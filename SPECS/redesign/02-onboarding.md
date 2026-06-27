@@ -574,3 +574,39 @@ Calm, premium, NZ English (organise, colour, centre, Aotearoa). Functional steps
 **Why this is premium.** Every decision serves the first five minutes of a six-figure relationship. One spine with two toggles means a retainer client and a redesign client each get a journey correctly sized for them, and the honest progress count means no path ever feels like a stripped version of another, which is what makes four payment paths and two engagement types read as one calm experience. Gating only the money, and deferring the rest to a resumable checklist, means a client who already paid is never taxed with a form, and the empty-room problem is killed by a furnished portal and a seeded first request. The embedded Payment Element keeps the most expensive moment inside the Studio Ledger scene rather than bouncing it to a stranger's domain. Recognition over re-asking, prefill over blank fields, "add later" over "skip", the rationed green, the rare leaf on the recommended card and the success state: these are the brand promise made literal. Nothing falls between sign-up and the portal. The client should feel known, expected, and already moving, which is exactly the proof that "no gaps, one" is true and not just a claim.
 
 Written to `/Users/liammillerdev/ShipStudio/tahi-dashboard/SPECS/redesign/02-onboarding.md`.
+
+---
+
+## As built (added 2026-06-27)
+
+Implemented as a Studio Ledger flow driven entirely by the entry link, not by an in-page switcher.
+
+**Files.**
+- `components/tahi/onboarding-shell.tsx` - shared scene (`SceneShell`, `ScenePill`, `Ledger`, `Stepper`), the `useGrow` height-animation hook, shared `TimezoneField` / `PhotoField`, and `ONBOARDING_CSS`. Reuses the auth neon leaf and brand glyphs; scene split flips to 42% scene / 58% card so the stepped form gets the room.
+- `components/tahi/onboarding-content.tsx` - the client flow (chooser, welcome + Loom hello, plan, Stripe payment, details, invite, kickoff).
+- `app/(onboarding)/onboarding/page.tsx` - server entry; resolves context + Clerk identity, renders the flow.
+- `lib/onboarding-entry.ts` - link -> context resolver.
+
+**Entry model.** The link decides the path (see `01-auth.md` "entry routing"). `resolveClientEntry` maps a persona key to `{ engagement, clientType, entry, hasEngagement }`: `selfserve`, `retainer`, `project`, `existing_project`, `existing_retainer`. Self-serve new clients see the chooser (retainer self-serve vs project enquiry -> proposal dead-end, since projects are invited to the platform later). Invited / existing clients skip the chooser and never see payment; when a project / schedule / contract is attached, the engagement is known and the flow goes straight to the right care path.
+
+**Steps** are assembled by `buildSteps(engagement, clientType)`:
+- new retainer: welcome, plan, pay, details, invite
+- new project: welcome, details, invite, kickoff
+- existing retainer: welcome, plan, pay
+- existing project: welcome, kickoff
+
+**Decisions carried through from the research.** Retainers ($1,500-$4,000/mo) are card-first and self-serve; projects and large scopes go to proposal / invoice, never gated behind a card. An "invoice / net terms" fallback is offered on the pay step (portal access is not hard-coupled to payment). Plan cards read "+ tax where it applies" (confirm NZ GST treatment before launch).
+
+**Payment (wired).** The pay step uses an inline Stripe PaymentElement (`components/tahi/onboarding-payment.tsx`). `POST /api/portal/checkout` ensures a Stripe customer for the org, resolves the plan + optional parallel-track prices by `lookup_key`, creates a `default_incomplete` subscription, records a `subscriptions` row, and returns the first-payment client secret. The webhook (`customer.subscription.updated`) flips the row to active. Plans/add-ons are defined in `lib/stripe-plans.ts` and created idempotently by `POST /api/admin/integrations/stripe/setup-plans` (run once per Stripe environment). If Stripe is not configured or prices are missing, the step degrades to the invoice / net-terms path so onboarding is never blocked.
+
+**Invites (wired).** The invite step posts to `POST /api/portal/invites`, which creates Clerk organization invitations (role `org:member`) for the client's org; each invitee gets an email immediately.
+
+**Config note.** Requires `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` in env (test and live). Add the keys, then call setup-plans once to mint the products/prices for that environment.
+
+The design's preview-only Tweaks panel and the duplicate `SelfServe` component are dropped.
+
+**Skipped here.** The final cream "portal / care portal" screens are intentionally not built in onboarding; they fold into the first home/tour feature. On finish the flow routes to `/overview`.
+
+## Removed
+
+`02-onboarding-research.md` (the productized-vs-enterprise audit) has been removed now that its conclusions are folded into this spec and the build.

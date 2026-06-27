@@ -37,10 +37,24 @@ interface Testimonial {
 }
 
 interface TrustAvatar {
-  /** Background colour of the placeholder avatar. */
-  bg: string
-  /** Optional "+N" chip text; when set the swatch renders as a count chip. */
+  /** Profile photo URL. Takes precedence over `bg`. */
+  src?: string
+  /** Background colour, used when there is no photo. */
+  bg?: string
+  /** Optional "+N" chip text; when set it renders as a count chip. */
   more?: string
+}
+
+// One avatar in the trust stack: a "+N" chip, a profile photo, or a colour
+// swatch fallback. `sm` is the condensed (mobile, under-card) variant.
+function TrustAv({ a, sm }: { a: TrustAvatar; sm?: boolean }) {
+  const cls = cn('ta-av', sm && 'ta-av-sm', a.more && 'ta-av-more')
+  if (a.more) return <span className={cls}>{a.more}</span>
+  if (a.src) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img className={cls} src={a.src} alt="" />
+  }
+  return <span className={cls} style={{ background: a.bg }} />
 }
 
 interface AuthShellProps {
@@ -261,13 +275,7 @@ export function AuthShell({
             <div className="ta-trust">
               <div className="ta-avatars" aria-hidden="true">
                 {trust.avatars.map((a, i) => (
-                  <span
-                    key={i}
-                    className={cn('ta-av', a.more && 'ta-av-more')}
-                    style={{ background: a.bg }}
-                  >
-                    {a.more}
-                  </span>
+                  <TrustAv key={i} a={a} />
                 ))}
               </div>
               <span className="ta-trust-line">{trust.line}</span>
@@ -306,13 +314,7 @@ export function AuthShell({
           <div className="ta-trust-mobile">
             <div className="ta-avatars" aria-hidden="true">
               {trust.avatars.map((a, i) => (
-                <span
-                  key={i}
-                  className={cn('ta-av ta-av-sm', a.more && 'ta-av-more')}
-                  style={{ background: a.bg }}
-                >
-                  {a.more}
-                </span>
+                <TrustAv key={i} a={a} sm />
               ))}
             </div>
             <span className="ta-trust-line">{trust.line}</span>
@@ -323,14 +325,14 @@ export function AuthShell({
   )
 }
 
-// Default trust avatar palette (placeholder swatches; swap for real client
-// avatars/logos when available). The last entry is the "+N" count chip.
+// Trust avatar stack. Placeholder profile photos for now; swap for real client
+// faces/logos when available. The last entry is the "+N" count chip.
 export const TAHI_TRUST_AVATARS: TrustAvatar[] = [
-  { bg: '#C99A6A' },
-  { bg: '#7aab6b' },
-  { bg: '#5b7da0' },
-  { bg: '#b06a8a' },
-  { bg: '#3C5733', more: '+40' },
+  { src: 'https://randomuser.me/api/portraits/men/32.jpg' },
+  { src: 'https://randomuser.me/api/portraits/women/44.jpg' },
+  { src: 'https://randomuser.me/api/portraits/men/75.jpg' },
+  { src: 'https://randomuser.me/api/portraits/women/68.jpg' },
+  { more: '+40' },
 ]
 
 // ──────────────────────────────────────────────────────────────────────
@@ -379,11 +381,11 @@ const AUTH_CSS = `
 
 .ta-trust{ display:flex; flex-direction:column; gap:12px; }
 .ta-avatars{ display:flex; }
-.ta-av{ width:28px; height:28px; border-radius:50%; border:2px solid #1E3019; object-fit:cover; background:#26331d; }
-.ta-av + .ta-av{ margin-left:-8px; }
-.ta-av-more{ display:flex; align-items:center; justify-content:center; font:700 10px 'Manrope'; color:#E6EFE2; }
-.ta-av-sm{ width:24px; height:24px; border:2px solid #F7F6F3; }
-.ta-av-sm + .ta-av-sm{ margin-left:-7px; }
+.ta-av{ width:36px; height:36px; border-radius:50%; border:2px solid #1E3019; object-fit:cover; background:#26331d; }
+.ta-av + .ta-av{ margin-left:-10px; }
+.ta-av-more{ display:flex; align-items:center; justify-content:center; font:700 11px 'Manrope'; color:#E6EFE2; }
+.ta-av-sm{ width:31px; height:31px; border:2px solid #F7F6F3; }
+.ta-av-sm + .ta-av-sm{ margin-left:-9px; }
 .ta-trust-line{ font-size:13px; color:#DCE8D9; line-height:1.4; }
 
 /* ---- form column + card ---- */
