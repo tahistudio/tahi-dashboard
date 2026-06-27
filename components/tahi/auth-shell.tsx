@@ -235,9 +235,12 @@ const AUTH_CSS = `
 @keyframes ta-cardup{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:translateY(0); } }
 
 .ta-wordmark{ color:#FDFDFC; }
-.ta-pill{ display:inline-flex; align-items:center; gap:8px; height:28px; padding:0 12px; border-radius:0 .625rem 0 .625rem; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); font-size:13px; font-weight:600; color:#DCE8D9; }
+/* align-self + width:fit-content keep the pill hugging its text even when the
+   scene column is a flex container (sign-in / centeredScene), where flex
+   children otherwise stretch to full width. */
+.ta-pill{ display:inline-flex; align-self:flex-start; width:fit-content; align-items:center; gap:8px; height:28px; padding:0 12px; border-radius:0 .625rem 0 .625rem; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); font-size:13px; font-weight:600; color:#DCE8D9; }
 .ta-pill-leaf{ display:inline-flex; color:#7aab6b; }
-.ta-headline{ margin:22px 0 0; font-size:36px; line-height:1.05; font-weight:700; letter-spacing:-0.025em; color:#FDFDFC; max-width:14ch; }
+.ta-headline{ margin:22px 0 0; font-size:36px; line-height:1.05; font-weight:700; letter-spacing:-0.025em; color:#FDFDFC; max-width:20ch; text-wrap:balance; }
 .ta-sub{ margin:18px 0 0; font-size:15px; line-height:1.6; color:#DCE8D9; max-width:40ch; }
 
 .ta-glass{ background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.12); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border-radius:.5rem; padding:20px; }

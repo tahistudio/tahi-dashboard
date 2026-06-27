@@ -22,9 +22,9 @@ export default function SignInPage() {
       cardTitle="Welcome back"
       cardSubtitle="Sign in to your workspace."
       helperText="Encrypted and secure."
-      footerPrompt="New here?"
-      footerLinkLabel="Talk to the studio"
-      footerLinkHref="mailto:business@tahi.studio"
+      footerPrompt="Don't have an account?"
+      footerLinkLabel="Sign up"
+      footerLinkHref="/sign-up"
     >
       <ClerkSignIn appearance={tahiClerkAppearance} />
     </AuthShell>
