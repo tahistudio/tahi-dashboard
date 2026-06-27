@@ -13,12 +13,12 @@ export default function SignUpPage() {
       headline="Your project, start to finish, in one place."
       sub="From the first brief to the final invoice, you can always see where things stand."
       testimonial={{
-        quote: 'Calm, sharp, and exactly the kind of partner we hoped for. Everything in one place, nothing dropped.',
-        initials: 'MK',
-        name: 'Mereana K.',
-        role: 'Founder, Kōwhai Studio',
+        quote: "Tahi have been brilliant to work with. Friendly, fast, and always delivering high quality work. I'd highly recommend them to anyone looking for a reliable web team.",
+        initials: 'EK',
+        name: 'Evan Kwan',
+        role: 'Marketing Manager, Physitrack',
       }}
-      trust={{ avatars: TAHI_TRUST_AVATARS, line: 'Trusted by independent studios.' }}
+      trust={{ avatars: TAHI_TRUST_AVATARS, line: 'Trusted by some of the biggest companies.' }}
       showLegal
       footerPrompt="Already have an account?"
       footerLinkLabel="Sign in"

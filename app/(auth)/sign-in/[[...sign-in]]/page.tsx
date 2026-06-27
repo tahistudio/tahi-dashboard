@@ -14,10 +14,10 @@ export default function SignInPage() {
       headline="Welcome back."
       sub="Your project, right where you left it."
       testimonial={{
-        quote: 'Calm, sharp, and exactly the kind of partner we hoped for. Everything in one place, nothing dropped.',
-        initials: 'MK',
-        name: 'Mereana K.',
-        role: 'Founder, Kōwhai Studio',
+        quote: "Tahi have been brilliant to work with. Friendly, fast, and always delivering high quality work. I'd highly recommend them to anyone looking for a reliable web team.",
+        initials: 'EK',
+        name: 'Evan Kwan',
+        role: 'Marketing Manager, Physitrack',
       }}
       footerPrompt="Don't have an account?"
       footerLinkLabel="Sign up"
