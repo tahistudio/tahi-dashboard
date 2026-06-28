@@ -1,8 +1,9 @@
-import { getRequestAuth, getPortalAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, sql } from 'drizzle-orm'
+import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
 // ── GET /api/portal/conversations ──────────────────────────────────────────
 // List conversations for the current client org where visibility = 'external'.
@@ -181,10 +182,13 @@ export async function GET(req: NextRequest) {
 // Body: { type: 'direct', content? }
 export async function POST(req: NextRequest) {
   try {
-    const { orgId, userId } = await getRequestAuth(req)
+    const { orgId, userId, impersonating } = await getPortalAuth(req)
 
     if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (impersonating) {
+      return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
     }
 
     let body: { type?: string; content?: string }
@@ -275,8 +279,10 @@ export async function POST(req: NextRequest) {
       joinedAt: now,
     })
 
-    // If there is initial content, send as the first message
-    if (body.content?.trim()) {
+    // If there is initial content, send as the first message (sanitise the
+    // client HTML; it is rendered to admins via dangerouslySetInnerHTML).
+    const safeContent = sanitizeRichText(body.content)
+    if (safeContent.trim()) {
       const msgId = crypto.randomUUID()
       await database.insert(schema.messages).values({
         id: msgId,
@@ -285,7 +291,7 @@ export async function POST(req: NextRequest) {
         orgId,
         authorId: contactId,
         authorType: 'contact',
-        body: body.content.trim(),
+        body: safeContent,
         isInternal: false,
         createdAt: now,
         updatedAt: now,

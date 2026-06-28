@@ -1,9 +1,10 @@
-import { getRequestAuth, getPortalAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, ne, inArray } from 'drizzle-orm'
 import { createNotifications } from '@/lib/notifications'
+import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
 // ── GET /api/portal/conversations/[id]/messages ────────────────────────────
 // Paginated messages for a conversation. Only returns non-internal messages.
@@ -180,10 +181,13 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { orgId, userId } = await getRequestAuth(req)
+    const { orgId, userId, impersonating } = await getPortalAuth(req)
 
     if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (impersonating) {
+      return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
     }
 
     const { id: conversationId } = await params
@@ -199,6 +203,12 @@ export async function POST(
     }
 
     if (!body.content?.trim()) {
+      return NextResponse.json({ error: 'content is required' }, { status: 400 })
+    }
+
+    // Client HTML rendered to admins via dangerouslySetInnerHTML: sanitise here.
+    const safeContent = sanitizeRichText(body.content)
+    if (!safeContent.trim()) {
       return NextResponse.json({ error: 'content is required' }, { status: 400 })
     }
 
@@ -267,7 +277,7 @@ export async function POST(
       orgId,
       authorId: participantId,
       authorType: 'contact',
-      body: body.content.trim(),
+      body: safeContent,
       isInternal: false,
       createdAt: now,
       updatedAt: now,
@@ -325,7 +335,7 @@ export async function POST(
       await createNotifications(database, recipients, {
         type: 'new_message',
         title: `New message in ${convName}`,
-        body: body.content.trim().slice(0, 200),
+        body: safeContent.slice(0, 200),
         entityType: 'message',
         entityId: conversationId,
       })

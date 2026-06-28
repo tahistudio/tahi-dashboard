@@ -1,4 +1,4 @@
-import { getRequestAuth, getPortalAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -48,9 +48,12 @@ export async function GET(req: NextRequest) {
  * Update the current user's contact info (name, role).
  */
 export async function PATCH(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const { orgId, userId, impersonating } = await getPortalAuth(req)
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  if (impersonating) {
+    return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
   }
 
   const body = await req.json() as {

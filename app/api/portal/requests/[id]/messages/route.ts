@@ -1,9 +1,10 @@
-import { getRequestAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
 import { createNotification } from '@/lib/notifications'
+import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -11,10 +12,13 @@ type Params = { params: Promise<{ id: string }> }
 // Clients post messages to a request thread (always external : isInternal: false).
 export async function POST(req: NextRequest, { params }: Params) {
   try {
-    const { orgId, userId } = await getRequestAuth(req)
+    const { orgId, userId, impersonating } = await getPortalAuth(req)
 
     if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (impersonating) {
+      return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
     }
 
     const { id } = await params
@@ -27,6 +31,12 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
 
     if (!body.body?.trim()) {
+      return NextResponse.json({ error: 'Message body is required' }, { status: 400 })
+    }
+
+    // Client HTML rendered to admins via dangerouslySetInnerHTML: sanitise here.
+    const safeBody = sanitizeRichText(body.body)
+    if (!safeBody.trim()) {
       return NextResponse.json({ error: 'Message body is required' }, { status: 400 })
     }
 
@@ -62,7 +72,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       orgId,
       authorId: contact?.id ?? userId,
       authorType: 'contact',
-      body: body.body.trim(),
+      body: safeBody,
       isInternal: false,
     })
 
@@ -84,7 +94,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         userType: 'team_member',
         type: 'new_message',
         title: `New client message on "${reqInfo.title}"`,
-        body: body.body.trim().slice(0, 200),
+        body: safeBody.slice(0, 200),
         entityType: 'request',
         entityId: id,
       })

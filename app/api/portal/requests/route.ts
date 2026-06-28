@@ -1,8 +1,9 @@
-import { getRequestAuth, getPortalAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, ne, sql, inArray } from 'drizzle-orm'
+import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
 // ── GET /api/portal/requests ─────────────────────────────────────────────────
 // Returns requests scoped to the client's own org.
@@ -86,10 +87,16 @@ export async function GET(req: NextRequest) {
 
 // ── POST /api/portal/requests ────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
+  // getPortalAuth resolves the caller's Clerk org -> the D1 organisations.id, so
+  // the row is written under the correct tenant id (getRequestAuth would store
+  // the raw Clerk org id, which mismatches every clerkOrgId-provisioned client).
+  const { orgId, userId, impersonating } = await getPortalAuth(req)
 
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  if (impersonating) {
+    return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
   }
 
   const body = await req.json() as {
@@ -101,6 +108,11 @@ export async function POST(req: NextRequest) {
   if (!title?.trim()) {
     return NextResponse.json({ error: 'Request title is required' }, { status: 400 })
   }
+
+  // Client-submitted rich text is rendered to Tahi admins via
+  // dangerouslySetInnerHTML, so sanitise it server-side at this untrusted
+  // boundary (allowlist; strips scripts / event handlers / unsafe hrefs).
+  const safeDescription = description ? sanitizeRichText(description) : null
 
   const database2 = await db()
   const drizzle2 = database2 as ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -120,7 +132,7 @@ export async function POST(req: NextRequest) {
       ${title.trim()},
       ${type ?? 'small_task'},
       ${category ?? 'development'},
-      ${description ?? null},
+      ${safeDescription},
       ${dueDate ?? null},
       ${formResponses ?? null},
       'submitted',

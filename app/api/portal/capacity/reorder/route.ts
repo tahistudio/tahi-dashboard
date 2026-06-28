@@ -1,4 +1,4 @@
-import { getRequestAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -14,13 +14,17 @@ import { trackCanHandle } from '@/lib/plan-utils'
 // ordered "Up next" lane of that TARGET track. The move is type-validated so a
 // large_task can never land in a small track.
 //
-// Mutation: uses getRequestAuth (not getPortalAuth) so a previewing admin in
-// Client view cannot write to a real client's queue.
+// Mutation: getPortalAuth resolves the D1 org id (so the scope works for
+// clerkOrgId-provisioned clients), and we reject impersonating so a previewing
+// admin in Client view still cannot write to a real client's queue.
 export async function PUT(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const { orgId, userId, impersonating } = await getPortalAuth(req)
 
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  if (impersonating) {
+    return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
   }
 
   const body = await req.json() as { trackId?: string; requestIds?: string[] }
