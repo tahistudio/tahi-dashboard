@@ -1,8 +1,10 @@
 {
+  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tahi-dashboard",
   "main": ".open-next/worker.js",
   "compatibility_date": "2025-03-01",
   "compatibility_flags": ["nodejs_compat"],
+  "account_id": "ccd4c7a3b9f7abdf566f0628579d3f4b",
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
@@ -11,7 +13,7 @@
     {
       "binding": "DB",
       "database_name": "tahi-db",
-      "database_id": "placeholder"
+      "database_id": "3bfa4848-9d46-4d30-9118-269d04293657"
     }
   ],
   "r2_buckets": [
@@ -19,5 +21,31 @@
       "binding": "STORAGE",
       "bucket_name": "tahi-storage"
     }
-  ]
+  ],
+  "env": {
+    "staging": {
+      "name": "tahi-dashboard-staging",
+      "main": ".open-next/worker.js",
+      "compatibility_date": "2025-03-01",
+      "compatibility_flags": ["nodejs_compat"],
+      "account_id": "ccd4c7a3b9f7abdf566f0628579d3f4b",
+      "assets": {
+        "directory": ".open-next/assets",
+        "binding": "ASSETS"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "tahi-db-staging",
+          "database_id": "b91cd27f-5d20-40ff-951a-85fec248522a"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "STORAGE",
+          "bucket_name": "tahi-storage-staging"
+        }
+      ]
+    }
+  }
 }
