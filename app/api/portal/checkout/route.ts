@@ -94,6 +94,26 @@ export async function POST(req: NextRequest) {
       .where(eq(schema.organisations.id, orgId))
   }
 
+  // Free any prior in-progress checkout so the client can switch presentment
+  // currency. Stripe locks a customer to a single currency while they hold an
+  // open subscription or invoice ("You cannot combine currencies on a single
+  // customer"), so each currency change here would otherwise fail. Cancel the
+  // previous incomplete subscription(s) and void their open first invoice
+  // before creating the new one. No-op on the first call (no priors).
+  try {
+    const prior = await stripe.subscriptions.list({ customer: customerId, status: 'incomplete', limit: 20 })
+    for (const s of prior.data) {
+      try { await stripe.subscriptions.cancel(s.id) } catch { /* already cancelled */ }
+      const inv = s.latest_invoice
+      const invId = typeof inv === 'string' ? inv : inv?.id ?? null
+      if (invId) {
+        try { await stripe.invoices.voidInvoice(invId) } catch { /* already void or paid */ }
+      }
+    }
+  } catch {
+    // non-fatal: the create below may still succeed
+  }
+
   // Create the incomplete subscription and pull the first-payment client secret.
   // `currency` selects the matching currency_option on each price.
   const subscription = await stripe.subscriptions.create({
