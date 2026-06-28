@@ -105,7 +105,7 @@ A template picker on create (date-remapped on apply) and the conversational AI w
 8. **State sheet:** overdue hero, blocked chip + warning, empty My Work, subtask progress, due-countdown ramp.
 
 **Integration constraints:**
-- Honor `resolveAccessScoping` in My Work and every list (never leak other teams' tasks).
+- Honor `resolveAccessScoping` in My Work and every list (never leak other teams' tasks). Note: the 2026-06 security audit confirmed `resolveAccessScoping` currently fails OPEN for a Tahi-org user with no `teamMembers` row (they see everything). The permissions spec (05) flips this to deny-by-default; build My Work on the assumption that scoping is authoritative and fail-closed, so a teammate with no grant sees an empty, guided My Work, never the whole studio's tasks.
 - Fix the dead detail: add GET+DELETE to `/api/admin/tasks/[id]` or reroute `/tasks/[id]` to the slide-over.
 - Unify the create shape: reconcile the AI wizard's `type`/`priority` enums with the DB (scope `type`, priority standard/high/urgent).
 - Keep hierarchy at task -> flat subtask unless a schema change is explicitly agreed; single assignee unless agreed.
@@ -122,5 +122,6 @@ The teams that love their task tool love it for one thing: it opens to "here is 
 3. **Single assignee** in schema; multi-assignee is a schema change, not just UI.
 4. **Enum drift** between AI wizard drafts (small/large, low/medium/high/urgent) and the DB (scope type, standard/high/urgent). Unify before building create flows.
 5. **Flat subtasks, blocks-only dependencies.** Deeper nesting or typed dependencies (FS/SS/FF) are schema changes to call out, not assume.
-6. **The 2700-line monolith** is a regression risk; decompose carefully and keep drag-drop, bulk bar, and persisted prefs working.
+6. **The 2700-line monolith** is a regression risk; decompose carefully and keep drag-drop, bulk bar, and persisted prefs working. The repo now has a Playwright e2e harness (Clerk test mode) plus a broad Vitest suite, so the decomposition can be guarded by tests rather than eyeballed.
+7. **Access scoping fails open today** (audit-confirmed): a Tahi-org user with no `teamMembers` row sees all tasks. My Work must not ship until scoping is authoritative (deny-by-default, per spec 05), or it becomes a studio-wide leak under the banner "your work".
 7. **No recurring tasks, no calendar/timeline, no keyboard-first** today; all greenfield if specced.

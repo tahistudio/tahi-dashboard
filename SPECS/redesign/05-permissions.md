@@ -63,7 +63,7 @@ It governs 04 (the nav), 06-08 (what each page shows and returns), and client tr
 2. **Every grant has a why.** The free-text reason on each override is first-class and shown back in the audit view, so "why can X see Y" always has an answer.
 3. **Inherit is the resting state.** Most nodes stay `Inherit`; allow/deny are the deliberate exceptions, visually distinct from the default.
 4. **Visibility is not authorization.** The UI hides denied surfaces, but the server is the gate. The spec treats client-side gating as courtesy, never security.
-5. **Preview before you commit.** The owner can view the app as a given role or client before saving, building on impersonation.
+5. **Preview before you commit, safely.** The owner can view the app as a given role or client before saving, building on impersonation. The client lens is now **read-only at the server** (every portal write rejects an impersonating session), so "View as" is a true safe preview that can never accidentally mutate a real client's data. Design preview-as to lean into that: it is a lens, not a session you can act in.
 6. **One coherent story over two systems.** Feature visibility and data scope are presented together per subject, even though they persist separately.
 
 ## Anatomy of the management surface (Settings > Team & access)
@@ -128,9 +128,9 @@ It governs 04 (the nav), 06-08 (what each page shows and returns), and client tr
 
 ## Open decisions and risks (resolve before/while building)
 
-1. **Server enforcement gap.** Most `/api/admin/*` routes check only `isTahiAdmin(orgId)` + `resolveAccessScoping`, not `requireFeature`. A denied teammate could still hit an API directly. The spec's stance: every data route must enforce the same feature + scope as the UI hides. This is the most important risk.
+1. **Server enforcement gap (CONFIRMED by the 2026-06 security audit).** Most `/api/admin/*` routes check only `isTahiAdmin(orgId)` + `resolveAccessScoping`, not `requireFeature`. A denied teammate could still hit an API directly. The spec's stance: every data route must enforce the same feature + scope as the UI hides. This is the most important risk, and the audit verified it is live, so the builder must treat per-route enforcement as a hard requirement, not a nicety. (The portal side of this is already done: all client-facing routes now resolve and owner-bind the org via `getPortalAuth`; the gap is the admin/team-member side.)
 2. **Two parallel systems** (feature_visibility vs teamMemberAccess; `teamMembers.role` vs `roles`/`teamMemberRoles`). Recommend `teamMemberRoles`/`roles` as canonical identity; have `access-scoping` read from it. Present both axes as one story.
-3. **Safe-default = admin** (a Tahi user with no role resolves to admin). Convenient but undercuts least-privilege; consider flipping to deny-by-default once seeding is reliable. Decide explicitly.
+3. **Safe-default = admin (CONFIRMED issue: scoping fails OPEN).** A Tahi-org user with no `teamMembers` row resolves to full admin, and `resolveAccessScoping` returns "unrestricted" for them, so the audit confirmed a contractor added to the Tahi org with no row sees every client. Convenient default, but it is the opposite of least-privilege. The decision this spec now makes: **flip to deny-by-default** (a Tahi user with no explicit role/scope sees nothing until granted). Build the seeding so the owners (Liam/Staci as super_admin) are always granted, so flipping the default can never lock them out.
 4. **No audit trail today** despite an `auditLog` table. The spec adds one (write on every assign-role + feature-visibility change). Required for "why can X see Y".
 5. **Inert expressive schema** (`rolePermissions.scopeType`, `fieldRestrictions`) implies capabilities the runtime does not honor. Label v1 (page/tab/card visibility + org scope) vs v2 (per-action via `permissions.action`, per-field via `fieldRestrictions`) clearly so we never imply more than we enforce.
 6. **One role per member** (assign-role ends active rows) contradicts the many-roles, time-bounded `teamMemberRoles` design. Pick one and state it.

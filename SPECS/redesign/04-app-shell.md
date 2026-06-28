@@ -50,7 +50,7 @@ Five regions, consistent across every internal page:
 
 1. **Sidebar (left, always dark).** Wordmark, grouped nav, collapse control, and the user card pinned to the bottom.
 2. **Top bar (hairline).** Page context / breadcrumb, global search, notifications, display-currency switch, private-mode and dark-mode toggles, owner-only impersonation control.
-3. **Impersonation banner (owner only, when active).** A thin sticky strip making "you are viewing as <client>" unmissable, with a one-click exit.
+3. **Impersonation banner (owner only, when active).** A thin sticky strip making "you are viewing as <client>" unmissable, with a one-click exit. The client lens is **read-only**: a previewing owner sees the client's portal exactly but cannot mutate their data (no send, no submit, no reorder, no pay). Design the banner to communicate this calmly ("Viewing as <Client>, read-only") so the owner is never surprised that a write is disabled.
 4. **Page frame (cream canvas).** The content region: generous gutters, a max content width, the page title as bare ink, content below. This is where 06-08 live.
 5. **Mobile bottom tabs.** On small screens the sidebar collapses to a bottom tab bar (the client portal especially), with the overflow nav in a sheet.
 
@@ -95,7 +95,7 @@ Rules: owner sees all groups; teammate sees Workspace plus whatever their role b
 - **Nav item:** icon + label + optional count badge; hover wash; active = leaf radius + accent. Keyboard focusable, `aria-current="page"` on the active route.
 - **User card (sidebar bottom):** avatar, name, role/org line, and a menu (account, theme, sign out). For clients it shows their org; for owner it can show the active impersonation target.
 - **Top bar controls:** each is a quiet icon button with a visible focus ring and a tooltip; counts are small ledger badges. The command palette (existing keyboard shortcuts) is the fast path.
-- **Impersonation banner:** sticky, thin, status-info tone (not alarming), "Viewing <client> as their team" + "Exit" button. Only ever for owner.
+- **Impersonation banner:** sticky, thin, status-info tone (not alarming), "Viewing <Client>, read-only" + "Exit" button. Only ever for owner. Because the lens is read-only, write affordances in the previewed portal render in a disabled/quiet state with a tooltip ("Read-only while viewing as a client"), never as live buttons that fail on click.
 - **Page frame:** a consistent wrapper that owns the title slot, optional actions slot (right-aligned), and the content region, so every page in 06-08 starts from the same skeleton.
 
 ## Motion and dynamism
@@ -119,7 +119,7 @@ Rules: owner sees all groups; teammate sees Workspace plus whatever their role b
 
 - **Collapsed vs expanded rail** (persisted).
 - **Group collapsed vs expanded** (persisted per group).
-- **Owner impersonating a client** (banner + the nav swaps to the client portal view) and **exit impersonation**.
+- **Owner impersonating a client** (banner + the nav swaps to the client portal view, **read-only**: write controls disabled with a tooltip, never live) and **exit impersonation**.
 - **Teammate with a narrow role** (few groups; empty groups absent, never shown empty).
 - **Loading** (nav renders immediately from resolved permissions; content region shows the page's own skeleton).
 - **Notification count** present / zero (badge hidden at zero).
@@ -128,7 +128,7 @@ Rules: owner sees all groups; teammate sees Workspace plus whatever their role b
 ## Copy deck
 
 - Group labels: Workspace, Sales, Clients, Marketing, Finance, Operations, Knowledge (team); Your project, Library, Billing (client).
-- Impersonation banner: "Viewing <Client> as their team" / "Exit".
+- Impersonation banner: "Viewing <Client>, read-only" / "Exit". Disabled-write tooltip: "Read-only while viewing as a client."
 - User card menu: Account, Appearance, Sign out.
 - Search placeholder: "Search or jump to..." Empty notifications: "You are all caught up."
 - Tooltips are verbs ("Search", "Notifications", "Switch currency", "Toggle theme").
@@ -155,6 +155,7 @@ Rules: owner sees all groups; teammate sees Workspace plus whatever their role b
 **Integration constraints (so it drops into the codebase):**
 - Sidebar colours are the hardcoded const palette above; the rest uses CSS variable tokens, never hardcoded hex.
 - Nav visibility is resolved server-side from `lib/permissions.ts`; design the three audience views, do not invent client-side role logic.
+- The shell can assume its occupant is a real, entitled user: an unprovisioned or unpaid/un-invited lead is held in onboarding by the access gate and never reaches this frame, so the shell never has to render a "you have no workspace / you have not paid" empty state (that lives in onboarding, spec 02). The client audience is a provisioned client org (Clerk org mapped to a D1 organisation); the read-only client lens is server-enforced, so the disabled write affordances are reflecting a real server rule, not a cosmetic guess.
 - Reuse the existing region components (`app-sidebar`, `app-top-nav`, `mobile-bottom-nav`, `sidebar-user-card`); this is a reskin + UX tightening, not a rebuild.
 - Leaf radius only on the active item and CTA; everything else square-ish.
 - Honour `prefers-reduced-motion`, 44px touch targets, visible focus, AA contrast on the dark rail.

@@ -5,6 +5,14 @@
 > teammate's "my work" desk, and the client's calm project home. Numbers are the
 > hero; the page answers "what do I do next" before anything else.
 
+> Arrival is gated: a user only reaches this home once they are entitled (a paid
+> retainer client, an invited project/existing client, or a teammate). An
+> unprovisioned or unpaid lead is held in onboarding (spec 02), so every home can
+> assume a real, entitled occupant and a first-run state that is "welcome, here is
+> your studio", never "you have not paid". The client's first-run is persona-aware:
+> an invited project client lands with their engagement already set up (no payment
+> step in their history); a self-serve retainer client lands having just paid.
+
 > Prepend `_studio-ledger-theme.md` before this brief in Claude design.
 
 ## What exists today (as built)
@@ -81,7 +89,7 @@ Port the existing portal data into the ledger language:
 - Healthy NeedsYou ("All quiet" / "You are all caught up").
 - Feature-denied zones absent (regrid), not empty.
 - Loading: masthead and shell paint immediately; each zone shows its own skeleton; any failed aggregate renders null, never an error.
-- Impersonation routes correctly through `OverviewSwitcher` (client and team-member lenses).
+- Impersonation routes correctly through `OverviewSwitcher` (client and team-member lenses), and the client lens is **read-only**: the client home renders fully but its write affordances (New Request, book-a-call, approve) are disabled with the read-only tooltip while the owner is previewing.
 
 ## Copy deck
 

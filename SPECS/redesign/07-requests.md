@@ -45,7 +45,7 @@ Make submitting, tracking, and delivering work feel effortless and trustworthy. 
 ## Experience principles
 
 1. **Numbers lead.** `#requestNumber`, `Rev n/max`, queue position, due-countdown, capacity % are the heroes; lean into them, Studio Ledger style.
-2. **Internal and external are visibly different and never leak.** External (client-visible) and internal messages/requests/notes are styled distinctly and enforced server-side. This is the trust-critical surface.
+2. **Internal and external are visibly different and never leak.** External (client-visible) and internal messages/requests/notes are styled distinctly and enforced server-side. This is the trust-critical surface. Two things now hold that the design can rely on: client-submitted rich text (request descriptions, thread messages) is **sanitised server-side at the untrusted boundary** (`lib/sanitize-rich-text.ts`, allowlist) before it is ever rendered to a teammate, so a client can never inject script into an admin's view; and every portal route resolves and owner-binds the org via `getPortalAuth`, so a client only ever reads/writes their own org's rows. Design the thread to render rich text confidently (it is safe) while keeping the internal/external boundary unmistakable.
 3. **Capacity is honest and visible.** For retainer clients, show "one active per track, next in queue" in both portal and admin. The constraint is a feature.
 4. **One dataset, many saved views.** List, board, workload, and named filter presets are lenses on the same data.
 5. **Two interactions to act.** Inline status edit, quick-add, drag-to-move; the detail is one click, not a maze.
@@ -109,7 +109,7 @@ Build the admin **form builder** for `requestForms` (question types already defi
 - Custom column `statusValue` must map to a real `requests.status` or cards vanish; design within the known status set.
 - One-level nesting only (`parentRequestId`, same-org); do not imply deeper trees.
 - Reconcile the legacy `type` vs new `size` and the priority set (standard/high in detail vs urgent referenced in list) before building.
-- Client privacy is load-bearing and server-enforced: internal messages (`isInternal`), internal requests, and scope reasons must never reach the portal.
+- Client privacy is load-bearing and server-enforced: internal messages (`isInternal`), internal requests, and scope reasons must never reach the portal. Two mechanisms are already in place and must be reused, not reinvented: sanitise any client-submitted rich text on write with `lib/sanitize-rich-text.ts` (every portal message/description ingestion point), and scope every portal route with `getPortalAuth` (resolved D1 org id, owner-bound, impersonation read-only). New portal write surfaces follow the same two rules.
 - Reuse existing components; tokens only; honor reduced motion, 44px, AA.
 
 ## Why this is premium
@@ -118,7 +118,7 @@ The productized-service competitors win on one feeling: the client always knows 
 
 ## Open decisions and risks
 
-1. **Client-privacy gaps are an open QA flag.** The internal/external boundary (messages `isInternal`, internal requests, scope reasons) must be treated as load-bearing and tested before requests become daily-trusted. Highest priority.
+1. **Client-privacy boundary (partly hardened, still load-bearing).** Two prior gaps are now closed: client rich-text input is sanitised server-side before it reaches an admin (no stored XSS), and all portal routes scope via `getPortalAuth` (no cross-tenant reads/writes; impersonation is read-only). What remains load-bearing and must be tested before requests become daily-trusted: the `isInternal` message/request gating and scope-reason hiding must be enforced on every read path so an internal note or a scope reason can never reach the portal. There is now a Playwright e2e harness (Clerk test mode) to lock these flows down, so "tested before trusted" is a concrete, automatable gate, not a hope.
 2. **Legacy `type` vs new `size`** dual columns and a **priority-set mismatch** (detail standard/high vs list urgent) need reconciling.
 3. **File-upload / voice-note bugs** were flagged in March; verify before leaning on them.
 4. **Custom kanban `statusValue`** must map to real statuses or cards disappear.

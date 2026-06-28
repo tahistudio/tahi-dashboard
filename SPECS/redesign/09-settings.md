@@ -82,7 +82,7 @@ The settings landing is a tidy index of these groups (not an auto-scroll of ever
   - **Kanban columns:** per-client columns mapping to real `requests.status` values.
   - **Task templates:** the 08 template editor (name, category, default priority, subtasks, estimated hours).
   - **Permissions:** the full 05 builder (three-way Inherit/Allow/Deny + reason, roles matrix, data scope, preview-as, audit) lives in Team & access. No top-level page.
-- **Integrations:** one card per service with connect/disconnect + status; secrets are never shown (they live in the Worker env, per the Cloudflare setup).
+- **Integrations:** one card per service with connect/disconnect + status; secrets are never shown (they live in the Worker env, set per-environment in the Cloudflare/CI deploy, never rendered and never committed). The card shows connection status and a connect/manage affordance only; any key entry happens out-of-band, never in a plain field on this page.
 - **Search:** a single field that filters sections by label + description across all groups.
 
 ## Motion, accessibility
@@ -139,5 +139,5 @@ A settings page is where software quietly tells you whether it respects you. A 4
 1. **Permissions relocation** (decided: fully inside Settings, top-level item removed). Must redirect the old `/permissions` route so existing links and the 05 builder keep working.
 2. **The 4,817-line monolith** is a real regression risk; decompose into per-section files behind the new IA carefully, preserving each section's save logic.
 3. **Builder ownership overlaps** with 07 (forms, columns) and 08 (templates). Settings is canonical; 07/08 link to these editors rather than duplicating them. Keep the specs in sync.
-4. **Audience gating** is currently inline `isAdmin` checks; move to the same feature/permission gating as the rest of the app so teammate-visible sections are correct.
+4. **Audience gating** is currently inline `isAdmin` checks; move to the same feature/permission gating as the rest of the app so teammate-visible sections are correct. Align with spec 05's deny-by-default decision: a teammate sees Account plus only the sections their role explicitly grants, never "admin minus a few rows". Server-gate each section (the real gate); a denied section is absent, not disabled.
 5. **Sub-routes** (audit, automations, crons) should fold under the new groups (Advanced / Automations) rather than remain loose routes.
