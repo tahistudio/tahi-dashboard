@@ -93,6 +93,43 @@ export default clerkMiddleware(async (auth, req) => {
     return NextResponse.next()
   }
 
+  // Onboarding / welcome entry: persist the invite token from the link into a
+  // cookie so it survives the Clerk sign-in -> sign-up round-trip. The redirect
+  // query param is dropped twice on that journey (the auth footer "Sign up"
+  // link is static, and the org-creation task hands off to the configured
+  // after-sign-up URL), which would otherwise strand an invited client in the
+  // self-serve chooser instead of their pre-set flow. The onboarding page
+  // recovers the token from this cookie when the URL no longer carries it, and
+  // accept-invite clears it once consumed. We resolve auth and the redirect
+  // here (rather than auth.protect()) so the cookie can ride the response.
+  {
+    const p = req.nextUrl.pathname
+    if (p.startsWith('/onboarding') || p.startsWith('/welcome')) {
+      const linkToken = req.nextUrl.searchParams.get('token')
+      const { userId } = await auth()
+      let res: NextResponse
+      if (!userId) {
+        const target = p + (req.nextUrl.search || '')
+        const url = req.nextUrl.clone()
+        url.pathname = '/sign-in'
+        url.search = ''
+        url.searchParams.set('redirect_url', target)
+        res = NextResponse.redirect(url)
+      } else {
+        res = NextResponse.next()
+      }
+      if (linkToken) {
+        res.cookies.set('tahi-invite-token', linkToken, {
+          path: '/',
+          httpOnly: true,
+          sameSite: 'lax',
+          maxAge: 60 * 60, // 1 hour: long enough to finish sign-up, short-lived after
+        })
+      }
+      return res
+    }
+  }
+
   // Bare domain root: redirect to the right home at the edge. The page-level
   // RSC redirect renders Next's 404 in the OpenNext external-middleware setup,
   // so we resolve it here where NextResponse.redirect is reliable.

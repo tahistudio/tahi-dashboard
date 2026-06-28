@@ -1,4 +1,5 @@
 import { clerkClient } from '@clerk/nextjs/server'
+import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { getServerAuth } from '@/lib/server-auth'
 import { resolveClientEntry, clientEntryFromPersona, type ClientPersona } from '@/lib/onboarding-entry'
@@ -25,9 +26,15 @@ export default async function OnboardingPage({
     redirect(`/sign-in?redirect_url=${encodeURIComponent('/onboarding' + (qs ? '?' + qs : ''))}`)
   }
 
-  // An invite token (server-trusted) wins over any query-param persona.
+  // An invite token (server-trusted) wins over any query-param persona. The
+  // token may no longer be on the URL after the Clerk auth round-trip, so fall
+  // back to the cookie the middleware stashed from the original link.
   const tokenParam = params.token
-  const token = typeof tokenParam === 'string' ? tokenParam : Array.isArray(tokenParam) ? tokenParam[0] : undefined
+  let token = typeof tokenParam === 'string' ? tokenParam : Array.isArray(tokenParam) ? tokenParam[0] : undefined
+  if (!token) {
+    const jar = await cookies()
+    token = jar.get('tahi-invite-token')?.value || undefined
+  }
 
   let entry = resolveClientEntry(params)
   let inviteToken: string | undefined

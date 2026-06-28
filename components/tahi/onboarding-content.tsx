@@ -20,7 +20,7 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
-import { useAuth, useClerk } from '@clerk/nextjs'
+import { useClerk } from '@clerk/nextjs'
 import { cn } from '@/lib/utils'
 import {
   SceneShell,
@@ -218,7 +218,6 @@ export function OnboardingContent({
   inviteToken?: string
 }) {
   const router = useRouter()
-  const { orgId: activeClerkOrgId } = useAuth()
   const { setActive } = useClerk()
   const [provisioning, setProvisioning] = React.useState(false)
   const [joinError, setJoinError] = React.useState<string | null>(null)
@@ -230,9 +229,14 @@ export function OnboardingContent({
 
   // Invited clients (token link) join their pre-created org with no payment.
   // Consume the token once on mount and activate the org for this session, so
-  // the rest of onboarding and the portal can scope to it.
+  // the rest of onboarding and the portal can scope to it. We do NOT gate on
+  // activeClerkOrgId: the Clerk org-creation sign-up task may have handed the
+  // user a throwaway org of their own, but the invite must still join (and
+  // setActive) the pre-created studio org. A ref guards against a double run.
+  const inviteHandledRef = React.useRef(false)
   React.useEffect(() => {
-    if (!inviteToken || activeClerkOrgId) return
+    if (!inviteToken || inviteHandledRef.current) return
+    inviteHandledRef.current = true
     let cancelled = false
     ;(async () => {
       try {
@@ -246,14 +250,18 @@ export function OnboardingContent({
         if (res.ok && json.clerkOrgId) {
           if (setActive) await setActive({ organization: json.clerkOrgId })
         } else {
+          inviteHandledRef.current = false // allow a retry on a transient failure
           setJoinError(json.error ?? 'We could not open your workspace. Please contact the studio.')
         }
       } catch {
-        if (!cancelled) setJoinError('We could not open your workspace. Please contact the studio.')
+        if (!cancelled) {
+          inviteHandledRef.current = false
+          setJoinError('We could not open your workspace. Please contact the studio.')
+        }
       }
     })()
     return () => { cancelled = true }
-  }, [inviteToken, activeClerkOrgId, setActive])
+  }, [inviteToken, setActive])
   const contact = {
     name: entry.contactName ?? 'there',
     email: entry.contactEmail ?? '',

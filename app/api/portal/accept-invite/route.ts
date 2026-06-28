@@ -129,5 +129,9 @@ export async function POST(req: NextRequest) {
     // non-fatal
   }
 
-  return NextResponse.json({ ok: true, orgId: org.id, clerkOrgId })
+  // The token is consumed: clear the survival cookie the middleware set so a
+  // later visit doesn't re-trigger an accept attempt on a spent invite.
+  const res = NextResponse.json({ ok: true, orgId: org.id, clerkOrgId })
+  res.cookies.set('tahi-invite-token', '', { path: '/', maxAge: 0 })
+  return res
 }
