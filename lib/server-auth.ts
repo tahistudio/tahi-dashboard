@@ -77,13 +77,15 @@ function getClerkClient() {
  */
 export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResult> {
   // Dev-only Ship Studio preview bypass (see note above; prod build strips this).
+  // Triggered ONLY by the explicit ?shipstudio=1 signal (persisted to the
+  // tahi-ship-studio cookie + x-ship-studio header by middleware). The old
+  // User-Agent triggers (HeadlessChrome, Edg/) were removed: 'Edg/' matches
+  // every Microsoft Edge user, so on any non-prod exposure a normal Edge
+  // browser would silently authenticate as the Tahi admin.
   if (process.env.NODE_ENV !== 'production') {
-    const ua = req.headers.get('user-agent') ?? ''
     if (
       req.headers.get('x-ship-studio') === '1' ||
-      req.cookies.get('tahi-ship-studio')?.value === '1' ||
-      ua.includes('HeadlessChrome') ||
-      ua.includes('Edg/')
+      req.cookies.get('tahi-ship-studio')?.value === '1'
     ) {
       return shipStudioIdentity()
     }
@@ -220,15 +222,14 @@ export async function getPortalAuth(
  */
 export async function getServerAuth(): Promise<RequestAuthResult> {
   // Dev-only Ship Studio preview bypass (see note above; prod build strips this).
+  // Explicit ?shipstudio=1 signal only; the over-broad UA triggers were removed
+  // (see getRequestAuth above for why 'Edg/' was dangerous).
   if (process.env.NODE_ENV !== 'production') {
     const hdrs = await headers()
     const cookieStore = await cookies()
-    const ua = hdrs.get('user-agent') ?? ''
     if (
       hdrs.get('x-ship-studio') === '1' ||
-      cookieStore.get('tahi-ship-studio')?.value === '1' ||
-      ua.includes('HeadlessChrome') ||
-      ua.includes('Edg/')
+      cookieStore.get('tahi-ship-studio')?.value === '1'
     ) {
       return shipStudioIdentity()
     }

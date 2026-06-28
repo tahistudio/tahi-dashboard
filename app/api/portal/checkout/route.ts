@@ -19,9 +19,15 @@ export const dynamic = 'force-dynamic'
  * (customer.subscription.updated) flips our row to active on success.
  */
 export async function POST(req: NextRequest) {
-  const { orgId, userId } = await getPortalAuth(req)
+  const { orgId, userId, impersonating } = await getPortalAuth(req)
   if (!orgId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  // Admin "Client view" impersonation is strictly read-only. Block it from this
+  // write path so previewing a client's portal can never create a real Stripe
+  // subscription / invoice against that client. (Mirror of the portal/invites guard.)
+  if (impersonating) {
+    return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
   }
 
   const body = (await req.json()) as { plan?: string; addon?: boolean; currency?: string }

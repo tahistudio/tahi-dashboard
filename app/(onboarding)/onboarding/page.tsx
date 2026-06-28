@@ -36,6 +36,25 @@ export default async function OnboardingPage({
     token = jar.get('tahi-invite-token')?.value || undefined
   }
 
+  // Fetch the Clerk user once: skip onboarding if already completed, prefill
+  // identity, and learn the caller's verified email (used to gate invite PII).
+  // (redirect() is called outside the try so its NEXT_REDIRECT survives.)
+  let onboardingComplete = false
+  let viewerEmail: string | undefined
+  let viewerEmailVerified = false
+  let viewerName: string | undefined
+  try {
+    const clerk = await clerkClient()
+    const user = await clerk.users.getUser(userId)
+    onboardingComplete = !!user.publicMetadata?.onboardingComplete
+    const primary = user.emailAddresses.find(e => e.id === user.primaryEmailAddressId)
+    viewerEmail = primary?.emailAddress
+    viewerEmailVerified = primary?.verification?.status === 'verified'
+    viewerName = `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || undefined
+  } catch {
+    // non-fatal: render onboarding without prefill
+  }
+
   let entry = resolveClientEntry(params)
   let inviteToken: string | undefined
   if (token) {
@@ -46,10 +65,18 @@ export default async function OnboardingPage({
         token,
       )
       if (invite && invite.flow === 'client' && invite.persona && !invite.expired) {
+        // Only disclose the invitee's PII (company / name / email) when the
+        // signed-in user's VERIFIED email matches the invite. A token holder on
+        // a different account still gets the right persona/flow, but never the
+        // invitee's details (accept-invite separately enforces the same binding).
+        const matches =
+          viewerEmailVerified &&
+          !!invite.contactEmail &&
+          (viewerEmail ?? '').toLowerCase() === invite.contactEmail.toLowerCase()
         entry = clientEntryFromPersona(invite.persona as ClientPersona, {
-          companyName: invite.companyName ?? undefined,
-          contactName: invite.contactName ?? undefined,
-          contactEmail: invite.contactEmail ?? undefined,
+          companyName: matches ? invite.companyName ?? undefined : undefined,
+          contactName: matches ? invite.contactName ?? undefined : undefined,
+          contactEmail: matches ? invite.contactEmail ?? undefined : undefined,
         })
         inviteToken = token
       }
@@ -58,19 +85,9 @@ export default async function OnboardingPage({
     }
   }
 
-  // Fetch the Clerk user once: skip onboarding if already completed, and
-  // prefill identity when the link did not carry it. (redirect() is called
-  // outside the try so its NEXT_REDIRECT is not swallowed by the catch.)
-  let onboardingComplete = false
-  try {
-    const clerk = await clerkClient()
-    const user = await clerk.users.getUser(userId)
-    onboardingComplete = !!user.publicMetadata?.onboardingComplete
-    entry.contactName = entry.contactName ?? (`${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || undefined)
-    entry.contactEmail = entry.contactEmail ?? user.emailAddresses[0]?.emailAddress
-  } catch {
-    // non-fatal: render onboarding without prefill
-  }
+  // Prefill from the signed-in user where the link did not carry identity.
+  entry.contactName = entry.contactName ?? viewerName
+  entry.contactEmail = entry.contactEmail ?? viewerEmail
   // Only skip onboarding when they are genuinely ready (complete AND in an org).
   // Gating on orgId too prevents the /overview <-> /onboarding redirect loop a
   // complete-but-org-less session would otherwise hit.

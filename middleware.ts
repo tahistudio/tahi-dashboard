@@ -59,12 +59,13 @@ export default clerkMiddleware(async (auth, req) => {
   // dead-code-eliminated from the production Cloudflare bundle and can never run
   // on a deployed environment.
   if (process.env.NODE_ENV !== 'production') {
-    const ua = req.headers.get('user-agent') ?? ''
+    // Explicit ?shipstudio=1 (or the cookie it sets) only. The User-Agent
+    // triggers (HeadlessChrome, Edg/) were removed: 'Edg/' matches every
+    // Microsoft Edge user, so the bypass would fire for normal Edge browsers
+    // on any non-prod exposure. Prod build strips this whole block.
     const isStudio =
       req.nextUrl.searchParams.get('shipstudio') === '1' ||
-      req.cookies.get('tahi-ship-studio')?.value === '1' ||
-      ua.includes('HeadlessChrome') ||
-      ua.includes('Edg/')
+      req.cookies.get('tahi-ship-studio')?.value === '1'
     if (isStudio) {
       const headers = new Headers(req.headers)
       headers.set('x-ship-studio', '1')
@@ -122,6 +123,7 @@ export default clerkMiddleware(async (auth, req) => {
         res.cookies.set('tahi-invite-token', linkToken, {
           path: '/',
           httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
           sameSite: 'lax',
           maxAge: 60 * 60, // 1 hour: long enough to finish sign-up, short-lived after
         })
