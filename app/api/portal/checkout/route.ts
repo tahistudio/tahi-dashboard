@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
         stripeSubscriptionId: subscription.id,
         status: 'incomplete',
         hasPrioritySupport: addon,
-        billingCountry: 'NZ',
+        billingCountry: currency === 'nzd' ? 'NZ' : null,
         updatedAt: now,
       })
       .where(eq(schema.subscriptions.id, existing.id))
@@ -137,7 +137,7 @@ export async function POST(req: NextRequest) {
       stripeSubscriptionId: subscription.id,
       status: 'incomplete',
       hasPrioritySupport: addon,
-      billingCountry: 'NZ',
+      billingCountry: currency === 'nzd' ? 'NZ' : null,
     })
   }
 

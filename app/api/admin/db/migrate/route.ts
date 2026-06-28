@@ -1892,6 +1892,34 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE organisations ADD COLUMN custom_large_tracks integer DEFAULT 0`,
     ],
   },
+  {
+    name: '0080',
+    description: 'Onboarding access + invite links. organisations.clerk_org_id links a D1 client to its Clerk org (getPortalAuth resolves a caller\'s Clerk org -> this D1 row, so the D1 primary key never has to equal the Clerk org id). New onboarding_invites table holds opaque, non-guessable link tokens that join an invited client to a pre-created org with no payment step, carrying optional contract / schedule / proposal context and the persona (server-trusted, not a spoofable query param). Duplicate-column / already-exists errors are caught upstream so re-runs are idempotent.',
+    statements: [
+      `ALTER TABLE organisations ADD COLUMN clerk_org_id text`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_orgs_clerk_org ON organisations(clerk_org_id)`,
+      `CREATE TABLE IF NOT EXISTS onboarding_invites (
+        id text PRIMARY KEY NOT NULL,
+        token text NOT NULL,
+        flow text NOT NULL DEFAULT 'client',
+        org_id text REFERENCES organisations(id) ON DELETE CASCADE,
+        persona text,
+        contract_id text,
+        schedule_id text,
+        proposal_id text,
+        contact_email text,
+        contact_name text,
+        expires_at text,
+        used_at text,
+        used_by_user_id text,
+        created_by_id text,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_onboarding_invites_token ON onboarding_invites(token)`,
+      `CREATE INDEX IF NOT EXISTS idx_onboarding_invites_org ON onboarding_invites(org_id)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

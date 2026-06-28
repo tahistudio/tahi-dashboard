@@ -11,8 +11,14 @@ export const dynamic = 'force-dynamic'
  * Audience-agnostic: works for clients and teammates regardless of org state.
  */
 export async function POST(req: NextRequest) {
-  const { userId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  // Only mark complete once the user belongs to an org. A user with no org has
+  // not finished provisioning / joining; marking them complete would make the
+  // onboarding page redirect to /overview, which the middleware bounces back to
+  // /onboarding (no org) - an infinite loop. Refuse until they have one.
+  if (!orgId) return NextResponse.json({ ok: false, reason: 'no-org' })
 
   try {
     const clerk = await clerkClient()

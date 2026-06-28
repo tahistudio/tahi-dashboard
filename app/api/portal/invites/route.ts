@@ -11,11 +11,16 @@ export const dynamic = 'force-dynamic'
  * email immediately. Returns a per-email result so the UI can report failures.
  */
 export async function POST(req: NextRequest) {
-  const { orgId, userId } = await getPortalAuth(req)
+  const { orgId, clerkOrgId, userId, impersonating } = await getPortalAuth(req)
   if (!orgId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Invitations must target the caller's own Clerk org. An admin in Client view
+  // has no client Clerk session here, so this is not the place to send them.
+  if (impersonating || !clerkOrgId) {
+    return NextResponse.json({ error: 'Invites can only be sent from your own account' }, { status: 400 })
+  }
 
   const body = (await req.json()) as { emails?: string[] }
   const emails = (body.emails ?? [])
@@ -31,7 +36,7 @@ export async function POST(req: NextRequest) {
     emails.map(async emailAddress => {
       try {
         await clerk.organizations.createOrganizationInvitation({
-          organizationId: orgId,
+          organizationId: clerkOrgId,
           inviterUserId: userId,
           emailAddress,
           role: 'org:member',

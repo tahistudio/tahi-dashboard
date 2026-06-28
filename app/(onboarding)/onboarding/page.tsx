@@ -1,7 +1,9 @@
 import { clerkClient } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
 import { getServerAuth } from '@/lib/server-auth'
-import { resolveClientEntry } from '@/lib/onboarding-entry'
+import { resolveClientEntry, clientEntryFromPersona, type ClientPersona } from '@/lib/onboarding-entry'
+import { resolveInvite } from '@/lib/onboarding-invites'
+import { db } from '@/lib/db'
 import { OnboardingContent, type OnboardingLead } from '@/components/tahi/onboarding-content'
 
 export const metadata = { title: 'Welcome to Tahi' }
@@ -17,13 +19,37 @@ export default async function OnboardingPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const params = await searchParams
-  const { userId } = await getServerAuth()
+  const { userId, orgId } = await getServerAuth()
   if (!userId) {
     const qs = new URLSearchParams(params as Record<string, string>).toString()
     redirect(`/sign-in?redirect_url=${encodeURIComponent('/onboarding' + (qs ? '?' + qs : ''))}`)
   }
 
-  const entry = resolveClientEntry(params)
+  // An invite token (server-trusted) wins over any query-param persona.
+  const tokenParam = params.token
+  const token = typeof tokenParam === 'string' ? tokenParam : Array.isArray(tokenParam) ? tokenParam[0] : undefined
+
+  let entry = resolveClientEntry(params)
+  let inviteToken: string | undefined
+  if (token) {
+    try {
+      const database = await db()
+      const invite = await resolveInvite(
+        database as ReturnType<typeof import('drizzle-orm/d1').drizzle>,
+        token,
+      )
+      if (invite && invite.flow === 'client' && invite.persona && !invite.expired) {
+        entry = clientEntryFromPersona(invite.persona as ClientPersona, {
+          companyName: invite.companyName ?? undefined,
+          contactName: invite.contactName ?? undefined,
+          contactEmail: invite.contactEmail ?? undefined,
+        })
+        inviteToken = token
+      }
+    } catch {
+      // fall back to the query-param entry
+    }
+  }
 
   // Fetch the Clerk user once: skip onboarding if already completed, and
   // prefill identity when the link did not carry it. (redirect() is called
@@ -38,10 +64,13 @@ export default async function OnboardingPage({
   } catch {
     // non-fatal: render onboarding without prefill
   }
-  if (onboardingComplete) redirect('/overview')
+  // Only skip onboarding when they are genuinely ready (complete AND in an org).
+  // Gating on orgId too prevents the /overview <-> /onboarding redirect loop a
+  // complete-but-org-less session would otherwise hit.
+  if (onboardingComplete && orgId) redirect('/overview')
 
   // SEAM: the studio lead is the assigned PM for this client; default to Liam.
   const lead: OnboardingLead = { name: 'Liam Miller', first: 'Liam', role: 'Your studio lead', initials: 'LM', img: '/liam-profile.jpg' }
 
-  return <OnboardingContent entry={entry} lead={lead} redirectTo="/overview" />
+  return <OnboardingContent entry={entry} lead={lead} redirectTo="/overview" inviteToken={inviteToken} />
 }

@@ -17,7 +17,7 @@ export default async function WelcomePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const params = await searchParams
-  const { userId } = await getServerAuth()
+  const { userId, orgId } = await getServerAuth()
   if (!userId) {
     const qs = new URLSearchParams(params as Record<string, string>).toString()
     redirect(`/sign-in?redirect_url=${encodeURIComponent('/welcome' + (qs ? '?' + qs : ''))}`)
@@ -38,7 +38,8 @@ export default async function WelcomePage({
   } catch {
     // non-fatal
   }
-  if (onboardingComplete) redirect('/overview')
+  // Complete AND in an org before skipping ahead (avoids the redirect loop).
+  if (onboardingComplete && orgId) redirect('/overview')
   first = first || 'there'
   const initials = first.slice(0, 2).toUpperCase()
 

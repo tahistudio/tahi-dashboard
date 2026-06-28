@@ -20,6 +20,7 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
+import { useAuth, useClerk } from '@clerk/nextjs'
 import { cn } from '@/lib/utils'
 import {
   SceneShell,
@@ -209,17 +210,50 @@ export function OnboardingContent({
   entry,
   lead,
   redirectTo,
+  inviteToken,
 }: {
   entry: ClientEntry
   lead: OnboardingLead
   redirectTo: string
+  inviteToken?: string
 }) {
   const router = useRouter()
+  const { orgId: activeClerkOrgId } = useAuth()
+  const { setActive } = useClerk()
+  const [provisioning, setProvisioning] = React.useState(false)
+  const [joinError, setJoinError] = React.useState<string | null>(null)
   const onComplete = () => {
     // Best-effort: mark onboarding done so re-entry skips to the dashboard.
     fetch('/api/onboarding/complete', { method: 'POST' }).catch(() => {})
     router.push(redirectTo)
   }
+
+  // Invited clients (token link) join their pre-created org with no payment.
+  // Consume the token once on mount and activate the org for this session, so
+  // the rest of onboarding and the portal can scope to it.
+  React.useEffect(() => {
+    if (!inviteToken || activeClerkOrgId) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/portal/accept-invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: inviteToken }),
+        })
+        const json = (await res.json()) as { clerkOrgId?: string; error?: string }
+        if (cancelled) return
+        if (res.ok && json.clerkOrgId) {
+          if (setActive) await setActive({ organization: json.clerkOrgId })
+        } else {
+          setJoinError(json.error ?? 'We could not open your workspace. Please contact the studio.')
+        }
+      } catch {
+        if (!cancelled) setJoinError('We could not open your workspace. Please contact the studio.')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [inviteToken, activeClerkOrgId, setActive])
   const contact = {
     name: entry.contactName ?? 'there',
     email: entry.contactEmail ?? '',
@@ -256,6 +290,32 @@ export function OnboardingContent({
   const back = () => { setDir(-1); setIdx(Math.max(0, idx - 1)) }
   const goSelf = (v: 'choose' | 'proposal' | 'done', d = 1) => { setDir(d); setSelfView(v) }
   const pickRetainer = () => { setDir(1); setEngagement('retainer'); setChosen(true); setIdx(0) }
+
+  // Self-serve clients need a linked D1 org before the pay step. Clerk may have
+  // already created their Clerk org during sign-up (the org-creation task), so
+  // we do NOT gate on !activeClerkOrgId: /api/portal/provision is idempotent and
+  // creates the linked D1 row for whichever Clerk org they have (or makes one if
+  // none). Without this, a Clerk-created org leaves no D1 row and checkout 403s.
+  const needsProvision = clientType === 'new' && entry.entry === 'selfserve'
+  const ensureOrg = async (): Promise<boolean> => {
+    setProvisioning(true)
+    try {
+      const res = await fetch('/api/portal/provision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: entry.companyName || undefined }),
+      })
+      const json = (await res.json()) as { clerkOrgId?: string }
+      if (!res.ok || !json.clerkOrgId) return false
+      if (setActive) await setActive({ organization: json.clerkOrgId })
+      return true
+    } catch {
+      return false
+    } finally {
+      setProvisioning(false)
+    }
+  }
+  const planContinue = async () => { if (await ensureOrg()) next() }
 
   // Send any pending invites (Clerk org invitations) then advance.
   const sendInvitesAndNext = async () => {
@@ -363,6 +423,9 @@ export function OnboardingContent({
     }
   } else if (stepId === 'plan') {
     wide = true
+    // Self-serve clients have no org yet; provision one before advancing to pay
+    // so the checkout call on the next step can scope to it.
+    if (needsProvision) onPrimary = planContinue
     title = 'Choose how we&apos;ll work together.'.replace('&apos;', "'")
     sub = 'Pick the pace that fits. Change or pause it any time.'
     body = (
@@ -498,13 +561,14 @@ export function OnboardingContent({
                 <div className={cn('ob-body', dir > 0 ? 'ob-in-up' : 'ob-in-down')} key={inChooser ? 'self:' + selfView : stepId} ref={growInner}>
                   {title && <h1 className="ob-h1">{title}</h1>}
                   {sub && <p className="ob-sub">{sub}</p>}
+                  {joinError && <div className="ob-decline" role="alert">{joinError}</div>}
                   {body}
                 </div>
               </div>
               {footer && (
                 <div className={cn('ob-footer', idx === 0 && 'end')}>
-                  {idx > 0 && <button className="ob-back" onClick={back}>Back</button>}
-                  {primary && <button className="ob-next" onClick={onPrimary}>{primary}</button>}
+                  {idx > 0 && <button className="ob-back" onClick={back} disabled={provisioning}>Back</button>}
+                  {primary && <button className="ob-next" onClick={onPrimary} disabled={provisioning}>{provisioning ? 'Setting up your workspace' : primary}</button>}
                 </div>
               )}
               {skip && <div style={{ marginTop: '14px', textAlign: 'center' }}><button className="ob-skip" onClick={next}>{skip} &rarr;</button></div>}

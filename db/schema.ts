@@ -36,6 +36,13 @@ export const organisations = sqliteTable('organisations', {
   // maintain | scale | tune | launch | hourly | custom | none
   planType: text('plan_type').default('none'),
   stripeCustomerId: text('stripe_customer_id'),
+  // Clerk organization id this client signs in through. Null until the client
+  // first authenticates: a self-serve signup creates a fresh Clerk org and
+  // links it here; an invited client links the org on accept. getPortalAuth
+  // resolves a caller's Clerk org back to this D1 row via this column, so the
+  // D1 primary key (a stable UUID referenced by every FK) never has to equal
+  // the Clerk org id.
+  clerkOrgId: text('clerk_org_id'),
   xeroContactId: text('xero_contact_id'),
   // green | amber | red
   healthStatus: text('health_status').default('green'),
@@ -72,6 +79,9 @@ export const organisations = sqliteTable('organisations', {
 }, (table) => [
   index('idx_orgs_status').on(table.status),
   index('idx_orgs_plan').on(table.planType),
+  // Non-null clerk_org_id must be unique (one D1 org per Clerk org). SQLite
+  // treats NULLs as distinct, so unprovisioned orgs all sit at NULL happily.
+  uniqueIndex('idx_orgs_clerk_org').on(table.clerkOrgId),
 ])
 
 // ============================================================
@@ -97,6 +107,46 @@ export const contacts = sqliteTable('contacts', {
   index('idx_contacts_org').on(table.orgId),
   index('idx_contacts_clerk').on(table.clerkUserId),
   index('idx_contacts_person').on(table.personId),
+])
+
+// ============================================================
+// ONBOARDING INVITES (opaque link tokens for client / team onboarding)
+// ============================================================
+// Flow: an admin creates the client (org row) first, then generates an opaque,
+// non-guessable token. The link (/onboarding?token=... or /welcome?token=...)
+// carries the engagement context through sign-in and, on first use, joins the
+// user to the pre-created org with NO payment step, optionally attaching their
+// contract / schedule / proposal. Self-serve signups never need a token.
+// Persona is read from this row (server-trusted), never from a spoofable query
+// param. See lib/onboarding-invites.ts (create / resolve / consume).
+export const onboardingInvites = sqliteTable('onboarding_invites', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // The opaque random string that appears in the link. Non-guessable, unique.
+  token: text('token').notNull(),
+  // 'client' | 'team'
+  flow: text('flow').notNull().default('client'),
+  // The pre-created org this invite joins the user to (client flow).
+  orgId: text('org_id').references(() => organisations.id, { onDelete: 'cascade' }),
+  // ClientPersona for the client flow: retainer | project | existing_project |
+  // existing_retainer | selfserve.
+  persona: text('persona'),
+  // Optional engagement artefacts already set up for this client.
+  contractId: text('contract_id'),
+  scheduleId: text('schedule_id'),
+  proposalId: text('proposal_id'),
+  // Prefill identity, so we never re-ask for what we already hold.
+  contactEmail: text('contact_email'),
+  contactName: text('contact_name'),
+  // Lifecycle. Single-use: usedAt + usedByUserId stamp the consuming user.
+  expiresAt: text('expires_at'),
+  usedAt: text('used_at'),
+  usedByUserId: text('used_by_user_id'),
+  // Team member who generated the link.
+  createdById: text('created_by_id'),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('idx_onboarding_invites_token').on(table.token),
+  index('idx_onboarding_invites_org').on(table.orgId),
 ])
 
 // ============================================================

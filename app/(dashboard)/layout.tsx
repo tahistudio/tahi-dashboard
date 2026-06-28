@@ -1,4 +1,5 @@
 import { getServerAuth } from '@/lib/server-auth'
+import { clerkClient } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
 import { AppSidebar } from '@/components/tahi/app-sidebar'
 import { AppTopNav } from '@/components/tahi/app-top-nav'
@@ -26,6 +27,26 @@ export default async function DashboardLayout({
   if (!userId) redirect('/sign-in')
 
   const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
+
+  // Onboarding-completion gate (the durable lock behind the middleware's no-org
+  // redirect). A client may reach the dashboard ONLY once their onboarding is
+  // finished - so a client who already holds an org but has not finished (Clerk
+  // minted one at sign-up, or self-serve provisioned one before paying) is sent
+  // back to /onboarding instead of slipping into /overview. Admins bypass.
+  // redirect() is called OUTSIDE the try so its NEXT_REDIRECT is not swallowed;
+  // we fail-open (treat as complete) on a Clerk hiccup so a transient error
+  // never locks a real client out.
+  let onboardingComplete = true
+  if (!isAdmin) {
+    try {
+      const clerk = await clerkClient()
+      const user = await clerk.users.getUser(userId)
+      onboardingComplete = !!user.publicMetadata?.onboardingComplete
+    } catch {
+      onboardingComplete = true
+    }
+  }
+  if (!onboardingComplete) redirect('/onboarding')
 
   // Granular permissions: resolve the caller's capabilities once, server-side,
   // and feed them to the sidebar + <Gate>. Fail-open (full access) if the
