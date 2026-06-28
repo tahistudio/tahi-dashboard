@@ -277,6 +277,14 @@ export function OnboardingContent({
   const [videoOpen, setVideoOpen] = React.useState(false)
   const [invites, setInvites] = React.useState<string[]>([])
   const [inviteEmail, setInviteEmail] = React.useState('')
+  // Self-serve project enquiry form (controlled, so it actually submits).
+  const [enqCompany, setEnqCompany] = React.useState('')
+  const [enqWebsite, setEnqWebsite] = React.useState('')
+  const [enqBrief, setEnqBrief] = React.useState('')
+  const [enqBudget, setEnqBudget] = React.useState('Not sure yet')
+  const [enqDiscipline, setEnqDiscipline] = React.useState('Both design and development')
+  const [enqSubmitting, setEnqSubmitting] = React.useState(false)
+  const [enqError, setEnqError] = React.useState<string | null>(null)
 
   const calDays = React.useMemo(() => upcomingDays(4), [])
   const steps = React.useMemo(() => buildSteps(engagement, clientType), [engagement, clientType])
@@ -289,6 +297,32 @@ export function OnboardingContent({
   const next = () => { setDir(1); if (idx >= steps.length - 1) onComplete(); else setIdx(idx + 1) }
   const back = () => { setDir(-1); setIdx(Math.max(0, idx - 1)) }
   const goSelf = (v: 'choose' | 'proposal' | 'done', d = 1) => { setDir(d); setSelfView(v) }
+
+  // Submit the one-off project enquiry: required fields, then POST (records a
+  // lead + emails business@tahi.studio), then show the "we're on it" screen.
+  const submitEnquiry = async () => {
+    setEnqError(null)
+    if (!enqCompany.trim()) { setEnqError('Please add your company name.'); return }
+    if (!enqBrief.trim()) { setEnqError('Tell us a little about the project.'); return }
+    setEnqSubmitting(true)
+    try {
+      const res = await fetch('/api/portal/enquiry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company: enqCompany, website: enqWebsite, brief: enqBrief, budget: enqBudget, disciplines: enqDiscipline }),
+      })
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        setEnqError(j.error ?? 'Something went wrong. Please try again.')
+        return
+      }
+      goSelf('done', 1)
+    } catch {
+      setEnqError('Something went wrong. Please try again.')
+    } finally {
+      setEnqSubmitting(false)
+    }
+  }
   const pickRetainer = () => { setDir(1); setEngagement('retainer'); setChosen(true); setIdx(0) }
 
   // Self-serve clients need a linked D1 org before the pay step. Clerk may have
@@ -355,13 +389,14 @@ export function OnboardingContent({
           <h1 className="ob-h1">Tell us about the project.</h1>
           <p className="ob-sub">A few details so we come prepared. We&apos;ll reach out to learn more and set up a quick call. No commitment.</p>
           <div className="ob-identity"><span className="ob-identity-av">{contact.initials}</span><span className="ob-identity-t"><b>{contact.name}</b><small>{contact.email}</small></span><span className="ob-identity-tag">From your sign-up</span></div>
-          <div className="ob-row2 ob-field"><div><label className="ob-label">Company name</label><input className="ob-input" placeholder="Company name" /></div><div><label className="ob-label">Website <span style={{ color: '#9b9a94' }}>(if you have one)</span></label><input className="ob-input" placeholder="yourcompany.com" /></div></div>
-          <div className="ob-field"><label className="ob-label">What are you after?</label><textarea className="ob-textarea" placeholder="A new site, a rebrand, a product surface. A sentence or two is enough." /></div>
+          <div className="ob-row2 ob-field"><div><label className="ob-label">Company name <span style={{ color: '#b3261e' }}>*</span></label><input className="ob-input" placeholder="Company name" value={enqCompany} onChange={e => setEnqCompany(e.target.value)} autoComplete="organization" /></div><div><label className="ob-label">Website <span style={{ color: '#9b9a94' }}>(if you have one)</span></label><input className="ob-input" placeholder="yourcompany.com" value={enqWebsite} onChange={e => setEnqWebsite(e.target.value)} /></div></div>
+          <div className="ob-field"><label className="ob-label">What are you after? <span style={{ color: '#b3261e' }}>*</span></label><textarea className="ob-textarea" placeholder="A new site, a rebrand, a product surface. A sentence or two is enough." value={enqBrief} onChange={e => setEnqBrief(e.target.value)} /></div>
           <div className="ob-row2 ob-field">
-            <div><label className="ob-label">Rough budget</label><select className="ob-select" defaultValue="Not sure yet">{BUDGETS.map(b => <option key={b} value={b}>{b}</option>)}</select></div>
-            <div><label className="ob-label">You&apos;re after</label><select className="ob-select" defaultValue="Both design and development">{DISCIPLINES.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
+            <div><label className="ob-label">Rough budget</label><select className="ob-select" value={enqBudget} onChange={e => setEnqBudget(e.target.value)}>{BUDGETS.map(b => <option key={b} value={b}>{b}</option>)}</select></div>
+            <div><label className="ob-label">You&apos;re after</label><select className="ob-select" value={enqDiscipline} onChange={e => setEnqDiscipline(e.target.value)}>{DISCIPLINES.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
           </div>
-          <div className="ob-footer"><button className="ob-back" onClick={() => goSelf('choose', -1)}>Back</button><button className="ob-next" onClick={() => goSelf('done', 1)}>Send and we&apos;ll be in touch</button></div>
+          {enqError && <div className="ob-decline" role="alert">{enqError}</div>}
+          <div className="ob-footer"><button className="ob-back" onClick={() => goSelf('choose', -1)} disabled={enqSubmitting}>Back</button><button className="ob-next" onClick={submitEnquiry} disabled={enqSubmitting}>{enqSubmitting ? 'Sending...' : "Send and we'll be in touch"}</button></div>
         </>
       )
     } else {
