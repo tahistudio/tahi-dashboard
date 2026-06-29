@@ -15,6 +15,7 @@ import { PermissionsProvider, type PermissionsValue } from '@/components/tahi/pe
 import { PrivateModeProvider } from '@/components/tahi/private-mode-context'
 import { db } from '@/lib/db'
 import { resolvePermissions, featureMap } from '@/lib/permissions'
+import './app-shell.css'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -80,7 +81,7 @@ export default async function DashboardLayout({
             root layout <head> so it runs before body parses. See
             app/layout.tsx. */}
         <SkipToContent />
-        <div className="flex h-screen overflow-hidden" style={{ background: 'var(--color-bg-cream)' }}>
+        <div className="tahi-shell flex h-screen overflow-hidden" style={{ background: 'var(--color-bg-cream)' }}>
           {/* AppSidebar handles its own responsive visibility:
               desktop persistent, mobile drawer triggered from top-nav hamburger. */}
           <AppSidebar isAdmin={isAdmin} features={perms.features} />
@@ -93,7 +94,7 @@ export default async function DashboardLayout({
               </div>
             </main>
           </div>
-          <MobileBottomNav isAdmin={isAdmin} />
+          <MobileBottomNav isAdmin={isAdmin} features={perms.features} />
           <ProductTour isAdmin={isAdmin} />
           <KeyboardShortcuts />
         </div>

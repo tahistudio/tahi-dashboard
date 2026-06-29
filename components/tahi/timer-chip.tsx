@@ -1,23 +1,27 @@
 'use client'
 
 /**
- * <TimerChip>. Always-present timer control in the admin top-nav.
+ * <TimerChip>. Always-present time-tracker control in the admin top-nav.
  *
- * Two states in one button:
+ * Re-skinned to the "Tahi App Shell" forest design: a single relative `.tt`
+ * root holding the pill and an absolutely-positioned `.tt-panel` child. No
+ * shared Popover; outside-click + Escape are handled locally.
  *
- *   Idle:    Play icon. Click → opens a Popover with a searchable list of
- *            active requests. Pick one → POST /api/admin/timers → chip
- *            switches to the active state with HH:MM:SS.
- *   Active:  Pause dot + HH:MM:SS (or just the dot on small screens).
- *            Click → opens the controls popover: Pause/Resume, Stop &
- *            log, Discard, jump to request.
+ * Two states in one pill:
+ *
+ *   Idle:    Clock icon + "Track time". Click -> opens the panel with a
+ *            searchable picker across Requests / Tasks / Clients. Picking a
+ *            row POSTs /api/admin/timers and the chip flips to active.
+ *   Active:  Pulsing dot (.tt-dot) + HH:MM:SS + target. Click -> opens the
+ *            panel readout with Pause/Resume, Stop & log, Discard, and a
+ *            jump-to-request link.
  *
  * Heartbeats POST /api/admin/timers/ping every 30s while active. Polls
  * GET /api/admin/timers every 30s so the chip resyncs with the server
  * (catches pauses from another tab, stop from the request page, etc.).
  *
- * On first load, if the active timer's lastPingAt is > 2 minutes old
- * we prompt the user to log or discard. Covers laptop-sleep gaps.
+ * On first load, if the active timer's lastPingAt is > 2 minutes old we
+ * prompt the user to log or discard. Covers laptop-sleep gaps.
  *
  * Admin-only. Clients never see this.
  */
@@ -25,7 +29,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import {
-  Play, Pause, Square, Loader2, Clock3, ChevronDown, ExternalLink, Search,
+  Play, Pause, Square, Loader2, Clock, ChevronDown, ExternalLink, Search,
   Inbox, CheckSquare, Users,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
@@ -33,8 +37,6 @@ import { formatElapsed, isStaleTimer } from '@/lib/timer-helpers'
 import { notifyTimerChanged, subscribeToTimerChanges } from '@/lib/timer-events'
 import { useToast } from '@/components/tahi/toast'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
-import { Popover } from '@/components/tahi/popover'
-import { EmptyState } from '@/components/tahi/empty-state'
 
 interface ActiveTimerResponse {
   timer: {
@@ -88,8 +90,7 @@ export function TimerChip() {
   const [timer, setTimer] = useState<ActiveTimerResponse['timer']>(null)
   const [loaded, setLoaded] = useState(false)
   const [tick, setTick] = useState(0)
-  const [controlsOpen, setControlsOpen] = useState(false)
-  const [pickerOpen, setPickerOpen] = useState(false)
+  const [open, setOpen] = useState(false)
   const [acting, setActing] = useState(false)
   const [staleTimer, setStaleTimer] = useState<ActiveTimerResponse['timer']>(null)
 
@@ -102,7 +103,7 @@ export function TimerChip() {
   const [pickerSource, setPickerSource] = useState<TimerSource>('request')
   const [pickerQuery, setPickerQuery] = useState('')
 
-  const triggerRef = useRef<HTMLButtonElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
 
   // --- fetch + heartbeat ---------------------------------------------------
@@ -150,16 +151,35 @@ export function TimerChip() {
     return () => clearInterval(id)
   }, [timer])
 
-  // Lazy-load each source list the first time its tab is activated.
-  // Track which lists we've already tried to load so an empty server
-  // response doesn't cause an infinite re-fetch loop (the previous
-  // version re-fired the effect every render because the "fetch me"
-  // condition (length === 0 && !loading) stayed true after an empty
-  // result).
+  // Outside-click + Escape close the panel (replaces the shared Popover).
+  useEffect(() => {
+    if (!open) return
+    function onDown(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  // Clear the picker query whenever the panel closes.
+  useEffect(() => { if (!open) setPickerQuery('') }, [open])
+
+  // Lazy-load each source list the first time its tab is activated while the
+  // picker (idle panel) is open. Track which lists we've already tried to load
+  // so an empty server response doesn't cause an infinite re-fetch loop (the
+  // "fetch me" condition length === 0 && !loading would otherwise stay true
+  // after an empty result).
   const fetchedRef = useRef({ request: false, task: false, client: false })
 
   useEffect(() => {
-    if (!pickerOpen) return
+    if (!open || timer) return
     if (pickerSource === 'request' && !fetchedRef.current.request && !requestsLoading) {
       fetchedRef.current.request = true
       setRequestsLoading(true)
@@ -185,11 +205,7 @@ export function TimerChip() {
         .catch(() => setClients([]))
         .finally(() => setClientsLoading(false))
     }
-  }, [pickerOpen, pickerSource, requestsLoading, tasksLoading, clientsLoading])
-
-  // Close either popover if the other opens, so we don't get stacked.
-  useEffect(() => { if (pickerOpen) setControlsOpen(false) }, [pickerOpen])
-  useEffect(() => { if (controlsOpen) setPickerOpen(false) }, [controlsOpen])
+  }, [open, timer, pickerSource, requestsLoading, tasksLoading, clientsLoading])
 
   // --- actions -------------------------------------------------------------
 
@@ -218,7 +234,7 @@ export function TimerChip() {
       } else if (res.ok) {
         await fetchTimer()
         notifyTimerChanged()
-        setPickerOpen(false)
+        setOpen(false)
         setPickerQuery('')
         showToast('Timer started', 'success')
       } else {
@@ -254,7 +270,7 @@ export function TimerChip() {
       showToast('Network error. Try again.', 'error')
     } finally {
       setActing(false)
-      setControlsOpen(false)
+      setOpen(false)
     }
   }
 
@@ -280,38 +296,28 @@ export function TimerChip() {
       }
     } finally {
       setActing(false)
-      setControlsOpen(false)
+      setOpen(false)
     }
   }
 
+  // Pre-hydration placeholder. Matches the idle pill geometry so the nav
+  // doesn't jump when state arrives.
   if (!loaded) {
-    // Render a placeholder that matches the eventual "Track time"
-    // chip's geometry so the nav doesn't jump when state arrives.
     return (
-      <button
-        disabled
-        aria-label="Timer loading"
-        className="flex items-center"
-        style={{
-          gap: '0.375rem',
-          padding: '0.3125rem 0.625rem',
-          borderRadius: 'var(--radius-button)',
-          background: 'transparent',
-          border: '1px solid var(--color-border-subtle)',
-          color: 'var(--color-text-subtle)',
-          fontSize: '0.75rem',
-          fontWeight: 500,
-          cursor: 'wait',
-          minHeight: '2rem',
-        }}
-      >
-        <Clock3 size={12} aria-hidden="true" className="animate-pulse" />
-        <span className="hidden sm:inline">Track time</span>
-      </button>
+      <div className="tt" data-status="idle">
+        <button type="button" className="tt-pill" disabled aria-label="Timer loading">
+          <span className="tt-ic"><Clock size={16} aria-hidden="true" /></span>
+          <span className="tt-lbl">Track time</span>
+          <span className="tt-chev"><ChevronDown size={12} aria-hidden="true" /></span>
+        </button>
+      </div>
     )
   }
 
-  const isPaused = !!timer?.isPaused
+  const status: 'idle' | 'running' | 'paused' = !timer ? 'idle' : timer.isPaused ? 'paused' : 'running'
+  const active = !!timer
+  const running = status === 'running'
+  const paused = status === 'paused'
 
   // Derive displayed elapsed from startedAt (server truth) + the `tick`
   // pulse for re-render. Prevents drift.
@@ -324,209 +330,139 @@ export function TimerChip() {
     const rawMs = pausedMs - startedMs - (timer.pausedSeconds ?? 0) * 1000
     seconds = Math.max(0, Math.floor(rawMs / 1000))
   }
+  const elapsed = formatElapsed(seconds)
+  const targetTitle = timer?.targetTitle ?? 'Untitled'
 
-  // ── Idle ── Play button that opens the request picker.
-  if (!timer) {
-    return (
-      <>
-        <button
-          ref={triggerRef}
-          onClick={() => setPickerOpen(v => !v)}
-          className="flex items-center transition-colors"
-          style={{
-            gap: '0.375rem',
-            padding: '0.3125rem 0.625rem',
-            borderRadius: 'var(--radius-button)',
-            background: 'transparent',
-            border: '1px solid var(--color-border-subtle)',
-            color: 'var(--color-text-muted)',
-            fontSize: '0.75rem',
-            fontWeight: 500,
-            cursor: 'pointer',
-            minHeight: '2rem',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.background = 'var(--color-brand-50)'
-            e.currentTarget.style.color = 'var(--color-text-active)'
-            e.currentTarget.style.borderColor = 'var(--color-brand-100)'
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = 'var(--color-text-muted)'
-            e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
-          }}
-          aria-expanded={pickerOpen}
-          aria-label="Start timer"
-          title="Start a timer"
-        >
-          <Play size={12} aria-hidden="true" />
-          <span className="hidden sm:inline">Track time</span>
-        </button>
-
-        <Popover
-          anchorRef={triggerRef}
-          open={pickerOpen}
-          onClose={() => { setPickerOpen(false); setPickerQuery('') }}
-          width="22rem"
-          align="end"
-          maxHeight="28rem"
-        >
-          <SourcePicker
-            source={pickerSource}
-            setSource={s => { setPickerSource(s); setPickerQuery('') }}
-            requests={requests}
-            tasks={tasks}
-            clients={clients}
-            loading={
-              pickerSource === 'request' ? requestsLoading :
-              pickerSource === 'task' ? tasksLoading : clientsLoading
-            }
-            query={pickerQuery}
-            setQuery={setPickerQuery}
-            onPick={id => void startTimer(pickerSource, id)}
-            acting={acting}
-          />
-        </Popover>
-      </>
-    )
-  }
-
-  // ── Active ── Pulse + elapsed; click opens the control menu.
   return (
-    <>
+    <div
+      ref={rootRef}
+      className={'tt' + (open ? ' open' : '') + (active ? ' active' : '')}
+      data-status={status}
+    >
       <button
-        ref={triggerRef}
-        onClick={() => setControlsOpen(v => !v)}
-        className="flex items-center transition-colors"
-        style={{
-          gap: '0.375rem',
-          padding: '0.3125rem 0.625rem',
-          borderRadius: 'var(--radius-button)',
-          // Active = brand-filled chip so the running timer stands
-          // out from the rest of the nav. Paused = muted, clearly
-          // "not currently counting".
-          background: isPaused ? 'var(--color-bg-secondary)' : 'var(--color-brand)',
-          border: `1px solid ${isPaused ? 'var(--color-border)' : 'var(--color-brand)'}`,
-          color: isPaused ? 'var(--color-text-muted)' : '#ffffff',
-          fontSize: '0.75rem',
-          fontWeight: 600,
-          cursor: 'pointer',
-          minHeight: '2rem',
-          boxShadow: isPaused ? 'none' : '0 1px 0 rgba(15, 20, 16, 0.16)',
-        }}
-        aria-expanded={controlsOpen}
-        aria-label={`Active timer ${formatElapsed(seconds)} ${isPaused ? 'paused' : 'running'}`}
+        type="button"
+        className="tt-pill"
+        onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        aria-label={active ? `Active timer ${elapsed} ${running ? 'running' : 'paused'}` : 'Track time'}
       >
-        {isPaused
-          ? <Pause size={12} aria-hidden="true" />
-          : <span
-              aria-hidden="true"
-              className="animate-pulse"
-              style={{
-                width: '0.4375rem', height: '0.4375rem', borderRadius: '50%',
-                background: '#ffffff',
-                boxShadow: '0 0 0 2px rgba(255, 255, 255, 0.32)',
-              }}
-            />}
-        <span className="hidden sm:inline font-mono tabular-nums">{formatElapsed(seconds)}</span>
-        <ChevronDown size={10} aria-hidden="true" className="hidden sm:inline-block" />
+        <span className="tt-ic">
+          {active ? <span className="tt-dot" aria-hidden="true" /> : <Clock size={16} aria-hidden="true" />}
+        </span>
+        {active ? (
+          <span className="tt-live">
+            <span className="tt-time">{elapsed}</span>
+            <span className="tt-tgt">{targetTitle}</span>
+          </span>
+        ) : (
+          <span className="tt-lbl">Track time</span>
+        )}
+        <span className="tt-chev"><ChevronDown size={12} aria-hidden="true" /></span>
       </button>
 
-      <Popover
-        anchorRef={triggerRef}
-        open={controlsOpen}
-        onClose={() => setControlsOpen(false)}
-        width="16rem"
-        align="end"
-      >
-        {/* Target */}
-        <div
-          style={{
-            padding: '0.625rem 0.875rem',
-            borderBottom: '1px solid var(--color-border-subtle)',
-            background: 'var(--color-bg-secondary)',
-          }}
-        >
-          <p
-            style={{
-              fontSize: '0.625rem',
-              fontWeight: 600,
-              color: 'var(--color-text-subtle)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-              margin: 0,
-            }}
-          >
-            Tracking
-          </p>
-          <div className="flex items-center" style={{ gap: '0.375rem', marginTop: '0.125rem' }}>
-            <span
-              className="truncate"
-              style={{ fontSize: '0.8125rem', color: 'var(--color-text)', flex: 1, minWidth: 0, fontWeight: 500 }}
-            >
-              {timer.targetTitle ?? 'Untitled'}
-            </span>
-            {timer.requestId && (
-              <Link
-                href={`/requests/${timer.requestId}`}
-                onClick={() => setControlsOpen(false)}
-                aria-label="Open request"
+      {open && (
+        <div className="tt-panel">
+          <div className="tt-head">Time tracker</div>
+
+          {!active ? (
+            <SourcePicker
+              source={pickerSource}
+              setSource={s => { setPickerSource(s); setPickerQuery('') }}
+              requests={requests}
+              tasks={tasks}
+              clients={clients}
+              loading={
+                pickerSource === 'request' ? requestsLoading :
+                pickerSource === 'task' ? tasksLoading : clientsLoading
+              }
+              query={pickerQuery}
+              setQuery={setPickerQuery}
+              onPick={id => void startTimer(pickerSource, id)}
+              acting={acting}
+            />
+          ) : (
+            <>
+              <div className="tt-readout">
+                <span className="tt-big">{elapsed}</span>
+                <span className="tt-sub">{`${running ? 'Running' : 'Paused'} . ${targetTitle}`}</span>
+              </div>
+
+              <div className="tt-ctrls">
+                {running && (
+                  <button type="button" className="tt-btn" onClick={() => void pauseOrResume()} disabled={acting}>
+                    {acting ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Pause size={14} aria-hidden="true" />} Pause
+                  </button>
+                )}
+                {paused && (
+                  <button type="button" className="tt-btn tt-start" onClick={() => void pauseOrResume()} disabled={acting}>
+                    {acting ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Play size={14} aria-hidden="true" />} Resume
+                  </button>
+                )}
+                <button type="button" className="tt-btn tt-stop" onClick={() => void stop('log')} disabled={acting}>
+                  <Square size={12} aria-hidden="true" /> Stop
+                </button>
+              </div>
+
+              <div
                 style={{
-                  display: 'inline-flex',
+                  display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  width: '1.25rem',
-                  height: '1.25rem',
-                  borderRadius: 'var(--radius-sm)',
-                  color: 'var(--color-text-subtle)',
+                  justifyContent: timer?.requestId ? 'space-between' : 'flex-end',
+                  gap: '0.5rem',
                 }}
-                onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand)' }}
-                onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-subtle)' }}
               >
-                <ExternalLink size={12} aria-hidden="true" />
-              </Link>
-            )}
-          </div>
+                {timer?.requestId && (
+                  <Link
+                    href={`/requests/${timer.requestId}`}
+                    onClick={() => setOpen(false)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.3125rem',
+                      font: '600 11.5px Manrope, sans-serif',
+                      color: 'var(--text-muted)',
+                      textDecoration: 'none',
+                      padding: '0.25rem 0.375rem',
+                      borderRadius: '6px',
+                      transition: 'color 0.14s, background 0.14s',
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.color = 'var(--brand-strong)'
+                      e.currentTarget.style.background = 'var(--bg-secondary)'
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.color = 'var(--text-muted)'
+                      e.currentTarget.style.background = 'transparent'
+                    }}
+                  >
+                    <ExternalLink size={12} aria-hidden="true" /> Open request
+                  </Link>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void stop('discard')}
+                  disabled={acting}
+                  style={{
+                    border: 'none',
+                    background: 'none',
+                    cursor: acting ? 'not-allowed' : 'pointer',
+                    font: '600 11.5px Manrope, sans-serif',
+                    color: 'var(--text-faint)',
+                    padding: '0.25rem 0.375rem',
+                    borderRadius: '6px',
+                    opacity: acting ? 0.5 : 1,
+                    transition: 'color 0.14s, background 0.14s',
+                  }}
+                  onMouseEnter={e => { if (!acting) e.currentTarget.style.color = 'var(--text-muted)' }}
+                  onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-faint)' }}
+                >
+                  Discard
+                </button>
+              </div>
+            </>
+          )}
         </div>
-
-        {/* Big live time */}
-        <div style={{ padding: '0.625rem 0.875rem 0', textAlign: 'center' }}>
-          <span
-            className="font-mono tabular-nums"
-            style={{
-              fontSize: '1.25rem',
-              fontWeight: 700,
-              color: isPaused ? 'var(--color-text-muted)' : 'var(--color-brand-dark)',
-              letterSpacing: '0.02em',
-            }}
-          >
-            {formatElapsed(seconds)}
-          </span>
-        </div>
-
-        {/* Actions */}
-        <div style={{ padding: '0.375rem' }}>
-          <MenuItem
-            icon={isPaused ? <Play size={13} /> : <Pause size={13} />}
-            label={isPaused ? 'Resume timer' : 'Pause timer'}
-            onClick={pauseOrResume}
-            disabled={acting}
-          />
-          <MenuItem
-            icon={<Square size={13} />}
-            label="Stop & log time"
-            onClick={() => void stop('log')}
-            disabled={acting}
-          />
-          <MenuItem
-            icon={<Clock3 size={13} />}
-            label="Discard (don't log)"
-            onClick={() => void stop('discard')}
-            disabled={acting}
-            tone="danger"
-          />
-        </div>
-      </Popover>
+      )}
 
       {/* Stale-timer recovery prompt */}
       {staleTimer && timer && timer.id === staleTimer.id && (
@@ -544,14 +480,14 @@ export function TimerChip() {
           onCancel={() => setStaleTimer(null)}
         />
       )}
-    </>
+    </div>
   )
 }
 
 /**
- * Three-tab picker: Request | Task | Client. Common search bar across all
+ * Three-source picker: Request | Task | Client. Common search bar across all
  * three; tab swap clears the query. Each tab shows up to 40 results so the
- * popover never grows unbounded.
+ * panel never grows unbounded. Re-skinned to the app-shell tt-* classes.
  */
 function SourcePicker({
   source,
@@ -606,277 +542,143 @@ function SourcePicker({
 
   const SourceIcon = source === 'request' ? Inbox : source === 'task' ? CheckSquare : Users
 
+  const emptyTitle = q
+    ? 'No matches'
+    : source === 'request' ? 'No open requests'
+    : source === 'task' ? 'No open tasks'
+    : 'No active clients'
+  const emptyDesc = q
+    ? 'Try a shorter search.'
+    : source === 'request' ? 'Track time from a request once one is open.'
+    : source === 'task' ? 'Pick up a task to time work against it.'
+    : 'Track miscellaneous time against a client.'
+
   return (
     <>
-      {/* Header. Tiny label + tight segmented control. The label gives
-          the popover a clear identity ("you're picking a target") and
-          the segmented control is the brand pattern used elsewhere. */}
-      <div
-        style={{
-          padding: '0.75rem 0.875rem 0.625rem',
-          borderBottom: '1px solid var(--color-border-subtle)',
-          background: 'var(--color-bg-secondary)',
-        }}
-      >
-        <p
-          style={{
-            fontSize: '0.625rem',
-            fontWeight: 600,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            color: 'var(--color-text-subtle)',
-            margin: '0 0 0.4375rem',
-          }}
-        >
-          Track time on
-        </p>
-        <div
-          role="tablist"
-          aria-label="Track time source"
-          style={{
-            display: 'flex',
-            gap: '0.125rem',
-            padding: '0.1875rem',
-            background: 'var(--color-bg)',
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 'var(--radius-md)',
-          }}
-        >
-          {(['request', 'task', 'client'] as const).map(s => {
-            const Icon = s === 'request' ? Inbox : s === 'task' ? CheckSquare : Users
-            const active = source === s
-            return (
-              <button
-                key={s}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => setSource(s)}
-                className="flex items-center justify-center"
-                style={{
-                  flex: 1,
-                  gap: '0.3125rem',
-                  padding: '0.3125rem 0.5rem',
-                  fontSize: '0.75rem',
-                  fontWeight: active ? 600 : 500,
-                  color: active ? 'var(--color-text-active)' : 'var(--color-text-muted)',
-                  background: active ? 'var(--color-brand-100)' : 'transparent',
-                  border: 'none',
-                  borderRadius: 'var(--radius-sm)',
-                  cursor: 'pointer',
-                  textTransform: 'capitalize',
-                  transition: 'background-color 150ms ease, color 150ms ease',
-                }}
-                onMouseEnter={e => {
-                  if (!active) e.currentTarget.style.background = 'var(--color-bg-secondary)'
-                }}
-                onMouseLeave={e => {
-                  if (!active) e.currentTarget.style.background = 'transparent'
-                }}
-              >
-                <Icon size={12} aria-hidden="true" />
-                {s === 'request' ? 'Requests' : s === 'task' ? 'Tasks' : 'Clients'}
-              </button>
-            )
-          })}
-        </div>
+      {/* Source tabs. No dedicated app-shell class exists for this control, so
+          it's composed from the shell CSS vars (no new hardcoded hex). */}
+      <div role="tablist" aria-label="Track time source" style={{ display: 'flex', gap: '0.25rem' }}>
+        {(['request', 'task', 'client'] as const).map(s => {
+          const Icon = s === 'request' ? Inbox : s === 'task' ? CheckSquare : Users
+          const on = source === s
+          return (
+            <button
+              key={s}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              onClick={() => setSource(s)}
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.3125rem',
+                padding: '0.375rem 0.25rem',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                border: `1px solid ${on ? 'transparent' : 'var(--border)'}`,
+                background: on ? 'var(--brand-100)' : 'var(--bg)',
+                color: on ? 'var(--brand-strong)' : 'var(--text-muted)',
+                font: `${on ? 700 : 600} 11.5px Manrope, sans-serif`,
+                transition: 'background 0.14s, color 0.14s, border-color 0.14s',
+              }}
+              onMouseEnter={e => { if (!on) e.currentTarget.style.background = 'var(--bg-secondary)' }}
+              onMouseLeave={e => { if (!on) e.currentTarget.style.background = 'var(--bg)' }}
+            >
+              <Icon size={13} aria-hidden="true" />
+              {s === 'request' ? 'Requests' : s === 'task' ? 'Tasks' : 'Clients'}
+            </button>
+          )
+        })}
       </div>
 
       {/* Search */}
-      <div
-        style={{
-          padding: '0.625rem 0.875rem',
-          borderBottom: '1px solid var(--color-border-subtle)',
-          background: 'var(--color-bg)',
-          flexShrink: 0,
-        }}
-      >
-        <div
-          className="tahi-input-group flex items-center"
-          style={{
-            gap: '0.4375rem',
-            padding: '0 0.5rem',
-            height: '2rem',
-            background: 'var(--color-bg)',
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 'var(--radius-md)',
-          }}
-        >
-          <Search size={13} style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} aria-hidden="true" />
-          <input
-            type="text"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder={source === 'request' ? 'Search requests' : source === 'task' ? 'Search tasks' : 'Search clients'}
-            autoFocus
-            style={{
-              flex: 1, minWidth: 0,
-              border: 'none', outline: 'none', background: 'transparent',
-              fontSize: '0.8125rem',
-              color: 'var(--color-text)',
-            }}
-          />
-        </div>
+      <div className="tt-search">
+        <Search size={14} aria-hidden="true" />
+        <input
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder={source === 'request' ? 'Search requests' : source === 'task' ? 'Search tasks' : 'Search clients'}
+          aria-label="Search to track time on"
+          autoFocus
+        />
       </div>
 
-      {/* Items */}
-      <div role="list" style={{ overflowY: 'auto', flex: 1, padding: '0.25rem' }}>
+      {/* Results */}
+      <div className="tt-list" role="list">
         {loading ? (
           <div
             style={{
-              padding: '1.5rem 0.75rem',
               display: 'flex',
-              flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
               gap: '0.5rem',
-              color: 'var(--color-text-subtle)',
-              fontSize: '0.75rem',
+              padding: '1.25rem 0.5rem',
+              color: 'var(--text-faint)',
+              font: '500 12px Manrope, sans-serif',
             }}
           >
-            <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-brand)' }} aria-hidden="true" />
-            Loading
+            <Loader2 size={14} className="animate-spin" aria-hidden="true" /> Loading
           </div>
         ) : items.length === 0 ? (
-          <div style={{ padding: '0.5rem' }}>
-            <EmptyState
-              variant="inline"
-              icon={<SourceIcon className="w-5 h-5" />}
-              title={q
-                ? 'No matches'
-                : source === 'request' ? 'No open requests'
-                : source === 'task' ? 'No open tasks'
-                : 'No active clients'}
-              description={q
-                ? 'Try a shorter search.'
-                : source === 'request' ? 'Track time straight from a request once one is open.'
-                : source === 'task' ? 'Pick up a task to start timing work against it.'
-                : 'Track miscellaneous time against a client when needed.'}
-            />
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              textAlign: 'center',
+              gap: '0.25rem',
+              padding: '1.25rem 0.75rem',
+              color: 'var(--text-muted)',
+            }}
+          >
+            <SourceIcon size={18} aria-hidden="true" style={{ color: 'var(--text-faint)', marginBottom: '0.25rem' }} />
+            <span style={{ font: '600 12.5px Manrope, sans-serif', color: 'var(--text)' }}>{emptyTitle}</span>
+            <span style={{ font: '500 11.5px Manrope, sans-serif', color: 'var(--text-faint)' }}>{emptyDesc}</span>
           </div>
         ) : (
           items.slice(0, 40).map(item => (
             <button
               key={item.id}
               type="button"
+              role="listitem"
+              className="tt-opt"
               onClick={() => onPick(item.id)}
               disabled={acting}
-              className="flex items-center w-full"
-              style={{
-                gap: '0.5rem',
-                padding: '0.4375rem 0.5rem',
-                fontSize: '0.8125rem',
-                background: 'transparent',
-                border: 'none',
-                borderRadius: 'var(--radius-md)',
-                cursor: acting ? 'not-allowed' : 'pointer',
-                textAlign: 'left',
-                color: 'var(--color-text)',
-                transition: 'background-color 150ms ease',
-              }}
-              onMouseEnter={e => {
-                if (acting) return
-                e.currentTarget.style.background = 'var(--color-bg-secondary)'
-                const tile = e.currentTarget.querySelector<HTMLElement>('[data-row-icon]')
-                if (tile) {
-                  tile.style.background = 'var(--color-brand-100)'
-                  tile.style.color = 'var(--color-text-active)'
-                }
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.background = 'transparent'
-                const tile = e.currentTarget.querySelector<HTMLElement>('[data-row-icon]')
-                if (tile) {
-                  tile.style.background = 'var(--color-bg-tertiary)'
-                  tile.style.color = 'var(--color-text-muted)'
-                }
-              }}
+              style={{ cursor: acting ? 'not-allowed' : 'pointer', opacity: acting ? 0.6 : 1 }}
             >
-              <span
-                data-row-icon
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: '1.5rem',
-                  height: '1.5rem',
-                  flexShrink: 0,
-                  background: 'var(--color-bg-tertiary)',
-                  color: 'var(--color-text-muted)',
-                  borderRadius: 'var(--radius-sm)',
-                  transition: 'background-color 150ms ease, color 150ms ease',
-                }}
-              >
-                <SourceIcon size={12} aria-hidden="true" />
+              <span className="tt-ic" style={{ flexShrink: 0 }}>
+                <SourceIcon size={14} aria-hidden="true" />
               </span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="truncate" style={{ fontWeight: 500 }}>
+              <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                <span className="tt-opt-t">
                   {item.mono && (
-                    <span
-                      className="font-mono"
-                      style={{ color: 'var(--color-text-subtle)', marginRight: '0.3125rem', fontWeight: 400 }}
-                    >
+                    <span style={{ color: 'var(--text-faint)', marginRight: '0.3125rem', fontWeight: 500 }}>
                       {item.mono}
                     </span>
                   )}
                   {item.label}
-                </div>
+                </span>
                 {item.sub && (
-                  <div
-                    className="truncate"
-                    style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginTop: '0.0625rem' }}
+                  <span
+                    style={{
+                      font: '500 10.5px Manrope, sans-serif',
+                      color: 'var(--text-faint)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
                   >
                     {item.sub}
-                  </div>
+                  </span>
                 )}
-              </div>
+              </span>
             </button>
           ))
         )}
       </div>
     </>
-  )
-}
-
-function MenuItem({
-  icon,
-  label,
-  onClick,
-  disabled,
-  tone = 'neutral',
-}: {
-  icon: React.ReactNode
-  label: string
-  onClick: () => void
-  disabled?: boolean
-  tone?: 'neutral' | 'danger'
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      disabled={disabled}
-      className="flex items-center w-full transition-colors"
-      style={{
-        gap: '0.5rem',
-        padding: '0.4375rem 0.625rem',
-        fontSize: '0.8125rem',
-        color: tone === 'danger' ? 'var(--color-danger)' : 'var(--color-text)',
-        background: 'transparent',
-        border: 'none',
-        borderRadius: 'var(--radius-sm)',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
-        textAlign: 'left',
-      }}
-      onMouseEnter={e => {
-        if (!disabled) e.currentTarget.style.background = tone === 'danger' ? 'var(--color-danger-bg)' : 'var(--color-bg-secondary)'
-      }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-    >
-      {disabled ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : <span aria-hidden="true" style={{ display: 'inline-flex' }}>{icon}</span>}
-      {label}
-    </button>
   )
 }

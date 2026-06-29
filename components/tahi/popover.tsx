@@ -57,6 +57,11 @@ interface PopoverProps {
    *  finger-friendly menus on phones — the user card popup, attachment
    *  pickers etc. Desktop layout unchanged. */
   mobileFullWidth?: boolean
+  /** When true, the panel renders with no surface chrome (transparent
+   *  background, no border / shadow, overflow visible) so the children own
+   *  the look. Used by the forest user-card menu, which paints its own dark
+   *  surface. Positioning / flip / escape / outside-click all still apply. */
+  bare?: boolean
 }
 
 const MOBILE_BREAKPOINT = 480
@@ -72,6 +77,7 @@ export function Popover({
   offset = 4,
   align = 'start',
   mobileFullWidth = false,
+  bare = false,
 }: PopoverProps) {
   const [mounted, setMounted] = useState(false)
   const [position, setPosition] = useState<{
@@ -210,11 +216,11 @@ export function Popover({
         width: finalWidth,
         maxHeight: typeof maxHeight === 'number' ? `${maxHeight}px` : maxHeight,
         zIndex: 1000,
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-card)',
-        boxShadow: 'var(--shadow-lg)',
-        overflow: 'hidden',
+        background: bare ? 'transparent' : 'var(--color-bg)',
+        border: bare ? 'none' : '1px solid var(--color-border)',
+        borderRadius: bare ? 0 : 'var(--radius-card)',
+        boxShadow: bare ? 'none' : 'var(--shadow-lg)',
+        overflow: bare ? 'visible' : 'hidden',
         display: 'flex',
         flexDirection: 'column',
       }}

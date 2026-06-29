@@ -1,9 +1,17 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Bell, CheckCheck } from 'lucide-react'
+import {
+  Bell,
+  CheckCheck,
+  FileText,
+  Receipt,
+  MessageSquare,
+  CheckSquare,
+  Building2,
+} from 'lucide-react'
 import { apiPath } from '@/lib/api'
-import { AnimatedBell } from '@/components/tahi/animated-icons'
+import { Popover } from '@/components/tahi/popover'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +43,18 @@ function formatRelative(dateStr: string): string {
   } catch { return '' }
 }
 
+function iconFor(n: Notification) {
+  switch (n.entityType) {
+    case 'request':      return <FileText     size={16} aria-hidden="true" />
+    case 'invoice':      return <Receipt      size={16} aria-hidden="true" />
+    case 'message':      return <MessageSquare size={16} aria-hidden="true" />
+    case 'task':         return <CheckSquare  size={16} aria-hidden="true" />
+    case 'organisation':
+    case 'client':       return <Building2    size={16} aria-hidden="true" />
+    default:             return <Bell         size={16} aria-hidden="true" />
+  }
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function NotificationBell() {
@@ -43,7 +63,6 @@ export function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0)
   const [loading, setLoading] = useState(false)
   const [markingAll, setMarkingAll] = useState(false)
-  const panelRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
 
   const fetchNotifications = useCallback(async () => {
@@ -110,36 +129,6 @@ export function NotificationBell() {
     }
   }, [fetchNotifications])
 
-  // Close panel on outside click
-  useEffect(() => {
-    if (!open) return
-    function handleClick(e: MouseEvent) {
-      if (
-        panelRef.current &&
-        !panelRef.current.contains(e.target as Node) &&
-        buttonRef.current &&
-        !buttonRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [open])
-
-  // Close panel on Escape
-  useEffect(() => {
-    if (!open) return
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setOpen(false)
-        buttonRef.current?.focus()
-      }
-    }
-    document.addEventListener('keydown', handleKey)
-    return () => document.removeEventListener('keydown', handleKey)
-  }, [open])
-
   const markAllRead = useCallback(async () => {
     setMarkingAll(true)
     try {
@@ -178,186 +167,112 @@ export function NotificationBell() {
     }
   }, [open, fetchNotifications])
 
+  const openNotification = useCallback((n: Notification) => {
+    if (!n.read) markOneRead(n.id).catch(() => {})
+    setOpen(false)
+  }, [markOneRead])
+
+  const hasUnread = unreadCount > 0
+
   return (
     <div style={{ position: 'relative' }}>
       <button
         ref={buttonRef}
+        className={'tb-bell' + (hasUnread ? ' has-unread' : '')}
         onClick={handleToggle}
         aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
         aria-expanded={open}
         aria-haspopup="true"
-        className="relative p-2 rounded-lg text-[var(--color-text-subtle)] hover:bg-[var(--color-bg-secondary)] hover:text-[var(--color-text)] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
-        style={{ minHeight: 44, minWidth: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       >
-        <AnimatedBell size={16} aria-label="" />
-        {unreadCount > 0 && (
-          <span
-            style={{
-              position: 'absolute',
-              top: '0.375rem',
-              right: '0.375rem',
-              minWidth: 16,
-              height: 16,
-              borderRadius: 99,
-              background: 'var(--color-brand)',
-              color: 'white',
-              fontSize: 10,
-              fontWeight: 700,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '0 0.25rem',
-              lineHeight: 1,
-            }}
-            aria-hidden="true"
-          >
-            {unreadCount > 99 ? '99+' : unreadCount}
-          </span>
-        )}
+        <Bell size={18} aria-hidden="true" />
+        {hasUnread && <span className="tb-bell-dot" aria-hidden="true" />}
       </button>
 
-      {open && (
-        <div
-          ref={panelRef}
-          role="dialog"
-          aria-label="Notifications"
-          className="fixed inset-x-0 mx-2 md:absolute md:inset-x-auto md:right-0 md:mx-0 md:w-[22.5rem]"
-          style={{
-            top: '3.5rem',
-            maxWidth: 'calc(100vw - 1rem)',
-            background: 'var(--color-bg)',
-            borderRadius: 'var(--radius-card)',
-            border: '1px solid var(--color-border)',
-            boxShadow: 'var(--shadow-lg)',
-            zIndex: 100,
-            overflow: 'hidden',
-          }}
-        >
-          {/* Header */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '0.875rem 1rem 0.75rem',
-              borderBottom: '1px solid var(--color-border-subtle)',
-            }}
-          >
-            <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
-              Notifications
-              {unreadCount > 0 && (
-                <span
-                  style={{
-                    marginLeft: '0.5rem',
-                    fontSize: '0.75rem',
-                    fontWeight: 500,
-                    color: 'var(--color-brand)',
-                    background: 'var(--color-brand-50)',
-                    padding: '0.0625rem 0.4375rem',
-                    borderRadius: 99,
-                  }}
-                >
-                  {unreadCount} new
-                </span>
-              )}
-            </h3>
-            {unreadCount > 0 && (
+      <Popover
+        anchorRef={buttonRef}
+        open={open}
+        onClose={() => setOpen(false)}
+        width="23.75rem"
+        align="end"
+        maxHeight="32rem"
+        mobileFullWidth
+      >
+        <div className="notif">
+          <div className="notif-head">
+            <h4>Notifications</h4>
+            {hasUnread && (
               <button
+                className="notif-read"
                 onClick={markAllRead}
                 disabled={markingAll}
-                className="flex items-center gap-1 text-xs font-medium hover:opacity-70 transition-opacity"
-                style={{ color: 'var(--color-brand)', background: 'none', border: 'none', cursor: markingAll ? 'not-allowed' : 'pointer', padding: '0.25rem 0.5rem' }}
               >
-                <CheckCheck style={{ width: 13, height: 13 }} aria-hidden="true" />
-                {markingAll ? 'Marking...' : 'Mark all read'}
+                <CheckCheck size={16} aria-hidden="true" />
+                {markingAll ? 'Marking...' : 'Mark all as read'}
               </button>
             )}
           </div>
 
-          {/* List */}
-          <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+          <div className="notif-list">
             {loading && notifications.length === 0 ? (
-              <div style={{ padding: '1.5rem 1rem' }}>
+              <div style={{ padding: '0.5rem 0.25rem' }}>
                 {[1, 2, 3].map(i => (
-                  <div key={i} className="animate-pulse" style={{ marginBottom: '1rem' }}>
-                    <div style={{ height: 14, background: 'var(--color-bg-tertiary)', borderRadius: 6, marginBottom: 6, width: '70%' }} />
-                    <div style={{ height: 12, background: 'var(--color-bg-secondary)', borderRadius: 6, width: '50%' }} />
+                  <div
+                    key={i}
+                    className="animate-pulse"
+                    style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', padding: '0.75rem' }}
+                  >
+                    <div style={{ width: 36, height: 36, borderRadius: 11, background: 'var(--color-bg-tertiary)', flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ height: 14, background: 'var(--color-bg-tertiary)', borderRadius: 6, marginBottom: 6, width: '70%' }} />
+                      <div style={{ height: 12, background: 'var(--color-bg-secondary)', borderRadius: 6, width: '40%' }} />
+                    </div>
                   </div>
                 ))}
               </div>
             ) : notifications.length === 0 ? (
-              <div style={{ padding: '2.5rem 1rem', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-                <Bell style={{ width: 24, height: 24, margin: '0 auto 0.625rem', opacity: 0.4 }} aria-hidden="true" />
-                <p style={{ fontSize: '0.8125rem' }}>No notifications yet</p>
+              <div className="notif-empty">
+                <span className="notif-empty-ic">
+                  <Bell size={20} aria-hidden="true" />
+                </span>
+                You are all caught up.
+                <small>New activity will show up here.</small>
               </div>
             ) : (
-              notifications.map((n, i) => (
-                <div
+              notifications.map(n => (
+                <button
                   key={n.id}
-                  onClick={() => { if (!n.read) markOneRead(n.id).catch(() => {}) }}
-                  style={{
-                    padding: '0.75rem 1rem',
-                    minHeight: '2.75rem',
-                    borderBottom: i < notifications.length - 1 ? '1px solid var(--color-border-subtle)' : 'none',
-                    background: n.read ? 'var(--color-bg)' : 'var(--color-brand-50)',
-                    cursor: n.read ? 'default' : 'pointer',
-                    transition: 'background 0.1s',
-                  }}
+                  className={'notif-row' + (!n.read ? ' unread' : '')}
+                  onClick={() => openNotification(n)}
                 >
-                  <div style={{ display: 'flex', gap: '0.625rem', alignItems: 'flex-start' }}>
-                    {!n.read && (
+                  <span className="notif-ic">
+                    {iconFor(n)}
+                    {!n.read && <span className="notif-dot" aria-hidden="true" />}
+                  </span>
+                  <span className="notif-body">
+                    <b data-private>{n.title}</b>
+                    {n.body && (
                       <span
-                        style={{
-                          width: '0.375rem',
-                          height: '0.375rem',
-                          borderRadius: '50%',
-                          background: 'var(--color-brand)',
-                          marginTop: '0.3125rem',
-                          flexShrink: 0,
-                        }}
-                        aria-hidden="true"
-                      />
-                    )}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p
                         data-private
                         style={{
                           fontSize: '0.8125rem',
-                          fontWeight: n.read ? 400 : 600,
-                          color: 'var(--color-text)',
-                          margin: 0,
+                          color: 'var(--color-text-muted)',
                           lineHeight: 1.4,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
                         }}
                       >
-                        {n.title}
-                      </p>
-                      {n.body && (
-                        <p
-                          data-private
-                          style={{
-                            fontSize: '0.75rem',
-                            color: 'var(--color-text-muted)',
-                            margin: '0.125rem 0 0',
-                            lineHeight: 1.4,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {n.body}
-                        </p>
-                      )}
-                      <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', margin: '0.25rem 0 0' }}>
-                        {formatRelative(n.createdAt)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                        {n.body}
+                      </span>
+                    )}
+                    <span className="notif-time">{formatRelative(n.createdAt)}</span>
+                  </span>
+                </button>
               ))
             )}
           </div>
         </div>
-      )}
+      </Popover>
     </div>
   )
 }

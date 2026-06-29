@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
-import { Eye, X, UserCog, ChevronDown, Check } from 'lucide-react'
+import { Eye, UserCog, ChevronDown, Check } from 'lucide-react'
 import { Popover } from '@/components/tahi/popover'
 import { apiPath } from '@/lib/api'
 
@@ -162,66 +162,33 @@ export function ImpersonationBanner() {
   const isTeamMember = impersonation.type === 'team_member'
 
   let displayName: string
-  let bannerIcon: React.ReactNode
-  let bannerBg: string
-  let bannerBorder: string
-  let bannerColor: string
 
   if (isTeamMember) {
     displayName = impersonation.teamMemberName
-    bannerIcon = <UserCog className="w-4 h-4 flex-shrink-0" />
-    bannerBg = 'var(--color-info-bg)'
-    bannerBorder = 'var(--color-info)'
-    bannerColor = 'var(--color-info)'
   } else {
     displayName = impersonation.contactName
       ? `${impersonation.contactName} at ${impersonation.orgName}`
       : impersonation.orgName
-    bannerIcon = <Eye className="w-4 h-4 flex-shrink-0" />
-    bannerBg = 'var(--color-warning-bg)'
-    bannerBorder = 'var(--color-warning)'
-    bannerColor = 'var(--color-warning)'
   }
 
   return (
-    <div
-      className="flex items-center justify-center gap-3 flex-shrink-0"
-      style={{
-        padding: '0.5rem 1rem',
-        background: bannerBg,
-        borderBottom: `1px solid ${bannerBorder}`,
-        color: bannerColor,
-      }}
-    >
-      {bannerIcon}
-      <span className="text-sm font-medium">
-        Viewing as {isTeamMember ? 'team member ' : ''}
-        {impersonation.type === 'client' ? (
-          <ClientSwitcher currentOrgId={impersonation.orgId} label={displayName} color={bannerColor} />
-        ) : (
-          <strong>{displayName}</strong>
-        )}
-        {isTeamMember && impersonation.accessRules.length > 0 && (
-          <span className="font-normal opacity-75">
-            {' '}({impersonation.accessRules[0].role.replace(/_/g, ' ')})
-          </span>
-        )}
+    <div className="imp-banner">
+      <span className="imp-eye">
+        {isTeamMember ? <UserCog size={15} /> : <Eye size={15} />}
       </span>
-      <button
-        onClick={handleExit}
-        className="flex items-center gap-1 text-sm font-medium transition-colors"
-        style={{
-          padding: '0.25rem 0.75rem',
-          borderRadius: '0.375rem',
-          border: `1px solid ${bannerBorder}`,
-          background: 'transparent',
-          cursor: 'pointer',
-          color: bannerColor,
-        }}
-      >
-        <X className="w-3.5 h-3.5" />
-        Exit
-      </button>
+      {isTeamMember ? (
+        <span>
+          Viewing as <b>{displayName}</b>
+          {impersonation.accessRules.length > 0 && (
+            <> ({impersonation.accessRules[0].role.replace(/_/g, ' ')})</>
+          )}.
+        </span>
+      ) : (
+        <span>
+          Viewing <ClientSwitcher currentOrgId={impersonation.orgId} label={displayName} color="#ffffff" /> . Read-only client view.
+        </span>
+      )}
+      <button className="imp-exit" onClick={handleExit}>Exit preview</button>
     </div>
   )
 }
