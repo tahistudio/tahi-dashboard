@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import {
   ShoppingBag, Plus, RefreshCw, Tag, Loader2, Ticket, Trash2,
 } from 'lucide-react'
@@ -56,27 +57,9 @@ const CATEGORY_LABELS: Record<string, string> = {
 // ---- Admin Services ----------------------------------------------------------
 
 export function AdminServicesContent() {
-  const [services, setServices] = useState<ServiceItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: servicesData, isLoading: loading, mutate: mutateServices } = useSWR<{ items: ServiceItem[] }>('/api/admin/services')
+  const services = servicesData?.items ?? []
   const [showForm, setShowForm] = useState(false)
-
-  const fetchServices = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/services'))
-      if (!res.ok) throw new Error('Failed')
-      const data = (await res.json()) as { items: ServiceItem[] }
-      setServices(data.items ?? [])
-    } catch {
-      setServices([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchServices()
-  }, [fetchServices])
 
   return (
     <div className="space-y-6" style={{ maxWidth: '68.75rem' }}>
@@ -89,7 +72,7 @@ export function AdminServicesContent() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={fetchServices}
+            onClick={() => void mutateServices()}
             className="flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors"
             style={{
               color: 'var(--color-text-muted)',
@@ -248,7 +231,7 @@ export function AdminServicesContent() {
           onClose={() => setShowForm(false)}
           onCreated={() => {
             setShowForm(false)
-            fetchServices()
+            void mutateServices()
           }}
         />
       )}
@@ -259,28 +242,10 @@ export function AdminServicesContent() {
 // ---- Coupons Section ---------------------------------------------------------
 
 function CouponsSection() {
-  const [coupons, setCoupons] = useState<CouponItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: couponsData, isLoading: loading, mutate: mutateCoupons } = useSWR<{ items: CouponItem[] }>('/api/admin/services/coupons')
+  const coupons = couponsData?.items ?? []
   const [showForm, setShowForm] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
-
-  const fetchCoupons = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/services/coupons'))
-      if (!res.ok) throw new Error('Failed')
-      const data = (await res.json()) as { items: CouponItem[] }
-      setCoupons(data.items ?? [])
-    } catch {
-      setCoupons([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchCoupons()
-  }, [fetchCoupons])
 
   const handleDelete = async (code: string) => {
     setDeleting(code)
@@ -289,7 +254,7 @@ function CouponsSection() {
         method: 'DELETE',
       })
       if (res.ok) {
-        setCoupons(prev => prev.filter(c => c.code !== code))
+        await mutateCoupons()
       }
     } finally {
       setDeleting(null)
@@ -423,7 +388,7 @@ function CouponsSection() {
           onClose={() => setShowForm(false)}
           onCreated={() => {
             setShowForm(false)
-            fetchCoupons()
+            void mutateCoupons()
           }}
         />
       )}
@@ -638,19 +603,8 @@ function CreateCouponDialog({
 // ---- Client Portal Services --------------------------------------------------
 
 export function PortalServicesContent() {
-  const [services, setServices] = useState<ServiceItem[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/portal/services'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ items: ServiceItem[] }>
-      })
-      .then(data => setServices(data.items ?? []))
-      .catch(() => setServices([]))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data: servicesData, isLoading: loading } = useSWR<{ items: ServiceItem[] }>('/api/portal/services')
+  const services = servicesData?.items ?? []
 
   return (
     <div className="space-y-6" style={{ maxWidth: '56.25rem' }}>

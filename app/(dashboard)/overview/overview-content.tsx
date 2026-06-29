@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import {
@@ -164,34 +165,17 @@ export function OverviewSwitcher({ userName, orgName }: { userName: string; orgN
 
 export function AdminOverview({ userName }: { userName: string }) {
   const { features } = usePermissions()
-  const [ledger, setLedger] = useState<LedgerData | null>(null)
-  const [kpis, setKpis] = useState<KPIs | null>(null)
-  const [recentRequests, setRecentRequests] = useState<RecentRequest[]>([])
-  const [loading, setLoading] = useState(true)
-  const [fetchError, setFetchError] = useState(false)
 
   // The shared overview payload only feeds the KPI cells, Recent Requests and
   // Getting Started. Skip the fetch entirely when none of them are visible.
   const needsOverviewData = KPI_DATA_FEATURES.some(key => features[key] !== false)
-
-  useEffect(() => {
-    if (!needsOverviewData) {
-      setLoading(false)
-      return
-    }
-    fetch(apiPath('/api/admin/overview'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to fetch overview')
-        return r.json() as Promise<LedgerData & { recentRequests: RecentRequest[] }>
-      })
-      .then(data => {
-        setLedger(data)
-        setKpis(data.kpis)
-        setRecentRequests(data.recentRequests)
-      })
-      .catch(() => setFetchError(true))
-      .finally(() => setLoading(false))
-  }, [needsOverviewData])
+  const { data: overviewData, isLoading: loading, error: overviewError } = useSWR<LedgerData & { recentRequests: RecentRequest[] }>(
+    needsOverviewData ? '/api/admin/overview' : null
+  )
+  const ledger = overviewData ?? null
+  const kpis = overviewData?.kpis ?? null
+  const recentRequests = overviewData?.recentRequests ?? []
+  const fetchError = !!overviewError
 
   const hasAnyCard = CARD_FEATURES.some(key => features[key] !== false)
 
@@ -439,20 +423,9 @@ interface CapacityData {
 // ─── Client Overview ──────────────────────────────────────────────────────────
 
 export function ClientOverview({ userName, orgName }: { userName: string; orgName: string }) {
-  const [requests, setRequests] = useState<RecentRequest[]>([])
-  const [loading, setLoading] = useState(true)
-  const [fetchError, setFetchError] = useState(false)
-
-  useEffect(() => {
-    fetch(apiPath('/api/portal/requests?status=active&page=1'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to fetch requests')
-        return r.json() as Promise<{ requests: RecentRequest[] }>
-      })
-      .then(data => setRequests(data.requests ?? []))
-      .catch(() => setFetchError(true))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data: requestsData, isLoading: loading, error: requestsError } = useSWR<{ requests: RecentRequest[] }>('/api/portal/requests?status=active&page=1')
+  const requests = requestsData?.requests ?? []
+  const fetchError = !!requestsError
 
   const open = requests.filter(r => !['delivered', 'archived'].includes(r.status))
   const inReview = requests.filter(r => r.status === 'client_review')
@@ -604,38 +577,23 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
 // ─── Onboarding Checklist Wrapper ──────────────────────────────────────────────
 
 function OnboardingChecklistWrapper() {
-  const [state, setState] = useState<Record<string, boolean> | null>(null)
-  const [loomUrl, setLoomUrl] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [dismissed, setDismissed] = useState(false)
+  const [dismissed, setDismissed] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('tahi-onboarding-dismissed') === '1'
+    return false
+  })
 
-  const fetchOnboarding = useCallback(async () => {
-    if (typeof window !== 'undefined' && localStorage.getItem('tahi-onboarding-dismissed') === '1') {
-      setDismissed(true)
-      setLoading(false)
-      return
-    }
-    try {
-      const res = await fetch(apiPath('/api/portal/onboarding'))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as {
-        onboardingState: Record<string, boolean>
-        onboardingLoomUrl: string | null
-      }
-      setState(data.onboardingState)
-      setLoomUrl(data.onboardingLoomUrl)
-    } catch {
-      setState(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const { data: onboardingData, isLoading: loading, mutate } = useSWR<{
+    onboardingState: Record<string, boolean>
+    onboardingLoomUrl: string | null
+  }>(dismissed ? null : '/api/portal/onboarding')
 
-  useEffect(() => { void fetchOnboarding() }, [fetchOnboarding])
+  const state = onboardingData?.onboardingState ?? null
+  const loomUrl = onboardingData?.onboardingLoomUrl ?? null
 
   async function handleToggleStep(step: string, completed: boolean) {
-    if (!state) return
-    setState(prev => prev ? { ...prev, [step]: completed } : prev)
+    if (!onboardingData) return
+    // Optimistic update
+    void mutate({ ...onboardingData, onboardingState: { ...onboardingData.onboardingState, [step]: completed } }, { revalidate: false })
     try {
       await fetch(apiPath('/api/portal/onboarding'), {
         method: 'PATCH',
@@ -643,7 +601,8 @@ function OnboardingChecklistWrapper() {
         body: JSON.stringify({ step, completed }),
       })
     } catch {
-      setState(prev => prev ? { ...prev, [step]: !completed } : prev)
+      // Revert
+      void mutate(onboardingData, { revalidate: false })
     }
   }
 
@@ -1020,21 +979,10 @@ function GettingStarted() {
 // ─── Schedule Call Widget (client portal, T88) ──────────────────────────────
 
 function ScheduleCallWidget() {
-  const [bookingUrl, setBookingUrl] = useState<string | null>(null)
-  const [loaded, setLoaded] = useState(false)
+  const { data: bookingData } = useSWR<{ url: string | null }>('/api/portal/settings/booking')
+  const bookingUrl = bookingData?.url ?? null
 
-  useEffect(() => {
-    fetch(apiPath('/api/portal/settings/booking'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ url: string | null }>
-      })
-      .then(data => setBookingUrl(data.url ?? null))
-      .catch(() => setBookingUrl(null))
-      .finally(() => setLoaded(true))
-  }, [])
-
-  if (!loaded || !bookingUrl) return null
+  if (!bookingData || !bookingUrl) return null
 
   return (
     <div
@@ -1099,21 +1047,10 @@ interface CapacityData {
 }
 
 function TrackCapacityCard() {
-  const [data, setData] = useState<CapacityData | null>(null)
-  const [loaded, setLoaded] = useState(false)
+  const { data: capacityData } = useSWR<CapacityData>('/api/portal/capacity')
+  const data = capacityData ?? null
 
-  useEffect(() => {
-    fetch(apiPath('/api/portal/capacity'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<CapacityData>
-      })
-      .then(d => setData(d))
-      .catch(() => setData(null))
-      .finally(() => setLoaded(true))
-  }, [])
-
-  if (!loaded || !data?.subscription) return null
+  if (!capacityData || !data?.subscription) return null
 
   const plan = data.subscription
 
@@ -1257,32 +1194,24 @@ function TrackCapacityCard() {
 // ─── Review Outreach Banner (T107) ───────────────────────────────────────────
 
 function ReviewOutreachBanner() {
-  const [show, setShow] = useState(false)
+  const [dismissed, setDismissed] = useState(false)
   const [responding, setResponding] = useState(false)
-
-  useEffect(() => {
-    fetch(apiPath('/api/portal/review-outreach'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ pending: boolean }>
-      })
-      .then(data => setShow(data.pending))
-      .catch(() => setShow(false))
-  }, [])
+  const { data: outreachData } = useSWR<{ pending: boolean }>('/api/portal/review-outreach')
+  const show = !dismissed && (outreachData?.pending ?? false)
 
   if (!show) return null
 
   const handleResponse = async (action: 'yes' | 'defer' | 'no') => {
     setResponding(true)
+    setDismissed(true)
     try {
       await fetch(apiPath('/api/portal/review-outreach'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       })
-      setShow(false)
     } catch {
-      // silent
+      setDismissed(false)
     } finally {
       setResponding(false)
     }

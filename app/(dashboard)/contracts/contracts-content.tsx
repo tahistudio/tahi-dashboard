@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -80,10 +81,12 @@ function formatDate(iso: string | null): string {
 
 export function ContractsContent() {
   const router = useRouter()
-  const [items, setItems] = useState<ContractListItem[]>([])
-  const [orgs, setOrgs] = useState<OrgOption[]>([])
-  const [templates, setTemplates] = useState<TemplateOption[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: contractsData, isLoading: loading, mutate: mutateContracts } = useSWR<{ items: ContractListItem[] }>('/api/admin/contracts')
+  const { data: orgsData } = useSWR<{ clients: OrgOption[] }>('/api/admin/clients')
+  const { data: templatesData } = useSWR<{ items: TemplateOption[] }>('/api/admin/contracts/templates')
+  const items = contractsData?.items ?? []
+  const orgs = orgsData?.clients ?? []
+  const templates = templatesData?.items ?? []
   const [search, setSearch] = useState('')
   // Two permanent FilterBar chips: status + type. nonRemovable so the
   // X never appears and the "+ Add filter" button is hidden.
@@ -102,37 +105,6 @@ export function ContractsContent() {
     const f = activeFilters.find(a => a.id === 'type')
     return new Set(f?.values ?? [])
   }, [activeFilters])
-
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [contractsRes, orgsRes, templatesRes] = await Promise.all([
-        fetch(apiPath('/api/admin/contracts')),
-        fetch(apiPath('/api/admin/clients')),
-        fetch(apiPath('/api/admin/contracts/templates')),
-      ])
-      if (contractsRes.ok) {
-        const data = await contractsRes.json() as { items: ContractListItem[] }
-        setItems(data.items ?? [])
-      } else {
-        setItems([])
-      }
-      if (orgsRes.ok) {
-        const data = await orgsRes.json() as { clients: OrgOption[] }
-        setOrgs(data.clients ?? [])
-      }
-      if (templatesRes.ok) {
-        const data = await templatesRes.json() as { items: TemplateOption[] }
-        setTemplates(data.items ?? [])
-      }
-    } catch {
-      setItems([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchAll() }, [fetchAll])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -172,7 +144,7 @@ export function ContractsContent() {
     const res = await fetch(apiPath(`/api/admin/contracts/${deleteTarget.id}`), { method: 'DELETE' })
     if (res.ok) {
       setDeleteTarget(null)
-      void fetchAll()
+      void mutateContracts()
     }
   }
 
@@ -293,7 +265,7 @@ export function ContractsContent() {
         title="Contracts"
         subtitle="NDAs, SOWs, MSAs and other agreements with tamper-evident e-signatures."
       >
-        <TahiButton variant="secondary" size="sm" onClick={fetchAll} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+        <TahiButton variant="secondary" size="sm" onClick={() => { void mutateContracts() }} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
           Refresh
         </TahiButton>
         <Link href="/contracts/templates">

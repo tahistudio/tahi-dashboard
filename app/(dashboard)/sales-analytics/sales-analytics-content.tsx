@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { ArrowRight, BarChart2, Inbox, PieChart, TrendingUp } from 'lucide-react'
 import { PageHeader } from '@/components/tahi/page-header'
@@ -8,7 +9,6 @@ import { Card } from '@/components/tahi/card'
 import { FeatureCard } from '@/components/tahi/feature-card'
 import { FunnelChart, DonutChart, MultiBarChart } from '@/components/tahi/chart'
 import { EmptyState } from '@/components/tahi/empty-state'
-import { apiPath } from '@/lib/api'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -65,29 +65,11 @@ function lastSixMonths(): Array<{ key: string; year: number; month: number }> {
 
 export function SalesAnalyticsContent() {
   const { format } = useDisplayCurrency()
-  const [deals, setDeals] = useState<DealSummary[]>([])
-  const [stages, setStages] = useState<StageSummary[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    Promise.all([
-      fetch(apiPath('/api/admin/deals?limit=100')).then(r =>
-        r.ok ? r.json() as Promise<{ items: DealSummary[] }> : { items: [] },
-      ),
-      fetch(apiPath('/api/admin/pipeline/stages')).then(r =>
-        r.ok ? r.json() as Promise<{ stages: StageSummary[] }> : { stages: [] },
-      ),
-    ])
-      .then(([dealsData, stagesData]) => {
-        setDeals(dealsData.items ?? [])
-        setStages(stagesData.stages ?? [])
-      })
-      .catch(() => {
-        setDeals([])
-        setStages([])
-      })
-      .finally(() => setLoading(false))
-  }, [])
+  const { data: dealsData, isLoading: dealsLoading } = useSWR<{ items: DealSummary[] }>('/api/admin/deals?limit=100')
+  const { data: stagesData, isLoading: stagesLoading } = useSWR<{ stages: StageSummary[] }>('/api/admin/pipeline/stages')
+  const loading = dealsLoading || stagesLoading
+  const deals = dealsData?.items ?? []
+  const stages = stagesData?.stages ?? []
 
   // ── Derived analytics ────────────────────────────────────────────────────
   const openDeals = useMemo(

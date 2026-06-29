@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
 import { apiPath } from '@/lib/api'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
@@ -106,11 +107,6 @@ const ACTIVITY_TYPE_OPTIONS = [
 
 export function ContactDetail({ contactId }: { contactId: string }) {
   const router = useRouter()
-  const [contact, setContact] = useState<ContactData | null>(null)
-  const [activities, setActivities] = useState<ActivityItem[]>([])
-  const [deals, setDeals] = useState<DealItem[]>([])
-  const [messages, setMessages] = useState<MessageItem[]>([])
-  const [loading, setLoading] = useState(true)
 
   // Quick-add activity form
   const [showAddActivity, setShowAddActivity] = useState(false)
@@ -119,31 +115,24 @@ export function ContactDetail({ contactId }: { contactId: string }) {
   const [newActivityDesc, setNewActivityDesc] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/contacts/${contactId}`))
-      if (!res.ok) {
-        router.push('/clients')
-        return
-      }
-      const json = await res.json() as {
-        contact: ContactData
-        activities: ActivityItem[]
-        deals: DealItem[]
-        messages: MessageItem[]
-      }
-      setContact(json.contact)
-      setActivities(json.activities ?? [])
-      setDeals(json.deals ?? [])
-      setMessages(json.messages ?? [])
-    } finally {
-      setLoading(false)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contactId])
+  // Single endpoint returns the contact plus its activities, deals, and
+  // messages. Cached via SWR; the global fetcher throws on a non-2xx response,
+  // which we treat as "not found" and bounce back to /clients.
+  const { data, isLoading: loading, error, mutate } = useSWR<{
+    contact: ContactData
+    activities: ActivityItem[]
+    deals: DealItem[]
+    messages: MessageItem[]
+  }>(`/api/admin/contacts/${contactId}`)
 
-  useEffect(() => { void load() }, [load])
+  const contact = data?.contact ?? null
+  const activities = data?.activities ?? []
+  const deals = data?.deals ?? []
+  const messages = data?.messages ?? []
+
+  useEffect(() => {
+    if (error) router.push('/clients')
+  }, [error, router])
 
   const handleAddActivity = useCallback(async () => {
     if (!newActivityTitle.trim() || !contact) return
@@ -164,12 +153,12 @@ export function ContactDetail({ contactId }: { contactId: string }) {
         setNewActivityTitle('')
         setNewActivityDesc('')
         setShowAddActivity(false)
-        await load()
+        await mutate()
       }
     } finally {
       setSubmitting(false)
     }
-  }, [newActivityType, newActivityTitle, newActivityDesc, contactId, contact, load])
+  }, [newActivityType, newActivityTitle, newActivityDesc, contactId, contact, mutate])
 
   if (loading) return <LoadingSkeleton />
   if (!contact) return null

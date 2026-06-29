@@ -8,7 +8,8 @@
  * collapses behind a disclosure for debugging.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import {
   ArrowLeft, RefreshCw, Play, CheckCircle2, AlertTriangle, Clock,
@@ -60,26 +61,10 @@ function statusTone(status: string): 'positive' | 'danger' | 'warning' | 'neutra
 
 export function CronsContent() {
   const { showToast } = useToast()
-  const [items, setItems] = useState<CronItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, isLoading: loading, mutate } = useSWR<{ items: CronItem[] }>('/api/admin/crons')
+  const items = data?.items ?? []
   const [runningCron, setRunningCron] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
-    try {
-      const r = await fetch(apiPath('/api/admin/crons'))
-      if (!r.ok) throw new Error('Failed')
-      const data = await r.json() as { items: CronItem[] }
-      setItems(data.items ?? [])
-    } catch {
-      setItems([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchAll() }, [fetchAll])
 
   async function runNow(cron: CronItem) {
     setRunningCron(cron.cron)
@@ -96,7 +81,7 @@ export function CronsContent() {
     } finally {
       setRunningCron(null)
       // Refresh after a tick so the new cron_run row is visible.
-      setTimeout(() => { void fetchAll() }, 800)
+      setTimeout(() => { void mutate() }, 800)
     }
   }
 
@@ -123,7 +108,7 @@ export function CronsContent() {
         <TahiButton
           variant="secondary"
           size="sm"
-          onClick={() => void fetchAll()}
+          onClick={() => void mutate()}
           iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
         >
           Refresh

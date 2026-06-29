@@ -10,7 +10,7 @@
  * page, so the admin view here is just an explainer.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import useSWR from 'swr'
 import { Layers, RefreshCw, CreditCard, Building2 } from 'lucide-react'
 import Link from 'next/link'
 import { TrackQueueView, type TrackLanes } from '@/components/tahi/track-queue-view'
@@ -22,39 +22,26 @@ import { getUpgradeGhostTracks, type GhostTrack } from '@/lib/plan-utils'
 import { bucketTracks, bucketUnified, type CapacityResponse } from '@/lib/track-lanes'
 
 export function TracksContent({ isAdmin }: { isAdmin: boolean }) {
-  const [tracks, setTracks] = useState<TrackLanes[]>([])
-  const [ghosts, setGhosts] = useState<GhostTrack[]>([])
-  const [unified, setUnified] = useState(false)
-  const [loading, setLoading] = useState(!isAdmin)
+  // Admin users skip the fetch entirely (they see a "go to clients" prompt).
+  // Portal users get cached capacity data; back-nav never triggers a spinner.
+  const { data: capacityData, isLoading: loading, mutate } = useSWR<CapacityResponse>(
+    isAdmin ? null : '/api/portal/capacity'
+  )
 
-  const fetchTracks = useCallback(async () => {
-    if (isAdmin) { setLoading(false); return }
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/portal/capacity'))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as CapacityResponse
-      if (data.tracksMode === 'off') {
-        // Tracks off: one unified board, no per-track split, no upsell.
-        setUnified(true)
-        setTracks([bucketUnified(data)])
-        setGhosts([])
-      } else {
-        setUnified(false)
-        setTracks(bucketTracks(data))
-        // Ghost upsell only when the server says so (auto mode + retainer plan).
-        setGhosts(data.showGhosts
-          ? getUpgradeGhostTracks(data.subscription?.planType ?? null, !!data.subscription?.hasPrioritySupport)
-          : [])
-      }
-    } catch {
-      setTracks([]); setGhosts([]); setUnified(false)
-    } finally {
-      setLoading(false)
-    }
-  }, [isAdmin])
+  // Derive tracks, ghosts, and unified mode from the cached CapacityResponse.
+  const tracks: TrackLanes[] = !capacityData ? [] :
+    capacityData.tracksMode === 'off'
+      ? [bucketUnified(capacityData)]
+      : bucketTracks(capacityData)
 
-  useEffect(() => { fetchTracks() }, [fetchTracks])
+  const unified = capacityData?.tracksMode === 'off'
+
+  const ghosts: GhostTrack[] = (capacityData && capacityData.tracksMode !== 'off' && capacityData.showGhosts)
+    ? getUpgradeGhostTracks(
+        capacityData.subscription?.planType ?? null,
+        !!capacityData.subscription?.hasPrioritySupport
+      )
+    : []
 
   // Org-scoped reorder / cross-track move: passing the target trackId lets the
   // server bind the moved request to that track (type-validated: a large_task can
@@ -67,8 +54,8 @@ export function TracksContent({ isAdmin }: { isAdmin: boolean }) {
         body: JSON.stringify({ trackId, requestIds: orderedRequestIds }),
       })
       if (!res.ok) throw new Error('Failed')
-      await fetchTracks()
-    } catch { await fetchTracks() }
+      await mutate()
+    } catch { await mutate() }
   }
 
   return (
@@ -83,7 +70,7 @@ export function TracksContent({ isAdmin }: { isAdmin: boolean }) {
           </p>
         </div>
         {!isAdmin && (
-          <TahiButton variant="secondary" size="sm" onClick={fetchTracks} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+          <TahiButton variant="secondary" size="sm" onClick={() => void mutate()} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
             Refresh
           </TahiButton>
         )}

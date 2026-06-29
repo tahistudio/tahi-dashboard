@@ -14,9 +14,9 @@
  * page links out to publish.buffer.com.
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useMemo } from 'react'
+import useSWR from 'swr'
 import { Share2, RefreshCw, ExternalLink, Calendar, Sparkles } from 'lucide-react'
-import { apiPath } from '@/lib/api'
 import { Badge } from '@/components/tahi/badge'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -58,46 +58,23 @@ interface BufferPostsPayload {
 }
 
 export function SocialContent() {
-  const [status, setStatus] = useState<BufferStatus | null>(null)
-  const [sentPosts, setSentPosts] = useState<BufferPost[]>([])
-  const [scheduledPosts, setScheduledPosts] = useState<BufferPost[]>([])
-  const [loadingStatus, setLoadingStatus] = useState(true)
-  const [loadingPosts, setLoadingPosts] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { data: status, isLoading: loadingStatus, error: statusError, mutate: mutateStatus } = useSWR<BufferStatus>('/api/admin/integrations/buffer/status')
+  const { data: sentData, isLoading: loadingSent, mutate: mutateSent } = useSWR<BufferPostsPayload>(
+    status?.connected ? '/api/admin/integrations/buffer/posts?status=sent&count=50' : null
+  )
+  const { data: scheduledData, mutate: mutateScheduled } = useSWR<BufferPostsPayload>(
+    status?.connected ? '/api/admin/integrations/buffer/posts?status=scheduled&count=20' : null
+  )
+  const sentPosts = sentData?.posts ?? []
+  const scheduledPosts = scheduledData?.posts ?? []
+  const loadingPosts = loadingSent
+  const error = statusError ? (statusError instanceof Error ? statusError.message : 'Failed to load') : null
 
-  const fetchAll = useCallback(async () => {
-    setLoadingStatus(true)
-    setError(null)
-    try {
-      const statusRes = await fetch(apiPath('/api/admin/integrations/buffer/status'))
-      if (!statusRes.ok) throw new Error('Status fetch failed')
-      const statusData = await statusRes.json() as BufferStatus
-      setStatus(statusData)
-
-      if (statusData.connected) {
-        setLoadingPosts(true)
-        const [sentRes, scheduledRes] = await Promise.all([
-          fetch(apiPath('/api/admin/integrations/buffer/posts?status=sent&count=50')),
-          fetch(apiPath('/api/admin/integrations/buffer/posts?status=scheduled&count=20')),
-        ])
-        if (sentRes.ok) {
-          const data = await sentRes.json() as BufferPostsPayload
-          setSentPosts(data.posts)
-        }
-        if (scheduledRes.ok) {
-          const data = await scheduledRes.json() as BufferPostsPayload
-          setScheduledPosts(data.posts)
-        }
-        setLoadingPosts(false)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load')
-    } finally {
-      setLoadingStatus(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchAll() }, [fetchAll])
+  const mutateAll = () => {
+    void mutateStatus()
+    void mutateSent()
+    void mutateScheduled()
+  }
 
   // Build 30-day cadence histogram from sent posts.
   const cadence = useMemo(() => {
@@ -154,7 +131,7 @@ export function SocialContent() {
           <TahiButton
             variant="secondary"
             size="sm"
-            onClick={() => { void fetchAll() }}
+            onClick={mutateAll}
             disabled={loadingStatus || loadingPosts}
             iconLeft={loadingStatus || loadingPosts
               ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />

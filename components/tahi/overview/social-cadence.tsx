@@ -33,9 +33,9 @@
 // (Sparkline uses useReveal); the most-recent-day pulse + streak count-up are
 // one-shot / motion-safe only; the dot matrix is static.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import useSWR from 'swr'
 import { Megaphone } from 'lucide-react'
-import { apiPath } from '@/lib/api'
 import { DomainCard, IconChip, CountPill, Sparkline } from '@/components/tahi/overview/domain-card'
 import { CountUp } from '@/components/tahi/count-up'
 
@@ -97,43 +97,14 @@ function todayStartMs(): number {
 // ── Card ──────────────────────────────────────────────────────────────────────
 
 export function SocialCadence({ className }: { className?: string }) {
-  const [channels, setChannels] = useState<BufferChannel[]>([])
-  const [sentPosts, setSentPosts] = useState<BufferPost[]>([])
-  const [scheduledPosts, setScheduledPosts] = useState<BufferPost[]>([])
-  const [configured, setConfigured] = useState(true)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-
-    const statusP = fetch(apiPath('/api/admin/integrations/buffer/status'))
-      .then(r => (r.ok ? (r.json() as Promise<{ channels: BufferChannel[]; configured: boolean }>) : { channels: [], configured: false }))
-      .catch(() => ({ channels: [] as BufferChannel[], configured: false }))
-
-    const sentP = fetch(apiPath('/api/admin/integrations/buffer/posts?status=sent&count=100'))
-      .then(r => (r.ok ? (r.json() as Promise<{ posts: BufferPost[] }>) : { posts: [] }))
-      .catch(() => ({ posts: [] as BufferPost[] }))
-
-    const scheduledP = fetch(apiPath('/api/admin/integrations/buffer/posts?status=scheduled&count=100'))
-      .then(r => (r.ok ? (r.json() as Promise<{ posts: BufferPost[] }>) : { posts: [] }))
-      .catch(() => ({ posts: [] as BufferPost[] }))
-
-    Promise.all([statusP, sentP, scheduledP])
-      .then(([s, sent, scheduled]) => {
-        if (cancelled) return
-        setChannels(s.channels ?? [])
-        setConfigured(s.configured ?? false)
-        setSentPosts(sent.posts ?? [])
-        setScheduledPosts(scheduled.posts ?? [])
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const { data: statusData, isLoading: statusLoading } = useSWR<{ channels: BufferChannel[]; configured: boolean }>('/api/admin/integrations/buffer/status')
+  const { data: sentData, isLoading: sentLoading } = useSWR<{ posts: BufferPost[] }>('/api/admin/integrations/buffer/posts?status=sent&count=100')
+  const { data: scheduledData, isLoading: scheduledLoading } = useSWR<{ posts: BufferPost[] }>('/api/admin/integrations/buffer/posts?status=scheduled&count=100')
+  const loading = statusLoading || sentLoading || scheduledLoading
+  const channels = statusData?.channels ?? []
+  const configured = statusData?.configured ?? true
+  const sentPosts = sentData?.posts ?? []
+  const scheduledPosts = scheduledData?.posts ?? []
 
   // 30-day cadence: posts-per-day buckets (index 0 = 29 days ago, last = today).
   const cadence = useMemo(() => {

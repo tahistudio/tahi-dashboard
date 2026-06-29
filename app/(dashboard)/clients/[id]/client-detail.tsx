@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { apiPath } from '@/lib/api'
@@ -214,23 +215,18 @@ type TabId = typeof TABS[number]['id']
 
 export function ClientDetail({ clientId }: { clientId: string }) {
   const router = useRouter()
-  const [data, setData] = useState<ClientData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<TabId>('overview')
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/clients/${clientId}`))
-      if (!res.ok) { router.push('/clients'); return }
-      setData(await res.json() as ClientData)
-    } finally {
-      setLoading(false)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId])
+  // SWR-backed client record. `mutate` (aliased load) refetches after edits,
+  // archive, etc. Any fetch error (e.g. a 404) bounces back to /clients,
+  // matching the old non-ok redirect.
+  const { data, isLoading: loading, error, mutate: load } = useSWR<ClientData>(
+    `/api/admin/clients/${clientId}`,
+  )
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    if (error) router.push('/clients')
+  }, [error, router])
 
   if (loading) return <LoadingSkeleton />
   if (!data) return null
@@ -318,7 +314,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
                 <Handshake className="w-3.5 h-3.5 sm:mr-1.5" />
                 <span className="hidden sm:inline">New Deal</span>
               </TahiButton>
-              <TahiButton variant="secondary" size="sm" onClick={load}>
+              <TahiButton variant="secondary" size="sm" onClick={() => { void load() }}>
                 <RefreshCw className="w-3.5 h-3.5 sm:mr-1.5" />
                 <span className="hidden sm:inline">Refresh</span>
               </TahiButton>
@@ -986,8 +982,6 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
   const { displayCurrency, formatNativeWithDisplay } = useDisplayCurrency()
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [teamMembers, setTeamMembers] = useState<TeamMemberPm[]>([])
-  const [assignedPm, setAssignedPm] = useState<string | null>(null)
   const [pmLoading, setPmLoading] = useState(false)
   const [autoDeriving, setAutoDeriving] = useState(false)
   const [reenablingField, setReenablingField] = useState<'billingModel' | 'retainerDates' | 'customMrr' | null>(null)
@@ -1026,19 +1020,15 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
     }
   }
 
-  useEffect(() => {
-    // Load team members for PM selector
-    fetch(apiPath('/api/admin/team-members'))
-      .then(r => r.json() as Promise<{ items: TeamMemberPm[] }>)
-      .then(d => setTeamMembers(d.items ?? []))
-      .catch(() => {})
-
-    // Load current PM assignment
-    fetch(apiPath(`/api/admin/clients/${org.id}/pm`))
-      .then(r => r.json() as Promise<{ pmId: string | null; pmName: string | null }>)
-      .then(d => setAssignedPm(d.pmId))
-      .catch(() => {})
-  }, [org.id])
+  // Team members for the PM selector + the current PM assignment, both cached
+  // via SWR. Errors stay silent (data falls back to empty/null), matching the
+  // old .catch(() => {}) handlers.
+  const { data: teamMembersData } = useSWR<{ items: TeamMemberPm[] }>('/api/admin/team-members')
+  const teamMembers = teamMembersData?.items ?? []
+  const { data: pmData, mutate: mutatePm } = useSWR<{ pmId: string | null; pmName: string | null }>(
+    `/api/admin/clients/${org.id}/pm`,
+  )
+  const assignedPm = pmData?.pmId ?? null
 
   const handlePmChange = async (pmId: string | null) => {
     setPmLoading(true)
@@ -1048,7 +1038,8 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pmId }),
       })
-      setAssignedPm(pmId)
+      // Optimistically reflect the new PM in the SWR cache.
+      await mutatePm({ pmId, pmName: pmData?.pmName ?? null }, { revalidate: false })
     } catch {
       // silent
     } finally {
@@ -2002,23 +1993,13 @@ function requestsToBoardItems(requests: Request[]): BoardItem[] {
 
 function RequestsTab({ clientId }: { clientId: string }) {
   const router = useRouter()
-  const [requests, setRequests] = useState<Request[]>([])
-  const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [view, setView] = useState<'list' | 'board'>('list')
 
-  const load = async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/requests?clientId=${clientId}&status=all`))
-      const data = await res.json() as { requests: Request[] }
-      setRequests(data.requests ?? [])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { void load() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  const { data, isLoading: loading, mutate: load } = useSWR<{ requests: Request[] }>(
+    `/api/admin/requests?clientId=${clientId}&status=all`,
+  )
+  const requests = data?.requests ?? []
 
   if (loading) return <SkeletonList rows={3} />
 
@@ -2106,18 +2087,12 @@ interface InvoiceRow {
 }
 
 function InvoicesTab({ clientId }: { clientId: string }) {
-  const [invoices, setInvoices] = useState<InvoiceRow[]>([])
-  const [loading, setLoading] = useState(true)
   const router = useRouter()
 
-  useEffect(() => {
-    setLoading(true)
-    fetch(apiPath(`/api/admin/invoices?orgId=${clientId}`))
-      .then(r => r.json() as Promise<{ items: InvoiceRow[] }>)
-      .then(data => setInvoices(data.items ?? []))
-      .catch(() => setInvoices([]))
-      .finally(() => setLoading(false))
-  }, [clientId])
+  const { data, isLoading: loading } = useSWR<{ items: InvoiceRow[] }>(
+    `/api/admin/invoices?orgId=${clientId}`,
+  )
+  const invoices = data?.items ?? []
 
   const formatTabDate = (dateStr: string | null): string => {
     if (!dateStr) return '--'
@@ -2455,34 +2430,38 @@ function TrackQueueTab({ clientId }: { clientId: string }) {
   const [mode, setMode] = useState<TracksMode>('auto')
   const [smallCount, setSmallCount] = useState(0)
   const [largeCount, setLargeCount] = useState(0)
-  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
-  const fetchTracks = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/capacity?orgId=${clientId}`))
-      if (!res.ok) { setTracks([]); return }
-      const data = await res.json() as CapacityResponse & { customSmallTracks?: number; customLargeTracks?: number }
-      const m = (data.tracksMode ?? 'auto') as TracksMode
-      setMode(m)
-      setSmallCount(data.customSmallTracks ?? 0)
-      setLargeCount(data.customLargeTracks ?? 0)
-      if (m === 'off') {
-        setUnified(true)
-        setTracks([bucketUnified(data)])
-      } else {
-        setUnified(false)
-        setTracks(bucketTracks(data))
-      }
-    } catch {
-      setTracks([])
-    } finally {
-      setLoading(false)
-    }
-  }, [clientId])
-
-  useEffect(() => { fetchTracks() }, [fetchTracks])
+  // Capacity is cached via SWR. The server response drives several pieces of
+  // local state (mode + counts are editable before save), so onSuccess mirrors
+  // the response into state exactly as the old fetch did. `mutate` (aliased
+  // fetchTracks) re-syncs after a save.
+  const { isLoading: loading, mutate: fetchTracks } = useSWR<
+    CapacityResponse & { customSmallTracks?: number; customLargeTracks?: number }
+  >(
+    `/api/admin/capacity?orgId=${clientId}`,
+    async (path: string) => {
+      const res = await fetch(apiPath(path))
+      if (!res.ok) throw new Error('Failed to load capacity')
+      return res.json()
+    },
+    {
+      onSuccess: (data) => {
+        const m = (data.tracksMode ?? 'auto') as TracksMode
+        setMode(m)
+        setSmallCount(data.customSmallTracks ?? 0)
+        setLargeCount(data.customLargeTracks ?? 0)
+        if (m === 'off') {
+          setUnified(true)
+          setTracks([bucketUnified(data)])
+        } else {
+          setUnified(false)
+          setTracks(bucketTracks(data))
+        }
+      },
+      onError: () => { setTracks([]) },
+    },
+  )
 
   const saveOverride = useCallback(async (next: { tracksMode: TracksMode; customSmallTracks?: number; customLargeTracks?: number }) => {
     setSaving(true)
@@ -2631,37 +2610,34 @@ function Stepper({ label, value, onChange, disabled, atMax }: {
 }
 
 function FilesTab({ clientId }: { clientId: string }) {
-  const [files, setFiles] = useState<FileRow[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    // Fetch requests for this client, then fetch files for each
-    fetch(apiPath(`/api/admin/requests?clientId=${clientId}&status=all`))
-      .then(r => r.json() as Promise<{ requests: { id: string; title: string }[] }>)
-      .then(async data => {
-        const reqs = data.requests ?? []
-        const allFiles: FileRow[] = []
-        // Fetch files for each request in parallel (batched)
-        const results = await Promise.all(
-          reqs.map(async req => {
-            try {
-              const res = await fetch(apiPath(`/api/admin/requests/${req.id}/files`))
-              if (!res.ok) return []
-              const json = await res.json() as { items: FileRow[] }
-              return (json.items ?? []).map(f => ({ ...f, requestTitle: req.title }))
-            } catch {
-              return []
-            }
-          })
-        )
-        for (const batch of results) allFiles.push(...batch)
-        allFiles.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        setFiles(allFiles)
-      })
-      .catch(() => setFiles([]))
-      .finally(() => setLoading(false))
-  }, [clientId])
+  // Files live across many requests; this fetches the client's requests then
+  // each request's files and merges them. An inline SWR fetcher keeps that
+  // multi-request transform intact while caching the merged result.
+  const { data: files = [], isLoading: loading } = useSWR<FileRow[]>(
+    `client-files:${clientId}`,
+    async () => {
+      const r = await fetch(apiPath(`/api/admin/requests?clientId=${clientId}&status=all`))
+      const data = await r.json() as { requests: { id: string; title: string }[] }
+      const reqs = data.requests ?? []
+      const allFiles: FileRow[] = []
+      // Fetch files for each request in parallel (batched)
+      const results = await Promise.all(
+        reqs.map(async req => {
+          try {
+            const res = await fetch(apiPath(`/api/admin/requests/${req.id}/files`))
+            if (!res.ok) return []
+            const json = await res.json() as { items: FileRow[] }
+            return (json.items ?? []).map(f => ({ ...f, requestTitle: req.title }))
+          } catch {
+            return []
+          }
+        })
+      )
+      for (const batch of results) allFiles.push(...batch)
+      allFiles.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      return allFiles
+    },
+  )
 
   function formatSize(bytes: number | null): string {
     if (!bytes) return '--'
@@ -2770,8 +2746,6 @@ interface BrandRow {
 }
 
 function BrandsTab({ clientId }: { clientId: string }) {
-  const [brands, setBrands] = useState<BrandRow[]>([])
-  const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -2785,21 +2759,10 @@ function BrandsTab({ clientId }: { clientId: string }) {
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/brands?orgId=${clientId}`))
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as { items: BrandRow[] }
-      setBrands(json.items ?? [])
-    } catch {
-      setBrands([])
-    } finally {
-      setLoading(false)
-    }
-  }, [clientId])
-
-  useEffect(() => { void load() }, [load])
+  const { data, isLoading: loading, mutate: load } = useSWR<{ items: BrandRow[] }>(
+    `/api/admin/brands?orgId=${clientId}`,
+  )
+  const brands = data?.items ?? []
 
   const resetForm = () => {
     setFormName('')
@@ -3151,24 +3114,10 @@ const CONTRACT_STATUS_TONES: Record<string, BadgeTone> = {
 }
 
 function ContractsTab({ clientId }: { clientId: string }) {
-  const [contracts, setContracts] = useState<ContractRow[]>([])
-  const [loading, setLoading] = useState(true)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/contracts?orgId=${clientId}`))
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as { items: ContractRow[] }
-      setContracts(json.items ?? [])
-    } catch {
-      setContracts([])
-    } finally {
-      setLoading(false)
-    }
-  }, [clientId])
-
-  useEffect(() => { void load() }, [load])
+  const { data, isLoading: loading } = useSWR<{ items: ContractRow[] }>(
+    `/api/admin/contracts?orgId=${clientId}`,
+  )
+  const contracts = data?.items ?? []
 
   const columns: DataTableColumn<ContractRow>[] = [
     {
@@ -3274,8 +3223,6 @@ const CALL_STATUS_TONES: Record<string, BadgeTone> = {
 }
 
 function CallsTab({ clientId, orgName }: { clientId: string; orgName: string }) {
-  const [calls, setCalls] = useState<ScheduledCallRow[]>([])
-  const [loadingCalls, setLoadingCalls] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [formTitle, setFormTitle] = useState('')
   const [formDate, setFormDate] = useState('')
@@ -3284,21 +3231,10 @@ function CallsTab({ clientId, orgName }: { clientId: string; orgName: string }) 
   const [formUrl, setFormUrl] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const fetchCalls = useCallback(async () => {
-    setLoadingCalls(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/calls?orgId=${clientId}`))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { calls: ScheduledCallRow[] }
-      setCalls(data.calls ?? [])
-    } catch {
-      setCalls([])
-    } finally {
-      setLoadingCalls(false)
-    }
-  }, [clientId])
-
-  useEffect(() => { void fetchCalls() }, [fetchCalls])
+  const { data, isLoading: loadingCalls, mutate: fetchCalls } = useSWR<{ calls: ScheduledCallRow[] }>(
+    `/api/admin/calls?orgId=${clientId}`,
+  )
+  const calls = data?.calls ?? []
 
   async function handleCreate() {
     if (!formTitle.trim() || !formDate) return
@@ -3569,17 +3505,10 @@ interface TimeEntryRow {
 }
 
 function TimeTab({ clientId }: { clientId: string }) {
-  const [entries, setEntries] = useState<TimeEntryRow[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    fetch(apiPath(`/api/admin/time?orgId=${clientId}`))
-      .then(r => r.json() as Promise<{ items: TimeEntryRow[] }>)
-      .then(data => setEntries(data.items ?? []))
-      .catch(() => setEntries([]))
-      .finally(() => setLoading(false))
-  }, [clientId])
+  const { data, isLoading: loading } = useSWR<{ items: TimeEntryRow[] }>(
+    `/api/admin/time?orgId=${clientId}`,
+  )
+  const entries = data?.items ?? []
 
   const totalHours = entries.reduce((s, e) => s + e.hours, 0)
   const billableHours = entries.filter(e => e.billable).reduce((s, e) => s + e.hours, 0)
@@ -3685,18 +3614,12 @@ interface DealRow {
 const DEAL_STAGE_FALLBACK = { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text)' }
 
 function DealsTab({ clientId, orgName }: { clientId: string; orgName: string }) {
-  const [deals, setDeals] = useState<DealRow[]>([])
-  const [loading, setLoading] = useState(true)
   const router = useRouter()
 
-  useEffect(() => {
-    setLoading(true)
-    fetch(apiPath(`/api/admin/deals?orgId=${clientId}`))
-      .then(r => r.json() as Promise<{ items: DealRow[] }>)
-      .then(data => setDeals(data.items ?? []))
-      .catch(() => setDeals([]))
-      .finally(() => setLoading(false))
-  }, [clientId])
+  const { data, isLoading: loading } = useSWR<{ items: DealRow[] }>(
+    `/api/admin/deals?orgId=${clientId}`,
+  )
+  const deals = data?.items ?? []
 
   if (loading) {
     return (
@@ -3810,22 +3733,14 @@ interface CrmActivityRow {
 // (components/tahi/activity-timeline.tsx, ACTIVITY_TYPE_META).
 
 function CrmActivitiesTab({ clientId }: { clientId: string }) {
-  const [items, setItems] = useState<CrmActivityRow[]>([])
-  const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ type: 'note', title: '', description: '' })
 
-  const fetchActivities = useCallback(() => {
-    setLoading(true)
-    fetch(apiPath(`/api/admin/activities?orgId=${clientId}`))
-      .then(r => r.json() as Promise<{ items: CrmActivityRow[] }>)
-      .then(data => setItems(data.items ?? []))
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false))
-  }, [clientId])
-
-  useEffect(() => { fetchActivities() }, [fetchActivities])
+  const { data, isLoading: loading, mutate: fetchActivities } = useSWR<{ items: CrmActivityRow[] }>(
+    `/api/admin/activities?orgId=${clientId}`,
+  )
+  const items = data?.items ?? []
 
   const handleSubmit = async () => {
     if (!form.title.trim()) return
@@ -3968,26 +3883,26 @@ interface RevenueTimeEntry {
 }
 
 function RevenueTab({ clientId }: { clientId: string }) {
-  const [invoices, setInvoices] = useState<RevenueInvoice[]>([])
-  const [timeEntries, setTimeEntries] = useState<RevenueTimeEntry[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    Promise.all([
-      fetch(apiPath(`/api/admin/invoices?orgId=${clientId}`))
-        .then(r => r.json() as Promise<{ items: RevenueInvoice[] }>)
-        .then(d => d.items ?? [])
-        .catch(() => [] as RevenueInvoice[]),
-      fetch(apiPath(`/api/admin/time?orgId=${clientId}`))
-        .then(r => r.json() as Promise<{ items: RevenueTimeEntry[] }>)
-        .then(d => d.items ?? [])
-        .catch(() => [] as RevenueTimeEntry[]),
-    ]).then(([inv, time]) => {
-      setInvoices(inv)
-      setTimeEntries(time)
-    }).finally(() => setLoading(false))
-  }, [clientId])
+  // Invoices + time entries load together via an inline SWR fetcher; each side
+  // swallows its own error and falls back to an empty list, just like before.
+  const { data, isLoading: loading } = useSWR<{ invoices: RevenueInvoice[]; timeEntries: RevenueTimeEntry[] }>(
+    `client-revenue:${clientId}`,
+    async () => {
+      const [inv, time] = await Promise.all([
+        fetch(apiPath(`/api/admin/invoices?orgId=${clientId}`))
+          .then(r => r.json() as Promise<{ items: RevenueInvoice[] }>)
+          .then(d => d.items ?? [])
+          .catch(() => [] as RevenueInvoice[]),
+        fetch(apiPath(`/api/admin/time?orgId=${clientId}`))
+          .then(r => r.json() as Promise<{ items: RevenueTimeEntry[] }>)
+          .then(d => d.items ?? [])
+          .catch(() => [] as RevenueTimeEntry[]),
+      ])
+      return { invoices: inv, timeEntries: time }
+    },
+  )
+  const invoices = data?.invoices ?? []
+  const timeEntries = data?.timeEntries ?? []
 
   if (loading) {
     return (
@@ -4120,9 +4035,6 @@ interface ClientCostRow {
 }
 
 function ProfitabilityTab({ clientId }: { clientId: string }) {
-  const [data, setData] = useState<ProfitabilityData | null>(null)
-  const [costs, setCosts] = useState<ClientCostRow[]>([])
-  const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({
     description: '',
@@ -4135,23 +4047,23 @@ function ProfitabilityTab({ clientId }: { clientId: string }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const loadAll = useCallback(async () => {
-    setLoading(true)
-    try {
+  // Profitability + costs load together (both must succeed) via an inline SWR
+  // fetcher. `mutate` (aliased loadAll) refetches after a cost is added/removed.
+  const { data: combined, isLoading: loading, mutate: loadAll } = useSWR<{ profit: ProfitabilityData; costs: ClientCostRow[] }>(
+    `client-profitability:${clientId}`,
+    async () => {
       const [profitRes, costsRes] = await Promise.all([
         fetch(apiPath(`/api/admin/clients/${clientId}/profitability`)).then(r => r.ok ? r.json() : Promise.reject()),
         fetch(apiPath(`/api/admin/clients/${clientId}/costs`)).then(r => r.ok ? r.json() : Promise.reject()),
       ])
-      setData(profitRes as ProfitabilityData)
-      setCosts(((costsRes as { costs?: ClientCostRow[] }).costs) ?? [])
-    } catch {
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [clientId])
-
-  useEffect(() => { loadAll() }, [loadAll])
+      return {
+        profit: profitRes as ProfitabilityData,
+        costs: ((costsRes as { costs?: ClientCostRow[] }).costs) ?? [],
+      }
+    },
+  )
+  const data = combined?.profit ?? null
+  const costs = combined?.costs ?? []
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
@@ -4406,17 +4318,10 @@ interface AuditEntry {
 }
 
 function ActivityTab({ clientId }: { clientId: string }) {
-  const [entries, setEntries] = useState<AuditEntry[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    fetch(apiPath(`/api/admin/audit-log?orgId=${clientId}&limit=50`))
-      .then(r => r.json() as Promise<{ items: AuditEntry[] }>)
-      .then(data => setEntries(data.items ?? []))
-      .catch(() => setEntries([]))
-      .finally(() => setLoading(false))
-  }, [clientId])
+  const { data, isLoading: loading } = useSWR<{ items: AuditEntry[] }>(
+    `/api/admin/audit-log?orgId=${clientId}&limit=50`,
+  )
+  const entries = data?.items ?? []
 
   if (loading) {
     return (

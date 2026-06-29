@@ -26,13 +26,13 @@
 // guarded, and the count-up is gated on inView (which returns true immediately
 // under reduced motion, so the figure paints at its final state).
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef } from 'react'
+import useSWR from 'swr'
 import { Wallet } from 'lucide-react'
 import { DomainCard } from './domain-card'
 import { useReveal } from '@/lib/use-homepage-motion'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { CountUp } from '@/components/tahi/count-up'
-import { apiPath } from '@/lib/api'
 
 // ── Endpoint shape (only the take-home slice we consume) ──────────────────────
 
@@ -262,29 +262,9 @@ function LeafMarker({ draw }: { draw: boolean }) {
 export function TakeHomeGauges({ className }: { className?: string }) {
   const { format } = useDisplayCurrency()
   const { ref, inView } = useReveal<HTMLDivElement>()
-  const [takeHome, setTakeHome] = useState<TakeHome | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [failed, setFailed] = useState(false)
-
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    setFailed(false)
-    try {
-      const res = await fetch(apiPath('/api/admin/financial-reports/summary'))
-      if (!res.ok) throw new Error('Failed')
-      const json = (await res.json()) as SummaryResponse
-      setTakeHome(json.takeHome ?? null)
-    } catch {
-      setTakeHome(null)
-      setFailed(true)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchData()
-  }, [fetchData])
+  const { data: summaryData, isLoading: loading, error } = useSWR<SummaryResponse>('/api/admin/financial-reports/summary')
+  const takeHome = summaryData?.takeHome ?? null
+  const failed = !!error
 
   const hasTarget = !!takeHome && takeHome.targetEach > 0
   const founders: Founder[] = takeHome

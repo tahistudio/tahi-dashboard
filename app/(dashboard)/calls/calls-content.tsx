@@ -9,7 +9,8 @@
  * transcript availability. Tabs split upcoming vs past.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { Calendar, FileText, ExternalLink, RefreshCw, UserPlus, TrendingUp, Building2, AlertTriangle } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -81,30 +82,14 @@ function formatRelative(iso: string): string {
 
 export function CallsContent() {
   const { showToast } = useToast()
-  const [items, setItems] = useState<CallRow[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, isLoading: loading, mutate: mutateItems } = useSWR<{ items: CallRow[] }>('/api/admin/calls/index')
+  const items = data?.items ?? []
   const [search, setSearch] = useState('')
   const [tab, setTab] = useState<'upcoming' | 'past'>('upcoming')
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([
     { id: 'type', values: [] },
   ])
   const [syncing, setSyncing] = useState(false)
-
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
-    try {
-      const r = await fetch(apiPath('/api/admin/calls/index'))
-      if (!r.ok) throw new Error('Failed')
-      const data = await r.json() as { items: CallRow[] }
-      setItems(data.items ?? [])
-    } catch {
-      setItems([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchAll() }, [fetchAll])
 
   async function syncNow() {
     setSyncing(true)
@@ -113,7 +98,7 @@ export function CallsContent() {
       const data = await r.json() as { created?: number; updated?: number; error?: string }
       if (r.ok) {
         showToast(`Calendar synced — ${data.created ?? 0} new, ${data.updated ?? 0} updated`, 'success')
-        await fetchAll()
+        await mutateItems()
       } else {
         showToast(`Sync failed: ${data.error ?? 'unknown'}`, 'error')
       }
@@ -126,7 +111,10 @@ export function CallsContent() {
 
   async function reclassify(callId: string, meetingType: 'discovery' | 'client' | 'partnership') {
     // Optimistic update — flip the local row immediately, then PATCH.
-    setItems(prev => prev.map(c => c.id === callId ? { ...c, meetingType } : c))
+    void mutateItems(
+      prev => prev ? { items: prev.items.map(c => c.id === callId ? { ...c, meetingType } : c) } : prev,
+      { revalidate: false }
+    )
     try {
       const r = await fetch(apiPath(`/api/admin/discovery-calls/${callId}`), {
         method: 'PATCH',
@@ -137,7 +125,7 @@ export function CallsContent() {
       showToast(`Reclassified as ${meetingType}`, 'success')
     } catch {
       showToast('Could not reclassify — refresh and try again', 'error')
-      await fetchAll()
+      await mutateItems()
     }
   }
 

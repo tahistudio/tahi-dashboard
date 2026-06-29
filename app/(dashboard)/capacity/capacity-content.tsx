@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import {
   Gauge, Users, TrendingUp, Calendar,
   RefreshCw, Phone, Clock, BarChart2,
@@ -82,22 +83,16 @@ function getWeekLabel(weekOffset: number): string {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
+interface CapacityBundle {
+  capacityData: StartDateResult | null
+  forecast: ForecastData | null
+  teamMembers: TeamMember[]
+}
+
 export function CapacityContent() {
-  const [capacityData, setCapacityData] = useState<StartDateResult | null>(null)
-  const [forecast, setForecast] = useState<ForecastData | null>(null)
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
-
-  // Sales call helper
-  const [callHours, setCallHours] = useState('')
-  const [callResult, setCallResult] = useState<StartDateResult | null>(null)
-  const [callLoading, setCallLoading] = useState(false)
-
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    setError(false)
-    try {
+  const { data, isLoading: loading, error: swrError, mutate } = useSWR<CapacityBundle>(
+    '/api/admin/capacity',
+    async () => {
       const [capRes, forecastRes, teamRes] = await Promise.all([
         fetch(apiPath('/api/admin/capacity/start-date'), {
           method: 'POST',
@@ -107,29 +102,22 @@ export function CapacityContent() {
         fetch(apiPath('/api/admin/capacity/forecast')),
         fetch(apiPath('/api/admin/team-members')),
       ])
+      const capacityData = capRes.ok ? (await capRes.json() as StartDateResult) : null
+      const forecast = forecastRes.ok ? (await forecastRes.json() as ForecastData) : null
+      const teamJson = teamRes.ok ? (await teamRes.json() as { items: TeamMember[] }) : { items: [] }
+      return { capacityData, forecast, teamMembers: teamJson.items ?? [] }
+    },
+  )
 
-      if (capRes.ok) {
-        const data = await capRes.json() as StartDateResult
-        setCapacityData(data)
-      }
+  const error = !loading && (swrError || !data)
+  const capacityData = data?.capacityData ?? null
+  const forecast = data?.forecast ?? null
+  const teamMembers = data?.teamMembers ?? []
 
-      if (forecastRes.ok) {
-        const data = await forecastRes.json() as ForecastData
-        setForecast(data)
-      }
-
-      if (teamRes.ok) {
-        const data = await teamRes.json() as { items: TeamMember[] }
-        setTeamMembers(data.items ?? [])
-      }
-    } catch {
-      setError(true)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchData() }, [fetchData])
+  // Sales call helper
+  const [callHours, setCallHours] = useState('')
+  const [callResult, setCallResult] = useState<StartDateResult | null>(null)
+  const [callLoading, setCallLoading] = useState(false)
 
   const buildTimeline = (): WeekProjection[] => {
     if (!capacityData) return []
@@ -195,7 +183,7 @@ export function CapacityContent() {
           title="Unable to load capacity data"
           description="There was an error loading the capacity data. Please try again."
           ctaLabel="Retry"
-          onCtaClick={fetchData}
+          onCtaClick={() => void mutate()}
         />
       </div>
     )
@@ -222,7 +210,7 @@ export function CapacityContent() {
         subtitle="Team utilization, projected capacity, and pipeline impact."
       >
         <button
-          onClick={fetchData}
+          onClick={() => void mutate()}
           className="flex items-center gap-2 px-4 text-sm font-medium transition-colors"
           style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text)', cursor: 'pointer', height: '2.25rem' }}
         >

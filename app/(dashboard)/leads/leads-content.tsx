@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import useSWR from 'swr'
 import { useSearchParams } from 'next/navigation'
 import {
   Plus, Clock, RefreshCw, Save, Trash2, ArrowUpRight,
@@ -165,8 +166,8 @@ const SOURCE_LABEL_BY_VALUE = new Map(SOURCES.map(s => [s.value, s.label]))
 // -- Main Component --
 
 export function LeadsContent() {
-  const [leads, setLeads] = useState<Lead[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: leadsData, isLoading: loading, mutate: mutateLeads } = useSWR<{ leads: Lead[] }>('/api/admin/leads')
+  const leads = leadsData?.leads ?? []
   const [search, setSearch] = useState('')
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([
     { id: 'status', values: ['new', 'qualifying', 'nurturing'] },
@@ -195,20 +196,6 @@ export function LeadsContent() {
    *  ConfirmDialog asking whether to re-run enrichment. */
   const [pendingReenrich, setPendingReenrich] = useState<Lead | null>(null)
 
-  const fetchLeads = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/leads'))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { leads: Lead[] }
-      setLeads(data.leads ?? [])
-    } catch {
-      setLeads([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-  useEffect(() => { fetchLeads() }, [fetchLeads])
 
   // Auto-open the slide-over from a ?lead=ID URL param. Lets the
   // full-page detail's Edit button (which routes here with ?lead=ID)
@@ -323,7 +310,7 @@ export function LeadsContent() {
       const data = await res.json() as { id: string }
       setShowNewForm(false)
       setDraft(null)
-      await fetchLeads()
+      await mutateLeads()
       await openLead(data.id)
     } finally {
       setSaving(false)
@@ -340,7 +327,7 @@ export function LeadsContent() {
         body: JSON.stringify(draft),
       })
       await openLead(selectedLead.id)
-      await fetchLeads()
+      await mutateLeads()
       setEditing(false)
       setDraft(null)
 
@@ -369,7 +356,7 @@ export function LeadsContent() {
       await fetch(apiPath(`/api/admin/leads/${pendingDelete.id}`), { method: 'DELETE' })
       setSelectedLead(null)
       setPendingDelete(null)
-      await fetchLeads()
+      await mutateLeads()
     } catch {
       // ignore
     }
@@ -388,7 +375,7 @@ export function LeadsContent() {
         throw new Error(errJson.detail ?? errJson.error ?? 'Enrichment failed')
       }
       await openLead(leadId)
-      await fetchLeads()
+      await mutateLeads()
     } catch (err) {
       setEnrichError(err instanceof Error ? err.message : 'Enrichment failed')
     } finally {
@@ -466,7 +453,7 @@ export function LeadsContent() {
         body: JSON.stringify(patch),
       })
       await openLead(leadId)
-      await fetchLeads()
+      await mutateLeads()
     } catch {
       // best-effort — UI just leaves the banner visible if the patch fails
     }
@@ -485,7 +472,7 @@ export function LeadsContent() {
         const data = await res.json() as { dealId: string }
         setPendingPromote(null)
         setSelectedLead(null)
-        await fetchLeads()
+        await mutateLeads()
         // Redirect to the new deal so Liam lands where he can keep
         // working — pipeline → deal detail.
         if (data.dealId) window.location.href = apiPath(`/deals?deal=${data.dealId}`)
@@ -535,7 +522,10 @@ export function LeadsContent() {
           // Optimistic local update so the chip changes instantly,
           // then PATCH. Refetch on completion to pick up any side
           // effects (e.g. archive activity row).
-          setLeads(prev => prev.map(l => l.id === r.id ? { ...l, status: next } : l))
+          void mutateLeads(
+            prev => prev ? { leads: prev.leads.map(l => l.id === r.id ? { ...l, status: next } : l) } : prev,
+            { revalidate: false }
+          )
           try {
             await fetch(apiPath(`/api/admin/leads/${r.id}`), {
               method: 'PATCH',
@@ -543,7 +533,7 @@ export function LeadsContent() {
               body: JSON.stringify({ status: next }),
             })
           } finally {
-            fetchLeads()
+            void mutateLeads()
           }
         },
       },
@@ -862,7 +852,7 @@ export function LeadsContent() {
         <BulkImportPanel
           onDone={async () => {
             setShowBulkImport(false)
-            await fetchLeads()
+            await mutateLeads()
           }}
         />
       </SlideOver>

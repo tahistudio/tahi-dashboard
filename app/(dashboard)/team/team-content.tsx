@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import useSWR from 'swr'
 import { useUser } from '@clerk/nextjs'
 import {
   Plus, UserCog, Mail, Shield, RefreshCw, Clock, Trash2,
@@ -486,11 +487,8 @@ function AccessPanel({
   onClose: () => void
   onUpdated: () => void
 }) {
-  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [rules, setRules] = useState<AccessRule[]>([])
-  const [orgs, setOrgs] = useState<OrgOption[]>([])
 
   // Form state
   const [accessRole, setAccessRole] = useState('task_handler')
@@ -499,43 +497,26 @@ function AccessPanel({
   const [trackType, setTrackType] = useState('all')
   const [selectedOrgIds, setSelectedOrgIds] = useState<string[]>([])
 
-  const fetchAccess = useCallback(async () => {
-    if (!member) return
-    setLoading(true)
-    try {
-      const [accessRes, orgsRes] = await Promise.all([
-        fetch(apiPath(`/api/admin/team/${member.id}/access`)),
-        fetch(apiPath('/api/admin/clients')),
-      ])
+  const { data: accessData, isLoading: accessLoading } = useSWR<{ rules: AccessRule[] }>(
+    member ? `/api/admin/team/${member.id}/access` : null
+  )
+  const { data: orgsData, isLoading: orgsLoading } = useSWR<{ organisations: OrgOption[] }>(
+    member ? '/api/admin/clients' : null
+  )
+  const rules = accessData?.rules ?? []
+  const orgs = orgsData?.organisations ?? []
+  const loading = accessLoading || orgsLoading
 
-      if (accessRes.ok) {
-        const data = await accessRes.json() as { rules: AccessRule[] }
-        setRules(data.rules)
-        // Pre-fill form from first rule if one exists
-        if (data.rules.length > 0) {
-          const r = data.rules[0]
-          setAccessRole(r.role)
-          setScopeType(r.scopeType)
-          setPlanType(r.planType ?? '')
-          setTrackType(r.trackType)
-          setSelectedOrgIds(r.orgIds ?? [])
-        }
-      }
-
-      if (orgsRes.ok) {
-        const data = await orgsRes.json() as { organisations: OrgOption[] }
-        setOrgs(data.organisations ?? [])
-      }
-    } catch {
-      setError('Failed to load access rules')
-    } finally {
-      setLoading(false)
-    }
-  }, [member])
-
+  // Pre-fill form from first rule whenever the access data loads
   useEffect(() => {
-    if (member) fetchAccess()
-  }, [member, fetchAccess])
+    if (!accessData?.rules?.length) return
+    const r = accessData.rules[0]
+    setAccessRole(r.role)
+    setScopeType(r.scopeType)
+    setPlanType(r.planType ?? '')
+    setTrackType(r.trackType)
+    setSelectedOrgIds(r.orgIds ?? [])
+  }, [accessData])
 
   async function handleSave() {
     if (!member) return
@@ -728,8 +709,8 @@ function AccessPanel({
 // -- Main Component --
 
 export function TeamContent() {
-  const [members, setMembers] = useState<TeamMember[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: teamData, isLoading: loading, mutate: mutateTeam } = useSWR<{ items: TeamMember[] }>('/api/admin/team')
+  const members = teamData?.items ?? []
   const [showAddSlideOver, setShowAddSlideOver] = useState(false)
   const [editMember, setEditMember] = useState<TeamMember | null>(null)
   const [accessMember, setAccessMember] = useState<TeamMember | null>(null)
@@ -745,20 +726,6 @@ export function TeamContent() {
   ])
   const { user } = useUser()
   const router = useRouter()
-
-  const fetchTeam = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/team'))
-      if (!res.ok) throw new Error('Failed to fetch')
-      const data = await res.json() as { items: TeamMember[] }
-      setMembers(data.items ?? [])
-    } catch {
-      setMembers([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
 
   // Check if the current Clerk user has a linked team member record
   const currentUserLinked = useMemo(() => {
@@ -790,21 +757,21 @@ export function TeamContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clerkUserId: user.id }),
       })
-      fetchTeam()
+      await mutateTeam()
     } catch {
       // silently fail
     } finally {
       setLinkingAccount(false)
     }
-  }, [user, fetchTeam])
+  }, [user, mutateTeam])
 
   const handleDeleteMember = useCallback(async () => {
     if (!deleteMember) return
     const res = await fetch(apiPath(`/api/admin/team/${deleteMember.id}`), { method: 'DELETE' })
     if (!res.ok) throw new Error('Failed to remove member')
     setDeleteMember(null)
-    fetchTeam()
-  }, [deleteMember, fetchTeam])
+    await mutateTeam()
+  }, [deleteMember, mutateTeam])
 
   const handleViewAs = useCallback(async (member: TeamMember) => {
     try {
@@ -840,10 +807,6 @@ export function TeamContent() {
       router.push('/overview')
     }
   }, [router])
-
-  useEffect(() => {
-    fetchTeam()
-  }, [fetchTeam])
 
   // Computed stats for the KPI strip + Donut. All derived from the
   // existing members payload — no extra API calls.
@@ -1023,7 +986,7 @@ export function TeamContent() {
         title="Team"
         subtitle="Manage team members, roles, and access scoping."
       >
-        <TahiButton variant="secondary" size="sm" onClick={fetchTeam} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+        <TahiButton variant="secondary" size="sm" onClick={() => void mutateTeam()} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
           Refresh
         </TahiButton>
         <TahiButton size="sm" onClick={() => setShowAddSlideOver(true)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
@@ -1227,19 +1190,19 @@ export function TeamContent() {
       <AddMemberSlideOver
         open={showAddSlideOver}
         onClose={() => setShowAddSlideOver(false)}
-        onCreated={fetchTeam}
+        onCreated={() => void mutateTeam()}
       />
 
       <EditMemberSlideOver
         member={editMember}
         onClose={() => setEditMember(null)}
-        onUpdated={fetchTeam}
+        onUpdated={() => void mutateTeam()}
       />
 
       <AccessPanel
         member={accessMember}
         onClose={() => setAccessMember(null)}
-        onUpdated={fetchTeam}
+        onUpdated={() => void mutateTeam()}
       />
 
       <ConfirmDialog

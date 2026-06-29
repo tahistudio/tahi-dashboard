@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import useSWR from 'swr'
 import { useSearchParams, useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
@@ -13,6 +14,7 @@ import {
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
+import { useToast } from '@/components/tahi/toast'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { ViewToggle } from '@/components/tahi/view-toggle'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
@@ -291,8 +293,6 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
   const [tagFilter, setTagFilter] = useState('all')
-  const [requests, setRequests] = useState<Request[]>([])
-  const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(() => searchParams.get('new') === '1')
   const defaultClientId = searchParams.get('client') ?? undefined
   const [bulkCreateOpen, setBulkCreateOpen] = useState(false)
@@ -307,60 +307,54 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     window.addEventListener('tahi:shortcut', handleShortcut)
     return () => window.removeEventListener('tahi:shortcut', handleShortcut)
   }, [])
-  const [boardColumns, setBoardColumns] = useState<BoardViewColumn[]>(BOARD_COLS)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const statusOptions = isAdmin ? ADMIN_STATUS_OPTIONS : CLIENT_STATUS_OPTIONS
 
-  // Fetch custom kanban columns (admin only). Mapped to the shared BoardView
-  // column shape; falls back to BOARD_COLS when none are configured.
-  useEffect(() => {
-    if (!isAdmin) return
-    fetch(apiPath('/api/admin/kanban-columns'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ columns: Array<{ statusValue: string; colour: string | null; label: string; position: number }> }>
-      })
-      .then(data => {
-        if (data.columns && data.columns.length > 0) {
-          const mapped: BoardViewColumn[] = data.columns
-            .sort((a, b) => a.position - b.position)
-            .map(c => ({
-              id: c.statusValue,
-              label: c.label,
-              statusValue: c.statusValue,
-              color: c.colour ?? `var(--status-${c.statusValue.replace(/_/g, '-')}-dot)`,
-            }))
-          setBoardColumns(mapped)
-        }
-      })
-      .catch(() => {
-        // Keep defaults
-      })
-  }, [isAdmin])
+  const { showToast } = useToast()
 
-  const fetchRequests = useCallback(async () => {
-    setLoading(true)
-    try {
-      const params = new URLSearchParams({ status: activeTab })
-      const endpoint = isAdmin ? apiPath('/api/admin/requests') : apiPath('/api/portal/requests')
-      const res = await fetch(`${endpoint}?${params}`)
-      if (!res.ok) throw new Error('Failed to fetch')
-      const data = await res.json() as { requests?: Request[] }
-      setRequests(data.requests ?? [])
-    } catch {
-      setRequests([])
-    } finally {
-      setLoading(false)
+  // Custom kanban columns (admin only) via SWR. The conditional key skips the
+  // fetch entirely for clients. Mapped to the shared BoardView column shape;
+  // falls back to BOARD_COLS when none are configured or the fetch fails.
+  const { data: kanbanData } = useSWR<{ columns: Array<{ statusValue: string; colour: string | null; label: string; position: number }> }>(
+    isAdmin ? '/api/admin/kanban-columns' : null,
+  )
+  const boardColumns = useMemo<BoardViewColumn[]>(() => {
+    const cols = kanbanData?.columns
+    if (cols && cols.length > 0) {
+      return [...cols]
+        .sort((a, b) => a.position - b.position)
+        .map(c => ({
+          id: c.statusValue,
+          label: c.label,
+          statusValue: c.statusValue,
+          color: c.colour ?? `var(--status-${c.statusValue.replace(/_/g, '-')}-dot)`,
+        }))
     }
-  }, [activeTab, isAdmin])
+    return BOARD_COLS
+  }, [kanbanData])
 
-  useEffect(() => { fetchRequests() }, [fetchRequests])
+  // Main request list via SWR. The key encodes (endpoint, status tab) so each
+  // tab caches independently; keepPreviousData shows the prior rows while a new
+  // tab revalidates (no spinner flash). The global fetcher adds apiPath +
+  // parses JSON. isLoading is true only on the first uncached load.
+  // NOTE: the admin GET silently caps at 50 rows (server-side limit; the page
+  // param is unused here). Pagination is a follow-up and can't be done purely
+  // server-side, because this list is filtered client-side (search / category /
+  // type / client-tag) after the fetch.
+  const requestsKey = `${isAdmin ? '/api/admin/requests' : '/api/portal/requests'}?status=${activeTab}`
+  const { data: requestsData, isLoading: loading, mutate: mutateRequests } =
+    useSWR<{ requests?: Request[] }>(requestsKey)
+  const requests = useMemo(() => requestsData?.requests ?? [], [requestsData])
 
-  // Inline status change from list view
+  // Inline status change from list view. Optimistically patches the SWR cache,
+  // fires the PUT, and reverts by revalidating from the server on failure.
   const handleStatusChange = useCallback(async (requestId: string, newStatus: string) => {
-    // Optimistic update
-    setRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: newStatus } : r))
+    const prev = requestsData
+    const optimistic = prev
+      ? { ...prev, requests: (prev.requests ?? []).map(r => r.id === requestId ? { ...r, status: newStatus } : r) }
+      : prev
+    mutateRequests(optimistic, { revalidate: false })
     try {
       const res = await fetch(apiPath(`/api/admin/requests/${requestId}`), {
         method: 'PUT',
@@ -369,9 +363,9 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       })
       if (!res.ok) throw new Error('Failed')
     } catch {
-      fetchRequests() // Revert on failure
+      mutateRequests() // Revert on failure by revalidating from the server
     }
-  }, [fetchRequests])
+  }, [requestsData, mutateRequests])
 
   // Clear selection when tab changes
   useEffect(() => { setSelectedIds(new Set()) }, [activeTab])
@@ -558,26 +552,47 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     if (!src) return
     const fromStatus = src.status
     const wasChild = !!src.parentRequestId
+    // No-op drop (same column, not a nested child): nothing to persist.
+    if (!wasChild && fromStatus === toStatus) return
+
+    // Optimistically paint the move into the SWR cache: set the new status and,
+    // when a nested child is dropped onto a column, clear its parent too.
+    const prev = requestsData
+    const optimistic = prev
+      ? {
+          ...prev,
+          requests: (prev.requests ?? []).map(r =>
+            r.id === itemId
+              ? { ...r, status: toStatus, parentRequestId: wasChild ? null : r.parentRequestId }
+              : r,
+          ),
+        }
+      : prev
+    mutateRequests(optimistic, { revalidate: false })
+
     try {
       if (wasChild) {
-        await fetch(apiPath(`/api/admin/requests/${itemId}/nest`), {
+        const res = await fetch(apiPath(`/api/admin/requests/${itemId}/nest`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ parentRequestId: null }),
         })
+        if (!res.ok) throw new Error('Failed')
       }
       if (fromStatus !== toStatus) {
-        await fetch(apiPath(`/api/admin/requests/${itemId}`), {
+        const res = await fetch(apiPath(`/api/admin/requests/${itemId}`), {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: toStatus }),
         })
+        if (!res.ok) throw new Error('Failed')
       }
-      if (wasChild || fromStatus !== toStatus) fetchRequests()
+      mutateRequests() // Revalidate from the server once the write lands
     } catch {
-      // silent
+      mutateRequests(prev, { revalidate: false }) // Revert the optimistic paint
+      showToast('Could not move request', 'error')
     }
-  }, [isAdmin, requestById, fetchRequests])
+  }, [isAdmin, requestById, requestsData, mutateRequests, showToast])
 
   // Board nest: dropping card A onto card B nests A under B. Cross-client drops
   // are refused before the confirm dialog opens (same guard the backend enforces).
@@ -611,11 +626,11 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         return
       }
       setNestPrompt(null)
-      fetchRequests()
+      mutateRequests()
     } catch {
       setNestError('Failed to nest request (network)')
     }
-  }, [nestPrompt, fetchRequests])
+  }, [nestPrompt, mutateRequests])
 
   // ── DataTable columns ─────────────────────────────────────────────────────
   const columns = useMemo<DataTableColumn<Request>[]>(() => {
@@ -749,7 +764,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     <>
       <NewRequestDialog
         open={dialogOpen}
-        onClose={() => { setDialogOpen(false); fetchRequests() }}
+        onClose={() => { setDialogOpen(false); mutateRequests() }}
         isAdmin={isAdmin}
         defaultOrgId={defaultClientId}
       />
@@ -757,7 +772,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       <AiRequestWizard
         open={aiWizardOpen}
         onClose={() => setAiWizardOpen(false)}
-        onRequestsCreated={() => { setAiWizardOpen(false); fetchRequests() }}
+        onRequestsCreated={() => { setAiWizardOpen(false); mutateRequests() }}
         context={isAdmin
           ? { orgId: defaultClientId, speaker: 'admin' }
           : { speaker: 'client' }}
@@ -873,7 +888,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
               selectedCount={selectedIds.size}
               selectedIds={selectedIds}
               onClear={() => setSelectedIds(new Set())}
-              onDone={() => { setSelectedIds(new Set()); fetchRequests() }}
+              onDone={() => { setSelectedIds(new Set()); mutateRequests() }}
             />
           </Card>
         )}
@@ -933,7 +948,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       {bulkCreateOpen && (
         <BulkCreateDialog
           onClose={() => setBulkCreateOpen(false)}
-          onCreated={() => { setBulkCreateOpen(false); fetchRequests() }}
+          onCreated={() => { setBulkCreateOpen(false); mutateRequests() }}
         />
       )}
     </>
@@ -950,19 +965,9 @@ interface WorkloadTeamMember {
 }
 
 function WorkloadView({ requests }: { requests: Request[] }) {
-  const [members, setMembers] = useState<WorkloadTeamMember[]>([])
-  const [loadingMembers, setLoadingMembers] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/team-members'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ items: WorkloadTeamMember[] }>
-      })
-      .then(data => setMembers(data.items ?? []))
-      .catch(() => setMembers([]))
-      .finally(() => setLoadingMembers(false))
-  }, [])
+  const { data: membersData, isLoading: loadingMembers } =
+    useSWR<{ items: WorkloadTeamMember[] }>('/api/admin/team-members')
+  const members = membersData?.items ?? []
 
   if (loadingMembers) {
     return (
@@ -1177,15 +1182,12 @@ function BulkActionBar({
   const [statusDropdown, setStatusDropdown] = useState(false)
   const [assignDropdown, setAssignDropdown] = useState(false)
   const [assignRole, setAssignRole] = useState<'pm' | 'assignee' | 'follower'>('assignee')
-  const [teamMembers, setTeamMembers] = useState<Array<{ id: string; name: string }>>([])
-
-  useEffect(() => {
-    if (!assignDropdown || teamMembers.length > 0) return
-    fetch(apiPath('/api/admin/team-members'))
-      .then(r => r.json() as Promise<{ items: Array<{ id: string; name: string }> }>)
-      .then(d => setTeamMembers(d.items ?? []))
-      .catch(() => setTeamMembers([]))
-  }, [assignDropdown, teamMembers.length])
+  // Team members load lazily the first time the Assign dropdown opens. The
+  // conditional key skips the fetch until then; SWR dedups + caches after.
+  const { data: teamData } = useSWR<{ items: Array<{ id: string; name: string }> }>(
+    assignDropdown ? '/api/admin/team-members' : null,
+  )
+  const teamMembers = teamData?.items ?? []
 
   const handleBulkStatus = async (status: string) => {
     setActionLoading(true)
@@ -1447,8 +1449,8 @@ function BulkCreateDialog({
   onClose: () => void
   onCreated: () => void
 }) {
-  const [orgs, setOrgs] = useState<OrgOption[]>([])
-  const [orgsLoading, setOrgsLoading] = useState(true)
+  const { data: clientsData, isLoading: orgsLoading } = useSWR<{ clients: OrgOption[] }>('/api/admin/clients')
+  const orgs = clientsData?.clients ?? []
   const [selectedOrgIds, setSelectedOrgIds] = useState<Set<string>>(new Set())
   const [title, setTitle] = useState('')
   const [category, setCategory] = useState('')
@@ -1458,16 +1460,6 @@ function BulkCreateDialog({
   const [errorMsg, setErrorMsg] = useState('')
   const [filterPlan, setFilterPlan] = useState('all')
   const [searchOrg, setSearchOrg] = useState('')
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/clients'))
-      .then(r => r.json() as Promise<{ clients: OrgOption[] }>)
-      .then(data => {
-        setOrgs(data.clients ?? [])
-      })
-      .catch(() => setOrgs([]))
-      .finally(() => setOrgsLoading(false))
-  }, [])
 
   const filteredOrgs = orgs.filter(o => {
     if (filterPlan !== 'all' && o.planType !== filterPlan) return false

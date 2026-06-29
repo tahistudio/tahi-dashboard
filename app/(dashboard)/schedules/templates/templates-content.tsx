@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { ArrowLeft, Trash2, Save, Calendar } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -21,26 +22,10 @@ interface Template {
 
 export function TemplatesContent() {
   const { showToast } = useToast()
-  const [items, setItems] = useState<Template[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, isLoading: loading, mutate } = useSWR<{ items: Template[] }>('/api/admin/schedules/templates')
+  const items = data?.items ?? []
   const [editing, setEditing] = useState<Template | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Template | null>(null)
-
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/schedules/templates'))
-      if (!res.ok) throw new Error('failed')
-      const data = await res.json() as { items: Template[] }
-      setItems(data.items ?? [])
-    } catch {
-      setItems([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchAll() }, [fetchAll])
 
   async function handleDelete() {
     if (!deleteTarget) return
@@ -48,7 +33,7 @@ export function TemplatesContent() {
       const res = await fetch(apiPath(`/api/admin/schedules/templates/${deleteTarget.id}`), { method: 'DELETE' })
       if (!res.ok) throw new Error('failed')
       setDeleteTarget(null)
-      void fetchAll()
+      void mutate()
     } catch {
       showToast('Could not delete.', 'error')
     }
@@ -116,7 +101,7 @@ export function TemplatesContent() {
         <TemplateEditDialog
           template={editing}
           onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); void fetchAll() }}
+          onSaved={() => { setEditing(null); void mutate() }}
         />
       )}
       <ConfirmDialog

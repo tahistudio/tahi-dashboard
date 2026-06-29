@@ -21,6 +21,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import useSWR from 'swr'
 import { Users, Building2, Shield, SlidersHorizontal, RefreshCw } from 'lucide-react'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
@@ -139,39 +140,30 @@ const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
 export function PermissionsBuilder() {
   const { showToast } = useToast()
 
-  const [data, setData] = useState<SubjectsResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [errored, setErrored] = useState(false)
   const [tab, setTab] = useState<TabKey>('team')
 
   // The subject whose feature panel is open (null = panel closed).
   const [panelSubject, setPanelSubject] = useState<PanelSubject | null>(null)
 
-  const fetchSubjects = useCallback(async () => {
-    setLoading(true)
-    setErrored(false)
-    try {
+  // Subjects load via SWR (cached across nav). The inline fetcher normalises so
+  // the arrays are always present for the optimistic patch below.
+  const { data, isLoading: loading, error: subjectsErr, mutate } = useSWR<SubjectsResponse>(
+    '/api/admin/permissions/subjects',
+    async () => {
       const res = await fetch(apiPath('/api/admin/permissions/subjects'))
       if (!res.ok) throw new Error('Failed')
       const json = (await res.json()) as SubjectsResponse
-      setData({
+      return {
         teamMembers: json.teamMembers ?? [],
         orgs: json.orgs ?? [],
         roles: json.roles ?? [],
-      })
-    } catch {
-      setData(null)
-      setErrored(true)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+      }
+    },
+  )
+  const errored = !!subjectsErr
+  const fetchSubjects = useCallback(() => { void mutate() }, [mutate])
 
-  useEffect(() => {
-    void fetchSubjects()
-  }, [fetchSubjects])
-
-  // Assign (or clear) a member's level role. Optimistic: patch local state,
+  // Assign (or clear) a member's level role. Optimistic: patch the cache,
   // toast, and reconcile on the server response.
   const assignRole = useCallback(
     async (member: TeamMember, roleId: string | null) => {
@@ -179,8 +171,8 @@ export function PermissionsBuilder() {
       const role = roleId ? roles.find(r => r.id === roleId) ?? null : null
       const label = role ? humaniseRole(role.name) : 'No role'
 
-      // Optimistic local patch.
-      setData(prev => {
+      // Optimistic cache patch.
+      void mutate(prev => {
         if (!prev) return prev
         return {
           ...prev,
@@ -190,7 +182,7 @@ export function PermissionsBuilder() {
               : m,
           ),
         }
-      })
+      }, { revalidate: false })
 
       try {
         const res = await fetch(apiPath('/api/admin/permissions/assign-role'), {
@@ -207,10 +199,10 @@ export function PermissionsBuilder() {
         const msg = e instanceof Error ? e.message : 'Could not update role'
         showToast(msg, 'error')
         // Revert by refetching authoritative state.
-        void fetchSubjects()
+        void mutate()
       }
     },
-    [data?.roles, fetchSubjects, showToast],
+    [data?.roles, mutate, showToast],
   )
 
   const openPanel = useCallback((subject: PanelSubject) => {
@@ -644,44 +636,36 @@ function FeaturePanel({
   const { showToast } = useToast()
 
   // Map featureKey -> override effect. Absence = inherit (default for the level).
+  // These are the editable working copy, seeded from the fetched overrides and
+  // then patched optimistically by setEffect / commitReason.
   const [overrides, setOverrides] = useState<Map<string, Effect>>(new Map())
   const [reasons, setReasons] = useState<Map<string, string>>(new Map())
-  const [loading, setLoading] = useState(false)
-  const [errored, setErrored] = useState(false)
 
   const open = subject !== null
 
-  const loadOverrides = useCallback(async (s: PanelSubject) => {
-    setLoading(true)
-    setErrored(false)
-    try {
-      const res = await fetch(
-        apiPath(`/api/admin/permissions/feature-visibility?subjectType=${encodeURIComponent(s.type)}&subjectId=${encodeURIComponent(s.id)}`),
-      )
-      if (!res.ok) throw new Error('Failed')
-      const json = (await res.json()) as { overrides: Override[] }
-      const nextEffects = new Map<string, Effect>()
-      const nextReasons = new Map<string, string>()
-      for (const o of json.overrides ?? []) {
-        nextEffects.set(o.featureKey, o.effect)
-        if (o.reason) nextReasons.set(o.featureKey, o.reason)
-      }
-      setOverrides(nextEffects)
-      setReasons(nextReasons)
-    } catch {
-      setOverrides(new Map())
-      setReasons(new Map())
-      setErrored(true)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  // Fetch the subject's overrides via SWR; the key encodes the subject so each
+  // one caches separately. keepPreviousData is off so switching subjects shows
+  // the skeleton rather than the prior subject's toggles (matches prior code).
+  const { data: ovData, isLoading: loading, error: ovErr } = useSWR<{ overrides: Override[] }>(
+    subject
+      ? `/api/admin/permissions/feature-visibility?subjectType=${encodeURIComponent(subject.type)}&subjectId=${encodeURIComponent(subject.id)}`
+      : null,
+    { keepPreviousData: false },
+  )
+  const errored = !!ovErr
 
-  // Fetch on open / subject change.
+  // Seed the editable maps whenever a fresh set of overrides arrives.
   useEffect(() => {
-    if (!subject) return
-    void loadOverrides(subject)
-  }, [subject, loadOverrides])
+    if (!ovData) return
+    const nextEffects = new Map<string, Effect>()
+    const nextReasons = new Map<string, string>()
+    for (const o of ovData.overrides ?? []) {
+      nextEffects.set(o.featureKey, o.effect)
+      if (o.reason) nextReasons.set(o.featureKey, o.reason)
+    }
+    setOverrides(nextEffects)
+    setReasons(nextReasons)
+  }, [ovData])
 
   // Top-level feature nodes relevant to this subject's audience, in tree order.
   const topNodes = useMemo<FeatureNode[]>(() => {

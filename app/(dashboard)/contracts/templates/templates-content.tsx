@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { ArrowLeft, Plus, Trash2, Save, FileSignature, Edit3, RefreshCw } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -45,8 +46,8 @@ const TYPE_BY_VALUE = new Map(TYPE_OPTIONS.map(t => [t.value, t]))
 
 export function TemplatesContent() {
   const { showToast } = useToast()
-  const [items, setItems] = useState<Template[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, isLoading: loading, mutate } = useSWR<{ items: Template[] }>('/api/admin/contracts/templates')
+  const items = data?.items ?? []
   const [editing, setEditing] = useState<Template | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Template | null>(null)
@@ -58,22 +59,6 @@ export function TemplatesContent() {
     const f = activeFilters.find(a => a.id === 'type')
     return new Set(f?.values ?? [])
   }, [activeFilters])
-
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/contracts/templates'))
-      if (!res.ok) throw new Error('failed')
-      const data = await res.json() as { items: Template[] }
-      setItems(data.items ?? [])
-    } catch {
-      setItems([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchAll() }, [fetchAll])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -103,7 +88,7 @@ export function TemplatesContent() {
       const res = await fetch(apiPath(`/api/admin/contracts/templates/${deleteTarget.id}`), { method: 'DELETE' })
       if (!res.ok) throw new Error('failed')
       setDeleteTarget(null)
-      void fetchAll()
+      void mutate()
     } catch {
       showToast('Could not delete.', 'error')
     }
@@ -250,13 +235,13 @@ export function TemplatesContent() {
       <TemplateSlideOver
         open={showCreate}
         onClose={() => setShowCreate(false)}
-        onSaved={() => { setShowCreate(false); void fetchAll() }}
+        onSaved={() => { setShowCreate(false); void mutate() }}
       />
       <TemplateSlideOver
         open={!!editing}
         template={editing ?? undefined}
         onClose={() => setEditing(null)}
-        onSaved={() => { setEditing(null); void fetchAll() }}
+        onSaved={() => { setEditing(null); void mutate() }}
       />
       <ConfirmDialog
         open={!!deleteTarget}

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
+import useSWR from 'swr'
 import { apiPath } from '@/lib/api'
 import {
   AlertTriangle, Loader2,
@@ -244,9 +245,6 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 
 export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) {
   const { showToast } = useToast()
-  const [task, setTask] = useState<Task | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [fetchError, setFetchError] = useState(false)
 
   // Editable fields
   const [editingTitle, setEditingTitle] = useState(false)
@@ -257,14 +255,6 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
   const [dueDateInput, setDueDateInput] = useState('')
   const [statusUpdating, setStatusUpdating] = useState(false)
 
-  // Related data
-  const [subtasks, setSubtasks] = useState<Subtask[]>([])
-  const [subtasksLoading, setSubtasksLoading] = useState(true)
-  const [dependencies, setDependencies] = useState<TaskDependency[]>([])
-  const [depsLoading, setDepsLoading] = useState(true)
-  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([])
-  const [timeLoading, setTimeLoading] = useState(true)
-  const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([])
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
   const [comment, setComment] = useState('')
 
@@ -275,81 +265,39 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
   // Suppress unused variable warnings
   void currentUserId
 
-  const loadTask = useCallback(async () => {
-    try {
-      const res = await fetch(apiPath(`/api/admin/tasks/${taskId}`))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { task?: Task }
-      setTask(data.task ?? null)
-    } catch {
-      setFetchError(true)
-    } finally {
-      setLoading(false)
-    }
-  }, [taskId])
+  // Task via SWR. The global fetcher throws on non-2xx, so a non-ok response
+  // surfaces as taskError -> the "Failed to load" screen (matching the old
+  // loadTask which threw on !res.ok). An ok response with no task -> null ->
+  // "Task not found". Task is never mutated locally (every field edit PATCHes
+  // then revalidates via mutateTask), so it derives straight from the cache.
+  const { data: taskData, isLoading: loading, error: taskError, mutate: mutateTask } =
+    useSWR<{ task?: Task }>(`/api/admin/tasks/${taskId}`)
+  const task = taskData?.task ?? null
+  const fetchError = !!taskError
 
-  const loadSubtasks = useCallback(async () => {
-    setSubtasksLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/tasks/${taskId}/subtasks`))
-      if (!res.ok) throw new Error('Not found')
-      const data = await res.json() as { subtasks?: Subtask[] }
-      setSubtasks(data.subtasks ?? [])
-    } catch {
-      setSubtasks([])
-    } finally {
-      setSubtasksLoading(false)
-    }
-  }, [taskId])
-
-  const loadDependencies = useCallback(async () => {
-    setDepsLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/tasks/${taskId}/dependencies`))
-      if (!res.ok) throw new Error('Not found')
-      const data = await res.json() as { dependencies?: TaskDependency[] }
-      setDependencies(data.dependencies ?? [])
-    } catch {
-      setDependencies([])
-    } finally {
-      setDepsLoading(false)
-    }
-  }, [taskId])
-
-  const loadTimeEntries = useCallback(async () => {
-    setTimeLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/time-entries?taskId=${taskId}`))
-      if (!res.ok) throw new Error('Not found')
-      const data = await res.json() as { items?: TimeEntry[] }
-      setTimeEntries(data.items ?? [])
-    } catch {
-      setTimeEntries([])
-    } finally {
-      setTimeLoading(false)
-    }
-  }, [taskId])
-
-  const loadTeamMembers = useCallback(async () => {
-    if (!isAdmin) return
-    try {
-      const res = await fetch(apiPath('/api/admin/team-members'))
-      if (res.ok) {
-        const data = await res.json() as { items: TeamMemberOption[] }
-        setTeamMembers(data.items ?? [])
-      }
-    } catch {
-      // non-fatal
-    }
-  }, [isAdmin])
-
+  // Subtasks via SWR, mirrored into local state because they are optimistically
+  // toggled / appended below (toggleSubtask, addSubtask).
+  const { data: subtasksData, isLoading: subtasksLoading } =
+    useSWR<{ subtasks?: Subtask[] }>(`/api/admin/tasks/${taskId}/subtasks`)
+  const [subtasks, setSubtasks] = useState<Subtask[]>([])
   useEffect(() => {
-    loadTask()
-    loadSubtasks()
-    loadDependencies()
-    loadTimeEntries()
-    loadTeamMembers()
-  }, [loadTask, loadSubtasks, loadDependencies, loadTimeEntries, loadTeamMembers])
+    if (subtasksData) setSubtasks(subtasksData.subtasks ?? [])
+  }, [subtasksData])
+
+  // Dependencies + time entries are read-only; derive straight from SWR.
+  const { data: depsData, isLoading: depsLoading } =
+    useSWR<{ dependencies?: TaskDependency[] }>(`/api/admin/tasks/${taskId}/dependencies`)
+  const dependencies = depsData?.dependencies ?? []
+
+  const { data: timeData, isLoading: timeLoading } =
+    useSWR<{ items?: TimeEntry[] }>(`/api/admin/time-entries?taskId=${taskId}`)
+  const timeEntries = timeData?.items ?? []
+
+  // Team members (admin only) for the assignee picker.
+  const { data: teamMembersData } = useSWR<{ items: TeamMemberOption[] }>(
+    isAdmin ? '/api/admin/team-members' : null,
+  )
+  const teamMembers = teamMembersData?.items ?? []
 
   // ---- Mutation handlers -------------------------------------------------------
 
@@ -361,7 +309,7 @@ export function TaskDetail({ taskId, isAdmin, currentUserId }: TaskDetailProps) 
         body: JSON.stringify({ [field]: value }),
       })
       if (res.ok) {
-        await loadTask()
+        await mutateTask()
         showToast(`${field.charAt(0).toUpperCase() + field.slice(1)} updated`)
       }
     } catch {

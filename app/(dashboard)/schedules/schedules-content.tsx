@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useMemo } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -74,9 +75,10 @@ function formatDate(iso: string | null): string {
 export function SchedulesContent() {
   const router = useRouter()
   const { showToast } = useToast()
-  const [items, setItems] = useState<ScheduleListItem[]>([])
-  const [templates, setTemplates] = useState<ScheduleTemplateOption[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: schedulesData, isLoading: loading, mutate: mutateSchedules } = useSWR<{ items: ScheduleListItem[] }>('/api/admin/schedules')
+  const { data: templatesData } = useSWR<{ items: ScheduleTemplateOption[] }>('/api/admin/schedules/templates')
+  const items = schedulesData?.items ?? []
+  const templates = templatesData?.items ?? []
   const [search, setSearch] = useState('')
   // FilterBar-style: status held in a permanent multiselect chip. Empty
   // selection = all statuses.
@@ -89,32 +91,6 @@ export function SchedulesContent() {
   }, [activeFilters])
   const [deleteTarget, setDeleteTarget] = useState<ScheduleListItem | null>(null)
   const [newDialogOpen, setNewDialogOpen] = useState(false)
-
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [schedulesRes, templatesRes] = await Promise.all([
-        fetch(apiPath('/api/admin/schedules')),
-        fetch(apiPath('/api/admin/schedules/templates')),
-      ])
-      if (schedulesRes.ok) {
-        const data = await schedulesRes.json() as { items: ScheduleListItem[] }
-        setItems(data.items ?? [])
-      } else {
-        setItems([])
-      }
-      if (templatesRes.ok) {
-        const data = await templatesRes.json() as { items: ScheduleTemplateOption[] }
-        setTemplates(data.items ?? [])
-      }
-    } catch {
-      setItems([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchAll() }, [fetchAll])
 
   const filtered = useMemo(() => items.filter(s => {
     if (selectedStatuses.size > 0 && !selectedStatuses.has(statusKey(s.status))) return false
@@ -154,7 +130,7 @@ export function SchedulesContent() {
     const res = await fetch(apiPath(`/api/admin/schedules/${deleteTarget.id}`), { method: 'DELETE' })
     if (res.ok) {
       setDeleteTarget(null)
-      void fetchAll()
+      void mutateSchedules()
     } else {
       showToast('Failed to delete schedule', 'error')
     }
@@ -278,7 +254,7 @@ export function SchedulesContent() {
         title="Schedules"
         subtitle="Project gantts and timelines you can share with clients."
       >
-        <TahiButton variant="secondary" size="sm" onClick={fetchAll} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+        <TahiButton variant="secondary" size="sm" onClick={() => { void mutateSchedules() }} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
           Refresh
         </TahiButton>
         <Link href="/schedules/templates">

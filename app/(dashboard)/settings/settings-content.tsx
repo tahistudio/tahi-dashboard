@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import {
   RefreshCw, Sun, Moon,
@@ -70,7 +71,6 @@ const INTEGRATIONS: IntegrationCard[] = [
 export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
   const [settings, setSettings] = useState<Record<string, string | null>>({})
   const [integrationStatus, setIntegrationStatus] = useState<Record<string, { configured: boolean }>>({})
-  const [loading, setLoading] = useState(true)
   const [darkMode, setDarkMode] = useState(false)
   const [savingKey, setSavingKey] = useState<string | null>(null)
   const { showToast } = useToast()
@@ -79,40 +79,49 @@ export function SettingsContent({ isAdmin }: { isAdmin: boolean }) {
   const [emailNotifications, setEmailNotifications] = useState(true)
   const [slackNotifications, setSlackNotifications] = useState(false)
 
-  const fetchSettings = useCallback(async () => {
-    if (!isAdmin) {
-      setLoading(false)
-      return
-    }
-
-    setLoading(true)
-    try {
+  // Combined settings + integration status load. Non-trivial (two parallel
+  // requests merged into one value) so we use an inline fetcher; the key is a
+  // stable identity gated to null for non-admins (who don't see this block).
+  // Local state is seeded from the SWR result below so the existing optimistic
+  // saveSetting + toggle handlers keep working unchanged.
+  const { data: settingsData, isLoading: settingsLoading, mutate: mutateSettings } = useSWR<{
+    settings: Record<string, string | null>
+    integrationStatus: Record<string, { configured: boolean }>
+  }>(
+    isAdmin ? 'admin/settings+integration-status' : null,
+    async () => {
       const [settingsRes, intStatusRes] = await Promise.all([
         fetch(apiPath('/api/admin/settings')),
         fetch(apiPath('/api/admin/integrations/status')),
       ])
-
+      const out: {
+        settings: Record<string, string | null>
+        integrationStatus: Record<string, { configured: boolean }>
+      } = { settings: {}, integrationStatus: {} }
       if (settingsRes.ok) {
         const data = await settingsRes.json() as { settings: Record<string, string | null> }
-        setSettings(data.settings ?? {})
-        setEmailNotifications(data.settings?.['notifications.email'] !== 'false')
-        setSlackNotifications(data.settings?.['notifications.slack'] === 'true')
+        out.settings = data.settings ?? {}
       }
-
       if (intStatusRes.ok) {
-        const statusData = await intStatusRes.json() as Record<string, { configured: boolean }>
-        setIntegrationStatus(statusData)
+        out.integrationStatus = await intStatusRes.json() as Record<string, { configured: boolean }>
       }
-    } catch {
-      // Settings load failed, keep defaults
-    } finally {
-      setLoading(false)
-    }
-  }, [isAdmin])
+      return out
+    },
+  )
+  // Non-admins never fetch, so they should not sit on a spinner.
+  const loading = isAdmin ? settingsLoading : false
 
+  // Seed local state from the fetched payload (and re-seed on a refresh).
   useEffect(() => {
-    fetchSettings()
-  }, [fetchSettings])
+    if (settingsData) {
+      setSettings(settingsData.settings ?? {})
+      setEmailNotifications(settingsData.settings?.['notifications.email'] !== 'false')
+      setSlackNotifications(settingsData.settings?.['notifications.slack'] === 'true')
+      setIntegrationStatus(settingsData.integrationStatus ?? {})
+    }
+  }, [settingsData])
+
+  const fetchSettings = () => { void mutateSettings() }
 
   // Dark mode init
   useEffect(() => {
@@ -529,32 +538,20 @@ interface ContactProfile {
 }
 
 function ProfileSection() {
-  const [profile, setProfile] = useState<ContactProfile | null>(null)
-  const [loadingProfile, setLoadingProfile] = useState(true)
+  const { data, isLoading: loadingProfile, mutate } = useSWR<{ contact: ContactProfile | null }>('/api/portal/profile')
+  const profile = data?.contact ?? null
   const [editName, setEditName] = useState('')
   const [editRole, setEditRole] = useState('')
   const [savingProfile, setSavingProfile] = useState(false)
   const [profileSaved, setProfileSaved] = useState(false)
 
-  const fetchProfile = useCallback(async () => {
-    setLoadingProfile(true)
-    try {
-      const res = await fetch(apiPath('/api/portal/profile'))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { contact: ContactProfile | null }
-      if (data.contact) {
-        setProfile(data.contact)
-        setEditName(data.contact.name)
-        setEditRole(data.contact.role ?? '')
-      }
-    } catch {
-      setProfile(null)
-    } finally {
-      setLoadingProfile(false)
+  // Seed the editable fields whenever the profile loads or refreshes.
+  useEffect(() => {
+    if (data?.contact) {
+      setEditName(data.contact.name)
+      setEditRole(data.contact.role ?? '')
     }
-  }, [])
-
-  useEffect(() => { void fetchProfile() }, [fetchProfile])
+  }, [data])
 
   async function handleSaveProfile() {
     if (!editName.trim()) return
@@ -568,7 +565,7 @@ function ProfileSection() {
       })
       if (res.ok) {
         setProfileSaved(true)
-        await fetchProfile()
+        await mutate()
         setTimeout(() => setProfileSaved(false), 3000)
       }
     } catch {
@@ -754,29 +751,13 @@ function BookingLinkSection({
 // -- Forms Section --
 
 function FormsSection() {
-  const [forms, setForms] = useState<FormTemplate[]>([])
-  const [loadingForms, setLoadingForms] = useState(true)
+  const { data, isLoading: loadingForms, mutate } = useSWR<{ forms: FormTemplate[] }>('/api/admin/forms')
+  const forms = data?.forms ?? []
   const [editingForm, setEditingForm] = useState<FormTemplate | null>(null)
   const [showNewForm, setShowNewForm] = useState(false)
   const [newName, setNewName] = useState('')
   const [newCategory, setNewCategory] = useState('')
   const [saving, setSaving] = useState(false)
-
-  const fetchForms = useCallback(async () => {
-    setLoadingForms(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/forms'))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { forms: FormTemplate[] }
-      setForms(data.forms ?? [])
-    } catch {
-      setForms([])
-    } finally {
-      setLoadingForms(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchForms() }, [fetchForms])
 
   async function handleCreate() {
     if (!newName.trim()) return
@@ -794,7 +775,7 @@ function FormsSection() {
       setShowNewForm(false)
       setNewName('')
       setNewCategory('')
-      await fetchForms()
+      await mutate()
     } catch {
       // Failed
     } finally {
@@ -806,7 +787,7 @@ function FormsSection() {
     try {
       await fetch(apiPath(`/api/admin/forms/${id}`), { method: 'DELETE' })
       if (editingForm?.id === id) setEditingForm(null)
-      await fetchForms()
+      await mutate()
     } catch {
       // Failed
     }
@@ -863,7 +844,7 @@ function FormsSection() {
                   form={form}
                   onSaved={async () => {
                     setEditingForm(null)
-                    await fetchForms()
+                    await mutate()
                   }}
                 />
               )}
@@ -1061,8 +1042,8 @@ function priorityBadgeTone(p: string): 'info' | 'warning' | 'danger' | 'rose' | 
 }
 
 function TaskTemplatesSection() {
-  const [templates, setTemplates] = useState<TaskTemplate[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, isLoading: loading, mutate } = useSWR<{ templates: TaskTemplate[] }>('/api/admin/task-templates')
+  const templates = data?.templates ?? []
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formName, setFormName] = useState('')
@@ -1072,22 +1053,6 @@ function TaskTemplatesSection() {
   const [formDescription, setFormDescription] = useState('')
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
-
-  const fetchTemplates = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/task-templates'))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { templates: TaskTemplate[] }
-      setTemplates(data.templates ?? [])
-    } catch {
-      setTemplates([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchTemplates() }, [fetchTemplates])
 
   function resetForm() {
     setFormName('')
@@ -1133,7 +1098,7 @@ function TaskTemplatesSection() {
       })
       if (res.ok) {
         resetForm()
-        await fetchTemplates()
+        await mutate()
       }
     } catch {
       // silent
@@ -1146,7 +1111,7 @@ function TaskTemplatesSection() {
     setDeletingId(id)
     try {
       await fetch(apiPath(`/api/admin/task-templates/${id}`), { method: 'DELETE' })
-      await fetchTemplates()
+      await mutate()
     } catch {
       // silent
     } finally {
@@ -1410,8 +1375,9 @@ function PipelineDefaultsSection({
   onSave: (key: string, value: string) => Promise<void>
   savingKey: string | null
 }) {
-  const [members, setMembers] = useState<TeamMemberOption[]>([])
-  const [loadingMembers, setLoadingMembers] = useState(true)
+  // Shared key with LeadAutomationsSection so SWR serves both from one request.
+  const { data: membersData, isLoading: loadingMembers } = useSWR<{ items?: TeamMemberOption[] }>('/api/admin/team-members')
+  const members = membersData?.items ?? []
   const [signatureDraft, setSignatureDraft] = useState<string>('')
 
   const ownerKey = 'pipeline.defaultDealOwnerId'
@@ -1423,24 +1389,6 @@ function PipelineDefaultsSection({
   useEffect(() => {
     setSignatureDraft(currentSignature)
   }, [currentSignature])
-
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      try {
-        const res = await fetch(apiPath('/api/admin/team-members'))
-        if (!res.ok) throw new Error('Failed to load team members')
-        const data = await res.json() as { items?: TeamMemberOption[] }
-        if (!cancelled) setMembers(data.items ?? [])
-      } catch {
-        if (!cancelled) setMembers([])
-      } finally {
-        if (!cancelled) setLoadingMembers(false)
-      }
-    }
-    void load()
-    return () => { cancelled = true }
-  }, [])
 
   const signatureDirty = signatureDraft !== currentSignature
 
@@ -1605,8 +1553,9 @@ function LeadAutomationsSection({
   onSave: (key: string, value: string) => Promise<void>
   savingKey: string | null
 }) {
-  const [members, setMembers] = useState<TeamMemberOption[]>([])
-  const [loadingMembers, setLoadingMembers] = useState(true)
+  // Shared key with PipelineDefaultsSection so SWR serves both from one request.
+  const { data: membersData, isLoading: loadingMembers } = useSWR<{ items?: TeamMemberOption[] }>('/api/admin/team-members')
+  const members = membersData?.items ?? []
 
   const ownerKey = 'leads.defaultLeadOwnerId'
   const cronEnabledKey = 'leads.cronEnabled'
@@ -1640,24 +1589,6 @@ function LeadAutomationsSection({
     setQuestionsDirty(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings[discoveryTemplateKey]])
-
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      try {
-        const res = await fetch(apiPath('/api/admin/team-members'))
-        if (!res.ok) throw new Error('Failed to load team members')
-        const data = await res.json() as { items?: TeamMemberOption[] }
-        if (!cancelled) setMembers(data.items ?? [])
-      } catch {
-        if (!cancelled) setMembers([])
-      } finally {
-        if (!cancelled) setLoadingMembers(false)
-      }
-    }
-    void load()
-    return () => { cancelled = true }
-  }, [])
 
   // Helper to read bool settings with defaults.
   const boolSetting = (key: string, fallback: boolean): boolean => {
@@ -2042,8 +1973,8 @@ interface GoogleStatus {
 }
 
 function GoogleIntegrationSection() {
-  const [status, setStatus] = useState<GoogleStatus | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: status, isLoading: loading, mutate: load, error: statusError } =
+    useSWR<GoogleStatus>('/api/admin/integrations/google/status')
   const [connecting, setConnecting] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [lastSyncSummary, setLastSyncSummary] = useState<{
@@ -2052,22 +1983,10 @@ function GoogleIntegrationSection() {
   const [error, setError] = useState<string | null>(null)
   const { showToast } = useToast()
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/integrations/google/status'))
-      if (!res.ok) throw new Error('Failed to load Google status')
-      const data = await res.json() as GoogleStatus
-      setStatus(data)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load status')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  // Surface a status-load failure through the same banner the action errors use.
+  const displayError = error ?? (statusError ? 'Failed to load Google status' : null)
 
   useEffect(() => {
-    void load()
     // Pick up ?connected=1 or ?error=X from the OAuth callback redirect
     if (typeof window !== 'undefined' && window.location.hash.includes('google')) {
       if (window.location.hash.includes('connected=1')) {
@@ -2077,7 +1996,7 @@ function GoogleIntegrationSection() {
         if (m) setError(decodeURIComponent(m[1]))
       }
     }
-  }, [load, showToast])
+  }, [showToast])
 
   async function startConnect() {
     setConnecting(true)
@@ -2210,9 +2129,9 @@ function GoogleIntegrationSection() {
           </>
         )}
 
-        {error && (
+        {displayError && (
           <div className="text-sm text-[var(--color-danger)] bg-[var(--color-danger-bg)] border border-[var(--color-danger)] rounded-lg p-3">
-            {error}
+            {displayError}
           </div>
         )}
       </div>
@@ -2233,8 +2152,11 @@ interface PipelineStageData {
 }
 
 function PipelineStagesSection() {
+  // Server copy via SWR; the editable draft lives in local state and is seeded
+  // from the fetched data (and re-seeded after a save).
+  const { data: stagesData, isLoading: loadingStages, mutate } =
+    useSWR<{ stages: PipelineStageData[] }>('/api/admin/pipeline/stages')
   const [stages, setStages] = useState<PipelineStageData[]>([])
-  const [loadingStages, setLoadingStages] = useState(true)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
@@ -2243,22 +2165,12 @@ function PipelineStagesSection() {
   const [newProbability, setNewProbability] = useState('50')
   const { showToast } = useToast()
 
-  const fetchStages = useCallback(async () => {
-    setLoadingStages(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/pipeline/stages'))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { stages: PipelineStageData[] }
-      setStages((data.stages ?? []).sort((a, b) => a.position - b.position))
+  useEffect(() => {
+    if (stagesData?.stages) {
+      setStages([...stagesData.stages].sort((a, b) => a.position - b.position))
       setDirty(false)
-    } catch {
-      setStages([])
-    } finally {
-      setLoadingStages(false)
     }
-  }, [])
-
-  useEffect(() => { void fetchStages() }, [fetchStages])
+  }, [stagesData])
 
   function updateStage(idx: number, updates: Partial<PipelineStageData>) {
     setStages(prev => prev.map((s, i) => i === idx ? { ...s, ...updates } : s))
@@ -2320,7 +2232,7 @@ function PipelineStagesSection() {
       })
       if (!res.ok) throw new Error('Failed to save')
       showToast('Pipeline stages saved', 'success')
-      await fetchStages()
+      await mutate()
     } catch {
       showToast('Failed to save pipeline stages', 'error')
     } finally {
@@ -2488,8 +2400,6 @@ interface ClientOption {
 
 function KanbanColumnsSection() {
   const [mode, setMode] = useState<'global' | 'client'>('global')
-  const [columns, setColumns] = useState<KanbanColumnData[]>([])
-  const [loadingCols, setLoadingCols] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [newLabel, setNewLabel] = useState('')
   const [newStatus, setNewStatus] = useState('')
@@ -2497,56 +2407,31 @@ function KanbanColumnsSection() {
   const [saving, setSaving] = useState(false)
 
   // Per-client state
-  const [clients, setClients] = useState<ClientOption[]>([])
-  const [loadingClients, setLoadingClients] = useState(false)
   const [selectedClientId, setSelectedClientId] = useState('')
   const [clientSearch, setClientSearch] = useState('')
 
-  const fetchColumns = useCallback(async (orgId?: string) => {
-    setLoadingCols(true)
-    try {
-      const qs = orgId ? `?orgId=${encodeURIComponent(orgId)}` : ''
-      const res = await fetch(apiPath(`/api/admin/kanban-columns${qs}`))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { columns: KanbanColumnData[] }
-      setColumns((data.columns ?? []).sort((a, b) => a.position - b.position))
-    } catch {
-      setColumns([])
-    } finally {
-      setLoadingCols(false)
-    }
-  }, [])
-
-  const fetchClients = useCallback(async () => {
-    setLoadingClients(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/clients?limit=200'))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { organisations?: ClientOption[] }
-      setClients(data.organisations ?? [])
-    } catch {
-      setClients([])
-    } finally {
-      setLoadingClients(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (mode === 'global') {
-      void fetchColumns()
-      setSelectedClientId('')
-    } else {
-      void fetchClients()
-    }
-  }, [mode, fetchColumns, fetchClients])
-
-  useEffect(() => {
-    if (mode === 'client' && selectedClientId) {
-      void fetchColumns(selectedClientId)
-    }
-  }, [mode, selectedClientId, fetchColumns])
-
   const currentOrgId = mode === 'client' ? selectedClientId : undefined
+
+  // Columns for the active context. The key encodes the orgId so each view
+  // caches separately; null (skip) in per-client mode until a client is picked.
+  const columnsKey = mode === 'global'
+    ? '/api/admin/kanban-columns'
+    : selectedClientId
+      ? `/api/admin/kanban-columns?orgId=${encodeURIComponent(selectedClientId)}`
+      : null
+  const { data: columnsData, isLoading: loadingCols, mutate: mutateColumns } =
+    useSWR<{ columns: KanbanColumnData[] }>(columnsKey)
+  const columns = [...(columnsData?.columns ?? [])].sort((a, b) => a.position - b.position)
+
+  // Client picker list, only loaded in per-client mode (shared cache key).
+  const { data: clientsData, isLoading: loadingClients } =
+    useSWR<{ organisations?: ClientOption[] }>(mode === 'client' ? '/api/admin/clients?limit=200' : null)
+  const clients = clientsData?.organisations ?? []
+
+  // Reset the chosen client when returning to global mode (matches prior effect).
+  useEffect(() => {
+    if (mode === 'global') setSelectedClientId('')
+  }, [mode])
 
   async function handleAdd() {
     if (!newLabel.trim() || !newStatus.trim()) return
@@ -2568,7 +2453,7 @@ function KanbanColumnsSection() {
       setNewLabel('')
       setNewStatus('')
       setNewColour('#5A824E')
-      await fetchColumns(currentOrgId)
+      await mutateColumns()
     } catch {
       // Failed
     } finally {
@@ -2579,7 +2464,7 @@ function KanbanColumnsSection() {
   async function handleDeleteColumn(id: string) {
     try {
       await fetch(apiPath(`/api/admin/kanban-columns/${id}`), { method: 'DELETE' })
-      await fetchColumns(currentOrgId)
+      await mutateColumns()
     } catch {
       // Failed
     }
@@ -2592,7 +2477,7 @@ function KanbanColumnsSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
       })
-      await fetchColumns(currentOrgId)
+      await mutateColumns()
     } catch {
       // Failed
     }
@@ -2853,30 +2738,14 @@ interface WebhookEndpoint {
 }
 
 function WebhooksSection() {
-  const [endpoints, setEndpoints] = useState<WebhookEndpoint[]>([])
-  const [loadingWebhooks, setLoadingWebhooks] = useState(true)
+  const { data, isLoading: loadingWebhooks, mutate } = useSWR<{ endpoints: WebhookEndpoint[] }>('/api/admin/webhooks')
+  const endpoints = data?.endpoints ?? []
   const [showAdd, setShowAdd] = useState(false)
   const [newUrl, setNewUrl] = useState('')
   const [newSecret, setNewSecret] = useState('')
   const [selectedEvents, setSelectedEvents] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null)
-
-  const fetchWebhooks = useCallback(async () => {
-    setLoadingWebhooks(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/webhooks'))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { endpoints: WebhookEndpoint[] }
-      setEndpoints(data.endpoints ?? [])
-    } catch {
-      setEndpoints([])
-    } finally {
-      setLoadingWebhooks(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchWebhooks() }, [fetchWebhooks])
 
   async function handleAdd() {
     if (!newUrl.trim() || !newSecret.trim() || selectedEvents.length === 0) return
@@ -2895,7 +2764,7 @@ function WebhooksSection() {
       setNewUrl('')
       setNewSecret('')
       setSelectedEvents([])
-      await fetchWebhooks()
+      await mutate()
     } catch {
       // Failed
     } finally {
@@ -2907,7 +2776,7 @@ function WebhooksSection() {
     setDeleteLoading(id)
     try {
       await fetch(apiPath(`/api/admin/webhooks?id=${id}`), { method: 'DELETE' })
-      await fetchWebhooks()
+      await mutate()
     } catch {
       // Failed
     } finally {
@@ -3457,16 +3326,7 @@ interface AiCostResponse {
 }
 
 function AiCostSection() {
-  const [data, setData] = useState<AiCostResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/reports/ai-cost'))
-      .then(r => r.ok ? r.json() : null)
-      .then(d => setData(d as AiCostResponse | null))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data, isLoading: loading } = useSWR<AiCostResponse>('/api/admin/reports/ai-cost')
 
   const fmtTokens = (n: number) => {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -3605,19 +3465,8 @@ function AiContextDocsSection({
   onSave: (key: string, value: string) => Promise<void>
   savingKey: string | null
 }) {
-  const [docs, setDocs] = useState<DocLite[]>([])
-  const [loadingDocs, setLoadingDocs] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/docs'))
-      .then(r => r.ok ? r.json() : { pages: [] })
-      .then(data => {
-        const typed = data as { pages?: DocLite[] }
-        setDocs(typed.pages ?? [])
-      })
-      .catch(() => setDocs([]))
-      .finally(() => setLoadingDocs(false))
-  }, [])
+  const { data, isLoading: loadingDocs } = useSWR<{ pages?: DocLite[] }>('/api/admin/docs')
+  const docs = data?.pages ?? []
 
   return (
     <section id="ai-context">
@@ -3743,54 +3592,26 @@ interface BufferPostsResponse {
 }
 
 function BufferIntegrationSection() {
-  const [status, setStatus] = useState<BufferStatusResponse | null>(null)
-  const [posts, setPosts] = useState<BufferPostLite[] | null>(null)
-  const [postsTotals, setPostsTotals] = useState<BufferPostsResponse['totals'] | null>(null)
-  const [loadingStatus, setLoadingStatus] = useState(true)
-  const [loadingPosts, setLoadingPosts] = useState(false)
-  const [postsError, setPostsError] = useState<string | null>(null)
-
-  const fetchStatus = useCallback(async () => {
-    setLoadingStatus(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/integrations/buffer/status'))
-      if (!res.ok) throw new Error()
-      const data = await res.json() as BufferStatusResponse
-      setStatus(data)
-    } catch {
-      setStatus({
+  const { data: statusData, isLoading: loadingStatus, error: statusErr } =
+    useSWR<BufferStatusResponse>('/api/admin/integrations/buffer/status')
+  // On a status-load failure, fall back to a not-configured shell (matches prior behavior).
+  const status: BufferStatusResponse | null = statusData ?? (statusErr
+    ? {
         configured: false, connected: false,
         organizationId: null, organizationName: null,
         channels: [], errorMessage: 'Status check failed',
-      })
-    } finally {
-      setLoadingStatus(false)
-    }
-  }, [])
-
-  const fetchPosts = useCallback(async () => {
-    setLoadingPosts(true)
-    setPostsError(null)
-    try {
-      const res = await fetch(apiPath('/api/admin/integrations/buffer/posts?count=10'))
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { error?: string }
-        throw new Error(err.error ?? 'Posts fetch failed')
       }
-      const data = await res.json() as BufferPostsResponse
-      setPosts(data.posts)
-      setPostsTotals(data.totals)
-    } catch (err) {
-      setPostsError(err instanceof Error ? err.message : 'Posts fetch failed')
-    } finally {
-      setLoadingPosts(false)
-    }
-  }, [])
+    : null)
 
-  useEffect(() => { void fetchStatus() }, [fetchStatus])
-  useEffect(() => {
-    if (status?.connected) void fetchPosts()
-  }, [status?.connected, fetchPosts])
+  // Posts depend on a connected status; skip otherwise. isValidating drives the
+  // refresh button so a manual refresh still shows "Loading...".
+  const { data: postsData, isValidating: loadingPosts, error: postsErrObj, mutate: mutatePosts } =
+    useSWR<BufferPostsResponse>(status?.connected ? '/api/admin/integrations/buffer/posts?count=10' : null)
+  const posts = postsData?.posts ?? null
+  const postsTotals = postsData?.totals ?? null
+  const postsError = postsErrObj
+    ? (((postsErrObj as { info?: { error?: string } }).info?.error) ?? 'Posts fetch failed')
+    : null
 
   // Channel id → display label lookup for posts
   const channelLabel = (id: string) => {
@@ -3888,7 +3709,7 @@ function BufferIntegrationSection() {
                 <TahiButton
                   variant="secondary"
                   size="sm"
-                  onClick={() => { void fetchPosts() }}
+                  onClick={() => { void mutatePosts() }}
                   disabled={loadingPosts}
                   iconLeft={loadingPosts ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                 >
@@ -4018,8 +3839,8 @@ function formatReserveAmount(amount: number, currency: string): string {
 
 function ReservesSection() {
   const { showToast } = useToast()
-  const [reserves, setReserves] = useState<ReserveRow[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, isLoading: loading, mutate } = useSWR<{ reserves: ReserveRow[] }>('/api/admin/reserves')
+  const reserves = data?.reserves ?? []
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editing, setEditing] = useState<ReserveRow | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<ReserveRow | null>(null)
@@ -4033,22 +3854,6 @@ function ReservesSection() {
   const [formRate, setFormRate] = useState('')
   const [formNotes, setFormNotes] = useState('')
   const [saving, setSaving] = useState(false)
-
-  const fetchReserves = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/reserves'))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { reserves: ReserveRow[] }
-      setReserves(data.reserves ?? [])
-    } catch {
-      setReserves([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchReserves() }, [fetchReserves])
 
   function resetForm() {
     setFormName('')
@@ -4131,7 +3936,7 @@ function ReservesSection() {
       }
       showToast(editing ? 'Reserve updated' : 'Reserve created', 'success')
       closeDrawer()
-      await fetchReserves()
+      await mutate()
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to save reserve', 'error')
     } finally {
@@ -4146,7 +3951,7 @@ function ReservesSection() {
       if (!res.ok) throw new Error('Failed')
       showToast('Reserve deleted', 'success')
       setConfirmDelete(null)
-      await fetchReserves()
+      await mutate()
     } catch {
       showToast('Failed to delete reserve', 'error')
     }

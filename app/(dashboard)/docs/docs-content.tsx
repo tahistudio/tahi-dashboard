@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import useSWR from 'swr'
 import { useSearchParams } from 'next/navigation'
 import {
   BookOpen, Plus, Clock, Save,
@@ -82,8 +83,8 @@ function joinCats(cats: string[]): string {
 // -- Main Component --
 
 export function DocsContent() {
-  const [pages, setPages] = useState<DocPage[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: pagesData, isLoading: loading, mutate: mutatePages } = useSWR<{ pages: DocPage[] }>('/api/admin/docs')
+  const pages = pagesData?.pages ?? []
   const [search, setSearch] = useState('')
   // FilterBar-style: active filters held as an array of ActiveFilter.
   // We seed it with the Categories chip already present so it can't be
@@ -111,22 +112,6 @@ export function DocsContent() {
   const [showNewForm, setShowNewForm] = useState(false)
   const [showVersions, setShowVersions] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<DocPage | null>(null)
-
-  const fetchPages = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/docs'))
-      if (!res.ok) throw new Error('Failed to fetch')
-      const data = await res.json() as { pages: DocPage[] }
-      setPages(data.pages ?? [])
-    } catch {
-      setPages([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchPages() }, [fetchPages])
 
   const loadPage = useCallback(async (id: string) => {
     try {
@@ -225,7 +210,7 @@ export function DocsContent() {
       setEditTitle('')
       setEditContent('')
       setEditCategories([])
-      await fetchPages()
+      await mutatePages()
       await loadPage(data.id)
     } finally {
       setSaving(false)
@@ -246,7 +231,7 @@ export function DocsContent() {
         }),
       })
       await loadPage(selectedPage.id)
-      await fetchPages()
+      await mutatePages()
       setEditing(false)
     } finally {
       setSaving(false)
@@ -259,7 +244,7 @@ export function DocsContent() {
       await fetch(apiPath(`/api/admin/docs/${pendingDelete.id}`), { method: 'DELETE' })
       setSelectedPage(null)
       setPendingDelete(null)
-      await fetchPages()
+      await mutatePages()
     } catch {
       // ignore
     }

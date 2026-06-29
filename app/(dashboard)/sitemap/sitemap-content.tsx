@@ -8,7 +8,8 @@
  * Visual mode (auto-arranged canvas) lands Day 4.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import useSWR from 'swr'
 import {
   Plus, Trash2, Copy, ChevronRight, ChevronDown,
   Loader2, Save, FileText, Layers, FolderTree, Sparkles, AlertCircle, CheckCircle2, Download, Users,
@@ -145,25 +146,37 @@ export function SitemapContent() {
   const { showToast } = useToast()
   const { user } = useUser()
   const isOwner = (user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? '') === SITEMAP_AI_OWNER
-  const [nodes, setNodes] = useState<SitemapNode[]>([])
-  const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
   const [adding, setAdding] = useState(false)
   const [boardroomOpen, setBoardroomOpen] = useState(false)
-  const [siteReviews, setSiteReviews] = useState<SitemapReview[]>([])
   const [boardroomRunning, setBoardroomRunning] = useState(false)
 
-  const fetchSiteReviews = useCallback(async () => {
-    if (!isOwner) return
-    try {
-      const res = await fetch(apiPath('/api/admin/sitemap/review-site'))
-      if (!res.ok) return
-      const json = await res.json() as { reviews: SitemapReview[] }
-      setSiteReviews(json.reviews ?? [])
-    } catch { /* ignore */ }
-  }, [isOwner])
+  const { data: nodesData, isLoading: loading, mutate: mutateNodes } = useSWR<{ nodes: SitemapNode[] }>('/api/admin/sitemap/nodes')
+  const nodes = nodesData?.nodes ?? []
+
+  const { data: siteReviewsData, mutate: mutateSiteReviews } = useSWR<{ reviews: SitemapReview[] }>(
+    isOwner ? '/api/admin/sitemap/review-site' : null
+  )
+  const siteReviews = siteReviewsData?.reviews ?? []
+
+  // First load: set initial selectedId and expand nodes that have children.
+  useEffect(() => {
+    if (!nodesData?.nodes?.length) return
+    const loadedNodes = nodesData.nodes
+    if (!selectedId) {
+      setSelectedId(loadedNodes.find(n => !n.parentId)?.id ?? loadedNodes[0].id)
+    }
+    setExpanded(prev => {
+      if (prev.size > 0) return prev
+      const withChildren = new Set<string>()
+      const parentIds = new Set(loadedNodes.map(n => n.parentId).filter((id): id is string => !!id))
+      for (const id of parentIds) withChildren.add(id)
+      return withChildren
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodesData])
 
   async function runBoardroom() {
     if (nodes.length === 0) {
@@ -181,7 +194,7 @@ export function SitemapContent() {
       }
       const json = await res.json() as { outcomes: Array<{ reviewerKey: string; ok: boolean }> }
       const ok = json.outcomes.filter(o => o.ok).length
-      await fetchSiteReviews()
+      await mutateSiteReviews()
       setBoardroomOpen(true)
       showToast(`${ok}/${json.outcomes.length} site reviewers completed`, ok === json.outcomes.length ? 'success' : 'error')
     } catch (err) {
@@ -191,41 +204,10 @@ export function SitemapContent() {
     }
   }
 
-  useEffect(() => { void fetchSiteReviews() }, [fetchSiteReviews])
-
   const selected = useMemo(
     () => nodes.find(n => n.id === selectedId) ?? null,
     [nodes, selectedId],
   )
-
-  const fetchNodes = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/sitemap/nodes'))
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const json = await res.json() as { nodes: SitemapNode[] }
-      setNodes(json.nodes)
-      if (!selectedId && json.nodes.length > 0) {
-        setSelectedId(json.nodes.find(n => !n.parentId)?.id ?? json.nodes[0].id)
-      }
-      // First load: expand every node that has children so the full
-      // planned IA is visible at a glance. Subsequent loads keep the
-      // user's manual collapse state.
-      setExpanded(prev => {
-        if (prev.size > 0) return prev
-        const withChildren = new Set<string>()
-        const parentIds = new Set(json.nodes.map(n => n.parentId).filter((id): id is string => !!id))
-        for (const id of parentIds) withChildren.add(id)
-        return withChildren
-      })
-    } catch (err) {
-      showToast(`Failed to load: ${err instanceof Error ? err.message : 'error'}`, 'error')
-    } finally {
-      setLoading(false)
-    }
-  }, [selectedId, showToast])
-
-  useEffect(() => { void fetchNodes() }, [fetchNodes])
 
   async function createNode(parentId: string | null, nodeType: SitemapNode['nodeType'] = 'page') {
     setAdding(true)
@@ -248,7 +230,10 @@ export function SitemapContent() {
         return
       }
       const json = await res.json() as { node: SitemapNode }
-      setNodes(prev => [...prev, json.node])
+      await mutateNodes(
+        (prev) => prev ? { nodes: [...prev.nodes, json.node] } : prev,
+        { revalidate: false },
+      )
       setSelectedId(json.node.id)
       if (parentId) setExpanded(s => new Set([...s, parentId]))
     } catch (err) {
@@ -261,7 +246,11 @@ export function SitemapContent() {
   async function patchNode(id: string, patch: Partial<SitemapNode>) {
     setSaving(true)
     // Optimistic update
-    setNodes(prev => prev.map(n => n.id === id ? { ...n, ...patch } : n))
+    const prev = nodesData
+    await mutateNodes(
+      (cur) => cur ? { nodes: cur.nodes.map(n => n.id === id ? { ...n, ...patch } : n) } : cur,
+      { revalidate: false },
+    )
     try {
       const res = await fetch(apiPath(`/api/admin/sitemap/nodes/${id}`), {
         method: 'PATCH',
@@ -271,14 +260,17 @@ export function SitemapContent() {
       if (!res.ok) {
         const j = await res.json().catch(() => ({})) as { error?: string }
         showToast(`Save failed: ${j.error ?? 'unknown'}`, 'error')
-        await fetchNodes()  // rollback by re-fetch
+        await mutateNodes(prev, { revalidate: false })
         return
       }
       const json = await res.json() as { node: SitemapNode }
-      setNodes(prev => prev.map(n => n.id === id ? json.node : n))
+      await mutateNodes(
+        (cur) => cur ? { nodes: cur.nodes.map(n => n.id === id ? json.node : n) } : cur,
+        { revalidate: false },
+      )
     } catch (err) {
       showToast(`Save failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
-      await fetchNodes()
+      await mutateNodes(prev, { revalidate: false })
     } finally {
       setSaving(false)
     }
@@ -301,7 +293,7 @@ export function SitemapContent() {
       const j = await res.json() as { deletedCount: number }
       showToast(`Deleted ${j.deletedCount} node${j.deletedCount === 1 ? '' : 's'}`)
       if (selectedId === id) setSelectedId(null)
-      await fetchNodes()
+      await mutateNodes()
     } catch (err) {
       showToast(`Delete failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
     }
@@ -315,7 +307,10 @@ export function SitemapContent() {
         return
       }
       const j = await res.json() as { node: SitemapNode }
-      setNodes(prev => [...prev, j.node])
+      await mutateNodes(
+        (prev) => prev ? { nodes: [...prev.nodes, j.node] } : prev,
+        { revalidate: false },
+      )
       setSelectedId(j.node.id)
       showToast(`Duplicated "${j.node.title}"`)
     } catch (err) {
@@ -592,8 +587,10 @@ interface NodeDetailProps {
 
 function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving, isOwner }: NodeDetailProps) {
   const { showToast } = useToast()
-  const [reviews, setReviews] = useState<SitemapReview[]>([])
-  const [reviewLoading, setReviewLoading] = useState(false)
+  const { data: reviewsData, isLoading: reviewLoading, mutate: mutateReviews } = useSWR<{ reviews: SitemapReview[] }>(
+    isOwner ? `/api/admin/sitemap/nodes/${node.id}` : null
+  )
+  const reviews = reviewsData?.reviews ?? []
   const [runningKey, setRunningKey] = useState<ReviewerKey | 'all' | null>(null)
   const [applyingAll, setApplyingAll] = useState(false)
   // Spec mode = read-only doc (default, Staci-friendly).
@@ -670,23 +667,6 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving, isOwner }: N
     }
   }
 
-  const fetchReviews = useCallback(async () => {
-    if (!isOwner) return
-    setReviewLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/sitemap/nodes/${node.id}`))
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const json = await res.json() as { reviews: SitemapReview[] }
-      setReviews(json.reviews ?? [])
-    } catch {
-      // Silent. The panel already shows the node, reviews are a bonus.
-    } finally {
-      setReviewLoading(false)
-    }
-  }, [node.id, isOwner])
-
-  useEffect(() => { void fetchReviews() }, [fetchReviews])
-
   async function runReviewer(reviewerKey: ReviewerKey) {
     setRunningKey(reviewerKey)
     try {
@@ -700,7 +680,7 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving, isOwner }: N
         showToast(`Reviewer failed: ${j.error ?? 'unknown'}`, 'error')
         return
       }
-      await fetchReviews()
+      await mutateReviews()
       showToast(`${REVIEWERS.find(r => r.key === reviewerKey)?.label ?? reviewerKey} done`)
     } catch (err) {
       showToast(`Reviewer failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
@@ -723,7 +703,7 @@ function NodeDetail({ node, onPatch, onDelete, onDuplicate, saving, isOwner }: N
       const json = await res.json() as { outcomes: Array<{ reviewerKey: string; ok: boolean }> }
       const ok = json.outcomes.filter(o => o.ok).length
       const total = json.outcomes.length
-      await fetchReviews()
+      await mutateReviews()
       showToast(`${ok}/${total} reviewers completed`, ok === total ? 'success' : 'error')
     } catch (err) {
       showToast(`Review-all failed: ${err instanceof Error ? err.message : 'error'}`, 'error')

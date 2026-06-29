@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
+import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, RefreshCw, FileText } from 'lucide-react'
@@ -93,31 +94,14 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
   // Only switch to client view when impersonating a client, not a team member
   const isAdmin = isAdminProp && !isImpersonatingClient
   const { displayCurrency, formatNativeWithDisplay } = useDisplayCurrency()
-  const [invoice, setInvoice] = useState<InvoiceRow | null>(null)
-  const [items, setItems] = useState<LineItem[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
   const [patching, setPatching] = useState<string | null>(null)
 
-  const fetchInvoice = useCallback(async () => {
-    setLoading(true)
-    setError(false)
-    try {
-      const res = await fetch(apiPath(`/api/admin/invoices/${invoiceId}`))
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as { invoice?: InvoiceRow; items?: LineItem[] }
-      setInvoice(json.invoice ?? null)
-      setItems(json.items ?? [])
-    } catch {
-      setError(true)
-    } finally {
-      setLoading(false)
-    }
-  }, [invoiceId])
-
-  useEffect(() => {
-    fetchInvoice().catch(() => {})
-  }, [fetchInvoice])
+  const { data, isLoading: loading, error: fetchError, mutate } = useSWR<{ invoice?: InvoiceRow; items?: LineItem[] }>(
+    `/api/admin/invoices/${invoiceId}`
+  )
+  const invoice = data?.invoice ?? null
+  const items = data?.items ?? []
+  const error = !!fetchError || (!loading && !data?.invoice)
 
   const patchStatus = useCallback(async (newStatus: string) => {
     if (!invoice) return
@@ -134,13 +118,13 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
         body: JSON.stringify(body),
       })
       if (!res.ok) throw new Error('Failed')
-      await fetchInvoice()
+      await mutate()
     } catch {
       // silently revert
     } finally {
       setPatching(null)
     }
-  }, [invoice, invoiceId, fetchInvoice])
+  }, [invoice, invoiceId, mutate])
 
   if (loading) {
     return (
@@ -168,7 +152,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
           </p>
           {error && (
             <button
-              onClick={() => fetchInvoice().catch(() => {})}
+              onClick={() => void mutate()}
               className="flex items-center gap-2 text-sm font-medium hover:opacity-80 transition-opacity mx-auto"
               style={{ color: 'var(--color-brand)', background: 'none', border: 'none', cursor: 'pointer' }}
             >
@@ -336,7 +320,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                       body: JSON.stringify({ invoiceIds: [invoice.id] }),
                     })
                     if (res.ok) {
-                      fetchInvoice()
+                      void mutate()
                     } else {
                       const err = await res.json() as { error?: string }
                       alert(err.error ?? 'Xero sync failed. Reconnect Xero in Settings.')
@@ -363,7 +347,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                         await navigator.clipboard.writeText(data.payUrl)
                         alert('Stripe invoice created — payment link copied to clipboard.')
                       }
-                      fetchInvoice()
+                      void mutate()
                     } else {
                       // Surface the real Stripe error rather than a generic message.
                       // Most common cause: the client has no contact with email

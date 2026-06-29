@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
 import {
   Plus, FileText, RefreshCw, Download, X as XIcon,
@@ -116,45 +117,29 @@ function CreateInvoiceSlideOver({
   const { showToast } = useToast()
   const [orgId, setOrgId] = useState('')
   const [orgSearch, setOrgSearch] = useState('')
-  const [orgOptions, setOrgOptions] = useState<{ id: string; name: string }[]>([])
   const [showOrgDropdown, setShowOrgDropdown] = useState(false)
   const [selectedOrgName, setSelectedOrgName] = useState('')
   const [destination, setDestination] = useState<'manual' | 'xero' | 'stripe'>('manual')
   const [lineItems, setLineItems] = useState([{ description: '', quantity: '1', unitAmount: '' }])
-  // Track whether the selected org has at least one contact with an email
-  // (Stripe rejects the customer create call without one)
-  const [orgHasEmailContact, setOrgHasEmailContact] = useState<boolean | null>(null)
 
-  // Fetch clients on mount
-  useEffect(() => {
-    if (!open) return
-    fetch(apiPath('/api/admin/clients'))
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => {
-        const data = d as { organisations?: { id: string; name: string }[] }
-        setOrgOptions(data.organisations ?? [])
-      })
-      .catch(() => setOrgOptions([]))
-  }, [open])
+  // Fetch the client list when the slide-over is open; SWR caches it globally
+  // so re-opening is instant and no spinner flash occurs.
+  const { data: clientsData } = useSWR<{ organisations?: Array<{ id: string; name: string }> }>(
+    open ? '/api/admin/clients' : null
+  )
+  const orgOptions = clientsData?.organisations ?? []
 
-  // When the org changes, check if it has any contact with email.
-  // Used to pre-empt the "Stripe rejects customer without email" failure.
-  useEffect(() => {
-    if (!orgId.trim()) {
-      setOrgHasEmailContact(null)
-      return
-    }
-    let cancelled = false
-    fetch(apiPath(`/api/admin/clients/${orgId}/contacts`))
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => {
-        if (cancelled) return
-        const contacts = (d as { contacts?: Array<{ email?: string | null }> }).contacts ?? []
-        setOrgHasEmailContact(contacts.some(c => !!c.email))
-      })
-      .catch(() => { if (!cancelled) setOrgHasEmailContact(null) })
-    return () => { cancelled = true }
-  }, [orgId])
+  // Check if the selected org has at least one contact with an email.
+  // Stripe rejects customer creation without one. keepPreviousData:false so
+  // switching org never shows stale contact data from the previous org.
+  const { data: contactsData, isLoading: contactsLoading } = useSWR<{ contacts?: Array<{ email?: string | null }> }>(
+    orgId.trim() ? `/api/admin/clients/${orgId}/contacts` : null,
+    { keepPreviousData: false }
+  )
+  // null = unknown (loading or no org selected); true/false = determined
+  const orgHasEmailContact: boolean | null = (contactsLoading || !orgId.trim())
+    ? null
+    : contactsData?.contacts?.some(c => !!c.email) ?? false
 
   const [currency, setCurrency] = useState('NZD')
   const [dueDate, setDueDate] = useState('')
@@ -170,7 +155,6 @@ function CreateInvoiceSlideOver({
     setSelectedOrgName('')
     setDestination('manual')
     setLineItems([{ description: '', quantity: '1', unitAmount: '' }])
-    setOrgHasEmailContact(null)
     setCurrency('NZD')
     setDueDate('')
     setNotes('')
@@ -613,9 +597,6 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
   const isAdmin = isAdminProp && !isImpersonatingClient
   const router = useRouter()
 
-  const [invoices, setInvoices] = useState<Invoice[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [importing, setImporting] = useState(false)
 
@@ -649,25 +630,12 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
     setSourceFilter(source[0] ?? 'all')
   }, [setActiveTab])
 
-  // Fetch all invoices once, filter client-side for accurate overdue detection
-  const fetchInvoices = useCallback(async () => {
-    setLoading(true)
-    setError(false)
-    try {
-      const url = isAdmin
-        ? apiPath('/api/admin/invoices?status=all')
-        : apiPath('/api/portal/invoices')
-      const res = await fetch(url)
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as { items?: Invoice[] }
-      setInvoices(json.items ?? [])
-    } catch {
-      setError(true)
-      setInvoices([])
-    } finally {
-      setLoading(false)
-    }
-  }, [isAdmin])
+  // Fetch all invoices once and filter client-side for accurate overdue detection.
+  // The server returns at most 50 rows per default; pagination is a follow-up task.
+  const invoiceKey = isAdmin ? '/api/admin/invoices?status=all' : '/api/portal/invoices'
+  const { data: invoiceData, isLoading: loading, error: fetchError, mutate } = useSWR<{ items?: Invoice[] }>(invoiceKey)
+  const invoices = invoiceData?.items ?? []
+  const error = !!fetchError
 
   // Client-side filtering: status chip + source chip + date range + search
   const filteredInvoices = useMemo(() => {
@@ -706,18 +674,14 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
     })
   }, [invoices, activeFilters, dateRange, search])
 
-  useEffect(() => {
-    fetchInvoices().catch(() => {})
-  }, [fetchInvoices])
-
   const handleCreated = useCallback((invoiceId?: string) => {
     setShowCreate(false)
     if (invoiceId) {
       router.push(`/invoices/${invoiceId}`)
     } else {
-      fetchInvoices().catch(() => {})
+      void mutate()
     }
-  }, [fetchInvoices, router])
+  }, [mutate, router])
 
   // FilterBar definitions. Both chips are nonRemovable so they remain
   // visible without the "+ Add filter" button. Tones map to the same
@@ -999,7 +963,7 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
               size="sm"
               variant="secondary"
               iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
-              onClick={() => fetchInvoices().catch(() => {})}
+              onClick={() => void mutate()}
             >
               Retry
             </TahiButton>

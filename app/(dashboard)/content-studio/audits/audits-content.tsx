@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { Search, AlertTriangle } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -20,26 +21,19 @@ interface AuditRow {
 }
 
 export function AuditsContent() {
-  const [rows, setRows] = useState<AuditRow[]>([])
-  const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [slugInput, setSlugInput] = useState('')
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/content/audits'), { cache: 'no-store' })
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as { audits: AuditRow[] }
-      setRows(json.audits)
-    } catch {
-      setRows([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchData() }, [fetchData])
+  // Cached via SWR. Inline fetcher preserves the no-store semantics the manual
+  // fetch used; an error yields undefined data, which falls back to an empty list.
+  const { data, isLoading: loading, mutate } = useSWR<{ audits: AuditRow[] }>(
+    '/api/admin/content/audits',
+    (path: string) => fetch(apiPath(path), { cache: 'no-store' }).then(r => {
+      if (!r.ok) throw new Error('Failed')
+      return r.json() as Promise<{ audits: AuditRow[] }>
+    }),
+  )
+  const rows = data?.audits ?? []
 
   async function createAudit() {
     const slug = slugInput.trim()
@@ -62,7 +56,7 @@ export function AuditsContent() {
         return
       }
       setSlugInput('')
-      await fetchData()
+      await mutate()
       if (j.draftId) {
         // Open the audit's round-table page so Liam can watch the
         // reviewers run.

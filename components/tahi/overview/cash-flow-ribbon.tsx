@@ -25,7 +25,7 @@
 // (isAnimationActive off), the trough dot stops pulsing, and the count-up
 // resolves immediately. The chart only mounts once inView (useReveal).
 
-import { useEffect, useState, useCallback } from 'react'
+import useSWR from 'swr'
 import {
   ResponsiveContainer,
   AreaChart,
@@ -40,7 +40,6 @@ import { DomainCard } from './domain-card'
 import { useReveal } from '@/lib/use-homepage-motion'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { CountUp } from '@/components/tahi/count-up'
-import { apiPath } from '@/lib/api'
 
 // ── Endpoint shape ─────────────────────────────────────────────────────────────
 
@@ -142,29 +141,9 @@ function QuietTooltip({
 export function CashFlowRibbon({ className }: { className?: string }) {
   const { format } = useDisplayCurrency()
   const { ref, inView } = useReveal<HTMLDivElement>()
-  const [months, setMonths] = useState<ForecastMonth[]>([])
-  const [loading, setLoading] = useState(true)
-  const [failed, setFailed] = useState(false)
-
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    setFailed(false)
-    try {
-      const res = await fetch(apiPath('/api/admin/reports/cash-flow-forecast?months=6'))
-      if (!res.ok) throw new Error('Failed')
-      const json = (await res.json()) as ForecastResponse
-      setMonths(json.months ?? [])
-    } catch {
-      setMonths([])
-      setFailed(true)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchData()
-  }, [fetchData])
+  const { data: forecastData, isLoading: loading, error } = useSWR<ForecastResponse>('/api/admin/reports/cash-flow-forecast?months=6')
+  const months = forecastData?.months ?? []
+  const failed = !!error
 
   const points: ChartPoint[] = months.map(m => ({
     month: m.month,

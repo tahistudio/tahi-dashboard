@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import useSWR from 'swr'
 import dynamic from 'next/dynamic'
 import {
   Plus, Search, Inbox, RefreshCw,
@@ -22,7 +23,7 @@ import { TahiButton } from '@/components/tahi/tahi-button'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { Avatar } from '@/components/tahi/avatar'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
-import { fetchSchedulePhaseOptions, type SchedulePhaseOption } from '@/lib/schedule-phases'
+import { fetchSchedulePhaseOptions } from '@/lib/schedule-phases'
 
 // AI wizard modal -- only opened on click, defer to reduce first-paint JS.
 const AiTaskWizard = dynamic(
@@ -327,46 +328,28 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
     { validator: oneOf<'list' | 'board'>(['list', 'board']) },
   )
   const [search, setSearch] = useState('')
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [wizardOpen, setWizardOpen] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
   const [priorityFilter, setPriorityFilter] = useState('all')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   // Decision #046: always load every task, filter client-side. That way the
   // tab count next to "For us" or "For a client" always reflects the true
-  // total regardless of which tab is currently selected.
-  const fetchTasks = useCallback(async () => {
-    setLoading(true)
-    try {
-      const params = new URLSearchParams()
-      if (statusTab !== 'all') params.set('status', statusTab)
-      const endpoint = apiPath('/api/admin/tasks')
-      const res = await fetch(`${endpoint}?${params}`)
-      if (!res.ok) throw new Error('Failed to fetch')
-      const data = await res.json() as { tasks?: Task[] }
-      setTasks(data.tasks ?? [])
-    } catch {
-      setTasks([])
-    } finally {
-      setLoading(false)
-    }
-  }, [statusTab])
+  // total regardless of which tab is currently selected. The status tab is the
+  // only server-side filter, so it lives in the SWR key (each tab caches
+  // separately; keepPreviousData avoids a spinner flash). mutateTasks()
+  // replaces every old fetchTasks() refresh.
+  const tasksKey = `/api/admin/tasks${statusTab !== 'all' ? `?status=${statusTab}` : ''}`
+  const { data: tasksData, isLoading: loading, mutate: mutateTasks } = useSWR<{ tasks?: Task[] }>(tasksKey)
+  const tasks = tasksData?.tasks ?? []
 
-  // Load team members for assignee display
-  useEffect(() => {
-    if (!isAdmin) return
-    fetch(apiPath('/api/admin/team-members'))
-      .then(r => r.json() as Promise<{ items: TeamMember[] }>)
-      .then(data => setTeamMembers(data.items ?? []))
-      .catch(() => setTeamMembers([]))
-  }, [isAdmin])
-
-  useEffect(() => { fetchTasks() }, [fetchTasks])
+  // Team members (admin only) for assignee display.
+  const { data: teamMembersData } = useSWR<{ items: TeamMember[] }>(
+    isAdmin ? '/api/admin/team-members' : null,
+  )
+  const teamMembers = teamMembersData?.items ?? []
 
   // Clear selection when tabs change
   useEffect(() => { setSelectedIds(new Set()) }, [typeTab, statusTab])
@@ -419,7 +402,7 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
         <NewTaskDialog
           onClose={() => {
             setDialogOpen(false)
-            fetchTasks()
+            mutateTasks()
           }}
         />
       )}
@@ -430,7 +413,7 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
           isAdmin={isAdmin}
           teamMembers={teamMembers}
           onClose={() => setSelectedTaskId(null)}
-          onRefresh={fetchTasks}
+          onRefresh={() => { mutateTasks() }}
         />
       )}
 
@@ -619,7 +602,7 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
             selectedIds={selectedIds}
             teamMembers={teamMembers}
             onClear={() => setSelectedIds(new Set())}
-            onDone={() => { setSelectedIds(new Set()); fetchTasks() }}
+            onDone={() => { setSelectedIds(new Set()); mutateTasks() }}
           />
         )}
 
@@ -630,7 +613,7 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
           ) : filtered.length === 0 ? (
             <EmptyState isAdmin={isAdmin} onNew={() => setDialogOpen(true)} />
           ) : viewMode === 'board' ? (
-            <TaskBoardView tasks={filtered} isAdmin={isAdmin} teamMap={teamMap} onStatusChange={fetchTasks} />
+            <TaskBoardView tasks={filtered} isAdmin={isAdmin} teamMap={teamMap} onStatusChange={() => { mutateTasks() }} />
           ) : (
             <TaskListView
               tasks={filtered}
@@ -649,7 +632,7 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
       <AiTaskWizard
         open={wizardOpen}
         onClose={() => setWizardOpen(false)}
-        onTasksCreated={fetchTasks}
+        onTasksCreated={() => { mutateTasks() }}
       />
     </>
   )
@@ -1437,58 +1420,35 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
   onRefresh: () => void
 }) {
   const { showToast } = useToast()
-  const [subtasks, setSubtasks] = useState<Subtask[]>([])
-  const [subtasksLoading, setSubtasksLoading] = useState(true)
-  const [dependencies, setDependencies] = useState<TaskDependency[]>([])
-  const [depsLoading, setDepsLoading] = useState(true)
   const [comment, setComment] = useState('')
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
   const [editingStatus, setEditingStatus] = useState(task.status)
   const [saving, setSaving] = useState(false)
-  const [phaseOptions, setPhaseOptions] = useState<SchedulePhaseOption[]>([])
 
   const teamMap = new Map(teamMembers.map(m => [m.id, m]))
   const assignee = task.assigneeId ? teamMap.get(task.assigneeId) : null
 
   // Delivery-phase options for the spine selector. Org-scoped: tahi_internal
-  // tasks have no org, so no schedule phases apply. Non-fatal on failure.
-  useEffect(() => {
-    if (!isAdmin || !task.orgId) {
-      setPhaseOptions([])
-      return
-    }
-    let cancelled = false
-    fetchSchedulePhaseOptions(task.orgId)
-      .then(options => { if (!cancelled) setPhaseOptions(options) })
-      .catch(() => { /* non-fatal */ })
-    return () => { cancelled = true }
-  }, [isAdmin, task.orgId])
+  // tasks have no org, so the conditional key skips the fetch. Non-fatal.
+  const { data: phaseOptionsData } = useSWR(
+    isAdmin && task.orgId ? `schedule-phases:${task.orgId}` : null,
+    () => fetchSchedulePhaseOptions(task.orgId as string),
+  )
+  const phaseOptions = phaseOptionsData ?? []
 
-  // Fetch subtasks
+  // Subtasks via SWR, mirrored into local state because they are optimistically
+  // toggled / appended below (toggleSubtask, addSubtask).
+  const { data: subtasksData, isLoading: subtasksLoading } =
+    useSWR<{ subtasks?: Subtask[] }>(`/api/admin/tasks/${task.id}/subtasks`)
+  const [subtasks, setSubtasks] = useState<Subtask[]>([])
   useEffect(() => {
-    setSubtasksLoading(true)
-    fetch(apiPath(`/api/admin/tasks/${task.id}/subtasks`))
-      .then(r => {
-        if (!r.ok) throw new Error('Not found')
-        return r.json() as Promise<{ subtasks?: Subtask[] }>
-      })
-      .then(data => setSubtasks(data.subtasks ?? []))
-      .catch(() => setSubtasks([]))
-      .finally(() => setSubtasksLoading(false))
-  }, [task.id])
+    if (subtasksData) setSubtasks(subtasksData.subtasks ?? [])
+  }, [subtasksData])
 
-  // Fetch dependencies
-  useEffect(() => {
-    setDepsLoading(true)
-    fetch(apiPath(`/api/admin/tasks/${task.id}/dependencies`))
-      .then(r => {
-        if (!r.ok) throw new Error('Not found')
-        return r.json() as Promise<{ dependencies?: TaskDependency[] }>
-      })
-      .then(data => setDependencies(data.dependencies ?? []))
-      .catch(() => setDependencies([]))
-      .finally(() => setDepsLoading(false))
-  }, [task.id])
+  // Dependencies via SWR (read-only, no local mutation).
+  const { data: depsData, isLoading: depsLoading } =
+    useSWR<{ dependencies?: TaskDependency[] }>(`/api/admin/tasks/${task.id}/dependencies`)
+  const dependencies = depsData?.dependencies ?? []
 
   async function toggleSubtask(sub: Subtask) {
     const updated = subtasks.map(s => s.id === sub.id ? { ...s, completed: !s.completed } : s)
@@ -1977,42 +1937,20 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
   const [showPriorityWarning, setShowPriorityWarning] = useState(false)
   const [pendingPriority, setPendingPriority] = useState<string | null>(null)
 
-  // Data for selectors
-  const [clients, setClients] = useState<OrgOption[]>([])
-  const [clientsLoading, setClientsLoading] = useState(false)
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
-  const [teamLoading, setTeamLoading] = useState(false)
-  const [templates, setTemplates] = useState<TaskTemplate[]>([])
-  const [, setTemplatesLoading] = useState(false)
+  // Data for selectors, loaded via SWR when the dialog mounts (it is only
+  // rendered while open). The clients endpoint returns { organisations }.
+  const { data: clientsData, isLoading: clientsLoading } =
+    useSWR<{ organisations: Array<{ id: string; name: string }> }>('/api/admin/clients?status=active')
+  const clients: OrgOption[] = (clientsData?.organisations ?? []).map(o => ({ id: o.id, name: o.name }))
+
+  const { data: teamData, isLoading: teamLoading } =
+    useSWR<{ items: TeamMember[] }>('/api/admin/team-members')
+  const teamMembers = teamData?.items ?? []
+
+  const { data: templatesData } = useSWR<{ templates?: TaskTemplate[] }>('/api/admin/task-templates')
+  const templates = templatesData?.templates ?? []
 
   const showClientPicker = isForClient
-
-  // Load clients, team, and templates on open
-  useEffect(() => {
-    setClientsLoading(true)
-    fetch(apiPath('/api/admin/clients?status=active'))
-      .then(r => r.json() as Promise<{ organisations: Array<{ id: string; name: string }> }>)
-      .then(data => setClients((data.organisations ?? []).map(o => ({ id: o.id, name: o.name }))))
-      .catch(() => setClients([]))
-      .finally(() => setClientsLoading(false))
-
-    setTeamLoading(true)
-    fetch(apiPath('/api/admin/team-members'))
-      .then(r => r.json() as Promise<{ items: TeamMember[] }>)
-      .then(data => setTeamMembers(data.items ?? []))
-      .catch(() => setTeamMembers([]))
-      .finally(() => setTeamLoading(false))
-
-    setTemplatesLoading(true)
-    fetch(apiPath('/api/admin/task-templates'))
-      .then(r => {
-        if (!r.ok) throw new Error('Not found')
-        return r.json() as Promise<{ templates?: TaskTemplate[] }>
-      })
-      .then(data => setTemplates(data.templates ?? []))
-      .catch(() => setTemplates([]))
-      .finally(() => setTemplatesLoading(false))
-  }, [])
 
   function applyTemplate(tplId: string) {
     setTemplateId(tplId)

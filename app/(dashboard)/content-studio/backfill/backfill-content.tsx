@@ -13,7 +13,8 @@
  * for single fixes, /api/admin/content/bulk-backfill for the orchestrator.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import {
   CheckCircle2, RefreshCw, Loader2, Sparkles, Eye, ExternalLink,
   Settings as SettingsIcon,
@@ -165,12 +166,9 @@ function MissingPills({ item }: { item: ItemAudit }) {
 
 export function BackfillContent() {
   const { showToast } = useToast()
-  const [data, setData] = useState<CoverageResponse | null>(null)
-  const [loading, setLoading] = useState(true)
   const [bulkRunning, setBulkRunning] = useState<ContentType | 'all' | null>(null)
   const [bulkProgress, setBulkProgress] = useState<{ processed: number; total: number } | null>(null)
   const [perItemRunning, setPerItemRunning] = useState<string | null>(null)
-  const [settings, setSettings] = useState<BackfillSettings>({ autoBackfillEnabled: false, autoRewriteBody: false, glossaryDefaultTier: 'schema', glossaryAutoPublish: false })
   const [newTermInput, setNewTermInput] = useState('')
   const [newTermAuthor, setNewTermAuthor] = useState<'liam' | 'staci' | 'auto'>('auto')
   const [newTermResearch, setNewTermResearch] = useState(true)
@@ -186,30 +184,23 @@ export function BackfillContent() {
   const [rewriteBodyOnBulk, setRewriteBodyOnBulk] = useState(false)
   const [filterType, setFilterType] = useState<'all' | 'broken' | 'no-schema'>('broken')
 
-  const fetchAudit = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/content/coverage-audit?type=all&limit=500'))
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const json = await res.json() as CoverageResponse
-      setData(json)
-    } catch (err) {
-      showToast(`Audit failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
-    } finally {
-      setLoading(false)
-    }
-  }, [showToast])
+  // Coverage scoreboard. SWR caches it across tab switches; an error surfaces
+  // the same toast the manual fetch used to. isValidating drives the Re-audit
+  // button + first-load spinner, matching the old loading flag (true on mount
+  // and on every manual re-fetch).
+  const {
+    data,
+    isValidating: loading,
+    mutate: mutateAudit,
+  } = useSWR<CoverageResponse>('/api/admin/content/coverage-audit?type=all&limit=500', {
+    onError: (err) => showToast(`Audit failed: ${err instanceof Error ? err.message : 'error'}`, 'error'),
+  })
 
-  const fetchSettings = useCallback(async () => {
-    try {
-      const res = await fetch(apiPath('/api/admin/content/backfill-settings'))
-      if (!res.ok) return
-      const json = await res.json() as BackfillSettings
-      setSettings(json)
-    } catch { /* ignore */ }
-  }, [])
-
-  useEffect(() => { void fetchAudit(); void fetchSettings() }, [fetchAudit, fetchSettings])
+  // Backfill settings. A non-2xx (or network error) leaves the defaults in
+  // place, exactly like the old silent-fail fetch.
+  const SETTINGS_DEFAULT: BackfillSettings = { autoBackfillEnabled: false, autoRewriteBody: false, glossaryDefaultTier: 'schema', glossaryAutoPublish: false }
+  const { data: settingsData, mutate: mutateSettings } = useSWR<BackfillSettings>('/api/admin/content/backfill-settings')
+  const settings = settingsData ?? SETTINGS_DEFAULT
 
   async function runSingleBackfill(type: ContentType, itemId: string, opts: { rewriteBody?: boolean } = {}) {
     setPerItemRunning(itemId)
@@ -228,7 +219,7 @@ export function BackfillContent() {
       } else {
         const fixed = (json.schemaErrorsBefore ?? 0) - (json.schemaErrorsAfter ?? 0)
         showToast(`Patched ${json.patchedFields?.length ?? 0} fields${fixed > 0 ? ` (fixed ${fixed} schema errors)` : ''}`)
-        await fetchAudit()
+        await mutateAudit()
       }
     } catch (err) {
       showToast(`Failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
@@ -266,7 +257,7 @@ export function BackfillContent() {
         }
         cursor = json.cursor
       }
-      await fetchAudit()
+      await mutateAudit()
     } catch (err) {
       showToast(`Bulk run failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
     } finally {
@@ -322,7 +313,7 @@ export function BackfillContent() {
       )
       setGeneratedPreview(null)
       setNewTermInput('')
-      await fetchAudit()
+      await mutateAudit()
     } catch (err) {
       showToast(`Publish failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
     }
@@ -376,7 +367,7 @@ export function BackfillContent() {
         return
       }
       showToast(`Upgraded "${itemName}" — $${(genJson.totalCostCents / 100).toFixed(2)} · ${pubJson.patchedFields?.length ?? 0} fields patched`)
-      await fetchAudit()
+      await mutateAudit()
     } catch (err) {
       showToast(`Upgrade failed: ${err instanceof Error ? err.message : 'error'}`, 'error')
     } finally {
@@ -503,7 +494,8 @@ export function BackfillContent() {
   }
 
   async function saveSettings(next: BackfillSettings) {
-    setSettings(next)
+    // Optimistically paint the new settings into the SWR cache, then persist.
+    void mutateSettings(next, { revalidate: false })
     try {
       await fetch(apiPath('/api/admin/content/backfill-settings'), {
         method: 'POST',
@@ -537,7 +529,7 @@ export function BackfillContent() {
               Schema, FAQ markup, author, date-modified, related refs, category coverage across all Webflow content.
             </p>
           </div>
-          <TahiButton size="sm" variant="secondary" loading={loading} onClick={() => { void fetchAudit() }} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+          <TahiButton size="sm" variant="secondary" loading={loading} onClick={() => { void mutateAudit() }} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
             Re-audit
           </TahiButton>
         </div>

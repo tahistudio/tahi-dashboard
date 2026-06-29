@@ -1,6 +1,7 @@
 'use client'
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -245,13 +246,53 @@ function daysInStage(stageEnteredAt: string | null, updatedAt: string): number {
 // ---- Main component ------------------------------------------------------
 
 export function DealDetail({ dealId }: { dealId: string }) {
-  const [deal, setDeal] = useState<DealData | null>(null)
-  const [contacts, setContacts] = useState<DealContact[]>([])
-  const [activities, setActivities] = useState<DealActivity[]>([])
-  const [stages, setStages] = useState<Stage[]>([])
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
-  const [ltv, setLtv] = useState<{ total: number; wonDealCount: number; paidInvoiceCount: number } | null>(null)
-  const [loading, setLoading] = useState(true)
+  // Merged fetch: deal data + team members in one SWR call so a single
+  // mutate() refreshes everything. Inline fetcher handles the Promise.all.
+  const { data, isLoading: loading, mutate } = useSWR(
+    `/api/admin/deals/${dealId}`,
+    async (): Promise<{
+      deal: DealData | null
+      contacts: DealContact[]
+      activities: DealActivity[]
+      stages: Stage[]
+      ltv: { total: number; wonDealCount: number; paidInvoiceCount: number } | null
+      teamMembers: TeamMember[]
+    }> => {
+      const [dealRes, teamRes] = await Promise.all([
+        fetch(apiPath(`/api/admin/deals/${dealId}`)),
+        fetch(apiPath('/api/admin/team-members')),
+      ])
+      let dealPayload: {
+        deal: DealData
+        contacts: DealContact[]
+        activities: DealActivity[]
+        stages: Stage[]
+        ltv?: { total: number; wonDealCount: number; paidInvoiceCount: number } | null
+      } | null = null
+      if (dealRes.ok) {
+        dealPayload = await dealRes.json()
+      }
+      let members: TeamMember[] = []
+      if (teamRes.ok) {
+        const tData = await teamRes.json() as { items?: TeamMember[]; members?: TeamMember[] }
+        members = tData.items ?? tData.members ?? []
+      }
+      return {
+        deal: dealPayload?.deal ?? null,
+        contacts: dealPayload?.contacts ?? [],
+        activities: dealPayload?.activities ?? [],
+        stages: dealPayload?.stages ?? [],
+        ltv: dealPayload?.ltv ?? null,
+        teamMembers: members,
+      }
+    }
+  )
+  const deal = data?.deal ?? null
+  const contacts = data?.contacts ?? []
+  const activities = data?.activities ?? []
+  const stages = data?.stages ?? []
+  const ltv = data?.ltv ?? null
+  const teamMembers = data?.teamMembers ?? []
   const [showActivityForm, setShowActivityForm] = useState(false)
   const [showNudgeDialog, setShowNudgeDialog] = useState(false)
   // Activity row that is currently asking "are you sure?". Only one at a time.
@@ -278,8 +319,11 @@ export function DealDetail({ dealId }: { dealId: string }) {
   }
 
   async function deleteActivity(id: string) {
-    const previous = activities
-    setActivities(prev => prev.filter(a => a.id !== id))
+    const snapshot = data
+    void mutate(
+      prev => prev ? { ...prev, activities: prev.activities.filter(a => a.id !== id) } : prev,
+      { revalidate: false }
+    )
     setConfirmingDeleteId(null)
     setDeletingId(id)
     try {
@@ -287,48 +331,12 @@ export function DealDetail({ dealId }: { dealId: string }) {
       if (!res.ok) throw new Error(`Status ${res.status}`)
       showToast('Activity removed', 'success')
     } catch {
-      setActivities(previous)
+      if (snapshot !== undefined) void mutate(snapshot, { revalidate: false })
       showToast('Failed to delete activity', 'error')
     } finally {
       setDeletingId(null)
     }
   }
-
-  const fetchDeal = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [dealRes, teamRes] = await Promise.all([
-        fetch(apiPath(`/api/admin/deals/${dealId}`)),
-        fetch(apiPath('/api/admin/team-members')),
-      ])
-
-      if (dealRes.ok) {
-        const data = await dealRes.json() as {
-          deal: DealData
-          contacts: DealContact[]
-          activities: DealActivity[]
-          stages: Stage[]
-          ltv?: { total: number; wonDealCount: number; paidInvoiceCount: number } | null
-        }
-        setDeal(data.deal)
-        setContacts(data.contacts ?? [])
-        setActivities(data.activities ?? [])
-        setLtv(data.ltv ?? null)
-        setStages(data.stages ?? [])
-      }
-
-      if (teamRes.ok) {
-        const tData = await teamRes.json() as { items?: TeamMember[], members?: TeamMember[] }
-        setTeamMembers(tData.items ?? tData.members ?? [])
-      }
-    } catch {
-      // silent
-    } finally {
-      setLoading(false)
-    }
-  }, [dealId])
-
-  useEffect(() => { fetchDeal() }, [fetchDeal])
 
   if (loading) {
     return (
@@ -400,7 +408,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
           <DiscoveryCallsCard
             parentType="deal"
             parentId={deal.id}
-            onChanged={fetchDeal}
+            onChanged={() => { void mutate() }}
           />
 
           {/* Activity Timeline */}
@@ -663,7 +671,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
           </div>
 
           {/* Notes */}
-          <NotesSection dealId={dealId} initialNotes={deal.notes} onUpdated={fetchDeal} />
+          <NotesSection dealId={dealId} initialNotes={deal.notes} onUpdated={() => { void mutate() }} />
 
           {/* Associated Requests (T306) */}
           {deal.orgId && (
@@ -696,7 +704,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
               dealValueMin={deal.valueMin}
               dealValueMax={deal.valueMax}
               currency={deal.currency}
-              onUpdated={fetchDeal}
+              onUpdated={() => { void mutate() }}
             />
           </SidebarCard>
 
@@ -707,7 +715,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
                 dealId={dealId}
                 label={deal.nextActionLabel ?? null}
                 dueAt={deal.nextActionDueAt ?? null}
-                onUpdated={fetchDeal}
+                onUpdated={() => { void mutate() }}
               />
             </SidebarCard>
           )}
@@ -718,7 +726,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
               dealId={dealId}
               orgId={deal.orgId}
               orgName={deal.orgName}
-              onConverted={fetchDeal}
+              onConverted={() => { void mutate() }}
             />
           )}
 
@@ -735,7 +743,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
               valueMin={deal.valueMin}
               valueMax={deal.valueMax}
               currency={deal.currency}
-              onUpdated={fetchDeal}
+              onUpdated={() => { void mutate() }}
             />
             <ValueTrendline
               currentValue={deal.value}
@@ -751,7 +759,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
               dealId={dealId}
               currentOwnerId={deal.ownerId}
               teamMembers={teamMembers}
-              onUpdated={fetchDeal}
+              onUpdated={() => { void mutate() }}
             />
           </SidebarCard>
 
@@ -761,7 +769,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
               dealId={dealId}
               currentOrgId={deal.orgId}
               currentOrgName={deal.orgName}
-              onUpdated={fetchDeal}
+              onUpdated={() => { void mutate() }}
             />
           </SidebarCard>
 
@@ -785,7 +793,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
             <SourceSelector
               dealId={dealId}
               currentSource={deal.source}
-              onUpdated={fetchDeal}
+              onUpdated={() => { void mutate() }}
             />
           </SidebarCard>
 
@@ -805,13 +813,13 @@ export function DealDetail({ dealId }: { dealId: string }) {
               dealId={dealId}
               value={deal.expectedCloseDate}
               field="expectedCloseDate"
-              onUpdated={fetchDeal}
+              onUpdated={() => { void mutate() }}
             />
           </SidebarCard>
 
           {/* Engagement */}
           <SidebarCard title="Engagement">
-            <EngagementEditor dealId={dealId} deal={deal} onUpdated={fetchDeal} />
+            <EngagementEditor dealId={dealId} deal={deal} onUpdated={() => { void mutate() }} />
           </SidebarCard>
 
           {/* Auto-nudge toggle (only in Stalled stage) */}
@@ -828,7 +836,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ autoNudgesDisabled: !deal.autoNudgesDisabled }),
                     })
-                    fetchDeal()
+                    void mutate()
                   }}
                   className="inline-flex items-center gap-1.5 font-medium transition-colors rounded-full"
                   style={{
@@ -900,7 +908,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
             <ContactLinker
               dealId={dealId}
               contacts={contacts}
-              onUpdated={fetchDeal}
+              onUpdated={() => { void mutate() }}
             />
           </SidebarCard>
 
@@ -1017,7 +1025,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
           onClose={() => setShowActivityForm(false)}
           onCreated={() => {
             setShowActivityForm(false)
-            fetchDeal()
+            void mutate()
           }}
         />
       )}
@@ -1031,7 +1039,7 @@ export function DealDetail({ dealId }: { dealId: string }) {
           onClose={() => setShowNudgeDialog(false)}
           onSent={() => {
             setShowNudgeDialog(false)
-            fetchDeal()
+            void mutate()
           }}
         />
       )}
@@ -2222,20 +2230,14 @@ function ContactLinker({ dealId, contacts, onUpdated }: {
   onUpdated: () => void
 }) {
   const [showSearch, setShowSearch] = useState(false)
-  const [allContacts, setAllContacts] = useState<{ id: string; name: string; email: string; orgName?: string }[]>([])
   const [search, setSearch] = useState('')
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => {
-    if (!showSearch) return
-    fetch(apiPath('/api/admin/contacts'))
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => {
-        const data = d as { items?: { id: string; name: string; email: string; orgName?: string }[] }
-        setAllContacts(data.items ?? [])
-      })
-      .catch(() => setAllContacts([]))
-  }, [showSearch])
+  // Only fetch contacts when the search panel is open.
+  const { data: contactsData } = useSWR<{ items: { id: string; name: string; email: string; orgName?: string }[] }>(
+    showSearch ? '/api/admin/contacts' : null
+  )
+  const allContacts = contactsData?.items ?? []
 
   const linkedIds = new Set(contacts.map(c => c.contactId))
   const filtered = allContacts
@@ -2373,21 +2375,15 @@ function OrgSelector({ dealId, currentOrgId, currentOrgName, onUpdated }: {
   currentOrgName: string | null
   onUpdated: () => void
 }) {
-  const [orgs, setOrgs] = useState<{ id: string; name: string }[]>([])
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => {
-    if (!open) return
-    fetch(apiPath('/api/admin/clients'))
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => {
-        const data = d as { organisations?: { id: string; name: string }[] }
-        setOrgs(data.organisations ?? [])
-      })
-      .catch(() => setOrgs([]))
-  }, [open])
+  // Only fetch the client list when the picker is open.
+  const { data: orgsData } = useSWR<{ organisations?: { id: string; name: string }[] }>(
+    open ? '/api/admin/clients' : null
+  )
+  const orgs = orgsData?.organisations ?? []
 
   const filtered = orgs.filter(o =>
     o.name.toLowerCase().includes(search.toLowerCase())
@@ -2854,20 +2850,12 @@ function NudgeDialog({ dealId, dealTitle, contacts, onClose, onSent }: {
   const [body, setBody] = useState(
     `Hi,\n\nJust wanted to check in on this. Happy to answer any questions or jump on a quick call if it helps.\n\nCheers`
   )
-  const [templates, setTemplates] = useState<{ id: string; name: string; subject: string; bodyHtml: string }[]>([])
   const [scheduleDate, setScheduleDate] = useState('')
   const [sending, setSending] = useState(false)
   const [mode, setMode] = useState<'now' | 'schedule'>('now')
 
-  useEffect(() => {
-    fetch(apiPath('/api/admin/nudge-templates'))
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => {
-        const data = d as { items?: { id: string; name: string; subject: string; bodyHtml: string }[] }
-        setTemplates(data.items ?? [])
-      })
-      .catch(() => setTemplates([]))
-  }, [])
+  const { data: templatesData } = useSWR<{ items?: { id: string; name: string; subject: string; bodyHtml: string }[] }>('/api/admin/nudge-templates')
+  const templates = templatesData?.items ?? []
 
   const handleTemplate = (templateId: string) => {
     const t = templates.find(tp => tp.id === templateId)
@@ -3294,20 +3282,11 @@ interface AssociatedRequest {
 }
 
 function AssociatedRequests({ orgId }: { orgId: string }) {
-  const [requests, setRequests] = useState<AssociatedRequest[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: reqData, isLoading: loading } = useSWR<{ items: AssociatedRequest[] }>(
+    `/api/admin/requests?orgId=${encodeURIComponent(orgId)}&limit=20`
+  )
+  const requests = reqData?.items ?? []
   const [hoveredId, setHoveredId] = useState<string | null>(null)
-
-  useEffect(() => {
-    fetch(apiPath(`/api/admin/requests?orgId=${encodeURIComponent(orgId)}&limit=20`))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ items: AssociatedRequest[] }>
-      })
-      .then(d => setRequests(d.items ?? []))
-      .catch(() => setRequests([]))
-      .finally(() => setLoading(false))
-  }, [orgId])
 
   return (
     <div

@@ -13,6 +13,7 @@ import { SkipToContent } from '@/components/tahi/skip-to-content'
 import { DisplayCurrencyProvider } from '@/lib/display-currency-context'
 import { PermissionsProvider, type PermissionsValue } from '@/components/tahi/permissions-context'
 import { PrivateModeProvider } from '@/components/tahi/private-mode-context'
+import { SwrProvider } from '@/components/tahi/swr-provider'
 import { db } from '@/lib/db'
 import { resolvePermissions, featureMap } from '@/lib/permissions'
 import './app-shell.css'
@@ -72,6 +73,7 @@ export default async function DashboardLayout({
   }
 
   return (
+    <SwrProvider>
     <ToastProvider>
     <DisplayCurrencyProvider>
       <PermissionsProvider value={perms}>
@@ -103,5 +105,6 @@ export default async function DashboardLayout({
       </PermissionsProvider>
     </DisplayCurrencyProvider>
     </ToastProvider>
+    </SwrProvider>
   )
 }

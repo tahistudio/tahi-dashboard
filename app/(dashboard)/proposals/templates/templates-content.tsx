@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
@@ -72,28 +73,12 @@ function safeParseSnapshot(raw: string | null | undefined): TemplateSnapshot | n
 export function TemplatesContent() {
   const router = useRouter()
   const { showToast } = useToast()
-  const [items, setItems] = useState<TemplateListItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, isLoading: loading, mutate } = useSWR<{ items: TemplateListItem[] }>('/api/admin/proposals/templates')
+  const items = data?.items ?? []
   const [renameTarget, setRenameTarget] = useState<TemplateListItem | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<TemplateListItem | null>(null)
   const [previewTarget, setPreviewTarget] = useState<TemplateListItem | null>(null)
   const [creatingFromId, setCreatingFromId] = useState<string | null>(null)
-
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/proposals/templates'))
-      if (!res.ok) throw new Error('failed')
-      const data = await res.json() as { items: TemplateListItem[] }
-      setItems(data.items ?? [])
-    } catch {
-      setItems([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchAll() }, [fetchAll])
 
   // Rename uses PATCH on the existing endpoint with `name` only.
   async function handleRename(value: string) {
@@ -109,7 +94,7 @@ export function TemplatesContent() {
       if (!res.ok) throw new Error('failed')
       setRenameTarget(null)
       showToast('Template renamed', 'success')
-      void fetchAll()
+      void mutate()
     } catch {
       showToast('Could not rename template', 'error')
     }
@@ -122,7 +107,7 @@ export function TemplatesContent() {
       if (!res.ok) throw new Error('failed')
       setDeleteTarget(null)
       showToast('Template deleted', 'success')
-      void fetchAll()
+      void mutate()
     } catch {
       showToast('Could not delete template', 'error')
     }
@@ -170,7 +155,7 @@ export function TemplatesContent() {
         title="Proposal templates"
         subtitle="Reusable proposal structures. Save any proposal as a template, then spin up new ones in seconds."
       >
-        <TahiButton variant="secondary" size="sm" onClick={fetchAll} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+        <TahiButton variant="secondary" size="sm" onClick={() => { void mutate() }} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
           Refresh
         </TahiButton>
         <Link href="/proposals">
@@ -323,29 +308,11 @@ function PreviewDialog({
   onClose: () => void
   onCreate: () => void
 }) {
-  const [full, setFull] = useState<TemplateFull | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      setLoading(true)
-      setError(null)
-      try {
-        const res = await fetch(apiPath(`/api/admin/proposals/templates/${template.id}`))
-        if (!res.ok) throw new Error('failed')
-        const data = await res.json() as { template: TemplateFull }
-        if (!cancelled) setFull(data.template)
-      } catch {
-        if (!cancelled) setError('Could not load template')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    void load()
-    return () => { cancelled = true }
-  }, [template.id])
+  const { data: tplData, isLoading: loading, error: fetchError } = useSWR<{ template: TemplateFull }>(
+    `/api/admin/proposals/templates/${template.id}`
+  )
+  const full = tplData?.template ?? null
+  const error = fetchError ? 'Could not load template' : null
 
   const snapshot = safeParseSnapshot(full?.snapshot)
   const sections = snapshot?.sections ?? []

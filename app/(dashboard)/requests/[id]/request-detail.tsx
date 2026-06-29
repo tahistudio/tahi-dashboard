@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import useSWR from 'swr'
 import { apiPath } from '@/lib/api'
 import {
   Clock, AlertTriangle, RefreshCw,
@@ -26,7 +27,7 @@ import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { PeoplePanel, type Participant } from '@/components/tahi/people-panel'
 import { TimeCard } from '@/components/tahi/time-card'
 import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
-import { fetchSchedulePhaseOptions, type SchedulePhaseOption } from '@/lib/schedule-phases'
+import { fetchSchedulePhaseOptions } from '@/lib/schedule-phases'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -150,10 +151,6 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const [subRequests, setSubRequests] = useState<SubRequestRow[]>([])
   const [parentRequest, setParentRequest] = useState<ParentRequestRef | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
-  const [files, setFiles] = useState<RequestFile[]>([])
-  const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([])
-  const [loading, setLoading] = useState(true)
-  const [fetchError, setFetchError] = useState(false)
   // Visibility is now owned by <MessageComposer> and passed back through handleSendMessage.
   const [statusUpdating, setStatusUpdating] = useState(false)
   const [editingDueDate, setEditingDueDate] = useState(false)
@@ -164,7 +161,6 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const [newSubOpen, setNewSubOpen] = useState(false)
   const [unlinkingParent, setUnlinkingParent] = useState(false)
   const [participants, setParticipants] = useState<Participant[]>([])
-  const [phaseOptions, setPhaseOptions] = useState<SchedulePhaseOption[]>([])
   const threadBottomRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
 
@@ -175,23 +171,19 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
 
   const apiBase = isAdmin ? apiPath('/api/admin') : apiPath('/api/portal')
 
-  const loadFiles = useCallback(async () => {
-    try {
-      const url = isAdmin
-        ? apiPath(`/api/admin/requests/${requestId}/files`)
-        : apiPath(`/api/portal/requests/${requestId}/files`)
-      const res = await fetch(url)
-      if (res.ok) {
-        const data = await res.json() as { items: RequestFile[] }
-        setFiles(data.items ?? [])
-      }
-    } catch {
-      // non-fatal
-    }
-  }, [requestId, isAdmin])
-
-  const loadRequest = useCallback(async () => {
-    try {
+  // Request + messages via a single SWR entry. The inline fetcher mirrors the
+  // old dual-fetch (request endpoint + messages endpoint) and returns a merged
+  // object. Network failure throws -> SWR error -> "Failed to load" screen. A
+  // non-ok response leaves request null -> "Request not found", matching the
+  // previous behaviour. mutateRequest() replaces every loadRequest() refresh.
+  const {
+    data: requestData,
+    isLoading: loading,
+    error: requestError,
+    mutate: mutateRequest,
+  } = useSWR(
+    `request-detail:${isAdmin ? 'admin' : 'portal'}:${requestId}`,
+    async () => {
       const [reqRes, msgRes] = await Promise.all([
         fetch(`${apiBase}/requests/${requestId}`),
         fetch(isAdmin
@@ -199,6 +191,12 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           : `${apiBase}/requests/${requestId}`
         ),
       ])
+      let req: Request | null = null
+      let subs: SubRequestRow[] = []
+      let parent: ParentRequestRef | null = null
+      let unread = 0
+      let people: Participant[] = []
+      let msgs: Message[] = []
       if (reqRes.ok) {
         const data = await reqRes.json() as {
           request: Request
@@ -207,69 +205,67 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           unreadCount?: number
           participants?: Participant[]
         }
-        setRequest(data.request)
-        setSubRequests(data.subRequests ?? [])
-        setParentRequest(data.parent ?? null)
-        setUnreadCount(data.unreadCount ?? 0)
-        setParticipants(data.participants ?? [])
-        try {
-          setChecklists(JSON.parse(data.request.checklists || '[]') as Checklist[])
-        } catch {
-          setChecklists([])
-        }
+        req = data.request
+        subs = data.subRequests ?? []
+        parent = data.parent ?? null
+        unread = data.unreadCount ?? 0
+        people = data.participants ?? []
       }
       if (msgRes.ok) {
         if (isAdmin) {
           const data = await msgRes.json() as { items: Message[] }
-          setMessages(data.items ?? [])
+          msgs = data.items ?? []
         } else {
           const data = await msgRes.json() as { request: Request; messages: Message[] }
-          setRequest(data.request)
-          try {
-            setChecklists(JSON.parse(data.request.checklists || '[]') as Checklist[])
-          } catch {
-            setChecklists([])
-          }
-          setMessages(data.messages ?? [])
+          req = data.request
+          msgs = data.messages ?? []
         }
       }
-    } catch {
-      setFetchError(true)
-    } finally {
-      setLoading(false)
-    }
-  }, [requestId, apiBase, isAdmin])
+      return { request: req, subRequests: subs, parent, unreadCount: unread, participants: people, messages: msgs }
+    },
+  )
+  const fetchError = !!requestError
 
-  const loadTeamMembers = useCallback(async () => {
-    if (!isAdmin) return
+  // Mirror fetched data into local state. Local state is the source of truth for
+  // optimistic edits (patchRequest, checklists, participants, unlink), so each
+  // refresh (mutateRequest) re-syncs everything exactly as loadRequest used to.
+  useEffect(() => {
+    if (!requestData) return
+    setRequest(requestData.request)
+    setSubRequests(requestData.subRequests)
+    setParentRequest(requestData.parent)
+    setUnreadCount(requestData.unreadCount)
+    setParticipants(requestData.participants)
+    setMessages(requestData.messages)
     try {
-      const res = await fetch(apiPath('/api/admin/team-members'))
-      if (res.ok) {
-        const data = await res.json() as { items: TeamMemberOption[] }
-        setTeamMembers(data.items ?? [])
-      }
+      setChecklists(JSON.parse(requestData.request?.checklists || '[]') as Checklist[])
     } catch {
-      // non-fatal
+      setChecklists([])
     }
-  }, [isAdmin])
+  }, [requestData])
 
-  useEffect(() => {
-    loadRequest()
-    loadFiles()
-    loadTeamMembers()
-  }, [loadRequest, loadFiles, loadTeamMembers])
+  // Files via SWR (standard path key + global fetcher). mutateFiles() replaces
+  // the old loadFiles() refresh.
+  const filesKey = isAdmin
+    ? `/api/admin/requests/${requestId}/files`
+    : `/api/portal/requests/${requestId}/files`
+  const { data: filesData, mutate: mutateFiles } = useSWR<{ items: RequestFile[] }>(filesKey)
+  const files = filesData?.items ?? []
 
-  // Delivery-phase options for the spine selector. Keyed on the org so it
-  // only refetches if the request somehow changes org. Non-fatal on failure.
+  // Team members (admin only) for the assignee picker.
+  const { data: teamMembersData } = useSWR<{ items: TeamMemberOption[] }>(
+    isAdmin ? '/api/admin/team-members' : null,
+  )
+  const teamMembers = teamMembersData?.items ?? []
+
+  // Delivery-phase options for the spine selector. Conditional key skips the
+  // fetch for clients or before the org is known; non-fatal on failure.
   const requestOrgId = request?.orgId ?? null
-  useEffect(() => {
-    if (!isAdmin || !requestOrgId) return
-    let cancelled = false
-    fetchSchedulePhaseOptions(requestOrgId)
-      .then(options => { if (!cancelled) setPhaseOptions(options) })
-      .catch(() => { /* non-fatal */ })
-    return () => { cancelled = true }
-  }, [isAdmin, requestOrgId])
+  const { data: phaseOptionsData } = useSWR(
+    isAdmin && requestOrgId ? `schedule-phases:${requestOrgId}` : null,
+    () => fetchSchedulePhaseOptions(requestOrgId as string),
+  )
+  const phaseOptions = phaseOptionsData ?? []
 
   useEffect(() => {
     threadBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -337,7 +333,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       // Uploaded files have already been attached to the request via the
       // /api/uploads/confirm step inside the composer. We just need to
       // re-fetch the files panel + messages to show the new state.
-      await Promise.all([loadRequest(), loadFiles()])
+      await Promise.all([mutateRequest(), mutateFiles()])
     }
   }
 
@@ -465,7 +461,12 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
 
   // ---- Loading / Error / Not Found ------------------------------------------
 
-  if (loading) {
+  // Show the skeleton while SWR is loading, and also during the single frame
+  // after data arrives but before the mirror effect has synced it into local
+  // state (when the fetched request is non-null) so we never flash "not found".
+  const showSkeleton = loading || (!request && !fetchError && !(requestData && !requestData.request))
+
+  if (showSkeleton) {
     return (
       <div className="flex flex-col" style={{ gap: '2rem', maxWidth: '68.75rem' }}>
         {/* Back link skeleton */}
@@ -733,7 +734,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           forceOrgId={request.orgId}
           onCreated={() => {
             // Refresh sub-requests list without a full page load
-            loadRequest()
+            mutateRequest()
             showToast('Sub-request created')
           }}
         />
@@ -826,7 +827,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
               subRequests={subRequests}
               alwaysShow={isAdmin}
               canCreate={isAdmin}
-              onCreated={loadRequest}
+              onCreated={() => { mutateRequest() }}
               onRequestNew={() => setNewSubOpen(true)}
             />
           )}
@@ -834,7 +835,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           {/* Files */}
           <FilesPanel
             files={files}
-            onRefresh={loadFiles}
+            onRefresh={() => { mutateFiles() }}
             requestId={requestId}
             orgId={request.orgId}
             isAdmin={isAdmin}

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import {
   Zap, Plus, Trash2, RefreshCw, ToggleLeft, ToggleRight,
   ArrowLeft, ChevronDown,
@@ -51,25 +52,9 @@ const ACTION_OPTIONS = [
 // -- Main Component --
 
 export function AutomationsContent() {
-  const [rules, setRules] = useState<AutomationRule[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, isLoading: loading, mutate } = useSWR<{ items: AutomationRule[] }>('/api/admin/automations')
+  const rules = data?.items ?? []
   const [showCreate, setShowCreate] = useState(false)
-
-  const fetchRules = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/automations'))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { items: AutomationRule[] }
-      setRules(data.items ?? [])
-    } catch {
-      setRules([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchRules() }, [fetchRules])
 
   async function toggleRule(id: string, enabled: boolean) {
     try {
@@ -78,7 +63,11 @@ export function AutomationsContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled }),
       })
-      setRules(prev => prev.map(r => r.id === id ? { ...r, enabled } : r))
+      // Patch the cached row in place after the server confirms (no refetch).
+      mutate(
+        current => current ? { items: current.items.map(r => r.id === id ? { ...r, enabled } : r) } : current,
+        { revalidate: false },
+      )
     } catch {
       // Failed
     }
@@ -87,7 +76,11 @@ export function AutomationsContent() {
   async function deleteRule(id: string) {
     try {
       await fetch(apiPath(`/api/admin/automations/${id}`), { method: 'DELETE' })
-      setRules(prev => prev.filter(r => r.id !== id))
+      // Drop the deleted row from the cache after the server confirms.
+      mutate(
+        current => current ? { items: current.items.filter(r => r.id !== id) } : current,
+        { revalidate: false },
+      )
     } catch {
       // Failed
     }
@@ -130,7 +123,7 @@ export function AutomationsContent() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <TahiButton variant="secondary" size="sm" onClick={fetchRules} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+          <TahiButton variant="secondary" size="sm" onClick={() => mutate()} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
             Refresh
           </TahiButton>
           <TahiButton size="sm" onClick={() => setShowCreate(true)} iconLeft={<Plus className="w-3.5 h-3.5" />}>
@@ -144,7 +137,7 @@ export function AutomationsContent() {
         <CreateRuleForm
           onCreated={() => {
             setShowCreate(false)
-            fetchRules()
+            mutate()
           }}
           onCancel={() => setShowCreate(false)}
         />
