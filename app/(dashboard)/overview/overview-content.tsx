@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import {
   Inbox, FileText,
   Plus,
@@ -17,24 +18,68 @@ import { LedgerMasthead, type LedgerData } from '@/components/tahi/overview/ledg
 import { NeedsYou } from '@/components/tahi/overview/needs-you'
 import { InTheStudio } from '@/components/tahi/overview/in-the-studio'
 import { TodayRail } from '@/components/tahi/overview/today-rail'
-import { PipelineAhead } from '@/components/tahi/overview/pipeline-ahead'
 import { StudioCapacity } from '@/components/tahi/overview/studio-capacity'
 import { CashRunway } from '@/components/tahi/overview/cash-runway'
 import { ReceivablesTide } from '@/components/tahi/overview/receivables-tide'
 import { TheWire } from '@/components/tahi/overview/the-wire'
 import { TimeTracker } from '@/components/tahi/overview/time-tracker'
 import { WorldClock } from '@/components/tahi/overview/world-clock'
-import { ContentEngine } from '@/components/tahi/overview/content-engine'
-import { SocialCadence } from '@/components/tahi/overview/social-cadence'
-import { HotLeads } from '@/components/tahi/overview/hot-leads'
-import { ProposalsLive } from '@/components/tahi/overview/proposals-live'
-import { RetainerHealth } from '@/components/tahi/overview/retainer-health'
-import { ContractsCard } from '@/components/tahi/overview/contracts-card'
-import { TakeHomeGauges } from '@/components/tahi/overview/take-home-gauges'
-import { CashFlowRibbon } from '@/components/tahi/overview/cash-flow-ribbon'
 import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
+
+// ── Lightweight pulse skeleton for recharts cards (shown while chunk loads) ───
+function OverviewCardSkeleton() {
+  return (
+    <div
+      className="animate-pulse"
+      style={{
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-lg)',
+        minHeight: '12rem',
+      }}
+    />
+  )
+}
+
+// ── Recharts-bearing overview cards -- deferred to reduce first-paint JS ──────
+const ContentEngine = dynamic(
+  () => import('@/components/tahi/overview/content-engine').then(m => ({ default: m.ContentEngine })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const SocialCadence = dynamic(
+  () => import('@/components/tahi/overview/social-cadence').then(m => ({ default: m.SocialCadence })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const PipelineAhead = dynamic(
+  () => import('@/components/tahi/overview/pipeline-ahead').then(m => ({ default: m.PipelineAhead })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const HotLeads = dynamic(
+  () => import('@/components/tahi/overview/hot-leads').then(m => ({ default: m.HotLeads })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const ProposalsLive = dynamic(
+  () => import('@/components/tahi/overview/proposals-live').then(m => ({ default: m.ProposalsLive })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const RetainerHealth = dynamic(
+  () => import('@/components/tahi/overview/retainer-health').then(m => ({ default: m.RetainerHealth })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const ContractsCard = dynamic(
+  () => import('@/components/tahi/overview/contracts-card').then(m => ({ default: m.ContractsCard })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const TakeHomeGauges = dynamic(
+  () => import('@/components/tahi/overview/take-home-gauges').then(m => ({ default: m.TakeHomeGauges })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const CashFlowRibbon = dynamic(
+  () => import('@/components/tahi/overview/cash-flow-ribbon').then(m => ({ default: m.CashFlowRibbon })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
 
 // ─── Accent colour map (CSS var references for dark mode compat) ─────────────
 //

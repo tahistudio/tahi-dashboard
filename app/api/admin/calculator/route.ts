@@ -59,10 +59,13 @@ export async function POST(req: NextRequest) {
   // row's week range overlaps [startDate, startDate + durationWeeks].
   // Approximate: count every active schedule's row hours pro-rata
   // by overlap weeks. Cheap enough to do per-call.
-  const bookedHoursInWindow = await estimateBookedHours(database, body.inputs)
-
-  // Similar deals — same plan size, won/closed, last 24 months.
-  const similarDeals = await fetchSimilarDeals(database)
+  // The two estimators are independent reads (one hits scheduleRows, the
+  // other deals) and neither uses the other's result, so resolve them
+  // concurrently rather than back to back.
+  const [bookedHoursInWindow, similarDeals] = await Promise.all([
+    estimateBookedHours(database, body.inputs),
+    fetchSimilarDeals(database),
+  ])
 
   const outputs = compute(body.inputs, { bookedHoursInWindow, similarDeals })
 
@@ -194,17 +197,21 @@ export async function PATCH(req: NextRequest) {
   if (body.linkedArtefactRef !== undefined) updates.linkedArtefactRef = body.linkedArtefactRef
   if (body.isActive !== undefined) updates.isActive = body.isActive
   if (body.inputs) {
-    // Re-run math whenever inputs change.
-    const bookedHoursInWindow = await estimateBookedHours(database, body.inputs)
-    const similarDeals = await fetchSimilarDeals(database)
+    // Re-run math whenever inputs change. The two estimators are independent
+    // reads, so resolve them concurrently.
+    const [bookedHoursInWindow, similarDeals] = await Promise.all([
+      estimateBookedHours(database, body.inputs),
+      fetchSimilarDeals(database),
+    ])
     const outputs = compute(body.inputs, { bookedHoursInWindow, similarDeals })
     updates.inputs = JSON.stringify(body.inputs)
     updates.outputs = JSON.stringify(outputs)
   }
-  await database.update(schema.projectCalculations).set(updates)
+  // Update and read back the full row in a single round-trip via RETURNING,
+  // instead of an update followed by a separate SELECT.
+  const [row] = await database.update(schema.projectCalculations).set(updates)
     .where(eq(schema.projectCalculations.id, body.id))
-  const [row] = await database.select().from(schema.projectCalculations)
-    .where(eq(schema.projectCalculations.id, body.id)).limit(1)
+    .returning()
   return NextResponse.json({ calculation: row })
 }
 

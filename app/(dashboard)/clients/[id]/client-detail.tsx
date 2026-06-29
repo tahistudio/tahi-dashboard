@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { apiPath } from '@/lib/api'
 import { EngagementHealthCard } from '@/components/tahi/engagement-health-card'
 import { Gate } from '@/components/tahi/permissions-context'
@@ -59,8 +60,8 @@ import { RequestCard } from '@/components/tahi/request-card'
 import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { FeatureCard } from '@/components/tahi/feature-card'
-import { DonutChart, type DonutSegment } from '@/components/tahi/chart'
-import { BoardView, type BoardItem, type BoardColumn, type BoardPriority } from '@/components/tahi/board-view'
+import type { DonutSegment } from '@/components/tahi/chart'
+import type { BoardItem, BoardColumn, BoardPriority } from '@/components/tahi/board-view'
 import { ViewToggle } from '@/components/tahi/view-toggle'
 import { List as ListIcon, Columns as ColumnsIcon } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
@@ -73,6 +74,41 @@ import {
   calculateBundledSavings,
   type BillingInterval,
 } from '@/lib/billing'
+
+// Recharts (DonutChart) and the full board shell are tab-gated -- defer them.
+const DonutChart = dynamic(
+  () => import('@/components/tahi/chart').then(m => ({ default: m.DonutChart })),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        className="animate-pulse"
+        style={{
+          width: 160,
+          height: 160,
+          borderRadius: '50%',
+          background: 'var(--color-bg-secondary)',
+        }}
+      />
+    ),
+  }
+)
+const BoardView = dynamic(
+  () => import('@/components/tahi/board-view').then(m => ({ default: m.BoardView })),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        className="animate-pulse"
+        style={{
+          minHeight: '20rem',
+          borderRadius: 'var(--radius-lg)',
+          background: 'var(--color-bg-secondary)',
+        }}
+      />
+    ),
+  }
+)
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 

@@ -2,7 +2,7 @@ import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, sql } from 'drizzle-orm'
+import { eq, desc, and, sql, inArray } from 'drizzle-orm'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
 // ── GET /api/portal/conversations ──────────────────────────────────────────
@@ -31,24 +31,26 @@ export async function GET(req: NextRequest) {
 
   const participantId = contactRows.length > 0 ? contactRows[0].id : userId
 
-  // Get conversation IDs this user participates in
-  const participantConvs = await database
-    .select({ conversationId: schema.conversationParticipants.conversationId })
-    .from(schema.conversationParticipants)
-    .where(eq(schema.conversationParticipants.participantId, participantId))
+  // Get conversation IDs this user participates in AND org-scoped conversations
+  // for this org. These two lookups are independent of each other (one keys off
+  // participantId, the other off orgId), so run them concurrently.
+  const [participantConvs, orgConvs] = await Promise.all([
+    database
+      .select({ conversationId: schema.conversationParticipants.conversationId })
+      .from(schema.conversationParticipants)
+      .where(eq(schema.conversationParticipants.participantId, participantId)),
+    database
+      .select({ id: schema.conversations.id })
+      .from(schema.conversations)
+      .where(
+        and(
+          eq(schema.conversations.orgId, orgId),
+          eq(schema.conversations.visibility, 'external')
+        )
+      ),
+  ])
 
   const convIds = participantConvs.map(c => c.conversationId)
-
-  // Also include org-scoped conversations for this org where visibility=external
-  const orgConvs = await database
-    .select({ id: schema.conversations.id })
-    .from(schema.conversations)
-    .where(
-      and(
-        eq(schema.conversations.orgId, orgId),
-        eq(schema.conversations.visibility, 'external')
-      )
-    )
 
   // Merge unique IDs
   const allIds = new Set([...convIds, ...orgConvs.map(c => c.id)])
@@ -57,40 +59,87 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ conversations: [] })
   }
 
-  // Get full conversation data - only external visibility
-  let allConvs = await database
+  // Get full conversation data - only external visibility. Filter in SQL via
+  // an IN (...) on the merged id set rather than scanning the whole table.
+  const allConvs = await database
     .select()
     .from(schema.conversations)
+    .where(
+      and(
+        inArray(schema.conversations.id, [...allIds]),
+        eq(schema.conversations.visibility, 'external')
+      )
+    )
     .orderBy(desc(schema.conversations.updatedAt))
 
-  allConvs = allConvs.filter(c => allIds.has(c.id) && c.visibility === 'external')
+  if (allConvs.length === 0) {
+    return NextResponse.json({ conversations: [] })
+  }
+
+  // Batch-load all participants for these conversations in one query, then
+  // group by conversation. Avoids a per-conversation participant fetch.
+  const convIdList = allConvs.map(c => c.id)
+  const allParticipants = await database
+    .select()
+    .from(schema.conversationParticipants)
+    .where(inArray(schema.conversationParticipants.conversationId, convIdList))
+
+  const participantsByConv = new Map<string, typeof allParticipants>()
+  for (const p of allParticipants) {
+    const arr = participantsByConv.get(p.conversationId)
+    if (arr) arr.push(p)
+    else participantsByConv.set(p.conversationId, [p])
+  }
+
+  // Collect participant + org ids and resolve all names in batched lookups.
+  // The three queries are independent, so fire them concurrently.
+  const teamMemberIds = [...new Set(
+    allParticipants.filter(p => p.participantType === 'team_member').map(p => p.participantId)
+  )]
+  const contactIds = [...new Set(
+    allParticipants.filter(p => p.participantType === 'contact').map(p => p.participantId)
+  )]
+  const orgIdList = [...new Set(
+    allConvs.map(c => c.orgId).filter((x): x is string => !!x)
+  )]
+
+  const [tmNameRows, contactNameRows, orgNameRows] = await Promise.all([
+    teamMemberIds.length
+      ? database
+          .select({ id: schema.teamMembers.id, name: schema.teamMembers.name })
+          .from(schema.teamMembers)
+          .where(inArray(schema.teamMembers.id, teamMemberIds))
+      : Promise.resolve([] as { id: string; name: string }[]),
+    contactIds.length
+      ? database
+          .select({ id: schema.contacts.id, name: schema.contacts.name })
+          .from(schema.contacts)
+          .where(inArray(schema.contacts.id, contactIds))
+      : Promise.resolve([] as { id: string; name: string }[]),
+    orgIdList.length
+      ? database
+          .select({ id: schema.organisations.id, name: schema.organisations.name })
+          .from(schema.organisations)
+          .where(inArray(schema.organisations.id, orgIdList))
+      : Promise.resolve([] as { id: string; name: string }[]),
+  ])
+
+  const tmNameById = new Map(tmNameRows.map(r => [r.id, r.name]))
+  const contactNameById = new Map(contactNameRows.map(r => [r.id, r.name]))
+  const orgNameById = new Map(orgNameRows.map(r => [r.id, r.name]))
 
   const conversationsWithMeta = await Promise.all(
     allConvs.map(async conv => {
-      // Get participants
-      const participants = await database
-        .select()
-        .from(schema.conversationParticipants)
-        .where(eq(schema.conversationParticipants.conversationId, conv.id))
+      const participants = participantsByConv.get(conv.id) ?? []
 
-      // Get participant names
+      // Resolve participant names from the batched maps (same order, same
+      // skip-if-missing behaviour as the prior per-row lookups).
       const participantNames: string[] = []
       for (const p of participants) {
-        if (p.participantType === 'team_member') {
-          const tm = await database
-            .select({ name: schema.teamMembers.name })
-            .from(schema.teamMembers)
-            .where(eq(schema.teamMembers.id, p.participantId))
-            .limit(1)
-          if (tm.length > 0) participantNames.push(tm[0].name)
-        } else {
-          const ct = await database
-            .select({ name: schema.contacts.name })
-            .from(schema.contacts)
-            .where(eq(schema.contacts.id, p.participantId))
-            .limit(1)
-          if (ct.length > 0) participantNames.push(ct[0].name)
-        }
+        const nm = p.participantType === 'team_member'
+          ? tmNameById.get(p.participantId)
+          : contactNameById.get(p.participantId)
+        if (nm) participantNames.push(nm)
       }
 
       // Get last message (external only)
@@ -145,16 +194,8 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // Get org name
-      let orgName: string | null = null
-      if (conv.orgId) {
-        const orgs = await database
-          .select({ name: schema.organisations.name })
-          .from(schema.organisations)
-          .where(eq(schema.organisations.id, conv.orgId))
-          .limit(1)
-        if (orgs.length > 0) orgName = orgs[0].name
-      }
+      // Org name resolved from the batched map.
+      const orgName = conv.orgId ? (orgNameById.get(conv.orgId) ?? null) : null
 
       return {
         ...conv,

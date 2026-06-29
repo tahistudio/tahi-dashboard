@@ -8,7 +8,9 @@
    ============================================================ */
 
 @theme {
-  /* Typography */
+  /* Typography. Manrope is loaded via the Google Fonts @import above; the
+     codebase references the 'Manrope' family name literally throughout, so we
+     keep the named family rather than a next/font hashed name. */
   --font-sans: 'Manrope', ui-sans-serif, system-ui, sans-serif;
 
   /* Brand Colours

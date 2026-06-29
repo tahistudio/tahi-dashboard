@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import dynamic from 'next/dynamic'
 import {
   MessageSquare, Plus, Users, Hash, AtSign,
   Lock, ArrowLeft, Edit3, Trash2,
@@ -17,9 +18,40 @@ import { EmptyState } from '@/components/tahi/empty-state'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
 import { MessageThread } from '@/components/tahi/message-thread'
-import { MessageBubble } from '@/components/tahi/message-bubble'
-import { Composer, type ComposerSendPayload } from '@/components/tahi/composer'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
+import type { ComposerSendPayload } from '@/components/tahi/composer'
+
+// Tiptap (~300 KB) lands in both Composer and MessageBubble.
+// Defer them so the messages page shell paints before the editor loads.
+function MessageBubbleSkeleton() {
+  return (
+    <div className="animate-pulse flex items-start" style={{ gap: 'var(--space-3)', padding: 'var(--space-2) 0' }}>
+      <div style={{ width: '2rem', height: '2rem', borderRadius: '50%', background: 'var(--color-bg-tertiary)', flexShrink: 0 }} />
+      <div style={{ height: '2.75rem', width: '55%', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-tertiary)' }} />
+    </div>
+  )
+}
+function ComposerSkeleton() {
+  return (
+    <div
+      className="animate-pulse"
+      style={{
+        background: 'var(--color-bg-secondary)',
+        borderRadius: 'var(--radius-md)',
+        minHeight: '3.5rem',
+        border: '1px solid var(--color-border-subtle)',
+      }}
+    />
+  )
+}
+const MessageBubble = dynamic(
+  () => import('@/components/tahi/message-bubble').then(m => ({ default: m.MessageBubble })),
+  { ssr: false, loading: () => <MessageBubbleSkeleton /> }
+)
+const Composer = dynamic(
+  () => import('@/components/tahi/composer').then(m => ({ default: m.Composer })),
+  { ssr: false, loading: () => <ComposerSkeleton /> }
+)
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

@@ -11,12 +11,18 @@
 
 import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { Search } from 'lucide-react'
 import { NotificationBell } from './notification-bell'
 import { CurrencySwitcher } from './currency-switcher'
 import { TimerChip } from './timer-chip'
-import { SearchPalette } from './search-palette'
 import { resolveCrumb } from './nav-model'
+
+// SearchPalette is a large command palette only mounted when open -- defer it.
+const SearchPalette = dynamic(
+  () => import('./search-palette').then(m => ({ default: m.SearchPalette })),
+  { ssr: false }
+)
 
 interface AppTopNavProps {
   isAdmin: boolean

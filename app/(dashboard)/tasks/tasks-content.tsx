@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import {
   Plus, Search, Inbox, RefreshCw,
   Calendar, Zap, AlertTriangle, X, Loader2,
@@ -11,7 +12,6 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { apiPath } from '@/lib/api'
-import { AiTaskWizard } from '@/components/tahi/ai-task-wizard'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { DateRangePicker, type DateRange } from '@/components/tahi/date-range-picker'
 import { useToast } from '@/components/tahi/toast'
@@ -23,6 +23,12 @@ import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { Avatar } from '@/components/tahi/avatar'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
 import { fetchSchedulePhaseOptions, type SchedulePhaseOption } from '@/lib/schedule-phases'
+
+// AI wizard modal -- only opened on click, defer to reduce first-paint JS.
+const AiTaskWizard = dynamic(
+  () => import('@/components/tahi/ai-task-wizard').then(m => ({ default: m.AiTaskWizard })),
+  { ssr: false }
+)
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

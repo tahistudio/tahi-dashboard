@@ -2,7 +2,6 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
 
 // GET /api/admin/exchange-rates - list all cached rates
 export async function GET(req: NextRequest) {
@@ -64,40 +63,32 @@ export async function POST(req: NextRequest) {
   const database = await db()
   const now = new Date().toISOString()
 
-  // Upsert each rate
-  for (const [currency, rateToUsd] of Object.entries(data.rates)) {
-    const existing = await database
-      .select()
-      .from(schema.exchangeRates)
-      .where(eq(schema.exchangeRates.currency, currency))
-      .limit(1)
+  // Upsert every rate via onConflictDoUpdate on the currency primary key.
+  // This drops the per-currency existence SELECT (and the separate USD
+  // existence check) and runs the writes in one concurrent wave instead of
+  // ~20 sequential round-trips.
+  const ratesToUpsert = Object.entries(data.rates).map(([currency, rateToUsd]) => ({
+    currency,
+    rateToUsd,
+    updatedAt: now,
+  }))
 
-    if (existing.length > 0) {
-      await database
-        .update(schema.exchangeRates)
-        .set({ rateToUsd, updatedAt: now })
-        .where(eq(schema.exchangeRates.currency, currency))
-    } else {
-      await database
+  // Ensure USD = 1 is represented even if the API omitted it from symbols.
+  if (!ratesToUpsert.some(r => r.currency === 'USD')) {
+    ratesToUpsert.push({ currency: 'USD', rateToUsd: 1, updatedAt: now })
+  }
+
+  await Promise.all(
+    ratesToUpsert.map(r =>
+      database
         .insert(schema.exchangeRates)
-        .values({ currency, rateToUsd, updatedAt: now })
-    }
-  }
-
-  // Also ensure USD = 1 is stored
-  const usdExists = await database
-    .select()
-    .from(schema.exchangeRates)
-    .where(eq(schema.exchangeRates.currency, 'USD'))
-    .limit(1)
-
-  if (usdExists.length === 0) {
-    await database.insert(schema.exchangeRates).values({
-      currency: 'USD',
-      rateToUsd: 1,
-      updatedAt: now,
-    })
-  }
+        .values(r)
+        .onConflictDoUpdate({
+          target: schema.exchangeRates.currency,
+          set: { rateToUsd: r.rateToUsd, updatedAt: r.updatedAt },
+        })
+    )
+  )
 
   // Return NZD-based rates
   const allRates = await database.select().from(schema.exchangeRates)

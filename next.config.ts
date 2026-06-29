@@ -4,6 +4,20 @@ import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare'
 const nextConfig: NextConfig = {
   // The app serves at the domain root (e.g. portal.tahi.studio). No basePath.
 
+  experimental: {
+    optimizePackageImports: [
+      'lucide-react',
+      'recharts',
+      'date-fns',
+      '@radix-ui/react-dialog',
+      '@radix-ui/react-dropdown-menu',
+      '@radix-ui/react-popover',
+      '@radix-ui/react-select',
+      '@radix-ui/react-tabs',
+      '@radix-ui/react-tooltip',
+    ],
+  },
+
   // ─── NEXT_PUBLIC_* vars ─────────────────────────────────────────────────────
   // Webflow Cloud only injects env vars at RUNTIME, but Next.js NEXT_PUBLIC_* vars
   // must be baked in at BUILD time. We inline the public (non-secret) values here.

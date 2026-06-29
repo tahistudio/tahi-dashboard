@@ -14,102 +14,89 @@ export async function GET(req: NextRequest) {
 
   const database = await db()
 
-  // Total active clients
-  const activeClientsResult = await database
-    .select({ count: count() })
-    .from(schema.organisations)
-    .where(eq(schema.organisations.status, 'active'))
+  // Monthly request trend window (last 6 months)
+  const sixMonthsAgo = new Date()
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+  const sixMonthsAgoStr = sixMonthsAgo.toISOString()
+
+  // All of these aggregates are independent reads, so fire them in one
+  // Promise.all instead of eight sequential D1 round-trips. The average
+  // delivery time is now computed entirely in SQL via julianday() so no
+  // delivered-request rows transfer over the wire.
+  const [
+    activeClientsResult,
+    totalRequestsResult,
+    openRequestsResult,
+    avgDeliveryResult,
+    billableResult,
+    outstandingResult,
+    statusCounts,
+    recentRequests,
+  ] = await Promise.all([
+    database
+      .select({ count: count() })
+      .from(schema.organisations)
+      .where(eq(schema.organisations.status, 'active')),
+    database
+      .select({ count: count() })
+      .from(schema.requests),
+    database
+      .select({ count: count() })
+      .from(schema.requests)
+      .where(
+        and(
+          ne(schema.requests.status, 'delivered'),
+          ne(schema.requests.status, 'archived')
+        )
+      ),
+    database
+      .select({
+        avgDays: sql<number | null>`AVG(julianday(${schema.requests.deliveredAt}) - julianday(${schema.requests.createdAt}))`,
+      })
+      .from(schema.requests)
+      .where(
+        and(
+          eq(schema.requests.status, 'delivered'),
+          sql`${schema.requests.deliveredAt} IS NOT NULL`,
+          sql`${schema.requests.createdAt} IS NOT NULL`,
+          sql`julianday(${schema.requests.deliveredAt}) - julianday(${schema.requests.createdAt}) >= 0`
+        )
+      ),
+    database
+      .select({ total: sum(schema.timeEntries.hours) })
+      .from(schema.timeEntries)
+      .where(eq(schema.timeEntries.billable, true)),
+    database
+      .select({ total: sum(schema.invoices.totalUsd) })
+      .from(schema.invoices)
+      .where(inArray(schema.invoices.status, ['sent', 'overdue'])),
+    database
+      .select({
+        status: schema.requests.status,
+        count: count(),
+      })
+      .from(schema.requests)
+      .groupBy(schema.requests.status),
+    database
+      .select({ createdAt: schema.requests.createdAt })
+      .from(schema.requests)
+      .where(sql`${schema.requests.createdAt} >= ${sixMonthsAgoStr}`),
+  ])
 
   const totalClients = activeClientsResult[0]?.count ?? 0
-
-  // Total requests
-  const totalRequestsResult = await database
-    .select({ count: count() })
-    .from(schema.requests)
-
   const totalRequests = totalRequestsResult[0]?.count ?? 0
-
-  // Open requests (not delivered, not archived)
-  const openRequestsResult = await database
-    .select({ count: count() })
-    .from(schema.requests)
-    .where(
-      and(
-        ne(schema.requests.status, 'delivered'),
-        ne(schema.requests.status, 'archived')
-      )
-    )
-
   const openRequests = openRequestsResult[0]?.count ?? 0
 
-  // Average delivery days (approximate: days between createdAt and deliveredAt for delivered requests)
-  const deliveredRequests = await database
-    .select({
-      createdAt: schema.requests.createdAt,
-      deliveredAt: schema.requests.deliveredAt,
-    })
-    .from(schema.requests)
-    .where(eq(schema.requests.status, 'delivered'))
-
-  let avgDeliveryDays = 0
-  if (deliveredRequests.length > 0) {
-    let totalDays = 0
-    let validCount = 0
-    for (const r of deliveredRequests) {
-      if (r.createdAt && r.deliveredAt) {
-        const created = new Date(r.createdAt)
-        const delivered = new Date(r.deliveredAt)
-        const diffDays = (delivered.getTime() - created.getTime()) / (1000 * 60 * 60 * 24)
-        if (diffDays >= 0) {
-          totalDays += diffDays
-          validCount++
-        }
-      }
-    }
-    if (validCount > 0) {
-      avgDeliveryDays = Math.round((totalDays / validCount) * 10) / 10
-    }
-  }
-
-  // Total billable hours
-  const billableResult = await database
-    .select({ total: sum(schema.timeEntries.hours) })
-    .from(schema.timeEntries)
-    .where(eq(schema.timeEntries.billable, true))
+  const avgDaysRaw = avgDeliveryResult[0]?.avgDays
+  const avgDeliveryDays = avgDaysRaw != null ? Math.round(avgDaysRaw * 10) / 10 : 0
 
   const totalBillableHours = Number(billableResult[0]?.total ?? 0)
-
-  // Outstanding invoice amount (sent or overdue)
-  const outstandingResult = await database
-    .select({ total: sum(schema.invoices.totalUsd) })
-    .from(schema.invoices)
-    .where(inArray(schema.invoices.status, ['sent', 'overdue']))
-
   const outstandingInvoiceAmount = Number(outstandingResult[0]?.total ?? 0)
-
-  // Request counts by status
-  const statusCounts = await database
-    .select({
-      status: schema.requests.status,
-      count: count(),
-    })
-    .from(schema.requests)
-    .groupBy(schema.requests.status)
 
   const requestsByStatus: Record<string, number> = {}
   for (const row of statusCounts) {
     requestsByStatus[row.status] = row.count
   }
-
-  // Monthly request trend (last 6 months)
-  const sixMonthsAgo = new Date()
-  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
-  const sixMonthsAgoStr = sixMonthsAgo.toISOString()
-
-  const recentRequests = await database
-    .select({ createdAt: schema.requests.createdAt })
-    .from(schema.requests)
-    .where(sql`${schema.requests.createdAt} >= ${sixMonthsAgoStr}`)
 
   const monthlyTrend: Record<string, number> = {}
   for (let i = 5; i >= 0; i--) {

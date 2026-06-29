@@ -158,8 +158,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     { label: 'Archived',      statusValue: 'archived',      position: 5 },
   ]
 
-  for (const col of defaultColumns) {
-    await database.insert(schema.kanbanColumns).values({
+  await database.insert(schema.kanbanColumns).values(
+    defaultColumns.map(col => ({
       id: crypto.randomUUID(),
       orgId: newOrgId,
       label: col.label,
@@ -168,8 +168,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       isDefault: 1,
       createdAt: now,
       updatedAt: now,
-    })
-  }
+    }))
+  )
 
   // If retainer plan, provision a subscription and tracks
   if (planType === 'maintain') {

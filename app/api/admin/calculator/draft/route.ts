@@ -128,8 +128,9 @@ async function draftProposal(
       isFeatured: 0,
     },
   ]
-  for (const [i, v] of variants.entries()) {
-    await database.insert(schema.proposalVariants).values({
+  const scopeHtml = scopeHtmlFromInputs(inputs)
+  await database.insert(schema.proposalVariants).values(
+    variants.map((v, i) => ({
       id: crypto.randomUUID(),
       proposalId,
       name: v.name,
@@ -137,15 +138,15 @@ async function draftProposal(
       oneOffAmount: v.oneOffAmount,
       monthlyAmount: v.monthlyAmount,
       currency: ccy,
-      scopeHtml: scopeHtmlFromInputs(inputs),
+      scopeHtml,
       pricingNotesHtml: '<p>50% on signing, 50% on launch.</p>',
       ctaLabel: `Accept ${v.name}`,
       isFeatured: v.isFeatured,
       position: i,
       createdAt: now,
       updatedAt: now,
-    })
-  }
+    }))
+  )
 
   await database.update(schema.projectCalculations).set({
     linkedArtefactRef: `proposal:${proposalId}`,

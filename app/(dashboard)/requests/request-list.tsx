@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import {
   Plus, LayoutList, Columns3, BarChart3,
@@ -10,7 +11,6 @@ import {
   CheckSquare, Square, Users, Loader2, X, Sparkles,
 } from 'lucide-react'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
-import { AiRequestWizard } from '@/components/tahi/ai-request-wizard'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
@@ -31,6 +31,12 @@ import {
   type BoardPriority,
   type BoardTag,
 } from '@/components/tahi/board-view'
+
+// AI wizard modal -- only opened on click, defer to reduce first-paint JS.
+const AiRequestWizard = dynamic(
+  () => import('@/components/tahi/ai-request-wizard').then(m => ({ default: m.AiRequestWizard })),
+  { ssr: false }
+)
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

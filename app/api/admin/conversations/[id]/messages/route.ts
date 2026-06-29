@@ -75,55 +75,70 @@ export async function GET(
     : []
   const voiceByMessage = new Map(voiceRows.map(v => [v.messageId, v]))
 
-  // Enrich with sender names
-  const enrichedMessages = await Promise.all(
-    messages.map(async msg => {
-      let authorName = 'Unknown'
-      let authorAvatarUrl: string | null = null
+  // Batch-load author names by type to avoid a per-message lookup (N+1).
+  // The two lookups are independent, so resolve them concurrently.
+  const teamMemberAuthorIds = [...new Set(
+    messages.filter(m => m.authorType === 'team_member').map(m => m.authorId)
+  )]
+  const contactAuthorIds = [...new Set(
+    messages.filter(m => m.authorType !== 'team_member').map(m => m.authorId)
+  )]
 
-      if (msg.authorType === 'team_member') {
-        const tm = await database
-          .select({ name: schema.teamMembers.name, avatarUrl: schema.teamMembers.avatarUrl })
+  const [tmAuthorRows, contactAuthorRows] = await Promise.all([
+    teamMemberAuthorIds.length
+      ? database
+          .select({ id: schema.teamMembers.id, name: schema.teamMembers.name, avatarUrl: schema.teamMembers.avatarUrl })
           .from(schema.teamMembers)
-          .where(eq(schema.teamMembers.id, msg.authorId))
-          .limit(1)
-        if (tm.length > 0) {
-          authorName = tm[0].name
-          authorAvatarUrl = tm[0].avatarUrl
-        }
-      } else {
-        const ct = await database
-          .select({ name: schema.contacts.name })
+          .where(inArray(schema.teamMembers.id, teamMemberAuthorIds))
+      : Promise.resolve([] as { id: string; name: string; avatarUrl: string | null }[]),
+    contactAuthorIds.length
+      ? database
+          .select({ id: schema.contacts.id, name: schema.contacts.name })
           .from(schema.contacts)
-          .where(eq(schema.contacts.id, msg.authorId))
-          .limit(1)
-        if (ct.length > 0) {
-          authorName = ct[0].name
-        }
-      }
+          .where(inArray(schema.contacts.id, contactAuthorIds))
+      : Promise.resolve([] as { id: string; name: string }[]),
+  ])
 
-      const vn = voiceByMessage.get(msg.id)
+  const tmAuthorById = new Map(tmAuthorRows.map(r => [r.id, r]))
+  const contactNameById = new Map(contactAuthorRows.map(r => [r.id, r.name]))
 
-      return {
-        id: msg.id,
-        body: msg.body,
-        isInternal: msg.isInternal,
-        authorId: msg.authorId,
-        authorType: msg.authorType,
-        authorName,
-        authorAvatarUrl,
-        createdAt: msg.createdAt,
-        editedAt: msg.editedAt,
-        deletedAt: msg.deletedAt ?? null,
-        voiceNote: vn
-          ? {
-              url: `/api/uploads/serve?key=${encodeURIComponent(vn.storageKey)}`,
-              durationSeconds: vn.durationSeconds ?? undefined,
-            }
-          : null,
+  // Enrich with sender names from the batched maps.
+  const enrichedMessages = messages.map(msg => {
+    let authorName = 'Unknown'
+    let authorAvatarUrl: string | null = null
+
+    if (msg.authorType === 'team_member') {
+      const tm = tmAuthorById.get(msg.authorId)
+      if (tm) {
+        authorName = tm.name
+        authorAvatarUrl = tm.avatarUrl
       }
-    })
-  )
+    } else {
+      const nm = contactNameById.get(msg.authorId)
+      if (nm) authorName = nm
+    }
+
+    const vn = voiceByMessage.get(msg.id)
+
+    return {
+      id: msg.id,
+      body: msg.body,
+      isInternal: msg.isInternal,
+      authorId: msg.authorId,
+      authorType: msg.authorType,
+      authorName,
+      authorAvatarUrl,
+      createdAt: msg.createdAt,
+      editedAt: msg.editedAt,
+      deletedAt: msg.deletedAt ?? null,
+      voiceNote: vn
+        ? {
+            url: `/api/uploads/serve?key=${encodeURIComponent(vn.storageKey)}`,
+            durationSeconds: vn.durationSeconds ?? undefined,
+          }
+        : null,
+    }
+  })
 
   // Update lastReadAt for the current participant
   await database
@@ -275,22 +290,23 @@ export async function POST(
       })
     }
 
-    // Update conversation's updatedAt
-    await database
-      .update(schema.conversations)
-      .set({ updatedAt: now })
-      .where(eq(schema.conversations.id, conversationId))
-
-    // Update sender's lastReadAt
-    await database
-      .update(schema.conversationParticipants)
-      .set({ lastReadAt: now })
-      .where(
-        and(
-          eq(schema.conversationParticipants.conversationId, conversationId),
-          eq(schema.conversationParticipants.participantId, participantId)
-        )
-      )
+    // Bump the conversation's updatedAt and the sender's lastReadAt. These
+    // touch different tables with no data dependency, so run them concurrently.
+    await Promise.all([
+      database
+        .update(schema.conversations)
+        .set({ updatedAt: now })
+        .where(eq(schema.conversations.id, conversationId)),
+      database
+        .update(schema.conversationParticipants)
+        .set({ lastReadAt: now })
+        .where(
+          and(
+            eq(schema.conversationParticipants.conversationId, conversationId),
+            eq(schema.conversationParticipants.participantId, participantId)
+          )
+        ),
+    ])
 
     // Process @mentions and create mention rows + notifications
     const mentionedPeople = parseMentions(body.content.trim())

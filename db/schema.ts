@@ -79,6 +79,7 @@ export const organisations = sqliteTable('organisations', {
 }, (table) => [
   index('idx_orgs_status').on(table.status),
   index('idx_orgs_plan').on(table.planType),
+  index('idx_orgs_stripe_customer').on(table.stripeCustomerId),
   // Non-null clerk_org_id must be unique (one D1 org per Clerk org). SQLite
   // treats NULLs as distinct, so unprovisioned orgs all sit at NULL happily.
   uniqueIndex('idx_orgs_clerk_org').on(table.clerkOrgId),
@@ -107,6 +108,7 @@ export const contacts = sqliteTable('contacts', {
   index('idx_contacts_org').on(table.orgId),
   index('idx_contacts_clerk').on(table.clerkUserId),
   index('idx_contacts_person').on(table.personId),
+  index('idx_contacts_email').on(table.email),
 ])
 
 // ============================================================
@@ -180,7 +182,10 @@ export const teamMembers = sqliteTable('team_members', {
   // S20: JSON array of role strings, e.g. ["CEO","Developer"]
   roles: text('roles').default('[]'),
   ...timestamps,
-})
+}, (table) => [
+  index('idx_team_members_clerk').on(table.clerkUserId),
+  index('idx_team_members_person').on(table.personId),
+])
 
 // ============================================================
 // PERMISSIONS (Granular RBAC + ABAC)
@@ -368,6 +373,7 @@ export const subscriptions = sqliteTable('subscriptions', {
 }, (table) => [
   index('idx_subs_org').on(table.orgId),
   index('idx_subs_status').on(table.status),
+  index('idx_subs_stripe').on(table.stripeSubscriptionId),
 ])
 
 // ============================================================
@@ -383,7 +389,9 @@ export const tracks = sqliteTable('tracks', {
   // ID of request currently occupying this track (nullable = track is free)
   currentRequestId: text('current_request_id'),
   ...timestamps,
-})
+}, (table) => [
+  index('idx_tracks_subscription').on(table.subscriptionId),
+])
 
 // ============================================================
 // REQUESTS (All work items)
@@ -599,7 +607,10 @@ export const conversations = sqliteTable('conversations', {
   visibility: text('visibility').notNull().default('external'),
   createdById: text('created_by_id').notNull(),
   ...timestamps,
-})
+}, (table) => [
+  index('idx_conversations_org').on(table.orgId),
+  index('idx_conversations_request').on(table.requestId),
+])
 
 // ============================================================
 // CONVERSATION PARTICIPANTS
@@ -617,6 +628,7 @@ export const conversationParticipants = sqliteTable('conversation_participants',
   lastReadAt: text('last_read_at'),
 }, (table) => [
   index('idx_conv_participants_conv').on(table.conversationId),
+  index('idx_conv_participants_participant').on(table.participantId, table.participantType),
 ])
 
 // ============================================================
@@ -737,6 +749,7 @@ export const invoices = sqliteTable('invoices', {
   index('idx_invoices_org').on(table.orgId),
   index('idx_invoices_status').on(table.status),
   index('idx_invoices_recon_status').on(table.reconciliationStatus),
+  index('idx_invoices_stripe').on(table.stripeInvoiceId),
 ])
 
 // ============================================================
@@ -750,7 +763,9 @@ export const invoiceItems = sqliteTable('invoice_items', {
   quantity: real('quantity').default(1),
   unitPriceUsd: real('unit_price_usd').notNull(),
   totalUsd: real('total_usd').notNull(),
-})
+}, (table) => [
+  index('idx_invoice_items_invoice').on(table.invoiceId),
+])
 
 // ============================================================
 // TIME ENTRIES
@@ -875,7 +890,9 @@ export const taskSubtasks = sqliteTable('task_subtasks', {
   title: text('title').notNull(),
   completed: integer('completed', { mode: 'boolean' }).default(false),
   createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
-})
+}, (table) => [
+  index('idx_task_subtasks_task').on(table.taskId),
+])
 
 // ============================================================
 // MENTIONS (S19)
@@ -940,7 +957,9 @@ export const announcementDismissals = sqliteTable('announcement_dismissals', {
   announcementId: text('announcement_id').notNull().references(() => announcements.id, { onDelete: 'cascade' }),
   userId: text('user_id').notNull(),
   dismissedAt: text('dismissed_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
-})
+}, (table) => [
+  index('idx_announcement_dismissals_user').on(table.userId),
+])
 
 // ============================================================
 // AUTOMATION RULES
@@ -971,7 +990,10 @@ export const automationLog = sqliteTable('automation_log', {
   status: text('status').notNull(),
   errorMessage: text('error_message'),
   executedAt: text('executed_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
-})
+}, (table) => [
+  index('idx_auto_log_rule').on(table.ruleId),
+  index('idx_auto_log_executed').on(table.executedAt),
+])
 
 // ============================================================
 // NOTIFICATIONS
@@ -1241,7 +1263,10 @@ export const clientCosts = sqliteTable('client_costs', {
   recurring: integer('recurring', { mode: 'boolean' }).default(false),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
-})
+}, (table) => [
+  index('idx_client_costs_org_id').on(table.orgId),
+  index('idx_client_costs_date').on(table.date),
+])
 
 // ============================================================
 // CASE STUDY SUBMISSIONS
@@ -1272,7 +1297,9 @@ export const caseStudySubmissions = sqliteTable('case_study_submissions', {
   submittedAt: text('submitted_at'),
   tokenExpiresAt: text('token_expires_at'),
   ...timestamps,
-})
+}, (table) => [
+  index('idx_case_submissions_org').on(table.orgId),
+])
 
 export const caseStudies = sqliteTable('case_studies', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -1313,7 +1340,9 @@ export const docVersions = sqliteTable('doc_versions', {
   contentTiptap: text('content_tiptap'),
   savedById: text('saved_by_id'),
   savedAt: text('saved_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
-})
+}, (table) => [
+  index('idx_doc_versions_page').on(table.pageId),
+])
 
 // ============================================================
 // INTEGRATIONS
@@ -1405,7 +1434,10 @@ export const requestForms = sqliteTable('request_forms', {
   questions: text('questions').notNull().default('[]'),
   isDefault: integer('is_default').notNull().default(0),
   ...timestamps,
-})
+}, (table) => [
+  index('idx_request_forms_org_cat').on(table.orgId, table.category),
+  index('idx_request_forms_default').on(table.isDefault),
+])
 
 // ============================================================
 // KANBAN COLUMNS (Custom per-client overrides)
@@ -1420,7 +1452,9 @@ export const kanbanColumns = sqliteTable('kanban_columns', {
   position: integer('position').notNull().default(0),
   isDefault: integer('is_default').notNull().default(0),
   ...timestamps,
-})
+}, (table) => [
+  index('idx_kanban_org').on(table.orgId),
+])
 
 // ============================================================
 // CONTRACTS
@@ -1661,7 +1695,10 @@ export const dealContacts = sqliteTable('deal_contacts', {
   dealId: text('deal_id').notNull().references(() => deals.id, { onDelete: 'cascade' }),
   contactId: text('contact_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
   role: text('role'),
-})
+}, (table) => [
+  index('idx_deal_contacts_deal').on(table.dealId),
+  index('idx_deal_contacts_contact').on(table.contactId),
+])
 
 // ============================================================
 // CRM: ACTIVITIES
