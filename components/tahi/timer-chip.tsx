@@ -28,7 +28,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, ExternalLink, Inbox, CheckSquare, Users } from 'lucide-react'
+import { Loader2, ExternalLink } from 'lucide-react'
 import { ShellIcon } from '@/components/tahi/shell-icons'
 import { apiPath } from '@/lib/api'
 import { formatElapsed, isStaleTimer } from '@/lib/timer-helpers'
@@ -73,6 +73,15 @@ interface ClientOption {
 }
 
 type TimerSource = 'request' | 'task' | 'client'
+
+// Stable source order. The index drives the segmented control's sliding
+// indicator (data-i = 0/1/2), so this order must not change at runtime.
+const SOURCES: TimerSource[] = ['request', 'task', 'client']
+const SOURCE_LABELS: Record<TimerSource, string> = {
+  request: 'Requests',
+  task: 'Tasks',
+  client: 'Clients',
+}
 
 const POLL_MS = 30_000
 
@@ -382,7 +391,7 @@ export function TimerChip() {
             <>
               <div className="tt-readout">
                 <span className="tt-big">{elapsed}</span>
-                <span className="tt-sub">{`${running ? 'Running' : 'Paused'} . ${targetTitle}`}</span>
+                <span className="tt-sub">{`${running ? 'Running on' : 'Paused on'} ${targetTitle}`}</span>
               </div>
 
               <div className="tt-ctrls">
@@ -483,9 +492,11 @@ export function TimerChip() {
 }
 
 /**
- * Three-source picker: Request | Task | Client. Common search bar across all
- * three; tab swap clears the query. Each tab shows up to 40 results so the
- * panel never grows unbounded. Re-skinned to the app-shell tt-* classes.
+ * Three-source picker: Requests | Tasks | Clients. A sliding segmented control
+ * swaps the source (its index drives the indicator), a shared search filters
+ * the active list, and each result is a calm radio-style row. Picking a row
+ * starts the timer immediately; its radio fills while the start request is in
+ * flight. Up to 40 results render so the panel never grows unbounded.
  */
 function SourcePicker({
   source,
@@ -511,9 +522,11 @@ function SourcePicker({
   acting: boolean
 }) {
   const q = query.toLowerCase().trim()
+  // The row whose start request is currently in flight; fills its radio dot.
+  const [startingId, setStartingId] = useState<string | null>(null)
 
   // Normalise the active list into a common shape so we can render once.
-  let items: Array<{ id: string; label: string; sub?: string; mono?: string }> = []
+  let items: Array<{ id: string; label: string; mono?: string }> = []
   if (source === 'request') {
     items = requests
       .filter(r => !q
@@ -523,7 +536,6 @@ function SourcePicker({
       .map(r => ({
         id: r.id,
         label: r.title,
-        sub: r.orgName ?? undefined,
         mono: r.requestNumber != null ? `#${String(r.requestNumber).padStart(3, '0')}` : undefined,
       }))
   } else if (source === 'task') {
@@ -531,65 +543,42 @@ function SourcePicker({
       .filter(t => !q
         || t.title.toLowerCase().includes(q)
         || (t.orgName?.toLowerCase().includes(q) ?? false))
-      .map(t => ({ id: t.id, label: t.title, sub: t.orgName ?? 'Internal' }))
+      .map(t => ({ id: t.id, label: t.title }))
   } else {
     items = clients
       .filter(c => !q || c.name.toLowerCase().includes(q))
       .map(c => ({ id: c.id, label: c.name }))
   }
 
-  const SourceIcon = source === 'request' ? Inbox : source === 'task' ? CheckSquare : Users
-
-  const emptyTitle = q
+  const emptyText = loading
+    ? 'Loading...'
+    : q
     ? 'No matches'
     : source === 'request' ? 'No open requests'
     : source === 'task' ? 'No open tasks'
     : 'No active clients'
-  const emptyDesc = q
-    ? 'Try a shorter search.'
-    : source === 'request' ? 'Track time from a request once one is open.'
-    : source === 'task' ? 'Pick up a task to time work against it.'
-    : 'Track miscellaneous time against a client.'
 
   return (
     <>
-      {/* Source tabs. No dedicated app-shell class exists for this control, so
-          it's composed from the shell CSS vars (no new hardcoded hex). */}
-      <div role="tablist" aria-label="Track time source" style={{ display: 'flex', gap: '0.25rem' }}>
-        {(['request', 'task', 'client'] as const).map(s => {
-          const Icon = s === 'request' ? Inbox : s === 'task' ? CheckSquare : Users
-          const on = source === s
-          return (
-            <button
-              key={s}
-              type="button"
-              role="tab"
-              aria-selected={on}
-              onClick={() => setSource(s)}
-              style={{
-                flex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.3125rem',
-                padding: '0.375rem 0.25rem',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                border: `1px solid ${on ? 'transparent' : 'var(--border)'}`,
-                background: on ? 'var(--brand-100)' : 'var(--bg)',
-                color: on ? 'var(--brand-strong)' : 'var(--text-muted)',
-                font: `${on ? 700 : 600} 11.5px Manrope, sans-serif`,
-                transition: 'background 0.14s, color 0.14s, border-color 0.14s',
-              }}
-              onMouseEnter={e => { if (!on) e.currentTarget.style.background = 'var(--bg-secondary)' }}
-              onMouseLeave={e => { if (!on) e.currentTarget.style.background = 'var(--bg)' }}
-            >
-              <Icon size={13} aria-hidden="true" />
-              {s === 'request' ? 'Requests' : s === 'task' ? 'Tasks' : 'Clients'}
-            </button>
-          )
-        })}
+      {/* Sliding segmented source control. data-i = the active source's index
+          in SOURCES, which moves the .tt-seg-ind indicator. */}
+      <div className="tt-seg" data-i={SOURCES.indexOf(source)} role="group" aria-label="What to track">
+        <span className="tt-seg-ind" aria-hidden="true" />
+        {SOURCES.map(s => (
+          <button
+            key={s}
+            type="button"
+            className={'tt-seg-b' + (source === s ? ' on' : '')}
+            aria-pressed={source === s}
+            onClick={() => setSource(s)}
+            disabled={acting}
+          >
+            {SOURCE_LABELS[s]}
+          </button>
+        ))}
       </div>
+
+      <div className="tt-pick-lbl">What to track</div>
 
       {/* Search */}
       <div className="tt-search">
@@ -602,55 +591,35 @@ function SourcePicker({
           aria-label="Search to track time on"
           autoFocus
         />
+        {query && (
+          <button
+            type="button"
+            className="tt-search-x"
+            onClick={() => setQuery('')}
+            aria-label="Clear search"
+          >
+            <ShellIcon n="close" s={14} />
+          </button>
+        )}
       </div>
 
       {/* Results */}
       <div className="tt-list" role="list">
-        {loading ? (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.5rem',
-              padding: '1.25rem 0.5rem',
-              color: 'var(--text-faint)',
-              font: '500 12px Manrope, sans-serif',
-            }}
-          >
-            <Loader2 size={14} className="animate-spin" aria-hidden="true" /> Loading
-          </div>
-        ) : items.length === 0 ? (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              textAlign: 'center',
-              gap: '0.25rem',
-              padding: '1.25rem 0.75rem',
-              color: 'var(--text-muted)',
-            }}
-          >
-            <SourceIcon size={18} aria-hidden="true" style={{ color: 'var(--text-faint)', marginBottom: '0.25rem' }} />
-            <span style={{ font: '600 12.5px Manrope, sans-serif', color: 'var(--text)' }}>{emptyTitle}</span>
-            <span style={{ font: '500 11.5px Manrope, sans-serif', color: 'var(--text-faint)' }}>{emptyDesc}</span>
-          </div>
+        {loading || items.length === 0 ? (
+          <div className="tt-empty">{emptyText}</div>
         ) : (
-          items.slice(0, 40).map(item => (
-            <button
-              key={item.id}
-              type="button"
-              role="listitem"
-              className="tt-opt"
-              onClick={() => onPick(item.id)}
-              disabled={acting}
-              style={{ cursor: acting ? 'not-allowed' : 'pointer', opacity: acting ? 0.6 : 1 }}
-            >
-              <span className="tt-ic" style={{ flexShrink: 0 }}>
-                <SourceIcon size={14} aria-hidden="true" />
-              </span>
-              <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '1px' }}>
+          items.slice(0, 40).map(item => {
+            const on = acting && startingId === item.id
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="listitem"
+                className={'tt-opt' + (on ? ' on' : '')}
+                onClick={() => { setStartingId(item.id); onPick(item.id) }}
+                disabled={acting}
+              >
+                <span className="tt-opt-r" aria-hidden="true" />
                 <span className="tt-opt-t">
                   {item.mono && (
                     <span style={{ color: 'var(--text-faint)', marginRight: '0.3125rem', fontWeight: 500 }}>
@@ -659,22 +628,9 @@ function SourcePicker({
                   )}
                   {item.label}
                 </span>
-                {item.sub && (
-                  <span
-                    style={{
-                      font: '500 10.5px Manrope, sans-serif',
-                      color: 'var(--text-faint)',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >
-                    {item.sub}
-                  </span>
-                )}
-              </span>
-            </button>
-          ))
+              </button>
+            )
+          })
         )}
       </div>
     </>

@@ -25,7 +25,12 @@
 
 @layer components {
 
-.tahi-shell {
+/* Shell tokens live on :root (not .tahi-shell) because the dropdown menus
+   (notifications, currency, user menu, command palette) render through a portal
+   to document.body, OUTSIDE the .tahi-shell wrapper - scoping the tokens to
+   .tahi-shell left those portaled menus with undefined --bg / --text / --rail-*
+   and broken colours. Global definitions reach the portal. */
+:root {
   /* canvas / surface aliases -> real tokens (follow .dark automatically) */
   --cream: var(--color-bg-cream);
   --bg: var(--color-bg);
@@ -55,7 +60,22 @@
   --rail-icon: #6fa466;
   --rail-icon-active: #a6d99c;
 }
-.dark .tahi-shell {
+/* Dark mode: the design's exact dark shell palette (warm near-blacks, brighter
+   brand on dark, solid brand-100 tint). The forest rail stays fixed dark in
+   both themes; these tokens drive the canvas / top bar / menus / palette. */
+.dark {
+  --cream: #131211;
+  --bg: #1c1b19;
+  --bg-secondary: #232220;
+  --text: #eceae3;
+  --text-muted: #9a988f;
+  --text-faint: #6b6a63;
+  --border: rgba(255, 255, 255, 0.10);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --brand: #7aab6b;
+  --brand-strong: #8fbf80;
+  --brand-100: #222e1e;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -16px rgba(0, 0, 0, 0.6);
 }
 
@@ -465,10 +485,27 @@
 .tt-search:focus-within { border-color: var(--brand); color: var(--brand); }
 .tt-search input { flex: 1; min-width: 0; border: none; background: none; outline: none; font: 500 12.5px 'Manrope', sans-serif; color: var(--text); }
 .tt-search input::placeholder { color: var(--text-faint); }
-.tt-opt { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 9px; border: none; background: none; border-radius: 8px; text-align: left; color: var(--text); font: 500 12.5px 'Manrope', sans-serif; cursor: pointer; transition: background 0.14s; }
+.tt-opt { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 9px; border: none; background: none; border-radius: 8px; text-align: left; color: var(--text); font: 500 12.5px 'Manrope', sans-serif; cursor: pointer; transition: background 0.14s, color 0.14s; }
 .tt-opt:hover { background: var(--bg-secondary); }
 .tt-opt-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-opt-r { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--border-strong); flex-shrink: 0; position: relative; transition: border-color 0.14s; }
+.tt-opt.on .tt-opt-r { border-color: var(--brand); }
+.tt-opt.on .tt-opt-r::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--brand); }
+.tt-opt.on { color: var(--text); font-weight: 600; }
+.tt-opt:disabled { cursor: not-allowed; }
+.tt-opt:disabled:not(.on) { opacity: 0.5; }
 .tt-list { display: flex; flex-direction: column; gap: 1px; max-height: 150px; overflow-y: auto; margin: 0 -3px; padding: 0 3px; scrollbar-width: thin; }
+.tt-seg { position: relative; display: flex; background: var(--bg-secondary); padding: 3px; border-radius: 9px; }
+.tt-seg-ind { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 3); border-radius: 7px; background: var(--bg); box-shadow: 0 1px 3px rgba(20, 32, 12, 0.14); transition: transform 0.26s cubic-bezier(0.34, 1.3, 0.5, 1); }
+.tt-seg[data-i="1"] .tt-seg-ind { transform: translateX(100%); }
+.tt-seg[data-i="2"] .tt-seg-ind { transform: translateX(200%); }
+.tt-seg-b { position: relative; z-index: 1; flex: 1; padding: 7px 4px; border: none; background: none; border-radius: 7px; color: var(--text-muted); font: 600 11.5px 'Manrope', sans-serif; cursor: pointer; transition: color 0.2s; }
+.tt-seg-b.on { color: var(--text); }
+.tt-seg-b:disabled { cursor: not-allowed; }
+.tt-pick-lbl { font: 700 10.5px 'Manrope', sans-serif; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-faint); margin-top: -1px; }
+.tt-search-x { display: flex; border: none; background: none; padding: 2px; border-radius: 6px; color: var(--text-faint); cursor: pointer; transition: color 0.14s, background 0.14s; }
+.tt-search-x:hover { color: var(--text); background: var(--border); }
+.tt-empty { padding: 14px 6px; text-align: center; font: 500 12px 'Manrope', sans-serif; color: var(--text-faint); }
 
 /* ===================================================================
    NOTIFICATIONS DROPDOWN (inside existing Popover)
