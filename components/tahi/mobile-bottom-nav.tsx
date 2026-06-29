@@ -17,10 +17,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
-import {
-  LayoutDashboard, Inbox, CheckSquare, MessageSquare, FolderOpen,
-  Menu, Settings,
-} from 'lucide-react'
+import { ShellIcon, type ShellIconName } from '@/components/tahi/shell-icons'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { useUser } from '@clerk/nextjs'
 import { usePermissions } from '@/components/tahi/permissions-context'
@@ -38,20 +35,19 @@ import {
 const ADMIN_PRIMARY_HREFS = ['/overview', '/requests', '/tasks', '/messages']
 const CLIENT_PRIMARY_HREFS = ['/overview', '/requests', '/messages', '/files']
 
-// Fallback icons used only when an item is absent from the filtered nav (e.g.
-// if features are eventually passed and gate a primary tab). Mirrors the
-// explicit lists that existed before the nav-model refactor.
-const ADMIN_FALLBACK_ICONS: Record<string, NavItem['icon']> = {
-  '/overview': LayoutDashboard as NavItem['icon'],
-  '/requests': Inbox         as NavItem['icon'],
-  '/tasks':    CheckSquare   as NavItem['icon'],
-  '/messages': MessageSquare as NavItem['icon'],
+// Fallback icon names used only when an item is absent from the filtered nav
+// (e.g. if features are eventually passed and gate a primary tab).
+const ADMIN_FALLBACK_ICONS: Record<string, ShellIconName> = {
+  '/overview': 'overview',
+  '/requests': 'requests',
+  '/tasks':    'tasks',
+  '/messages': 'messages',
 }
-const CLIENT_FALLBACK_ICONS: Record<string, NavItem['icon']> = {
-  '/overview': LayoutDashboard as NavItem['icon'],
-  '/requests': Inbox          as NavItem['icon'],
-  '/messages': MessageSquare  as NavItem['icon'],
-  '/files':    FolderOpen     as NavItem['icon'],
+const CLIENT_FALLBACK_ICONS: Record<string, ShellIconName> = {
+  '/overview': 'overview',
+  '/requests': 'requests',
+  '/messages': 'messages',
+  '/files':    'files',
 }
 
 interface MobileBottomNavProps {
@@ -106,7 +102,7 @@ export function MobileBottomNav({ isAdmin = false, features }: MobileBottomNavPr
     return {
       href,
       label: item?.label ?? href.slice(1),
-      icon:  item?.icon  ?? fallbackIcons[href] ?? (Menu as NavItem['icon']),
+      icon:  (item?.icon ?? fallbackIcons[href] ?? 'overview') as ShellIconName,
     }
   })
 
@@ -143,7 +139,6 @@ export function MobileBottomNav({ isAdmin = false, features }: MobileBottomNavPr
         aria-label="Primary"
       >
         {primaryTabs.map(t => {
-          const Icon    = t.icon
           const isActive = active(t.href)
           return (
             <Link
@@ -152,7 +147,7 @@ export function MobileBottomNav({ isAdmin = false, features }: MobileBottomNavPr
               className={'mtab' + (isActive ? ' active' : '')}
               aria-current={isActive ? 'page' : undefined}
             >
-              <span className="mt-ic" aria-hidden="true"><Icon /></span>
+              <span className="mt-ic" aria-hidden="true"><ShellIcon n={t.icon} s={20} /></span>
               {t.label}
             </Link>
           )
@@ -164,7 +159,7 @@ export function MobileBottomNav({ isAdmin = false, features }: MobileBottomNavPr
           aria-expanded={sheetOpen}
           aria-label="Open full navigation menu"
         >
-          <span className="mt-ic" aria-hidden="true"><Menu size={20} /></span>
+          <span className="mt-ic" aria-hidden="true"><ShellIcon n="more" s={20} /></span>
           More
         </button>
       </nav>
@@ -188,7 +183,6 @@ export function MobileBottomNav({ isAdmin = false, features }: MobileBottomNavPr
               <div key={g.group}>
                 <div className="ms-glabel">{g.group}</div>
                 {g.items.map(it => {
-                  const Icon     = it.icon
                   const isActive = active(it.href)
                   return (
                     <Link
@@ -198,7 +192,7 @@ export function MobileBottomNav({ isAdmin = false, features }: MobileBottomNavPr
                       aria-current={isActive ? 'page' : undefined}
                       onClick={closeSheet}
                     >
-                      <span className="msi-ic" aria-hidden="true"><Icon /></span>
+                      <span className="msi-ic" aria-hidden="true"><ShellIcon n={it.icon} s={20} /></span>
                       {it.label}
                       {it.count != null && (
                         <span className="ms-count">{it.count}</span>
@@ -218,7 +212,7 @@ export function MobileBottomNav({ isAdmin = false, features }: MobileBottomNavPr
               onClick={closeSheet}
             >
               <span className="msi-ic" aria-hidden="true">
-                <Settings size={18} />
+                <ShellIcon n="settings" s={18} />
               </span>
               Settings
             </Link>

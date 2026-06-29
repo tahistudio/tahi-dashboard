@@ -13,8 +13,8 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { Check, ChevronDown } from 'lucide-react'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
+import { ShellIcon } from '@/components/tahi/shell-icons'
 import type { CurrencyCode } from '@/lib/currency'
 import { Popover } from '@/components/tahi/popover'
 
@@ -42,7 +42,7 @@ export function CurrencySwitcher() {
         aria-label={`Display currency: ${activeOption.code}. Change currency.`}
       >
         {activeOption.code}
-        <span className="cur-chev"><ChevronDown size={13} aria-hidden="true" /></span>
+        <span className="cur-chev"><ShellIcon n="chevron" s={13} /></span>
       </button>
 
       <Popover
@@ -76,7 +76,7 @@ export function CurrencySwitcher() {
             <span className="cr-code">{opt.symbol}</span>
             <span className="cr-name">{opt.name}</span>
             {opt.code === displayCurrency && (
-              <span className="cr-check"><Check size={16} aria-hidden="true" /></span>
+              <span className="cr-check"><ShellIcon n="check" s={16} /></span>
             )}
           </button>
         ))}

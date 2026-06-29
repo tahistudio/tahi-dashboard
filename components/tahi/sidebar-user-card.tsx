@@ -19,7 +19,7 @@ import * as React from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useUser, useClerk } from '@clerk/nextjs'
-import { Sun, Moon, Settings, LogOut, Eye, EyeOff, MoreVertical } from 'lucide-react'
+import { ShellIcon } from '@/components/tahi/shell-icons'
 import { Popover } from '@/components/tahi/popover'
 import { apiPath } from '@/lib/api'
 import { setImpersonation } from '@/components/tahi/impersonation-banner'
@@ -123,7 +123,7 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
           <b>{fullName}</b>
           {email && <small>{email}</small>}
         </span>
-        <span className="uc-menu-ic"><MoreVertical size={16} /></span>
+        <span className="uc-menu-ic"><ShellIcon n="dots" s={16} /></span>
       </button>
 
       <Popover
@@ -145,30 +145,30 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
           </div>
           <div className="ucm-div" />
           <button className="ucm-row" role="menuitem" onClick={() => { onToggleDarkMode(); }}>
-            <span className="ucm-ic">{darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}</span>
+            <span className="ucm-ic"><ShellIcon n={darkMode ? 'sun' : 'theme'} s={16} /></span>
             Theme
             <span className="ucm-state">{darkMode ? 'Dark' : 'Light'}</span>
           </button>
           {isSuperAdmin && (
             <>
               <button className="ucm-row" role="menuitem" onClick={() => { togglePrivateMode() }}>
-                <span className="ucm-ic"><EyeOff className="w-4 h-4" /></span>
+                <span className="ucm-ic"><ShellIcon n="private" s={16} /></span>
                 Private mode
                 <span className="ucm-state">{privateMode ? 'On' : 'Off'}</span>
               </button>
               <button className="ucm-row" role="menuitem" onClick={handleClientView} disabled={loadingClientView}>
-                <span className="ucm-ic"><Eye className="w-4 h-4" /></span>
+                <span className="ucm-ic"><ShellIcon n="impersonate" s={16} /></span>
                 {loadingClientView ? 'Starting client view...' : 'Client view'}
               </button>
             </>
           )}
           <div className="ucm-div" />
           <Link className="ucm-row" role="menuitem" href="/settings" onClick={() => setOpen(false)}>
-            <span className="ucm-ic"><Settings className="w-4 h-4" /></span>
+            <span className="ucm-ic"><ShellIcon n="settings" s={16} /></span>
             Settings
           </Link>
           <button className="ucm-row danger" role="menuitem" onClick={handleSignOut}>
-            <span className="ucm-ic"><LogOut className="w-4 h-4" /></span>
+            <span className="ucm-ic"><ShellIcon n="arrow" s={16} /></span>
             Sign out
           </button>
         </div>

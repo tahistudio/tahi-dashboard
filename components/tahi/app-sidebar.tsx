@@ -26,7 +26,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { PanelLeftClose, PanelLeftOpen, ChevronDown } from 'lucide-react'
+import { ShellIcon } from '@/components/tahi/shell-icons'
 import { cn } from '@/lib/utils'
 import { ADMIN_NAV, CLIENT_NAV, filterNav, isRouteActive, type NavGroup } from '@/components/tahi/nav-model'
 import { usePermissions } from '@/components/tahi/permissions-context'
@@ -232,12 +232,11 @@ function SidebarContent({
                 aria-controls={groupId}
               >
                 <span className="gl-text">{group.group}</span>
-                <span className="chev"><ChevronDown className="w-3 h-3" /></span>
+                <span className="chev"><ShellIcon n="chevron" s={13} /></span>
               </button>
               <div className="rail-items" id={groupId} aria-hidden={!open}>
                 <div className="rail-items-in">
                   {group.items.map(item => {
-                    const Icon = item.icon
                     const active = isItemActive(item.href)
                     return (
                       <Link
@@ -248,7 +247,7 @@ function SidebarContent({
                         data-tip={collapsed ? item.label : undefined}
                         className={cn('nav-item', active && 'active')}
                       >
-                        <span className="ni-ic"><Icon /></span>
+                        <span className="ni-ic"><ShellIcon n={item.icon} /></span>
                         <span className="ni-label">{item.label}</span>
                         {item.count != null && <span className="ni-count">{item.count}</span>}
                       </Link>
@@ -268,7 +267,7 @@ function SidebarContent({
           onClick={() => setCollapsed(true)}
           aria-label="Collapse sidebar"
         >
-          <PanelLeftClose className="w-4 h-4" />
+          <ShellIcon n="collapse" s={16} />
           <span>Collapse</span>
         </button>
         <button
@@ -277,7 +276,7 @@ function SidebarContent({
           aria-label="Expand sidebar"
           data-tip={collapsed ? 'Expand' : undefined}
         >
-          <PanelLeftOpen className="w-[18px] h-[18px]" />
+          <ShellIcon n="expand" s={18} />
         </button>
         <SidebarUserCard
           collapsed={collapsed}

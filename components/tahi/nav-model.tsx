@@ -4,23 +4,17 @@
  * Single source of truth for the sidebar rail, the mobile bottom tabs + "More"
  * sheet, and the top-bar breadcrumb, so the three surfaces never drift. Pure
  * data + a pure `filterNav` (no hooks) so any component can apply its own
- * audience / permission context.
+ * audience / permission context. Icons are ShellIcon names (the design's exact
+ * icon set, see components/tahi/shell-icons.tsx), not Lucide components.
  */
 
-import {
-  Inbox, Users, CreditCard, FileText, Clock, CheckSquare,
-  BarChart2, BookOpen, UserCog, MessageSquare,
-  FolderOpen, ShoppingBag, LayoutDashboard, Star, TrendingUp,
-  FileSignature, Gauge, Calendar, Megaphone, UserPlus, Share2, Phone,
-  PenLine, Map, Handshake,
-} from 'lucide-react'
 import { featureKeyForRoute } from '@/lib/feature-tree'
-import type * as React from 'react'
+import type { ShellIconName } from '@/components/tahi/shell-icons'
 
 export type NavItem = {
   label: string
   href: string
-  icon: React.ComponentType<{ className?: string }>
+  icon: ShellIconName
   adminOnly?: boolean
   clientOnly?: boolean
   clientVisible?: boolean
@@ -47,63 +41,63 @@ export const ADMIN_NAV: NavGroup[] = [
   {
     group: 'Workspace',
     items: [
-      { label: 'Overview',  href: '/overview',  icon: LayoutDashboard },
-      { label: 'Requests',  href: '/requests',  icon: Inbox },
-      { label: 'Tasks',     href: '/tasks',     icon: CheckSquare },
-      { label: 'Messages',  href: '/messages',  icon: MessageSquare },
+      { label: 'Overview', href: '/overview', icon: 'overview' },
+      { label: 'Requests', href: '/requests', icon: 'requests' },
+      { label: 'Tasks',    href: '/tasks',    icon: 'tasks' },
+      { label: 'Messages', href: '/messages', icon: 'messages' },
     ],
   },
   {
     group: 'Sales',
     items: [
-      { label: 'Leads',           href: '/leads',           icon: UserPlus,      adminOnly: true },
-      { label: 'Calls',           href: '/calls',           icon: Phone,         adminOnly: true },
-      { label: 'Deals',           href: '/deals',           icon: TrendingUp,    adminOnly: true },
-      { label: 'Proposals',       href: '/proposals',       icon: FileText,      adminOnly: true },
-      { label: 'Schedules',       href: '/schedules',       icon: Calendar,      adminOnly: true },
-      { label: 'Contracts',       href: '/contracts',       icon: FileSignature, adminOnly: true },
-      { label: 'Calculator',      href: '/calculator',      icon: Gauge,         adminOnly: true },
-      { label: 'Sales analytics', href: '/sales-analytics', icon: BarChart2,     adminOnly: true },
-      { label: 'Affiliates',      href: '/affiliates',      icon: Handshake,     adminOnly: true },
+      { label: 'Leads',           href: '/leads',           icon: 'leads',          adminOnly: true },
+      { label: 'Calls',           href: '/calls',           icon: 'calls',          adminOnly: true },
+      { label: 'Deals',           href: '/deals',           icon: 'deals',          adminOnly: true },
+      { label: 'Proposals',       href: '/proposals',       icon: 'proposals',      adminOnly: true },
+      { label: 'Schedules',       href: '/schedules',       icon: 'schedules',      adminOnly: true },
+      { label: 'Contracts',       href: '/contracts',       icon: 'contracts',      adminOnly: true },
+      { label: 'Calculator',      href: '/calculator',      icon: 'calculator',     adminOnly: true },
+      { label: 'Sales analytics', href: '/sales-analytics', icon: 'salesanalytics', adminOnly: true },
+      { label: 'Affiliates',      href: '/affiliates',      icon: 'affiliates',     adminOnly: true },
     ],
   },
   {
     group: 'Clients',
     items: [
-      { label: 'Clients', href: '/clients', icon: Users, adminOnly: true },
+      { label: 'Clients', href: '/clients', icon: 'clients', adminOnly: true },
     ],
   },
   {
     group: 'Marketing',
     items: [
-      { label: 'Content studio', href: '/content-studio', icon: PenLine,   adminOnly: true },
-      { label: 'Sitemap',        href: '/sitemap',        icon: Map,       adminOnly: true, emailAllowlist: SITEMAP_ALLOWLIST_EMAILS },
-      { label: 'Social',         href: '/social',         icon: Share2,    adminOnly: true },
-      { label: 'Reviews',        href: '/reviews',        icon: Star,      adminOnly: true },
-      { label: 'Announcements',  href: '/announcements',  icon: Megaphone, adminOnly: true },
+      { label: 'Content studio', href: '/content-studio', icon: 'content',       adminOnly: true },
+      { label: 'Sitemap',        href: '/sitemap',        icon: 'sitemap',       adminOnly: true, emailAllowlist: SITEMAP_ALLOWLIST_EMAILS },
+      { label: 'Social',         href: '/social',         icon: 'social',        adminOnly: true },
+      { label: 'Reviews',        href: '/reviews',        icon: 'reviews',       adminOnly: true },
+      { label: 'Announcements',  href: '/announcements',  icon: 'announcements', adminOnly: true },
     ],
   },
   {
     group: 'Finance',
     items: [
-      { label: 'Invoices',          href: '/invoices',          icon: FileText },
-      { label: 'Billing',           href: '/billing',           icon: CreditCard, adminOnly: true },
-      { label: 'Time',              href: '/time',              icon: Clock,      adminOnly: true },
-      { label: 'Financial reports', href: '/financial-reports', icon: BarChart2,  adminOnly: true },
-      { label: 'Reports',           href: '/reports',           icon: BarChart2,  adminOnly: true },
+      { label: 'Invoices',          href: '/invoices',          icon: 'invoices' },
+      { label: 'Billing',           href: '/billing',           icon: 'billing',          adminOnly: true },
+      { label: 'Time',              href: '/time',              icon: 'time',             adminOnly: true },
+      { label: 'Financial reports', href: '/financial-reports', icon: 'financialreports', adminOnly: true },
+      { label: 'Reports',           href: '/reports',           icon: 'reports',          adminOnly: true },
     ],
   },
   {
     group: 'Operations',
     items: [
-      { label: 'Capacity', href: '/capacity', icon: Gauge,   adminOnly: true },
-      { label: 'Team',     href: '/team',     icon: UserCog, adminOnly: true },
+      { label: 'Capacity', href: '/capacity', icon: 'capacity', adminOnly: true },
+      { label: 'Team',     href: '/team',     icon: 'team',     adminOnly: true },
     ],
   },
   {
     group: 'Knowledge',
     items: [
-      { label: 'Docs Hub', href: '/docs', icon: BookOpen, adminOnly: true },
+      { label: 'Docs Hub', href: '/docs', icon: 'docs', adminOnly: true },
     ],
   },
 ]
@@ -112,25 +106,25 @@ export const CLIENT_NAV: NavGroup[] = [
   {
     group: 'Your project',
     items: [
-      { label: 'Overview',  href: '/overview',  icon: LayoutDashboard, clientVisible: true },
-      { label: 'Requests',  href: '/requests',  icon: Inbox,           clientVisible: true },
-      { label: 'Messages',  href: '/messages',  icon: MessageSquare,   clientVisible: true },
-      { label: 'Schedule',  href: '/schedules', icon: Calendar,        clientVisible: true },
+      { label: 'Overview', href: '/overview',  icon: 'overview',  clientVisible: true },
+      { label: 'Requests', href: '/requests',  icon: 'requests',  clientVisible: true },
+      { label: 'Messages', href: '/messages',  icon: 'messages',  clientVisible: true },
+      { label: 'Schedule', href: '/schedules', icon: 'schedules', clientVisible: true },
     ],
   },
   {
     group: 'Library',
     items: [
-      { label: 'Files',    href: '/files',    icon: FolderOpen,  clientOnly: true, clientVisible: true },
-      { label: 'Services', href: '/services', icon: ShoppingBag, clientOnly: true, clientVisible: true },
+      { label: 'Files',    href: '/files',    icon: 'files',    clientOnly: true, clientVisible: true },
+      { label: 'Services', href: '/services', icon: 'services', clientOnly: true, clientVisible: true },
     ],
   },
   {
     group: 'Billing',
     items: [
-      { label: 'Invoices',  href: '/invoices',  icon: FileText,      clientVisible: true },
-      { label: 'Contracts', href: '/contracts', icon: FileSignature, clientVisible: true },
-      { label: 'Proposals', href: '/proposals', icon: FileText,      clientVisible: true },
+      { label: 'Invoices',  href: '/invoices',  icon: 'invoices',  clientVisible: true },
+      { label: 'Contracts', href: '/contracts', icon: 'contracts', clientVisible: true },
+      { label: 'Proposals', href: '/proposals', icon: 'proposals', clientVisible: true },
     ],
   },
 ]

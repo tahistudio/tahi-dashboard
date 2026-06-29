@@ -28,10 +28,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import {
-  Play, Pause, Square, Loader2, Clock, ChevronDown, ExternalLink, Search,
-  Inbox, CheckSquare, Users,
-} from 'lucide-react'
+import { Loader2, ExternalLink, Inbox, CheckSquare, Users } from 'lucide-react'
+import { ShellIcon } from '@/components/tahi/shell-icons'
 import { apiPath } from '@/lib/api'
 import { formatElapsed, isStaleTimer } from '@/lib/timer-helpers'
 import { notifyTimerChanged, subscribeToTimerChanges } from '@/lib/timer-events'
@@ -306,9 +304,9 @@ export function TimerChip() {
     return (
       <div className="tt" data-status="idle">
         <button type="button" className="tt-pill" disabled aria-label="Timer loading">
-          <span className="tt-ic"><Clock size={16} aria-hidden="true" /></span>
+          <span className="tt-ic"><ShellIcon n="clock" s={16} /></span>
           <span className="tt-lbl">Track time</span>
-          <span className="tt-chev"><ChevronDown size={12} aria-hidden="true" /></span>
+          <span className="tt-chev"><ShellIcon n="chevron" s={12} /></span>
         </button>
       </div>
     )
@@ -347,7 +345,7 @@ export function TimerChip() {
         aria-label={active ? `Active timer ${elapsed} ${running ? 'running' : 'paused'}` : 'Track time'}
       >
         <span className="tt-ic">
-          {active ? <span className="tt-dot" aria-hidden="true" /> : <Clock size={16} aria-hidden="true" />}
+          {active ? <span className="tt-dot" aria-hidden="true" /> : <ShellIcon n="clock" s={16} />}
         </span>
         {active ? (
           <span className="tt-live">
@@ -357,7 +355,7 @@ export function TimerChip() {
         ) : (
           <span className="tt-lbl">Track time</span>
         )}
-        <span className="tt-chev"><ChevronDown size={12} aria-hidden="true" /></span>
+        <span className="tt-chev"><ShellIcon n="chevron" s={12} /></span>
       </button>
 
       {open && (
@@ -390,16 +388,16 @@ export function TimerChip() {
               <div className="tt-ctrls">
                 {running && (
                   <button type="button" className="tt-btn" onClick={() => void pauseOrResume()} disabled={acting}>
-                    {acting ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Pause size={14} aria-hidden="true" />} Pause
+                    {acting ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <ShellIcon n="pause" s={14} />} Pause
                   </button>
                 )}
                 {paused && (
                   <button type="button" className="tt-btn tt-start" onClick={() => void pauseOrResume()} disabled={acting}>
-                    {acting ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Play size={14} aria-hidden="true" />} Resume
+                    {acting ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <ShellIcon n="play" s={14} />} Resume
                   </button>
                 )}
                 <button type="button" className="tt-btn tt-stop" onClick={() => void stop('log')} disabled={acting}>
-                  <Square size={12} aria-hidden="true" /> Stop
+                  <ShellIcon n="square" s={12} /> Stop
                 </button>
               </div>
 
@@ -595,7 +593,7 @@ function SourcePicker({
 
       {/* Search */}
       <div className="tt-search">
-        <Search size={14} aria-hidden="true" />
+        <ShellIcon n="search" s={15} />
         <input
           type="text"
           value={query}

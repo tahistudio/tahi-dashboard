@@ -1,17 +1,9 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import {
-  Bell,
-  CheckCheck,
-  FileText,
-  Receipt,
-  MessageSquare,
-  CheckSquare,
-  Building2,
-} from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { Popover } from '@/components/tahi/popover'
+import { ShellIcon } from '@/components/tahi/shell-icons'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,13 +37,13 @@ function formatRelative(dateStr: string): string {
 
 function iconFor(n: Notification) {
   switch (n.entityType) {
-    case 'request':      return <FileText     size={16} aria-hidden="true" />
-    case 'invoice':      return <Receipt      size={16} aria-hidden="true" />
-    case 'message':      return <MessageSquare size={16} aria-hidden="true" />
-    case 'task':         return <CheckSquare  size={16} aria-hidden="true" />
+    case 'request':      return <ShellIcon n="requests" s={16} />
+    case 'invoice':      return <ShellIcon n="invoices" s={16} />
+    case 'message':      return <ShellIcon n="messages" s={16} />
+    case 'task':         return <ShellIcon n="tasks" s={16} />
     case 'organisation':
-    case 'client':       return <Building2    size={16} aria-hidden="true" />
-    default:             return <Bell         size={16} aria-hidden="true" />
+    case 'client':       return <ShellIcon n="clients" s={16} />
+    default:             return <ShellIcon n="bell" s={16} />
   }
 }
 
@@ -184,7 +176,7 @@ export function NotificationBell() {
         aria-expanded={open}
         aria-haspopup="true"
       >
-        <Bell size={18} aria-hidden="true" />
+        <ShellIcon n="bell" s={18} />
         {hasUnread && <span className="tb-bell-dot" aria-hidden="true" />}
       </button>
 
@@ -206,7 +198,7 @@ export function NotificationBell() {
                 onClick={markAllRead}
                 disabled={markingAll}
               >
-                <CheckCheck size={16} aria-hidden="true" />
+                <ShellIcon n="checks" s={16} />
                 {markingAll ? 'Marking...' : 'Mark all as read'}
               </button>
             )}
@@ -232,7 +224,7 @@ export function NotificationBell() {
             ) : notifications.length === 0 ? (
               <div className="notif-empty">
                 <span className="notif-empty-ic">
-                  <Bell size={20} aria-hidden="true" />
+                  <ShellIcon n="bell" s={20} />
                 </span>
                 You are all caught up.
                 <small>New activity will show up here.</small>

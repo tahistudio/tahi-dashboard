@@ -2,7 +2,8 @@
 
 import { useCallback, useRef, useState, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
-import { Eye, UserCog, ChevronDown, Check } from 'lucide-react'
+import { ChevronDown, Check } from 'lucide-react'
+import { ShellIcon } from '@/components/tahi/shell-icons'
 import { Popover } from '@/components/tahi/popover'
 import { apiPath } from '@/lib/api'
 
@@ -174,7 +175,7 @@ export function ImpersonationBanner() {
   return (
     <div className="imp-banner">
       <span className="imp-eye">
-        {isTeamMember ? <UserCog size={15} /> : <Eye size={15} />}
+        <ShellIcon n="impersonate" s={15} />
       </span>
       {isTeamMember ? (
         <span>

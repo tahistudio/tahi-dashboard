@@ -12,7 +12,7 @@
 import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import dynamic from 'next/dynamic'
-import { Search } from 'lucide-react'
+import { ShellIcon } from '@/components/tahi/shell-icons'
 import { NotificationBell } from './notification-bell'
 import { CurrencySwitcher } from './currency-switcher'
 import { TimerChip } from './timer-chip'
@@ -64,7 +64,7 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
           onClick={() => setSearchOpen(true)}
           aria-label="Search the dashboard"
         >
-          <Search size={16} aria-hidden="true" />
+          <ShellIcon n="search" s={16} />
           <span>Search or jump to...</span>
           <span className="kbd" aria-hidden="true">
             <span>{'⌘'}</span>
@@ -83,7 +83,7 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
             onClick={() => setSearchOpen(true)}
             aria-label="Search the dashboard"
           >
-            <Search size={18} aria-hidden="true" />
+            <ShellIcon n="search" s={18} />
           </button>
         )}
         {isAdmin && <TimerChip />}

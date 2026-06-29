@@ -18,11 +18,9 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
-import {
-  Search, Loader2, X, ArrowRight, Inbox, CheckSquare, Users,
-  User as UserIcon, Briefcase, TrendingUp, FileText, FileSignature,
-  Calendar, BookOpen, Phone, ShoppingBag, Megaphone, Zap, UserCog,
-} from 'lucide-react'
+import { Loader2 } from 'lucide-react'
+import { ShellIcon } from '@/components/tahi/shell-icons'
+import type { ShellIconName } from '@/components/tahi/shell-icons'
 import { apiPath } from '@/lib/api'
 import type { SearchGroupType, SearchResultItem, SearchResponse } from '@/app/api/admin/search/route'
 
@@ -31,23 +29,23 @@ interface SearchPaletteProps {
   onClose: () => void
 }
 
-const TYPE_ICON: Record<SearchGroupType, React.ComponentType<{ size?: number; className?: string }>> = {
-  request: Inbox,
-  task: CheckSquare,
-  client: Users,
-  brand: Briefcase,
-  contact: UserIcon,
-  deal: TrendingUp,
-  invoice: FileText,
-  contract: FileSignature,
-  proposal: FileText,
-  schedule: Calendar,
-  doc: BookOpen,
-  call: Phone,
-  service: ShoppingBag,
-  announcement: Megaphone,
-  automation: Zap,
-  team: UserCog,
+const TYPE_ICON: Record<SearchGroupType, ShellIconName> = {
+  request: 'requests',
+  task: 'tasks',
+  client: 'clients',
+  brand: 'clients',
+  contact: 'team',
+  deal: 'deals',
+  invoice: 'invoices',
+  contract: 'contracts',
+  proposal: 'proposals',
+  schedule: 'schedules',
+  doc: 'docs',
+  call: 'calls',
+  service: 'services',
+  announcement: 'announcements',
+  automation: 'arrow',
+  team: 'team',
 }
 
 // One short context string per row, mapped to .cr-crumb. Prefer the
@@ -183,7 +181,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
           <span className="ci-ic" aria-hidden="true">
             {loading
               ? <Loader2 size={19} className="animate-spin" />
-              : <Search size={19} />}
+              : <ShellIcon n="search" s={19} />}
           </span>
           <input
             ref={inputRef}
@@ -203,7 +201,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
             aria-label="Close search (Escape)"
           >
             <span className="cmd-esc">esc</span>
-            <span className="cmd-x" aria-hidden="true"><X size={18} /></span>
+            <span className="cmd-x" aria-hidden="true"><ShellIcon n="close" s={18} /></span>
           </button>
         </div>
 
@@ -303,7 +301,7 @@ function ResultRow({
   onHover: () => void
   onSelect: () => void
 }) {
-  const Icon = TYPE_ICON[item.type]
+  const iconName = TYPE_ICON[item.type]
   const crumb = crumbFor(item)
   return (
     <button
@@ -318,12 +316,12 @@ function ResultRow({
       className={active ? 'cmd-row sel' : 'cmd-row'}
     >
       <span className="cr-ic" aria-hidden="true">
-        <Icon size={15} />
+        <ShellIcon n={iconName} s={15} />
       </span>
       <span className="cr-t" data-private>{item.title}</span>
       {crumb && <span className="cr-crumb" data-private>{crumb}</span>}
       <span className="cr-go" aria-hidden="true">
-        <ArrowRight size={15} />
+        <ShellIcon n="arrow" s={15} />
       </span>
     </button>
   )
