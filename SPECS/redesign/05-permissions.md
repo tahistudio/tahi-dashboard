@@ -51,7 +51,9 @@ It is also the foundation the rest of the redesign stands on. 04's nav visibilit
 
 **The single experiential throughline, which every element must serve or be cut:**
 
-> Every door in the studio is deliberate - each grant has a name, a reason, and a record.
+> Every door in the studio is deliberate - each grant has a name, a reason, and a record - and the map never lies, in either direction.
+
+This is the owner's stated north star for the whole platform (2026-07-04): every client and team member gets a per-subject panel the owner can tune, eventually down to the smallest aspects of their view and experience. The resulting app obeys one bidirectional invariant: if a person can see a surface it is because it was allowed, if they can click a control the click works, and if something is denied it is absent, not greyed or teased. Seeing the studio's finances is always the product of an explicit, recorded grant. And the model must scale: onboarding a new person starts from a template or a copied grant (the replicability primitive below), never from thirty hand-set toggles.
 
 ## Personas and jobs-to-be-done
 
@@ -98,6 +100,8 @@ It is also the foundation the rest of the redesign stands on. 04's nav visibilit
 5. **Preview before you commit, safely.** The owner can view the app as a role or client before trusting a change, building on impersonation. The client lens is read-only at the server (every portal write rejects an impersonating session), so preview-as is a lens, not a session you can act in. Consequence: the preview bar reuses 04's banner pattern exactly, with an always-visible exit.
 6. **One coherent story over two systems.** Feature visibility and data scope are presented together per subject, even though they persist separately (`feature_visibility` vs `teamMemberAccess`). Consequence: the team-member detail shows Role, Data scope, and Feature overrides as three ledger-labelled blocks in one column, one scroll, no second page.
 7. **Reading is free, writing is deliberate.** The list, detail, matrix, and history are all read-first; every write is a distinct control with instant optimistic feedback and a toast. Consequence: nothing edits on hover, nothing saves without a visible state change.
+8. **The map never lies, in either direction.** Visible = permitted and denied = absent are one promise read both ways; a surface that renders but rejects the click is a defect of the same severity as a leak. The single sanctioned exception is the read-only preview lens, where disabled write controls are the honest truth. Consequence: closing the admin-route enforcement gap (open decision 1) is a launch blocker for this redesign, not a follow-up.
+9. **Template-first replicability.** Access is authored once and reused: roles are the team-side template, plan defaults the client-side aspiration (open decision 11), and "Copy access from" turns any tuned subject into a starting point. Consequence: onboarding a new subject never begins from a blank slate of 27 toggles.
 
 ## Anatomy
 
@@ -219,7 +223,7 @@ At 375px (23.4375rem) the master-detail becomes a two-screen push. Stacking orde
 - Quiet pill: `--text-2xs` weight 600, `0.125rem 0.5rem`, `--radius-sm`, tinted fill + 1px matching hairline. Role tones as built: Super admin purple, Admin brand, Project manager info, Task handler teal, Viewer neutral; "No role" is outline-only neutral. Plan chips (clients) use the org `planType` label (Maintain / Scale / Tune / Launch / Hourly / Custom) in neutral tint. Colour is never the only signal; the label is always present.
 
 **Identity header (detail)**
-- Anatomy: 2.5rem circle avatar, name `--text-lg` weight 600 ink, role or plan chip beside the name, email (people) or "Client portal access" (orgs) in `--text-xs` `--color-text-muted` beneath. Right-aligned: "Preview as <name>" (people) or "View portal as <client>" (orgs) as a secondary button.
+- Anatomy: 2.5rem circle avatar, name `--text-lg` weight 600 ink, role or plan chip beside the name, email (people) or "Client portal access" (orgs) in `--text-xs` `--color-text-muted` beneath. Right-aligned: "Preview as <name>" (people) or "View portal as <client>" (orgs) as a secondary button, then a 2.25rem quiet icon button (ellipsis glyph, named "More actions") opening a small menu with one item, "Copy access from...", which opens the copy-access dialog below.
 - A single hairline divider (full-width rule element, not a one-sided border) separates the header from the blocks below, `1.25rem` clear on both sides.
 
 **Role assignment control (team member detail)**
@@ -257,6 +261,12 @@ At 375px (23.4375rem) the master-detail becomes a two-screen push. Stacking orde
 
 **Reason field**
 - Revealed beneath a row the moment its control leaves Inherit. Full row width, 2.25rem tall, `--text-xs`, white fill, 1px `--color-border-subtle`, `--radius-md`; placeholder "Why? (shown in the change history)"; labelled "Reason for <feature label> override". Commits on blur or Enter (toast "Reason saved" / "Could not save reason"). Setting the control back to Inherit clears and hides it.
+
+**Copy access dialog (the replicability primitive)**
+- Purpose: apply another subject's entire access story (role, data scope, feature overrides) to the selected subject in one deliberate act; the mechanic that makes onboarding template-first instead of thirty hand-set toggles.
+- Anatomy: centred dialog, 26rem, `--color-bg`, 1px `--color-border` hairline, `--shadow-floating`, `--radius-lg`. Title "Copy access from" (`--text-md` 600), a `SearchableSelect` of same-class subjects (team members for people, client orgs for orgs; the selected subject excluded), then once a source is chosen a preview line in `--text-sm` `--color-text-muted` summarising what will apply ("Task handler, sees 2 clients, 3 overrides"), and a warning line in `--text-xs` ink: "This replaces <name>'s current role, data scope, and feature overrides." Footer: "Cancel" (secondary) + "Copy access" (primary, brand fill, white text, `--radius-leaf-sm`; disabled until a source is chosen).
+- Behaviour: applies as one batch through the existing write paths (assign-role, scope PUT, feature-visibility upserts); writes one change-history summary entry ("Copied access from <source>") plus the individual entries those writes already produce; optimistic with a single toast; failure reverts everything.
+- States: rest / source chosen (preview fills) / applying (button spinner) / success (toast `Access copied from Staci Bonnie`, dialog closes, detail re-renders) / failure (toast `Could not copy access`, all values revert). Focus trapped, Esc cancels, focus returns to "More actions".
 
 **Roles matrix (Roles tab)**
 - Purpose: the at-a-glance audit of every role baseline; read-first, click-to-edit.
@@ -344,6 +354,7 @@ Calm, plain NZ voice. Hyphens only.
 - Zero-scope warning: `This teammate will see no clients.`
 - Overrides summary lines: `Financial reports - denied` / `Requests bulk actions - allowed` / `+2 more` / `No overrides - inherits the Task handler defaults.`
 - Buttons: `Configure features` / `Preview as Alex Rivera` / `View portal as Physitrack` / `View all` / `Done` / `Retry` / `Exit` / `Exit preview` / `Close` / `Clear search` / `Back`
+- Copy access: menu `More actions` / `Copy access from...`; dialog title `Copy access from`; picker placeholders `Choose a person` / `Choose a client`; preview `Task handler, sees 2 clients, 3 overrides`; warning `This replaces Alex Rivera's current role, data scope, and feature overrides.`; buttons `Cancel` / `Copy access`; toasts `Access copied from Staci Bonnie` / `Could not copy access`; history entry `Copied access from Staci Bonnie`
 - Slide-over subtitles: `Team member - 27 features` / `Client - 10 features` / `Role - 27 features`
 - Slide-over legend: `Inherit uses the default for this level` + `Set Allow or Deny to override the default for just this subject. Denying a parent also hides its sub-features.`
 - Three-way: `Inherit` / `Allow` / `Deny`
@@ -405,13 +416,14 @@ Calm, plain NZ voice. Hyphens only.
 6. **Change history** view: populated table with the real change-string patterns, plus the empty state.
 7. **Mobile (375px):** list screen, detail screen (pushed, with Back), the full-screen feature sheet, and the matrix in its horizontal scroller.
 8. **Dark mode** of screens 1, 2, and 4 minimum.
-9. **State sheet:** three-way control in all states (rest/hover/focus/each active/disabled-cascaded), reason revealed, zero-client warning strip, optimistic-failure toast pair, lockout guard message, list skeleton, load-error card, search no-matches.
+9. **State sheet:** three-way control in all states (rest/hover/focus/each active/disabled-cascaded), reason revealed, zero-client warning strip, optimistic-failure toast pair, lockout guard message, list skeleton, load-error card, search no-matches, and the copy-access dialog with a source chosen.
 
 **Integration constraints:**
 - Build on `lib/feature-tree.ts` + `lib/permissions.ts`; the builder edits `feature_visibility` (+ role assignment via `assign-role`) and `teamMemberAccess` (data scope). Do not invent a new model, new feature keys, or new role names; every feature row in a mock must be a real FEATURE_TREE node with its real `label` and `description`.
 - Server is the gate: the design must never imply client-side hiding equals security, and a denied surface downstream is absent, never disabled (cross-doc contract 6).
 - Keep the three-way + reason as the write primitive; add the matrix, preview-as, data scope, and change history around it. Reuse the existing `SlideOver`, `SearchableSelect`, `Badge`, `TahiButton`, `EmptyState`, and toast primitives - restyle, do not rebuild.
 - The subjects API must grow to feed the list (override counts, scope summary, level rank for sorting); flag this to the implementer rather than mocking data the endpoint cannot yet return.
+- "Copy access from" composes the existing write paths (assign-role, scope, feature-visibility); it introduces no new model. It is the template mechanic behind the owner's replicability requirement and ships with the builder, not after it.
 - The data-scope control replaces the `/team` "Access rules" slide-over as the canonical scope editor; `/team` links here.
 - MCP parity (CLAUDE.md rule 14): existing tools `get_feature_visibility`, `set_feature_visibility`, `list_permission_subjects`, `assign_team_role`; any new capability (scope editing, history reads) extends the worker MCP server.
 - Tokens only (no hardcoded hex outside the documented corrections); leaf radius only on the slide-over header icon wrapper and any primary CTA; hairlines all-sides or absent, never one-sided; 44px mobile targets; full reduced-motion support.
@@ -422,7 +434,7 @@ Permissions screens are where most products show their seams: a wall of checkbox
 
 ## Open decisions and risks (resolve before/while building)
 
-1. **Server enforcement gap (CONFIRMED by the 2026-06 security audit).** Most `/api/admin/*` routes check only `isTahiAdmin(orgId)` + `resolveAccessScoping`, not `requireFeature`. A denied teammate could still hit an API directly. The spec's stance: every data route must enforce the same feature + scope as the UI hides. This is the most important risk, and the audit verified it is live, so the builder must treat per-route enforcement as a hard requirement, not a nicety. (The portal side of this is already done: all client-facing routes now resolve and owner-bind the org via `getPortalAuth`; the gap is the admin/team-member side.)
+1. **Server enforcement gap (CONFIRMED by the 2026-06 security audit).** Most `/api/admin/*` routes check only `isTahiAdmin(orgId)` + `resolveAccessScoping`, not `requireFeature`. A denied teammate could still hit an API directly. The spec's stance: every data route must enforce the same feature + scope as the UI hides. This is the most important risk, and the audit verified it is live. Under the owner's stated invariant (visible = permitted, in both directions) this gap makes the map lie, so closing it is a **launch blocker** for the permissions redesign, not a hardening task. (The portal side of this is already done: all client-facing routes now resolve and owner-bind the org via `getPortalAuth`; the gap is the admin/team-member side.)
 2. **Two parallel systems** (feature_visibility vs teamMemberAccess; `teamMembers.role` vs `roles`/`teamMemberRoles`). Recommend `teamMemberRoles`/`roles` as canonical identity; have `access-scoping` read from it (today it keys off the legacy `teamMembers.role` string, so the two role systems can disagree for the same person). Present both axes as one story, which this design now does in the detail panel.
 3. **Safe-default = admin (CONFIRMED issue: scoping fails OPEN).** A Tahi-org user with no `teamMembers` row resolves to full admin, and `resolveAccessScoping` returns "unrestricted" for them, so the audit confirmed a contractor added to the Tahi org with no row sees every client. Convenient default, but it is the opposite of least-privilege. The decision this spec now makes: **flip to deny-by-default** (a Tahi user with no explicit role/scope sees nothing until granted). Migration `0078` already seeds Liam and Staci as super_admin (deterministic ids, idempotent), so flipping the default can never lock the owners out. The copy deck's "No role (no access)" reflects the post-flip world; the current build's "No role (default admin)" label must change with it.
 4. **No audit trail today** despite an `auditLog` table. The spec adds one (write on every assign-role + feature-visibility + scope change). Required for "why can X see Y". Deepening finding: `feature_visibility` rows carry `createdById` + `updatedAt`, so a partial v1 history is derivable, but `assign-role` records no actor and ended `teamMemberRoles` rows record no ender - the Who column needs new write paths, not just a read view.
@@ -432,3 +444,5 @@ Permissions screens are where most products show their seams: a wall of checkbox
 8. **Matrix cell semantics (new).** A role column blends two layers: the `rolePermissions` `.view` baseline (the inherit default) and role-level `feature_visibility` overrides. The matrix must render the **effective** value with the override dot marking the exception, and a cell edit writes `feature_visibility` (subjectType `role`) only - baseline editing is v2. Without this rule the same cell could mean two different stores.
 9. **Allow-segment contrast (new, design correction).** White text on `--color-brand` `#5A824E` is ~4.0:1 and fails AA at `--text-xs`; the active Allow segment (and any brand-filled mark at small sizes) must use `--color-brand-dark` `#425F39`, mirroring the 01-auth primary-button correction. The current build uses `--color-brand` and needs the swap.
 10. **History source and retention (new).** Decide whether the change history reads a new `auditLog` write path (recommended, decision 4) or a dedicated permissions log; either way cap the v1 view at the last 100 changes with no filters, and defer search/filter until the volume demands it.
+11. **Client-side templates (new, north star).** Roles template the team side; client orgs have no equivalent, so today every org is hand-tuned. Decide whether plan type becomes the client template (per-plan feature defaults applied at org creation, overridable per org). Recommended as a fast follow; "Copy access from" covers the gap in v1.
+12. **The "infinitely controllable" roadmap (new, north star).** The owner's end state is per-subject control over the smallest aspects of the experience (tabs, cards, individual actions). v1 stops at page/tab/card visibility plus org scope; the path there is deepening FEATURE_TREE with more child nodes and then the per-action layer already modelled in `permissions` (v2, decision 5). Grow the tree; never build a parallel mechanism.
