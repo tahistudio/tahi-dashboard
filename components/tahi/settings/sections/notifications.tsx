@@ -157,12 +157,9 @@ export function NotificationsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
           {/* One row per event group */}
           {GROUPS.map((g) => (
             <Fragment key={g.key}>
-              <div
-                className="sr-t"
-                style={{ padding: '14px 16px', borderTop: '1px solid var(--border-subtle)' }}
-              >
-                <b>{g.label}</b>
-                <small>{g.desc}</small>
+              <div style={{ padding: '14px 16px', borderTop: '1px solid var(--border-subtle)', minWidth: 0 }}>
+                <b style={{ display: 'block', font: '600 14px Manrope', color: 'var(--text)' }}>{g.label}</b>
+                <small style={{ display: 'block', marginTop: 2, font: '400 12.5px Manrope', color: 'var(--text-muted)' }}>{g.desc}</small>
               </div>
               {channels.map((c) => (
                 <div

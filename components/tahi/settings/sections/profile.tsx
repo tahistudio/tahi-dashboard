@@ -152,8 +152,8 @@ export function ProfileSection({ isAdmin = false }: { isAdmin?: boolean } = {}) 
       </div>
       <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>
         {editable
-          ? 'Email is managed through your login provider.'
-          : 'Your name and email are managed through your login provider (Clerk).'}
+          ? 'Email is managed through your account login.'
+          : 'Your name and email are managed through your account login.'}
       </p>
     </SectionShell>
   )
