@@ -18,5 +18,5 @@
 // Plus a new Fast Mode at 1/3 cost (TBD: wire up at call sites that
 // don't need the full latency budget).
 export const OPUS_MODEL = process.env.ANTHROPIC_OPUS_MODEL ?? 'claude-opus-4-8'
-export const SONNET_MODEL = process.env.ANTHROPIC_SONNET_MODEL ?? 'claude-sonnet-4-6'
+export const SONNET_MODEL = process.env.ANTHROPIC_SONNET_MODEL ?? 'claude-sonnet-5'
 export const HAIKU_MODEL = process.env.ANTHROPIC_HAIKU_MODEL ?? 'claude-haiku-4-5'

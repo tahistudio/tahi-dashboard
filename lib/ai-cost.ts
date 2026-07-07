@@ -22,6 +22,7 @@ export const RATE_CARD = {
   anthropic: {
     'claude-opus-4-7':       { in: 15.00, out: 75.00 },
     'claude-opus-4-8':       { in: 15.00, out: 75.00 },  // assumed == 4.7 until confirmed
+    'claude-sonnet-5':       { in: 3.00,  out: 15.00 },  // Sonnet 5 (current)
     'claude-sonnet-4-6':     { in: 3.00,  out: 15.00 },
     'claude-sonnet-4-7':     { in: 3.00,  out: 15.00 },  // forward-compat
     'claude-haiku-4-5':      { in: 1.00,  out: 5.00 },

@@ -33,7 +33,7 @@ import { sniffTechStack, type DetectedTech } from '@/lib/tech-stack-sniffer'
 
 export const dynamic = 'force-dynamic'
 
-const MODEL_FULL = 'claude-sonnet-4-6'
+const MODEL_FULL = 'claude-sonnet-5'
 const MODEL_SCORE = 'claude-haiku-4-5-20251001'
 // Per-lead token cap. Set via AI_PER_LEAD_TOKEN_CAP env var. 0 or unset
 // = disabled (no per-lead limit). Operator-level cost is managed by

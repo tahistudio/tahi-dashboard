@@ -15,7 +15,7 @@
  * adds its own input tokens which the API meters separately.
  */
 
-const MODEL = 'claude-sonnet-4-6'
+const MODEL = 'claude-sonnet-5'
 const MAX_TOKENS = 1500
 const MAX_WEB_SEARCH_USES = 5
 

@@ -22,7 +22,7 @@ import { eq } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
 
-const MODEL = 'claude-sonnet-4-6'
+const MODEL = 'claude-sonnet-5'
 const MAX_TRANSCRIPT_CHARS = 40_000
 
 const SYSTEM_PROMPT = `You are an extraction assistant for Tahi Studio, a Webflow design and development agency. You read transcripts of discovery and project calls, and pull structured information that helps the sales operator (Liam) capture deal-relevant details without re-watching the call.
