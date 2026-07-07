@@ -94,13 +94,6 @@ const CRONS: CronDef[] = [
     schedule: 'Weekly Mon 08:00 UK (disabled by default)',
   },
   {
-    cron: 'draft-approved-ideas',
-    label: 'Content drafting',
-    description: 'Picks up approved content ideas without a draft and runs the multi-agent drafting pipeline (researcher, writer, sales + readability reviewers, EIC). Disabled by default — flip content.draftingEnabled to true in settings once you trust the loop. Max 1-3 drafts per tick to keep token spend predictable.',
-    endpoint: '/api/admin/cron/draft-approved-ideas',
-    schedule: 'Hourly (disabled by default)',
-  },
-  {
     cron: 'link-engine-scan',
     label: 'Internal link engine',
     description: 'Scans every blog post published in the last 14 days, finds phrases in older posts where an inbound link to the fresh post would land naturally, drops the patches into /content-studio Links tab for Liam to approve. Disabled by default — toggle on via content.linkEngineEnabled setting.',
@@ -116,8 +109,8 @@ const CRONS: CronDef[] = [
   },
   {
     cron: 'round-table-advance',
-    label: 'Round table orchestrator',
-    description: 'Hand-cranks the round-table drafting pipeline forward by one stage per draft (oldest first, up to 3 drafts per tick). Picks up any draft in a non-terminal status (queued, researching, strategising, headline_lab, drafting, reviewing, editing, signing_off, covering). Drafts continue until ready_for_publish, failed, or cost_capped. Safe to run frequently — each stage has its own cost cap check.',
+    label: 'Round table drafting',
+    description: 'Drives the whole round-table drafting pipeline. First seeds queued drafts for approved content ideas that have no draft yet (gated by content.draftingEnabled, max 1-3 per tick), then advances every draft one stage (oldest first, up to 3 drafts per tick) through researching, strategising, headline_lab, drafting, reviewing, editing, signing_off, covering until ready_for_publish, failed, or cost_capped. Safe to run frequently - each stage has its own cost cap check. Replaces the retired draft-approved-ideas cron.',
     endpoint: '/api/admin/cron/round-table-advance',
     schedule: 'Every 5 min (disabled by default)',
   },

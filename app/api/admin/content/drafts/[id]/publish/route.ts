@@ -140,9 +140,8 @@ export async function POST(
       const msg = err instanceof Error ? err.message : String(err)
       if (/404|not found/i.test(msg)) {
         // Webflow item is gone. Clear the stale id so the publish
-        // proceeds as a fresh create, and log the cleanup so the next
-        // sync doesn't try to find this item anywhere.
-        console.log(`Draft ${id}: cleared stale publishedWebflowItemId ${draft.publishedWebflowItemId} (Webflow returned 404)`)
+        // proceeds as a fresh create, and so the next sync doesn't try
+        // to find this item anywhere.
         await database.update(schema.contentDrafts).set({
           publishedWebflowItemId: null,
           publishUrl: null,

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Users, ChevronDown, ChevronRight, Briefcase, Clock, Plus, X, Filter } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { getInitials } from '@/lib/utils'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 
@@ -51,12 +52,6 @@ const DEPT_COLORS: Record<string, { bg: string; text: string; border: string }> 
 
 function getDeptStyle(dept: string | null) {
   return DEPT_COLORS[dept?.toLowerCase() ?? ''] ?? DEPT_COLORS.operations
-}
-
-// -- Helpers --
-
-function getInitials(name: string): string {
-  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
 // -- Node Components --

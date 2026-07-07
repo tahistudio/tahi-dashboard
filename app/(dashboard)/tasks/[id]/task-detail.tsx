@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import useSWR from 'swr'
 import { apiPath } from '@/lib/api'
+import { getInitials } from '@/lib/utils'
 import {
   AlertTriangle, Loader2,
   FileText, Calendar, Plus, Trash2,
@@ -140,10 +141,6 @@ function formatDateTime(dateStr: string | null): string {
 
 function formatType(type: string): string {
   return TASK_TYPE_LABELS[type] ?? type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-}
-
-function getInitials(name: string): string {
-  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
 // ---- Sub-components ----------------------------------------------------------

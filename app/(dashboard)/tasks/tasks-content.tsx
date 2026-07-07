@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { apiPath } from '@/lib/api'
+import { getInitials } from '@/lib/utils'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { DateRangePicker, type DateRange } from '@/components/tahi/date-range-picker'
 import { useToast } from '@/components/tahi/toast'
@@ -183,10 +184,6 @@ function formatBucket(task: { orgId: string | null; orgName?: string | null; typ
   return taskBucket(task) === 'for_client'
     ? (task.orgName ? `For ${task.orgName}` : 'For a client')
     : 'For us'
-}
-
-function getInitials(name: string): string {
-  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────

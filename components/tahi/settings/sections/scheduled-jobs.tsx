@@ -16,6 +16,7 @@ import { useState } from 'react'
 import { Clock } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useResource } from '@/lib/use-resource'
+import { formatRelative } from '@/lib/utils'
 import {
   SectionShell,
   EmptyRow,
@@ -46,17 +47,6 @@ interface CronItem {
 
 interface CronsResponse {
   items: CronItem[]
-}
-
-function formatRelative(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  if (diff < 60_000) return 'just now'
-  const mins = Math.floor(diff / 60_000)
-  if (mins < 60) return mins + 'm ago'
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return hours + 'h ago'
-  const days = Math.floor(hours / 24)
-  return days + 'd ago'
 }
 
 function statusChip(status: CronStatus): { tone: ChipTone; label: string } {

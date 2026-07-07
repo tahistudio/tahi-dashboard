@@ -18,6 +18,7 @@ import {
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
+import { formatRelative } from '@/lib/utils'
 import { Badge } from '@/components/tahi/badge'
 import { useToast } from '@/components/tahi/toast'
 import { apiPath } from '@/lib/api'
@@ -39,17 +40,6 @@ interface CronItem {
   schedule: string
   lastRun: CronRun | null
   recentRuns: CronRun[]
-}
-
-function formatRelative(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  if (diff < 60_000) return 'just now'
-  const mins = Math.floor(diff / 60_000)
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
 }
 
 function statusTone(status: string): 'positive' | 'danger' | 'warning' | 'neutral' {

@@ -1,5 +1,5 @@
 /**
- * lib/permissions.ts — granular permissions resolver (SPECS/granular-permissions.md).
+ * lib/permissions.ts - granular permissions resolver (SPECS/granular-permissions.md).
  *
  * Resolves a user to an access LEVEL + a `can(featureKey)` decision, layering:
  *   1. audience (team vs client) from the Clerk org,
@@ -8,11 +8,11 @@
  * over the FEATURE_TREE manifest.
  *
  * LEVELS (highest to lowest):
- *   super_admin  — every feature, can NEVER be locked out; manages permissions.
- *   admin        — every feature by default; manages permissions; feature_visibility
+ *   super_admin  - every feature, can NEVER be locked out; manages permissions.
+ *   admin        - every feature by default; manages permissions; feature_visibility
  *                  deny can hide a feature from them, but they can always unhide it.
- *   team_member  — sees features their role can .view, minus feature_visibility deny.
- *   client       — client-audience features only, ON by default, minus per-org deny.
+ *   team_member  - sees features their role can .view, minus feature_visibility deny.
+ *   client       - client-audience features only, ON by default, minus per-org deny.
  *
  * Safe defaults (no lockout): a Tahi-org user with NO role assigned resolves to
  * `admin` (preserves the historical "all Tahi users are admin" behaviour). The
@@ -118,12 +118,69 @@ export function can(access: ResolvedAccess, featureKey: string): boolean {
   return decideFeature(access, featureKey)
 }
 
-/** Decide every FEATURE_TREE key for this access — sent to the client so the
+/** Decide every FEATURE_TREE key for this access - sent to the client so the
  *  sidebar + <Gate> can hide features without re-querying per node. */
 export function featureMap(access: ResolvedAccess): Record<string, boolean> {
   const map: Record<string, boolean> = {}
   for (const node of FEATURE_TREE) map[node.key] = decideFeature(access, node.key)
   return map
+}
+
+// ── workspace module toggles ────────────────────────────────────────────────
+//
+// The settings Modules tab (components/tahi/settings/sections/modules.tsx) saves
+// a `module_<key>_enabled` row per module ('true' | 'false', default enabled
+// when unset). A disabled module hides its mapped FEATURE_TREE nav feature(s)
+// for EVERYONE except super-admins (who must keep every feature so they can
+// always re-enable a module). Server-side resolution: the layout folds these
+// into the feature map it passes to the sidebar; nothing is hidden client-side.
+
+/** Module key (as saved by the Modules tab) -> the FEATURE_TREE keys it gates. */
+export const MODULE_FEATURE_MAP: Readonly<Record<string, ReadonlyArray<string>>> = {
+  requests: ['requests'],
+  messaging: ['messages'],
+  billing: ['billing'],
+  time_tracking: ['time'],
+  reports: ['reports'],
+  files: ['files'],
+  services: ['services'],
+}
+
+/** The settings-store key for a module toggle. Mirrors modules.tsx settingKey(). */
+export function moduleSettingKey(moduleKey: string): string {
+  return `module_${moduleKey}_enabled`
+}
+
+/** Every `module_<key>_enabled` setting key - the exact rows the layout reads. */
+export const MODULE_SETTING_KEYS: ReadonlyArray<string> =
+  Object.keys(MODULE_FEATURE_MAP).map(moduleSettingKey)
+
+/**
+ * Fold workspace module toggles into a resolved feature map. A module whose
+ * `module_<key>_enabled` setting is exactly 'false' turns its mapped feature(s)
+ * OFF for everyone EXCEPT super-admins. Any other value (including unset) leaves
+ * the feature untouched. Pure - the caller supplies the settings map - so it is
+ * fully testable and never touches the DB.
+ *
+ * SCOPE (deliberate): module toggles are a NAV-DECLUTTER control, not a
+ * security boundary. They hide a module from the sidebar/mobile nav feature
+ * map; deep links and API routes for a disabled module remain reachable.
+ * Security-grade denial is the job of roles + feature_visibility +
+ * requireFeature, which are enforced server-side per route.
+ */
+export function applyModuleGates(
+  features: Record<string, boolean>,
+  settings: Record<string, string | null | undefined>,
+  isSuperAdmin: boolean,
+): Record<string, boolean> {
+  if (isSuperAdmin) return features
+  const next = { ...features }
+  for (const [moduleKey, featureKeys] of Object.entries(MODULE_FEATURE_MAP)) {
+    if (settings[moduleSettingKey(moduleKey)] === 'false') {
+      for (const fk of featureKeys) next[fk] = false
+    }
+  }
+  return next
 }
 
 // ── DB loader ─────────────────────────────────────────────────────────────────

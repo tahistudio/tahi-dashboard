@@ -2593,17 +2593,22 @@ function DraftsTab({ onToast }: DraftsTabProps) {
   async function retryDraft(ideaId: string) {
     setRetrying(ideaId)
     try {
-      const res = await fetch(apiPath(`/api/admin/content/ideas/${ideaId}/draft`), {
+      // Re-draft now runs the 23-reviewer round-table pipeline. A failed
+      // draft is in a terminal status, so the round-table entry point
+      // spins up a fresh draft (it only 409s on an already-active draft).
+      const res = await fetch(apiPath(`/api/admin/content/ideas/${ideaId}/round-table`), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force: true }),
       })
-      const json = await res.json().catch(() => ({})) as { error?: string }
+      const json = await res.json().catch(() => ({})) as { draftId?: string; status?: string; error?: string }
       if (!res.ok) {
         onToast(json.error ?? 'Re-draft failed', 'error')
         return
       }
-      onToast('Re-drafting started', 'success')
+      onToast(`Round table started - pipeline at ${json.status ?? 'queued'}. Opening detail...`, 'success')
+      if (typeof window !== 'undefined' && json.draftId) {
+        window.location.href = `/content-studio/drafts/${json.draftId}/round-table`
+        return
+      }
       await fetchDrafts()
     } catch (err) {
       onToast(err instanceof Error ? err.message : 'Re-draft failed', 'error')

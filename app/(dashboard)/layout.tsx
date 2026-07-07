@@ -18,7 +18,7 @@ import { SwrProvider } from '@/components/tahi/swr-provider'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { inArray } from 'drizzle-orm'
-import { resolvePermissions, featureMap } from '@/lib/permissions'
+import { resolvePermissions, featureMap, applyModuleGates, MODULE_SETTING_KEYS } from '@/lib/permissions'
 import './app-shell.css'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -80,12 +80,28 @@ export default async function DashboardLayout({
   try {
     const drizzle = (await db()) as unknown as D1
     const access = await resolvePermissions(drizzle, { userId, orgId })
+
+    // Workspace module toggles (settings Modules tab) fold into the nav feature
+    // map here, server-side, so a disabled module hides its feature for EVERYONE
+    // except super-admins. Read fails open (no gating) so a settings hiccup can
+    // never hide a module the user should see.
+    let moduleSettings: Record<string, string | null> = {}
+    try {
+      const rows = await drizzle
+        .select({ key: schema.settings.key, value: schema.settings.value })
+        .from(schema.settings)
+        .where(inArray(schema.settings.key, [...MODULE_SETTING_KEYS]))
+      for (const row of rows) moduleSettings[row.key] = row.value
+    } catch {
+      moduleSettings = {}
+    }
+
     perms = {
       level: access.level,
       isAdmin: access.isAdmin,
       isSuperAdmin: access.isSuperAdmin,
       canManagePermissions: access.canManagePermissions,
-      features: featureMap(access),
+      features: applyModuleGates(featureMap(access), moduleSettings, access.isSuperAdmin),
     }
   } catch {
     // fail-open

@@ -20,6 +20,7 @@ import { Plus } from 'lucide-react'
 import { Card } from '@/components/tahi/card'
 import { Badge, statusTone } from '@/components/tahi/badge'
 import { TahiButton } from '@/components/tahi/tahi-button'
+import { getInitials } from '@/lib/utils'
 
 export interface SubRequestRow {
   id: string
@@ -66,12 +67,7 @@ function Initials({ name }: { name: string | null }) {
       }}
     >—</span>
   )
-  const initials = name
-    .split(' ')
-    .map(s => s[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase()
+  const initials = getInitials(name)
   return (
     <span
       aria-label={name}

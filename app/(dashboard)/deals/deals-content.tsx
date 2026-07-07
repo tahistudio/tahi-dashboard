@@ -12,6 +12,7 @@ import {
   Trophy, XCircle, Filter, X, Bell, BellOff,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { getInitials } from '@/lib/utils'
 import { calculatePipelineTotals, formatDealValue, formatDealValueSplit, rangeConfidenceLevel } from '@/lib/pipeline-math'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
@@ -118,10 +119,6 @@ function formatDate(dateStr: string | null): string {
     const d = new Date(dateStr)
     return d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: '2-digit' })
   } catch { return '--' }
-}
-
-function getInitials(name: string): string {
-  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
 // Deal owner avatar: a remote URL that can 404/expire degrades to the same

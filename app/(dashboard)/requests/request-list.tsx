@@ -14,6 +14,7 @@ import {
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { apiPath } from '@/lib/api'
+import { getInitials } from '@/lib/utils'
 import { useToast } from '@/components/tahi/toast'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { ViewToggle } from '@/components/tahi/view-toggle'
@@ -166,10 +167,6 @@ function getDueDateState(dueDate: string | null, status: string): 'overdue' | 'd
 
 function formatType(type: string) {
   return type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-}
-
-function getInitials(name: string): string {
-  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
 function sortRequests(requests: Request[], sortKey: SortKey): Request[] {

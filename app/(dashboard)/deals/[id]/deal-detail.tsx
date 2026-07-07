@@ -18,6 +18,7 @@ import { parseActivityMetadata } from '@/lib/activity-meta'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { DISPLAY_CURRENCIES } from '@/lib/currency'
 import { apiPath } from '@/lib/api'
+import { getInitials } from '@/lib/utils'
 import { sourceBadge } from '@/lib/chart-colors'
 import { REQUEST_STATUS_CONFIG } from '@/lib/status-config'
 import { SidebarSection, SidebarCard as SharedSidebarCard } from '@/components/tahi/sidebar-card'
@@ -135,10 +136,6 @@ function formatDate(dateStr: string | null): string {
     const d = new Date(dateStr)
     return d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
   } catch { return '--' }
-}
-
-function getInitials(name: string): string {
-  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
 const ACTIVITY_ICONS: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {

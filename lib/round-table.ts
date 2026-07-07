@@ -795,9 +795,6 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
       const { sanitizeAiTells } = await import('@/lib/ai-tell-sanitizer')
       const aiSani = sanitizeAiTells(cleanMarkdown)
       cleanMarkdown = aiSani.markdown
-      if (aiSani.totalChanges > 0) {
-        console.log(`Stripped ${aiSani.totalChanges} AI tells from draft ${draft.id}: ${aiSani.stripped.length} pattern strips, ${aiSani.replacements.length} word swaps`)
-      }
     } catch (err) { console.error('AI tell sanitize failed', err) }
 
     // Strip any H1 the writer slipped in. The post title is the page's
@@ -807,7 +804,6 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
     const h1Count = (cleanMarkdown.match(/^#\s/gm) ?? []).length
     if (h1Count > 0) {
       cleanMarkdown = cleanMarkdown.replace(/^#\s+/gm, '## ')
-      console.log(`Downgraded ${h1Count} H1 heading(s) to H2 in draft ${draft.id}`)
     }
 
     // Auto-link first-mention of every live glossary term to its term
@@ -825,9 +821,6 @@ async function stageCover(database: Database, draft: DraftRow): Promise<StageRes
       const { autoLinkGlossary } = await import('@/lib/blog-context')
       const glossLinked = autoLinkGlossary(cleanMarkdown, glossaryTerms)
       cleanMarkdown = glossLinked.markdown
-      if (glossLinked.linked.length > 0) {
-        console.log(`Auto-linked ${glossLinked.linked.length} glossary terms in draft ${draft.id}`)
-      }
     } catch { /* site_index empty / not migrated — skip */ }
     structured.bodyMarkdownClean = cleanMarkdown
     const cleanHtml = markdownToHtml(structured.bodyMarkdownClean)
