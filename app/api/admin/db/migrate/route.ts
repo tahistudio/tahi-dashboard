@@ -1940,6 +1940,25 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_notif_pref_user ON notification_preferences (user_id, user_type)`,
     ],
   },
+  {
+    name: '0082',
+    description: 'Event engine: webhook_deliveries log. One row per attempted delivery of a domain event (request/invoice/client lifecycle) to a registered outgoing webhook endpoint, written best-effort by lib/webhooks.ts fireWebhook. endpoint_id is the opaque settings-store id (key prefix webhook_endpoint_), not an FK. Powers a delivery history in settings > integrations. Additive only.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS webhook_deliveries (
+        id text PRIMARY KEY NOT NULL,
+        endpoint_id text,
+        event text NOT NULL,
+        url text NOT NULL,
+        status text NOT NULL,
+        status_code integer,
+        error_message text,
+        attempted_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_event ON webhook_deliveries(event)`,
+      `CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_endpoint ON webhook_deliveries(endpoint_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_attempted ON webhook_deliveries(attempted_at)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

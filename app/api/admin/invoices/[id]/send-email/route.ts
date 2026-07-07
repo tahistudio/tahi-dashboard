@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import { publicUrl } from '@/lib/app-url'
 
 type Params = { params: Promise<{ id: string }> }
@@ -43,10 +43,14 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   // Find primary contact for this org
   const [contact] = await drizzle
-    .select({ email: schema.contacts.email, name: schema.contacts.name })
+    .select({
+      email: schema.contacts.email,
+      name: schema.contacts.name,
+      clerkUserId: schema.contacts.clerkUserId,
+    })
     .from(schema.contacts)
     .where(eq(schema.contacts.orgId, invoiceRow.orgId))
-    .orderBy(schema.contacts.isPrimary)
+    .orderBy(desc(schema.contacts.isPrimary))
     .limit(1)
 
   if (!contact?.email) {
@@ -55,6 +59,11 @@ export async function POST(req: NextRequest, { params }: Params) {
       { status: 400 }
     )
   }
+
+  // Category: TRANSACTIONAL. This is the invoice delivery itself (it flips the
+  // invoice status to 'sent'), not a courtesy alert, so it is never gated by
+  // per-event notification preferences. Preferences apply only to
+  // notification-style pings such as the in-app bell row.
 
   if (!process.env.RESEND_API_KEY) {
     return NextResponse.json(

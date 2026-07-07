@@ -14,6 +14,7 @@ interface StripeCharge {
   status: string
   description: string | null
   invoice: string | null
+  payment_intent: string | null
   customer: string | null
   receipt_email: string | null
   billing_details: { email: string | null; name: string | null } | null
@@ -41,17 +42,20 @@ export async function POST(req: NextRequest) {
   const database = await db() as unknown as D1
 
   try {
-    // Fetch ALL charges from Stripe, paging past the 100-per-request cap via
-    // the `starting_after` cursor. MAX_PAGES bounds the worst case; `truncated`
-    // is reported if we stopped early.
-    const MAX_PAGES = 25
+    // Fetch charges from Stripe, paging past the 100-per-request cap via the
+    // `starting_after` cursor. Stripe lists newest-first. PAGE_SIZE * MAX_PAGES
+    // is the hard ceiling per run so a huge account can't burn the Worker's CPU
+    // budget; `truncated` is reported if we stopped on the ceiling with more to
+    // pull, and `pagesWalked` reports how many pages we actually fetched.
+    const PAGE_SIZE = 100
+    const MAX_PAGES = 10 // hard ceiling: 1000 charges per run
     const allCharges: StripeCharge[] = []
     let startingAfter: string | null = null
     let hasMore = true
-    let pages = 0
+    let pagesWalked = 0
 
-    while (hasMore && pages < MAX_PAGES) {
-      let url = 'https://api.stripe.com/v1/charges?limit=100'
+    while (hasMore && pagesWalked < MAX_PAGES) {
+      let url = `https://api.stripe.com/v1/charges?limit=${PAGE_SIZE}`
       if (startingAfter) url += `&starting_after=${startingAfter}`
 
       const chargesRes = await fetch(url, {
@@ -59,7 +63,7 @@ export async function POST(req: NextRequest) {
       })
 
       if (!chargesRes.ok) {
-        if (pages === 0) return NextResponse.json({ error: 'Stripe API error' }, { status: 502 })
+        if (pagesWalked === 0) return NextResponse.json({ error: 'Stripe API error' }, { status: 502 })
         break
       }
 
@@ -67,7 +71,7 @@ export async function POST(req: NextRequest) {
       allCharges.push(...page.data)
       startingAfter = page.data.length ? page.data[page.data.length - 1].id : null
       hasMore = !!page.has_more && page.data.length > 0
-      pages++
+      pagesWalked++
     }
 
     const truncated = hasMore
@@ -90,23 +94,42 @@ export async function POST(req: NextRequest) {
     let skipped = 0
     const results: Array<{ chargeId: string; status: string; amount?: number; orgMatch?: string }> = []
 
+    // In-run dedupe of payment_intents. Stripe can emit more than one charge
+    // object for a single payment (e.g. a retried/updated PaymentIntent); we
+    // only want one local row per payment. Seeded so we never race the DB set.
+    const seenPaymentIntents = new Set<string>()
+
     for (const charge of allCharges) {
-      // Skip charges that are linked to invoices (already imported via invoice import)
+      // Prefer the invoice-linked record: any charge tied to an invoice is
+      // owned by the invoice import (in_* row), so skip the bare ch_* here.
+      // Also skip when that invoice was already imported as a local row.
       if (charge.invoice) {
         skipped++
         continue
       }
 
-      // Skip refunded, failed, or already imported
+      // Skip refunded or non-succeeded charges outright.
       if (charge.status !== 'succeeded' || charge.refunded) {
         skipped++
         continue
       }
 
+      // Idempotency: this charge was already imported on a previous run (we
+      // store the charge id as stripeInvoiceId), so re-running never dupes.
       if (existingIds.has(charge.id)) {
         skipped++
         results.push({ chargeId: charge.id, status: 'already_exists' })
         continue
+      }
+
+      // Dedupe two charges that share one PaymentIntent within this run.
+      if (charge.payment_intent) {
+        if (seenPaymentIntents.has(charge.payment_intent)) {
+          skipped++
+          results.push({ chargeId: charge.id, status: 'duplicate_payment' })
+          continue
+        }
+        seenPaymentIntents.add(charge.payment_intent)
       }
 
       // Match customer
@@ -172,6 +195,7 @@ export async function POST(req: NextRequest) {
           totalUsd: amount,
         })
 
+        existingIds.add(charge.id) // guard against a repeated id inside one run
         imported++
         results.push({
           chargeId: charge.id,
@@ -188,7 +212,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, imported, skipped, total: allCharges.length, truncated, results })
+    return NextResponse.json({ success: true, imported, skipped, total: allCharges.length, pagesWalked, truncated, results })
   } catch (err) {
     return NextResponse.json({
       error: 'Stripe payments import failed',

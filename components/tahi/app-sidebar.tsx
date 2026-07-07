@@ -37,7 +37,19 @@ import { SidebarUserCard } from '@/components/tahi/sidebar-user-card'
 import { useUser } from '@clerk/nextjs'
 import * as React from 'react'
 
-export function AppSidebar({ isAdmin, features }: { isAdmin: boolean; features?: Record<string, boolean> }) {
+export function AppSidebar({
+  isAdmin,
+  features,
+  brandName,
+  brandLogoUrl,
+}: {
+  isAdmin: boolean
+  features?: Record<string, boolean>
+  // Client-portal brand lockup. Both undefined for admin/team sessions, so the
+  // default Tahi wordmark renders and the admin path stays pixel-identical.
+  brandName?: string | null
+  brandLogoUrl?: string | null
+}) {
   const pathname = usePathname()
   const { collapsed, setCollapsed } = useSidebar()
   const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
@@ -170,6 +182,8 @@ export function AppSidebar({ isAdmin, features }: { isAdmin: boolean; features?:
         darkMode={darkMode}
         toggleDarkMode={toggleDarkMode}
         setCollapsed={setCollapsed}
+        brandName={brandName}
+        brandLogoUrl={brandLogoUrl}
       />
     </aside>
   )
@@ -187,6 +201,8 @@ interface SidebarContentProps {
   darkMode: boolean
   toggleDarkMode: () => void
   setCollapsed: (next: boolean) => void
+  brandName?: string | null
+  brandLogoUrl?: string | null
 }
 
 function SidebarContent({
@@ -198,7 +214,15 @@ function SidebarContent({
   darkMode,
   toggleDarkMode,
   setCollapsed,
+  brandName,
+  brandLogoUrl,
 }: SidebarContentProps) {
+  // A client portal viewer with saved branding gets their own lockup; every
+  // other session (admin/team, or a client with no branding set) falls through
+  // to the default Tahi wordmark below, unchanged.
+  const hasClientBrand = !!(brandLogoUrl || brandName)
+  const brandLabel = brandName?.trim() || 'Portal'
+  const brandInitial = brandLabel.charAt(0).toUpperCase()
   return (
     <>
       {/* Brand lockup. Wordmark (expanded) + icon-mark tile (collapsed); the
@@ -206,15 +230,73 @@ function SidebarContent({
       <div className="rail-top">
         <Link
           href="/overview"
-          aria-label="Tahi Studio. Go to overview"
+          aria-label={hasClientBrand ? `${brandLabel}. Go to overview` : 'Tahi Studio. Go to overview'}
           style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', textDecoration: 'none', minWidth: 0 }}
         >
-          <span className="wm" style={{ color: 'var(--rail-text-active)' }}>
-            <TahiStudioWordmark height={26} title="Tahi Studio" />
-          </span>
-          <span className="mark-tile" aria-hidden="true">
-            <TahiIconMark size={36} variant="on-dark" />
-          </span>
+          {hasClientBrand ? (
+            <>
+              <span className="wm" style={{ color: 'var(--rail-text-active)', minWidth: 0 }}>
+                {brandLogoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={brandLogoUrl}
+                    alt={brandLabel}
+                    style={{ height: 26, maxWidth: 160, objectFit: 'contain', display: 'block' }}
+                  />
+                ) : (
+                  <span
+                    style={{
+                      font: "700 1.0625rem 'Manrope', sans-serif",
+                      letterSpacing: '-0.01em',
+                      color: 'var(--rail-text-active)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      maxWidth: 168,
+                    }}
+                  >
+                    {brandLabel}
+                  </span>
+                )}
+              </span>
+              <span className="mark-tile" aria-hidden="true">
+                {brandLogoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={brandLogoUrl}
+                    alt=""
+                    style={{ width: 36, height: 36, objectFit: 'contain', borderRadius: 10, display: 'block' }}
+                  />
+                ) : (
+                  <span
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 10,
+                      background: 'var(--color-brand)',
+                      color: '#fff',
+                      font: "700 1rem 'Manrope', sans-serif",
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxShadow: '0 4px 14px -4px rgba(0, 0, 0, 0.5)',
+                    }}
+                  >
+                    {brandInitial}
+                  </span>
+                )}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="wm" style={{ color: 'var(--rail-text-active)' }}>
+                <TahiStudioWordmark height={26} title="Tahi Studio" />
+              </span>
+              <span className="mark-tile" aria-hidden="true">
+                <TahiIconMark size={36} variant="on-dark" />
+              </span>
+            </>
+          )}
         </Link>
       </div>
 

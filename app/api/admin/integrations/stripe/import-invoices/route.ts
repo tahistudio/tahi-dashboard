@@ -22,18 +22,20 @@ export async function POST(req: NextRequest) {
   const database = await db() as unknown as D1
 
   try {
-    // Fetch ALL invoices from Stripe, paging past the 100-per-request cap
-    // via the `starting_after` cursor. MAX_PAGES bounds the worst case so a
-    // huge account can't run the Worker past its CPU budget; the response
-    // reports `truncated` if we stopped early.
-    const MAX_PAGES = 25
+    // Fetch invoices from Stripe, paging past the 100-per-request cap via the
+    // `starting_after` cursor. PAGE_SIZE * MAX_PAGES is the hard ceiling per run
+    // so a huge account can't run the Worker past its CPU budget; the response
+    // reports `truncated` if we stopped on the ceiling with more to pull, and
+    // `pagesWalked` reports how many pages we actually fetched.
+    const PAGE_SIZE = 100
+    const MAX_PAGES = 10 // hard ceiling: 1000 invoices per run
     const allInvoices: StripeInvoiceLike[] = []
     let startingAfter: string | null = null
     let hasMore = true
-    let pages = 0
+    let pagesWalked = 0
 
-    while (hasMore && pages < MAX_PAGES) {
-      let url = 'https://api.stripe.com/v1/invoices?limit=100&expand[]=data.lines'
+    while (hasMore && pagesWalked < MAX_PAGES) {
+      let url = `https://api.stripe.com/v1/invoices?limit=${PAGE_SIZE}&expand[]=data.lines`
       if (startingAfter) url += `&starting_after=${startingAfter}`
 
       const stripeRes = await fetch(url, {
@@ -43,7 +45,7 @@ export async function POST(req: NextRequest) {
       if (!stripeRes.ok) {
         // First page failing is a hard error; a later page failing just stops
         // paging and we import what we already pulled.
-        if (pages === 0) {
+        if (pagesWalked === 0) {
           const errText = await stripeRes.text()
           return NextResponse.json({ error: 'Stripe API error', message: errText }, { status: 502 })
         }
@@ -54,7 +56,7 @@ export async function POST(req: NextRequest) {
       allInvoices.push(...page.data)
       startingAfter = page.data.length ? page.data[page.data.length - 1].id : null
       hasMore = !!page.has_more && page.data.length > 0
-      pages++
+      pagesWalked++
     }
 
     const truncated = hasMore
@@ -78,7 +80,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, imported, updated, skipped, total: allInvoices.length, truncated, results })
+    return NextResponse.json({ success: true, imported, updated, skipped, total: allInvoices.length, pagesWalked, truncated, results })
   } catch (err) {
     return NextResponse.json({
       error: 'Stripe import failed',

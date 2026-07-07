@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { dispatchDomainEvent } from '@/lib/events'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -199,6 +200,20 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     .update(schema.deals)
     .set({ orgId: newOrgId, updatedAt: now })
     .where(eq(schema.deals.id, id))
+
+  // Fire the domain event (automations + outgoing webhooks). Non-blocking.
+  await dispatchDomainEvent(database, {
+    type: 'client_onboarded',
+    entityId: newOrgId,
+    entityType: 'organisation',
+    orgId: newOrgId,
+    data: {
+      name: orgName,
+      planType,
+      source: 'deal_conversion',
+      dealId: id,
+    },
+  })
 
   return NextResponse.json({
     success: true,

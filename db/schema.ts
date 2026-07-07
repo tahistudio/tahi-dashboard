@@ -1003,6 +1003,31 @@ export const automationLog = sqliteTable('automation_log', {
 ])
 
 // ============================================================
+// OUTGOING WEBHOOK DELIVERIES
+// ============================================================
+
+// One row per attempted delivery of a domain event to a registered outgoing
+// webhook endpoint. Written best-effort by lib/webhooks.ts fireWebhook so the
+// settings > integrations webhooks UI can show a delivery history. Endpoints
+// themselves live in the settings key/value store (key prefix
+// `webhook_endpoint_`), so endpointId here is that opaque id, not an FK.
+export const webhookDeliveries = sqliteTable('webhook_deliveries', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  endpointId: text('endpoint_id'),
+  event: text('event').notNull(),
+  url: text('url').notNull(),
+  // delivered | failed
+  status: text('status').notNull(),
+  statusCode: integer('status_code'),
+  errorMessage: text('error_message'),
+  attemptedAt: text('attempted_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  index('idx_webhook_deliveries_event').on(table.event),
+  index('idx_webhook_deliveries_endpoint').on(table.endpointId),
+  index('idx_webhook_deliveries_attempted').on(table.attemptedAt),
+])
+
+// ============================================================
 // NOTIFICATIONS
 // ============================================================
 

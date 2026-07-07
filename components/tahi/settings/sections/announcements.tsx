@@ -29,8 +29,9 @@ import { apiPath } from '@/lib/api'
  *   - `emoji` and `cta` (button label) drive the live preview but are NOT
  *     persisted by the current POST (no columns / body keys). The live banner
  *     falls back to a per-type emoji.
- *   - The "also send email" toggle is kept as designed; the email fan-out is a
- *     later backend gap and is not sent to the server.
+ *   - The "also send email" toggle now drives a real email fan-out: when on and
+ *     the announcement is published, the POST carries `sendEmail: true` and the
+ *     route emails the targeted contacts, returning how many were reached.
  */
 
 interface AnnouncementRow {
@@ -140,6 +141,7 @@ export function AnnouncementsSection() {
         targetValue?: string
         targetIds?: string[]
         publish: boolean
+        sendEmail?: boolean
       } = {
         title: title.trim(),
         content: body.trim(),
@@ -149,6 +151,8 @@ export function AnnouncementsSection() {
       }
       if (targetType === 'plan_type') payload.targetValue = plan
       if (targetType === 'org') payload.targetIds = orgIds
+      // Email only fans out for a published announcement; a draft stays silent.
+      if (sendEmail && active) payload.sendEmail = true
 
       const res = await fetch(apiPath('/api/admin/announcements'), {
         method: 'POST',
@@ -159,8 +163,20 @@ export function AnnouncementsSection() {
         const j = (await res.json().catch(() => null)) as { error?: string } | null
         throw new Error(j?.error ?? 'Failed to publish')
       }
-      setFlash(active ? 'Published to the workspace.' : 'Saved as a draft.')
-      setTimeout(() => setFlash(null), 2600)
+      const result = (await res.json().catch(() => null)) as { emailed?: number } | null
+      const emailed = result?.emailed ?? 0
+      if (!active) {
+        setFlash('Saved as a draft.')
+      } else if (sendEmail) {
+        setFlash(
+          emailed > 0
+            ? `Published to the workspace and emailed ${emailed} ${emailed === 1 ? 'client' : 'clients'}.`
+            : 'Published to the workspace. No clients were emailed.',
+        )
+      } else {
+        setFlash('Published to the workspace.')
+      }
+      setTimeout(() => setFlash(null), 3600)
       await mutate()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong.')
@@ -386,7 +402,7 @@ export function AnnouncementsSection() {
         <div className="set-row" style={{ borderTop: '1px solid var(--border-subtle)' }}>
           <div className="sr-t">
             <b>Also send email</b>
-            <small>Email the banner to the audience as well. Delivery is coming soon.</small>
+            <small>Email the announcement to the audience as well when you publish.</small>
           </div>
           <Toggle
             on={sendEmail}

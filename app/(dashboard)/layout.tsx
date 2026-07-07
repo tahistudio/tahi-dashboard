@@ -16,10 +16,28 @@ import { PermissionsProvider, type PermissionsValue } from '@/components/tahi/pe
 import { PrivateModeProvider } from '@/components/tahi/private-mode-context'
 import { SwrProvider } from '@/components/tahi/swr-provider'
 import { db } from '@/lib/db'
+import { schema } from '@/db/d1'
+import { inArray } from 'drizzle-orm'
 import { resolvePermissions, featureMap } from '@/lib/permissions'
 import './app-shell.css'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+// Client-portal branding helpers. Admin sessions never touch any of this, so
+// the Tahi team's shell is byte-for-byte unchanged.
+const HEX6 = /^#[0-9a-fA-F]{6}$/
+function normalizeHex(v: string | null | undefined): string | null {
+  if (!v) return null
+  const s = v.trim()
+  return HEX6.test(s) ? s.toLowerCase() : null
+}
+// Derive a darker shade for hover / "strong" accents so a tinted portal still
+// has a two-step brand ramp. Pure function, no deps.
+function darkenHex(hex: string, factor = 0.82): string {
+  const n = parseInt(hex.slice(1), 16)
+  const to2 = (x: number) => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0')
+  return `#${to2(((n >> 16) & 255) * factor)}${to2(((n >> 8) & 255) * factor)}${to2((n & 255) * factor)}`
+}
 
 export default async function DashboardLayout({
   children,
@@ -73,6 +91,53 @@ export default async function DashboardLayout({
     // fail-open
   }
 
+  // ── Client-portal brand tint ────────────────────────────────────────────
+  // Admin Branding settings (portal_name / portal_primary_color /
+  // portal_logo_url) are consumed ONLY for client portal viewers. Admins skip
+  // this entirely, so nothing below can alter the Tahi team's shell. Fail-safe:
+  // any read error or a bad/missing value simply leaves the defaults in place.
+  let portalBrand: { color: string | null; name: string | null; logoUrl: string | null } = {
+    color: null, name: null, logoUrl: null,
+  }
+  if (!isAdmin) {
+    try {
+      const database = await db()
+      const rows = await database
+        .select()
+        .from(schema.settings)
+        .where(inArray(schema.settings.key, ['portal_primary_color', 'portal_name', 'portal_logo_url']))
+      const map: Record<string, string | null> = {}
+      for (const row of rows) map[row.key] = row.value
+      portalBrand = {
+        color: normalizeHex(map['portal_primary_color']),
+        name: map['portal_name']?.trim() || null,
+        logoUrl: map['portal_logo_url']?.trim() || null,
+      }
+    } catch {
+      // fail-safe: no branding, defaults stand
+    }
+  }
+
+  // CSS custom-property override, applied inline on the shell wrapper for client
+  // sessions with a valid saved colour only. For admins (or a bad hex) brandVars
+  // is empty, so the style is identical to before. --color-brand / --brand feed
+  // the portal's accents; --color-brand-dark / --brand-strong feed hovers.
+  const brandVars: Record<`--${string}`, string> = {}
+  if (!isAdmin && portalBrand.color) {
+    const strong = darkenHex(portalBrand.color)
+    brandVars['--color-brand'] = portalBrand.color
+    brandVars['--color-brand-dark'] = strong
+    brandVars['--brand'] = portalBrand.color
+    brandVars['--brand-strong'] = strong
+  }
+
+  // Favicon (favicon_light_url / favicon_dark_url) is a platform-level Tahi
+  // asset (super-admin only, same for every org) rather than per-client
+  // branding, and our dark mode is class-based (not prefers-color-scheme), so a
+  // media-swapped <link rel="icon"> would be unreliable. Left unwired on
+  // purpose. TODO: when per-org favicons exist, emit client-only <link
+  // rel="icon"> tags here from the settings values.
+
   return (
     <SwrProvider>
     <ToastProvider>
@@ -84,10 +149,15 @@ export default async function DashboardLayout({
             root layout <head> so it runs before body parses. See
             app/layout.tsx. */}
         <SkipToContent />
-        <div className="tahi-shell flex h-screen overflow-hidden" style={{ background: 'var(--color-bg-cream)' }}>
+        <div className="tahi-shell flex h-screen overflow-hidden" style={{ background: 'var(--color-bg-cream)', ...brandVars }}>
           {/* AppSidebar handles its own responsive visibility:
               desktop persistent, mobile drawer triggered from top-nav hamburger. */}
-          <AppSidebar isAdmin={isAdmin} features={perms.features} />
+          <AppSidebar
+            isAdmin={isAdmin}
+            features={perms.features}
+            brandName={portalBrand.name}
+            brandLogoUrl={portalBrand.logoUrl}
+          />
           <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
             {isAdmin && <ImpersonationBanner />}
             <AnnouncementBanner />

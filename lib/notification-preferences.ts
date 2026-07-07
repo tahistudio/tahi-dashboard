@@ -38,6 +38,7 @@ export const PREF_EVENT_TYPES: readonly NotificationEventType[] = [
   'invoice_created',
   'invoice_paid',
   'invoice_overdue',
+  'announcement_posted',
 ]
 
 export const PREF_CHANNELS: readonly NotificationChannel[] = ['in_app', 'email', 'slack']

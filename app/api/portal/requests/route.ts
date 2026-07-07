@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, ne, sql, inArray } from 'drizzle-orm'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
+import { dispatchDomainEvent } from '@/lib/events'
 
 // ── GET /api/portal/requests ─────────────────────────────────────────────────
 // Returns requests scoped to the client's own org.
@@ -146,6 +147,22 @@ export async function POST(req: NextRequest) {
       ${now}
     )
   `)
+
+  // Fire the domain event (automations + outgoing webhooks). Non-blocking.
+  await dispatchDomainEvent(drizzle2, {
+    type: 'request_created',
+    entityId: id,
+    entityType: 'request',
+    orgId,
+    data: {
+      title: title.trim(),
+      type: type ?? 'small_task',
+      category: category ?? 'development',
+      status: 'submitted',
+      isInternal: 0,
+      source: 'portal',
+    },
+  })
 
   return NextResponse.json({ id }, { status: 201 })
 }

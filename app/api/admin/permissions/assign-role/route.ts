@@ -75,6 +75,18 @@ export async function POST(req: NextRequest) {
       startedAt: now,
       createdAt: now,
     })
+
+    // Neutralise the LEGACY teamMembers.role column so it can never diverge
+    // from the new system and hand a scoped member unrestricted access via
+    // lib/access-scoping.ts (which treats legacy role === 'admin' as an
+    // unrestricted grant). The legacy column only understands 'admin' |
+    // 'member': keep 'admin' parity for admin-level roles, collapse every
+    // scoped role to 'member'.
+    const legacyRole = roleName === 'super_admin' || roleName === 'admin' ? 'admin' : 'member'
+    await drizzle
+      .update(schema.teamMembers)
+      .set({ role: legacyRole })
+      .where(eq(schema.teamMembers.id, teamMemberId))
   }
 
   await logAudit(drizzle as unknown as DB, {

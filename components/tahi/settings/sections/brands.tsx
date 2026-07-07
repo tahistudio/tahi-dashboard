@@ -1,36 +1,31 @@
 'use client'
 
 /*
- * BrandsSection - Client portal > Brands
+ * BrandsSection - Client portal > Brand
  *
- * Design source: the `function Brands(){...}` block in settings-app.jsx renders
- * a client's brand assets (logos, colours, fonts, guidelines) as a managed
- * add / edit / delete list, each row showing a name, a format / detail line and
- * a "Linked" chip.
+ * Each row is one real brand record from the `brands` table for the signed-in
+ * client's org (name, primary colour, website, notes, single logo URL). Add /
+ * edit / delete persist through /api/portal/brands, scoped to the caller's own
+ * org. Workspace admins (contacts.portalRole === 'admin') can manage; members
+ * get a read-only view.
  *
- * Backend reality today: each client org has brand record(s) in the `brands`
- * table carrying a SINGLE logo URL and a SINGLE primary colour (plus website /
- * notes). There is no storage yet for multiple logos, full colour palettes,
- * typeface files or guideline PDFs - those need R2 uploads and a brand_assets
- * schema (a later gap, called out in the note below).
- *
- * So the list is seeded from the real brand record(s) returned for the signed-in
- * client. Add / edit / delete operate on the in-session list only (there is no
- * per-asset persistence endpoint yet); the note makes that explicit.
+ * Not yet stored: multiple logos, full colour palettes, uploaded typefaces and
+ * guideline PDFs - those need R2 storage + a brand_assets table (called out in
+ * the note below).
  */
 
 import { useState } from 'react'
 import { Palette, Plus } from 'lucide-react'
 import { useResource } from '@/lib/use-resource'
+import { apiPath } from '@/lib/api'
 import {
   SectionShell,
-  useManaged,
   EditDialog,
   RowActions,
   EmptyRow,
 } from '@/components/tahi/settings/primitives'
 
-const TITLE = 'Brands'
+const TITLE = 'Brand'
 const LEDE =
   'Your logos, colours, fonts and guidelines - so the studio always uses the right assets.'
 
@@ -47,53 +42,6 @@ interface BrandsResponse {
   items: PortalBrand[]
 }
 
-interface AssetRow extends Record<string, unknown> {
-  name: string
-  type: string
-  url: string
-  colour: string
-  meta: string
-}
-
-// Expand each real brand record into the asset rows we can honestly show today
-// (logo, primary colour, website). Prefix with the brand name when the org has
-// more than one brand so rows stay unambiguous.
-function seedAssets(brands: PortalBrand[]): AssetRow[] {
-  const many = brands.length > 1
-  const rows: AssetRow[] = []
-  for (const b of brands) {
-    const prefix = many ? b.name + ' - ' : ''
-    if (b.logoUrl) {
-      rows.push({
-        name: prefix + 'Primary logo',
-        type: 'Logo image',
-        url: b.logoUrl,
-        colour: '',
-        meta: 'Linked',
-      })
-    }
-    if (b.primaryColour) {
-      rows.push({
-        name: prefix + 'Brand colour',
-        type: b.primaryColour.toUpperCase(),
-        url: '',
-        colour: b.primaryColour,
-        meta: 'Linked',
-      })
-    }
-    if (b.website) {
-      rows.push({
-        name: prefix + 'Website',
-        type: b.website,
-        url: b.website,
-        colour: '',
-        meta: 'Linked',
-      })
-    }
-  }
-  return rows
-}
-
 function LoadingShell() {
   return (
     <SectionShell title={TITLE} lede={LEDE}>
@@ -106,8 +54,21 @@ function LoadingShell() {
   )
 }
 
-export function BrandsSection({ isAdmin: _isAdmin }: { isAdmin?: boolean } = {}) {
-  const { data, error, isLoading } = useResource<BrandsResponse>('/api/portal/brands')
+interface EditState {
+  id: string | null // null = creating a new brand
+  name: string
+  primaryColour: string
+  website: string
+  notes: string
+}
+
+export function BrandsSection({ isClientAdmin }: { isAdmin?: boolean; isClientAdmin?: boolean } = {}) {
+  const { data, error, isLoading, mutate } = useResource<BrandsResponse>('/api/portal/brands')
+  const [ed, setEd] = useState<EditState | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
+
+  const canManage = !!isClientAdmin
 
   if (isLoading && !data) return <LoadingShell />
 
@@ -122,48 +83,107 @@ export function BrandsSection({ isAdmin: _isAdmin }: { isAdmin?: boolean } = {})
   }
 
   const brands = data?.items ?? []
-  return <BrandsList key={brands.map((b) => b.id).join(',')} seed={seedAssets(brands)} />
-}
 
-function BrandsList({ seed }: { seed: AssetRow[] }) {
-  const L = useManaged<AssetRow>(seed)
-  const [ed, setEd] = useState<string | null>(null)
+  function flash(msg: string) {
+    setNote(msg)
+    window.setTimeout(() => setNote(''), 4600)
+  }
 
-  const editingRow = ed ? L.rows.find((r) => r._id === ed) ?? null : null
+  function startAdd() {
+    setEd({ id: null, name: '', primaryColour: '#5A824E', website: '', notes: '' })
+  }
+
+  function startEdit(b: PortalBrand) {
+    setEd({
+      id: b.id,
+      name: b.name,
+      primaryColour: b.primaryColour ?? '#5A824E',
+      website: b.website ?? '',
+      notes: b.notes ?? '',
+    })
+  }
+
+  async function saveEdit(values: Record<string, string>) {
+    if (!ed) return
+    const name = (values.name ?? '').trim()
+    if (!name) {
+      flash('Brand name is required.')
+      return
+    }
+    setBusy(true)
+    try {
+      const isNew = ed.id === null
+      const res = await fetch(apiPath('/api/portal/brands'), {
+        method: isNew ? 'POST' : 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(isNew ? {} : { id: ed.id }),
+          name,
+          primaryColour: values.primaryColour ?? '',
+          website: values.website ?? '',
+          notes: values.notes ?? '',
+        }),
+      })
+      if (res.ok) {
+        setEd(null)
+        await mutate()
+      } else if (res.status === 403) {
+        flash('Only workspace admins can manage brands.')
+      } else {
+        flash('Could not save this brand. Please try again shortly.')
+      }
+    } catch {
+      flash('Could not save this brand. Please try again shortly.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function remove(id: string) {
+    setBusy(true)
+    try {
+      const res = await fetch(apiPath('/api/portal/brands?id=' + encodeURIComponent(id)), {
+        method: 'DELETE',
+      })
+      if (res.ok) {
+        await mutate()
+      } else if (res.status === 403) {
+        flash('Only workspace admins can manage brands.')
+      } else {
+        flash('Could not remove this brand. Please try again shortly.')
+      }
+    } catch {
+      flash('Could not remove this brand. Please try again shortly.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <SectionShell
       title={TITLE}
       lede={LEDE}
       action={
-        <button
-          type="button"
-          className="btn1"
-          onClick={() => {
-            const id = L.add({ name: 'New asset', type: 'Link', url: '', colour: '', meta: 'Linked' })
-            setEd(id)
-          }}
-        >
-          <Plus size={15} />
-          Add asset
-        </button>
+        canManage ? (
+          <button type="button" className="btn1" onClick={startAdd} disabled={busy}>
+            <Plus size={15} />
+            Add brand
+          </button>
+        ) : undefined
       }
     >
       <div className="set-card lrow-wrap">
-        {L.rows.map((r, i) => (
+        {brands.map((b, i) => (
           <div
-            key={r._id}
-            className={'lrow' + (r._new ? ' lrow-enter' : '')}
+            key={b.id}
+            className="lrow"
             style={i ? { borderTop: '1px solid var(--border-subtle)' } : undefined}
           >
-            {r.colour ? (
+            {b.primaryColour ? (
               <span
                 className="lrow-ic"
                 aria-hidden="true"
-                style={{
-                  background: r.colour,
-                  boxShadow: 'inset 0 0 0 1px rgba(0,0,0,.12)',
-                }}
+                style={{ background: b.primaryColour, boxShadow: 'inset 0 0 0 1px rgba(0,0,0,.12)' }}
               />
             ) : (
               <span className="lrow-ic leaf">
@@ -171,40 +191,46 @@ function BrandsList({ seed }: { seed: AssetRow[] }) {
               </span>
             )}
             <div className="lrow-t">
-              <b>{r.name}</b>
-              <small style={r.url ? { fontFamily: 'ui-monospace, monospace', fontSize: 12 } : undefined}>
-                {r.url || r.type}
+              <b>{b.name}</b>
+              <small style={b.website ? { fontFamily: 'ui-monospace, monospace', fontSize: 12 } : undefined}>
+                {b.website || (b.primaryColour ? b.primaryColour.toUpperCase() : 'No colour set')}
               </small>
             </div>
-            <div className="lrow-r">
-              <span className="chip neutral">{r.meta || 'Linked'}</span>
-              <RowActions onEdit={() => setEd(r._id)} onDelete={() => L.remove(r._id)} />
-            </div>
+            {canManage && (
+              <div className="lrow-r">
+                <RowActions onEdit={() => startEdit(b)} onDelete={() => remove(b.id)} />
+              </div>
+            )}
           </div>
         ))}
-        {!L.rows.length && <EmptyRow text="No brand assets yet." />}
+        {!brands.length && <EmptyRow text="No brands yet." />}
       </div>
 
       <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>
-        Logos, colours and links come straight from your brand record. Uploaded
-        typefaces, full colour palettes and guideline files are coming soon - they
-        need file storage, so edits here are not saved yet.
+        {canManage
+          ? 'Uploaded typefaces, full colour palettes and guideline files are coming soon - they need file storage.'
+          : 'Only workspace admins can add or edit brands. Ask your Tahi contact if something needs changing.'}
       </p>
 
-      {editingRow && (
+      {note && <div className="plan-note">{note}</div>}
+
+      {ed && (
         <EditDialog
-          heading="Edit brand asset"
-          row={editingRow}
-          fields={[
-            { key: 'name', label: 'Asset name' },
-            { key: 'type', label: 'Format / detail' },
-            { key: 'url', label: 'Link (Figma / Drive / Notion)', ph: 'https://' },
-          ]}
-          onSave={(v) => {
-            L.patch(ed as string, v)
-            setEd(null)
+          heading={ed.id === null ? 'Add brand' : 'Edit brand'}
+          row={{
+            name: ed.name,
+            primaryColour: ed.primaryColour,
+            website: ed.website,
+            notes: ed.notes,
           }}
-          onClose={() => setEd(null)}
+          fields={[
+            { key: 'name', label: 'Brand name' },
+            { key: 'primaryColour', label: 'Primary colour', type: 'color' },
+            { key: 'website', label: 'Website', ph: 'https://' },
+            { key: 'notes', label: 'Notes', type: 'textarea' },
+          ]}
+          onSave={saveEdit}
+          onClose={() => (busy ? undefined : setEd(null))}
         />
       )}
     </SectionShell>

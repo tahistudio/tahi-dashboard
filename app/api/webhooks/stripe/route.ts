@@ -5,6 +5,9 @@ import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { importStripeInvoice, type StripeInvoiceLike } from '@/lib/stripe-import'
 import { applyBillingDerivation } from '@/lib/billing-derivation'
+import { dispatchDomainEvent } from '@/lib/events'
+
+type EventsDb = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 type BillingDb = Parameters<typeof applyBillingDerivation>[0]
 
@@ -132,6 +135,15 @@ export async function POST(req: Request) {
             .where(eq(schema.invoices.id, existing[0].id))
             .limit(1)
           await tryDerive(database, orgRow[0]?.orgId)
+
+          // Fire the domain event (automations + outgoing webhooks). Non-blocking.
+          await dispatchDomainEvent(database as EventsDb, {
+            type: 'invoice_paid',
+            entityId: existing[0].id,
+            entityType: 'invoice',
+            orgId: orgRow[0]?.orgId ?? null,
+            data: { status: 'paid', source: 'stripe' },
+          })
         }
       }
       break

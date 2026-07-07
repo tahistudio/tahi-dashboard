@@ -58,6 +58,12 @@ const GROUPS: { key: string; label: string; desc: string; events: string[] }[] =
     desc: 'New, paid, and overdue invoices.',
     events: ['invoice_created', 'invoice_paid', 'invoice_overdue'],
   },
+  {
+    key: 'announcements',
+    label: 'Announcements',
+    desc: 'Studio updates and broadcasts.',
+    events: ['announcement_posted'],
+  },
 ]
 
 function keyOf(event: string, channel: Channel): string {
@@ -184,7 +190,12 @@ export function NotificationsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
       </div>
 
       <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>
-        In-app notifications take effect immediately. Email and Slack preferences are saved and apply as those channels roll out.
+        In-app notifications take effect immediately. Email preferences are now
+        enforced on the notification emails we send, starting with invoices; new
+        request and message alerts are not emailed yet, so those email toggles
+        save and will apply once those emails ship. Transactional emails such as
+        contracts, receipts, and welcomes always send. Slack posts go to shared
+        team channels, so they are not controlled per person.
       </p>
       {isLoading && (
         <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>

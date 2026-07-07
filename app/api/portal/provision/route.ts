@@ -4,6 +4,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { dispatchDomainEvent } from '@/lib/events'
+
+type EventsDb = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 export const dynamic = 'force-dynamic'
 
@@ -144,6 +147,19 @@ export async function POST(req: NextRequest) {
       updatedAt: now,
     })
   }
+
+  // Fire the domain event (automations + outgoing webhooks). Non-blocking.
+  await dispatchDomainEvent(database as EventsDb, {
+    type: 'client_onboarded',
+    entityId: id,
+    entityType: 'organisation',
+    orgId: id,
+    data: {
+      name: orgName,
+      planType: 'none',
+      source: 'self_serve',
+    },
+  })
 
   return NextResponse.json({ orgId: id, clerkOrgId })
 }
