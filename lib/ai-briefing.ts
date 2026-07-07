@@ -265,7 +265,7 @@ If there are no items for today or this week, include an empty <today></today> o
 Maximum 5 items for today, 8 items for this week.`
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-5',
     max_tokens: 2048,
     system: systemPrompt,
     messages: [{ role: 'user', content: contextText }],

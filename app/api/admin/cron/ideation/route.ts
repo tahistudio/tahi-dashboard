@@ -45,7 +45,7 @@ export const dynamic = 'force-dynamic'
 
 const SITE_URL = 'https://www.tahi.studio/'
 const SITEMAP_URL = 'https://www.tahi.studio/sitemap.xml'
-const MODEL = 'claude-sonnet-4-6'
+const MODEL = 'claude-sonnet-5'
 
 // ── Signal types ──────────────────────────────────────────────────────────
 

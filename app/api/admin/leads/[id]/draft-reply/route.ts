@@ -24,7 +24,7 @@ import { loadAiContext } from '@/lib/ai-context'
 
 export const dynamic = 'force-dynamic'
 
-const MODEL = 'claude-sonnet-4-6'
+const MODEL = 'claude-sonnet-5'
 const TONE_EXAMPLE_COUNT = 5
 
 const SYSTEM_PROMPT = `You are Liam Miller's reply-drafting assistant at Tahi Studio, a Webflow design and development agency based in New Zealand.

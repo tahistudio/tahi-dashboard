@@ -78,7 +78,7 @@ export interface ReviewerCritique {
 export interface ReviewerDef {
   key: ReviewerKey
   displayName: string
-  model: 'claude-sonnet-4-6' | 'claude-opus-4-7'
+  model: 'claude-sonnet-5' | 'claude-opus-4-8'
   vetoCapable: boolean
   /** Default voice weight if Strategist doesn't override. 1.0 is the
    *  baseline; 1.5 = senior seat; 0.5 = junior. */
@@ -178,7 +178,7 @@ export const REVIEWERS: ReviewerDef[] = [
   {
     key: 'seo_aeo',
     displayName: 'SEO / AEO',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 1.5,
     systemPrompt: `You are a senior SEO and AEO (Answer Engine Optimisation) reviewer. You evaluate blog drafts for ranking potential on Google + traditional search + AI answer engines (Perplexity, ChatGPT, Claude search).
@@ -204,7 +204,7 @@ In "details", include: { "keywordDensityPct": number, "missingSecondaryKeywords"
   {
     key: 'sales',
     displayName: 'Sales',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 1.0,
     systemPrompt: `You are a senior sales reviewer for a Webflow agency. You evaluate blog drafts on how well they move a reader toward booking a discovery call.
@@ -226,7 +226,7 @@ In "details": { "ctaPresent": boolean, "ctaStrength": "weak|medium|strong", "obj
   {
     key: 'marketing',
     displayName: 'Marketing',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 1.0,
     systemPrompt: `You are a senior marketing reviewer. You evaluate blog drafts for top-of-funnel shareability and engagement.
@@ -248,7 +248,7 @@ In "details": { "hookStrength": "weak|medium|strong", "shareableLine": "...", "s
   {
     key: 'brand_tone',
     displayName: 'Brand tone',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: true,
     defaultWeight: 1.5,
     systemPrompt: `You are the brand tone reviewer for Tahi Studio. You evaluate every draft against the canonical Brand DNA and voice guidelines (provided below).
@@ -278,7 +278,7 @@ ${ctx.brandDocs ?? '(brand docs not yet loaded — use general Tahi positioning:
   {
     key: 'icp_reader',
     displayName: 'ICP reader',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 1.5,
     systemPrompt: `You ARE the ideal Tahi customer reading this draft as if you found it on Google. Embody the persona:
@@ -304,7 +304,7 @@ In "details": { "bouncePoint": "...", "wouldBookCall": boolean, "missingAnswers"
   {
     key: 'anti_ai',
     displayName: 'Anti-AI detection',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: true,
     defaultWeight: 1.5,
     systemPrompt: `You are an AI-writing detector + rewriter consultant. You assess whether this draft reads like an AI wrote it.
@@ -331,7 +331,7 @@ In "details": { "aiTells": [{ phrase, location, severity }], "burstinessScore": 
   {
     key: 'tahi_voice',
     displayName: 'Tahi voice',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: true,
     defaultWeight: 1.5,
     systemPrompt: `You are the "sounds like Liam wrote it" reviewer. You're checking that the draft matches Liam's actual writing voice, not just brand tone in the abstract.
@@ -362,7 +362,7 @@ ${ctx.brandDocs ?? '(use general Liam voice cues from system prompt)'}
   {
     key: 'originality',
     displayName: 'Originality + Information Gain',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     // VETO-capable. This is the single most load-bearing reviewer for
     // surviving Google's information-gain ranking signal (US20200349181A1,
     // weighted heavily from the March 2026 spam update). A draft that
@@ -406,7 +406,7 @@ In "details": {
   {
     key: 'internal_links',
     displayName: 'Internal link curator',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 1.0,
     systemPrompt: `You are the internal-linking reviewer. You suggest internal link opportunities + check existing internal links are well-placed.
@@ -428,7 +428,7 @@ In "details": { "internalLinksFound": number, "internalLinkSuggestions": [{ slug
   {
     key: 'accessibility',
     displayName: 'Accessibility',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 1.0,
     systemPrompt: `You are an accessibility reviewer. You check the draft for WCAG-relevant content issues.
@@ -452,7 +452,7 @@ In "details": { "headingHierarchyOk": boolean, "fleschKincaidGrade": number, "va
   {
     key: 'legal_risk',
     displayName: 'Legal / risk (light)',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 0.8,
     systemPrompt: `You are a light-touch legal risk reviewer (not a lawyer). You flag potential issues for Liam to review at sign-off.
@@ -475,7 +475,7 @@ In "details": { "unsourcedClaims": [...], "competitorClaims": [...], "outcomeGua
   {
     key: 'hook',
     displayName: 'Hook (first 100 words)',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 1.0,
     systemPrompt: `You evaluate ONLY the first 100 words of the draft. Your job is to determine whether they earn the reader's continued attention after they've arrived from a SERP or social link.
@@ -496,7 +496,7 @@ In "details": { "hookText": "the first 100 words verbatim", "openingTactic": "..
   {
     key: 'closing_cta',
     displayName: 'Closing / CTA',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 1.0,
     systemPrompt: `You evaluate ONLY the closing paragraphs + any CTA. Your job is to determine whether the reader leaves with momentum or just drifts off the page.
@@ -517,7 +517,7 @@ In "details": { "closingTactic": "summary|action|insight|other", "ctaMatchesInte
   {
     key: 'pacing',
     displayName: 'Pacing & rhythm',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 1.0,
     systemPrompt: `You evaluate the rhythm of the draft. Good writing has variation; AI writing is uniformly metered. You check sentence length variance, paragraph length variance, and structural variety.
@@ -539,7 +539,7 @@ In "details": { "sentenceLengthStddev": number, "paragraphLengthStddev": number,
   {
     key: 'citations',
     displayName: 'Citations & links',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: true,
     defaultWeight: 1.2,
     systemPrompt: `You evaluate citations + outbound links. The validated links list is provided — these are pre-checked HTTP 200s. Your job is to assess whether the citations are sufficient + authoritative.
@@ -570,7 +570,7 @@ ${(ctx.validatedLinks?.broken ?? []).map(l => `- ${l.url} (${l.reason})`).join('
   {
     key: 'visual_layout',
     displayName: 'Visual layout',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 0.8,
     systemPrompt: `You evaluate the visual rendering on a blog page. You flag text walls + suggest where bullets, tables, callouts, or images would land.
@@ -592,7 +592,7 @@ In "details": { "textWallParagraphs": [...], "bulletOpportunities": [...], "tabl
   {
     key: 'featured_snippet',
     displayName: 'Featured snippet',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 1.2,
     systemPrompt: `You evaluate whether the draft has a passage that could win Google's featured snippet (position zero) for the target query.
@@ -613,7 +613,7 @@ In "details": { "snippetPattern": "definition|list|table|qa|none", "snippetPassa
   {
     key: 'voice_search',
     displayName: 'Voice search / AEO',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 0.8,
     systemPrompt: `You evaluate the draft's optimisation for AI answer engines (Perplexity, ChatGPT, Claude) + voice search (Siri, Alexa, Google Assistant).
@@ -635,7 +635,7 @@ In "details": { "voiceReadyQas": [{ q, a }], "questionHeadings": [...], "fitForV
   {
     key: 'skim_test',
     displayName: 'Skim test',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 1.0,
     systemPrompt: `Read ONLY the H1, H2s, H3s, and any bolded text in the draft. Ignore body paragraphs. Then assess whether the post still makes sense + delivers value to a reader who is skimming on mobile.
@@ -656,7 +656,7 @@ In "details": { "skimTakeaway": "what a skimmer learns", "headingNarrative": "..
   {
     key: 'counter_argument',
     displayName: 'Counter-argument',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 1.0,
     systemPrompt: `You evaluate the draft for E-E-A-T credibility by checking whether it acknowledges + addresses the strongest counter-argument to its thesis.
@@ -677,7 +677,7 @@ In "details": { "counterArgumentAddressed": boolean, "honestyLevel": "weak|mediu
   {
     key: 'unique_angle',
     displayName: 'Unique angle',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 1.2,
     systemPrompt: `You evaluate whether there is at least ONE thing in this draft that nobody else on the SERP is saying. This is the single most important differentiator for ranking + sharing.
@@ -694,7 +694,7 @@ In "details": { "uniqueInsight": "the one thing", "differentiationConfidence": n
   {
     key: 'mobile_reading',
     displayName: 'Mobile reading',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 1.0,
     systemPrompt: `You evaluate how the draft reads on a 375px-wide phone screen. Mobile is where 70%+ of traffic lands.
@@ -717,7 +717,7 @@ In "details": { "longParagraphCount": number, "longSentenceCount": number, "mobi
   {
     key: 'emotional_resonance',
     displayName: 'Emotional resonance',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 0.8,
     systemPrompt: `You evaluate whether the draft makes the reader feel anything. Most B2B content is emotionally flat. The best content makes the reader feel seen, frustrated at the right thing, hopeful, or vindicated.
@@ -738,7 +738,7 @@ In "details": { "emotionalBeats": [...], "dominantEmotion": "...", "vulnerabilit
   {
     key: 'numeric_claims',
     displayName: 'Numeric claims + vague qualifiers',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     vetoCapable: false,
     defaultWeight: 1.0,
     systemPrompt: `You evaluate whether the article backs claims with SPECIFIC verifiable numbers rather than vague qualifiers. Specific numbers are the cheapest single signal that separates operator/expert content from generic LLM output in Google's helpful content systems.
