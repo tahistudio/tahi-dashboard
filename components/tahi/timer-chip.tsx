@@ -47,7 +47,7 @@ interface ActiveTimerResponse {
     lastPingAt: string
     notes: string | null
     targetTitle: string | null
-    targetType: 'request' | 'task'
+    targetType: 'request' | 'task' | 'org'
     elapsedSeconds: number
     elapsedHours: number
     isPaused: boolean

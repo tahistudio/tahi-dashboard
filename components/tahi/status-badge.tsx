@@ -1,4 +1,5 @@
-import { cn } from '@/lib/utils'
+import * as React from 'react'
+import { cn, snakeToTitle } from '@/lib/utils'
 import {
   REQUEST_STATUS_CONFIG,
   ORG_STATUS_CONFIG,
@@ -104,6 +105,77 @@ export function HealthDot({ health, className }: HealthDotProps) {
       style={{ background: colour }}
       title={health ?? 'Unknown'}
     />
+  )
+}
+
+// ── <Tag>. Generic status pill for free-form status strings ──────────────
+//
+// Where StatusBadge is bound to a known request/org/invoice vocabulary,
+// <Tag> maps an arbitrary status string onto one of the four semantic
+// tones (success / warning / danger / info) and falls back to a neutral
+// pill for anything unrecognised. The mapping is data-driven, so new
+// status words are a one-line addition to STATUS_TONE.
+//
+//   <Tag status="active" />
+//   <Tag status={call.status} />
+//   <Tag tone="warning">Needs review</Tag>
+
+export type Tone = 'success' | 'warning' | 'danger' | 'info' | 'neutral'
+
+// Tones resolve to the dark-safe --status-* token trios (which carry full
+// .dark overrides) rather than the semantic --color-*-bg tokens, which do
+// not. Danger reuses --color-danger the way status-config already does.
+const TONE_STYLE: Record<Tone, BadgeStyle> = {
+  success: { label: '', bg: 'var(--status-delivered-bg)',  color: 'var(--status-delivered-text)',  border: 'var(--status-delivered-border)' },
+  warning: { label: '', bg: 'var(--status-in-review-bg)',  color: 'var(--status-in-review-text)',  border: 'var(--status-in-review-border)' },
+  danger:  { label: '', bg: 'var(--color-danger-bg)',      color: 'var(--color-danger)' },
+  info:    { label: '', bg: 'var(--status-submitted-bg)',  color: 'var(--status-submitted-text)',  border: 'var(--status-submitted-border)' },
+  neutral: { label: '', bg: 'var(--status-archived-bg)',   color: 'var(--status-archived-text)',   border: 'var(--status-archived-border)' },
+}
+
+// Normalised status word -> tone. Extend here, not at the call site.
+const STATUS_TONE: Record<string, Tone> = {
+  active: 'success', paid: 'success', delivered: 'success', completed: 'success',
+  complete: 'success', done: 'success', approved: 'success', signed: 'success',
+  success: 'success', won: 'success', published: 'success', live: 'success',
+  pending: 'warning', in_review: 'warning', review: 'warning', paused: 'warning',
+  deferred: 'warning', warning: 'warning', draft: 'warning', on_hold: 'warning',
+  overdue: 'danger', failed: 'danger', cancelled: 'danger', canceled: 'danger',
+  error: 'danger', churned: 'danger', declined: 'danger', rejected: 'danger',
+  expired: 'danger', lost: 'danger', no_show: 'danger',
+  submitted: 'info', sent: 'info', new: 'info', scheduled: 'info',
+  info: 'info', in_progress: 'info', open: 'info', viewed: 'info',
+}
+
+function toneForStatus(status: string): Tone {
+  return STATUS_TONE[status.trim().toLowerCase().replace(/[\s-]+/g, '_')] ?? 'neutral'
+}
+
+interface TagProps {
+  /** Free-form status string, mapped to a tone via STATUS_TONE. */
+  status?: string
+  /** Explicit tone override. Wins over `status`. */
+  tone?: Tone
+  /** Display text. Defaults to a title-cased `status`. */
+  children?: React.ReactNode
+  className?: string
+}
+
+export function Tag({ status, tone, children, className }: TagProps) {
+  const resolved = tone ?? (status ? toneForStatus(status) : 'neutral')
+  const style = TONE_STYLE[resolved]
+  const label = children ?? (status ? snakeToTitle(status.trim().toLowerCase().replace(/[\s-]+/g, '_')) : '')
+  return (
+    <span
+      className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap', className)}
+      style={{
+        background: style.bg,
+        color: style.color,
+        border: style.border ? `1px solid ${style.border}` : undefined,
+      }}
+    >
+      {label}
+    </span>
   )
 }
 

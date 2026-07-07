@@ -1,9 +1,11 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { apiPath } from '@/lib/api'
 import { Popover } from '@/components/tahi/popover'
 import { ShellIcon } from '@/components/tahi/shell-icons'
+import { notificationHref, type NotificationEntityType } from '@/lib/notification-links'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -50,6 +52,7 @@ function iconFor(n: Notification) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function NotificationBell() {
+  const router = useRouter()
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
@@ -162,7 +165,11 @@ export function NotificationBell() {
   const openNotification = useCallback((n: Notification) => {
     if (!n.read) markOneRead(n.id).catch(() => {})
     setOpen(false)
-  }, [markOneRead])
+    // Deep-link to the entity when it has a navigable route; otherwise the
+    // click just marks it read. The resolver is shared with the server helper.
+    const href = notificationHref(n.entityType as NotificationEntityType | null, n.entityId)
+    if (href) router.push(href)
+  }, [markOneRead, router])
 
   const hasUnread = unreadCount > 0
 

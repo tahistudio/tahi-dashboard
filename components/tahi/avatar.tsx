@@ -11,6 +11,7 @@
  *
  *   <Avatar name="Liam Miller" />
  *   <Avatar name="Olivia Chen" src="/o.jpg" size="lg" />
+ *   <Avatar name="Ana Ruiz" imageUrl={contact.imageUrl} />   // src alias
  *   <Avatar name="Bot" status="online" />
  *   <Avatar.Stack>
  *     <Avatar name="A" />
@@ -43,6 +44,8 @@ const STATUS_COLOUR: Record<NonNullable<StatusDot>, string> = {
 interface AvatarProps {
   name: string
   src?: string | null
+  /** Alias for `src`. When both are set, `src` wins. */
+  imageUrl?: string | null
   size?: Size | number
   /** Optional presence dot in the bottom-right. */
   status?: StatusDot
@@ -74,6 +77,7 @@ function resolveSize(size: Size | number): number {
 function AvatarRoot({
   name,
   src,
+  imageUrl,
   size = 'md',
   status,
   ring,
@@ -85,7 +89,8 @@ function AvatarRoot({
 }: AvatarProps) {
   const [errored, setErrored] = React.useState(false)
   const px = resolveSize(size)
-  const showImg = src && !errored
+  const resolvedSrc = src ?? imageUrl
+  const showImg = resolvedSrc && !errored
   const fontPx = Math.max(10, Math.round(px * 0.4))
   const ringWidth = px <= 24 ? 1 : 2
 
@@ -124,7 +129,7 @@ function AvatarRoot({
       {showImg ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={src!}
+          src={resolvedSrc!}
           alt=""
           onError={() => setErrored(true)}
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
@@ -150,7 +155,7 @@ function AvatarRoot({
     </Tag>
   )
 
-  // Hover tooltip is on by default — every avatar in the dashboard
+  // Hover tooltip is on by default. Every avatar in the dashboard
   // should reveal the person's name on hover without the consumer
   // wiring it up. Suppress with tooltip={false} when the avatar is
   // already inside a labelled control.

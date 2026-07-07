@@ -553,6 +553,51 @@
 .imp-banner .imp-exit:hover { background: rgba(158, 196, 149, 0.2); border-color: rgba(158, 196, 149, 0.6); color: #fff; }
 
 /* ===================================================================
+   ANNOUNCEMENT BAR - client broadcast strip (forest, composed in Settings)
+   Hardcoded forest hex, the sanctioned exception alongside the imp-banner.
+   =================================================================== */
+.ann-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 11px 20px;
+  background: linear-gradient(90deg, #1e2a1b 0%, #243121 100%);
+  border-bottom: 1px solid #2d3d2a;
+  color: #eaf3e4;
+  font: 500 13px 'Manrope', sans-serif;
+  flex-shrink: 0;
+  animation: ann-in 0.32s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.ann-bar::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(143, 210, 128, 0.5), transparent); }
+@keyframes ann-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .ann-bar { animation: none; } }
+.ann-emoji { font-size: 20px; line-height: 1; flex-shrink: 0; }
+.ann-txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ann-txt b { font: 700 13px 'Manrope', sans-serif; color: #fff; }
+.ann-txt span { font: 500 12.5px 'Manrope', sans-serif; color: #cfe0c6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ann-cta { margin-left: auto; flex-shrink: 0; border: 1px solid rgba(158, 196, 149, 0.4); background: rgba(158, 196, 149, 0.12); color: #eaf3e4; font: 600 12px 'Manrope', sans-serif; padding: 7px 14px; border-radius: 8px; text-decoration: none; cursor: pointer; transition: background 0.14s, border-color 0.14s; }
+.ann-cta:hover { background: rgba(158, 196, 149, 0.22); border-color: rgba(158, 196, 149, 0.6); color: #fff; }
+.ann-x { flex-shrink: 0; border: 1px solid rgba(158, 196, 149, 0.4); background: rgba(158, 196, 149, 0.1); color: #cfe6c7; font-size: 18px; line-height: 1; width: 28px; height: 28px; border-radius: 8px; cursor: pointer; transition: background 0.14s, border-color 0.14s, color 0.14s; }
+.ann-x:hover { background: rgba(158, 196, 149, 0.2); border-color: rgba(158, 196, 149, 0.6); color: #fff; }
+.ann-bar:not(:has(.ann-cta)) .ann-x { margin-left: auto; }
+.ann-success .ann-cta { border-color: rgba(74, 222, 128, 0.5); background: rgba(74, 222, 128, 0.15); }
+.ann-maintenance, .ann-warning { background: linear-gradient(90deg, #2c2413 0%, #34290f 100%); border-bottom-color: #463610; }
+.ann-maintenance::after, .ann-warning::after { background: linear-gradient(90deg, transparent, rgba(245, 178, 60, 0.5), transparent); }
+.ann-maintenance .ann-cta, .ann-warning .ann-cta { border-color: rgba(245, 178, 60, 0.5); background: rgba(245, 178, 60, 0.15); }
+/* Mobile: emoji + controls on the top line, message wraps below full width. */
+@media (max-width: 767px) {
+  .ann-bar { flex-wrap: wrap; column-gap: 10px; }
+  .ann-emoji { order: 1; }
+  .ann-cta { order: 2; margin-left: auto; }
+  .ann-x { order: 3; margin-left: 0; }
+  .ann-bar:not(:has(.ann-cta)) .ann-x { margin-left: auto; }
+  .ann-txt { order: 4; flex-basis: 100%; margin-top: 8px; }
+  .ann-txt b { white-space: normal; }
+  .ann-txt span { white-space: normal; overflow: visible; text-overflow: clip; }
+}
+
+/* ===================================================================
    COMMAND PALETTE
    =================================================================== */
 .cmd-overlay { position: fixed; inset: 0; z-index: 120; display: flex; align-items: flex-start; justify-content: center; padding-top: 13vh; background: rgba(12, 18, 8, 0.42); backdrop-filter: blur(3px); animation: cmd-fade 0.15s var(--ease); }

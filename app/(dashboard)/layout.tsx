@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { AppSidebar } from '@/components/tahi/app-sidebar'
 import { AppTopNav } from '@/components/tahi/app-top-nav'
 import { ImpersonationBanner } from '@/components/tahi/impersonation-banner'
+import { AnnouncementBanner } from '@/components/tahi/announcement-banner'
 import { MobileBottomNav } from '@/components/tahi/mobile-bottom-nav'
 import { ProductTour } from '@/components/tahi/product-tour'
 import { ToastProvider } from '@/components/tahi/toast'
@@ -89,6 +90,7 @@ export default async function DashboardLayout({
           <AppSidebar isAdmin={isAdmin} features={perms.features} />
           <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
             {isAdmin && <ImpersonationBanner />}
+            <AnnouncementBanner />
             <AppTopNav isAdmin={isAdmin} />
             <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto dashboard-main">
               <div className="max-w-[90rem] mx-auto w-full dashboard-page-inner">
