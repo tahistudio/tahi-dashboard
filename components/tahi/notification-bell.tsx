@@ -79,16 +79,72 @@ export function NotificationBell() {
   useEffect(() => {
     fetchNotifications().catch(() => {})
 
-    // Connect to SSE stream for real-time notifications
+    // If EventSource is unavailable (old browser, SSR guard), degrade to a
+    // simple 60s poll and skip all the streaming machinery below.
+    if (typeof EventSource === 'undefined') {
+      const poll = setInterval(() => {
+        fetchNotifications().catch(() => {})
+      }, 60000)
+      return () => clearInterval(poll)
+    }
+
+    // Reconnecting SSE: on close/error the server ends streams after ~5min, or
+    // a proxy may drop the connection. Instead of degrading to slow 60s polling
+    // forever, reconnect with capped exponential backoff. A clean connect
+    // resets the backoff. We manage the lifecycle ourselves (rather than relying
+    // on the browser's built-in retry) so we can cap the delay and re-sync state
+    // on every reconnect.
     let eventSource: EventSource | null = null
-    try {
-      eventSource = new EventSource(apiPath('/api/notifications/stream'))
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let attempts = 0
+    let disposed = false
+
+    const RECONNECT_BASE_MS = 1000
+    const RECONNECT_MAX_MS = 30000
+
+    const scheduleReconnect = () => {
+      if (disposed || reconnectTimer) return
+      // 1s, 2s, 4s, ... capped at 30s, with a little jitter to avoid a
+      // thundering herd of clients reconnecting in lockstep.
+      const backoff = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempts)
+      const jitter = Math.random() * 500
+      attempts += 1
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        connect()
+      }, backoff + jitter)
+    }
+
+    const connect = () => {
+      if (disposed) return
+      try {
+        eventSource = new EventSource(apiPath('/api/notifications/stream'))
+      } catch {
+        // Construction failed; treat as a dropped connection and back off.
+        scheduleReconnect()
+        return
+      }
+
+      eventSource.onopen = () => {
+        // Successful (re)connect: reset backoff and resync any notifications
+        // that may have arrived while we were disconnected.
+        attempts = 0
+        fetchNotifications().catch(() => {})
+      }
 
       eventSource.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data) as {
             type: string
             notification?: Notification
+          }
+          if (data.type === 'reconnect') {
+            // Server is recycling this stream. Close and immediately reconnect
+            // (backoff already reset by the prior onopen).
+            eventSource?.close()
+            eventSource = null
+            connect()
+            return
           }
           if (data.type === 'notification' && data.notification) {
             const n = data.notification
@@ -105,22 +161,20 @@ export function NotificationBell() {
       }
 
       eventSource.onerror = () => {
-        // On error, fall back to polling
+        // Connection errored or closed. Tear down and reconnect with backoff.
         eventSource?.close()
         eventSource = null
+        scheduleReconnect()
       }
-    } catch {
-      // EventSource not supported or failed, fall back to polling
     }
 
-    // Fallback poll every 60 seconds
-    const interval = setInterval(() => {
-      fetchNotifications().catch(() => {})
-    }, 60000)
+    connect()
 
     return () => {
-      clearInterval(interval)
+      disposed = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
       eventSource?.close()
+      eventSource = null
     }
   }, [fetchNotifications])
 

@@ -1,6 +1,6 @@
 # tahi-dashboard — Active Task List
 
-Last updated: 2026-05-21 (split from the historical 1,222-line file)
+Last updated: 2026-07-07 (Waves 1-4 shipped — engines wired + hardening; migration apply + live smoke still open)
 
 **Active block: Phase 11 — Platform Polish + Notifications + Portal Readiness.**
 Aug 1 deadline. ~119 open tasks. Closed items are in `TASKS-ARCHIVE.md`.
@@ -11,6 +11,25 @@ Format:
 - `[ ]` open, `[x]` shipped (mark and move to TASKS-ARCHIVE.md once verified live)
 - Initials + date on claim: `— [AGENT] YYYY-MM-DD`
 - Tasks only flip to `[x]` after the Definition of Done in `CLAUDE.md` rule 8 is met
+
+---
+
+## Wave 1-4 (2026-07-07) — engines wired + hardening
+
+Shipped in four waves in one day (commits a414f31, 29dfe64, 6f65dda + earlier hardening 418b63d, f5700c2, 5db9c70). Code merged; live smoke-test + migration apply still open (see below).
+
+- [x] W-1 — [BE] Event engine: `lib/events.ts` bus wires the dead `fireAutomation` + `fireWebhook` into real domain events (request created / status changed, invoice created / paid / overdue, client onboarded), non-blocking, human-safe actions only. — 2026-07-07
+- [x] W-2 — [BE] Outgoing webhook deliveries logged to new `webhook_deliveries` table (migration 0082). — 2026-07-07
+- [x] W-3 — [BE] Announcements send real audience-targeted email (all / plan / org) honouring per-user prefs; shared `lib/announcement-emails.ts` backs create + `[id]/send`; double-send guarded via `emailSentAt`. — 2026-07-07
+- [x] W-4 — [BE/FE] Client portal persistence: Organization + Brand + real People roster (Clerk org invitations, admin-gated) + honest Plan & billing on the real subscription; brand tint for client sessions only. — 2026-07-07
+- [x] W-5 — [BE] Permissions fail-closed + `requireFeature` rollout; legacy `teamMembers.role` no longer grants unrestricted scope over a scoped new-system role; Xero OAuth state nonce. — 2026-07-07
+- [x] W-6 — [BE/FE] AI weaves (human-in-the-loop): briefing in top nav, request triage + reply drafts, overdue-invoice chase drafts, client health check, call action items. Suggestions / pending drafts only; a human click gates every send or apply. — 2026-07-07
+- [x] W-7 — [BE/FE] Dead-code sweep (~4,400 LOC): 12 zero-reference files + legacy blog-writer path removed, blog pipeline cut over to the round-table driver, console.logs stripped, duplicate helpers consolidated. — 2026-07-07
+- [x] W-8 — [BE] Model migration to Sonnet 5 / Opus 4.8; hardcoded model ids centralised on `SONNET_MODEL`. — 2026-07-07
+- [ ] W-OPS.MIGRATE — [BE/Ops] Apply migrations 0081 + 0082 to staging + prod D1 via `/api/admin/db/migrate`. Blocked on `TAHI_API_TOKEN` rotation / an admin session.
+- [ ] W-OPS.TOKEN — [Ops] Rotate `TAHI_API_TOKEN` (unblocks the migration apply above).
+- [ ] W-QA — [QA] Live smoke-test the wave features on staging: automation fire on a real request event, webhook delivery row written, announcement email fan-out, client portal Org/Brand/People persistence, AI weave drafts.
+- [ ] W-PUSH — [FE/BE] Web Push service worker (still unbuilt — the one notification channel with no handler).
 
 ---
 
@@ -83,8 +102,8 @@ Some columns from these are already in the schema — verify before writing the 
 - [ ] T662 — [BE] `{{requestNumber}}` variable in email templates + subject prefix `[REQ-{number}]`
 - [ ] T663 — [BE+FE] Portal noindex toggle + `/robots.txt` route
 - [ ] T664 — [FE] Accent colour sweep — migrate hardcoded rainbow hex (`#dbeafe`, `#ede9fe`, `#d1fae5`, `#fef3c7`) to brand-family tokens
-- [ ] T665 — [BE] Stripe import dedupe — keep `in_*`, drop matching `ch_*`
-- [ ] T666 — [BE] Stripe import pagination via `starting_after` cursor
+- [x] T665 — [BE] Stripe import dedupe — keep `in_*`, drop matching `ch_*`. — [BE] 2026-07-07 (Wave 1; dedupe live in both import-invoices + import-payments)
+- [x] T666 — [BE] Stripe import pagination via `starting_after` cursor. — [BE] 2026-07-07 (Wave 1; cursor pagination past the 100-record cap)
 - [ ] T667 — [BE] Xero category overrides table + sync-pnl respects manual flags after auto-detection
 
 ---
@@ -166,7 +185,7 @@ Largest single block, ~10 days.
 
 ## Phase 11 — Data accuracy (T706–T708)
 
-- [ ] T706 — [BE] Bank balance — fetch statement + cash from Xero, statement primary
+- [x] T706 — [BE] Bank balance — fetch statement + cash from Xero, statement primary. — [BE] 2026-07-07 (Wave 2; statement balance sourced from Xero bank summary)
 - [ ] T707 — [FE] BankRunwayCard shows statement vs cash rows
 - [ ] T708 — [BE] Outstanding KPI dedup — DISTINCT on invoice IDs, exclude voided/cancelled
 
