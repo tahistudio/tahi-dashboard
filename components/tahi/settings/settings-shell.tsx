@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   User, SunMoon, Bell, CalendarClock, Paintbrush, LayoutGrid, Megaphone,
@@ -131,6 +131,13 @@ export function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
   const [activeId, setActiveId] = useState<string>(
     () => visibleSections[0]?.id ?? 'profile',
   )
+
+  // Scroll the content region back to the top on every section switch, so you
+  // never land mid-scroll on the previous panel. #main-content is the scroll
+  // container (the dashboard layout's <main overflow-y-auto>).
+  useEffect(() => {
+    document.getElementById('main-content')?.scrollTo({ top: 0 })
+  }, [activeId])
 
   const active =
     visibleSections.find((s) => s.id === activeId) ?? visibleSections[0]

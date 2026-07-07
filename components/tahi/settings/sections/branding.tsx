@@ -11,7 +11,8 @@
  * favicon_light_url, favicon_dark_url.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ChangeEvent } from 'react'
+import { useUser } from '@clerk/nextjs'
 import { apiPath } from '@/lib/api'
 import { useResource } from '@/lib/use-resource'
 import { SectionShell, Seg } from '@/components/tahi/settings/primitives'
@@ -20,6 +21,43 @@ type SettingsMap = Record<string, string | null>
 
 const DEFAULT_COLOR = '#5A824E'
 const DEFAULT_FAVICON = '/favicon.png'
+
+// Favicon is a platform-level (Tahi) asset, so only super admins may change it.
+const SUPER_ADMIN_EMAILS = new Set(['business@tahi.studio', 'staci@tahi.studio'])
+
+// One favicon upload row: a file picker (no URL box) that stores the chosen
+// icon inline as a data URL via the settings key.
+function FaviconRow({ label, hint, value, saving, onPick }: {
+  label: string
+  hint: string
+  value: string
+  saving: boolean
+  onPick: (e: ChangeEvent<HTMLInputElement>) => void
+}) {
+  return (
+    <div className="set-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8, borderTop: '1px solid var(--border-subtle)' }}>
+      <div className="sr-t"><b>{label}</b><small>{hint}</small></div>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <label className="btn2" style={{ cursor: 'pointer' }}>
+          {saving ? 'Uploading...' : 'Upload icon'}
+          <input type="file" accept="image/png,image/x-icon,image/svg+xml,image/jpeg,.ico" onChange={onPick} style={{ display: 'none' }} />
+        </label>
+        {value && (
+          <>
+            <span className="led">Preview</span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={value}
+              alt={`${label} preview`}
+              style={{ width: 24, height: 24, objectFit: 'contain' }}
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+            />
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
 
 const SWATCHES = ['#5A824E', '#2A6FDB', '#1F8A5B', '#B4531F', '#6D4FA3', '#0E7C86']
 
@@ -39,6 +77,10 @@ export function BrandingSection(_props: { isAdmin?: boolean } = {}) {
   const [faviconLight, setFaviconLight] = useState(DEFAULT_FAVICON)
   const [faviconDark, setFaviconDark] = useState(DEFAULT_FAVICON)
   const [savingKey, setSavingKey] = useState<string | null>(null)
+
+  const { user } = useUser()
+  const email = user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? null
+  const isSuperAdmin = email ? SUPER_ADMIN_EMAILS.has(email) : false
 
   // Sync local editors from the loaded settings.
   useEffect(() => {
@@ -64,6 +106,20 @@ export function BrandingSection(_props: { isAdmin?: boolean } = {}) {
     } finally {
       setSavingKey(null)
     }
+  }
+
+  // Upload an icon file: read it to a data URL, preview it, and save inline.
+  function pickFavicon(e: ChangeEvent<HTMLInputElement>, key: string, setter: (v: string) => void) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const url = typeof reader.result === 'string' ? reader.result : ''
+      if (!url) return
+      setter(url)
+      void save(key, url)
+    }
+    reader.readAsDataURL(file)
   }
 
   if (isLoading && !settings) {
@@ -260,101 +316,25 @@ export function BrandingSection(_props: { isAdmin?: boolean } = {}) {
           )}
         </div>
 
-        {/* Favicon (light) */}
-        <div
-          className="set-row"
-          style={{
-            flexDirection: 'column',
-            alignItems: 'stretch',
-            gap: 8,
-            borderTop: '1px solid var(--border-subtle)',
-          }}
-        >
-          <div className="sr-t">
-            <b>Favicon (light mode)</b>
-            <small>Tab icon shown while the viewer is in light mode.</small>
-          </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <input
-              className="set-input"
-              type="url"
+        {/* Favicon - platform-level Tahi asset: super admins only, upload not URL. */}
+        {isSuperAdmin && (
+          <>
+            <FaviconRow
+              label="Favicon (light mode)"
+              hint="Tab icon shown in light mode. Platform asset - only super admins can change it."
               value={faviconLight}
-              onChange={(e) => setFaviconLight(e.target.value)}
-              placeholder={DEFAULT_FAVICON}
-              style={{ flex: 1 }}
+              saving={savingKey === 'favicon_light_url'}
+              onPick={(e) => pickFavicon(e, 'favicon_light_url', setFaviconLight)}
             />
-            <button
-              type="button"
-              className="btn1"
-              onClick={() => void save('favicon_light_url', faviconLight)}
-              disabled={savingKey === 'favicon_light_url'}
-            >
-              {savingKey === 'favicon_light_url' ? 'Saving...' : 'Save'}
-            </button>
-          </div>
-          {faviconLight && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2 }}>
-              <span className="led">Preview</span>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={faviconLight}
-                alt="Favicon light mode preview"
-                style={{ width: 24, height: 24, objectFit: 'contain' }}
-                onError={(e) => {
-                  ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-                }}
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Favicon (dark) */}
-        <div
-          className="set-row"
-          style={{
-            flexDirection: 'column',
-            alignItems: 'stretch',
-            gap: 8,
-            borderTop: '1px solid var(--border-subtle)',
-          }}
-        >
-          <div className="sr-t">
-            <b>Favicon (dark mode)</b>
-            <small>Tab icon shown while the viewer is in dark mode.</small>
-          </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <input
-              className="set-input"
-              type="url"
+            <FaviconRow
+              label="Favicon (dark mode)"
+              hint="Tab icon shown in dark mode."
               value={faviconDark}
-              onChange={(e) => setFaviconDark(e.target.value)}
-              placeholder={DEFAULT_FAVICON}
-              style={{ flex: 1 }}
+              saving={savingKey === 'favicon_dark_url'}
+              onPick={(e) => pickFavicon(e, 'favicon_dark_url', setFaviconDark)}
             />
-            <button
-              type="button"
-              className="btn1"
-              onClick={() => void save('favicon_dark_url', faviconDark)}
-              disabled={savingKey === 'favicon_dark_url'}
-            >
-              {savingKey === 'favicon_dark_url' ? 'Saving...' : 'Save'}
-            </button>
-          </div>
-          {faviconDark && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2 }}>
-              <span className="led">Preview</span>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={faviconDark}
-                alt="Favicon dark mode preview"
-                style={{ width: 24, height: 24, objectFit: 'contain' }}
-                onError={(e) => {
-                  ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-                }}
-              />
-            </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
     </SectionShell>
   )
