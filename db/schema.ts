@@ -1959,6 +1959,9 @@ export const leads = sqliteTable('leads', {
 export const aiReplyDrafts = sqliteTable('ai_reply_drafts', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   leadId: text('lead_id').references(() => leads.id, { onDelete: 'cascade' }),
+  // Overdue-invoice chase drafts reuse this table. Exactly one of leadId /
+  // invoiceId is set. Added in migration 0083.
+  invoiceId: text('invoice_id').references(() => invoices.id, { onDelete: 'cascade' }),
   // Original Sonnet output (frozen at draft time)
   aiDraftSubject: text('ai_draft_subject'),
   aiDraftBody: text('ai_draft_body').notNull(),
@@ -1975,6 +1978,7 @@ export const aiReplyDrafts = sqliteTable('ai_reply_drafts', {
   ...timestamps,
 }, (table) => [
   index('idx_ai_reply_drafts_lead').on(table.leadId),
+  index('idx_ai_reply_drafts_invoice').on(table.invoiceId),
   index('idx_ai_reply_drafts_status').on(table.status),
 ])
 

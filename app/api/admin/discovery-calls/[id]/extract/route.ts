@@ -19,27 +19,47 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { SONNET_MODEL } from '@/lib/ai-models'
 
 export const dynamic = 'force-dynamic'
 
-const MODEL = 'claude-sonnet-5'
+const MODEL = SONNET_MODEL
 const MAX_TRANSCRIPT_CHARS = 40_000
+
+// Meeting-type classifier values (see migration 0050 / sync-calendar
+// classifier): 'discovery' and 'deal' calls are sales, 'client' are
+// existing-org check-ins, 'partnership' are intro/sync, 'unclassified'
+// needs triage. Action items only make sense for client/project work,
+// so we gate on 'client' meeting type OR a concrete project linkage
+// (org / request / task). Pure sales calls (lead/deal only) never get
+// action-item extraction, keeping their output byte-compatible.
+function isProjectishCall(call: {
+  meetingType: string | null
+  orgId: string | null
+  requestId: string | null
+  taskId: string | null
+}): boolean {
+  return call.meetingType === 'client'
+    || !!call.orgId
+    || !!call.requestId
+    || !!call.taskId
+}
 
 const SYSTEM_PROMPT = `You are an extraction assistant for Tahi Studio, a Webflow design and development agency. You read transcripts of discovery and project calls, and pull structured information that helps the sales operator (Liam) capture deal-relevant details without re-watching the call.
 
 RULES
 1. Only extract what was EXPLICITLY discussed. Do not infer scope, budget, or timeline if they were not said out loud. If a field was not mentioned, omit the tag entirely.
-2. Use NZ English (colour, organise, centre). No em dashes or en dashes — commas, colons, or full stops instead.
+2. Use NZ English (colour, organise, centre). No em dashes or en dashes - commas, colons, or full stops instead.
 3. Keep summary tight: 2-3 sentences max, no filler.
 4. Budget extraction must be conservative. If the client said "around 5 to 10k", emit budgetMin=5000 and budgetMax=10000. If they said "we have budget" with no number, omit both.
 5. Outcome should reflect the call's actual sentiment + next step:
    - good_call: productive conversation, project moving forward but no commitment yet
-   - promote: clear buy signal — they want to move to a proposal/SOW
+   - promote: clear buy signal - they want to move to a proposal/SOW
    - nurture: timing or fit isn't right now but worth keeping warm
    - archive: dead, mismatched, or explicit no
    - no_show: client didn't attend (only if the transcript shows this)
 
-OUTPUT FORMAT (strict — parsed by regex; omit tags that have no content):
+OUTPUT FORMAT (strict - parsed by regex; omit tags that have no content):
 
 <outcome>good_call | promote | nurture | archive | no_show</outcome>
 <summary>2-3 sentence headline of the conversation. Lead with what they want and the next step.</summary>
@@ -48,7 +68,35 @@ OUTPUT FORMAT (strict — parsed by regex; omit tags that have no content):
 <budget_min>Lower bound of the budget range if mentioned (integer, no currency symbol).</budget_min>
 <budget_max>Upper bound if mentioned. If a single number was given, use the same value here.</budget_max>
 <budget_currency>3-letter code like NZD / USD / AUD. Default NZD if a $ amount was given with no currency.</budget_currency>
-<timeline>urgent | this_quarter | this_year | no_rush — based on what they said about when they need it.</timeline>`
+<timeline>urgent | this_quarter | this_year | no_rush - based on what they said about when they need it.</timeline>`
+
+// Appended as a SECOND system block (only for client/project calls) so
+// the cached base SYSTEM_PROMPT above stays byte-identical for sales
+// calls and keeps hitting the prompt cache.
+const ACTION_ITEMS_PROMPT = `ADDITIONAL EXTRACTION FOR THIS CALL: ACTION ITEMS
+
+This is a client or project call, not a pure sales call. In addition to the fields above, extract concrete action items: discrete pieces of work Tahi agreed to do, or next steps that were explicitly committed to on the call. These will become proposed tasks a human reviews before creating.
+
+RULES
+1. Only extract work that was EXPLICITLY discussed or agreed. Do not invent tasks or infer implied work.
+2. Each action item must be one discrete, actionable thing. Split compound commitments into separate items.
+3. Keep titles short and imperative (max ~10 words), e.g. "Update homepage hero copy".
+4. Use NZ English. No em dashes or en dashes.
+5. If no concrete action items were discussed, emit no action_item tags at all.
+
+OUTPUT FORMAT (append after the fields above; emit one block per task):
+
+<action_item>
+<ai_title>Short imperative task title, max ~10 words.</ai_title>
+<ai_detail>One line of extra context: the specific thing, any constraint, deadline, or reference mentioned. Omit the tag if there is nothing to add.</ai_detail>
+<ai_assignee>Name of the person who should own it, ONLY if a specific person was named on the call. Otherwise omit this tag.</ai_assignee>
+</action_item>`
+
+export interface ExtractedActionItem {
+  title: string
+  oneLineDetail: string | null
+  suggestedAssignee: string | null
+}
 
 interface ExtractedFields {
   outcome?: string
@@ -107,6 +155,27 @@ export async function POST(
     transcript,
   ].join('\n')
 
+  const projectish = isProjectishCall(call)
+
+  // Cache the base system prompt - identical across every transcript
+  // extraction and well over Sonnet's 1024-token cache minimum. Second +
+  // subsequent extracts within the 5-minute TTL pay ~10% input price on
+  // the cached portion. The action-items addendum is a separate,
+  // uncached block appended only for client/project calls, so sales
+  // calls send a byte-identical system array and keep hitting the cache.
+  const systemBlocks: Array<{
+    type: 'text'
+    text: string
+    cache_control?: { type: 'ephemeral' }
+  }> = [{
+    type: 'text',
+    text: SYSTEM_PROMPT,
+    cache_control: { type: 'ephemeral' },
+  }]
+  if (projectish) {
+    systemBlocks.push({ type: 'text', text: ACTION_ITEMS_PROMPT })
+  }
+
   let text = ''
   let inputTokens = 0
   let outputTokens = 0
@@ -116,16 +185,8 @@ export async function POST(
     const client = new Anthropic({ apiKey })
     const response = await client.messages.create({
       model: MODEL,
-      max_tokens: 1500,
-      // Cache the system prompt — identical across every transcript
-      // extraction and well over Sonnet's 1024-token cache minimum.
-      // Second + subsequent extracts within the 5-minute TTL pay ~10%
-      // input price on the cached portion.
-      system: [{
-        type: 'text',
-        text: SYSTEM_PROMPT,
-        cache_control: { type: 'ephemeral' },
-      }],
+      max_tokens: 2000,
+      system: systemBlocks,
       messages: [{ role: 'user', content: userMessage }],
     })
     text = response.content
@@ -151,6 +212,9 @@ export async function POST(
   }
 
   const extracted = parseExtraction(text)
+  // Action items are only ever populated for client/project calls. Sales
+  // calls always get an empty array, so their response is additive-only.
+  const actionItems = projectish ? parseActionItems(text) : []
 
   // Token accounting: roll into the lead's aiTokensSpent if linked.
   if (call.leadId) {
@@ -173,8 +237,34 @@ export async function POST(
   return NextResponse.json({
     callId: id,
     suggestions: extracted,
+    actionItems,
     tokensSpent: inputTokens + outputTokens,
   })
+}
+
+// Parse zero or more <action_item> blocks. Each block carries an
+// ai_title (required), optional ai_detail, and optional ai_assignee.
+// Blocks without a usable title are skipped.
+function parseActionItems(text: string): ExtractedActionItem[] {
+  const items: ExtractedActionItem[] = []
+  const blockRe = /<action_item>([\s\S]*?)<\/action_item>/gi
+  let match: RegExpExecArray | null
+  while ((match = blockRe.exec(text)) !== null) {
+    const block = match[1]
+    const inner = (name: string): string | null => {
+      const m = block.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, 'i'))
+      const v = m ? m[1].trim() : ''
+      return v ? v : null
+    }
+    const title = inner('ai_title')
+    if (!title) continue
+    items.push({
+      title,
+      oneLineDetail: inner('ai_detail'),
+      suggestedAssignee: inner('ai_assignee'),
+    })
+  }
+  return items
 }
 
 function parseExtraction(text: string): ExtractedFields {

@@ -1959,6 +1959,14 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_attempted ON webhook_deliveries(attempted_at)`,
     ],
   },
+  {
+    name: '0083',
+    description: 'Overdue-invoice chase drafts reuse the ai_reply_drafts table. Adds a nullable invoice_id column (exactly one of lead_id / invoice_id is set per row) plus an index so a pending chase draft can be looked up per invoice. Additive only; the duplicate-column error is swallowed upstream so re-runs are idempotent.',
+    statements: [
+      `ALTER TABLE ai_reply_drafts ADD COLUMN invoice_id text`,
+      `CREATE INDEX IF NOT EXISTS idx_ai_reply_drafts_invoice ON ai_reply_drafts(invoice_id)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

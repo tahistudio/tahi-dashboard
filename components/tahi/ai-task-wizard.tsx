@@ -31,6 +31,14 @@ interface AiTaskWizardProps {
     orgId?: string
     trackType?: string
   }
+  /**
+   * Optional pre-seed for the input box. When provided, the composer opens
+   * with this text already typed so the operator can review / tweak it and
+   * hit send themselves. We deliberately do NOT auto-send: the human still
+   * initiates the AI call. Used by the request-detail "break into tasks"
+   * action to hand the request's title/description/category to the wizard.
+   */
+  seed?: string
 }
 
 // ── Category and priority style maps ──────────────────────────────────────────
@@ -64,7 +72,7 @@ const INITIAL_MESSAGE: ChatMessage = {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
-export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: AiTaskWizardProps) {
+export function AiTaskWizard({ open, onClose, onTasksCreated, context = {}, seed }: AiTaskWizardProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([INITIAL_MESSAGE])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -96,6 +104,15 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {} }: Ai
       setTimeout(() => inputRef.current?.focus(), 300)
     }
   }, [open])
+
+  // Pre-fill the input from an optional seed when the panel opens. We only
+  // prime the text - the operator reviews it and presses send themselves,
+  // so the human still initiates the AI call (never auto-sent).
+  useEffect(() => {
+    if (open && seed) {
+      setInput(seed)
+    }
+  }, [open, seed])
 
   // Reset state when closing
   const handleClose = useCallback(() => {

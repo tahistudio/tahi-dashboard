@@ -2,18 +2,29 @@
  * POST /api/admin/ai-reply-drafts/[id]/send
  *
  * Fires the draft via Resend, flips status to 'sent', stamps sentAt
- * + resendMessageId, writes a lead_reply_sent activity.
+ * + resendMessageId, writes an activity.
  *
- * Requires RESEND_API_KEY env var. The from-address comes from the
- * settings key 'leads.replyFromEmail' (or falls back to a noreply
- * default).
+ * Handles two kinds of draft that share the ai_reply_drafts table:
+ *   - Lead first-reply drafts (draft.leadId set): recipient = the lead,
+ *     writes a lead_reply_sent activity, auto-advances new -> qualifying.
+ *   - Overdue-invoice chase drafts (draft.invoiceId set): recipient = the
+ *     client org's PRIMARY contact (desc isPrimary), writes an
+ *     invoice_chase_sent activity, leaves invoice status untouched.
+ *
+ * The send is always an explicit human click (never automatic, never
+ * chained from drafting). Requires RESEND_API_KEY. The from-address comes
+ * from the settings key 'leads.replyFromEmail' (or a fallback default).
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
+
+function invoiceNumber(id: string): string {
+  return `INV-${id.slice(0, 6).toUpperCase()}`
+}
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -45,18 +56,56 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (draft.status !== 'pending') {
     return NextResponse.json({ error: `Draft is ${draft.status}, not pending` }, { status: 409 })
   }
-  if (!draft.leadId) {
-    return NextResponse.json({ error: 'Draft is not attached to a lead' }, { status: 400 })
+  if (!draft.leadId && !draft.invoiceId) {
+    return NextResponse.json({ error: 'Draft is not attached to a lead or invoice' }, { status: 400 })
   }
 
-  // Pull the lead (need email + name)
-  const [lead] = await database
-    .select()
-    .from(schema.leads)
-    .where(eq(schema.leads.id, draft.leadId))
-    .limit(1)
-  if (!lead || !lead.email) {
-    return NextResponse.json({ error: 'Lead missing or has no email' }, { status: 400 })
+  // Resolve the recipient depending on the draft kind. Lead drafts go to
+  // the lead; invoice chase drafts go to the client org's primary contact.
+  let recipientEmail: string
+  let recipientName: string
+  let lead: typeof schema.leads.$inferSelect | null = null
+  let chaseOrgId: string | null = null
+  let chaseContactId: string | null = null
+  let subjectFallback: string
+
+  if (draft.leadId) {
+    const [leadRow] = await database
+      .select()
+      .from(schema.leads)
+      .where(eq(schema.leads.id, draft.leadId))
+      .limit(1)
+    if (!leadRow || !leadRow.email) {
+      return NextResponse.json({ error: 'Lead missing or has no email' }, { status: 400 })
+    }
+    lead = leadRow
+    recipientEmail = leadRow.email
+    recipientName = leadRow.name
+    subjectFallback = `Re: ${leadRow.name}`
+  } else {
+    // Invoice chase draft - recipient is the org's primary contact.
+    const [invoice] = await database
+      .select({ id: schema.invoices.id, orgId: schema.invoices.orgId })
+      .from(schema.invoices)
+      .where(eq(schema.invoices.id, draft.invoiceId as string))
+      .limit(1)
+    if (!invoice) {
+      return NextResponse.json({ error: 'Invoice not found for this draft' }, { status: 400 })
+    }
+    const [primaryContact] = await database
+      .select({ id: schema.contacts.id, name: schema.contacts.name, email: schema.contacts.email })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.orgId, invoice.orgId))
+      .orderBy(desc(schema.contacts.isPrimary))
+      .limit(1)
+    if (!primaryContact || !primaryContact.email) {
+      return NextResponse.json({ error: 'Client has no contact with an email' }, { status: 400 })
+    }
+    recipientEmail = primaryContact.email
+    recipientName = primaryContact.name
+    chaseOrgId = invoice.orgId
+    chaseContactId = primaryContact.id
+    subjectFallback = `Invoice ${invoiceNumber(invoice.id)}`
   }
 
   // Resolve the from-address (settings → fallback)
@@ -67,7 +116,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     .limit(1)
   const fromEmail = fromSetting?.value?.trim() || 'liam@tahi.studio'
 
-  const subject = (draft.finalSubject ?? draft.aiDraftSubject ?? '').trim() || `Re: ${lead.name}`
+  const subject = (draft.finalSubject ?? draft.aiDraftSubject ?? '').trim() || subjectFallback
   const bodyText = (draft.finalBody ?? draft.aiDraftBody ?? '').trim()
   if (!bodyText) {
     return NextResponse.json({ error: 'Draft body is empty' }, { status: 400 })
@@ -91,7 +140,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       },
       body: JSON.stringify({
         from: `Liam Miller <${fromEmail}>`,
-        to: [lead.email],
+        to: [recipientEmail],
         subject,
         html: htmlBody,
         text: bodyText,
@@ -127,40 +176,58 @@ export async function POST(req: NextRequest, { params }: Params) {
     })
     .where(eq(schema.aiReplyDrafts.id, id))
 
-  // Detect whether Liam edited the AI version — informs the tone log
+  // Detect whether Liam edited the AI version before sending.
   const wasEdited = (
     (draft.finalSubject ?? draft.aiDraftSubject) !== draft.aiDraftSubject
     || (draft.finalBody ?? draft.aiDraftBody) !== draft.aiDraftBody
   )
 
-  // Activity stamp
-  await database.insert(schema.activities).values({
-    id: crypto.randomUUID(),
-    type: 'lead_reply_sent',
-    title: `First reply sent to ${lead.email}`,
-    description: wasEdited
-      ? `Liam edited the AI draft before sending.`
-      : `AI draft sent as-is.`,
-    leadId: draft.leadId,
-    createdById: userId,
-    createdAt: now,
-    updatedAt: now,
-  })
-
-  // Auto-status: if the lead was 'new', flip to 'qualifying' (we've
-  // engaged). If 'qualifying' or higher, leave it.
-  if (lead.status === 'new') {
-    await database
-      .update(schema.leads)
-      .set({ status: 'qualifying', updatedAt: now })
-      .where(eq(schema.leads.id, lead.id))
+  if (lead && draft.leadId) {
+    // Lead first-reply activity + auto-advance.
     await database.insert(schema.activities).values({
       id: crypto.randomUUID(),
-      type: 'lead_status_changed',
-      title: 'Status changed: New → Qualifying (auto, on first reply)',
-      description: null,
-      leadId: lead.id,
-      createdById: 'system',
+      type: 'lead_reply_sent',
+      title: `First reply sent to ${recipientEmail}`,
+      description: wasEdited
+        ? `Liam edited the AI draft before sending.`
+        : `AI draft sent as-is.`,
+      leadId: draft.leadId,
+      createdById: userId,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    // Auto-status: if the lead was 'new', flip to 'qualifying' (we've
+    // engaged). If 'qualifying' or higher, leave it.
+    if (lead.status === 'new') {
+      await database
+        .update(schema.leads)
+        .set({ status: 'qualifying', updatedAt: now })
+        .where(eq(schema.leads.id, lead.id))
+      await database.insert(schema.activities).values({
+        id: crypto.randomUUID(),
+        type: 'lead_status_changed',
+        title: 'Status changed: New → Qualifying (auto, on first reply)',
+        description: null,
+        leadId: lead.id,
+        createdById: 'system',
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+  } else if (draft.invoiceId) {
+    // Invoice chase activity. Deliberately does NOT change invoice status -
+    // a chase is a nudge, not a state transition.
+    await database.insert(schema.activities).values({
+      id: crypto.randomUUID(),
+      type: 'invoice_chase_sent',
+      title: `Overdue-invoice chase sent to ${recipientEmail} (${invoiceNumber(draft.invoiceId)})`,
+      description: wasEdited
+        ? `Liam edited the AI draft before sending.`
+        : `AI draft sent as-is.`,
+      orgId: chaseOrgId,
+      contactId: chaseContactId,
+      createdById: userId,
       createdAt: now,
       updatedAt: now,
     })
@@ -170,5 +237,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     ok: true,
     resendMessageId: resendId,
     wasEdited,
+    recipientEmail,
+    recipientName,
   })
 }

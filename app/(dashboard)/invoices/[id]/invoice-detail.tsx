@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, RefreshCw, FileText } from 'lucide-react'
+import { ArrowLeft, RefreshCw, FileText, Sparkles, Send, X } from 'lucide-react'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { apiPath } from '@/lib/api'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
@@ -345,7 +345,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                       const data = await res.json() as { payUrl?: string }
                       if (data.payUrl) {
                         await navigator.clipboard.writeText(data.payUrl)
-                        alert('Stripe invoice created — payment link copied to clipboard.')
+                        alert('Stripe invoice created - payment link copied to clipboard.')
                       }
                       void mutate()
                     } else {
@@ -404,6 +404,11 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
           </div>
         )}
       </div>
+
+      {/* Overdue-invoice chase draft (admin only, sent/overdue invoices) */}
+      {isAdmin && (status === 'sent' || status === 'overdue') && (
+        <ChaseDraftCard invoiceId={invoiceId} recipientLabel={invoice.orgName ?? 'the client'} />
+      )}
 
       {/* Notes */}
       {invoice.notes && (
@@ -588,5 +593,321 @@ function ActionButton({
     >
       {label}
     </button>
+  )
+}
+
+// ─── AI chase draft card ────────────────────────────────────────────────────
+// Clones the lead draft-reply triad for overdue invoices: generate a PENDING
+// draft, edit it, then explicitly Send (Resend) or Dismiss. Nothing is ever
+// sent automatically - a human clicks Send.
+
+interface ChaseDraftRow {
+  id: string
+  aiDraftSubject: string | null
+  aiDraftBody: string
+  finalSubject: string | null
+  finalBody: string | null
+  status: string
+  tokensSpent: number | null
+}
+
+function ChaseDraftCard({ invoiceId, recipientLabel }: { invoiceId: string; recipientLabel: string }) {
+  const { data, mutate } = useSWR<{ draft: ChaseDraftRow | null }>(
+    `/api/admin/invoices/${invoiceId}/draft-chase`
+  )
+  const draft = data?.draft ?? null
+
+  const [subjectEdit, setSubjectEdit] = useState('')
+  const [bodyEdit, setBodyEdit] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [sentTo, setSentTo] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (draft) {
+      setSubjectEdit(draft.finalSubject ?? draft.aiDraftSubject ?? '')
+      setBodyEdit(draft.finalBody ?? draft.aiDraftBody ?? '')
+    }
+  }, [draft])
+
+  const generate = useCallback(async () => {
+    setGenerating(true)
+    setError(null)
+    setSentTo(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/invoices/${invoiceId}/draft-chase`), { method: 'POST' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string; detail?: string }
+        throw new Error(err.detail ?? err.error ?? 'Draft generation failed')
+      }
+      await mutate()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Draft generation failed')
+    } finally {
+      setGenerating(false)
+    }
+  }, [invoiceId, mutate])
+
+  const send = useCallback(async () => {
+    if (!draft) return
+    setSending(true)
+    setError(null)
+    try {
+      const subjectChanged = subjectEdit !== (draft.finalSubject ?? draft.aiDraftSubject ?? '')
+      const bodyChanged = bodyEdit !== (draft.finalBody ?? draft.aiDraftBody)
+      if (subjectChanged || bodyChanged) {
+        await fetch(apiPath(`/api/admin/ai-reply-drafts/${draft.id}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ finalSubject: subjectEdit, finalBody: bodyEdit }),
+        })
+      }
+      const res = await fetch(apiPath(`/api/admin/ai-reply-drafts/${draft.id}/send`), { method: 'POST' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string; detail?: string }
+        throw new Error(err.detail ?? err.error ?? 'Send failed')
+      }
+      const body = await res.json().catch(() => ({})) as { recipientEmail?: string }
+      setSentTo(body.recipientEmail ?? 'the client')
+      await mutate()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Send failed')
+    } finally {
+      setSending(false)
+    }
+  }, [draft, subjectEdit, bodyEdit, mutate])
+
+  const dismiss = useCallback(async () => {
+    if (!draft) return
+    try {
+      await fetch(apiPath(`/api/admin/ai-reply-drafts/${draft.id}`), { method: 'DELETE' })
+      await mutate()
+    } catch {
+      // ignore - the card falls back to the generate prompt on next load
+    }
+  }, [draft, mutate])
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '0.6875rem',
+    fontWeight: 600,
+    letterSpacing: '0.05em',
+    textTransform: 'uppercase',
+    color: 'var(--color-text-subtle)',
+    marginBottom: '0.25rem',
+    display: 'block',
+  }
+
+  return (
+    <div
+      style={{
+        background: 'var(--color-bg)',
+        borderRadius: 'var(--radius-card)',
+        border: '1px solid var(--color-border)',
+        padding: '1.25rem 1.25rem 1.375rem',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '0.75rem' }}>
+        <Sparkles style={{ width: 16, height: 16, color: 'var(--color-brand)' }} aria-hidden="true" />
+        <h2 style={{ fontSize: '0.9375rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
+          Chase email
+        </h2>
+      </div>
+
+      {sentTo && (
+        <div
+          style={{
+            padding: '0.5rem 0.75rem',
+            marginBottom: '0.75rem',
+            background: 'var(--color-success-bg)',
+            border: '1px solid var(--color-success)',
+            borderRadius: '0.5rem',
+            fontSize: '0.8125rem',
+            color: 'var(--color-success)',
+          }}
+        >
+          Chase sent to {sentTo}.
+        </div>
+      )}
+
+      {!draft ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem', alignItems: 'flex-start' }}>
+          <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text-muted)', lineHeight: 1.55 }}>
+            Draft a polite overdue-payment follow-up to {recipientLabel}&rsquo;s primary contact. Grounded in this
+            invoice (number, amount, days overdue) and Tahi&rsquo;s tone. You review and send it yourself.
+          </p>
+          {error && (
+            <div
+              style={{
+                padding: '0.5rem 0.75rem',
+                background: 'var(--color-danger-bg)',
+                border: '1px solid var(--color-danger)',
+                borderRadius: '0.5rem',
+                fontSize: '0.75rem',
+                color: 'var(--color-danger)',
+              }}
+            >
+              {error}
+            </div>
+          )}
+          <button
+            onClick={() => void generate()}
+            disabled={generating}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '0.5625rem 1.125rem',
+              borderRadius: '0.5rem',
+              fontSize: '0.875rem',
+              fontWeight: 600,
+              background: 'var(--color-brand)',
+              color: 'white',
+              border: 'none',
+              cursor: generating ? 'not-allowed' : 'pointer',
+              opacity: generating ? 0.6 : 1,
+              minHeight: 44,
+            }}
+          >
+            {generating
+              ? <RefreshCw style={{ width: 14, height: 14 }} className="animate-spin" aria-hidden="true" />
+              : <Sparkles style={{ width: 14, height: 14 }} aria-hidden="true" />}
+            {generating ? 'Drafting...' : 'Draft chase email'}
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <div>
+            <label style={labelStyle}>Subject</label>
+            <input
+              data-private
+              value={subjectEdit}
+              onChange={e => setSubjectEdit(e.target.value)}
+              placeholder="(no subject)"
+              style={{
+                width: '100%',
+                fontSize: '0.8125rem',
+                fontFamily: 'inherit',
+                color: 'var(--color-text)',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                borderRadius: '0.5rem',
+                padding: '0.5rem 0.625rem',
+              }}
+            />
+          </div>
+          <div>
+            <label style={labelStyle}>Body</label>
+            <textarea
+              data-private
+              value={bodyEdit}
+              onChange={e => setBodyEdit(e.target.value)}
+              rows={10}
+              style={{
+                width: '100%',
+                fontSize: '0.8125rem',
+                fontFamily: 'inherit',
+                color: 'var(--color-text)',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                borderRadius: '0.5rem',
+                padding: '0.5rem 0.625rem',
+                lineHeight: 1.55,
+                resize: 'vertical',
+              }}
+            />
+          </div>
+
+          {error && (
+            <div
+              style={{
+                padding: '0.5rem 0.75rem',
+                background: 'var(--color-danger-bg)',
+                border: '1px solid var(--color-danger)',
+                borderRadius: '0.5rem',
+                fontSize: '0.75rem',
+                color: 'var(--color-danger)',
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <button
+              onClick={() => void send()}
+              disabled={sending || !bodyEdit.trim()}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '0.5625rem 1.125rem',
+                borderRadius: '0.5rem',
+                fontSize: '0.875rem',
+                fontWeight: 600,
+                background: 'var(--color-brand)',
+                color: 'white',
+                border: 'none',
+                cursor: sending || !bodyEdit.trim() ? 'not-allowed' : 'pointer',
+                opacity: sending || !bodyEdit.trim() ? 0.6 : 1,
+                minHeight: 44,
+              }}
+            >
+              {sending
+                ? <RefreshCw style={{ width: 14, height: 14 }} className="animate-spin" aria-hidden="true" />
+                : <Send style={{ width: 14, height: 14 }} aria-hidden="true" />}
+              {sending ? 'Sending...' : 'Send chase'}
+            </button>
+            <button
+              onClick={() => void generate()}
+              disabled={generating}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '0.5625rem 1.125rem',
+                borderRadius: '0.5rem',
+                fontSize: '0.875rem',
+                fontWeight: 600,
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+                border: '1px solid var(--color-border)',
+                cursor: generating ? 'not-allowed' : 'pointer',
+                opacity: generating ? 0.6 : 1,
+                minHeight: 44,
+              }}
+            >
+              <RefreshCw style={{ width: 14, height: 14 }} aria-hidden="true" />
+              Regenerate
+            </button>
+            <button
+              onClick={() => void dismiss()}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '0.5625rem 1.125rem',
+                borderRadius: '0.5rem',
+                fontSize: '0.875rem',
+                fontWeight: 600,
+                background: 'var(--color-bg)',
+                color: 'var(--color-text-muted)',
+                border: '1px solid var(--color-border)',
+                cursor: 'pointer',
+                minHeight: 44,
+              }}
+            >
+              <X style={{ width: 14, height: 14 }} aria-hidden="true" />
+              Dismiss
+            </button>
+            {draft.tokensSpent != null && draft.tokensSpent > 0 && (
+              <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginLeft: 'auto' }}>
+                {draft.tokensSpent.toLocaleString()} tokens
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

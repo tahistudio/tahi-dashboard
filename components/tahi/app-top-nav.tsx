@@ -14,6 +14,7 @@ import { usePathname } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { ShellIcon } from '@/components/tahi/shell-icons'
 import { NotificationBell } from './notification-bell'
+import { BriefingTrigger } from './briefing-trigger'
 import { CurrencySwitcher } from './currency-switcher'
 import { TimerChip } from './timer-chip'
 import { resolveCrumb } from './nav-model'
@@ -88,6 +89,7 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
         )}
         {isAdmin && <TimerChip />}
         {isAdmin && <span className="tb-divider" aria-hidden="true" />}
+        {isAdmin && <BriefingTrigger />}
         <NotificationBell />
         <CurrencySwitcher />
       </div>
