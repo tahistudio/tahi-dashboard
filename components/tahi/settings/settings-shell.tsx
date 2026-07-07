@@ -6,7 +6,7 @@ import {
   User, SunMoon, Bell, CalendarClock, Paintbrush, LayoutGrid, Megaphone,
   Building2, FileText, Columns3, ClipboardList, Target, GitBranch, Sparkles,
   Plug, Webhook, Workflow, Clock, Bot, Users, CreditCard, PiggyBank,
-  ScrollText, AlertTriangle, Palette, ChevronDown,
+  ScrollText, AlertTriangle, Palette, ChevronDown, Wallet,
 } from 'lucide-react'
 import '@/app/(dashboard)/settings/settings.css'
 
@@ -35,6 +35,9 @@ import { ReservesSection } from '@/components/tahi/settings/sections/reserves'
 import { AuditLogSection } from '@/components/tahi/settings/sections/audit-log'
 import { DangerZoneSection } from '@/components/tahi/settings/sections/danger-zone'
 import { BrandsSection } from '@/components/tahi/settings/sections/brands'
+import { OrgSettingsSection } from '@/components/tahi/settings/sections/org'
+import { PeopleSection } from '@/components/tahi/settings/sections/people'
+import { PlanBillingSection } from '@/components/tahi/settings/sections/plan'
 
 type Audience = 'both' | 'admin' | 'client'
 
@@ -78,13 +81,17 @@ const SECTIONS: SectionDef[] = [
 
   { id: 'teamaccess', label: 'Team & access', icon: Users, group: 'Team & access', audience: 'admin', Component: TeamAccessSection },
 
-  { id: 'plans', label: 'Plans & retainers', icon: CreditCard, group: 'Billing', audience: 'admin', Component: PlansRetainersSection },
+  { id: 'plans', label: 'Client plans', icon: CreditCard, group: 'Billing', audience: 'admin', Component: PlansRetainersSection },
   { id: 'reserves', label: 'Reserves', icon: PiggyBank, group: 'Billing', audience: 'admin', Component: ReservesSection },
 
   { id: 'audit', label: 'Audit log', icon: ScrollText, group: 'Advanced', audience: 'admin', Component: AuditLogSection },
   { id: 'danger', label: 'Danger zone', icon: AlertTriangle, group: 'Advanced', audience: 'admin', Component: DangerZoneSection },
 
-  { id: 'brands', label: 'Brands', icon: Palette, group: 'Brand', audience: 'client', Component: BrandsSection },
+  // Client portal sections (Organization + Plan & billing groups).
+  { id: 'org', label: 'Organization', icon: Building2, group: 'Organization', audience: 'client', Component: OrgSettingsSection },
+  { id: 'people', label: 'People', icon: Users, group: 'Organization', audience: 'client', Component: PeopleSection },
+  { id: 'brands', label: 'Brand', icon: Palette, group: 'Organization', audience: 'client', Component: BrandsSection },
+  { id: 'plan', label: 'Plan & billing', icon: Wallet, group: 'Plan & billing', audience: 'client', Component: PlanBillingSection },
 ]
 
 // Group display order per audience.
@@ -92,7 +99,7 @@ const ADMIN_GROUPS = [
   'Account', 'Workspace', 'Intake & boards', 'Sales & pipeline',
   'Automations & integrations', 'Team & access', 'Billing', 'Advanced',
 ]
-const CLIENT_GROUPS = ['Account', 'Brand']
+const CLIENT_GROUPS = ['Account', 'Organization', 'Plan & billing']
 
 function isVisible(section: SectionDef, isAdmin: boolean): boolean {
   if (section.audience === 'both') return true

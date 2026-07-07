@@ -39,7 +39,7 @@ interface StagesResponse {
 
 // The managed row shape. `id` is the backend row id (undefined for rows added
 // in the UI that have not yet been persisted).
-interface StageRow {
+interface StageRow extends Record<string, unknown> {
   id?: string
   name: string
   color: string

@@ -47,7 +47,7 @@ type PlanKind = 'base' | 'track'
 
 // A single sellable line: either a plan's base retainer or its parallel-track
 // add-on. `amount` is in minor units (cents), matching lib/stripe-plans.ts.
-interface PlanRow {
+interface PlanRow extends Record<string, unknown> {
   planName: string
   kind: PlanKind
   label: string

@@ -41,7 +41,7 @@ interface SettingsResponse {
 
 export function BookingSection({ isAdmin }: { isAdmin?: boolean } = {}) {
   const { data, error, isLoading, mutate } = useResource<SettingsResponse>(
-    isAdmin === false ? null : apiPath('/api/admin/settings'),
+    isAdmin === false ? null : '/api/admin/settings',
   )
 
   if (isAdmin === false) return null

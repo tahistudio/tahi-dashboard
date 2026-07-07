@@ -25,7 +25,7 @@ import {
   EmptyRow,
 } from '@/components/tahi/settings/primitives'
 
-interface KanbanColumn {
+interface KanbanColumn extends Record<string, unknown> {
   id: string
   orgId: string | null
   label: string
