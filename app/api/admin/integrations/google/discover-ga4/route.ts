@@ -19,6 +19,7 @@
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -49,10 +50,12 @@ async function upsertSetting(database: Awaited<ReturnType<typeof db>>, key: stri
 }
 
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
 
   const database = await db()
   let tokens

@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -19,10 +20,12 @@ interface WebhookEndpoint {
  * List all registered webhook endpoints from the settings table.
  */
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -50,10 +53,12 @@ export async function GET(req: NextRequest) {
  * Register a new webhook endpoint.
  */
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
 
   const body = await req.json() as {
     url?: string
@@ -104,10 +109,12 @@ export async function POST(req: NextRequest) {
  * Remove a webhook endpoint by id (passed as query param).
  */
 export async function DELETE(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
 
   const url = new URL(req.url)
   const id = url.searchParams.get('id')

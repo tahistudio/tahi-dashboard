@@ -20,6 +20,7 @@
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
@@ -33,10 +34,12 @@ const SCOPES = [
 ]
 
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
 
   const clientId = process.env.GOOGLE_CLIENT_ID
   if (!clientId) {

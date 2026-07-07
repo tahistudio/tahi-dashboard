@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
@@ -8,10 +9,12 @@ export const dynamic = 'force-dynamic'
  * Returns which integrations have their env vars configured.
  */
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
 
   return NextResponse.json({
     stripe: {

@@ -5,8 +5,14 @@
  * website, industry, brand colour. Shown under the client Organization group.
  *
  * Scaffold: fields are local state and the logo preview is a client-side data
- * URL. Persisting these needs a portal org endpoint (name/website/industry/
- * brandColour) plus R2 for the logo. Flagged, not wired.
+ * URL. There is NO portal org-settings endpoint today (checked app/api/portal:
+ * organisations rows are only written by provision/onboarding/checkout, not a
+ * general client-editable PATCH), so Save cannot persist yet. The button is
+ * honest about that rather than silently discarding input.
+ *
+ * TODO(portal-org-endpoint): add PATCH /api/portal/org (getPortalAuth-scoped to
+ * the caller's orgId; fields name/website/industry/brandColour) plus an R2
+ * upload path for the logo, then wire Save to it and drop the notice below.
  */
 
 import { useState } from 'react'
@@ -25,6 +31,14 @@ export function OrgSettingsSection() {
   const [industry, setIndustry] = useState('')
   const [colour, setColour] = useState('#5A824E')
   const [logo, setLogo] = useState<string>('')
+  const [note, setNote] = useState('')
+
+  function save() {
+    // TODO(portal-org-endpoint): POST/PATCH to the portal org endpoint once it
+    // exists. Until then, be honest that nothing is persisted.
+    setNote('Editing your organization details in the portal is coming soon. For now, ask your studio contact to update these and they will sync here.')
+    window.setTimeout(() => setNote(''), 5200)
+  }
 
   function pickLogo(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -63,9 +77,10 @@ export function OrgSettingsSection() {
           </div>
         </div>
         <div className="set-row" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border-subtle)' }}>
-          <button className="btn1" type="button">Save organization</button>
+          <button className="btn1" type="button" onClick={save}>Save organization</button>
         </div>
       </div>
+      {note && <div className="plan-note">{note}</div>}
     </SectionShell>
   )
 }

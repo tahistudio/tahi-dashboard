@@ -11,6 +11,10 @@
 
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import {
+  filterRecipientsByInAppPref,
+  isEventChannelEnabled,
+} from './notification-preferences'
 
 // The event / entity vocabulary and the deep-link resolver live in a
 // client-safe module so the bell and this helper share one source of truth.
@@ -39,6 +43,17 @@ export async function createNotification(
   params: CreateNotificationParams,
 ): Promise<void> {
   try {
+    // Honour the recipient's in-app preference for this event. A muted user
+    // gets no bell row; on any lookup failure isEventChannelEnabled fails open.
+    const allowed = await isEventChannelEnabled(
+      database,
+      params.userId,
+      params.userType,
+      params.type,
+      'in_app',
+    )
+    if (!allowed) return
+
     await database.insert(schema.notifications).values({
       id: crypto.randomUUID(),
       userId: params.userId,
@@ -142,8 +157,16 @@ export async function createNotifications(
 ): Promise<void> {
   if (recipients.length === 0) return
   try {
+    // Drop recipients who muted this event's in-app channel before inserting.
+    const targets = await filterRecipientsByInAppPref(
+      database,
+      recipients,
+      shared.type,
+    )
+    if (targets.length === 0) return
+
     const now = new Date().toISOString()
-    const rows = recipients.map((r) => ({
+    const rows = targets.map((r) => ({
       id: crypto.randomUUID(),
       userId: r.userId,
       userType: r.userType,

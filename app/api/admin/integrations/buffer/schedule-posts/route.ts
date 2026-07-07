@@ -29,6 +29,7 @@
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { createPost, listChannels, listOrganizations } from '@/lib/buffer'
 
@@ -55,10 +56,12 @@ interface Body {
 }
 
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
 
   const token = process.env.BUFFER_API_KEY
   if (!token) {

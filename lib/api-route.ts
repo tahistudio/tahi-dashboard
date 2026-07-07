@@ -14,6 +14,10 @@
  * scoping (CLAUDE.md rule 11) - the handler still calls `scopedOrgIds` /
  * `requireAccessToOrg` itself, using the `userId` these wrappers forward.
  *
+ * `defineAdminRoute` accepts one opt-in policy step: pass `{ feature }` to
+ * enforce a granular-permissions FEATURE_TREE key after the org gate (see
+ * lib/require-feature.ts). Omitting it preserves the exact historical behaviour.
+ *
  * The one behaviour these add on top of the raw routes is the catch-all 500:
  * an unhandled throw becomes `{ error: 'Internal server error' }, { status: 500 }`
  * instead of bubbling to Next's default 500 page. This is intentional and
@@ -27,6 +31,7 @@ import {
   isTahiAdmin,
   type RequestAuthResult,
 } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 
 /** The resolved portal auth context, including org resolution + impersonation. */
 export type PortalAuthResult = Awaited<ReturnType<typeof getPortalAuth>>
@@ -60,6 +65,17 @@ interface PortalRouteOptions {
   requireUser?: boolean
 }
 
+interface AdminRouteOptions {
+  /**
+   * Optional FEATURE_TREE key (e.g. 'financial_reports', 'time'). When set, the
+   * route additionally enforces granular permissions after the isTahiAdmin gate:
+   * super-admins, admins, and the MCP token pass; a scoped team member whose
+   * role cannot see the feature gets the standard 403. Omit to gate on org
+   * membership only (the historical behaviour).
+   */
+  feature?: string
+}
+
 function toInternalError(scope: string, err: unknown): NextResponse {
   console.error(`[${scope}] unhandled error`, err)
   return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -81,15 +97,26 @@ function toInternalError(scope: string, err: unknown): NextResponse {
  *     // auth.userId is available for scopedOrgIds / requireAccessToOrg (rule 11)
  *     return NextResponse.json({ widget: row ?? null })
  *   })
+ *
+ * Pass `{ feature }` to additionally enforce a granular-permissions feature key
+ * after the org gate (super-admins / admins / MCP always pass, scoped team
+ * members are gated by their role):
+ *
+ *   export const GET = defineAdminRoute(handler, { feature: 'financial_reports' })
  */
 export function defineAdminRoute<P = Record<string, string>>(
   handler: AdminRouteHandler<P>,
+  options: AdminRouteOptions = {},
 ): (req: NextRequest, ctx: RouteContext<P>) => Promise<Response> {
   return async (req, ctx) => {
     try {
       const auth = await getRequestAuth(req)
       if (!isTahiAdmin(auth.orgId)) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+      if (options.feature) {
+        const denied = await requireFeature(auth, options.feature)
+        if (denied) return denied
       }
       return await handler(req, auth, ctx)
     } catch (err) {

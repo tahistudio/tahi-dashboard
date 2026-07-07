@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -9,10 +10,12 @@ import { eq } from 'drizzle-orm'
  * Returns MailerLite connection status.
  */
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
 
   const hasApiKey = !!process.env.MAILERLITE_API_KEY
 
@@ -38,10 +41,12 @@ export async function GET(req: NextRequest) {
  * Body: { email: string, action: 'unsubscribe' }
  */
 export async function PUT(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
 
   const body = await req.json() as { email?: string; action?: string }
   if (!body.email) {
@@ -61,10 +66,12 @@ export async function PUT(req: NextRequest) {
  * Adds a contact to a MailerLite group (T129).
  */
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
 
   const body = await req.json() as {
     email?: string

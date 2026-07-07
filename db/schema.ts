@@ -102,6 +102,13 @@ export const contacts = sqliteTable('contacts', {
   role: text('role'),
   clerkUserId: text('clerk_user_id'),
   isPrimary: integer('is_primary', { mode: 'boolean' }).default(false),
+  // Portal access role — the client-admin authority signal. Deny-by-default:
+  // 'member' can only see their own scoped portal view; 'admin' can administer
+  // the org's portal (manage contacts, billing visibility, etc). Kept separate
+  // from `isPrimary` (single email-targeting flag, one per org) and the
+  // free-text `role` (job title). Backfilled to 'admin' where isPrimary=1.
+  // 'admin' | 'member'
+  portalRole: text('portal_role').notNull().default('member'),
   lastLoginAt: text('last_login_at'),
   ...timestamps,
 }, (table) => [
@@ -1015,6 +1022,37 @@ export const notifications = sqliteTable('notifications', {
 }, (table) => [
   index('idx_notifications_user').on(table.userId),
   index('idx_notifications_read').on(table.read),
+])
+
+// ============================================================
+// NOTIFICATION PREFERENCES (per-user x per-event x per-channel)
+// ============================================================
+// One row per (userId, userType, eventType, channel). Resolution order:
+// exact (userId, userType, eventType, channel) row -> the eventType='*'
+// default row for that user/channel -> a hardcoded default in code.
+// Deny/allow via `enabled`. userType mirrors the notifications table's dual
+// identity model so this joins cleanly to (userId, userType). Channels:
+// 'in_app' | 'email' | 'slack'. eventType is a NotificationEventType value
+// or '*' for the per-user default row.
+export const notificationPreferences = sqliteTable('notification_preferences', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text('user_id').notNull(),
+  // team_member | contact
+  userType: text('user_type').notNull(),
+  // a NotificationEventType value, or '*' for the per-user default row
+  eventType: text('event_type').notNull(),
+  // in_app | email | slack
+  channel: text('channel').notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('uq_notif_pref').on(
+    table.userId,
+    table.userType,
+    table.eventType,
+    table.channel,
+  ),
+  index('idx_notif_pref_user').on(table.userId, table.userType),
 ])
 
 // ============================================================
@@ -1996,6 +2034,8 @@ export type RequestStep = typeof requestSteps.$inferSelect
 export type NewRequestStep = typeof requestSteps.$inferInsert
 export type Tag = typeof tags.$inferSelect
 export type Notification = typeof notifications.$inferSelect
+export type NotificationPreference = typeof notificationPreferences.$inferSelect
+export type NewNotificationPreference = typeof notificationPreferences.$inferInsert
 export type DocPage = typeof docPages.$inferSelect
 export type Integration = typeof integrations.$inferSelect
 export type Conversation = typeof conversations.$inferSelect

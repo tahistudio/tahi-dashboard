@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -10,10 +11,12 @@ import { eq } from 'drizzle-orm'
  * Returns the trigger URLs that Zapier can poll for new data.
  */
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://portal.tahi.studio'
 
@@ -56,10 +59,12 @@ export async function GET(req: NextRequest) {
  * Body: { action: 'create_request'|'update_status', ...data }
  */
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
 
   const body = await req.json() as {
     action?: string

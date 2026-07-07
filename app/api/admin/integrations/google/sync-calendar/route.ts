@@ -19,6 +19,7 @@
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -45,6 +46,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
     userId = auth.userId
+    const denied = await requireFeature(auth, 'settings.integrations')
+    if (denied) return denied
   }
 
   const database = await db()

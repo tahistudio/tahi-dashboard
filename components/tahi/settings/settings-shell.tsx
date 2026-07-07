@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
+import { usePermissions } from '@/components/tahi/permissions-context'
+import { useResource } from '@/lib/use-resource'
 import {
   User, SunMoon, Bell, CalendarClock, Paintbrush, LayoutGrid, Megaphone,
   Building2, FileText, Columns3, ClipboardList, Target, GitBranch, Sparkles,
@@ -41,7 +43,7 @@ import { PlanBillingSection } from '@/components/tahi/settings/sections/plan'
 
 type Audience = 'both' | 'admin' | 'client'
 
-type SectionComponent = React.ComponentType<{ isAdmin?: boolean }>
+type SectionComponent = React.ComponentType<{ isAdmin?: boolean; isClientAdmin?: boolean }>
 
 interface SectionDef {
   id: string
@@ -50,6 +52,13 @@ interface SectionDef {
   group: string
   audience: Audience
   Component: SectionComponent
+  // Admin-only sections that hold sensitive workspace controls. Hidden from the
+  // sub-nav for admins who are not super-admins. This is the cosmetic layer that
+  // complements the server-side feature gate (the real enforcement).
+  superAdminOnly?: boolean
+  // Client sections that only a workspace admin (contacts.portalRole === 'admin',
+  // or the primary contact) may reach. Hidden from client members in the sub-nav.
+  clientAdminOnly?: boolean
 }
 
 // Registry order is intentional: it drives the order items appear inside their
@@ -61,9 +70,9 @@ const SECTIONS: SectionDef[] = [
   { id: 'booking', label: 'Booking', icon: CalendarClock, group: 'Account', audience: 'admin', Component: BookingSection },
 
   { id: 'branding', label: 'Branding', icon: Paintbrush, group: 'Workspace', audience: 'admin', Component: BrandingSection },
-  { id: 'modules', label: 'Modules', icon: LayoutGrid, group: 'Workspace', audience: 'admin', Component: ModulesSection },
+  { id: 'modules', label: 'Modules', icon: LayoutGrid, group: 'Workspace', audience: 'admin', superAdminOnly: true, Component: ModulesSection },
   { id: 'announce', label: 'Announcements', icon: Megaphone, group: 'Workspace', audience: 'admin', Component: AnnouncementsSection },
-  { id: 'studio', label: 'Studio details', icon: Building2, group: 'Workspace', audience: 'admin', Component: StudioDetailsSection },
+  { id: 'studio', label: 'Studio details', icon: Building2, group: 'Workspace', audience: 'admin', superAdminOnly: true, Component: StudioDetailsSection },
 
   { id: 'forms', label: 'Request forms', icon: FileText, group: 'Intake & boards', audience: 'admin', Component: RequestFormsSection },
   { id: 'kanban', label: 'Kanban columns', icon: Columns3, group: 'Intake & boards', audience: 'admin', Component: KanbanColumnsSection },
@@ -73,23 +82,23 @@ const SECTIONS: SectionDef[] = [
   { id: 'stages', label: 'Pipeline stages', icon: GitBranch, group: 'Sales & pipeline', audience: 'admin', Component: PipelineStagesSection },
   { id: 'leadauto', label: 'Lead automations', icon: Sparkles, group: 'Sales & pipeline', audience: 'admin', Component: LeadAutomationsSection },
 
-  { id: 'integrations', label: 'Integrations', icon: Plug, group: 'Automations & integrations', audience: 'admin', Component: IntegrationsSection },
-  { id: 'webhooks', label: 'Webhooks', icon: Webhook, group: 'Automations & integrations', audience: 'admin', Component: WebhooksSection },
+  { id: 'integrations', label: 'Integrations', icon: Plug, group: 'Automations & integrations', audience: 'admin', superAdminOnly: true, Component: IntegrationsSection },
+  { id: 'webhooks', label: 'Webhooks', icon: Webhook, group: 'Automations & integrations', audience: 'admin', superAdminOnly: true, Component: WebhooksSection },
   { id: 'automations', label: 'Automations', icon: Workflow, group: 'Automations & integrations', audience: 'admin', Component: AutomationsSection },
-  { id: 'crons', label: 'Scheduled jobs', icon: Clock, group: 'Automations & integrations', audience: 'admin', Component: ScheduledJobsSection },
+  { id: 'crons', label: 'Scheduled jobs', icon: Clock, group: 'Automations & integrations', audience: 'admin', superAdminOnly: true, Component: ScheduledJobsSection },
   { id: 'aicontext', label: 'AI context', icon: Bot, group: 'Automations & integrations', audience: 'admin', Component: AiContextSection },
 
-  { id: 'teamaccess', label: 'Team & access', icon: Users, group: 'Team & access', audience: 'admin', Component: TeamAccessSection },
+  { id: 'teamaccess', label: 'Team & access', icon: Users, group: 'Team & access', audience: 'admin', superAdminOnly: true, Component: TeamAccessSection },
 
-  { id: 'plans', label: 'Client plans', icon: CreditCard, group: 'Billing', audience: 'admin', Component: PlansRetainersSection },
-  { id: 'reserves', label: 'Reserves', icon: PiggyBank, group: 'Billing', audience: 'admin', Component: ReservesSection },
+  { id: 'plans', label: 'Client plans', icon: CreditCard, group: 'Billing', audience: 'admin', superAdminOnly: true, Component: PlansRetainersSection },
+  { id: 'reserves', label: 'Reserves', icon: PiggyBank, group: 'Billing', audience: 'admin', superAdminOnly: true, Component: ReservesSection },
 
   { id: 'audit', label: 'Audit log', icon: ScrollText, group: 'Advanced', audience: 'admin', Component: AuditLogSection },
-  { id: 'danger', label: 'Danger zone', icon: AlertTriangle, group: 'Advanced', audience: 'admin', Component: DangerZoneSection },
+  { id: 'danger', label: 'Danger zone', icon: AlertTriangle, group: 'Advanced', audience: 'admin', superAdminOnly: true, Component: DangerZoneSection },
 
   // Client portal sections (Organization + Plan & billing groups).
   { id: 'org', label: 'Organization', icon: Building2, group: 'Organization', audience: 'client', Component: OrgSettingsSection },
-  { id: 'people', label: 'People', icon: Users, group: 'Organization', audience: 'client', Component: PeopleSection },
+  { id: 'people', label: 'People', icon: Users, group: 'Organization', audience: 'client', clientAdminOnly: true, Component: PeopleSection },
   { id: 'brands', label: 'Brand', icon: Palette, group: 'Organization', audience: 'client', Component: BrandsSection },
   { id: 'plan', label: 'Plan & billing', icon: Wallet, group: 'Plan & billing', audience: 'client', Component: PlanBillingSection },
 ]
@@ -101,18 +110,67 @@ const ADMIN_GROUPS = [
 ]
 const CLIENT_GROUPS = ['Account', 'Organization', 'Plan & billing']
 
-function isVisible(section: SectionDef, isAdmin: boolean): boolean {
+interface Visibility {
+  isAdmin: boolean
+  isSuperAdmin: boolean
+  isClientAdmin: boolean
+}
+
+function isVisible(section: SectionDef, v: Visibility): boolean {
   if (section.audience === 'both') return true
-  return isAdmin ? section.audience === 'admin' : section.audience === 'client'
+  if (v.isAdmin) {
+    if (section.audience !== 'admin') return false
+    // Sensitive admin surfaces are super-admin only in the sub-nav.
+    if (section.superAdminOnly && !v.isSuperAdmin) return false
+    return true
+  }
+  // Client portal.
+  if (section.audience !== 'client') return false
+  // People (and any future admin-only client surface) is hidden from members.
+  if (section.clientAdminOnly && !v.isClientAdmin) return false
+  return true
+}
+
+interface PortalProfileResponse {
+  contact: {
+    isPrimary?: boolean | number | null
+    portalRole?: string | null
+  } | null
 }
 
 export function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
   const groupOrder = isAdmin ? ADMIN_GROUPS : CLIENT_GROUPS
 
+  // Super-admin flag drives the admin sub-nav gate (#7). Resolved server-side in
+  // the dashboard layout and surfaced through PermissionsProvider (no flash).
+  const { isSuperAdmin } = usePermissions()
+
+  // Client-admin flag drives the client sub-nav gate (#6). The signal is
+  // contacts.portalRole === 'admin'; until the portal profile endpoint exposes
+  // it, we fall back to the primary-contact flag (the foundation backfilled
+  // portalRole = 'admin' where is_primary = 1, so they agree for current data).
+  // TODO: once GET /api/portal/profile returns portalRole, drop the isPrimary
+  // fallback below.
+  const { data: profile } = useResource<PortalProfileResponse>(
+    isAdmin ? null : '/api/portal/profile',
+  )
+  const isClientAdmin = useMemo(() => {
+    if (isAdmin) return false
+    const c = profile?.contact
+    if (!c) return false
+    if (typeof c.portalRole === 'string') return c.portalRole === 'admin'
+    return !!c.isPrimary
+  }, [isAdmin, profile])
+
+  const visibility = useMemo<Visibility>(
+    () => ({ isAdmin, isSuperAdmin, isClientAdmin }),
+    [isAdmin, isSuperAdmin, isClientAdmin],
+  )
+
   // Sections this audience may see, kept in registry order.
   const visibleSections = useMemo(
-    () => SECTIONS.filter((s) => isVisible(s, isAdmin)),
-    [isAdmin],
+    () => SECTIONS.filter((s) => isVisible(s, visibility)),
+    [visibility],
   )
 
   // Group them for the sub-nav, preserving the group display order and the
@@ -206,7 +264,9 @@ export function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
 
         {/* Active section, re-keyed so it re-animates on switch */}
         <div className="set-anim" key={active?.id}>
-          {ActiveComponent ? <ActiveComponent isAdmin={isAdmin} /> : null}
+          {ActiveComponent ? (
+            <ActiveComponent isAdmin={isAdmin} isClientAdmin={isClientAdmin} />
+          ) : null}
         </div>
       </div>
     </div>

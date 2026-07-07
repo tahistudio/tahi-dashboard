@@ -1,103 +1,195 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { apiPath } from '@/lib/api'
 import { useResource } from '@/lib/use-resource'
 import { SectionShell, Toggle } from '@/components/tahi/settings/primitives'
 
-interface SettingsPayload {
-  settings: Record<string, string | null>
+type Channel = 'in_app' | 'email' | 'slack'
+
+interface PrefRow {
+  eventType: string
+  channel: string
+  enabled: boolean
+}
+
+interface PrefsPayload {
+  preferences: PrefRow[]
+}
+
+/**
+ * Per-channel default when a user has no stored row for that channel. Mirrors
+ * DEFAULT_ENABLED in lib/notification-preferences.ts. In-app notifications are
+ * gated by these prefs at send time today; email and Slack preferences are
+ * stored and take effect on each send path as it adopts the check (so the UI
+ * does not claim enforcement the backend does not yet deliver).
+ */
+const DEFAULTS: Record<Channel, boolean> = { in_app: true, email: true, slack: false }
+
+const CHANNELS: { key: Channel; label: string; adminOnly?: boolean }[] = [
+  { key: 'in_app', label: 'In-app' },
+  { key: 'email', label: 'Email' },
+  // Slack is a workspace/team channel, not surfaced to portal clients.
+  { key: 'slack', label: 'Slack', adminOnly: true },
+]
+
+/**
+ * Each toggle group maps to one or more concrete NotificationEventType values.
+ * Toggling a group writes every event in the group for that channel, and the
+ * group reads on only when all of its events are on, so the grid stays in sync
+ * with the granular rows the send paths look up.
+ */
+const GROUPS: { key: string; label: string; desc: string; events: string[] }[] = [
+  {
+    key: 'requests',
+    label: 'Requests',
+    desc: 'Status changes and new requests.',
+    events: ['request_status_changed', 'request_created'],
+  },
+  {
+    key: 'messages',
+    label: 'Messages',
+    desc: 'New messages and mentions.',
+    events: ['new_message'],
+  },
+  {
+    key: 'invoices',
+    label: 'Invoices',
+    desc: 'New, paid, and overdue invoices.',
+    events: ['invoice_created', 'invoice_paid', 'invoice_overdue'],
+  },
+]
+
+function keyOf(event: string, channel: Channel): string {
+  return event + '|' + channel
 }
 
 /**
  * Notifications settings section.
  *
- * Email + Slack toggles persist to /api/admin/settings under the keys
- * notifications.email and notifications.slack. Email is shown to everyone;
- * Slack is admin-only. Defaults mirror the existing settings surface:
- * email is on unless explicitly 'false', Slack is off unless 'true'.
+ * Per-event, per-channel preferences backed by the notification_preferences
+ * table. Admins read/write their own team-member prefs via /api/admin/
+ * notifications; clients read/write their own contact prefs via /api/portal/
+ * notifications. Both endpoints are per-user, so the client tab persists (it no
+ * longer PATCHes the admin-gated key/value store and silently 403s).
  */
 export function NotificationsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
-  // Only admins can read /api/admin/settings; non-admins skip the fetch and
-  // fall back to defaults so they never sit on a spinner.
-  const { data, isLoading, mutate } = useResource<SettingsPayload>(
-    isAdmin ? '/api/admin/settings' : null,
-  )
+  const endpoint = isAdmin ? '/api/admin/notifications' : '/api/portal/notifications'
+  const { data, isLoading, mutate } = useResource<PrefsPayload>(endpoint)
 
-  const [email, setEmail] = useState(true)
-  const [slack, setSlack] = useState(false)
-  const [saving, setSaving] = useState<string | null>(null)
+  // Stored rows keyed `${eventType}|${channel}`. Absent keys fall back to
+  // DEFAULTS via resolved(), so an empty store reads as "everything at default".
+  const [state, setState] = useState<Record<string, boolean>>({})
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
-    const s = data?.settings
-    if (!s) return
-    setEmail(s['notifications.email'] !== 'false')
-    setSlack(s['notifications.slack'] === 'true')
+    const rows = data?.preferences
+    if (!rows) return
+    const next: Record<string, boolean> = {}
+    for (const r of rows) next[keyOf(r.eventType, r.channel as Channel)] = r.enabled
+    setState(next)
   }, [data])
 
-  async function save(key: string, next: boolean, revert: (v: boolean) => void) {
-    setSaving(key)
+  const channels = CHANNELS.filter((c) => isAdmin || !c.adminOnly)
+
+  function resolved(event: string, channel: Channel): boolean {
+    const k = keyOf(event, channel)
+    return k in state ? state[k] : DEFAULTS[channel]
+  }
+
+  function groupOn(events: string[], channel: Channel): boolean {
+    return events.every((e) => resolved(e, channel))
+  }
+
+  async function toggleGroup(events: string[], channel: Channel) {
+    const next = !groupOn(events, channel)
+    const prev = state
+    const optimistic = { ...state }
+    for (const e of events) optimistic[keyOf(e, channel)] = next
+    setState(optimistic)
+    setError(false)
+    setSaving(true)
     try {
-      const res = await fetch(apiPath('/api/admin/settings'), {
+      const res = await fetch(apiPath(endpoint), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, value: next ? 'true' : 'false' }),
+        body: JSON.stringify({
+          updates: events.map((e) => ({ eventType: e, channel, enabled: next })),
+        }),
       })
       if (!res.ok) {
-        revert(!next)
+        setState(prev)
+        setError(true)
       } else {
         void mutate()
       }
     } catch {
-      revert(!next)
+      setState(prev)
+      setError(true)
     } finally {
-      setSaving(null)
+      setSaving(false)
     }
   }
 
-  function toggleEmail() {
-    const next = !email
-    setEmail(next)
-    void save('notifications.email', next, setEmail)
-  }
-
-  function toggleSlack() {
-    const next = !slack
-    setSlack(next)
-    void save('notifications.slack', next, setSlack)
-  }
-
-  const loading = isAdmin ? isLoading : false
+  const cols = 'minmax(0, 1fr) repeat(' + channels.length + ', 64px)'
 
   return (
-    <SectionShell title="Notifications" lede="Where the studio reaches you.">
-      <div className="set-card">
-        <div className="set-row">
-          <div className="sr-t">
-            <b>Email notifications</b>
-            <small>Request updates, messages, and invoices.</small>
-          </div>
-          <Toggle
-            on={email}
-            onClick={toggleEmail}
-            ariaLabel="Toggle email notifications"
-          />
-        </div>
-        {isAdmin && (
-          <div className="set-row">
-            <div className="sr-t">
-              <b>Slack notifications</b>
-              <small>Post activity to your connected Slack.</small>
+    <SectionShell title="Notifications" lede="Choose what reaches you, and where.">
+      <div className="set-card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: cols, alignItems: 'center' }}>
+          {/* Column headers */}
+          <div style={{ padding: '12px 16px' }} />
+          {channels.map((c) => (
+            <div
+              key={c.key}
+              style={{
+                textAlign: 'center',
+                font: '600 12px Manrope',
+                color: 'var(--text-muted)',
+                padding: '12px 4px',
+              }}
+            >
+              {c.label}
             </div>
-            <Toggle
-              on={slack}
-              onClick={toggleSlack}
-              ariaLabel="Toggle Slack notifications"
-            />
-          </div>
-        )}
+          ))}
+
+          {/* One row per event group */}
+          {GROUPS.map((g) => (
+            <Fragment key={g.key}>
+              <div
+                className="sr-t"
+                style={{ padding: '14px 16px', borderTop: '1px solid var(--border-subtle)' }}
+              >
+                <b>{g.label}</b>
+                <small>{g.desc}</small>
+              </div>
+              {channels.map((c) => (
+                <div
+                  key={c.key}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    padding: '14px 4px',
+                    borderTop: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <Toggle
+                    on={groupOn(g.events, c.key)}
+                    onClick={() => toggleGroup(g.events, c.key)}
+                    ariaLabel={g.label + ' ' + c.label + ' notifications'}
+                  />
+                </div>
+              ))}
+            </Fragment>
+          ))}
+        </div>
       </div>
-      {loading && (
+
+      <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>
+        In-app notifications take effect immediately. Email and Slack preferences are saved and apply as those channels roll out.
+      </p>
+      {isLoading && (
         <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>
           Loading your preferences...
         </p>
@@ -105,6 +197,14 @@ export function NotificationsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
       {saving && (
         <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>
           Saving...
+        </p>
+      )}
+      {error && (
+        <p
+          className="set-lede"
+          style={{ marginTop: 12, marginBottom: 0, color: 'var(--color-danger, #f87171)' }}
+        >
+          Could not save that change. Please try again.
         </p>
       )}
     </SectionShell>

@@ -1,25 +1,29 @@
 'use client'
 
 /**
- * TeamAccessSection - the settings entry point for who is on the team and what
- * they can see. This is deliberately a summary, not the full permissions
- * builder: it reads a light headcount from /api/admin/permissions/subjects
- * (team members, roles, client orgs) and points to the two pages that own the
- * real work - /permissions for the deny-by-default access rules and /team for
- * the roster itself.
+ * TeamAccessSection - the real Team & access pane, folded into Settings.
  *
- * Deferred to a later phase (lives on /permissions, not here): the full roles
- * matrix, preview-as, copy-access between members, and the change history.
+ * Rather than linking out to /permissions, this surfaces the built permissions
+ * system inline. It composes the existing PermissionsBuilder from the
+ * /permissions page wholesale (its own three-tab master-detail of team members,
+ * clients, and roles, plus the per-feature Inherit/Allow/Deny slide-over), so
+ * there is one source of truth and no reinvented logic. On top of that it adds:
+ *   - a glanceable summary (headcounts) in the settings visual language, and
+ *   - a link out to the team roster (/team) for add / edit / offboard.
  *
- * Admin-only surface. Rendered inside the settings shell which already gates on
- * admin; the isAdmin prop lets a non-admin skip the fetch instead of sitting on
- * a spinner.
+ * Honest scope note: preview-as, copy-access between members, and change
+ * history are not built yet anywhere. They are called out as a "Later phase"
+ * card rather than faked. When those ship, extend here.
+ *
+ * Admin-only surface. The settings shell only mounts this for admins; the
+ * isAdmin prop lets a non-admin skip the summary fetch instead of spinning.
  */
 
 import Link from 'next/link'
-import { Shield, Users, ArrowRight } from 'lucide-react'
+import { Shield, Users, ArrowRight, Eye, Copy, History } from 'lucide-react'
 import { useResource } from '@/lib/use-resource'
 import { SectionShell, Chip } from '@/components/tahi/settings/primitives'
+import { PermissionsBuilder } from '@/app/(dashboard)/permissions/permissions-content'
 
 interface SubjectRole {
   roleId: string
@@ -44,6 +48,26 @@ interface Stat {
   value: number
   hint: string
 }
+
+// The advanced surfaces that do not exist yet. Listed honestly so the pane
+// never implies they work; remove an entry once it is genuinely built.
+const NOT_YET_BUILT: { icon: typeof Eye; label: string; blurb: string }[] = [
+  {
+    icon: Eye,
+    label: 'Preview as',
+    blurb: 'See the dashboard exactly as a given member or client would.',
+  },
+  {
+    icon: Copy,
+    label: 'Copy access',
+    blurb: "Clone one member's role and overrides onto another.",
+  },
+  {
+    icon: History,
+    label: 'Change history',
+    blurb: 'An audit trail of who changed which permission, and when.',
+  },
+]
 
 export function TeamAccessSection({ isAdmin }: { isAdmin?: boolean } = {}) {
   // Admin-only: non-admins skip the fetch and never sit on a spinner.
@@ -79,8 +103,16 @@ export function TeamAccessSection({ isAdmin }: { isAdmin?: boolean } = {}) {
   return (
     <SectionShell
       title="Team & access"
-      lede="Who is on the team and what each person can see. Access is deny-by-default: members see nothing until a rule grants it."
+      lede="Who is on the team and what each person can see. Access is deny-by-default: members see nothing until a role or rule grants it. Assign roles and per-feature Allow/Deny overrides below."
+      action={
+        <Link className="btn2" href="/team">
+          <Users size={15} />
+          Team roster
+          <ArrowRight size={15} />
+        </Link>
+      }
     >
+      {/* Glanceable headcounts, in the settings visual language. */}
       <div className="card-grid2">
         {stats.map((s) => (
           <div key={s.label} className="set-card">
@@ -102,44 +134,44 @@ export function TeamAccessSection({ isAdmin }: { isAdmin?: boolean } = {}) {
         ))}
       </div>
 
-      <div className="set-card" style={{ marginTop: 16 }}>
-        <div className="set-row">
-          <span className="lrow-ic leaf">
-            <Shield size={18} />
-          </span>
-          <div className="sr-t">
-            <b>Access rules</b>
-            <small>Roles, client scoping, and per-feature visibility.</small>
-          </div>
-          <Link className="btn1" href="/permissions">
-            Manage permissions
-            <ArrowRight size={15} />
-          </Link>
-        </div>
-        <div className="set-row">
-          <span className="lrow-ic leaf">
-            <Users size={18} />
-          </span>
-          <div className="sr-t">
-            <b>Team roster</b>
-            <small>Add, edit, and offboard team members.</small>
-          </div>
-          <Link className="btn2" href="/team">
-            Manage team
-            <ArrowRight size={15} />
-          </Link>
-        </div>
+      {/* The real builder, composed wholesale from the /permissions page:
+          team / clients / roles master-detail + the Inherit/Allow/Deny panel. */}
+      <div style={{ marginTop: 20 }}>
+        <PermissionsBuilder />
       </div>
 
-      <div
-        className="set-card"
-        style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}
-      >
-        <Chip tone="neutral">Later phase</Chip>
-        <small style={{ color: 'var(--text-faint)', font: '500 12.5px Manrope' }}>
-          The full roles matrix, preview-as, copy access between members, and change history live on
-          the permissions page and are still being built out.
-        </small>
+      {/* Honest placeholder: advanced surfaces that are not built yet. */}
+      <div className="set-card" style={{ marginTop: 20 }}>
+        <div className="set-row" style={{ alignItems: 'flex-start' }}>
+          <span className="lrow-ic leaf">
+            <Eye size={18} />
+          </span>
+          <div className="sr-t">
+            <b style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              Coming later
+              <Chip tone="neutral">Later phase</Chip>
+            </b>
+            <small>
+              These are not built yet, so nothing here is live. They will slot in
+              alongside the builder above once ready.
+            </small>
+          </div>
+        </div>
+        {NOT_YET_BUILT.map((f) => {
+          const Icon = f.icon
+          return (
+            <div key={f.label} className="set-row">
+              <span className="lrow-ic">
+                <Icon size={16} />
+              </span>
+              <div className="sr-t">
+                <b>{f.label}</b>
+                <small>{f.blurb}</small>
+              </div>
+              <Chip tone="neutral">Not built</Chip>
+            </div>
+          )
+        })}
       </div>
     </SectionShell>
   )

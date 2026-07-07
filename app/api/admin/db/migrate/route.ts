@@ -1920,6 +1920,26 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_onboarding_invites_org ON onboarding_invites(org_id)`,
     ],
   },
+  {
+    name: '0081',
+    description: 'Notification preferences + client-admin portal role. contacts.portal_role (admin|member, default member) is the client-admin authority signal, backfilled to admin where is_primary=1 so current primary contacts keep working; it stays separate from is_primary (email-targeting) and the free-text role (job title). New notification_preferences table stores per-user x per-event x per-channel toggles (user_id, user_type team_member|contact, event_type = a NotificationEventType value or "*" default row, channel in_app|email|slack, enabled). Resolution: exact row -> event_type="*" row -> hardcoded default. Duplicate-column / already-exists errors are caught upstream so re-runs are idempotent.',
+    statements: [
+      `ALTER TABLE contacts ADD COLUMN portal_role text NOT NULL DEFAULT 'member'`,
+      `UPDATE contacts SET portal_role = 'admin' WHERE is_primary = 1`,
+      `CREATE TABLE IF NOT EXISTS notification_preferences (
+        id text PRIMARY KEY NOT NULL,
+        user_id text NOT NULL,
+        user_type text NOT NULL,
+        event_type text NOT NULL,
+        channel text NOT NULL,
+        enabled integer NOT NULL DEFAULT 1,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_notif_pref ON notification_preferences (user_id, user_type, event_type, channel)`,
+      `CREATE INDEX IF NOT EXISTS idx_notif_pref_user ON notification_preferences (user_id, user_type)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

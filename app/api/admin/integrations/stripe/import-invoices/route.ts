@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { importStripeInvoice, type StripeInvoiceLike } from '@/lib/stripe-import'
@@ -10,8 +11,10 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  * Import invoices from Stripe using fetch (no SDK, CF Workers compatible).
  */
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
 
   const stripeKey = process.env.STRIPE_SECRET_KEY
   if (!stripeKey) return NextResponse.json({ error: 'Stripe not configured' }, { status: 503 })

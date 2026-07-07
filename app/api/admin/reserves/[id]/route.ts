@@ -7,6 +7,7 @@
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -18,8 +19,10 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 const VALID_CATEGORIES = ['tax', 'buffer', 'deposits', 'other'] as const
 
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const denied = await requireFeature({ userId, orgId }, 'financial_reports')
+  if (denied) return denied
 
   const { id } = await params
   const body = (await req.json()) as Partial<{
@@ -50,8 +53,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const denied = await requireFeature({ userId, orgId }, 'financial_reports')
+  if (denied) return denied
 
   const { id } = await params
   const database = (await db()) as D1
