@@ -89,8 +89,10 @@ test.describe('Settings control room', () => {
       await expect(matrix.locator('th', { hasText: new RegExp('^' + role + '$') })).toBeVisible()
     }
 
-    // Change history view opens (audit-backed).
-    await page.getByRole('button', { name: 'Change history' }).click()
+    // Change history view opens (audit-backed). Dispatch the click on the
+    // element directly: the Next dev overlay renders an empty portal div that
+    // intercepts pointer hit-testing in headless runs.
+    await page.locator('.ta-history-link').evaluate((el) => (el as HTMLElement).click())
     await expect(page.locator('.hist')).toBeVisible({ timeout: 15_000 })
     await expect(page.locator('.hist thead')).toContainText('Reason')
   })
