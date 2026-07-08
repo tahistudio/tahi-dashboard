@@ -2,8 +2,11 @@ import { getRequestAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import type { DB } from '@/db/d1'
 import { eq, and, isNull } from 'drizzle-orm'
 import { requireManagePermissions } from '@/lib/require-permission'
+import { requireFeature } from '@/lib/require-feature'
+import { logAudit } from '@/lib/audit'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -18,6 +21,10 @@ export async function POST(req: NextRequest) {
   const drizzle = (await db()) as unknown as D1
   const { denied } = await requireManagePermissions(drizzle, auth)
   if (denied) return denied
+  // Feature-gate: only super-admins (un-lockable) or a subject explicitly granted
+  // the permissions builder may mutate role assignments.
+  const featureDenied = await requireFeature(auth, 'settings.permissions')
+  if (featureDenied) return featureDenied
 
   const body = await req.json() as { teamMemberId?: string; roleId?: string | null }
   const { teamMemberId, roleId } = body
@@ -39,6 +46,17 @@ export async function POST(req: NextRequest) {
 
   const now = new Date().toISOString()
 
+  // Capture the current (before) active role for the audit trail.
+  const [prev] = await drizzle
+    .select({ roleId: schema.teamMemberRoles.roleId, roleName: schema.roles.name })
+    .from(schema.teamMemberRoles)
+    .leftJoin(schema.roles, eq(schema.roles.id, schema.teamMemberRoles.roleId))
+    .where(and(
+      eq(schema.teamMemberRoles.teamMemberId, teamMemberId),
+      isNull(schema.teamMemberRoles.endedAt),
+    ))
+    .limit(1)
+
   // End all currently-active role assignments for this member.
   await drizzle
     .update(schema.teamMemberRoles)
@@ -57,7 +75,30 @@ export async function POST(req: NextRequest) {
       startedAt: now,
       createdAt: now,
     })
+
+    // Neutralise the LEGACY teamMembers.role column so it can never diverge
+    // from the new system and hand a scoped member unrestricted access via
+    // lib/access-scoping.ts (which treats legacy role === 'admin' as an
+    // unrestricted grant). The legacy column only understands 'admin' |
+    // 'member': keep 'admin' parity for admin-level roles, collapse every
+    // scoped role to 'member'.
+    const legacyRole = roleName === 'super_admin' || roleName === 'admin' ? 'admin' : 'member'
+    await drizzle
+      .update(schema.teamMembers)
+      .set({ role: legacyRole })
+      .where(eq(schema.teamMembers.id, teamMemberId))
   }
+
+  await logAudit(drizzle as unknown as DB, {
+    action: roleId ? 'permission.role_assigned' : 'permission.role_cleared',
+    userId: auth.userId,
+    entityType: 'team_member',
+    entityId: teamMemberId,
+    metadata: {
+      before: { roleId: prev?.roleId ?? null, roleName: prev?.roleName ?? null },
+      after: { roleId: roleId ?? null, roleName },
+    },
+  })
 
   return NextResponse.json({ ok: true, roleId: roleId ?? null, roleName })
 }

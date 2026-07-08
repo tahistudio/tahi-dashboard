@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, inArray } from 'drizzle-orm'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -17,46 +17,32 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { id } = await params
   const database = await db()
 
-  // Look for a team member access rule with role = 'project_manager' for this org
-  const rules = await database
+  // Find the PM for this org in a single JOIN: a project_manager access rule
+  // whose org link points at this client, resolved to the team member.
+  const matches = await database
     .select({
-      teamMemberId: schema.teamMemberAccess.teamMemberId,
+      pmId: schema.teamMembers.id,
+      pmName: schema.teamMembers.name,
     })
     .from(schema.teamMemberAccess)
-    .where(eq(schema.teamMemberAccess.role, 'project_manager'))
-
-  for (const rule of rules) {
-    // Check via full access rule lookup
-    const accessRules = await database
-      .select()
-      .from(schema.teamMemberAccess)
-      .where(
-        and(
-          eq(schema.teamMemberAccess.teamMemberId, rule.teamMemberId),
-          eq(schema.teamMemberAccess.role, 'project_manager')
-        )
+    .innerJoin(
+      schema.teamMemberAccessOrgs,
+      eq(schema.teamMemberAccessOrgs.accessId, schema.teamMemberAccess.id)
+    )
+    .innerJoin(
+      schema.teamMembers,
+      eq(schema.teamMembers.id, schema.teamMemberAccess.teamMemberId)
+    )
+    .where(
+      and(
+        eq(schema.teamMemberAccess.role, 'project_manager'),
+        eq(schema.teamMemberAccessOrgs.orgId, id)
       )
+    )
+    .limit(1)
 
-    for (const ar of accessRules) {
-      const orgs = await database
-        .select({ orgId: schema.teamMemberAccessOrgs.orgId })
-        .from(schema.teamMemberAccessOrgs)
-        .where(eq(schema.teamMemberAccessOrgs.accessId, ar.id))
-
-      if (orgs.some(o => o.orgId === id)) {
-        // Found the PM
-        const tm = await database
-          .select({ id: schema.teamMembers.id, name: schema.teamMembers.name })
-          .from(schema.teamMembers)
-          .where(eq(schema.teamMembers.id, rule.teamMemberId))
-          .limit(1)
-
-        return NextResponse.json({
-          pmId: tm.length > 0 ? tm[0].id : null,
-          pmName: tm.length > 0 ? tm[0].name : null,
-        })
-      }
-    }
+  if (matches.length > 0) {
+    return NextResponse.json({ pmId: matches[0].pmId, pmName: matches[0].pmName })
   }
 
   return NextResponse.json({ pmId: null, pmName: null })
@@ -78,36 +64,33 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const database = await db()
   const now = new Date().toISOString()
 
-  // Remove existing PM assignment for this org
-  // Find all PM access rules
-  const pmRules = await database
-    .select()
-    .from(schema.teamMemberAccess)
-    .where(eq(schema.teamMemberAccess.role, 'project_manager'))
+  // Remove any existing PM assignment for this org. Find the matching
+  // org links in a single JOIN (project_manager rules linked to this org),
+  // then drop them in one batched delete instead of a per-rule loop.
+  const linkedRules = await database
+    .select({ accessId: schema.teamMemberAccessOrgs.accessId })
+    .from(schema.teamMemberAccessOrgs)
+    .innerJoin(
+      schema.teamMemberAccess,
+      eq(schema.teamMemberAccess.id, schema.teamMemberAccessOrgs.accessId)
+    )
+    .where(
+      and(
+        eq(schema.teamMemberAccess.role, 'project_manager'),
+        eq(schema.teamMemberAccessOrgs.orgId, clientOrgId)
+      )
+    )
 
-  for (const rule of pmRules) {
-    // Check if this rule is linked to our org
-    const linkedOrgs = await database
-      .select()
-      .from(schema.teamMemberAccessOrgs)
+  const linkedAccessIds = [...new Set(linkedRules.map(r => r.accessId))]
+  if (linkedAccessIds.length > 0) {
+    await database
+      .delete(schema.teamMemberAccessOrgs)
       .where(
         and(
-          eq(schema.teamMemberAccessOrgs.accessId, rule.id),
+          inArray(schema.teamMemberAccessOrgs.accessId, linkedAccessIds),
           eq(schema.teamMemberAccessOrgs.orgId, clientOrgId)
         )
       )
-
-    if (linkedOrgs.length > 0) {
-      // Remove the org link
-      await database
-        .delete(schema.teamMemberAccessOrgs)
-        .where(
-          and(
-            eq(schema.teamMemberAccessOrgs.accessId, rule.id),
-            eq(schema.teamMemberAccessOrgs.orgId, clientOrgId)
-          )
-        )
-    }
   }
 
   // If a new PM is being assigned, create the access rule

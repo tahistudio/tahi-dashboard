@@ -14,7 +14,8 @@
  * Polls every 4s while the draft is in a non-terminal status.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -121,8 +122,6 @@ const TERMINAL_STATUSES = new Set(['ready_for_publish', 'failed', 'cost_capped',
 
 export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   const router = useRouter()
-  const [data, setData] = useState<DraftSnapshot | null>(null)
-  const [loading, setLoading] = useState(true)
   const [advancing, setAdvancing] = useState(false)
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false)
   const [restarting, setRestarting] = useState(false)
@@ -146,33 +145,28 @@ export function RoundTableDetail({ draftId }: RoundTableDetailProps) {
   const [schemaErrors, setSchemaErrors] = useState<Array<{ severity: string; node: string; field: string; message: string }>>([])
   const [repairing, setRepairing] = useState(false)
 
-  const fetchSnapshot = useCallback(async () => {
-    try {
-      const res = await fetch(apiPath(`/api/admin/content/drafts/${draftId}/pipeline`))
-      if (!res.ok) throw new Error('Failed to load')
-      const json = await res.json() as DraftSnapshot
-      setData(json)
-      // Auto-select latest revision on first load
+  // SWR-backed snapshot. `mutate` (aliased fetchSnapshot) refetches after any
+  // mutation, exactly like the old manual refetch. Polling is driven by
+  // refreshInterval: 4s while the pipeline is non-terminal, matching the old
+  // setInterval that gated on the same TERMINAL_STATUSES check. The global
+  // dedupingInterval (5s) would otherwise throttle a 4s poll to ~8s, so this
+  // hook lowers it to keep the true 4s cadence. onSuccess preserves the
+  // "auto-select the latest revision on load" side effect.
+  const {
+    data,
+    isLoading: loading,
+    mutate: fetchSnapshot,
+  } = useSWR<DraftSnapshot>(`/api/admin/content/drafts/${draftId}/pipeline`, {
+    dedupingInterval: 2000,
+    refreshInterval: (latest) =>
+      latest && !TERMINAL_STATUSES.has(latest.draft.status) ? 4000 : 0,
+    onSuccess: (json) => {
       if (json.revisions.length > 0) {
         const maxRev = Math.max(...json.revisions.map(r => r.revisionNumber))
-        setSelectedRevision(prev => prev === 1 ? maxRev : prev)
+        setSelectedRevision(prev => (prev === 1 ? maxRev : prev))
       }
-    } catch {
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [draftId])
-
-  useEffect(() => { void fetchSnapshot() }, [fetchSnapshot])
-
-  // Soft-poll while pipeline is running
-  useEffect(() => {
-    if (!data) return
-    if (TERMINAL_STATUSES.has(data.draft.status)) return
-    const t = setInterval(() => { void fetchSnapshot() }, 4000)
-    return () => clearInterval(t)
-  }, [data, fetchSnapshot])
+    },
+  })
 
   // Auto-tick: only fire the next advance when the PRIOR stage is
   // genuinely done. The server encodes that two ways:

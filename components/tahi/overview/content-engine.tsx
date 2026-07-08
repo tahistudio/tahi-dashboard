@@ -38,9 +38,9 @@
 // pulse are .tahi-pulse-once (one play, motion-safe only); the countdown is the
 // page-shared tick (information, not decoration).
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import useSWR from 'swr'
 import { PenTool } from 'lucide-react'
-import { apiPath } from '@/lib/api'
 import { DomainCard, CountPill } from '@/components/tahi/overview/domain-card'
 import { CardDeck } from '@/components/tahi/card-deck'
 import { CountUp } from '@/components/tahi/count-up'
@@ -118,50 +118,21 @@ const CARD_PROPS = {
 // ── Card ──────────────────────────────────────────────────────────────────────
 
 export function ContentEngine({ className }: { className?: string }) {
-  const [drafts, setDrafts] = useState<Draft[]>([])
-  const [counts, setCounts] = useState<StageCounts>(EMPTY_COUNTS)
-  const [ideaCount, setIdeaCount] = useState(0)
-  const [history, setHistory] = useState<PublishHistoryRow[]>([])
-  const [nextSlotIso, setNextSlotIso] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-
-    const draftsP = fetch(apiPath('/api/admin/content/drafts'))
-      .then(r => (r.ok ? (r.json() as Promise<{ drafts: Draft[]; counts: StageCounts }>) : { drafts: [], counts: EMPTY_COUNTS }))
-      .catch(() => ({ drafts: [] as Draft[], counts: EMPTY_COUNTS }))
-
-    const ideasP = fetch(apiPath('/api/admin/content/ideas?status=all'))
-      .then(r => (r.ok ? (r.json() as Promise<{ counts: { total: number } }>) : { counts: { total: 0 } }))
-      .catch(() => ({ counts: { total: 0 } }))
-
-    const scheduleP = fetch(apiPath('/api/admin/content/schedule'))
-      .then(r => (r.ok ? (r.json() as Promise<{ publishHistory: PublishHistoryRow[]; readyDrafts: ScheduleReadyDraft[] }>) : { publishHistory: [], readyDrafts: [] }))
-      .catch(() => ({ publishHistory: [] as PublishHistoryRow[], readyDrafts: [] as ScheduleReadyDraft[] }))
-
-    Promise.all([draftsP, ideasP, scheduleP])
-      .then(([d, i, s]) => {
-        if (cancelled) return
-        setDrafts(d.drafts ?? [])
-        setCounts(d.counts ?? EMPTY_COUNTS)
-        setIdeaCount(i.counts?.total ?? 0)
-        setHistory(s.publishHistory ?? [])
-        // Earliest auto-slot among ready drafts = the next thing that goes out.
-        const slots = (s.readyDrafts ?? [])
-          .map(r => r.autoSlot?.scheduledFor ?? null)
-          .filter((v): v is string => !!v && !Number.isNaN(Date.parse(v)))
-          .sort((a, b) => Date.parse(a) - Date.parse(b))
-        setNextSlotIso(slots[0] ?? null)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const { data: draftsData, isLoading: draftsLoading } = useSWR<{ drafts: Draft[]; counts: StageCounts }>('/api/admin/content/drafts')
+  const { data: ideasData, isLoading: ideasLoading } = useSWR<{ counts: { total: number } }>('/api/admin/content/ideas?status=all')
+  const { data: scheduleData, isLoading: scheduleLoading } = useSWR<{ publishHistory: PublishHistoryRow[]; readyDrafts: ScheduleReadyDraft[] }>('/api/admin/content/schedule')
+  const loading = draftsLoading || ideasLoading || scheduleLoading
+  const drafts = draftsData?.drafts ?? []
+  const counts = draftsData?.counts ?? EMPTY_COUNTS
+  const ideaCount = ideasData?.counts?.total ?? 0
+  const history = scheduleData?.publishHistory ?? []
+  const nextSlotIso = useMemo(() => {
+    const slots = (scheduleData?.readyDrafts ?? [])
+      .map(r => r.autoSlot?.scheduledFor ?? null)
+      .filter((v): v is string => !!v && !Number.isNaN(Date.parse(v)))
+      .sort((a, b) => Date.parse(a) - Date.parse(b))
+    return slots[0] ?? null
+  }, [scheduleData])
 
   // Deck leads with the furthest-along drafts (finalising/ready first), capped
   // so the stack stays a peek-deck, not a backlog dump.

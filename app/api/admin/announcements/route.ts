@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { desc } from 'drizzle-orm'
+import { fanOutAnnouncementEmails } from '@/lib/announcement-emails'
 
 // ── GET /api/admin/announcements ────────────────────────────────────────────
 // List announcements, most recent first.
@@ -58,6 +59,7 @@ export async function POST(req: NextRequest) {
     targetIds?: string[]
     expiresAt?: string
     publish?: boolean
+    sendEmail?: boolean
   }
 
   if (!body.title?.trim()) {
@@ -79,14 +81,20 @@ export async function POST(req: NextRequest) {
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 
+  const title = body.title.trim()
+  const content = body.content.trim()
+  const type = body.type ?? 'info'
+  const targetValue = body.targetValue ?? null
+  const targetIds = body.targetIds ?? null
+
   await database.insert(schema.announcements).values({
     id,
-    title: body.title.trim(),
-    body: body.content.trim(),
-    type: body.type ?? 'info',
+    title,
+    body: content,
+    type,
     targetType,
-    targetValue: body.targetValue ?? null,
-    targetIds: body.targetIds ? JSON.stringify(body.targetIds) : null,
+    targetValue,
+    targetIds: targetIds ? JSON.stringify(targetIds) : null,
     expiresAt: body.expiresAt ?? null,
     publishedAt: body.publish ? now : null,
     createdById: userId,
@@ -94,5 +102,24 @@ export async function POST(req: NextRequest) {
     updatedAt: now,
   })
 
-  return NextResponse.json({ id }, { status: 201 })
+  // Optional email fan-out. Only send when the announcement is actually
+  // published (a draft stays silent) and email delivery was requested. Best
+  // effort: any failure here is swallowed so the announcement still succeeds.
+  let emailed = 0
+  if (body.sendEmail === true && body.publish === true) {
+    try {
+      emailed = await fanOutAnnouncementEmails(database, {
+        title,
+        body: content,
+        type,
+        targetType,
+        targetValue,
+        targetIds,
+      })
+    } catch (err) {
+      console.error('[announcements] email fan-out failed', err)
+    }
+  }
+
+  return NextResponse.json({ id, emailed }, { status: 201 })
 }

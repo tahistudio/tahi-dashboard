@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useMemo } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
@@ -79,9 +80,10 @@ function relativeTime(iso: string | null): string {
 export function ProposalsContent() {
   const router = useRouter()
   const { showToast } = useToast()
-  const [items, setItems] = useState<ProposalListItem[]>([])
-  const [templates, setTemplates] = useState<TemplateOption[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: proposalsData, isLoading: loading, mutate: mutateProposals } = useSWR<{ items: ProposalListItem[] }>('/api/admin/proposals')
+  const { data: templatesData } = useSWR<{ items: TemplateOption[] }>('/api/admin/proposals/templates')
+  const items = proposalsData?.items ?? []
+  const templates = templatesData?.items ?? []
   const [search, setSearch] = useState('')
   // Status filter held as an ActiveFilter so the FilterBar primitive
   // can drive it. Seeded with an empty multiselect so the chip is
@@ -97,32 +99,6 @@ export function ProposalsContent() {
   const [creating, setCreating] = useState(false)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<ProposalListItem | null>(null)
-
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [pRes, tRes] = await Promise.all([
-        fetch(apiPath('/api/admin/proposals')),
-        fetch(apiPath('/api/admin/proposals/templates')),
-      ])
-      if (pRes.ok) {
-        const data = await pRes.json() as { items: ProposalListItem[] }
-        setItems(data.items ?? [])
-      } else {
-        setItems([])
-      }
-      if (tRes.ok) {
-        const data = await tRes.json() as { items: TemplateOption[] }
-        setTemplates(data.items ?? [])
-      }
-    } catch {
-      setItems([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchAll() }, [fetchAll])
 
   const filtered = useMemo(() => items.filter(p => {
     if (selectedStatuses.size > 0 && !selectedStatuses.has(statusKey(p.status))) return false
@@ -203,7 +179,7 @@ export function ProposalsContent() {
     const res = await fetch(apiPath(`/api/admin/proposals/${deleteTarget.id}`), { method: 'DELETE' })
     if (res.ok) {
       setDeleteTarget(null)
-      void fetchAll()
+      void mutateProposals()
     } else {
       showToast('Failed to delete proposal', 'error')
     }
@@ -351,7 +327,7 @@ export function ProposalsContent() {
         title="Proposals"
         subtitle="Premium client proposals with package variants and public links."
       >
-        <TahiButton variant="secondary" size="sm" onClick={fetchAll} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+        <TahiButton variant="secondary" size="sm" onClick={() => { void mutateProposals() }} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
           Refresh
         </TahiButton>
         <Link href="/proposals/templates">

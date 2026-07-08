@@ -3,6 +3,9 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 
+// Must match the key written by the connect route.
+const XERO_STATE_KEY = 'xero_oauth_state'
+
 /**
  * GET /api/admin/integrations/xero/callback
  * Stub: handles the Xero OAuth callback, exchanges code for tokens,
@@ -24,6 +27,34 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(
       new URL('/settings?xero=error', new URL(req.url).origin),
     )
+  }
+
+  // Verify + consume the single-use CSRF state nonce BEFORE exchanging the
+  // code. Reject any mismatch (missing, wrong, expired, or already consumed
+  // nonce) with a 400 so a forged callback can never trigger a token exchange.
+  const returnedState = url.searchParams.get('state')
+  const stateDb = await db()
+  const [stateRow] = await stateDb
+    .select({ value: schema.settings.value })
+    .from(schema.settings)
+    .where(eq(schema.settings.key, XERO_STATE_KEY))
+    .limit(1)
+  // Consume immediately (single-use): delete the stored nonce regardless of
+  // whether it matches, so a leaked/guessed nonce can't be replayed.
+  await stateDb.delete(schema.settings).where(eq(schema.settings.key, XERO_STATE_KEY))
+
+  let stateValid = false
+  if (returnedState && stateRow?.value) {
+    try {
+      const stored = JSON.parse(stateRow.value) as { nonce?: string; expiresAt?: string }
+      const notExpired = stored.expiresAt ? Date.parse(stored.expiresAt) > Date.now() : false
+      stateValid = stored.nonce === returnedState && notExpired
+    } catch {
+      stateValid = false
+    }
+  }
+  if (!stateValid) {
+    return NextResponse.json({ error: 'Invalid OAuth state' }, { status: 400 })
   }
 
   const clientId = process.env.XERO_CLIENT_ID

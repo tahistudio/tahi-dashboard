@@ -1,6 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo } from 'react'
+import useSWR from 'swr'
+import dynamic from 'next/dynamic'
 import {
   MessageSquare, Plus, Users, Hash, AtSign,
   Lock, ArrowLeft, Edit3, Trash2,
@@ -17,9 +19,40 @@ import { EmptyState } from '@/components/tahi/empty-state'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
 import { MessageThread } from '@/components/tahi/message-thread'
-import { MessageBubble } from '@/components/tahi/message-bubble'
-import { Composer, type ComposerSendPayload } from '@/components/tahi/composer'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
+import type { ComposerSendPayload } from '@/components/tahi/composer'
+
+// Tiptap (~300 KB) lands in both Composer and MessageBubble.
+// Defer them so the messages page shell paints before the editor loads.
+function MessageBubbleSkeleton() {
+  return (
+    <div className="animate-pulse flex items-start" style={{ gap: 'var(--space-3)', padding: 'var(--space-2) 0' }}>
+      <div style={{ width: '2rem', height: '2rem', borderRadius: '50%', background: 'var(--color-bg-tertiary)', flexShrink: 0 }} />
+      <div style={{ height: '2.75rem', width: '55%', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-tertiary)' }} />
+    </div>
+  )
+}
+function ComposerSkeleton() {
+  return (
+    <div
+      className="animate-pulse"
+      style={{
+        background: 'var(--color-bg-secondary)',
+        borderRadius: 'var(--radius-md)',
+        minHeight: '3.5rem',
+        border: '1px solid var(--color-border-subtle)',
+      }}
+    />
+  )
+}
+const MessageBubble = dynamic(
+  () => import('@/components/tahi/message-bubble').then(m => ({ default: m.MessageBubble })),
+  { ssr: false, loading: () => <MessageBubbleSkeleton /> }
+)
+const Composer = dynamic(
+  () => import('@/components/tahi/composer').then(m => ({ default: m.Composer })),
+  { ssr: false, loading: () => <ComposerSkeleton /> }
+)
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -143,62 +176,36 @@ export function MessagesContent({ isAdmin: isAdminProp }: { isAdmin: boolean }) 
   const { isImpersonatingClient } = useImpersonation()
   // Only switch to client view when impersonating a client, not a team member
   const isAdmin = isAdminProp && !isImpersonatingClient
-  const [conversations, setConversations] = useState<ConversationSummary[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([])
   const [activeConvId, setActiveConvId] = useState<string | null>(null)
-  const [messages, setMessages] = useState<MessageItem[]>([])
-  const [messagesLoading, setMessagesLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [showNewDialog, setShowNewDialog] = useState(false)
 
-  // ── Fetch conversations ───────────────────────────────────────────────────
+  // ── Conversations list via SWR ────────────────────────────────────────────
+  // The global fetcher throws on non-2xx, so convError covers both a non-ok
+  // response and a network failure (the old catch flagged `error` for both).
+  // mutateConversations() replaces every fetchConversations() refresh.
+  const convEndpoint = isAdmin ? '/api/admin/conversations' : '/api/portal/conversations'
+  const { data: convData, isLoading: loading, error: convError, mutate: mutateConversations } =
+    useSWR<{ conversations?: ConversationSummary[] }>(convEndpoint)
+  const conversations = convData?.conversations ?? []
+  const error = !!convError
 
-  const fetchConversations = useCallback(async () => {
-    setLoading(true)
-    setError(false)
-    try {
-      const endpoint = isAdmin ? '/api/admin/conversations' : '/api/portal/conversations'
-      const res = await fetch(apiPath(endpoint))
-      if (!res.ok) throw new Error('Failed to load conversations')
-      const data = await res.json() as { conversations?: ConversationSummary[] }
-      setConversations(data.conversations ?? [])
-    } catch {
-      setError(true)
-      setConversations([])
-    } finally {
-      setLoading(false)
-    }
-  }, [isAdmin])
-
-  useEffect(() => { fetchConversations() }, [fetchConversations])
-
-  // ── Fetch messages for active conversation ────────────────────────────────
-
-  const fetchMessages = useCallback(async (convId: string) => {
-    setMessagesLoading(true)
-    try {
-      const endpoint = isAdmin
-        ? `/api/admin/conversations/${convId}/messages`
-        : `/api/portal/conversations/${convId}/messages`
-      const res = await fetch(apiPath(endpoint))
-      if (!res.ok) throw new Error('Failed to load messages')
-      const data = await res.json() as { items?: MessageItem[] }
-      setMessages(data.items ?? [])
-    } catch {
-      setMessages([])
-    } finally {
-      setMessagesLoading(false)
-    }
-  }, [isAdmin])
-
-  useEffect(() => {
-    if (activeConvId) {
-      fetchMessages(activeConvId)
-    }
-  }, [activeConvId, fetchMessages])
+  // ── Messages for the active conversation (dependent fetch) ────────────────
+  // Conditional key: null until a conversation is selected, so SWR skips the
+  // fetch entirely. keepPreviousData is disabled here so switching threads
+  // never flashes the previous thread's messages while the new one loads (the
+  // old code surfaced a loading state during that gap). There was no polling
+  // before, so none is added. mutateMessages() replaces fetchMessages().
+  const messagesEndpoint = activeConvId
+    ? (isAdmin
+        ? `/api/admin/conversations/${activeConvId}/messages`
+        : `/api/portal/conversations/${activeConvId}/messages`)
+    : null
+  const { data: messagesData, isLoading: messagesLoading, mutate: mutateMessages } =
+    useSWR<{ items?: MessageItem[] }>(messagesEndpoint, { keepPreviousData: false })
+  const messages = messagesData?.items ?? []
 
   // ── Send message (via Composer payload) ───────────────────────────────────
 
@@ -263,14 +270,14 @@ export function MessagesContent({ isAdmin: isAdminProp }: { isAdmin: boolean }) 
         })
       }
 
-      await fetchMessages(activeConvId)
-      await fetchConversations()
+      await mutateMessages()
+      await mutateConversations()
     } catch {
       // Error sending message — silently swallow to match prior behaviour.
     } finally {
       setSending(false)
     }
-  }, [activeConvId, isAdmin, sending, fetchMessages, fetchConversations])
+  }, [activeConvId, isAdmin, sending, mutateMessages, mutateConversations])
 
   // ── Delete message ────────────────────────────────────────────────────────
 
@@ -283,11 +290,11 @@ export function MessagesContent({ isAdmin: isAdminProp }: { isAdmin: boolean }) 
         body: JSON.stringify({ messageId, deleted: true }),
       })
       if (!res.ok) throw new Error('Failed to delete')
-      await fetchMessages(activeConvId)
+      await mutateMessages()
     } catch {
       // Error deleting message
     }
-  }, [activeConvId, isAdmin, fetchMessages])
+  }, [activeConvId, isAdmin, mutateMessages])
 
   // ── Filter conversations by search + chips ────────────────────────────────
 
@@ -409,7 +416,7 @@ export function MessagesContent({ isAdmin: isAdminProp }: { isAdmin: boolean }) 
                 <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', margin: 0 }}>
                   Failed to load conversations.
                 </p>
-                <TahiButton variant="ghost" size="sm" onClick={fetchConversations} style={{ marginTop: '0.5rem' }}>
+                <TahiButton variant="ghost" size="sm" onClick={() => mutateConversations()} style={{ marginTop: '0.5rem' }}>
                   Retry
                 </TahiButton>
               </div>
@@ -671,7 +678,7 @@ export function MessagesContent({ isAdmin: isAdminProp }: { isAdmin: boolean }) 
           onCreated={(id: string) => {
             setShowNewDialog(false)
             setActiveConvId(id)
-            fetchConversations()
+            mutateConversations()
           }}
         />
       </SlideOver>
@@ -705,45 +712,39 @@ function NewConversationForm({
   const [initialMessage, setInitialMessage] = useState('')
   const [creating, setCreating] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
-  const [participantOptions, setParticipantOptions] = useState<ParticipantSelectOption[]>([])
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([])
   const [participantSearch, setParticipantSearch] = useState<string | null>(null)
 
-  // Load team members + contacts as participant options
-  useEffect(() => {
-    if (!isAdmin) return
+  // Load team members + contacts as participant options (admin only). Merge of
+  // two endpoints, so an inline SWR fetcher returns the combined option list.
+  const { data: participantOptionsData } = useSWR(
+    isAdmin ? 'new-conversation:participants' : null,
+    async () => {
+      const [teamRes, clientsRes] = await Promise.all([
+        fetch(apiPath('/api/admin/team')),
+        fetch(apiPath('/api/admin/clients')),
+      ])
 
-    async function load() {
-      try {
-        const [teamRes, clientsRes] = await Promise.all([
-          fetch(apiPath('/api/admin/team')),
-          fetch(apiPath('/api/admin/clients')),
-        ])
+      const opts: ParticipantSelectOption[] = []
 
-        const opts: ParticipantSelectOption[] = []
-
-        if (teamRes.ok) {
-          const data = await teamRes.json() as { items: Array<{ id: string; name: string; email: string }> }
-          for (const m of (data.items ?? [])) {
-            opts.push({ value: `team:${m.id}`, label: m.name, subtitle: `Team · ${m.email}` })
-          }
+      if (teamRes.ok) {
+        const data = await teamRes.json() as { items: Array<{ id: string; name: string; email: string }> }
+        for (const m of (data.items ?? [])) {
+          opts.push({ value: `team:${m.id}`, label: m.name, subtitle: `Team · ${m.email}` })
         }
-
-        if (clientsRes.ok) {
-          const data = await clientsRes.json() as { organisations: Array<{ id: string; name: string }> }
-          for (const org of (data.organisations ?? [])) {
-            opts.push({ value: `org:${org.id}`, label: org.name, subtitle: 'Client org' })
-          }
-        }
-
-        setParticipantOptions(opts)
-      } catch {
-        // Failed to load participants
       }
-    }
 
-    load()
-  }, [isAdmin])
+      if (clientsRes.ok) {
+        const data = await clientsRes.json() as { organisations: Array<{ id: string; name: string }> }
+        for (const org of (data.organisations ?? [])) {
+          opts.push({ value: `org:${org.id}`, label: org.name, subtitle: 'Client org' })
+        }
+      }
+
+      return opts
+    },
+  )
+  const participantOptions = participantOptionsData ?? []
 
   function addParticipant(val: string | null) {
     if (!val) return

@@ -11,6 +11,14 @@ interface ImportPage {
   position?: number
 }
 
+/** Constant-time string compare (avoids a timing oracle on the seed secret). */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
 function toSlug(text: string): string {
   return text
     .toLowerCase()
@@ -19,15 +27,22 @@ function toSlug(text: string): string {
 }
 
 // POST /api/admin/docs/seed
-// Seed endpoint that accepts x-seed-key header (TAHI_ORG_ID) for CLI auth.
-// Accepts same payload as /api/admin/docs/import.
+// Seed endpoint for CLI use. Auth: a Clerk Tahi admin, OR a CLI caller that
+// presents the real server-only secret (x-seed-key === TAHI_API_TOKEN).
+// SECURITY: the seed key used to be NEXT_PUBLIC_TAHI_ORG_ID, which is a PUBLIC
+// value (committed, shipped in client bundles, readable from any admin's JWT),
+// so anyone could anonymously inject doc pages. It now requires a high-entropy
+// Worker secret. This route is in middleware's public matcher, so it must do
+// its own auth (constant-time compare to resist timing oracles).
 export async function POST(req: NextRequest) {
-  // Auth: accept either Clerk admin or x-seed-key header
   const seedKey = req.headers.get('x-seed-key')
-  const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
+  const seedSecret = process.env.TAHI_API_TOKEN
 
-  if (!tahiOrgId || seedKey !== tahiOrgId) {
-    // Fall back to Clerk auth
+  const keyOk =
+    !!seedSecret && !!seedKey && timingSafeEqual(seedKey, seedSecret)
+
+  if (!keyOk) {
+    // Fall back to Clerk admin auth.
     try {
       const { getRequestAuth, isTahiAdmin } = await import('@/lib/server-auth')
       const { orgId } = await getRequestAuth(req)

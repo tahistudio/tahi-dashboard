@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -17,8 +18,10 @@ interface XeroContact {
 // GET /api/admin/integrations/xero/match-contacts
 // Returns Xero contacts with suggested dashboard org matches
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
 
   const database = await db() as unknown as D1
 
@@ -72,8 +75,10 @@ export async function GET(req: NextRequest) {
 // PATCH /api/admin/integrations/xero/match-contacts
 // Confirm a match: link Xero contact to dashboard org
 export async function PATCH(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
 
   const body = await req.json() as { orgId: string; xeroContactId: string }
   if (!body.orgId || !body.xeroContactId) {

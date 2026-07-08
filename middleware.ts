@@ -59,12 +59,13 @@ export default clerkMiddleware(async (auth, req) => {
   // dead-code-eliminated from the production Cloudflare bundle and can never run
   // on a deployed environment.
   if (process.env.NODE_ENV !== 'production') {
-    const ua = req.headers.get('user-agent') ?? ''
+    // Explicit ?shipstudio=1 (or the cookie it sets) only. The User-Agent
+    // triggers (HeadlessChrome, Edg/) were removed: 'Edg/' matches every
+    // Microsoft Edge user, so the bypass would fire for normal Edge browsers
+    // on any non-prod exposure. Prod build strips this whole block.
     const isStudio =
       req.nextUrl.searchParams.get('shipstudio') === '1' ||
-      req.cookies.get('tahi-ship-studio')?.value === '1' ||
-      ua.includes('HeadlessChrome') ||
-      ua.includes('Edg/')
+      req.cookies.get('tahi-ship-studio')?.value === '1'
     if (isStudio) {
       const headers = new Headers(req.headers)
       headers.set('x-ship-studio', '1')
@@ -91,6 +92,44 @@ export default clerkMiddleware(async (auth, req) => {
   const authHeader = req.headers.get('authorization')
   if (authHeader?.startsWith('Bearer ') && req.nextUrl.pathname.startsWith('/api/')) {
     return NextResponse.next()
+  }
+
+  // Onboarding / welcome entry: persist the invite token from the link into a
+  // cookie so it survives the Clerk sign-in -> sign-up round-trip. The redirect
+  // query param is dropped twice on that journey (the auth footer "Sign up"
+  // link is static, and the org-creation task hands off to the configured
+  // after-sign-up URL), which would otherwise strand an invited client in the
+  // self-serve chooser instead of their pre-set flow. The onboarding page
+  // recovers the token from this cookie when the URL no longer carries it, and
+  // accept-invite clears it once consumed. We resolve auth and the redirect
+  // here (rather than auth.protect()) so the cookie can ride the response.
+  {
+    const p = req.nextUrl.pathname
+    if (p.startsWith('/onboarding') || p.startsWith('/welcome')) {
+      const linkToken = req.nextUrl.searchParams.get('token')
+      const { userId } = await auth()
+      let res: NextResponse
+      if (!userId) {
+        const target = p + (req.nextUrl.search || '')
+        const url = req.nextUrl.clone()
+        url.pathname = '/sign-in'
+        url.search = ''
+        url.searchParams.set('redirect_url', target)
+        res = NextResponse.redirect(url)
+      } else {
+        res = NextResponse.next()
+      }
+      if (linkToken) {
+        res.cookies.set('tahi-invite-token', linkToken, {
+          path: '/',
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          maxAge: 60 * 60, // 1 hour: long enough to finish sign-up, short-lived after
+        })
+      }
+      return res
+    }
   }
 
   // Bare domain root: redirect to the right home at the edge. The page-level

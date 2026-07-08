@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, like, or, and, ne, inArray, sql } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
+import { dispatchDomainEvent } from '@/lib/events'
 
 // ── GET /api/admin/clients ──────────────────────────────────────────────────
 // Query params: ?status=active&plan=maintain&search=acme&page=1
@@ -209,6 +210,19 @@ export async function POST(req: NextRequest) {
       updatedAt: now,
     })
   }
+
+  // Fire the domain event (automations + outgoing webhooks). Non-blocking.
+  await dispatchDomainEvent(drizzle, {
+    type: 'client_onboarded',
+    entityId: id,
+    entityType: 'organisation',
+    orgId: id,
+    data: {
+      name: name.trim(),
+      planType: planType || 'none',
+      source: 'admin',
+    },
+  })
 
   return NextResponse.json({ id }, { status: 201 })
 }

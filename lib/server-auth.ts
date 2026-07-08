@@ -31,6 +31,9 @@ import { auth } from '@clerk/nextjs/server'
 import { createClerkClient } from '@clerk/backend'
 import { cookies, headers } from 'next/headers'
 import type { NextRequest } from 'next/server'
+import { db } from '@/lib/db'
+import { schema } from '@/db/d1'
+import { eq } from 'drizzle-orm'
 
 export interface RequestAuthResult {
   userId: string | null
@@ -74,13 +77,15 @@ function getClerkClient() {
  */
 export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResult> {
   // Dev-only Ship Studio preview bypass (see note above; prod build strips this).
+  // Triggered ONLY by the explicit ?shipstudio=1 signal (persisted to the
+  // tahi-ship-studio cookie + x-ship-studio header by middleware). The old
+  // User-Agent triggers (HeadlessChrome, Edg/) were removed: 'Edg/' matches
+  // every Microsoft Edge user, so on any non-prod exposure a normal Edge
+  // browser would silently authenticate as the Tahi admin.
   if (process.env.NODE_ENV !== 'production') {
-    const ua = req.headers.get('user-agent') ?? ''
     if (
       req.headers.get('x-ship-studio') === '1' ||
-      req.cookies.get('tahi-ship-studio')?.value === '1' ||
-      ua.includes('HeadlessChrome') ||
-      ua.includes('Edg/')
+      req.cookies.get('tahi-ship-studio')?.value === '1'
     ) {
       return shipStudioIdentity()
     }
@@ -143,27 +148,71 @@ export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResul
 }
 
 /**
- * Portal auth with admin "Client view" impersonation.
+ * Portal auth with Clerk-org -> D1-org resolution and admin "Client view"
+ * impersonation.
  *
- * Portal endpoints scope to the caller's own org. When a Tahi admin previews the
- * client experience (Client view), the browser carries a `tahi-impersonate-org`
- * cookie naming the org to view. ONLY the admin org may use it; for any real
- * client the cookie is ignored (their orgId is never the admin org, so the
- * branch never runs). The returned `orgId` is the effective portal org, so an
- * endpoint's existing "reject the admin org" guard keeps working unchanged.
+ * A real client signs in through a Clerk organization; the matching D1
+ * `organisations` row is found via its `clerkOrgId` column (set when onboarding
+ * provisions the client). This helper returns the *D1 org id* as `orgId`, so
+ * every portal route keeps scoping by `organisations.id` and its foreign keys
+ * unchanged, and also exposes the raw `clerkOrgId` for the few routes that call
+ * Clerk organization APIs (e.g. teammate invites).
+ *
+ * Until onboarding links a Clerk org to a D1 row, `orgId` is null and portal
+ * routes 403 (the client has no provisioned workspace yet) - this is the
+ * correct access gate, not a bug.
+ *
+ * When a Tahi admin previews the client experience (Client view), the browser
+ * carries a `tahi-impersonate-org` cookie naming the D1 org to view. ONLY the
+ * admin org may use it; a non-impersonating admin keeps the Tahi org id as
+ * `orgId` so an endpoint's existing "reject the admin org" guard is unchanged.
  */
 export async function getPortalAuth(
   req: NextRequest,
-): Promise<RequestAuthResult & { impersonating: boolean }> {
+): Promise<RequestAuthResult & { clerkOrgId: string | null; impersonating: boolean }> {
   const result = await getRequestAuth(req)
+  const clerkOrgId = result.orgId
   const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
-  if (result.orgId && tahiOrgId && result.orgId === tahiOrgId) {
+
+  // Tahi admin. Client view carries the target D1 org id in a cookie.
+  if (clerkOrgId && tahiOrgId && clerkOrgId === tahiOrgId) {
     const target = req.cookies.get('tahi-impersonate-org')?.value
     if (target) {
-      return { ...result, orgId: target, impersonating: true }
+      return { ...result, orgId: target, clerkOrgId, impersonating: true }
+    }
+    // Non-impersonating admin: leave orgId as the Tahi org so portal routes
+    // (which 403 the admin org) behave exactly as before.
+    return { ...result, clerkOrgId, impersonating: false }
+  }
+
+  // Real client: resolve their Clerk org to the linked D1 organisation.
+  let d1OrgId: string | null = null
+  if (clerkOrgId) {
+    try {
+      const database = await db()
+      const [org] = await database
+        .select({ id: schema.organisations.id })
+        .from(schema.organisations)
+        .where(eq(schema.organisations.clerkOrgId, clerkOrgId))
+        .limit(1)
+      d1OrgId = org?.id ?? null
+      if (!d1OrgId) {
+        // Back-compat: a pre-existing org may use the Clerk org id AS its D1
+        // primary key (the old implicit assumption). Fall back to that so we
+        // never regress an already-working client while the link is adopted.
+        const [legacy] = await database
+          .select({ id: schema.organisations.id })
+          .from(schema.organisations)
+          .where(eq(schema.organisations.id, clerkOrgId))
+          .limit(1)
+        d1OrgId = legacy?.id ?? null
+      }
+    } catch {
+      d1OrgId = null
     }
   }
-  return { ...result, impersonating: false }
+
+  return { ...result, orgId: d1OrgId, clerkOrgId, impersonating: false }
 }
 
 /**
@@ -173,15 +222,14 @@ export async function getPortalAuth(
  */
 export async function getServerAuth(): Promise<RequestAuthResult> {
   // Dev-only Ship Studio preview bypass (see note above; prod build strips this).
+  // Explicit ?shipstudio=1 signal only; the over-broad UA triggers were removed
+  // (see getRequestAuth above for why 'Edg/' was dangerous).
   if (process.env.NODE_ENV !== 'production') {
     const hdrs = await headers()
     const cookieStore = await cookies()
-    const ua = hdrs.get('user-agent') ?? ''
     if (
       hdrs.get('x-ship-studio') === '1' ||
-      cookieStore.get('tahi-ship-studio')?.value === '1' ||
-      ua.includes('HeadlessChrome') ||
-      ua.includes('Edg/')
+      cookieStore.get('tahi-ship-studio')?.value === '1'
     ) {
       return shipStudioIdentity()
     }

@@ -1,20 +1,24 @@
-import { getRequestAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
 
 // ── PUT /api/portal/tracks/[trackId]/reorder ───────────────────────────────
-// Client portal: reorder requests in a track queue, scoped to authenticated org
+// Client portal: reorder requests in a track queue, scoped to authenticated org.
+// getPortalAuth resolves the D1 org id; impersonating admins are read-only.
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ trackId: string }> }
 ) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const { orgId, userId, impersonating } = await getPortalAuth(req)
 
   // Deny if not authenticated or if this is the admin org
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  if (impersonating) {
+    return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
   }
 
   const { trackId } = await params

@@ -1,18 +1,21 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import useSWR from 'swr'
 import { apiPath } from '@/lib/api'
 import {
   Clock, AlertTriangle, RefreshCw,
   User, CheckCircle2, Loader2, Activity,
   FileText, Image as ImageIcon, Download, Paperclip,
   Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud, ChevronDown, Eye,
+  Sparkles, Wand2, X, Check,
 } from 'lucide-react'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import Link from 'next/link'
 import { RequestThread } from '@/components/tahi/request-thread'
 import dynamic from 'next/dynamic'
 const MessageComposer = dynamic(() => import('@/components/tahi/message-composer').then(m => ({ default: m.MessageComposer })), { ssr: false })
+const AiTaskWizard = dynamic(() => import('@/components/tahi/ai-task-wizard').then(m => ({ default: m.AiTaskWizard })), { ssr: false })
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
@@ -26,7 +29,7 @@ import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { PeoplePanel, type Participant } from '@/components/tahi/people-panel'
 import { TimeCard } from '@/components/tahi/time-card'
 import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
-import { fetchSchedulePhaseOptions, type SchedulePhaseOption } from '@/lib/schedule-phases'
+import { fetchSchedulePhaseOptions } from '@/lib/schedule-phases'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -140,6 +143,105 @@ interface RequestDetailProps {
   currentUserId?: string
 }
 
+// AI triage suggestion shape returned by POST /api/admin/requests/[id]/triage.
+// These are SUGGESTIONS only - nothing applies until the admin clicks Apply.
+interface TriageSuggestion {
+  suggestedAssigneeId: string | null
+  suggestedAssigneeName: string | null
+  suggestedPriority: 'standard' | 'high'
+  suggestedTrack: 'small' | 'large'
+  oneLineReason: string
+}
+
+// Strip HTML down to readable text for seeding the AI wizard from a
+// request's rich-text description.
+function stripHtmlToText(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+// Convert a plain-text AI draft into the minimal HTML the thread renders.
+// Escapes first, then maps blank lines to paragraphs and single newlines
+// to <br>. Keeps the posted message consistent with composer output.
+function draftTextToHtml(text: string): string {
+  const escape = (s: string) => s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  return text
+    .split(/\n{2,}/)
+    .map(p => p.trim())
+    .filter(Boolean)
+    .map(p => `<p>${escape(p).replace(/\n/g, '<br>')}</p>`)
+    .join('')
+}
+
+// A single triage suggestion rendered as a chip with an inline Apply
+// button. Apply calls back into the existing PATCH-backed handlers - the
+// chip itself never mutates anything directly.
+function SuggestionApplyChip({
+  label,
+  value,
+  onApply,
+}: {
+  label: string
+  value: string
+  onApply: () => Promise<void> | void
+}) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <span
+      className="inline-flex items-center rounded-full"
+      style={{
+        gap: '0.375rem',
+        padding: '0.1875rem 0.1875rem 0.1875rem 0.5rem',
+        fontSize: '0.6875rem',
+        fontWeight: 500,
+        background: 'var(--color-bg)',
+        color: 'var(--color-text-muted)',
+        border: '1px solid var(--color-border)',
+      }}
+    >
+      <span>
+        {label}: <strong style={{ color: 'var(--color-text)' }}>{value}</strong>
+      </span>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          if (busy) return
+          setBusy(true)
+          try { await onApply() } finally { setBusy(false) }
+        }}
+        className="inline-flex items-center transition-colors"
+        style={{
+          gap: '0.1875rem',
+          padding: '0.125rem 0.4375rem',
+          fontSize: '0.6875rem',
+          fontWeight: 600,
+          borderRadius: '9999px',
+          border: 'none',
+          background: busy ? 'var(--color-bg-tertiary)' : 'var(--color-brand)',
+          color: busy ? 'var(--color-text-subtle)' : '#ffffff',
+          cursor: busy ? 'not-allowed' : 'pointer',
+        }}
+      >
+        {busy
+          ? <Loader2 size={10} className="animate-spin" aria-hidden="true" />
+          : <Check size={10} aria-hidden="true" />}
+        Apply
+      </button>
+    </span>
+  )
+}
+
 // ---- Main Component ----------------------------------------------------------
 
 export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }: RequestDetailProps) {
@@ -150,10 +252,6 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const [subRequests, setSubRequests] = useState<SubRequestRow[]>([])
   const [parentRequest, setParentRequest] = useState<ParentRequestRef | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
-  const [files, setFiles] = useState<RequestFile[]>([])
-  const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([])
-  const [loading, setLoading] = useState(true)
-  const [fetchError, setFetchError] = useState(false)
   // Visibility is now owned by <MessageComposer> and passed back through handleSendMessage.
   const [statusUpdating, setStatusUpdating] = useState(false)
   const [editingDueDate, setEditingDueDate] = useState(false)
@@ -164,34 +262,43 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const [newSubOpen, setNewSubOpen] = useState(false)
   const [unlinkingParent, setUnlinkingParent] = useState(false)
   const [participants, setParticipants] = useState<Participant[]>([])
-  const [phaseOptions, setPhaseOptions] = useState<SchedulePhaseOption[]>([])
   const threadBottomRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
 
-  // Following is now handled via the People panel's Followers slot —
+  // ---- AI weaves (admin, human-in-the-loop) --------------------------------
+  // 1) Task breakdown: opens the existing AI task wizard, seeded from this
+  //    request. 2) Triage: dismissible suggestion banner, each field applied
+  //    explicitly. 3) Reply draft: a PENDING draft the admin edits then posts
+  //    through the normal thread flow. The AI never mutates or posts anything.
+  const [wizardOpen, setWizardOpen] = useState(false)
+  const [triage, setTriage] = useState<TriageSuggestion | null>(null)
+  const [triageLoading, setTriageLoading] = useState(false)
+  const [triageError, setTriageError] = useState<string | null>(null)
+  const [replyDraft, setReplyDraft] = useState<string | null>(null)
+  const [replyLoading, setReplyLoading] = useState(false)
+  const [replyError, setReplyError] = useState<string | null>(null)
+  const [postingDraft, setPostingDraft] = useState(false)
+
+  // Following is now handled via the People panel's Followers slot -
   // the user adds themselves as a follower if they want notifications.
   // The old localStorage-based per-device "Follow" button was removed
   // (duplicated the Followers participants list + wasn't server-backed).
 
   const apiBase = isAdmin ? apiPath('/api/admin') : apiPath('/api/portal')
 
-  const loadFiles = useCallback(async () => {
-    try {
-      const url = isAdmin
-        ? apiPath(`/api/admin/requests/${requestId}/files`)
-        : apiPath(`/api/portal/requests/${requestId}/files`)
-      const res = await fetch(url)
-      if (res.ok) {
-        const data = await res.json() as { items: RequestFile[] }
-        setFiles(data.items ?? [])
-      }
-    } catch {
-      // non-fatal
-    }
-  }, [requestId, isAdmin])
-
-  const loadRequest = useCallback(async () => {
-    try {
+  // Request + messages via a single SWR entry. The inline fetcher mirrors the
+  // old dual-fetch (request endpoint + messages endpoint) and returns a merged
+  // object. Network failure throws -> SWR error -> "Failed to load" screen. A
+  // non-ok response leaves request null -> "Request not found", matching the
+  // previous behaviour. mutateRequest() replaces every loadRequest() refresh.
+  const {
+    data: requestData,
+    isLoading: loading,
+    error: requestError,
+    mutate: mutateRequest,
+  } = useSWR(
+    `request-detail:${isAdmin ? 'admin' : 'portal'}:${requestId}`,
+    async () => {
       const [reqRes, msgRes] = await Promise.all([
         fetch(`${apiBase}/requests/${requestId}`),
         fetch(isAdmin
@@ -199,6 +306,12 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           : `${apiBase}/requests/${requestId}`
         ),
       ])
+      let req: Request | null = null
+      let subs: SubRequestRow[] = []
+      let parent: ParentRequestRef | null = null
+      let unread = 0
+      let people: Participant[] = []
+      let msgs: Message[] = []
       if (reqRes.ok) {
         const data = await reqRes.json() as {
           request: Request
@@ -207,75 +320,73 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           unreadCount?: number
           participants?: Participant[]
         }
-        setRequest(data.request)
-        setSubRequests(data.subRequests ?? [])
-        setParentRequest(data.parent ?? null)
-        setUnreadCount(data.unreadCount ?? 0)
-        setParticipants(data.participants ?? [])
-        try {
-          setChecklists(JSON.parse(data.request.checklists || '[]') as Checklist[])
-        } catch {
-          setChecklists([])
-        }
+        req = data.request
+        subs = data.subRequests ?? []
+        parent = data.parent ?? null
+        unread = data.unreadCount ?? 0
+        people = data.participants ?? []
       }
       if (msgRes.ok) {
         if (isAdmin) {
           const data = await msgRes.json() as { items: Message[] }
-          setMessages(data.items ?? [])
+          msgs = data.items ?? []
         } else {
           const data = await msgRes.json() as { request: Request; messages: Message[] }
-          setRequest(data.request)
-          try {
-            setChecklists(JSON.parse(data.request.checklists || '[]') as Checklist[])
-          } catch {
-            setChecklists([])
-          }
-          setMessages(data.messages ?? [])
+          req = data.request
+          msgs = data.messages ?? []
         }
       }
-    } catch {
-      setFetchError(true)
-    } finally {
-      setLoading(false)
-    }
-  }, [requestId, apiBase, isAdmin])
+      return { request: req, subRequests: subs, parent, unreadCount: unread, participants: people, messages: msgs }
+    },
+  )
+  const fetchError = !!requestError
 
-  const loadTeamMembers = useCallback(async () => {
-    if (!isAdmin) return
+  // Mirror fetched data into local state. Local state is the source of truth for
+  // optimistic edits (patchRequest, checklists, participants, unlink), so each
+  // refresh (mutateRequest) re-syncs everything exactly as loadRequest used to.
+  useEffect(() => {
+    if (!requestData) return
+    setRequest(requestData.request)
+    setSubRequests(requestData.subRequests)
+    setParentRequest(requestData.parent)
+    setUnreadCount(requestData.unreadCount)
+    setParticipants(requestData.participants)
+    setMessages(requestData.messages)
     try {
-      const res = await fetch(apiPath('/api/admin/team-members'))
-      if (res.ok) {
-        const data = await res.json() as { items: TeamMemberOption[] }
-        setTeamMembers(data.items ?? [])
-      }
+      setChecklists(JSON.parse(requestData.request?.checklists || '[]') as Checklist[])
     } catch {
-      // non-fatal
+      setChecklists([])
     }
-  }, [isAdmin])
+  }, [requestData])
 
-  useEffect(() => {
-    loadRequest()
-    loadFiles()
-    loadTeamMembers()
-  }, [loadRequest, loadFiles, loadTeamMembers])
+  // Files via SWR (standard path key + global fetcher). mutateFiles() replaces
+  // the old loadFiles() refresh.
+  const filesKey = isAdmin
+    ? `/api/admin/requests/${requestId}/files`
+    : `/api/portal/requests/${requestId}/files`
+  const { data: filesData, mutate: mutateFiles } = useSWR<{ items: RequestFile[] }>(filesKey)
+  const files = filesData?.items ?? []
 
-  // Delivery-phase options for the spine selector. Keyed on the org so it
-  // only refetches if the request somehow changes org. Non-fatal on failure.
+  // Team members (admin only) for the assignee picker.
+  const { data: teamMembersData } = useSWR<{ items: TeamMemberOption[] }>(
+    isAdmin ? '/api/admin/team-members' : null,
+  )
+  const teamMembers = teamMembersData?.items ?? []
+
+  // Delivery-phase options for the spine selector. Conditional key skips the
+  // fetch for clients or before the org is known; non-fatal on failure.
   const requestOrgId = request?.orgId ?? null
-  useEffect(() => {
-    if (!isAdmin || !requestOrgId) return
-    let cancelled = false
-    fetchSchedulePhaseOptions(requestOrgId)
-      .then(options => { if (!cancelled) setPhaseOptions(options) })
-      .catch(() => { /* non-fatal */ })
-    return () => { cancelled = true }
-  }, [isAdmin, requestOrgId])
+  const { data: phaseOptionsData } = useSWR(
+    isAdmin && requestOrgId ? `schedule-phases:${requestOrgId}` : null,
+    () => fetchSchedulePhaseOptions(requestOrgId as string),
+  )
+  const phaseOptions = phaseOptionsData ?? []
 
   useEffect(() => {
     threadBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
 
-  // Mark the request as read 2s after load. A quick glance shouldn't count —
+  // Mark the request as read 2s after load. A quick glance shouldn't count -
   // if the user leaves sooner, we preserve the unread badge for next time.
   useEffect(() => {
     if (!isAdmin || loading || !request) return
@@ -333,15 +444,19 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         conversationId: convId ?? undefined,
       }),
     })
-    if (res.ok) {
-      // Uploaded files have already been attached to the request via the
-      // /api/uploads/confirm step inside the composer. We just need to
-      // re-fetch the files panel + messages to show the new state.
-      await Promise.all([loadRequest(), loadFiles()])
+    if (!res.ok) {
+      // Surface the failure to the caller (composer or AI-draft card) so a
+      // failed post is never silently swallowed and the user can retry.
+      const j = await res.json().catch(() => ({})) as { error?: string }
+      throw new Error(j.error ?? 'Failed to send message')
     }
+    // Uploaded files have already been attached to the request via the
+    // /api/uploads/confirm step inside the composer. We just need to
+    // re-fetch the files panel + messages to show the new state.
+    await Promise.all([mutateRequest(), mutateFiles()])
   }
 
-  // Optimistic patch helper — updates local state immediately, PATCHes the
+  // Optimistic patch helper - updates local state immediately, PATCHes the
   // server in the background, rolls back + toasts on failure. Every field-
   // level mutation below goes through this so the UI never blinks.
   const patchRequest = useCallback(async (
@@ -361,13 +476,13 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       if (!res.ok) {
         setRequest(previous)
         const j = await res.json().catch(() => ({})) as { error?: string }
-        showToast(j.error ?? 'Update failed — please retry')
+        showToast(j.error ?? 'Update failed - please retry')
         return
       }
       if (successMsg) showToast(successMsg)
     } catch {
       setRequest(previous)
-      showToast('Network error — try again')
+      showToast('Network error - try again')
     }
   }, [request, requestId, showToast])
 
@@ -393,7 +508,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       }
     } catch {
       setChecklists(previous)
-      showToast('Network error — try again')
+      showToast('Network error - try again')
     }
   }
 
@@ -405,7 +520,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     )
   }
 
-  // Un-link this sub-request from its parent — promotes it to a top-level
+  // Un-link this sub-request from its parent - promotes it to a top-level
   // request. Uses the same /nest endpoint that drag-to-nest does. Optimistic.
   async function handleUnlinkFromParent() {
     if (!request?.parentRequestId || unlinkingParent) return
@@ -431,7 +546,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     } catch {
       setRequest(previous.request)
       setParentRequest(previous.parent)
-      showToast('Network error — try again')
+      showToast('Network error - try again')
     } finally {
       setUnlinkingParent(false)
     }
@@ -463,9 +578,97 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     )
   }
 
+  // Run AI triage - returns SUGGESTIONS only. Never mutates the request.
+  async function runTriage() {
+    if (triageLoading) return
+    setTriageLoading(true)
+    setTriageError(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/requests/${requestId}/triage`), { method: 'POST' })
+      const json = await res.json().catch(() => ({})) as { suggestion?: TriageSuggestion; error?: string }
+      if (!res.ok || !json.suggestion) {
+        setTriageError(json.error ?? 'Triage failed')
+        return
+      }
+      setTriage(json.suggestion)
+    } catch {
+      setTriageError('Network error - try again')
+    } finally {
+      setTriageLoading(false)
+    }
+  }
+
+  // Apply the suggested assignee via the existing PATCH flow (patchRequest).
+  async function applyTriageAssignee() {
+    if (!triage) return
+    await handleAssigneeChange(triage.suggestedAssigneeId)
+    setTriage(prev => (prev ? { ...prev, suggestedAssigneeId: null, suggestedAssigneeName: null } : prev))
+  }
+
+  // Apply the suggested priority via the existing PATCH flow (patchRequest).
+  async function applyTriagePriority() {
+    if (!triage) return
+    await handlePriorityChange(triage.suggestedPriority)
+  }
+
+  // Generate a PENDING reply draft. Does not post - lands in the review card.
+  async function runDraftReply() {
+    if (replyLoading) return
+    setReplyLoading(true)
+    setReplyError(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/requests/${requestId}/draft-reply`), { method: 'POST' })
+      const json = await res.json().catch(() => ({})) as { body?: string; error?: string }
+      if (!res.ok || !json.body) {
+        setReplyError(json.error ?? 'Draft failed')
+        return
+      }
+      setReplyDraft(json.body)
+    } catch {
+      setReplyError('Network error - try again')
+    } finally {
+      setReplyLoading(false)
+    }
+  }
+
+  // Post the (human-edited) draft through the EXISTING message flow. This is
+  // the sole approval gate for the reply draft - the admin clicks Post.
+  async function postDraftReply() {
+    if (!replyDraft?.trim() || postingDraft) return
+    setPostingDraft(true)
+    try {
+      await handleSendMessage(draftTextToHtml(replyDraft), null, [], 'public')
+      setReplyDraft(null)
+      showToast('Reply posted to thread')
+    } catch {
+      setReplyError('Failed to post - try again')
+    } finally {
+      setPostingDraft(false)
+    }
+  }
+
+  // Build the wizard seed from this request (title / category / client /
+  // description). The wizard opens with this text pre-filled; the admin
+  // reviews and sends it themselves.
+  const taskWizardSeed = request
+    ? [
+        'Break this request into actionable tasks.',
+        '',
+        `Title: ${request.title}`,
+        request.category ? `Category: ${request.category}` : null,
+        request.orgName ? `Client: ${request.orgName}` : null,
+        request.description ? `\nDetails:\n${stripHtmlToText(request.description)}` : null,
+      ].filter(Boolean).join('\n')
+    : ''
+
   // ---- Loading / Error / Not Found ------------------------------------------
 
-  if (loading) {
+  // Show the skeleton while SWR is loading, and also during the single frame
+  // after data arrives but before the mirror effect has synced it into local
+  // state (when the fetched request is non-null) so we never flash "not found".
+  const showSkeleton = loading || (!request && !fetchError && !(requestData && !requestData.request))
+
+  if (showSkeleton) {
     return (
       <div className="flex flex-col" style={{ gap: '2rem', maxWidth: '68.75rem' }}>
         {/* Back link skeleton */}
@@ -537,7 +740,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
 
   return (
     <div className="flex flex-col" style={{ gap: '1.5rem', maxWidth: '68.75rem' }}>
-      {/* Breadcrumb — includes parent when this request is a sub-request */}
+      {/* Breadcrumb - includes parent when this request is a sub-request */}
       <Breadcrumb
         items={[
           { label: 'Requests', href: '/requests' },
@@ -554,7 +757,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         ]}
       />
 
-      {/* Header card — minimal, modern dashboard style. Meta row up top
+      {/* Header card - minimal, modern dashboard style. Meta row up top
           (request number + status badge + small indicator pills), then the
           title owns the full width, then a compact progress bar below
           instead of a chunky stepper. */}
@@ -627,7 +830,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             )}
           </div>
 
-          {/* Title row — title on the left, compact people stack on the
+          {/* Title row - title on the left, compact people stack on the
               right so the header is balanced and you can tell at a glance
               who's on this request. */}
           <div className="flex items-start" style={{ gap: '1rem' }}>
@@ -671,7 +874,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           </div>
         </div>
 
-        {/* Minimal progress bar — replaces the chunky stepper. A single
+        {/* Minimal progress bar - replaces the chunky stepper. A single
             horizontal line with breakpoints; current step highlighted.
             Less visual weight than the numbered stepper and reads cleaner. */}
         <div
@@ -722,7 +925,93 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         </div>
       </div>
 
-      {/* Sub-request creation dialog — opened from the <SubRequestsPanel>
+      {/* AI triage suggestion banner - admin only. Suggestions never apply
+          themselves; each field has an explicit Apply button that routes
+          through the same PATCH the manual controls use. Dismissible. */}
+      {isAdmin && triage && (
+        <div
+          role="region"
+          aria-label="AI triage suggestions"
+          style={{
+            border: '1px solid var(--color-brand)',
+            background: 'var(--color-brand-50)',
+            borderRadius: 'var(--radius-leaf, 0 16px 0 16px)',
+            padding: '1rem 1.125rem',
+          }}
+        >
+          <div className="flex items-start" style={{ gap: '0.75rem' }}>
+            <div
+              className="flex items-center justify-center flex-shrink-0"
+              style={{
+                width: '1.75rem', height: '1.75rem',
+                borderRadius: '0 0.5rem 0 0.5rem',
+                background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
+              }}
+            >
+              <Sparkles size={14} style={{ color: '#ffffff' }} aria-hidden="true" />
+            </div>
+            <div className="flex-1" style={{ minWidth: 0 }}>
+              <div className="flex items-center justify-between" style={{ gap: '0.5rem' }}>
+                <p className="text-sm font-semibold" style={{ color: 'var(--color-brand-dark)', margin: 0 }}>
+                  AI triage suggestion
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setTriage(null)}
+                  aria-label="Dismiss triage suggestions"
+                  className="flex items-center justify-center transition-colors"
+                  style={{
+                    width: '1.5rem', height: '1.5rem', flexShrink: 0,
+                    border: 'none', background: 'transparent',
+                    color: 'var(--color-text-subtle)', cursor: 'pointer',
+                    borderRadius: '0.375rem',
+                  }}
+                >
+                  <X size={14} aria-hidden="true" />
+                </button>
+              </div>
+              <p className="text-xs" style={{ color: 'var(--color-text-muted)', margin: '0.25rem 0 0', lineHeight: 1.5 }}>
+                {triage.oneLineReason}
+              </p>
+
+              <div className="flex flex-wrap items-center" style={{ gap: '0.5rem', marginTop: '0.75rem' }}>
+                {/* Assignee suggestion + Apply (uses existing assign flow) */}
+                {triage.suggestedAssigneeId && triage.suggestedAssigneeName && request.assigneeId !== triage.suggestedAssigneeId && (
+                  <SuggestionApplyChip
+                    label="Assign"
+                    value={triage.suggestedAssigneeName}
+                    onApply={applyTriageAssignee}
+                  />
+                )}
+                {/* Priority suggestion + Apply (uses existing priority flow) */}
+                {request.priority !== triage.suggestedPriority && (
+                  <SuggestionApplyChip
+                    label="Priority"
+                    value={triage.suggestedPriority === 'high' ? 'High' : 'Standard'}
+                    onApply={applyTriagePriority}
+                  />
+                )}
+                {/* Track is shown as context. There is no request-level track
+                    endpoint to route an Apply through, so we surface it as a
+                    read-only hint rather than a misleading button. */}
+                <span
+                  className="inline-flex items-center rounded-full"
+                  style={{
+                    gap: '0.25rem', padding: '0.1875rem 0.5rem',
+                    fontSize: '0.6875rem', fontWeight: 500,
+                    background: 'var(--color-bg)', color: 'var(--color-text-muted)',
+                    border: '1px solid var(--color-border)',
+                  }}
+                >
+                  Suggested track: {triage.suggestedTrack === 'large' ? 'Large' : 'Small'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sub-request creation dialog - opened from the <SubRequestsPanel>
           "New sub-request" button. Client is locked to parent's org. */}
       {isAdmin && !request.parentRequestId && (
         <NewRequestDialog
@@ -733,7 +1022,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           forceOrgId={request.orgId}
           onCreated={() => {
             // Refresh sub-requests list without a full page load
-            loadRequest()
+            mutateRequest()
             showToast('Sub-request created')
           }}
         />
@@ -741,7 +1030,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
 
       {/* Two-column layout */}
       <div className="grid grid-cols-1 md:grid-cols-[1fr_16rem] lg:grid-cols-[1fr_20rem] gap-6">
-        {/* Left column — thread-first, description / sub-requests / files below,
+        {/* Left column - thread-first, description / sub-requests / files below,
             activity collapsed at the bottom */}
         <div className="flex flex-col gap-6">
           {/* Thread (first for immediate comms context) */}
@@ -793,6 +1082,167 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 background: 'var(--color-bg-secondary)',
               }}
             >
+              {/* AI reply draft - admin only. Generates a PENDING draft the
+                  admin edits in place and then explicitly posts through the
+                  normal thread flow below. The AI never posts. */}
+              {isAdmin && (
+                <div style={{ marginBottom: '0.75rem' }}>
+                  {!replyDraft ? (
+                    <div className="flex items-center flex-wrap" style={{ gap: '0.5rem' }}>
+                      <button
+                        type="button"
+                        onClick={runDraftReply}
+                        disabled={replyLoading}
+                        className="inline-flex items-center transition-colors"
+                        style={{
+                          gap: '0.375rem',
+                          padding: '0.375rem 0.75rem',
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                          borderRadius: 'var(--radius-button)',
+                          border: '1px solid var(--color-border)',
+                          background: 'var(--color-bg)',
+                          color: 'var(--color-brand)',
+                          cursor: replyLoading ? 'not-allowed' : 'pointer',
+                          opacity: replyLoading ? 0.6 : 1,
+                          minHeight: '2rem',
+                        }}
+                      >
+                        {replyLoading
+                          ? <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+                          : <Sparkles size={13} aria-hidden="true" />}
+                        {replyLoading ? 'Drafting…' : 'AI: draft reply'}
+                      </button>
+                      {replyError && (
+                        <span className="text-xs" style={{ color: 'var(--color-danger)' }}>
+                          {replyError}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        border: '1px solid var(--color-brand)',
+                        background: 'var(--color-brand-50)',
+                        borderRadius: 'var(--radius-lg)',
+                        padding: '0.75rem 0.875rem',
+                      }}
+                    >
+                      <div className="flex items-center justify-between" style={{ marginBottom: '0.5rem', gap: '0.5rem' }}>
+                        <span className="inline-flex items-center text-xs font-semibold" style={{ gap: '0.375rem', color: 'var(--color-brand-dark)' }}>
+                          <Sparkles size={13} aria-hidden="true" />
+                          AI draft - review before posting
+                        </span>
+                        <span
+                          className="inline-flex items-center rounded-full"
+                          style={{
+                            padding: '0.125rem 0.5rem', fontSize: '0.625rem', fontWeight: 600,
+                            textTransform: 'uppercase', letterSpacing: '0.04em',
+                            background: 'var(--color-warning-bg)', color: 'var(--color-warning)',
+                          }}
+                        >
+                          Pending
+                        </span>
+                      </div>
+                      <textarea
+                        value={replyDraft}
+                        onChange={e => setReplyDraft(e.target.value)}
+                        rows={7}
+                        aria-label="AI reply draft - edit before posting"
+                        style={{
+                          width: '100%',
+                          padding: '0.625rem 0.75rem',
+                          borderRadius: 'var(--radius-md)',
+                          border: '1px solid var(--color-border)',
+                          background: 'var(--color-bg)',
+                          color: 'var(--color-text)',
+                          fontSize: '0.8125rem',
+                          fontFamily: 'inherit',
+                          lineHeight: 1.6,
+                          resize: 'vertical',
+                          outline: 'none',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                      {replyError && (
+                        <p className="text-xs" style={{ color: 'var(--color-danger)', margin: '0.375rem 0 0' }}>
+                          {replyError}
+                        </p>
+                      )}
+                      <div className="flex items-center flex-wrap" style={{ gap: '0.5rem', marginTop: '0.625rem' }}>
+                        <button
+                          type="button"
+                          onClick={postDraftReply}
+                          disabled={postingDraft || !replyDraft.trim()}
+                          className="inline-flex items-center transition-colors"
+                          style={{
+                            gap: '0.375rem',
+                            padding: '0.375rem 0.75rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            borderRadius: 'var(--radius-button)',
+                            border: 'none',
+                            background: postingDraft || !replyDraft.trim() ? 'var(--color-bg-tertiary)' : 'var(--color-brand)',
+                            color: postingDraft || !replyDraft.trim() ? 'var(--color-text-subtle)' : '#ffffff',
+                            cursor: postingDraft || !replyDraft.trim() ? 'not-allowed' : 'pointer',
+                            minHeight: '2rem',
+                          }}
+                        >
+                          {postingDraft
+                            ? <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+                            : <Check size={13} aria-hidden="true" />}
+                          {postingDraft ? 'Posting…' : 'Post to thread'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={runDraftReply}
+                          disabled={replyLoading || postingDraft}
+                          className="inline-flex items-center transition-colors"
+                          style={{
+                            gap: '0.375rem',
+                            padding: '0.375rem 0.75rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 500,
+                            borderRadius: 'var(--radius-button)',
+                            border: '1px solid var(--color-border)',
+                            background: 'var(--color-bg)',
+                            color: 'var(--color-text-muted)',
+                            cursor: replyLoading || postingDraft ? 'not-allowed' : 'pointer',
+                            opacity: replyLoading || postingDraft ? 0.6 : 1,
+                            minHeight: '2rem',
+                          }}
+                        >
+                          {replyLoading
+                            ? <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+                            : <RefreshCw size={13} aria-hidden="true" />}
+                          Regenerate
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setReplyDraft(null); setReplyError(null) }}
+                          disabled={postingDraft}
+                          className="inline-flex items-center transition-colors"
+                          style={{
+                            gap: '0.375rem',
+                            padding: '0.375rem 0.75rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 500,
+                            borderRadius: 'var(--radius-button)',
+                            border: 'none',
+                            background: 'transparent',
+                            color: 'var(--color-text-muted)',
+                            cursor: postingDraft ? 'not-allowed' : 'pointer',
+                            minHeight: '2rem',
+                          }}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <MessageComposer
                 onSubmit={handleSendMessage}
                 placeholder={isAdmin ? 'Reply to client or add an internal note…' : 'Add a comment or question…'}
@@ -819,14 +1269,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             </Card>
           )}
 
-          {/* Sub-requests — only for top-level requests (V1 disallows grandchildren) */}
+          {/* Sub-requests - only for top-level requests (V1 disallows grandchildren) */}
           {!request.parentRequestId && (
             <SubRequestsPanel
               parentRequestId={request.id}
               subRequests={subRequests}
               alwaysShow={isAdmin}
               canCreate={isAdmin}
-              onCreated={loadRequest}
+              onCreated={() => { mutateRequest() }}
               onRequestNew={() => setNewSubOpen(true)}
             />
           )}
@@ -834,17 +1284,17 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           {/* Files */}
           <FilesPanel
             files={files}
-            onRefresh={loadFiles}
+            onRefresh={() => { mutateFiles() }}
             requestId={requestId}
             orgId={request.orgId}
             isAdmin={isAdmin}
           />
 
-          {/* Activity log — collapsed by default at the bottom */}
+          {/* Activity log - collapsed by default at the bottom */}
           <ActivityLog request={request} messages={messages} files={files} />
         </div>
 
-        {/* Right column: Metadata sidebar — primary-use blocks first.
+        {/* Right column: Metadata sidebar - primary-use blocks first.
             Time → Actions → People → Checklists → Details. */}
         <div className="flex flex-col gap-4">
           {/* Time (admin only): live timer + manual log + recent entries */}
@@ -921,7 +1371,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                   {request.scopeFlagged ? 'Scope flagged' : 'Flag scope creep'}
                 </button>
 
-                {/* Make top-level — only for sub-requests */}
+                {/* Make top-level - only for sub-requests */}
                 {request.parentRequestId && (
                   <button
                     type="button"
@@ -961,11 +1411,72 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     Make top-level
                   </button>
                 )}
+
+                {/* AI assist - human-in-the-loop. "Break into tasks" opens the
+                    existing task wizard seeded from this request; "Suggest
+                    triage" fetches routing suggestions into the banner above.
+                    Neither changes anything without an explicit follow-up. */}
+                <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '0.25rem 0' }} aria-hidden="true" />
+                <button
+                  type="button"
+                  onClick={() => setWizardOpen(true)}
+                  className="flex items-center transition-colors"
+                  style={{
+                    gap: '0.375rem',
+                    padding: '0.3125rem 0.625rem',
+                    fontSize: '0.75rem',
+                    fontWeight: 500,
+                    borderRadius: 'var(--radius-button)',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-brand)',
+                    cursor: 'pointer',
+                    minHeight: '2rem',
+                    justifyContent: 'flex-start',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-brand-50)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg)' }}
+                >
+                  <Wand2 size={12} aria-hidden="true" />
+                  AI: break into tasks
+                </button>
+                <button
+                  type="button"
+                  onClick={runTriage}
+                  disabled={triageLoading}
+                  className="flex items-center transition-colors"
+                  style={{
+                    gap: '0.375rem',
+                    padding: '0.3125rem 0.625rem',
+                    fontSize: '0.75rem',
+                    fontWeight: 500,
+                    borderRadius: 'var(--radius-button)',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-brand)',
+                    cursor: triageLoading ? 'not-allowed' : 'pointer',
+                    opacity: triageLoading ? 0.6 : 1,
+                    minHeight: '2rem',
+                    justifyContent: 'flex-start',
+                  }}
+                  onMouseEnter={e => { if (!triageLoading) e.currentTarget.style.background = 'var(--color-brand-50)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg)' }}
+                >
+                  {triageLoading
+                    ? <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+                    : <Sparkles size={12} aria-hidden="true" />}
+                  {triageLoading ? 'Analysing…' : 'AI: suggest triage'}
+                </button>
+                {triageError && (
+                  <span className="text-xs" style={{ color: 'var(--color-danger)' }}>
+                    {triageError}
+                  </span>
+                )}
               </div>
             </SidebarCard>
           )}
 
-          {/* People — PM / Assignees / Followers */}
+          {/* People - PM / Assignees / Followers */}
           <PeoplePanel
             requestId={requestId}
             orgId={request.orgId}
@@ -981,7 +1492,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             isAdmin={isAdmin}
           />
 
-          {/* Details — reference info at the bottom since it changes less */}
+          {/* Details - reference info at the bottom since it changes less */}
           <SidebarCard title="Details">
             <div className="flex flex-col" style={{ gap: '0.875rem' }}>
               <DetailRow label="Type">
@@ -1033,7 +1544,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 )}
               </DetailRow>
 
-              {/* Delivery phase — links this request to a schedule gantt row
+              {/* Delivery phase - links this request to a schedule gantt row
                   so the schedule shows live delivery status (spine #148).
                   Admin-only; hidden when the org has no schedule phases. */}
               {isAdmin && (phaseOptions.length > 0 || request.scheduleRowId) && (
@@ -1145,6 +1656,22 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           </SidebarCard>
         </div>
       </div>
+
+      {/* AI task wizard - seeded from this request. Opens with a pre-filled
+          prompt the admin reviews and sends; tasks are reviewed + created
+          inside the wizard exactly as on the tasks page. */}
+      {isAdmin && (
+        <AiTaskWizard
+          open={wizardOpen}
+          onClose={() => setWizardOpen(false)}
+          context={{ orgId: request.orgId, trackType: request.size ?? undefined }}
+          seed={taskWizardSeed}
+          onTasksCreated={() => {
+            mutateRequest()
+            showToast('Tasks created')
+          }}
+        />
+      )}
 
       {/* Mobile bottom nav spacer */}
       <div className="h-28 md:hidden" aria-hidden="true" />
@@ -1436,7 +1963,7 @@ function formatActivityDate(iso: string) {
 /**
  * Compact overlapping avatar stack shown in the request detail header.
  * PM first, then assignees, then followers if we still have room. Extra
- * people collapse into a "+N" chip. Purely visual — the full list of
+ * people collapse into a "+N" chip. Purely visual - the full list of
  * people is managed in the sidebar People panel.
  */
 function PeopleStack({ participants }: { participants: Participant[] }) {
@@ -1488,7 +2015,7 @@ function PeopleStack({ participants }: { participants: Participant[] }) {
         {visible.map(({ p, accent }, i) => (
           <span
             key={p.id}
-            title={`${p.name ?? 'Unknown'}${p.role === 'pm' ? ' — PM' : p.role === 'assignee' ? ' — Assignee' : ' — Follower'}`}
+            title={`${p.name ?? 'Unknown'}${p.role === 'pm' ? ' - PM' : p.role === 'assignee' ? ' - Assignee' : ' - Follower'}`}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -2049,7 +2576,7 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
         fileId: string
       }
 
-      // uploadUrl is already absolute (origin + basePath + path) — wrapping
+      // uploadUrl is already absolute (origin + basePath + path) - wrapping
       // it in apiPath() double-prepends /dashboard and produces 404s.
       const uploadRes = await fetch(presignData.uploadUrl, {
         method: 'PUT',
@@ -2242,7 +2769,7 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
 }
 
 /**
- * <FileActions> — view / download / delete action group on each file row.
+ * <FileActions> - view / download / delete action group on each file row.
  *
  * View opens inline in a new tab when the MIME is renderable (image, PDF,
  * video, audio). Download forces attachment Content-Disposition. Delete

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import {
   Shield, ArrowLeft, RefreshCw, ChevronLeft, ChevronRight,
   ChevronDown,
@@ -8,7 +9,6 @@ import {
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
-import { apiPath } from '@/lib/api'
 import Link from 'next/link'
 
 interface AuditEntry {
@@ -46,8 +46,6 @@ const ENTITY_OPTIONS = [
 ]
 
 export function AuditLogContent() {
-  const [entries, setEntries] = useState<AuditEntry[]>([])
-  const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
 
   // Filters
@@ -56,28 +54,19 @@ export function AuditLogContent() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
 
-  const fetchEntries = useCallback(async () => {
-    setLoading(true)
-    try {
-      const params = new URLSearchParams()
-      params.set('page', page.toString())
-      if (actionFilter) params.set('action', actionFilter)
-      if (entityFilter) params.set('entityType', entityFilter)
-      if (dateFrom) params.set('dateFrom', dateFrom)
-      if (dateTo) params.set('dateTo', dateTo)
+  // Encode every filter + page in the SWR key so each view caches separately;
+  // keepPreviousData shows the prior rows while the new page/filter loads.
+  const auditParams = new URLSearchParams()
+  auditParams.set('page', page.toString())
+  if (actionFilter) auditParams.set('action', actionFilter)
+  if (entityFilter) auditParams.set('entityType', entityFilter)
+  if (dateFrom) auditParams.set('dateFrom', dateFrom)
+  if (dateTo) auditParams.set('dateTo', dateTo)
 
-      const res = await fetch(apiPath(`/api/admin/audit?${params.toString()}`))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { items: AuditEntry[] }
-      setEntries(data.items ?? [])
-    } catch {
-      setEntries([])
-    } finally {
-      setLoading(false)
-    }
-  }, [page, actionFilter, entityFilter, dateFrom, dateTo])
-
-  useEffect(() => { fetchEntries() }, [fetchEntries])
+  const { data, isLoading: loading, mutate } = useSWR<{ items: AuditEntry[] }>(
+    `/api/admin/audit?${auditParams.toString()}`,
+  )
+  const entries = data?.items ?? []
 
   function formatTimestamp(iso: string): string {
     try {
@@ -107,7 +96,7 @@ export function AuditLogContent() {
             </p>
           </div>
         </div>
-        <TahiButton variant="secondary" size="sm" onClick={fetchEntries} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+        <TahiButton variant="secondary" size="sm" onClick={() => mutate()} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
           Refresh
         </TahiButton>
       </div>

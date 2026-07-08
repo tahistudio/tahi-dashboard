@@ -25,7 +25,8 @@
 // The proposal list endpoint does not carry view counts, so analytics are
 // fetched per shared/decided proposal in parallel and merged in.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import useSWR from 'swr'
 import { FileText } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { DomainCard, CountPill } from '@/components/tahi/overview/domain-card'
@@ -66,67 +67,47 @@ const SHARED_STATUSES = new Set(['shared', 'accepted', 'declined', 'expired'])
 // ── Card ──────────────────────────────────────────────────────────────────────
 
 export function ProposalsLive({ className }: { className?: string }) {
-  const [proposals, setProposals] = useState<LiveProposal[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: proposals = [], isLoading: loading } = useSWR<LiveProposal[]>(
+    'admin/proposals+analytics',
+    async () => {
+      const res = await fetch(apiPath('/api/admin/proposals'))
+      const data = res.ok ? ((await res.json()) as { items: ProposalRow[] }) : { items: [] }
+      const rows = data.items ?? []
 
-  useEffect(() => {
-    let cancelled = false
-
-    async function load() {
-      try {
-        const res = await fetch(apiPath('/api/admin/proposals'))
-        const data = res.ok ? ((await res.json()) as { items: ProposalRow[] }) : { items: [] }
-        const rows = data.items ?? []
-
-        // Fetch view analytics only for proposals that were actually shared.
-        const sharable = rows.filter(p => p.status && SHARED_STATUSES.has(p.status))
-        const statsById = new Map<string, ViewStats>()
-        await Promise.all(
-          sharable.map(async p => {
-            try {
-              const vr = await fetch(
-                apiPath(`/api/admin/views?resourceType=proposal&resourceId=${encodeURIComponent(p.id)}&limit=50`),
-              )
-              if (!vr.ok) return
-              const vd = (await vr.json()) as {
-                stats: { totalViews: number; uniqueSessions: number; lastViewedAt: string | null }
-                events: { pagesViewed: string | null }[]
-              }
-              const maxPagesViewed = vd.events.reduce((max, e) => {
-                if (!e.pagesViewed) return max
-                try {
-                  const arr = JSON.parse(e.pagesViewed) as unknown[]
-                  return Array.isArray(arr) ? Math.max(max, arr.length) : max
-                } catch {
-                  return max
-                }
-              }, 0)
-              statsById.set(p.id, {
-                totalViews: vd.stats.totalViews ?? 0,
-                uniqueSessions: vd.stats.uniqueSessions ?? 0,
-                lastViewedAt: vd.stats.lastViewedAt ?? null,
-                maxPagesViewed,
-              })
-            } catch {
-              /* leave this proposal without stats */
+      // Fetch view analytics only for proposals that were actually shared.
+      const sharable = rows.filter(p => p.status && SHARED_STATUSES.has(p.status))
+      const statsById = new Map<string, ViewStats>()
+      await Promise.all(
+        sharable.map(async p => {
+          try {
+            const vr = await fetch(
+              apiPath(`/api/admin/views?resourceType=proposal&resourceId=${encodeURIComponent(p.id)}&limit=50`),
+            )
+            if (!vr.ok) return
+            const vd = (await vr.json()) as {
+              stats: { totalViews: number; uniqueSessions: number; lastViewedAt: string | null }
+              events: { pagesViewed: string | null }[]
             }
-          }),
-        )
+            const maxPagesViewed = vd.events.reduce((max, e) => {
+              if (!e.pagesViewed) return max
+              try {
+                const arr = JSON.parse(e.pagesViewed) as unknown[]
+                return Array.isArray(arr) ? Math.max(max, arr.length) : max
+              } catch { return max }
+            }, 0)
+            statsById.set(p.id, {
+              totalViews: vd.stats.totalViews ?? 0,
+              uniqueSessions: vd.stats.uniqueSessions ?? 0,
+              lastViewedAt: vd.stats.lastViewedAt ?? null,
+              maxPagesViewed,
+            })
+          } catch { /* leave this proposal without stats */ }
+        }),
+      )
 
-        if (cancelled) return
-        setProposals(rows.map(p => ({ ...p, stats: statsById.get(p.id) ?? null })))
-      } catch {
-        if (!cancelled) setProposals([])
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
+      return rows.map(p => ({ ...p, stats: statsById.get(p.id) ?? null }))
     }
-
-    load()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  )
 
   // ── Funnel counts ──
   const funnel = useMemo(() => {

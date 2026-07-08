@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useMemo } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import {
   Users, Inbox, Clock, CreditCard, BarChart2,
@@ -73,49 +74,32 @@ function formatMonthLabel(key: string): string {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function ReportsContent() {
-  const [data, setData] = useState<ReportData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
   const { displayCurrency } = useDisplayCurrency()
-  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({})
 
-  // Fetch exchange rates for currency conversion
-  useEffect(() => {
-    fetch(apiPath('/api/admin/exchange-rates'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ rates: Array<{ currency: string; rateToNzd: number }> }>
-      })
-      .then(d => {
-        // Convert array of {currency, rateToNzd} to Record<string, number>
-        const rateMap: Record<string, number> = { NZD: 1 }
-        if (Array.isArray(d.rates)) {
-          for (const r of d.rates) {
-            if (r.currency && r.rateToNzd) rateMap[r.currency] = r.rateToNzd
-          }
+  // Exchange rates for currency conversion. The response is an array we reshape
+  // into a {currency: rate} map, so use an inline fetcher; the cache value is
+  // the final map. Falls back to { NZD: 1 } when the request fails.
+  const { data: exchangeRatesData } = useSWR<Record<string, number>>(
+    '/api/admin/exchange-rates',
+    async () => {
+      const r = await fetch(apiPath('/api/admin/exchange-rates'))
+      if (!r.ok) throw new Error('Failed')
+      const d = await r.json() as { rates: Array<{ currency: string; rateToNzd: number }> }
+      const rateMap: Record<string, number> = { NZD: 1 }
+      if (Array.isArray(d.rates)) {
+        for (const rate of d.rates) {
+          if (rate.currency && rate.rateToNzd) rateMap[rate.currency] = rate.rateToNzd
         }
-        setExchangeRates(rateMap)
-      })
-      .catch(() => setExchangeRates({ NZD: 1 }))
-  }, [])
+      }
+      return rateMap
+    },
+  )
+  const exchangeRates = exchangeRatesData ?? { NZD: 1 }
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    setError(false)
-    try {
-      const res = await fetch(apiPath('/api/admin/reports/overview'))
-      if (!res.ok) throw new Error('Failed to load')
-      const json = await res.json() as ReportData
-      setData(json)
-    } catch {
-      setError(true)
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchData() }, [fetchData])
+  const { data, isLoading: loading, error: overviewErr, mutate } =
+    useSWR<ReportData>('/api/admin/reports/overview')
+  const error = !!overviewErr
+  const fetchData = () => { void mutate() }
 
   if (loading) {
     return (
@@ -506,50 +490,17 @@ const AGING_BUCKETS = [
 ]
 
 function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProps) {
-  const [healthData, setHealthData] = useState<FinancialHealthData | null>(null)
-  const [agingData, setAgingData] = useState<AgingData | null>(null)
-  const [healthLoading, setHealthLoading] = useState(true)
-  const [agingLoading, setAgingLoading] = useState(true)
-  const [healthError, setHealthError] = useState(false)
-  const [agingError, setAgingError] = useState(false)
+  const { data: healthData, isLoading: healthLoading, error: healthErr, mutate: mutateHealth } =
+    useSWR<FinancialHealthData>('/api/admin/billing/financial-health')
+  const { data: agingData, isLoading: agingLoading, error: agingErr, mutate: mutateAging } =
+    useSWR<AgingData>('/api/admin/reports/invoice-aging')
+  const healthError = !!healthErr
+  const agingError = !!agingErr
+  const fetchHealth = () => { void mutateHealth() }
+  const fetchAging = () => { void mutateAging() }
   const [expandedBucket, setExpandedBucket] = useState<string | null>(null)
 
   const fmtCur = (v: number) => formatInCur(v, displayCurrency, exchangeRates)
-
-  const fetchHealth = useCallback(async () => {
-    setHealthLoading(true)
-    setHealthError(false)
-    try {
-      const res = await fetch(apiPath('/api/admin/billing/financial-health'))
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as FinancialHealthData
-      setHealthData(json)
-    } catch {
-      setHealthError(true)
-      setHealthData(null)
-    } finally {
-      setHealthLoading(false)
-    }
-  }, [])
-
-  const fetchAging = useCallback(async () => {
-    setAgingLoading(true)
-    setAgingError(false)
-    try {
-      const res = await fetch(apiPath('/api/admin/reports/invoice-aging'))
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as AgingData
-      setAgingData(json)
-    } catch {
-      setAgingError(true)
-      setAgingData(null)
-    } finally {
-      setAgingLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchHealth() }, [fetchHealth])
-  useEffect(() => { fetchAging() }, [fetchAging])
 
   return (
     <div className="space-y-6">
@@ -1046,19 +997,8 @@ interface ResponseTimeRow {
 }
 
 function ResponseTimeSection() {
-  const [rows, setRows] = useState<ResponseTimeRow[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/reports/response-time'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ items: ResponseTimeRow[] }>
-      })
-      .then(d => setRows(d.items ?? []))
-      .catch(() => setRows([]))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data, isLoading: loading } = useSWR<{ items: ResponseTimeRow[] }>('/api/admin/reports/response-time')
+  const rows = data?.items ?? []
 
   const formatTime = (mins: number): string => {
     if (mins === 0) return 'N/A'
@@ -1222,20 +1162,8 @@ interface SalesData {
 
 
 function SalesPipelineSection({ displayCurrency, exchangeRates }: CurrencyProps) {
-  const [data, setData] = useState<SalesData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data, isLoading: loading } = useSWR<SalesData>('/api/admin/reports/sales')
   const fmtCur = (v: number) => formatInCur(v, displayCurrency, exchangeRates)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/reports/sales'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<SalesData>
-      })
-      .then(d => setData(d))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false))
-  }, [])
 
   if (loading) {
     return (
@@ -1387,19 +1315,8 @@ interface CloseRateData {
 // FUNNEL uses stageColour() directly instead of a separate palette
 
 function SalesFunnelSection({ displayCurrency, exchangeRates }: CurrencyProps) {
-  const [data, setData] = useState<CloseRateData | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/reports/close-rates'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<CloseRateData>
-      })
-      .then(d => setData(d))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false))
-  }, [])
+  // Shared key with the Win/Loss section so SWR serves both from one request.
+  const { data, isLoading: loading } = useSWR<CloseRateData>('/api/admin/reports/close-rates')
 
   if (loading) {
     return (
@@ -1765,26 +1682,16 @@ interface SourceDeal {
 }
 
 function SourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProps) {
-  const [deals, setDeals] = useState<SourceDeal[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    // Fetch all deals to group by source
-    fetch(apiPath('/api/admin/deals?limit=500'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ items: Array<{ source: string | null; valueNzd: number; value: number }> }>
-      })
-      .then(d => {
-        const items = (d.items ?? []).map(deal => ({
-          source: deal.source,
-          valueNzd: deal.valueNzd ?? deal.value,
-        }))
-        setDeals(items)
-      })
-      .catch(() => setDeals([]))
-      .finally(() => setLoading(false))
-  }, [])
+  // Shared deals key across this section, Source ROI, and Stage Velocity. The
+  // identical key string + global fetcher means SWR fetches once and serves all
+  // three from one cached request. Each section shapes the raw rows locally.
+  const { data, isLoading: loading } = useSWR<{
+    items: Array<{ source: string | null; valueNzd: number; value: number }>
+  }>('/api/admin/deals?limit=500')
+  const deals: SourceDeal[] = (data?.items ?? []).map(deal => ({
+    source: deal.source,
+    valueNzd: deal.valueNzd ?? deal.value,
+  }))
 
   if (loading) {
     return (
@@ -1981,19 +1888,10 @@ interface StageVelocityItem {
 }
 
 function StageVelocitySection() {
-  const [data, setData] = useState<StageVelocityItem[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/reports/close-rates'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ stageVelocity?: StageVelocityItem[] }>
-      })
-      .then(d => setData(d.stageVelocity ?? []))
-      .catch(() => setData([]))
-      .finally(() => setLoading(false))
-  }, [])
+  // Shared key with the Sales Funnel section so SWR serves both from one request.
+  const { data: closeRates, isLoading: loading } =
+    useSWR<{ stageVelocity?: StageVelocityItem[] }>('/api/admin/reports/close-rates')
+  const data = closeRates?.stageVelocity ?? []
 
   if (loading) {
     return (
@@ -2091,71 +1989,60 @@ interface CloseRateSourceData {
 }
 
 function CloseRateSourceBreakdownSection({ displayCurrency, exchangeRates }: CurrencyProps) {
-  const [sourceData, setSourceData] = useState<CloseRateSourceData[]>([])
-  const [loading, setLoading] = useState(true)
+  // Shared deals key (see SourceBreakdownSection): one cached request feeds all
+  // three deal-based sections. The close-rate-by-source aggregation is derived.
+  const { data: dealsData, isLoading: loading } = useSWR<{
+    items: Array<{
+      source: string | null
+      valueNzd: number
+      value: number
+      stageIsClosedWon: number | null
+      stageIsClosedLost: number | null
+      createdAt: string
+      closedAt: string | null
+    }>
+  }>('/api/admin/deals?limit=500')
 
-  useEffect(() => {
-    // Fetch deals and compute close rates by source
-    fetch(apiPath('/api/admin/deals?limit=500'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{
-          items: Array<{
-            source: string | null
-            valueNzd: number
-            value: number
-            stageIsClosedWon: number | null
-            stageIsClosedLost: number | null
-            createdAt: string
-            closedAt: string | null
-          }>
-        }>
-      })
-      .then(d => {
-        const items = d.items ?? []
-        const sourceMap = new Map<string, {
-          won: number; lost: number; total: number; totalValue: number; totalDays: number; closedCount: number
-        }>()
+  const sourceData: CloseRateSourceData[] = useMemo(() => {
+    const items = dealsData?.items ?? []
+    const sourceMap = new Map<string, {
+      won: number; lost: number; total: number; totalValue: number; totalDays: number; closedCount: number
+    }>()
 
-        for (const deal of items) {
-          const key = deal.source ?? 'unknown'
-          const existing = sourceMap.get(key) ?? { won: 0, lost: 0, total: 0, totalValue: 0, totalDays: 0, closedCount: 0 }
-          existing.total++
+    for (const deal of items) {
+      const key = deal.source ?? 'unknown'
+      const existing = sourceMap.get(key) ?? { won: 0, lost: 0, total: 0, totalValue: 0, totalDays: 0, closedCount: 0 }
+      existing.total++
 
-          if (deal.stageIsClosedWon) {
-            existing.won++
-            existing.totalValue += deal.valueNzd ?? deal.value
-          } else if (deal.stageIsClosedLost) {
-            existing.lost++
-          }
+      if (deal.stageIsClosedWon) {
+        existing.won++
+        existing.totalValue += deal.valueNzd ?? deal.value
+      } else if (deal.stageIsClosedLost) {
+        existing.lost++
+      }
 
-          if (deal.closedAt && deal.createdAt) {
-            const days = Math.max(0, (new Date(deal.closedAt).getTime() - new Date(deal.createdAt).getTime()) / (1000 * 60 * 60 * 24))
-            existing.totalDays += days
-            existing.closedCount++
-          }
+      if (deal.closedAt && deal.createdAt) {
+        const days = Math.max(0, (new Date(deal.closedAt).getTime() - new Date(deal.createdAt).getTime()) / (1000 * 60 * 60 * 24))
+        existing.totalDays += days
+        existing.closedCount++
+      }
 
-          sourceMap.set(key, existing)
-        }
+      sourceMap.set(key, existing)
+    }
 
-        const result: CloseRateSourceData[] = Array.from(sourceMap.entries())
-          .map(([source, data]) => ({
-            source: SOURCE_LABELS[source] ?? (source === 'unknown' ? 'Unknown' : source),
-            wonCount: data.won,
-            lostCount: data.lost,
-            totalCount: data.total,
-            closeRate: data.total > 0 ? Math.round((data.won / data.total) * 100) : 0,
-            avgDealSize: data.won > 0 ? Math.round(data.totalValue / data.won) : 0,
-            avgCycleDays: data.closedCount > 0 ? Math.round(data.totalDays / data.closedCount) : 0,
-          }))
-          .filter(s => s.totalCount > 0)
-          .sort((a, b) => b.closeRate - a.closeRate)
-
-        setSourceData(result)
-      })
-      .catch(() => setSourceData([]))
-      .finally(() => setLoading(false))
-  }, [])
+    return Array.from(sourceMap.entries())
+      .map(([source, data]) => ({
+        source: SOURCE_LABELS[source] ?? (source === 'unknown' ? 'Unknown' : source),
+        wonCount: data.won,
+        lostCount: data.lost,
+        totalCount: data.total,
+        closeRate: data.total > 0 ? Math.round((data.won / data.total) * 100) : 0,
+        avgDealSize: data.won > 0 ? Math.round(data.totalValue / data.won) : 0,
+        avgCycleDays: data.closedCount > 0 ? Math.round(data.totalDays / data.closedCount) : 0,
+      }))
+      .filter(s => s.totalCount > 0)
+      .sort((a, b) => b.closeRate - a.closeRate)
+  }, [dealsData])
 
   if (loading) {
     return (
@@ -2272,50 +2159,40 @@ function CloseRateSourceBreakdownSection({ displayCurrency, exchangeRates }: Cur
 // ── Sales Cycle Length Section (T391) ─────────────────────────────────────────
 
 function SalesCycleLengthSection() {
-  const [monthlyData, setMonthlyData] = useState<Array<{ month: string; avgDays: number; count: number }>>([])
-  const [loading, setLoading] = useState(true)
+  // Shared deals key (see SourceBreakdownSection): one cached request feeds all
+  // three deal-based sections. The monthly cycle-length series is derived.
+  const { data: dealsData, isLoading: loading } = useSWR<{
+    items: Array<{
+      createdAt: string
+      closedAt: string | null
+      stageIsClosedWon: number | null
+    }>
+  }>('/api/admin/deals?limit=500')
 
-  useEffect(() => {
-    fetch(apiPath('/api/admin/deals?limit=500'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{
-          items: Array<{
-            createdAt: string
-            closedAt: string | null
-            stageIsClosedWon: number | null
-          }>
-        }>
-      })
-      .then(d => {
-        const items = d.items ?? []
-        const monthMap = new Map<string, { totalDays: number; count: number }>()
+  const monthlyData = useMemo(() => {
+    const items = dealsData?.items ?? []
+    const monthMap = new Map<string, { totalDays: number; count: number }>()
 
-        for (const deal of items) {
-          if (!deal.stageIsClosedWon || !deal.closedAt) continue
-          const closed = new Date(deal.closedAt)
-          const created = new Date(deal.createdAt)
-          const days = Math.max(0, (closed.getTime() - created.getTime()) / (1000 * 60 * 60 * 24))
-          const key = `${closed.getFullYear()}-${String(closed.getMonth() + 1).padStart(2, '0')}`
-          const existing = monthMap.get(key) ?? { totalDays: 0, count: 0 }
-          existing.totalDays += days
-          existing.count++
-          monthMap.set(key, existing)
-        }
+    for (const deal of items) {
+      if (!deal.stageIsClosedWon || !deal.closedAt) continue
+      const closed = new Date(deal.closedAt)
+      const created = new Date(deal.createdAt)
+      const days = Math.max(0, (closed.getTime() - created.getTime()) / (1000 * 60 * 60 * 24))
+      const key = `${closed.getFullYear()}-${String(closed.getMonth() + 1).padStart(2, '0')}`
+      const existing = monthMap.get(key) ?? { totalDays: 0, count: 0 }
+      existing.totalDays += days
+      existing.count++
+      monthMap.set(key, existing)
+    }
 
-        const result = Array.from(monthMap.entries())
-          .map(([month, data]) => ({
-            month: formatMonthLabel(month),
-            avgDays: Math.round(data.totalDays / data.count),
-            count: data.count,
-          }))
-          .sort((a, b) => a.month.localeCompare(b.month))
-
-        setMonthlyData(result)
-      })
-      .catch(() => setMonthlyData([]))
-      .finally(() => setLoading(false))
-  }, [])
+    return Array.from(monthMap.entries())
+      .map(([month, data]) => ({
+        month: formatMonthLabel(month),
+        avgDays: Math.round(data.totalDays / data.count),
+        count: data.count,
+      }))
+      .sort((a, b) => a.month.localeCompare(b.month))
+  }, [dealsData])
 
   if (loading) {
     return (
@@ -2428,16 +2305,8 @@ interface RetainerHealthRow {
 }
 
 function RetainerHealthSection({ displayCurrency, exchangeRates }: CurrencyProps) {
-  const [rows, setRows] = useState<RetainerHealthRow[] | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/reports/retainer-health'))
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => setRows((d as { clients?: RetainerHealthRow[] }).clients ?? []))
-      .catch(() => setRows([]))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data, isLoading: loading } = useSWR<{ clients?: RetainerHealthRow[] }>('/api/admin/reports/retainer-health')
+  const rows = data ? (data.clients ?? []) : null
 
   if (loading) {
     return (
@@ -2552,16 +2421,7 @@ interface CashFlowData {
 }
 
 function CashFlowForecastSection({ displayCurrency, exchangeRates }: CurrencyProps) {
-  const [data, setData] = useState<CashFlowData | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/reports/cash-flow-forecast?months=6'))
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => setData(d as CashFlowData))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data, isLoading: loading } = useSWR<CashFlowData>('/api/admin/reports/cash-flow-forecast?months=6')
 
   if (loading) {
     return <SkeletonChart height="14rem" />
@@ -2632,16 +2492,7 @@ interface UtilMember {
 interface UtilData { weeks: number; members: UtilMember[]; teamAverage: number }
 
 function UtilizationSection() {
-  const [data, setData] = useState<UtilData | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/reports/utilization?weeks=4'))
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => setData(d as UtilData))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data, isLoading: loading } = useSWR<UtilData>('/api/admin/reports/utilization?weeks=4')
 
   if (loading) {
     return (
@@ -2758,26 +2609,14 @@ interface ExpenseDashboardData {
 }
 
 function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyProps) {
-  const [data, setData] = useState<ExpenseDashboardData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState<'idle' | 'pnl' | 'balances'>('idle')
   const [syncMessage, setSyncMessage] = useState<string | null>(null)
   const [windowMonths, setWindowMonths] = useState<3 | 6 | 12 | 24>(12)
 
-  const loadData = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/reports/expenses?months=${windowMonths}`))
-      if (!res.ok) throw new Error('Failed')
-      setData(await res.json() as ExpenseDashboardData)
-    } catch {
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [windowMonths])
-
-  useEffect(() => { loadData() }, [loadData])
+  // The window selector lives in the key so each range caches separately;
+  // keepPreviousData keeps the prior chart up while a new range loads.
+  const { data, isLoading: loading, mutate } =
+    useSWR<ExpenseDashboardData>(`/api/admin/reports/expenses?months=${windowMonths}`)
 
   async function runPnlSync() {
     setSyncing('pnl')
@@ -2791,7 +2630,7 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
       const json = await res.json() as { synced?: number; failed?: number }
       if (res.ok) {
         setSyncMessage(`Synced ${json.synced ?? 0} month(s)${json.failed ? `, ${json.failed} failed` : ''}`)
-        await loadData()
+        await mutate()
       } else {
         setSyncMessage('Sync failed. Check Xero connection.')
       }
@@ -2980,7 +2819,7 @@ function ExpenseDashboardSection({ displayCurrency, exchangeRates }: CurrencyPro
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ accountName: c.accountName, isRecurring: next }),
                               })
-                              if (res.ok) await loadData()
+                              if (res.ok) await mutate()
                             } catch { /* noop */ }
                           }}
                           className="text-xs font-medium px-2 py-0.5 rounded transition-colors hover:opacity-80"
@@ -3034,16 +2873,8 @@ interface ProfitabilityRow {
 }
 
 function ClientProfitabilityScorecard({ displayCurrency, exchangeRates }: CurrencyProps) {
-  const [rows, setRows] = useState<ProfitabilityRow[] | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/reports/client-profitability'))
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => setRows((d as { clients?: ProfitabilityRow[] }).clients ?? []))
-      .catch(() => setRows([]))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data, isLoading: loading } = useSWR<{ clients?: ProfitabilityRow[] }>('/api/admin/reports/client-profitability')
+  const rows = data ? (data.clients ?? []) : null
 
   if (loading) {
     return (
@@ -3184,8 +3015,9 @@ function monthlyEquivalent(c: Commitment): number {
 }
 
 function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
-  const [items, setItems] = useState<Commitment[] | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: commitmentsData, isLoading: loading, mutate } =
+    useSWR<{ commitments?: Commitment[] }>('/api/admin/commitments')
+  const items = commitmentsData ? (commitmentsData.commitments ?? []) : null
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<{
@@ -3209,22 +3041,6 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/commitments'))
-      if (!res.ok) throw new Error('Failed')
-      const d = await res.json() as { commitments?: Commitment[] }
-      setItems(d.commitments ?? [])
-    } catch {
-      setItems([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { load() }, [load])
 
   function resetForm() {
     setForm({ name: '', vendor: '', amount: '', currency: 'NZD', cadence: 'monthly',
@@ -3294,7 +3110,7 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
       }
       resetForm()
       setShowForm(false)
-      await load()
+      await mutate()
     } catch {
       setError('Network error')
     } finally {
@@ -3306,7 +3122,7 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
     if (!confirm('Delete this commitment?')) return
     try {
       await fetch(apiPath(`/api/admin/commitments/${id}`), { method: 'DELETE' })
-      await load()
+      await mutate()
     } catch { /* noop */ }
   }
 
@@ -3317,13 +3133,18 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ active: !c.active }),
       })
-      await load()
+      await mutate()
     } catch { /* noop */ }
   }
 
   async function toggleDiscretionary(c: Commitment) {
-    // Optimistic flip
-    setItems(prev => prev?.map(x => x.id === c.id ? { ...x, isDiscretionary: !c.isDiscretionary } : x) ?? prev)
+    // Optimistic flip in the SWR cache, revert by revalidating on failure.
+    mutate(
+      cur => cur
+        ? { commitments: (cur.commitments ?? []).map(x => x.id === c.id ? { ...x, isDiscretionary: !c.isDiscretionary } : x) }
+        : cur,
+      { revalidate: false },
+    )
     try {
       await fetch(apiPath(`/api/admin/commitments/${c.id}`), {
         method: 'PATCH',
@@ -3331,7 +3152,7 @@ function CommitmentsSection({ displayCurrency, exchangeRates }: CurrencyProps) {
         body: JSON.stringify({ isDiscretionary: !c.isDiscretionary }),
       })
     } catch {
-      await load()
+      await mutate()
     }
   }
 

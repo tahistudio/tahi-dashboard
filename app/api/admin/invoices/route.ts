@@ -3,8 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, inArray } from 'drizzle-orm'
-import { createNotifications } from '@/lib/notifications'
+import { notifyOrgContacts } from '@/lib/notifications'
 import { getOrgScope, requireAccessToOrg } from '@/lib/require-access'
+import { dispatchDomainEvent } from '@/lib/events'
 
 // ── GET /api/admin/invoices ───────────────────────────────────────────────────
 // Returns paginated invoices with org name joined.
@@ -164,30 +165,33 @@ export async function POST(req: NextRequest) {
 
   await drizzle.insert(schema.invoiceItems).values(itemRows)
 
-  // Notify client contacts about the new invoice
-  const contacts = await drizzle
-    .select({ id: schema.contacts.id })
-    .from(schema.contacts)
-    .where(eq(schema.contacts.orgId, body.orgId))
-    .limit(10)
+  // Notify client contacts about the new invoice. notifyOrgContacts keys the
+  // rows on each contact's Clerk user id (the id the bell queries and the
+  // preferences filter on) and skips contacts without a linked login.
+  // totalAmount is already a dollar amount in the invoice's currency, not
+  // cents. (We don't store amounts in minor units anywhere.)
+  const formattedAmount = `${currency} ${totalAmount.toFixed(2)}`
+  await notifyOrgContacts(drizzle, body.orgId, {
+    type: 'invoice_created',
+    title: 'New invoice created',
+    body: `An invoice for ${formattedAmount} has been created for your account`,
+    entityType: 'invoice',
+    entityId: invoiceId,
+  })
 
-  const recipients = contacts.map((c) => ({
-    userId: c.id,
-    userType: 'contact' as const,
-  }))
-
-  if (recipients.length > 0) {
-    // totalAmount is already a dollar amount in the invoice's currency,
-    // not cents. (We don't store amounts in minor units anywhere.)
-    const formattedAmount = `${currency} ${totalAmount.toFixed(2)}`
-    await createNotifications(drizzle, recipients, {
-      type: 'invoice_created',
-      title: 'New invoice created',
-      body: `An invoice for ${formattedAmount} has been created for your account`,
-      entityType: 'invoice',
-      entityId: invoiceId,
-    })
-  }
+  // Fire the domain event (automations + outgoing webhooks). Non-blocking.
+  await dispatchDomainEvent(drizzle, {
+    type: 'invoice_created',
+    entityId: invoiceId,
+    entityType: 'invoice',
+    orgId: body.orgId,
+    data: {
+      status: 'draft',
+      currency,
+      totalAmount,
+      source: requestedSource,
+    },
+  })
 
   return NextResponse.json({ id: invoiceId })
 }

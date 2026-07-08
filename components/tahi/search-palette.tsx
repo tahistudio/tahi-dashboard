@@ -6,6 +6,10 @@
  * a 150ms debounce, renders suggestions on top, then one section per
  * non-empty group (Requests, Tasks, Clients, Deals, ...).
  *
+ * Skinned to the "Tahi App Shell" command-palette design (see
+ * app/(dashboard)/app-shell.css: .cmd-overlay / .cmd / .cmd-input /
+ * .cmd-results / .cmd-row / .cmd-glabel / .cmd-empty).
+ *
  * Keyboard:
  *   ArrowDown / ArrowUp : move active row
  *   Enter               : open active row
@@ -14,13 +18,10 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
-import {
-  Search, Loader2, Inbox, CheckSquare, Users, User as UserIcon,
-  Briefcase, TrendingUp, FileText, FileSignature, Calendar, BookOpen,
-  Phone, ShoppingBag, Megaphone, Zap, UserCog,
-} from 'lucide-react'
+import { Loader2 } from 'lucide-react'
+import { ShellIcon } from '@/components/tahi/shell-icons'
+import type { ShellIconName } from '@/components/tahi/shell-icons'
 import { apiPath } from '@/lib/api'
-import { Badge, statusTone } from '@/components/tahi/badge'
 import type { SearchGroupType, SearchResultItem, SearchResponse } from '@/app/api/admin/search/route'
 
 interface SearchPaletteProps {
@@ -28,23 +29,32 @@ interface SearchPaletteProps {
   onClose: () => void
 }
 
-const TYPE_ICON: Record<SearchGroupType, React.ComponentType<{ size?: number; className?: string }>> = {
-  request: Inbox,
-  task: CheckSquare,
-  client: Users,
-  brand: Briefcase,
-  contact: UserIcon,
-  deal: TrendingUp,
-  invoice: FileText,
-  contract: FileSignature,
-  proposal: FileText,
-  schedule: Calendar,
-  doc: BookOpen,
-  call: Phone,
-  service: ShoppingBag,
-  announcement: Megaphone,
-  automation: Zap,
-  team: UserCog,
+const TYPE_ICON: Record<SearchGroupType, ShellIconName> = {
+  request: 'requests',
+  task: 'tasks',
+  client: 'clients',
+  brand: 'clients',
+  contact: 'team',
+  deal: 'deals',
+  invoice: 'invoices',
+  contract: 'contracts',
+  proposal: 'proposals',
+  schedule: 'schedules',
+  doc: 'docs',
+  call: 'calls',
+  service: 'services',
+  announcement: 'announcements',
+  automation: 'arrow',
+  team: 'team',
+}
+
+// One short context string per row, mapped to .cr-crumb. Prefer the
+// item's subtitle (org name / email) and fall back to a humanised badge
+// (status / role) so every row carries some context where one exists.
+function crumbFor(item: SearchResultItem): string | undefined {
+  if (item.sub) return item.sub
+  if (item.badge) return item.badge.replace(/_/g, ' ')
+  return undefined
 }
 
 export function SearchPalette({ open, onClose }: SearchPaletteProps) {
@@ -158,105 +168,40 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   if (!open) return null
 
   return (
-    <div
-      className="fixed inset-0 z-[70] flex items-center justify-center"
-      style={{
-        background: 'rgba(15, 20, 16, 0.55)',
-        backdropFilter: 'blur(4px) saturate(140%)',
-        WebkitBackdropFilter: 'blur(4px) saturate(140%)',
-        padding: 'var(--space-4)',
-      }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
-      role="presentation"
-    >
+    <div className="cmd-overlay" onClick={onClose} role="presentation">
       <div
+        className="cmd"
+        onClick={e => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label="Search the dashboard"
-        style={{
-          width: '100%',
-          maxWidth: '42rem',
-          maxHeight: '70vh',
-          background: 'var(--color-bg)',
-          borderRadius: 'var(--radius-lg)',
-          border: '1px solid var(--color-border)',
-          boxShadow: '0 24px 60px rgba(15, 20, 16, 0.32), 0 4px 16px rgba(15, 20, 16, 0.10)',
-          overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
       >
-        {/* Input row. Tall (4rem) with generous side padding so the
-            search bar reads as a command-palette header. Borderless
-            interior; the row gets its own visual weight from the
-            surrounding container. */}
-        <div
-          className="flex items-center"
-          style={{
-            padding: '0 var(--space-6)',
-            height: '4rem',
-            borderBottom: '1px solid var(--color-border-subtle)',
-            background: 'var(--color-bg)',
-            gap: 'var(--space-4)',
-          }}
-        >
-          <span style={{ display: 'inline-flex', flexShrink: 0 }}>
+        {/* Input row */}
+        <div className="cmd-input">
+          <span className="ci-ic" aria-hidden="true">
             {loading
-              ? <Loader2 size={18} className="animate-spin" style={{ color: 'var(--color-brand)' }} aria-hidden="true" />
-              : <Search size={18} style={{ color: 'var(--color-brand)' }} aria-hidden="true" />}
+              ? <Loader2 size={19} className="animate-spin" />
+              : <ShellIcon n="search" s={19} />}
           </span>
           <input
             ref={inputRef}
             type="text"
-            placeholder="Search requests, tasks, clients, deals, docs..."
+            placeholder="Search or jump to..."
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKey}
-            aria-label="Search the dashboard"
+            aria-label="Search or jump to"
             aria-controls="search-palette-results"
             aria-activedescendant={flatItems[clampedActive] ? `search-result-${clampedActive}` : undefined}
-            className="search-palette-input"
-            style={{
-              flex: 1,
-              minWidth: 0,
-              border: 'none',
-              outline: 'none',
-              background: 'transparent',
-              fontSize: 'var(--text-base)',
-              color: 'var(--color-text)',
-              fontWeight: 500,
-              padding: '0.5rem 0',
-            }}
           />
           <button
             type="button"
+            className="cmd-close"
             onClick={onClose}
-            className="flex items-center justify-center"
-            style={{
-              flexShrink: 0,
-              padding: '0.125rem 0.4375rem',
-              height: '1.5rem',
-              borderRadius: 'var(--radius-sm)',
-              background: 'var(--color-bg-secondary)',
-              border: '1px solid var(--color-border-subtle)',
-              color: 'var(--color-text-muted)',
-              fontSize: '0.625rem',
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-              fontWeight: 500,
-              cursor: 'pointer',
-              transition: 'background-color 150ms ease, color 150ms ease',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.background = 'var(--color-bg-tertiary)'
-              e.currentTarget.style.color = 'var(--color-text)'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.background = 'var(--color-bg-secondary)'
-              e.currentTarget.style.color = 'var(--color-text-muted)'
-            }}
             aria-label="Close search (Escape)"
           >
-            Esc
+            <span className="cmd-esc">esc</span>
+            <span className="cmd-x" aria-hidden="true"><ShellIcon n="close" s={18} /></span>
           </button>
         </div>
 
@@ -266,30 +211,28 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
           ref={listRef}
           role="listbox"
           aria-label="Search results"
-          style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-2) 0' }}
+          className="cmd-results"
         >
           {debounced.length < 2 ? (
-            <EmptyHint
-              icon={<Search size={28} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />}
-              title="Search everywhere"
-              description="Find a request, task, client, deal, doc, invoice, anything you've created in the dashboard. Start typing to see results across the app."
-            />
+            <div className="cmd-empty">
+              Search the dashboard
+              <small>Find a request, client, deal, doc, or action.</small>
+            </div>
           ) : !data ? (
-            <EmptyHint
-              icon={<Loader2 size={20} className="animate-spin" style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />}
-              title="Searching"
-              description={`Looking for "${debounced}"`}
-            />
+            <div className="cmd-empty">
+              Searching...
+              <small>{`Looking for "${debounced}"`}</small>
+            </div>
           ) : data.totalCount === 0 ? (
-            <EmptyHint
-              icon={<Search size={28} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />}
-              title={`No matches for "${debounced}"`}
-              description="Try a shorter query or a different keyword."
-            />
+            <div className="cmd-empty">
+              {`No matches for "${debounced}"`}
+              <small>Try a shorter query or a different keyword.</small>
+            </div>
           ) : (
             <>
               {data.suggestions.length > 0 && (
-                <ResultSection label="Suggestions">
+                <div>
+                  <div className="cmd-glabel">Suggestions</div>
                   {data.suggestions.map((item, i) => (
                     <ResultRow
                       key={`s-${item.type}-${item.id}`}
@@ -300,12 +243,13 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
                       onSelect={() => navigateTo(item)}
                     />
                   ))}
-                </ResultSection>
+                </div>
               )}
               {data.groups.map(group => {
                 const offset = data.suggestions.length + cumulativeOffset(data.groups, group.type)
                 return (
-                  <ResultSection key={group.type} label={group.label} count={group.items.length}>
+                  <div key={group.type}>
+                    <div className="cmd-glabel">{group.label}</div>
                     {group.items.map((item, i) => {
                       const idx = offset + i
                       return (
@@ -319,37 +263,11 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
                         />
                       )
                     })}
-                  </ResultSection>
+                  </div>
                 )
               })}
             </>
           )}
-        </div>
-
-        {/* Footer */}
-        <div
-          style={{
-            borderTop: '1px solid var(--color-border-subtle)',
-            padding: '0.5rem var(--space-4)',
-            background: 'var(--color-bg-secondary)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 'var(--space-3)',
-            flexWrap: 'wrap',
-          }}
-        >
-          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', margin: 0 }}>
-            {data ? `${data.totalCount} result${data.totalCount === 1 ? '' : 's'}` : 'Type at least 2 characters'}
-          </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }} className="hidden sm:flex">
-            <KbdHint><Up /> <Down /></KbdHint>
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>navigate</span>
-            <KbdHint>Enter</KbdHint>
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>open</span>
-            <KbdHint>Esc</KbdHint>
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>close</span>
-          </div>
         </div>
       </div>
     </div>
@@ -370,59 +288,6 @@ function cumulativeOffset(
   return sum
 }
 
-function ResultSection({
-  label,
-  count,
-  children,
-}: {
-  label: string
-  count?: number
-  children: React.ReactNode
-}) {
-  return (
-    <section style={{ padding: '0 var(--space-2)', marginBottom: 'var(--space-2)' }}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0.375rem 0.625rem 0.25rem',
-        }}
-      >
-        <span
-          style={{
-            fontSize: '0.6875rem',
-            fontWeight: 600,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            color: 'var(--color-text-subtle)',
-          }}
-        >
-          {label}
-        </span>
-        {typeof count === 'number' && count > 0 && (
-          <span
-            style={{
-              fontSize: '0.625rem',
-              fontWeight: 500,
-              color: 'var(--color-text-subtle)',
-              background: 'var(--color-bg-secondary)',
-              border: '1px solid var(--color-border-subtle)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '0.0625rem 0.375rem',
-            }}
-          >
-            {count}
-          </span>
-        )}
-      </div>
-      <div role="group" aria-label={label}>
-        {children}
-      </div>
-    </section>
-  )
-}
-
 function ResultRow({
   item,
   index,
@@ -436,7 +301,8 @@ function ResultRow({
   onHover: () => void
   onSelect: () => void
 }) {
-  const Icon = TYPE_ICON[item.type]
+  const iconName = TYPE_ICON[item.type]
+  const crumb = crumbFor(item)
   return (
     <button
       type="button"
@@ -447,134 +313,16 @@ function ResultRow({
       onMouseEnter={onHover}
       onFocus={onHover}
       onClick={onSelect}
-      className="w-full flex items-center text-left"
-      style={{
-        gap: 'var(--space-3)',
-        padding: '0.5rem 0.625rem',
-        background: active ? 'var(--color-bg-secondary)' : 'transparent',
-        border: 'none',
-        borderRadius: 'var(--radius-md)',
-        color: 'var(--color-text)',
-        cursor: 'pointer',
-        transition: 'background-color 150ms ease',
-      }}
+      className={active ? 'cmd-row sel' : 'cmd-row'}
     >
-      <span
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '1.75rem',
-          height: '1.75rem',
-          flexShrink: 0,
-          background: active ? 'var(--color-brand-100)' : 'var(--color-bg-tertiary)',
-          color: active ? 'var(--color-text-active)' : 'var(--color-text-muted)',
-          borderRadius: 'var(--radius-sm)',
-          transition: 'background-color 150ms ease, color 150ms ease',
-        }}
-      >
-        <Icon size={14} aria-hidden="true" />
+      <span className="cr-ic" aria-hidden="true">
+        <ShellIcon n={iconName} s={15} />
       </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          data-private
-          style={{
-            fontSize: 'var(--text-sm)',
-            fontWeight: 500,
-            color: 'var(--color-text)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {item.title}
-        </div>
-        {item.sub && (
-          <div
-            data-private
-            style={{
-              fontSize: 'var(--text-xs)',
-              color: 'var(--color-text-subtle)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              marginTop: '0.0625rem',
-            }}
-          >
-            {item.sub}
-          </div>
-        )}
-      </div>
-      {item.badge && (
-        <span style={{ flexShrink: 0 }}>
-          <Badge
-            tone={statusTone(item.badge)}
-            variant="soft"
-            size="sm"
-            leader={false}
-          >
-            {item.badge.replace(/_/g, ' ')}
-          </Badge>
-        </span>
-      )}
+      <span className="cr-t" data-private>{item.title}</span>
+      {crumb && <span className="cr-crumb" data-private>{crumb}</span>}
+      <span className="cr-go" aria-hidden="true">
+        <ShellIcon n="arrow" s={15} />
+      </span>
     </button>
   )
 }
-
-function EmptyHint({
-  icon,
-  title,
-  description,
-}: {
-  icon: React.ReactNode
-  title: string
-  description: string
-}) {
-  return (
-    <div
-      style={{
-        padding: '2rem var(--space-4)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: '0.5rem',
-        textAlign: 'center',
-      }}
-    >
-      <div style={{ marginBottom: '0.25rem' }}>{icon}</div>
-      <p style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
-        {title}
-      </p>
-      <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)', margin: 0, maxWidth: '24rem' }}>
-        {description}
-      </p>
-    </div>
-  )
-}
-
-function KbdHint({ children }: { children: React.ReactNode }) {
-  return (
-    <kbd
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '0.125rem',
-        padding: '0.0625rem var(--space-1-5)',
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-sm)',
-        fontSize: '0.625rem',
-        fontFamily:
-          'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-        color: 'var(--color-text-muted)',
-        fontWeight: 500,
-        lineHeight: 1.4,
-      }}
-    >
-      {children}
-    </kbd>
-  )
-}
-
-const Up = () => <span aria-hidden="true">{'↑'}</span>
-const Down = () => <span aria-hidden="true">{'↓'}</span>

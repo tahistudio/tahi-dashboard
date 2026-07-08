@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import useSWR from 'swr'
 import {
   RefreshCw, AlertTriangle, FileSearch, CheckCircle2, XCircle, HelpCircle,
   Lightbulb, FileEdit, Calendar, ExternalLink, ChevronDown, ChevronRight,
@@ -370,16 +371,9 @@ interface SpendData {
 }
 
 function SpendStrip() {
-  const [data, setData] = useState<SpendData | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    fetch(apiPath('/api/admin/content/spend'))
-      .then(r => r.ok ? r.json() as Promise<SpendData> : null)
-      .then(j => { if (!cancelled) setData(j) })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [])
+  // Cached via SWR; the global fetcher throws on a non-2xx, which leaves data
+  // undefined and renders nothing, matching the old silent-null behaviour.
+  const { data } = useSWR<SpendData>('/api/admin/content/spend')
 
   if (!data) return null
 
@@ -427,8 +421,6 @@ interface HealthTabProps {
 }
 
 function HealthTab({ onToast }: HealthTabProps) {
-  const [data, setData] = useState<HealthResponse | null>(null)
-  const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
   // Captured from the most recent scan. Surfaces under the table when
   // the latest run reported errors so Liam can see what failed without
@@ -436,21 +428,11 @@ function HealthTab({ onToast }: HealthTabProps) {
   const [lastScanErrors, setLastScanErrors] = useState<Array<{ url: string; error: string }>>([])
   const [errorsExpanded, setErrorsExpanded] = useState(false)
 
-  const fetchHealth = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/content/health'))
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as HealthResponse
-      setData(json)
-    } catch {
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchHealth() }, [fetchHealth])
+  // SWR-backed health snapshot. `mutate` (aliased fetchHealth) refetches after
+  // a scan, exactly like the old manual refetch.
+  const { data, isLoading: loading, mutate: fetchHealth } = useSWR<HealthResponse>(
+    '/api/admin/content/health',
+  )
 
   // Drives the "Scan now" button. Issues a POST with no body so the
   // server pulls the full sitemap, then loops on continueFromIndex
@@ -1023,9 +1005,6 @@ interface IdeasTabProps {
 }
 
 function IdeasTab({ onToast }: IdeasTabProps) {
-  const [data, setData] = useState<IdeasResponse | null>(null)
-  const [clusters, setClusters] = useState<ClusterRow[]>([])
-  const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
   const [seeding, setSeeding] = useState(false)
   const [selectedClusters, setSelectedClusters] = useState<Set<string>>(new Set())
@@ -1119,34 +1098,26 @@ function IdeasTab({ onToast }: IdeasTabProps) {
     }
   }
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [ideasRes, clustersRes] = await Promise.all([
-        fetch(apiPath('/api/admin/content/ideas?status=all&week=current')),
-        fetch(apiPath('/api/admin/content/clusters')),
-      ])
-      if (ideasRes.ok) {
-        const json = await ideasRes.json() as IdeasResponse
-        setData(json)
-      } else {
-        setData(null)
-      }
-      if (clustersRes.ok) {
-        const json = await clustersRes.json() as { clusters: ClusterRow[] }
-        setClusters(json.clusters ?? [])
-      } else {
-        setClusters([])
-      }
-    } catch {
-      setData(null)
-      setClusters([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchAll() }, [fetchAll])
+  // Ideas + clusters are independent endpoints; each gets its own SWR hook so
+  // they load in parallel and cache separately. `fetchAll` refetches both,
+  // preserving the old single-call refetch used after every mutation.
+  const {
+    data: ideasData,
+    isLoading: ideasLoading,
+    mutate: mutateIdeas,
+  } = useSWR<IdeasResponse>('/api/admin/content/ideas?status=all&week=current')
+  const {
+    data: clustersData,
+    isLoading: clustersLoading,
+    mutate: mutateClusters,
+  } = useSWR<{ clusters: ClusterRow[] }>('/api/admin/content/clusters')
+  const data = ideasData ?? null
+  const clusters = clustersData?.clusters ?? []
+  const loading = ideasLoading || clustersLoading
+  const fetchAll = useCallback(
+    () => Promise.all([mutateIdeas(), mutateClusters()]),
+    [mutateIdeas, mutateClusters],
+  )
 
   async function runIdeationNow() {
     setRunning(true)
@@ -1988,32 +1959,25 @@ interface LinksTabProps {
 }
 
 function LinksTab({ onToast }: LinksTabProps) {
-  const [data, setData] = useState<LinkSuggestionsResponse | null>(null)
-  const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
   const [actionInFlight, setActionInFlight] = useState<string | null>(null)
   const [expandedTargets, setExpandedTargets] = useState<Set<string>>(new Set())
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/content/links/suggestions'))
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as LinkSuggestionsResponse
-      setData(json)
-      // Expand the first target by default so Liam doesn't land on a
-      // collapsed list with nothing visible.
-      if (json.targets.length > 0) {
-        setExpandedTargets(prev => prev.size === 0 ? new Set([json.targets[0].targetUrl]) : prev)
-      }
-    } catch {
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchAll() }, [fetchAll])
+  // SWR-backed suggestions. `mutate` (aliased fetchAll) refetches after a scan
+  // or an apply/reject. onSuccess preserves the "expand the first target on
+  // load" side effect.
+  const { data, isLoading: loading, mutate: fetchAll } = useSWR<LinkSuggestionsResponse>(
+    '/api/admin/content/links/suggestions',
+    {
+      onSuccess: (json) => {
+        // Expand the first target by default so Liam doesn't land on a
+        // collapsed list with nothing visible.
+        if (json.targets.length > 0) {
+          setExpandedTargets(prev => prev.size === 0 ? new Set([json.targets[0].targetUrl]) : prev)
+        }
+      },
+    },
+  )
 
   async function runScan() {
     setScanning(true)
@@ -2580,38 +2544,22 @@ interface DraftsTabProps {
 }
 
 function DraftsTab({ onToast }: DraftsTabProps) {
-  const [data, setData] = useState<DraftsResponse | null>(null)
-  const [loading, setLoading] = useState(true)
   const [activeDetail, setActiveDetail] = useState<DraftDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [discarding, setDiscarding] = useState(false)
   const [retrying, setRetrying] = useState<string | null>(null)
 
-  const fetchDrafts = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/content/drafts?status=all&limit=100'))
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as DraftsResponse
-      setData(json)
-    } catch {
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchDrafts() }, [fetchDrafts])
-
-  // Soft poll while anything's in-flight. 6s is gentle on the API + the
-  // user's bandwidth, and matches the rough lower-bound of a Sonnet call.
-  useEffect(() => {
-    if (!data) return
-    const anyInProgress = data.drafts.some(d => isInProgress(d.status))
-    if (!anyInProgress) return
-    const t = setInterval(() => { void fetchDrafts() }, 6000)
-    return () => clearInterval(t)
-  }, [data, fetchDrafts])
+  // SWR-backed drafts list. Soft-polls every 6s while anything is in-flight,
+  // gated on the same isInProgress check the old setInterval used. 6s sits
+  // above the global 5s dedupe window so each poll fetches fresh. `mutate`
+  // (aliased fetchDrafts) refetches after discard/retry.
+  const { data, isLoading: loading, mutate: fetchDrafts } = useSWR<DraftsResponse>(
+    '/api/admin/content/drafts?status=all&limit=100',
+    {
+      refreshInterval: (latest) =>
+        latest && latest.drafts.some(d => isInProgress(d.status)) ? 6000 : 0,
+    },
+  )
 
   async function openDetail(draftId: string) {
     setDetailLoading(true)
@@ -2645,17 +2593,22 @@ function DraftsTab({ onToast }: DraftsTabProps) {
   async function retryDraft(ideaId: string) {
     setRetrying(ideaId)
     try {
-      const res = await fetch(apiPath(`/api/admin/content/ideas/${ideaId}/draft`), {
+      // Re-draft now runs the 23-reviewer round-table pipeline. A failed
+      // draft is in a terminal status, so the round-table entry point
+      // spins up a fresh draft (it only 409s on an already-active draft).
+      const res = await fetch(apiPath(`/api/admin/content/ideas/${ideaId}/round-table`), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force: true }),
       })
-      const json = await res.json().catch(() => ({})) as { error?: string }
+      const json = await res.json().catch(() => ({})) as { draftId?: string; status?: string; error?: string }
       if (!res.ok) {
         onToast(json.error ?? 'Re-draft failed', 'error')
         return
       }
-      onToast('Re-drafting started', 'success')
+      onToast(`Round table started - pipeline at ${json.status ?? 'queued'}. Opening detail...`, 'success')
+      if (typeof window !== 'undefined' && json.draftId) {
+        window.location.href = `/content-studio/drafts/${json.draftId}/round-table`
+        return
+      }
       await fetchDrafts()
     } catch (err) {
       onToast(err instanceof Error ? err.message : 'Re-draft failed', 'error')
@@ -3801,25 +3754,13 @@ interface ScheduleTabProps {
 }
 
 function ScheduleTab({ onToast }: ScheduleTabProps) {
-  const [data, setData] = useState<ScheduleResponse | null>(null)
-  const [loading, setLoading] = useState(true)
   const [activeDraft, setActiveDraft] = useState<ScheduleReadyDraft | null>(null)
 
-  const fetchSchedule = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/content/schedule'))
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as ScheduleResponse
-      setData(json)
-    } catch {
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchSchedule() }, [fetchSchedule])
+  // SWR-backed schedule. `mutate` (aliased fetchSchedule) refetches after a
+  // publish or schedule change.
+  const { data, isLoading: loading, mutate: fetchSchedule } = useSWR<ScheduleResponse>(
+    '/api/admin/content/schedule',
+  )
 
   const readyDrafts = data?.readyDrafts ?? []
   const counts = data?.counts ?? { ready: 0, scheduled: 0, published: 0 }
@@ -3948,8 +3889,8 @@ function ScheduleTab({ onToast }: ScheduleTabProps) {
               <ScheduleReadyCard
                 key={d.id}
                 draft={d}
-                onPublishNow={() => publishDraft(d, 'now', undefined, fetchSchedule, onToast)}
-                onAuto={() => publishDraft(d, 'auto', undefined, fetchSchedule, onToast)}
+                onPublishNow={() => publishDraft(d, 'now', undefined, async () => { await fetchSchedule() }, onToast)}
+                onAuto={() => publishDraft(d, 'auto', undefined, async () => { await fetchSchedule() }, onToast)}
                 onCustom={() => setActiveDraft(d)}
               />
             ))}
@@ -4279,8 +4220,6 @@ function backfillStatusTone(status: string): BadgeTone {
 }
 
 function BackfillCard({ onToast }: BackfillCardProps) {
-  const [runs, setRuns] = useState<BackfillRunSummary[]>([])
-  const [runsLoading, setRunsLoading] = useState(true)
   const [running, setRunning] = useState(false)
   // Progress state for the live run. Resets between runs.
   const [progressDone, setProgressDone] = useState(0)
@@ -4295,21 +4234,13 @@ function BackfillCard({ onToast }: BackfillCardProps) {
   const [detailRunId, setDetailRunId] = useState<string | null>(null)
   const [detailItems, setDetailItems] = useState<BackfillItemRow[]>([])
 
-  const fetchRuns = useCallback(async () => {
-    setRunsLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/content/backfill/runs'))
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as { runs: BackfillRunSummary[] }
-      setRuns(json.runs ?? [])
-    } catch {
-      setRuns([])
-    } finally {
-      setRunsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchRuns() }, [fetchRuns])
+  // SWR-backed run history. `mutate` (aliased fetchRuns) refetches after a
+  // backfill run completes. runs is memoised so dependent callbacks keep a
+  // stable identity across renders.
+  const { data: runsData, isLoading: runsLoading, mutate: fetchRuns } = useSWR<{ runs: BackfillRunSummary[] }>(
+    '/api/admin/content/backfill/runs',
+  )
+  const runs = useMemo(() => runsData?.runs ?? [], [runsData])
 
   const runBackfill = useCallback(async (mode: 'all' | 'missing') => {
     setRunning(true)

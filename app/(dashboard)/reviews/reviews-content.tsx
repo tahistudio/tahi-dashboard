@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import {
   Star, Copy,
   Send, CheckCircle2, ExternalLink, Video, Globe,
@@ -102,8 +103,8 @@ function isVideoUrl(url: string | null): boolean {
 // Component
 
 export function ReviewsContent() {
-  const [reviews, setReviews] = useState<ReviewItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, isLoading: loading, mutate: mutateReviews } = useSWR<{ reviews: ReviewItem[] }>('/api/admin/reviews')
+  const reviews = data?.reviews ?? []
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('all')
   const [updatingId, setUpdatingId] = useState<string | null>(null)
@@ -113,22 +114,6 @@ export function ReviewsContent() {
   const [draftContent, setDraftContent] = useState<Record<string, string>>({})
   const [hoveredRow, setHoveredRow] = useState<string | null>(null)
 
-  const fetchReviews = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/reviews'))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { reviews?: ReviewItem[] }
-      setReviews(data.reviews ?? [])
-    } catch {
-      setReviews([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchReviews() }, [fetchReviews])
-
   const updateStatus = async (orgId: string, outreachStatus: string, nextAskAt?: string) => {
     setUpdatingId(orgId)
     try {
@@ -137,7 +122,7 @@ export function ReviewsContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orgId, outreachStatus, nextAskAt }),
       })
-      await fetchReviews()
+      await mutateReviews()
     } finally {
       setUpdatingId(null)
     }

@@ -27,12 +27,11 @@
 // prefers-reduced-motion (CSS), the countdown is information (the only resting
 // movement the page budget allows) via the shared tick.
 
-import { useEffect, useState } from 'react'
+import useSWR from 'swr'
 import { FileSignature } from 'lucide-react'
 import { DomainCard, IconChip } from './domain-card'
 import { CardDeck } from '@/components/tahi/card-deck'
 import { useSharedTick, useReveal } from '@/lib/use-homepage-motion'
-import { apiPath } from '@/lib/api'
 
 interface Contract {
   id: string
@@ -75,27 +74,8 @@ const GROUP_LABEL_STYLE: React.CSSProperties = {
 }
 
 export function ContractsCard({ className }: { className?: string }) {
-  const [contracts, setContracts] = useState<Contract[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-    fetch(apiPath('/api/admin/contracts'))
-      .then(r => (r.ok ? (r.json() as Promise<{ items: Contract[] }>) : { items: [] }))
-      .then(data => {
-        if (cancelled) return
-        setContracts(data.items ?? [])
-      })
-      .catch(() => {
-        if (!cancelled) setContracts([])
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const { data: contractsData, isLoading: loading } = useSWR<{ items: Contract[] }>('/api/admin/contracts')
+  const contracts = contractsData?.items ?? []
 
   if (loading) {
     return (

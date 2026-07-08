@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
+import useSWR from 'swr'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -11,6 +12,7 @@ import {
   Trophy, XCircle, Filter, X, Bell, BellOff,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { getInitials } from '@/lib/utils'
 import { calculatePipelineTotals, formatDealValue, formatDealValueSplit, rangeConfidenceLevel } from '@/lib/pipeline-math'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
@@ -119,10 +121,6 @@ function formatDate(dateStr: string | null): string {
   } catch { return '--' }
 }
 
-function getInitials(name: string): string {
-  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-}
-
 // Deal owner avatar: a remote URL that can 404/expire degrades to the same
 // initials chip the no-avatar case already shows, instead of a broken-image glyph.
 function OwnerAvatar({ name, avatarUrl }: { name: string; avatarUrl: string | null }) {
@@ -216,9 +214,34 @@ export function DealsContent() {
     { validator: oneOf<ViewMode>(['kanban', 'list']) },
   )
   const [search, setSearch] = useState('')
-  const [stages, setStages] = useState<PipelineStage[]>([])
-  const [deals, setDeals] = useState<Deal[]>([])
-  const [loading, setLoading] = useState(true)
+  // Merged fetch: stages + deals in one SWR key so a single mutate()
+  // refreshes both. Inline fetcher handles the DEFAULT_STAGES fallback.
+  const { data: pipelineData, isLoading: loading, mutate: mutateDeals } = useSWR<{
+    stages: PipelineStage[]
+    deals: Deal[]
+  }>(
+    '/api/admin/deals?limit=100',
+    async () => {
+      const [stagesRes, dealsRes] = await Promise.all([
+        fetch(apiPath('/api/admin/pipeline/stages')),
+        fetch(apiPath('/api/admin/deals?limit=100')),
+      ])
+      let fetchedStages = DEFAULT_STAGES
+      if (stagesRes.ok) {
+        const sData = await stagesRes.json() as { stages: PipelineStage[] }
+        const s = sData.stages ?? []
+        if (s.length > 0) fetchedStages = s
+      }
+      const fetchedDeals: Deal[] = []
+      if (dealsRes.ok) {
+        const dData = await dealsRes.json() as { items: Deal[] }
+        fetchedDeals.push(...(dData.items ?? []))
+      }
+      return { stages: fetchedStages, deals: fetchedDeals }
+    }
+  )
+  const stages = pipelineData?.stages ?? DEFAULT_STAGES
+  const deals = pipelineData?.deals ?? []
   const [sortKey, setSortKey] = useUserPreference<SortKey>(
     'pipeline.sortKey',
     'updatedAt',
@@ -233,8 +256,11 @@ export function DealsContent() {
   const [filterValueMin, setFilterValueMin] = useState('')
   const [filterValueMax, setFilterValueMax] = useState('')
   const [showFilters, setShowFilters] = useState(false)
-  const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([])
   const { displayCurrency, toDisplay } = useDisplayCurrency()
+
+  // Team members for owner filter
+  const { data: teamData } = useSWR<{ items?: TeamMemberOption[]; members?: TeamMemberOption[] }>('/api/admin/team')
+  const teamMembers = teamData?.items ?? teamData?.members ?? []
 
   // Open new deal dialog from query params (T361)
   useEffect(() => {
@@ -244,58 +270,15 @@ export function DealsContent() {
     }
   }, [searchParams])
 
-  // Fetch team members for filter
-  useEffect(() => {
-    async function loadTeam() {
-      try {
-        const res = await fetch(apiPath('/api/admin/team'))
-        if (!res.ok) return
-        const data = await res.json() as { items?: TeamMemberOption[], members?: TeamMemberOption[] }
-        setTeamMembers(data.items ?? data.members ?? [])
-      } catch {
-        // silent
-      }
-    }
-    void loadTeam()
-  }, [])
-
-  // fetchData(silent=true) re-fetches without flashing the loading skeleton.
-  // Used after optimistic mutations (drag-drop, close, create) so the user
-  // never sees a skeleton flash while the server confirms what they already
-  // see on screen.
-  const fetchData = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true)
-    try {
-      const [stagesRes, dealsRes] = await Promise.all([
-        fetch(apiPath('/api/admin/pipeline/stages')),
-        fetch(apiPath('/api/admin/deals?limit=100')),
-      ])
-      if (stagesRes.ok) {
-        const sData = await stagesRes.json() as { stages: PipelineStage[] }
-        const fetched = sData.stages ?? []
-        setStages(fetched.length > 0 ? fetched : DEFAULT_STAGES)
-      } else if (!silent) {
-        setStages(DEFAULT_STAGES)
-      }
-      if (dealsRes.ok) {
-        const dData = await dealsRes.json() as { items: Deal[] }
-        setDeals(dData.items ?? [])
-      }
-    } catch {
-      if (!silent) setStages(DEFAULT_STAGES)
-    } finally {
-      if (!silent) setLoading(false)
-    }
-  }, [])
-
-  // Apply a partial update to a deal in local state — used by KanbanView
-  // for optimistic drag-drop updates so the card moves instantly without
-  // waiting for the server.
-  const mutateDealLocal = useCallback((dealId: string, update: Partial<Deal>) => {
-    setDeals(prev => prev.map(d => d.id === dealId ? { ...d, ...update } : d))
-  }, [])
-
-  useEffect(() => { fetchData() }, [fetchData])
+  // Apply a partial update to a deal in the SWR cache optimistically -- used
+  // by KanbanView for drag-drop so the card moves instantly without waiting
+  // for the server round-trip.
+  const mutateDealLocal = (dealId: string, update: Partial<Deal>) => {
+    void mutateDeals(
+      prev => prev ? { ...prev, deals: prev.deals.map(d => d.id === dealId ? { ...d, ...update } : d) } : prev,
+      { revalidate: false }
+    )
+  }
 
   // Filter by search + filters (T299)
   const filtered = deals.filter(d => {
@@ -654,7 +637,7 @@ export function DealsContent() {
           deals={filtered}
           stages={stages}
           onMutateDealLocal={mutateDealLocal}
-          onSilentRevalidate={() => fetchData(true)}
+          onSilentRevalidate={() => { void mutateDeals() }}
           displayCurrency={displayCurrency}
           toDisplay={toDisplay}
         />
@@ -678,7 +661,7 @@ export function DealsContent() {
             setShowNewDeal(false)
             setInitialOrgId(null)
             // Silent revalidate — the new deal will appear without a skeleton flash.
-            fetchData(true)
+            void mutateDeals()
           }}
         />
       )}
@@ -1624,21 +1607,11 @@ function NewDealDialog({ stages, initialOrgId, onClose, onCreated }: {
   const [expectedCloseDate, setExpectedCloseDate] = useState('')
   const [orgId] = useState(initialOrgId ?? '')
   const [saving, setSaving] = useState(false)
-  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({})
-  const [loadingRates, setLoadingRates] = useState(false)
 
-  // Fetch exchange rates for conversion preview (T341)
-  useEffect(() => {
-    setLoadingRates(true)
-    fetch(apiPath('/api/admin/exchange-rates'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ rates: Record<string, number> }>
-      })
-      .then(d => setExchangeRates(d.rates ?? {}))
-      .catch(() => setExchangeRates({}))
-      .finally(() => setLoadingRates(false))
-  }, [])
+  // Exchange rates for conversion preview (T341) -- cached by SWR so the
+  // dialog opens instantly on repeat visits without a fetch flash.
+  const { data: ratesData, isLoading: loadingRates } = useSWR<{ rates: Record<string, number> }>('/api/admin/exchange-rates')
+  const exchangeRates = ratesData?.rates ?? {}
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

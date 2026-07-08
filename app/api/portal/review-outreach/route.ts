@@ -1,4 +1,4 @@
-import { getRequestAuth, getPortalAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -59,9 +59,12 @@ export async function GET(req: NextRequest) {
  * Body: { action: 'yes' | 'defer' | 'no' }
  */
 export async function POST(req: NextRequest) {
-  const { userId, orgId } = await getRequestAuth(req)
-  if (!userId || !orgId) {
+  const { userId, orgId, impersonating } = await getPortalAuth(req)
+  if (!userId || !orgId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (impersonating) {
+    return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
   }
 
   const body = await req.json() as { action?: string }

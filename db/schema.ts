@@ -36,6 +36,13 @@ export const organisations = sqliteTable('organisations', {
   // maintain | scale | tune | launch | hourly | custom | none
   planType: text('plan_type').default('none'),
   stripeCustomerId: text('stripe_customer_id'),
+  // Clerk organization id this client signs in through. Null until the client
+  // first authenticates: a self-serve signup creates a fresh Clerk org and
+  // links it here; an invited client links the org on accept. getPortalAuth
+  // resolves a caller's Clerk org back to this D1 row via this column, so the
+  // D1 primary key (a stable UUID referenced by every FK) never has to equal
+  // the Clerk org id.
+  clerkOrgId: text('clerk_org_id'),
   xeroContactId: text('xero_contact_id'),
   // green | amber | red
   healthStatus: text('health_status').default('green'),
@@ -72,6 +79,10 @@ export const organisations = sqliteTable('organisations', {
 }, (table) => [
   index('idx_orgs_status').on(table.status),
   index('idx_orgs_plan').on(table.planType),
+  index('idx_orgs_stripe_customer').on(table.stripeCustomerId),
+  // Non-null clerk_org_id must be unique (one D1 org per Clerk org). SQLite
+  // treats NULLs as distinct, so unprovisioned orgs all sit at NULL happily.
+  uniqueIndex('idx_orgs_clerk_org').on(table.clerkOrgId),
 ])
 
 // ============================================================
@@ -91,12 +102,60 @@ export const contacts = sqliteTable('contacts', {
   role: text('role'),
   clerkUserId: text('clerk_user_id'),
   isPrimary: integer('is_primary', { mode: 'boolean' }).default(false),
+  // Portal access role — the client-admin authority signal. Deny-by-default:
+  // 'member' can only see their own scoped portal view; 'admin' can administer
+  // the org's portal (manage contacts, billing visibility, etc). Kept separate
+  // from `isPrimary` (single email-targeting flag, one per org) and the
+  // free-text `role` (job title). Backfilled to 'admin' where isPrimary=1.
+  // 'admin' | 'member'
+  portalRole: text('portal_role').notNull().default('member'),
   lastLoginAt: text('last_login_at'),
   ...timestamps,
 }, (table) => [
   index('idx_contacts_org').on(table.orgId),
   index('idx_contacts_clerk').on(table.clerkUserId),
   index('idx_contacts_person').on(table.personId),
+  index('idx_contacts_email').on(table.email),
+])
+
+// ============================================================
+// ONBOARDING INVITES (opaque link tokens for client / team onboarding)
+// ============================================================
+// Flow: an admin creates the client (org row) first, then generates an opaque,
+// non-guessable token. The link (/onboarding?token=... or /welcome?token=...)
+// carries the engagement context through sign-in and, on first use, joins the
+// user to the pre-created org with NO payment step, optionally attaching their
+// contract / schedule / proposal. Self-serve signups never need a token.
+// Persona is read from this row (server-trusted), never from a spoofable query
+// param. See lib/onboarding-invites.ts (create / resolve / consume).
+export const onboardingInvites = sqliteTable('onboarding_invites', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // The opaque random string that appears in the link. Non-guessable, unique.
+  token: text('token').notNull(),
+  // 'client' | 'team'
+  flow: text('flow').notNull().default('client'),
+  // The pre-created org this invite joins the user to (client flow).
+  orgId: text('org_id').references(() => organisations.id, { onDelete: 'cascade' }),
+  // ClientPersona for the client flow: retainer | project | existing_project |
+  // existing_retainer | selfserve.
+  persona: text('persona'),
+  // Optional engagement artefacts already set up for this client.
+  contractId: text('contract_id'),
+  scheduleId: text('schedule_id'),
+  proposalId: text('proposal_id'),
+  // Prefill identity, so we never re-ask for what we already hold.
+  contactEmail: text('contact_email'),
+  contactName: text('contact_name'),
+  // Lifecycle. Single-use: usedAt + usedByUserId stamp the consuming user.
+  expiresAt: text('expires_at'),
+  usedAt: text('used_at'),
+  usedByUserId: text('used_by_user_id'),
+  // Team member who generated the link.
+  createdById: text('created_by_id'),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('idx_onboarding_invites_token').on(table.token),
+  index('idx_onboarding_invites_org').on(table.orgId),
 ])
 
 // ============================================================
@@ -130,7 +189,10 @@ export const teamMembers = sqliteTable('team_members', {
   // S20: JSON array of role strings, e.g. ["CEO","Developer"]
   roles: text('roles').default('[]'),
   ...timestamps,
-})
+}, (table) => [
+  index('idx_team_members_clerk').on(table.clerkUserId),
+  index('idx_team_members_person').on(table.personId),
+])
 
 // ============================================================
 // PERMISSIONS (Granular RBAC + ABAC)
@@ -318,6 +380,7 @@ export const subscriptions = sqliteTable('subscriptions', {
 }, (table) => [
   index('idx_subs_org').on(table.orgId),
   index('idx_subs_status').on(table.status),
+  index('idx_subs_stripe').on(table.stripeSubscriptionId),
 ])
 
 // ============================================================
@@ -333,7 +396,9 @@ export const tracks = sqliteTable('tracks', {
   // ID of request currently occupying this track (nullable = track is free)
   currentRequestId: text('current_request_id'),
   ...timestamps,
-})
+}, (table) => [
+  index('idx_tracks_subscription').on(table.subscriptionId),
+])
 
 // ============================================================
 // REQUESTS (All work items)
@@ -549,7 +614,10 @@ export const conversations = sqliteTable('conversations', {
   visibility: text('visibility').notNull().default('external'),
   createdById: text('created_by_id').notNull(),
   ...timestamps,
-})
+}, (table) => [
+  index('idx_conversations_org').on(table.orgId),
+  index('idx_conversations_request').on(table.requestId),
+])
 
 // ============================================================
 // CONVERSATION PARTICIPANTS
@@ -567,6 +635,7 @@ export const conversationParticipants = sqliteTable('conversation_participants',
   lastReadAt: text('last_read_at'),
 }, (table) => [
   index('idx_conv_participants_conv').on(table.conversationId),
+  index('idx_conv_participants_participant').on(table.participantId, table.participantType),
 ])
 
 // ============================================================
@@ -687,6 +756,7 @@ export const invoices = sqliteTable('invoices', {
   index('idx_invoices_org').on(table.orgId),
   index('idx_invoices_status').on(table.status),
   index('idx_invoices_recon_status').on(table.reconciliationStatus),
+  index('idx_invoices_stripe').on(table.stripeInvoiceId),
 ])
 
 // ============================================================
@@ -700,7 +770,9 @@ export const invoiceItems = sqliteTable('invoice_items', {
   quantity: real('quantity').default(1),
   unitPriceUsd: real('unit_price_usd').notNull(),
   totalUsd: real('total_usd').notNull(),
-})
+}, (table) => [
+  index('idx_invoice_items_invoice').on(table.invoiceId),
+])
 
 // ============================================================
 // TIME ENTRIES
@@ -825,7 +897,9 @@ export const taskSubtasks = sqliteTable('task_subtasks', {
   title: text('title').notNull(),
   completed: integer('completed', { mode: 'boolean' }).default(false),
   createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
-})
+}, (table) => [
+  index('idx_task_subtasks_task').on(table.taskId),
+])
 
 // ============================================================
 // MENTIONS (S19)
@@ -890,7 +964,9 @@ export const announcementDismissals = sqliteTable('announcement_dismissals', {
   announcementId: text('announcement_id').notNull().references(() => announcements.id, { onDelete: 'cascade' }),
   userId: text('user_id').notNull(),
   dismissedAt: text('dismissed_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
-})
+}, (table) => [
+  index('idx_announcement_dismissals_user').on(table.userId),
+])
 
 // ============================================================
 // AUTOMATION RULES
@@ -921,7 +997,35 @@ export const automationLog = sqliteTable('automation_log', {
   status: text('status').notNull(),
   errorMessage: text('error_message'),
   executedAt: text('executed_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
-})
+}, (table) => [
+  index('idx_auto_log_rule').on(table.ruleId),
+  index('idx_auto_log_executed').on(table.executedAt),
+])
+
+// ============================================================
+// OUTGOING WEBHOOK DELIVERIES
+// ============================================================
+
+// One row per attempted delivery of a domain event to a registered outgoing
+// webhook endpoint. Written best-effort by lib/webhooks.ts fireWebhook so the
+// settings > integrations webhooks UI can show a delivery history. Endpoints
+// themselves live in the settings key/value store (key prefix
+// `webhook_endpoint_`), so endpointId here is that opaque id, not an FK.
+export const webhookDeliveries = sqliteTable('webhook_deliveries', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  endpointId: text('endpoint_id'),
+  event: text('event').notNull(),
+  url: text('url').notNull(),
+  // delivered | failed
+  status: text('status').notNull(),
+  statusCode: integer('status_code'),
+  errorMessage: text('error_message'),
+  attemptedAt: text('attempted_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  index('idx_webhook_deliveries_event').on(table.event),
+  index('idx_webhook_deliveries_endpoint').on(table.endpointId),
+  index('idx_webhook_deliveries_attempted').on(table.attemptedAt),
+])
 
 // ============================================================
 // NOTIFICATIONS
@@ -943,6 +1047,37 @@ export const notifications = sqliteTable('notifications', {
 }, (table) => [
   index('idx_notifications_user').on(table.userId),
   index('idx_notifications_read').on(table.read),
+])
+
+// ============================================================
+// NOTIFICATION PREFERENCES (per-user x per-event x per-channel)
+// ============================================================
+// One row per (userId, userType, eventType, channel). Resolution order:
+// exact (userId, userType, eventType, channel) row -> the eventType='*'
+// default row for that user/channel -> a hardcoded default in code.
+// Deny/allow via `enabled`. userType mirrors the notifications table's dual
+// identity model so this joins cleanly to (userId, userType). Channels:
+// 'in_app' | 'email' | 'slack'. eventType is a NotificationEventType value
+// or '*' for the per-user default row.
+export const notificationPreferences = sqliteTable('notification_preferences', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text('user_id').notNull(),
+  // team_member | contact
+  userType: text('user_type').notNull(),
+  // a NotificationEventType value, or '*' for the per-user default row
+  eventType: text('event_type').notNull(),
+  // in_app | email | slack
+  channel: text('channel').notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('uq_notif_pref').on(
+    table.userId,
+    table.userType,
+    table.eventType,
+    table.channel,
+  ),
+  index('idx_notif_pref_user').on(table.userId, table.userType),
 ])
 
 // ============================================================
@@ -1191,7 +1326,10 @@ export const clientCosts = sqliteTable('client_costs', {
   recurring: integer('recurring', { mode: 'boolean' }).default(false),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
-})
+}, (table) => [
+  index('idx_client_costs_org_id').on(table.orgId),
+  index('idx_client_costs_date').on(table.date),
+])
 
 // ============================================================
 // CASE STUDY SUBMISSIONS
@@ -1222,7 +1360,9 @@ export const caseStudySubmissions = sqliteTable('case_study_submissions', {
   submittedAt: text('submitted_at'),
   tokenExpiresAt: text('token_expires_at'),
   ...timestamps,
-})
+}, (table) => [
+  index('idx_case_submissions_org').on(table.orgId),
+])
 
 export const caseStudies = sqliteTable('case_studies', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -1263,7 +1403,9 @@ export const docVersions = sqliteTable('doc_versions', {
   contentTiptap: text('content_tiptap'),
   savedById: text('saved_by_id'),
   savedAt: text('saved_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
-})
+}, (table) => [
+  index('idx_doc_versions_page').on(table.pageId),
+])
 
 // ============================================================
 // INTEGRATIONS
@@ -1355,7 +1497,10 @@ export const requestForms = sqliteTable('request_forms', {
   questions: text('questions').notNull().default('[]'),
   isDefault: integer('is_default').notNull().default(0),
   ...timestamps,
-})
+}, (table) => [
+  index('idx_request_forms_org_cat').on(table.orgId, table.category),
+  index('idx_request_forms_default').on(table.isDefault),
+])
 
 // ============================================================
 // KANBAN COLUMNS (Custom per-client overrides)
@@ -1370,7 +1515,9 @@ export const kanbanColumns = sqliteTable('kanban_columns', {
   position: integer('position').notNull().default(0),
   isDefault: integer('is_default').notNull().default(0),
   ...timestamps,
-})
+}, (table) => [
+  index('idx_kanban_org').on(table.orgId),
+])
 
 // ============================================================
 // CONTRACTS
@@ -1611,7 +1758,10 @@ export const dealContacts = sqliteTable('deal_contacts', {
   dealId: text('deal_id').notNull().references(() => deals.id, { onDelete: 'cascade' }),
   contactId: text('contact_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
   role: text('role'),
-})
+}, (table) => [
+  index('idx_deal_contacts_deal').on(table.dealId),
+  index('idx_deal_contacts_contact').on(table.contactId),
+])
 
 // ============================================================
 // CRM: ACTIVITIES
@@ -1809,6 +1959,9 @@ export const leads = sqliteTable('leads', {
 export const aiReplyDrafts = sqliteTable('ai_reply_drafts', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   leadId: text('lead_id').references(() => leads.id, { onDelete: 'cascade' }),
+  // Overdue-invoice chase drafts reuse this table. Exactly one of leadId /
+  // invoiceId is set. Added in migration 0083.
+  invoiceId: text('invoice_id').references(() => invoices.id, { onDelete: 'cascade' }),
   // Original Sonnet output (frozen at draft time)
   aiDraftSubject: text('ai_draft_subject'),
   aiDraftBody: text('ai_draft_body').notNull(),
@@ -1825,6 +1978,7 @@ export const aiReplyDrafts = sqliteTable('ai_reply_drafts', {
   ...timestamps,
 }, (table) => [
   index('idx_ai_reply_drafts_lead').on(table.leadId),
+  index('idx_ai_reply_drafts_invoice').on(table.invoiceId),
   index('idx_ai_reply_drafts_status').on(table.status),
 ])
 
@@ -1909,6 +2063,8 @@ export type RequestStep = typeof requestSteps.$inferSelect
 export type NewRequestStep = typeof requestSteps.$inferInsert
 export type Tag = typeof tags.$inferSelect
 export type Notification = typeof notifications.$inferSelect
+export type NotificationPreference = typeof notificationPreferences.$inferSelect
+export type NewNotificationPreference = typeof notificationPreferences.$inferInsert
 export type DocPage = typeof docPages.$inferSelect
 export type Integration = typeof integrations.$inferSelect
 export type Conversation = typeof conversations.$inferSelect

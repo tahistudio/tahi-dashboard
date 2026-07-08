@@ -84,21 +84,42 @@ const CLIENT_PERSONAS: Record<ClientPersona, Omit<ClientEntry, 'flow' | 'company
   existing_retainer: { persona: 'existing_retainer', engagement: 'retainer', clientType: 'existing', entry: 'invited', hasEngagement: true },
 }
 
-/** Resolve the client onboarding entry from the link's params (token first). */
-export function resolveClientEntry(params: Params): ClientEntry {
-  const token = one(params, 'token')
-  const fromToken = token ? resolveToken(token) : null
-
-  const personaKey = (fromToken?.persona ?? one(params, 'p') ?? 'selfserve') as ClientPersona
+/** Build a client entry from a server-trusted persona + prefill values. */
+export function clientEntryFromPersona(
+  personaKey: ClientPersona,
+  extras: { companyName?: string; contactName?: string; contactEmail?: string } = {},
+): ClientEntry {
   const base = CLIENT_PERSONAS[personaKey] ?? CLIENT_PERSONAS.selfserve
-
   return {
     flow: 'client',
     ...base,
-    companyName: fromToken?.companyName ?? one(params, 'company'),
-    contactName: fromToken?.contactName ?? one(params, 'name'),
-    contactEmail: fromToken?.contactEmail ?? one(params, 'email'),
+    companyName: extras.companyName,
+    contactName: extras.contactName,
+    contactEmail: extras.contactEmail,
   }
+}
+
+/**
+ * Resolve the client onboarding entry from the link's query params.
+ *
+ * Security: the persona may ONLY be chosen via `?p=` in development (so each
+ * path can be exercised locally). In production a client's persona comes from a
+ * server-resolved invite token (see lib/onboarding-invites.ts + the onboarding
+ * page), never a spoofable URL param, so a real visitor with no token always
+ * defaults to the self-serve chooser. Prefill values (company / name / email)
+ * are display-only and pass through in any environment.
+ */
+export function resolveClientEntry(params: Params): ClientEntry {
+  const devPersona =
+    process.env.NODE_ENV !== 'production'
+      ? (one(params, 'p') as ClientPersona | undefined)
+      : undefined
+  const personaKey = (devPersona ?? 'selfserve') as ClientPersona
+  return clientEntryFromPersona(personaKey, {
+    companyName: one(params, 'company'),
+    contactName: one(params, 'name'),
+    contactEmail: one(params, 'email'),
+  })
 }
 
 /** Resolve the teammate onboarding entry from the link's params. */

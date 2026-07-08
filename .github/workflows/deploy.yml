@@ -1,0 +1,105 @@
+name: Deploy dashboard
+
+# CI/CD for the dashboard worker (replaces the old manual `wrangler deploy`).
+#   push to `staging` -> build + deploy the tahi-dashboard-staging worker (staging.tahi.studio)
+#   push to `main`    -> build + deploy the tahi-dashboard worker        (portal.tahi.studio)
+#   Manual: Actions -> "Deploy dashboard" -> Run workflow -> pick target.
+#
+# Required GitHub REPO secrets (already present, used by mcp-worker-deploy):
+#   CLOUDFLARE_API_TOKEN   - Workers Scripts: Edit on the business@tahi.studio account
+#   CLOUDFLARE_ACCOUNT_ID  - ccd4c7a3b9f7abdf566f0628579d3f4b
+#
+# Required GitHub ENVIRONMENT variables (Settings -> Environments -> staging / production),
+# because Next.js bakes NEXT_PUBLIC_* into the bundle at BUILD time and they differ per env:
+#   NEXT_PUBLIC_APP_URL                    (staging: https://staging.tahi.studio  / prod: https://portal.tahi.studio)
+#   NEXT_PUBLIC_BASEPATH
+#   NEXT_PUBLIC_TAHI_ORG_ID                (dev Clerk org for staging, prod Clerk org for production)
+#   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY      (pk_test_... staging / pk_live_... production)
+#   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY     (pk_test_... staging / pk_live_... production)
+#   NEXT_PUBLIC_CLERK_SIGN_IN_URL  NEXT_PUBLIC_CLERK_SIGN_UP_URL
+#   NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL  NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL
+# Runtime server secrets (CLERK_SECRET_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, etc.) are
+# NOT set here - they live as Cloudflare Worker secrets on each worker (set once via the dashboard
+# or `wrangler secret put`). Tip: add a required reviewer on the `production` environment to gate prod.
+
+on:
+  push:
+    branches: [main, staging]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Environment to deploy
+        type: choice
+        options: [staging, production]
+        required: true
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    if: github.ref == 'refs/heads/staging' || github.event.inputs.target == 'staging'
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run type-check
+      - run: npm run lint
+      - name: Build (OpenNext)
+        env:
+          NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL }}
+          NEXT_PUBLIC_BASEPATH: ${{ vars.NEXT_PUBLIC_BASEPATH }}
+          NEXT_PUBLIC_TAHI_ORG_ID: ${{ vars.NEXT_PUBLIC_TAHI_ORG_ID }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_CLERK_SIGN_IN_URL: ${{ vars.NEXT_PUBLIC_CLERK_SIGN_IN_URL }}
+          NEXT_PUBLIC_CLERK_SIGN_UP_URL: ${{ vars.NEXT_PUBLIC_CLERK_SIGN_UP_URL }}
+          NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: ${{ vars.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL }}
+          NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: ${{ vars.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL }}
+        run: npx opennextjs-cloudflare build
+      - name: Deploy (staging)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --env staging
+
+  production:
+    if: github.ref == 'refs/heads/main' || github.event.inputs.target == 'production'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run type-check
+      - run: npm run lint
+      - name: Build (OpenNext)
+        env:
+          NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL }}
+          NEXT_PUBLIC_BASEPATH: ${{ vars.NEXT_PUBLIC_BASEPATH }}
+          NEXT_PUBLIC_TAHI_ORG_ID: ${{ vars.NEXT_PUBLIC_TAHI_ORG_ID }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_CLERK_SIGN_IN_URL: ${{ vars.NEXT_PUBLIC_CLERK_SIGN_IN_URL }}
+          NEXT_PUBLIC_CLERK_SIGN_UP_URL: ${{ vars.NEXT_PUBLIC_CLERK_SIGN_UP_URL }}
+          NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: ${{ vars.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL }}
+          NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: ${{ vars.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL }}
+        run: npx opennextjs-cloudflare build
+      - name: Deploy (production)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy

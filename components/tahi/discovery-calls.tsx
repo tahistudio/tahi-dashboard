@@ -21,7 +21,7 @@
 
 import * as React from 'react'
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, ArrowUpRight, ChevronDown, Sparkles, RefreshCw } from 'lucide-react'
+import { Plus, ArrowUpRight, ChevronDown, Sparkles, RefreshCw, ListChecks, Check } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { Input } from '@/components/tahi/input'
@@ -60,6 +60,22 @@ export interface DiscoveryCall {
   updatedAt: string
 }
 
+/** A proposed task the AI pulled out of a client/project call transcript.
+ *  Nothing is created from these until a human explicitly clicks. */
+export interface ExtractedActionItem {
+  title: string
+  oneLineDetail: string | null
+  suggestedAssignee: string | null
+}
+
+/** Shape returned by the extract endpoint: the sales-field suggestions
+ *  (unchanged, byte-compatible for leads/deals) plus any proposed action
+ *  items (only ever populated for client/project calls). */
+export interface ExtractionResult {
+  suggestions: Partial<DiscoveryCall> | null
+  actionItems: ExtractedActionItem[]
+}
+
 const CALL_OUTCOMES: Array<{ value: string; label: string; tone: BadgeTone }> = [
   { value: 'good_call', label: 'Good call',            tone: 'positive' },
   { value: 'promote',   label: 'Ready to promote',     tone: 'brand' },
@@ -79,7 +95,7 @@ const PARENT_PATH: Record<CallParentType, string> = {
   deal: '/api/admin/deals',
   request: '/api/admin/requests',
   task: '/api/admin/tasks',
-  // orgs are at /api/admin/clients in this codebase (legacy naming —
+  // orgs are at /api/admin/clients in this codebase (legacy naming -
   // see Decision #001 in DECISIONS.md). Same `organisations` table.
   org: '/api/admin/clients',
 }
@@ -155,14 +171,47 @@ export function DiscoveryCallsCard({
     await refreshAndBubble()
   }
 
-  async function extractCall(callId: string): Promise<Partial<DiscoveryCall> | null> {
+  async function extractCall(callId: string): Promise<ExtractionResult> {
     const res = await fetch(apiPath(`/api/admin/discovery-calls/${callId}/extract`), { method: 'POST' })
     if (!res.ok) {
       const err = await res.json().catch(() => ({})) as { error?: string; detail?: string }
       throw new Error(err.detail ?? err.error ?? 'Extraction failed')
     }
-    const data = await res.json() as { suggestions: Partial<DiscoveryCall> }
-    return data.suggestions ?? null
+    const data = await res.json() as {
+      suggestions?: Partial<DiscoveryCall>
+      actionItems?: ExtractedActionItem[]
+    }
+    return {
+      suggestions: data.suggestions ?? null,
+      actionItems: data.actionItems ?? [],
+    }
+  }
+
+  // Create a single Tahi task from a proposed action item. Only ever
+  // fired by an explicit human click in the UI. The task is linked to
+  // the call's client (orgId) and request context where present; the
+  // suggested owner is folded into the description since it is a name,
+  // not a resolvable assignee id.
+  async function createTaskFromActionItem(call: DiscoveryCall, item: ExtractedActionItem) {
+    const descParts: string[] = []
+    if (item.oneLineDetail) descParts.push(item.oneLineDetail)
+    if (item.suggestedAssignee) descParts.push(`Suggested owner: ${item.suggestedAssignee}`)
+    descParts.push(`From call: ${call.title}`)
+    const res = await fetch(apiPath('/api/admin/tasks'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: item.title,
+        description: descParts.join('\n\n'),
+        orgId: call.orgId ?? undefined,
+        requestId: call.requestId ?? undefined,
+      }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string }
+      throw new Error(err.error ?? 'Failed to create task')
+    }
+    onChanged?.()
   }
 
   const now = Date.now()
@@ -228,6 +277,7 @@ export function DiscoveryCallsCard({
                 onUpdate={(p) => updateCall(c.id, p)}
                 onDelete={() => deleteCall(c.id)}
                 onExtract={() => extractCall(c.id)}
+                onCreateTask={(item) => createTaskFromActionItem(c, item)}
                 onPromote={promoteToDealAction ? () => promoteToDealAction(c) : null}
               />
             ))}
@@ -247,6 +297,7 @@ export function DiscoveryCallsCard({
                 onUpdate={(p) => updateCall(c.id, p)}
                 onDelete={() => deleteCall(c.id)}
                 onExtract={() => extractCall(c.id)}
+                onCreateTask={(item) => createTaskFromActionItem(c, item)}
                 onPromote={promoteToDealAction ? () => promoteToDealAction(c) : null}
               />
             ))}
@@ -372,13 +423,15 @@ function CallRow({
   onUpdate,
   onDelete,
   onExtract,
+  onCreateTask,
   onPromote,
 }: {
   call: DiscoveryCall
   showPromote: boolean
   onUpdate: (patch: Partial<DiscoveryCall>) => Promise<void>
   onDelete: () => Promise<void>
-  onExtract: () => Promise<Partial<DiscoveryCall> | null>
+  onExtract: () => Promise<ExtractionResult>
+  onCreateTask: (item: ExtractedActionItem) => Promise<void>
   onPromote: (() => Promise<void>) | null
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -463,7 +516,7 @@ function CallRow({
             </div>
           )}
 
-          <CallPostFields call={call} onUpdate={onUpdate} onExtract={onExtract} />
+          <CallPostFields call={call} onUpdate={onUpdate} onExtract={onExtract} onCreateTask={onCreateTask} />
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem', gap: '0.5rem', flexWrap: 'wrap' }}>
             <button
@@ -500,10 +553,12 @@ function CallPostFields({
   call,
   onUpdate,
   onExtract,
+  onCreateTask,
 }: {
   call: DiscoveryCall
   onUpdate: (patch: Partial<DiscoveryCall>) => Promise<void>
-  onExtract: () => Promise<Partial<DiscoveryCall> | null>
+  onExtract: () => Promise<ExtractionResult>
+  onCreateTask: (item: ExtractedActionItem) => Promise<void>
 }) {
   const [transcript, setTranscript] = useState(call.transcript ?? '')
   const [summary, setSummary] = useState(call.summary ?? '')
@@ -518,6 +573,7 @@ function CallPostFields({
   const [extracting, setExtracting] = useState(false)
   const [extractionError, setExtractionError] = useState<string | null>(null)
   const [suggestion, setSuggestion] = useState<Partial<DiscoveryCall> | null>(null)
+  const [proposals, setProposals] = useState<ExtractedActionItem[] | null>(null)
 
   const dirty =
     transcript !== (call.transcript ?? '')
@@ -558,9 +614,15 @@ function CallPostFields({
     setExtracting(true)
     setExtractionError(null)
     try {
-      const s = await onExtract()
-      if (s && Object.keys(s).length > 0) setSuggestion(s)
-      else setExtractionError('No suggestions returned. Make sure the transcript has been saved first.')
+      const result = await onExtract()
+      const s = result.suggestions
+      const items = result.actionItems
+      const hasSuggestions = !!s && Object.keys(s).length > 0
+      if (hasSuggestions) setSuggestion(s)
+      if (items.length > 0) setProposals(items)
+      if (!hasSuggestions && items.length === 0) {
+        setExtractionError('No suggestions returned. Make sure the transcript has been saved first.')
+      }
     } catch (err) {
       setExtractionError(err instanceof Error ? err.message : 'Extraction failed')
     } finally {
@@ -583,7 +645,7 @@ function CallPostFields({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-      {transcript.trim() && !suggestion && (
+      {transcript.trim() && !suggestion && !proposals && (
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -641,6 +703,14 @@ function CallPostFields({
         </div>
       )}
 
+      {proposals && proposals.length > 0 && (
+        <ActionItemProposals
+          items={proposals}
+          onCreate={onCreateTask}
+          onDismiss={() => setProposals(null)}
+        />
+      )}
+
       {extractionError && (
         <div style={{
           padding: '0.4375rem 0.625rem',
@@ -659,7 +729,7 @@ function CallPostFields({
           className="tahi-select"
           style={miniInputStyle}
         >
-          <option value="">— pick after the call —</option>
+          <option value="">- pick after the call -</option>
           {CALL_OUTCOMES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </FieldLabel>
@@ -721,7 +791,7 @@ function CallPostFields({
             className="tahi-select"
             style={miniInputStyle}
           >
-            <option value="">— unknown —</option>
+            <option value="">- unknown -</option>
             {CALL_TIMELINES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
         </FieldLabel>
@@ -742,6 +812,147 @@ function CallPostFields({
         <TahiButton size="sm" onClick={save} disabled={!dirty || saving}>
           {saving ? 'Saving...' : 'Save call notes'}
         </TahiButton>
+      </div>
+    </div>
+  )
+}
+
+// Proposed tasks pulled from a client/project call transcript. Nothing
+// is created until the operator explicitly clicks "Create task" on a row
+// (or "Create all", which is still one deliberate click). "Dismiss"
+// clears the proposals without touching anything.
+function ActionItemProposals({
+  items,
+  onCreate,
+  onDismiss,
+}: {
+  items: ExtractedActionItem[]
+  onCreate: (item: ExtractedActionItem) => Promise<void>
+  onDismiss: () => void
+}) {
+  type RowStatus = 'idle' | 'creating' | 'created' | 'error'
+  const [statuses, setStatuses] = useState<Record<number, RowStatus>>({})
+  const [creatingAll, setCreatingAll] = useState(false)
+
+  async function createOne(idx: number) {
+    setStatuses((s) => ({ ...s, [idx]: 'creating' }))
+    try {
+      await onCreate(items[idx])
+      setStatuses((s) => ({ ...s, [idx]: 'created' }))
+    } catch {
+      setStatuses((s) => ({ ...s, [idx]: 'error' }))
+    }
+  }
+
+  async function createAll() {
+    setCreatingAll(true)
+    try {
+      for (let i = 0; i < items.length; i++) {
+        if (statuses[i] === 'created') continue
+        await createOne(i)
+      }
+    } finally {
+      setCreatingAll(false)
+    }
+  }
+
+  const allCreated = items.every((_, i) => statuses[i] === 'created')
+
+  return (
+    <div style={{
+      padding: '0.75rem 0.875rem',
+      background: 'var(--color-bg-secondary)',
+      border: '1px solid var(--color-border-subtle)',
+      borderRadius: 'var(--radius-md)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '0.5rem',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+        <ListChecks size={13} aria-hidden="true" style={{ color: 'var(--color-text-muted)' }} />
+        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text)' }}>
+          Proposed tasks from the transcript
+        </span>
+      </div>
+      <p style={{ margin: 0, fontSize: '0.6875rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+        Review each one. Nothing is created until you click.
+      </p>
+      <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+        {items.map((item, idx) => {
+          const status = statuses[idx] ?? 'idle'
+          const created = status === 'created'
+          return (
+            <li
+              key={idx}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '0.5rem',
+                padding: '0.5rem 0.625rem',
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-sm)',
+                opacity: created ? 0.65 : 1,
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div data-private style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text)', lineHeight: 1.4 }}>
+                  {item.title}
+                </div>
+                {item.oneLineDetail && (
+                  <div data-private style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', marginTop: '0.125rem', lineHeight: 1.45 }}>
+                    {item.oneLineDetail}
+                  </div>
+                )}
+                {item.suggestedAssignee && (
+                  <div data-private style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', marginTop: '0.1875rem' }}>
+                    Suggested owner: {item.suggestedAssignee}
+                  </div>
+                )}
+                {status === 'error' && (
+                  <div style={{ fontSize: '0.625rem', color: 'var(--color-danger)', marginTop: '0.1875rem' }}>
+                    Could not create. Try again.
+                  </div>
+                )}
+              </div>
+              {created ? (
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.25rem',
+                  fontSize: '0.6875rem',
+                  fontWeight: 600,
+                  color: 'var(--color-brand-dark)',
+                  flexShrink: 0,
+                  padding: '0.25rem 0.375rem',
+                }}>
+                  <Check size={12} aria-hidden="true" /> Created
+                </span>
+              ) : (
+                <TahiButton
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => { void createOne(idx) }}
+                  disabled={status === 'creating' || creatingAll}
+                >
+                  {status === 'creating' ? 'Creating...' : 'Create task'}
+                </TahiButton>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      <div style={{ display: 'flex', gap: '0.4375rem', justifyContent: 'flex-end' }}>
+        <TahiButton size="sm" variant="secondary" onClick={onDismiss}>Dismiss</TahiButton>
+        {!allCreated && (
+          <TahiButton
+            size="sm"
+            onClick={() => { void createAll() }}
+            disabled={creatingAll}
+          >
+            {creatingAll ? 'Creating...' : 'Create all'}
+          </TahiButton>
+        )}
       </div>
     </div>
   )

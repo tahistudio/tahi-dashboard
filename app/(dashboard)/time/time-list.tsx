@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import {
   Plus, Clock, RefreshCw, DollarSign, Timer, Download, ChevronDown, ChevronUp,
@@ -99,39 +100,21 @@ function LogTimeSlideOver({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const [clientOptions, setClientOptions] = useState<SelectOption[]>([])
-  const [memberOptions, setMemberOptions] = useState<SelectOption[]>([])
-  const [requestOptions, setRequestOptions] = useState<SelectOption[]>([])
+  // All three lists are fetched only when the slide-over is open.
+  // SWR caches them globally so re-opening is instant.
+  const { data: clientsData } = useSWR<{ organisations: Array<{ id: string; name: string }> }>(
+    open ? '/api/admin/clients' : null
+  )
+  const { data: teamData } = useSWR<{ items: Array<{ id: string; name: string; email: string }> }>(
+    open ? '/api/admin/team' : null
+  )
+  const { data: requestsData } = useSWR<{ requests: Array<{ id: string; title: string; orgName?: string | null }> }>(
+    open ? '/api/admin/requests?status=all' : null
+  )
 
-  useEffect(() => {
-    if (!open) return
-    fetch(apiPath('/api/admin/clients'))
-      .then(r => r.json() as Promise<{ organisations: Array<{ id: string; name: string }> }>)
-      .then(data => {
-        setClientOptions(
-          (data.organisations ?? []).map(o => ({ value: o.id, label: o.name }))
-        )
-      })
-      .catch(() => setClientOptions([]))
-
-    fetch(apiPath('/api/admin/team'))
-      .then(r => r.json() as Promise<{ items: Array<{ id: string; name: string; email: string }> }>)
-      .then(data => {
-        setMemberOptions(
-          (data.items ?? []).map(m => ({ value: m.id, label: m.name, subtitle: m.email }))
-        )
-      })
-      .catch(() => setMemberOptions([]))
-
-    fetch(apiPath('/api/admin/requests?status=all'))
-      .then(r => r.json() as Promise<{ requests: Array<{ id: string; title: string; orgName?: string | null }> }>)
-      .then(data => {
-        setRequestOptions(
-          (data.requests ?? []).map(r => ({ value: r.id, label: r.title, subtitle: r.orgName ?? undefined }))
-        )
-      })
-      .catch(() => setRequestOptions([]))
-  }, [open])
+  const clientOptions: SelectOption[] = (clientsData?.organisations ?? []).map(o => ({ value: o.id, label: o.name }))
+  const memberOptions: SelectOption[] = (teamData?.items ?? []).map(m => ({ value: m.id, label: m.name, subtitle: m.email }))
+  const requestOptions: SelectOption[] = (requestsData?.requests ?? []).map(r => ({ value: r.id, label: r.title, subtitle: r.orgName ?? undefined }))
 
   const handleSubmit = useCallback(async () => {
     if (!orgId || !teamMemberId || !hours || !date) {
@@ -578,14 +561,8 @@ function ByClientView({
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export function TimeList() {
-  const [entries, setEntries] = useState<TimeEntry[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [viewTab, setViewTab] = useState<'entries' | 'by_client'>('entries')
-  const [totalHours, setTotalHours] = useState(0)
-  const [billableHours, setBillableHours] = useState(0)
-  const [entryCount, setEntryCount] = useState(0)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
   const [search, setSearch] = useState('')
@@ -609,6 +586,15 @@ export function TimeList() {
     return new Set(f?.values ?? [])
   }, [activeFilters])
 
+  // Key encodes the billable filter so each view caches separately;
+  // keepPreviousData (global default) shows old rows while revalidating.
+  const timeKey = billableTab !== 'all' ? `/api/admin/time?billable=${billableTab}` : '/api/admin/time'
+  const { data: timeData, isLoading: loading, error: fetchError, mutate } = useSWR<TimeResponse>(timeKey)
+
+  const entries = timeData?.items ?? []
+  const totalHours = timeData?.totalHours ?? 0
+  const billableHours = timeData?.billableHours ?? 0
+
   // Client-side filter: date range + search + client + member.
   const filteredEntries = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -626,45 +612,21 @@ export function TimeList() {
       return true
     })
   }, [entries, dateRange, search, selectedClients, selectedMembers])
-
-  const fetchEntries = useCallback(async (billable: string) => {
-    setLoading(true)
-    setError(false)
-    try {
-      const params = new URLSearchParams()
-      if (billable !== 'all') params.set('billable', billable)
-      const url = apiPath(`/api/admin/time${params.toString() ? '?' + params.toString() : ''}`)
-      const res = await fetch(url)
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as TimeResponse
-      setEntries(json.items ?? [])
-      setTotalHours(json.totalHours ?? 0)
-      setBillableHours(json.billableHours ?? 0)
-      setEntryCount(json.entryCount ?? 0)
-    } catch {
-      setError(true)
-      setEntries([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const entryCount = timeData?.entryCount ?? 0
+  const error = !!fetchError
 
   const handleDelete = useCallback(async () => {
     if (!deleteTarget) return
     const res = await fetch(apiPath(`/api/admin/time/${deleteTarget}`), { method: 'DELETE' })
     if (!res.ok) throw new Error('Failed to delete')
     setDeleteTarget(null)
-    fetchEntries(billableTab).catch(() => {})
-  }, [deleteTarget, billableTab, fetchEntries])
-
-  useEffect(() => {
-    fetchEntries(billableTab).catch(() => {})
-  }, [billableTab, fetchEntries])
+    await mutate()
+  }, [deleteTarget, mutate])
 
   const handleCreated = useCallback(() => {
     setShowModal(false)
-    fetchEntries(billableTab).catch(() => {})
-  }, [billableTab, fetchEntries])
+    void mutate()
+  }, [mutate])
 
   // Filter defs derived from the loaded entries so chip options reflect
   // what's actually in the dataset. Recomputed on every refresh.
@@ -1019,7 +981,7 @@ export function TimeList() {
           entries={filteredEntries}
           loading={loading}
           error={error}
-          onRetry={() => fetchEntries(billableTab).catch(() => {})}
+          onRetry={() => void mutate()}
         />
       ) : (
         <Card padding="none">
@@ -1028,7 +990,7 @@ export function TimeList() {
               <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', marginBottom: '0.75rem' }}>
                 Failed to load time entries.
               </p>
-              <TahiButton variant="secondary" size="sm" onClick={() => fetchEntries(billableTab).catch(() => {})} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+              <TahiButton variant="secondary" size="sm" onClick={() => void mutate()} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
                 Retry
               </TahiButton>
             </div>

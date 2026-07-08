@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import useSWR from 'swr'
 import { RefreshCw } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Badge } from '@/components/tahi/badge'
@@ -28,29 +29,20 @@ interface Counts {
 const TYPE_ORDER = ['blog', 'glossary', 'service', 'work', 'about', 'contact', 'page', 'other']
 
 export function SiteIndexContent() {
-  const [rows, setRows] = useState<SiteIndexRow[]>([])
-  const [counts, setCounts] = useState<Counts | null>(null)
-  const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [filter, setFilter] = useState<string>('all')
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/content/site-index'), { cache: 'no-store' })
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as { rows: SiteIndexRow[]; counts: Counts }
-      setRows(json.rows)
-      setCounts(json.counts)
-    } catch {
-      setRows([])
-      setCounts(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchData() }, [fetchData])
+  // Cached via SWR. Inline fetcher preserves the no-store semantics; an error
+  // yields undefined data, which falls back to an empty list + null counts.
+  const { data, isLoading: loading, mutate } = useSWR<{ rows: SiteIndexRow[]; counts: Counts }>(
+    '/api/admin/content/site-index',
+    (path: string) => fetch(apiPath(path), { cache: 'no-store' }).then(r => {
+      if (!r.ok) throw new Error('Failed')
+      return r.json() as Promise<{ rows: SiteIndexRow[]; counts: Counts }>
+    }),
+  )
+  const rows = data?.rows ?? []
+  const counts = data?.counts ?? null
 
   async function runSync() {
     setSyncing(true)
@@ -66,7 +58,7 @@ export function SiteIndexContent() {
         return
       }
       const j = await res.json() as { newRows: number; changedRows: number; unchangedRows: number; deactivated: number; errors: number }
-      await fetchData()
+      await mutate()
       alert(`Sync done: ${j.newRows} new, ${j.changedRows} changed, ${j.unchangedRows} unchanged, ${j.deactivated} deactivated, ${j.errors} errors.`)
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Sync failed')

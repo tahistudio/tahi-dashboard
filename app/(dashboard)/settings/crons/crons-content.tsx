@@ -8,7 +8,8 @@
  * collapses behind a disclosure for debugging.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import {
   ArrowLeft, RefreshCw, Play, CheckCircle2, AlertTriangle, Clock,
@@ -17,6 +18,7 @@ import {
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
+import { formatRelative } from '@/lib/utils'
 import { Badge } from '@/components/tahi/badge'
 import { useToast } from '@/components/tahi/toast'
 import { apiPath } from '@/lib/api'
@@ -40,17 +42,6 @@ interface CronItem {
   recentRuns: CronRun[]
 }
 
-function formatRelative(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  if (diff < 60_000) return 'just now'
-  const mins = Math.floor(diff / 60_000)
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
-
 function statusTone(status: string): 'positive' | 'danger' | 'warning' | 'neutral' {
   if (status === 'success') return 'positive'
   if (status === 'error') return 'danger'
@@ -60,26 +51,10 @@ function statusTone(status: string): 'positive' | 'danger' | 'warning' | 'neutra
 
 export function CronsContent() {
   const { showToast } = useToast()
-  const [items, setItems] = useState<CronItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, isLoading: loading, mutate } = useSWR<{ items: CronItem[] }>('/api/admin/crons')
+  const items = data?.items ?? []
   const [runningCron, setRunningCron] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
-    try {
-      const r = await fetch(apiPath('/api/admin/crons'))
-      if (!r.ok) throw new Error('Failed')
-      const data = await r.json() as { items: CronItem[] }
-      setItems(data.items ?? [])
-    } catch {
-      setItems([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchAll() }, [fetchAll])
 
   async function runNow(cron: CronItem) {
     setRunningCron(cron.cron)
@@ -96,7 +71,7 @@ export function CronsContent() {
     } finally {
       setRunningCron(null)
       // Refresh after a tick so the new cron_run row is visible.
-      setTimeout(() => { void fetchAll() }, 800)
+      setTimeout(() => { void mutate() }, 800)
     }
   }
 
@@ -123,7 +98,7 @@ export function CronsContent() {
         <TahiButton
           variant="secondary"
           size="sm"
-          onClick={() => void fetchAll()}
+          onClick={() => void mutate()}
           iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
         >
           Refresh

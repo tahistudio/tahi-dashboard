@@ -1,4 +1,4 @@
-import { getRequestAuth, getPortalAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -48,9 +48,12 @@ export async function GET(req: NextRequest) {
  * Update onboarding step completion state.
  */
 export async function PATCH(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, impersonating } = await getPortalAuth(req)
   if (!orgId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  if (impersonating) {
+    return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
   }
 
   const body = await req.json() as { step: string; completed: boolean }

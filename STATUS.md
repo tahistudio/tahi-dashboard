@@ -1,7 +1,7 @@
 # Tahi Dashboard — Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-06-10** by Claude (granular permissions built + validated live; spine 0-5; requests v3 lift; portal fix; Private/Client view modes)
+> Last updated: **2026-07-07** by Claude (Waves 1-4: dead engines wired live, permissions fail-closed, settings IA + real client portal tabs, event engine, AI weaves everywhere, dead-code sweep, model migration)
 
 ---
 
@@ -25,14 +25,20 @@ Features that are coded and routed but haven't earned the user's trust as primar
 - Time tracking
 - Settings (some toggles broken per March QA — needs re-verification)
 - Reviews & case-study pipeline
-- Announcements
+- Announcements — now send real audience-targeted email honouring per-user prefs (Wave 1); UI trust still to earn
+
+## Automation & delivery (wired live 2026-07-07)
+
+- **Automation engine** — `lib/events.ts` bus fires the previously-dead `fireAutomation` on real domain events (request created / status changed, invoice created / paid / overdue, client onboarded). Actions are human-safe (assign / status / notify / task); external sends + deletes log `skipped_unsafe`.
+- **Outgoing webhooks** — `fireWebhook` now wired to the same event bus; every delivery logged to the new `webhook_deliveries` table (migration 0082).
+- **Announcement email** — React Email template + audience-targeted fan-out (all / plan / org) honouring per-user email prefs; shared `lib/announcement-emails.ts` backs both create and `[id]/send`, double-send guarded via `emailSentAt`.
 
 ## Stubs / not functional
 
 - SSE notification stream (`/api/notifications/stream` is a stub — Phase 11 upgrades it)
 - Web Push notifications (no service worker handler yet — Phase 11)
-- Email-to-Request intake (not yet built — Phase 11)
-- Xero payment webhook receiver (not yet built — Phase 11)
+- Email-to-Request intake — **in progress today** (2026-07-07, another agent)
+- Xero payment webhook receiver — **in progress today** (2026-07-07, another agent)
 
 ---
 
@@ -45,8 +51,9 @@ Verified 2026-05-21 against current code. Pipeline polish backlog (5 items) all 
    - R2 STORAGE binding (file upload end-to-end test on Webflow Cloud)
    - Settings page tabs (team / portal branding / modules — March audit said broken; code has no obvious stubs now)
    - Per-member docs access control (March feature request, status unknown)
-3. **P3 — Stripe import**: duplicates `in_*` / `ch_*` rows for same payment (T665); pagination caps at 100 (T666)
-4. **P3 — Bank balance card**: shows only cash balance; statement balance missing (T706)
+3. ~~**P3 — Stripe import**: duplicates `in_*` / `ch_*` rows; pagination caps at 100~~ **FIXED (Wave 1, T665/T666)** — `in_*`/`ch_*` dedupe + cursor pagination.
+4. ~~**P3 — Bank balance card**: statement balance missing~~ **FIXED (Wave 2, T706)** — statement balance now pulled from Xero bank summary.
+5. **P1 — Migrations 0081/0082 pending apply on staging + prod D1.** The event/webhook + portal persistence tables ship in code but the migrations have not run live (blocked on `TAHI_API_TOKEN` rotation / an admin session to hit `/api/admin/db/migrate`). Wave features degrade until applied.
 
 ---
 
@@ -69,6 +76,17 @@ Lifecycle-order build is in progress. Docs Hub was the first list-page lap; the 
 Full plan: `C:\Users\Work\.claude\plans\i-d-like-you-to-gentle-neumann.md`
 
 ---
+
+## Wave hardening (2026-07-07, latest)
+
+Four waves in one day turned dead code into live capability and hardened the trust boundaries.
+
+- **Permissions fail-closed + `requireFeature` rollout** — denied-by-default enforcement; legacy `teamMembers.role` no longer grants unrestricted scope when the member holds a scoped new-system role, and an admin-level new-system role can never be denied by the legacy path. Xero OAuth connect/callback now carries a single-use state nonce.
+- **Settings IA + real client portal tabs** — client portal Organization, Brand, and People tabs now persist against real data (brand tint for client sessions only, People roster with Clerk org invitations, admin-gated server-side); Plan & billing reads the honest subscription.
+- **Event engine wired** — `lib/events.ts` bus fires the previously-dead automation + outgoing-webhook engines on real domain events, non-blocking, human-safe actions only; deliveries logged to `webhook_deliveries` (migration 0082).
+- **AI weaves (human-in-the-loop)** — daily briefing surfaced in the top nav, request triage suggestions + reply drafts, overdue-invoice chase drafts, on-demand client health check, and call action items. Every weave produces suggestions or pending drafts only; a human click is the sole gate for anything that applies or sends.
+- **Dead-code sweep** — ~4,400 LOC removed (12 zero-reference files + the legacy single-prompt blog-writer path; blog pipeline cut over to the round-table driver); production console.logs removed; duplicate helpers consolidated into `lib/utils.ts`.
+- **Model migration** — moved to Sonnet 5 / Opus 4.8; hardcoded model ids centralised on `SONNET_MODEL` to prevent the retired-model class of bug that broke the briefing cron.
 
 ## Recent activity (2026-06-10, latest)
 

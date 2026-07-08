@@ -1,4 +1,4 @@
-import { getRequestAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -8,10 +8,13 @@ import Stripe from 'stripe'
 /**
  * GET /api/portal/billing/session
  * Generate a Stripe customer portal session URL for the current org.
+ * getPortalAuth resolves the caller's Clerk org -> the D1 organisations.id so
+ * the lookup works for clerkOrgId-provisioned clients (and an admin previewing
+ * Client view sees the impersonated org, read-only). Reject the Tahi admin org.
  */
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
-  if (!userId || !orgId) {
+  const { orgId, userId } = await getPortalAuth(req)
+  if (!userId || !orgId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

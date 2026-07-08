@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, Plus, Trash2, Share2, Copy, Star, ExternalLink, Mail, BookmarkPlus, Eye, ChevronUp, ChevronDown, MessageSquare, BarChart3, MoreHorizontal, Check, FileText } from 'lucide-react'
@@ -135,7 +136,6 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
   const [sections, setSections] = useState<Section[]>([])
   const [variants, setVariants] = useState<Variant[]>([])
   const [acceptances, setAcceptances] = useState<Acceptance[]>([])
-  const [loading, setLoading] = useState(true)
   const [sharing, setSharing] = useState(false)
   const [showEmail, setShowEmail] = useState(false)
   const [contacts, setContacts] = useState<Array<{ id: string; name: string; email: string; isPrimary: number }>>([])
@@ -172,24 +172,19 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
     } catch { /* silent */ }
   }
 
-  const fetchAll = useCallback(async (opts: { silent?: boolean } = {}) => {
-    if (!opts.silent) setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/proposals/${proposalId}`))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { proposal: Proposal; sections: Section[]; variants: Variant[]; acceptances: Acceptance[] }
-      setProposal(data.proposal)
-      setSections(data.sections ?? [])
-      setVariants(data.variants ?? [])
-      setAcceptances(data.acceptances ?? [])
-    } catch {
-      // silent
-    } finally {
-      if (!opts.silent) setLoading(false)
-    }
-  }, [proposalId])
-
-  useEffect(() => { void fetchAll() }, [fetchAll])
+  const { data: swrData, isLoading: loading, mutate } = useSWR<{
+    proposal: Proposal
+    sections: Section[]
+    variants: Variant[]
+    acceptances: Acceptance[]
+  }>(`/api/admin/proposals/${proposalId}`)
+  useEffect(() => {
+    if (!swrData) return
+    setProposal(swrData.proposal)
+    setSections(swrData.sections ?? [])
+    setVariants(swrData.variants ?? [])
+    setAcceptances(swrData.acceptances ?? [])
+  }, [swrData])
 
   // If the active view points to a section or variant that's been deleted
   // or hasn't loaded, fall back to the cover.
@@ -242,7 +237,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
         body: JSON.stringify({ type, title: seed.title, subtitle: seed.subtitle, data }),
       })
       if (!res.ok) throw new Error('Failed')
-      await fetchAll({ silent: true })
+      await mutate()
     } catch {
       showToast('Failed to add section', 'error')
     }
@@ -273,7 +268,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
     try {
       await fetch(apiPath(`/api/admin/proposals/${proposalId}/sections/${sectionId}`), { method: 'DELETE' })
     } catch {
-      await fetchAll({ silent: true })
+      await mutate()
       showToast('Failed to delete section', 'error')
     }
   }
@@ -307,7 +302,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
         }),
       ])
     } catch {
-      await fetchAll({ silent: true })
+      await mutate()
       showToast('Failed to reorder', 'error')
     }
   }
@@ -325,7 +320,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
         }),
       })
       if (!res.ok) throw new Error('Failed')
-      await fetchAll({ silent: true })
+      await mutate()
     } catch {
       showToast('Failed to add variant', 'error')
     }
@@ -346,7 +341,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
     try {
       await fetch(apiPath(`/api/admin/proposals/${proposalId}/variants/${variantId}`), { method: 'DELETE' })
     } catch {
-      await fetchAll({ silent: true })
+      await mutate()
       showToast('Failed to delete variant', 'error')
     }
   }
@@ -709,7 +704,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
             setProposal={setProposal}
             onPatch={(p) => trackSave(patchProposal(p))}
             proposalId={proposalId}
-            onLinkChanged={() => void fetchAll({ silent: true })}
+            onLinkChanged={() => void mutate()}
             publicUrl={publicUrl}
             sharing={sharing}
             onShare={() => trackSave(handleShare())}

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { CreditCard, ExternalLink, FileText, RefreshCw } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -62,44 +63,25 @@ const INTERVAL_LABELS: Record<string, string> = {
 }
 
 export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
-  const [invoices, setInvoices] = useState<InvoiceRow[]>([])
-  const [subscription, setSubscription] = useState<SubscriptionRow | null>(null)
-  const [billing, setBilling] = useState<PortalBilling | null>(null)
-  const [loading, setLoading] = useState(true)
   const [portalLoading, setPortalLoading] = useState(false)
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    try {
-      if (isAdmin) {
-        // Admin billing is a placeholder for now
-        setLoading(false)
-        return
-      }
+  // Portal-only fetches. Keys are null for admins so SWR skips them;
+  // the admin path renders <AdminBillingView /> before these values are used.
+  const { data: invoicesData, isLoading: invoicesLoading, mutate: mutateInvoices } = useSWR<{ items: InvoiceRow[] }>(
+    !isAdmin ? '/api/portal/invoices?status=all' : null
+  )
+  const { data: subData, isLoading: subLoading, mutate: mutateSub } = useSWR<{ subscription?: SubscriptionRow; billing?: PortalBilling }>(
+    !isAdmin ? '/api/portal/subscription' : null
+  )
 
-      const [invoicesRes, subRes] = await Promise.all([
-        fetch(apiPath('/api/portal/invoices?status=all')),
-        fetch(apiPath('/api/portal/subscription')).catch(() => null),
-      ])
+  const invoices = invoicesData?.items ?? []
+  const subscription = subData?.subscription ?? null
+  const billing = subData?.billing ?? null
+  const loading = invoicesLoading || subLoading
 
-      if (invoicesRes.ok) {
-        const data = await invoicesRes.json() as { items: InvoiceRow[] }
-        setInvoices(data.items ?? [])
-      }
-
-      if (subRes?.ok) {
-        const data = await subRes.json() as { subscription?: SubscriptionRow; billing?: PortalBilling }
-        setSubscription(data.subscription ?? null)
-        setBilling(data.billing ?? null)
-      }
-    } catch {
-      // Failed to load
-    } finally {
-      setLoading(false)
-    }
-  }, [isAdmin])
-
-  useEffect(() => { fetchData() }, [fetchData])
+  async function refresh() {
+    await Promise.all([mutateInvoices(), mutateSub()])
+  }
 
   async function openBillingPortal() {
     setPortalLoading(true)
@@ -132,7 +114,7 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
         title="Billing"
         subtitle="View your plan, invoices, and manage billing."
       >
-        <TahiButton variant="secondary" size="sm" onClick={fetchData} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+        <TahiButton variant="secondary" size="sm" onClick={() => void refresh()} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
           Refresh
         </TahiButton>
       </PageHeader>
@@ -290,35 +272,16 @@ interface AdminSubscription {
 }
 
 function AdminBillingView() {
-  const [subs, setSubs] = useState<AdminSubscription[]>([])
-  const [recentInvoices, setRecentInvoices] = useState<InvoiceRow[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: subsData, isLoading: subsLoading, mutate: mutateSubs } = useSWR<{ items: AdminSubscription[] }>('/api/admin/subscriptions')
+  const { data: invData, isLoading: invLoading, mutate: mutateInv } = useSWR<{ items: InvoiceRow[] }>('/api/admin/invoices?limit=10')
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [subsRes, invRes] = await Promise.all([
-        fetch(apiPath('/api/admin/subscriptions')),
-        fetch(apiPath('/api/admin/invoices?limit=10')),
-      ])
+  const subs = subsData?.items ?? []
+  const recentInvoices = invData?.items ?? []
+  const loading = subsLoading || invLoading
 
-      if (subsRes.ok) {
-        const data = await subsRes.json() as { items: AdminSubscription[] }
-        setSubs(data.items ?? [])
-      }
-
-      if (invRes.ok) {
-        const data = await invRes.json() as { items: InvoiceRow[] }
-        setRecentInvoices(data.items ?? [])
-      }
-    } catch {
-      // Failed
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchData() }, [fetchData])
+  async function refresh() {
+    await Promise.all([mutateSubs(), mutateInv()])
+  }
 
   const activeSubs = subs.filter(s => s.status === 'active')
 
@@ -335,7 +298,7 @@ function AdminBillingView() {
         title="Billing"
         subtitle="Subscriptions, invoices, and revenue overview."
       >
-        <TahiButton variant="secondary" size="sm" onClick={fetchData} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+        <TahiButton variant="secondary" size="sm" onClick={() => void refresh()} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
           Refresh
         </TahiButton>
       </PageHeader>

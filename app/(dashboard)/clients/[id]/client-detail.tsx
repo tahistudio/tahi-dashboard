@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { apiPath } from '@/lib/api'
 import { EngagementHealthCard } from '@/components/tahi/engagement-health-card'
 import { Gate } from '@/components/tahi/permissions-context'
@@ -49,6 +51,7 @@ import {
   Percent,
   Lock,
   Minus,
+  Sparkles,
 } from 'lucide-react'
 import { StatusBadge, PlanBadge, HealthDot } from '@/components/tahi/status-badge'
 import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
@@ -59,8 +62,8 @@ import { RequestCard } from '@/components/tahi/request-card'
 import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { FeatureCard } from '@/components/tahi/feature-card'
-import { DonutChart, type DonutSegment } from '@/components/tahi/chart'
-import { BoardView, type BoardItem, type BoardColumn, type BoardPriority } from '@/components/tahi/board-view'
+import type { DonutSegment } from '@/components/tahi/chart'
+import type { BoardItem, BoardColumn, BoardPriority } from '@/components/tahi/board-view'
 import { ViewToggle } from '@/components/tahi/view-toggle'
 import { List as ListIcon, Columns as ColumnsIcon } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
@@ -73,6 +76,41 @@ import {
   calculateBundledSavings,
   type BillingInterval,
 } from '@/lib/billing'
+
+// Recharts (DonutChart) and the full board shell are tab-gated -- defer them.
+const DonutChart = dynamic(
+  () => import('@/components/tahi/chart').then(m => ({ default: m.DonutChart })),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        className="animate-pulse"
+        style={{
+          width: 160,
+          height: 160,
+          borderRadius: '50%',
+          background: 'var(--color-bg-secondary)',
+        }}
+      />
+    ),
+  }
+)
+const BoardView = dynamic(
+  () => import('@/components/tahi/board-view').then(m => ({ default: m.BoardView })),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        className="animate-pulse"
+        style={{
+          minHeight: '20rem',
+          borderRadius: 'var(--radius-lg)',
+          background: 'var(--color-bg-secondary)',
+        }}
+      />
+    ),
+  }
+)
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -178,23 +216,18 @@ type TabId = typeof TABS[number]['id']
 
 export function ClientDetail({ clientId }: { clientId: string }) {
   const router = useRouter()
-  const [data, setData] = useState<ClientData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<TabId>('overview')
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/clients/${clientId}`))
-      if (!res.ok) { router.push('/clients'); return }
-      setData(await res.json() as ClientData)
-    } finally {
-      setLoading(false)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId])
+  // SWR-backed client record. `mutate` (aliased load) refetches after edits,
+  // archive, etc. Any fetch error (e.g. a 404) bounces back to /clients,
+  // matching the old non-ok redirect.
+  const { data, isLoading: loading, error, mutate: load } = useSWR<ClientData>(
+    `/api/admin/clients/${clientId}`,
+  )
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    if (error) router.push('/clients')
+  }, [error, router])
 
   if (loading) return <LoadingSkeleton />
   if (!data) return null
@@ -282,7 +315,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
                 <Handshake className="w-3.5 h-3.5 sm:mr-1.5" />
                 <span className="hidden sm:inline">New Deal</span>
               </TahiButton>
-              <TahiButton variant="secondary" size="sm" onClick={load}>
+              <TahiButton variant="secondary" size="sm" onClick={() => { void load() }}>
                 <RefreshCw className="w-3.5 h-3.5 sm:mr-1.5" />
                 <span className="hidden sm:inline">Refresh</span>
               </TahiButton>
@@ -456,10 +489,11 @@ function OverviewTab({
 
         {/* Right column (narrow) */}
         <div className="flex flex-col gap-6">
-          {/* Delivery spine (#148) Slice 4 — live rollup across this client's schedules. */}
+          {/* Delivery spine (#148) Slice 4 - live rollup across this client's schedules. */}
           <Gate feature="clients.engagement_health">
             <EngagementHealthCard orgId={org.id} />
           </Gate>
+          <AiHealthCheckCard org={org} onUpdated={onUpdated} />
           {recentRequests.length > 0 && (
             <RequestMixCard requests={recentRequests} />
           )}
@@ -492,7 +526,7 @@ function bucketRequestStatus(status: string): 'open' | 'review' | 'done' | 'othe
 const HEALTH_TILE: Record<string, { label: string; description: string; dot: string; tone: 'positive' | 'warning' | 'danger' | 'neutral' }> = {
   green:  { label: 'Healthy',     description: 'Engagement is on track. No red flags surfaced.',                     dot: '#22C55E', tone: 'positive' },
   amber:  { label: 'Watch',       description: 'Mixed signals. Worth a quick check-in with the client this week.',  dot: '#F59E0B', tone: 'warning'  },
-  red:    { label: 'At risk',     description: 'Action needed soon — surface to the lead and agree a next step.',    dot: '#EF4444', tone: 'danger'   },
+  red:    { label: 'At risk',     description: 'Action needed soon - surface to the lead and agree a next step.',    dot: '#EF4444', tone: 'danger'   },
 }
 
 function ClientSignalTiles({
@@ -896,7 +930,7 @@ interface TeamMemberPm {
 }
 
 /**
- * AutoPill — tiny inline indicator next to a billing field that shows
+ * AutoPill - tiny inline indicator next to a billing field that shows
  * whether the value is auto-derived from signals (green "Auto") or
  * manually set by the user (amber "Manual" + "use auto" link).
  *
@@ -950,8 +984,6 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
   const { displayCurrency, formatNativeWithDisplay } = useDisplayCurrency()
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [teamMembers, setTeamMembers] = useState<TeamMemberPm[]>([])
-  const [assignedPm, setAssignedPm] = useState<string | null>(null)
   const [pmLoading, setPmLoading] = useState(false)
   const [autoDeriving, setAutoDeriving] = useState(false)
   const [reenablingField, setReenablingField] = useState<'billingModel' | 'retainerDates' | 'customMrr' | null>(null)
@@ -990,19 +1022,15 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
     }
   }
 
-  useEffect(() => {
-    // Load team members for PM selector
-    fetch(apiPath('/api/admin/team-members'))
-      .then(r => r.json() as Promise<{ items: TeamMemberPm[] }>)
-      .then(d => setTeamMembers(d.items ?? []))
-      .catch(() => {})
-
-    // Load current PM assignment
-    fetch(apiPath(`/api/admin/clients/${org.id}/pm`))
-      .then(r => r.json() as Promise<{ pmId: string | null; pmName: string | null }>)
-      .then(d => setAssignedPm(d.pmId))
-      .catch(() => {})
-  }, [org.id])
+  // Team members for the PM selector + the current PM assignment, both cached
+  // via SWR. Errors stay silent (data falls back to empty/null), matching the
+  // old .catch(() => {}) handlers.
+  const { data: teamMembersData } = useSWR<{ items: TeamMemberPm[] }>('/api/admin/team-members')
+  const teamMembers = teamMembersData?.items ?? []
+  const { data: pmData, mutate: mutatePm } = useSWR<{ pmId: string | null; pmName: string | null }>(
+    `/api/admin/clients/${org.id}/pm`,
+  )
+  const assignedPm = pmData?.pmId ?? null
 
   const handlePmChange = async (pmId: string | null) => {
     setPmLoading(true)
@@ -1012,7 +1040,8 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pmId }),
       })
-      setAssignedPm(pmId)
+      // Optimistically reflect the new PM in the SWR cache.
+      await mutatePm({ pmId, pmName: pmData?.pmName ?? null }, { revalidate: false })
     } catch {
       // silent
     } finally {
@@ -1475,7 +1504,7 @@ function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { subscrip
     try {
       // Update both the org's planType (used as a quick filter on lists)
       // and the subscription row's planType (the authoritative one for
-      // billing math). Two writes — keep them parallel so a single network
+      // billing math). Two writes - keep them parallel so a single network
       // hiccup doesn't leave the two out of sync indefinitely.
       await Promise.all([
         fetch(apiPath(`/api/admin/clients/${orgId}`), {
@@ -1650,7 +1679,7 @@ function AddonToggleRow({
       onMouseEnter={e => { if (!busy) e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
       onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
       aria-pressed={on}
-      aria-label={`${label}: ${on ? 'on' : 'off'} — click to toggle`}
+      aria-label={`${label}: ${on ? 'on' : 'off'} - click to toggle`}
     >
       <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{label}</span>
       <span
@@ -1801,6 +1830,241 @@ function NoSubscriptionCard({ planType }: { planType: string | null }) {
 }
 
 // ── Health note card ───────────────────────────────────────────────────────────
+
+// ── AI health check card ───────────────────────────────────────────────────────
+//
+// Admin-triggered. A human clicks Generate; the model returns a narrative,
+// risk flags and a suggested status. NOTHING persists until the human clicks
+// one of the two explicit apply actions (both PATCH the org endpoint) or the
+// suggestion is dismissed. Human-in-the-loop: no auto-run, no auto-apply.
+
+interface HealthCheckResult {
+  generatedAt: string
+  currentHealthStatus: string | null
+  healthNarrative: string
+  riskFlags: string[]
+  suggestedHealthStatus: 'green' | 'amber' | 'red'
+  suggestedActions: string[]
+}
+
+const SUGGESTED_HEALTH_META: Record<'green' | 'amber' | 'red', { label: string; dot: string; bg: string; fg: string }> = {
+  green: { label: 'Healthy',  dot: '#22C55E', bg: 'var(--color-brand-50)',   fg: 'var(--color-brand)' },
+  amber: { label: 'Watch',    dot: '#F59E0B', bg: 'var(--color-warning-bg)', fg: 'var(--color-warning)' },
+  red:   { label: 'At risk',  dot: '#EF4444', bg: 'var(--color-danger-bg)',  fg: 'var(--color-danger)' },
+}
+
+function AiHealthCheckCard({ org, onUpdated }: { org: Organisation; onUpdated: () => void }) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<HealthCheckResult | null>(null)
+  const [applying, setApplying] = useState<'status' | 'note' | null>(null)
+  const [appliedStatus, setAppliedStatus] = useState(false)
+  const [savedNote, setSavedNote] = useState(false)
+
+  const generate = async () => {
+    setLoading(true)
+    setError(null)
+    setResult(null)
+    setAppliedStatus(false)
+    setSavedNote(false)
+    try {
+      const res = await fetch(apiPath(`/api/admin/clients/${org.id}/health-summary`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      const json = (await res.json().catch(() => null)) as { error?: string } | null
+      if (!res.ok) {
+        setError((json && typeof json.error === 'string' ? json.error : null) ?? 'Could not generate a health check. Please try again.')
+        return
+      }
+      setResult(json as HealthCheckResult)
+    } catch {
+      setError('Could not reach the health check service. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const applyStatus = async () => {
+    if (!result) return
+    setApplying('status')
+    try {
+      const res = await fetch(apiPath(`/api/admin/clients/${org.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ healthStatus: result.suggestedHealthStatus }),
+      })
+      if (!res.ok) throw new Error('Failed')
+      setAppliedStatus(true)
+      onUpdated()
+    } catch {
+      setError('Could not apply the health status. Please try again.')
+    } finally {
+      setApplying(null)
+    }
+  }
+
+  const saveNote = async () => {
+    if (!result) return
+    setApplying('note')
+    try {
+      const res = await fetch(apiPath(`/api/admin/clients/${org.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ healthNote: result.healthNarrative }),
+      })
+      if (!res.ok) throw new Error('Failed')
+      setSavedNote(true)
+      onUpdated()
+    } catch {
+      setError('Could not save the note. Please try again.')
+    } finally {
+      setApplying(null)
+    }
+  }
+
+  const dismiss = () => {
+    setResult(null)
+    setError(null)
+    setAppliedStatus(false)
+    setSavedNote(false)
+  }
+
+  const meta = result ? SUGGESTED_HEALTH_META[result.suggestedHealthStatus] : null
+
+  return (
+    <Card>
+      <Card.Header style={{ marginBottom: 'var(--space-3)', alignItems: 'center' }}>
+        <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
+          <Sparkles className="w-4 h-4 text-[var(--color-brand)]" aria-hidden="true" />
+          <Card.Title style={{ fontSize: 'var(--text-sm)' }}>AI health check</Card.Title>
+        </div>
+        {result && (
+          <button
+            onClick={dismiss}
+            className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+            aria-label="Dismiss suggestion"
+          >
+            <X className="w-3.5 h-3.5" /> Dismiss
+          </button>
+        )}
+      </Card.Header>
+
+      {!result && (
+        <>
+          <p className="text-xs text-[var(--color-text-muted)] mb-3">
+            Generate a grounded read on this client from their recent requests, tasks, invoices, calls and messages. Suggestions only, nothing changes until you apply them.
+          </p>
+          <TahiButton variant="primary" size="sm" onClick={generate} disabled={loading} loading={loading}>
+            {loading ? 'Analysing...' : (
+              <>
+                <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                Generate
+              </>
+            )}
+          </TahiButton>
+        </>
+      )}
+
+      {error && (
+        <div
+          className="mt-3 flex items-start gap-2 rounded-lg p-2.5 text-xs"
+          style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}
+        >
+          <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" aria-hidden="true" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {result && meta && (
+        <div className="flex flex-col gap-3">
+          {/* Suggested status pill */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-[var(--color-text-muted)]">Suggested status:</span>
+            <span
+              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold"
+              style={{ background: meta.bg, color: meta.fg }}
+            >
+              <span aria-hidden="true" style={{ width: '0.5rem', height: '0.5rem', borderRadius: '9999px', background: meta.dot, display: 'inline-block' }} />
+              {meta.label}
+            </span>
+            {result.currentHealthStatus && result.currentHealthStatus !== result.suggestedHealthStatus && (
+              <span className="text-[10px] text-[var(--color-text-subtle)]">
+                (currently {result.currentHealthStatus})
+              </span>
+            )}
+          </div>
+
+          {/* Narrative */}
+          <p className="text-sm text-[var(--color-text)] leading-relaxed">{result.healthNarrative}</p>
+
+          {/* Risk flags */}
+          {result.riskFlags.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-[var(--color-text-muted)] mb-1.5">Risk flags</p>
+              <ul className="flex flex-col gap-1">
+                {result.riskFlags.map((flag, i) => (
+                  <li key={i} className="flex items-start gap-1.5 text-xs text-[var(--color-text)]">
+                    <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: 'var(--color-warning)' }} aria-hidden="true" />
+                    <span>{flag}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Suggested actions */}
+          {result.suggestedActions.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-[var(--color-text-muted)] mb-1.5">Suggested actions</p>
+              <ul className="flex flex-col gap-1">
+                {result.suggestedActions.map((action, i) => (
+                  <li key={i} className="flex items-start gap-1.5 text-xs text-[var(--color-text)]">
+                    <ChevronRight className="w-3 h-3 flex-shrink-0 mt-0.5 text-[var(--color-brand)]" aria-hidden="true" />
+                    <span>{action}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Explicit apply actions */}
+          <div className="flex flex-wrap gap-2 pt-1 border-t border-[var(--color-border-subtle)] mt-1">
+            <TahiButton
+              variant="primary"
+              size="sm"
+              onClick={applyStatus}
+              disabled={applying !== null || appliedStatus}
+              loading={applying === 'status'}
+            >
+              {appliedStatus ? (
+                <><Check className="w-3.5 h-3.5 mr-1.5" /> Status applied</>
+              ) : (
+                `Apply health status`
+              )}
+            </TahiButton>
+            <TahiButton
+              variant="secondary"
+              size="sm"
+              onClick={saveNote}
+              disabled={applying !== null || savedNote}
+              loading={applying === 'note'}
+            >
+              {savedNote ? (
+                <><Check className="w-3.5 h-3.5 mr-1.5" /> Note saved</>
+              ) : (
+                'Save note'
+              )}
+            </TahiButton>
+          </div>
+          <p className="text-[10px] text-[var(--color-text-subtle)]">
+            AI generated from recent activity. Review before applying.
+          </p>
+        </div>
+      )}
+    </Card>
+  )
+}
 
 function HealthNoteCard({ note, health }: { note: string; health: string | null }) {
   const colours =
@@ -1966,23 +2230,13 @@ function requestsToBoardItems(requests: Request[]): BoardItem[] {
 
 function RequestsTab({ clientId }: { clientId: string }) {
   const router = useRouter()
-  const [requests, setRequests] = useState<Request[]>([])
-  const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [view, setView] = useState<'list' | 'board'>('list')
 
-  const load = async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/requests?clientId=${clientId}&status=all`))
-      const data = await res.json() as { requests: Request[] }
-      setRequests(data.requests ?? [])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { void load() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  const { data, isLoading: loading, mutate: load } = useSWR<{ requests: Request[] }>(
+    `/api/admin/requests?clientId=${clientId}&status=all`,
+  )
+  const requests = data?.requests ?? []
 
   if (loading) return <SkeletonList rows={3} />
 
@@ -2070,18 +2324,12 @@ interface InvoiceRow {
 }
 
 function InvoicesTab({ clientId }: { clientId: string }) {
-  const [invoices, setInvoices] = useState<InvoiceRow[]>([])
-  const [loading, setLoading] = useState(true)
   const router = useRouter()
 
-  useEffect(() => {
-    setLoading(true)
-    fetch(apiPath(`/api/admin/invoices?orgId=${clientId}`))
-      .then(r => r.json() as Promise<{ items: InvoiceRow[] }>)
-      .then(data => setInvoices(data.items ?? []))
-      .catch(() => setInvoices([]))
-      .finally(() => setLoading(false))
-  }, [clientId])
+  const { data, isLoading: loading } = useSWR<{ items: InvoiceRow[] }>(
+    `/api/admin/invoices?orgId=${clientId}`,
+  )
+  const invoices = data?.items ?? []
 
   const formatTabDate = (dateStr: string | null): string => {
     if (!dateStr) return '--'
@@ -2419,34 +2667,38 @@ function TrackQueueTab({ clientId }: { clientId: string }) {
   const [mode, setMode] = useState<TracksMode>('auto')
   const [smallCount, setSmallCount] = useState(0)
   const [largeCount, setLargeCount] = useState(0)
-  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
-  const fetchTracks = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/capacity?orgId=${clientId}`))
-      if (!res.ok) { setTracks([]); return }
-      const data = await res.json() as CapacityResponse & { customSmallTracks?: number; customLargeTracks?: number }
-      const m = (data.tracksMode ?? 'auto') as TracksMode
-      setMode(m)
-      setSmallCount(data.customSmallTracks ?? 0)
-      setLargeCount(data.customLargeTracks ?? 0)
-      if (m === 'off') {
-        setUnified(true)
-        setTracks([bucketUnified(data)])
-      } else {
-        setUnified(false)
-        setTracks(bucketTracks(data))
-      }
-    } catch {
-      setTracks([])
-    } finally {
-      setLoading(false)
-    }
-  }, [clientId])
-
-  useEffect(() => { fetchTracks() }, [fetchTracks])
+  // Capacity is cached via SWR. The server response drives several pieces of
+  // local state (mode + counts are editable before save), so onSuccess mirrors
+  // the response into state exactly as the old fetch did. `mutate` (aliased
+  // fetchTracks) re-syncs after a save.
+  const { isLoading: loading, mutate: fetchTracks } = useSWR<
+    CapacityResponse & { customSmallTracks?: number; customLargeTracks?: number }
+  >(
+    `/api/admin/capacity?orgId=${clientId}`,
+    async (path: string) => {
+      const res = await fetch(apiPath(path))
+      if (!res.ok) throw new Error('Failed to load capacity')
+      return res.json()
+    },
+    {
+      onSuccess: (data) => {
+        const m = (data.tracksMode ?? 'auto') as TracksMode
+        setMode(m)
+        setSmallCount(data.customSmallTracks ?? 0)
+        setLargeCount(data.customLargeTracks ?? 0)
+        if (m === 'off') {
+          setUnified(true)
+          setTracks([bucketUnified(data)])
+        } else {
+          setUnified(false)
+          setTracks(bucketTracks(data))
+        }
+      },
+      onError: () => { setTracks([]) },
+    },
+  )
 
   const saveOverride = useCallback(async (next: { tracksMode: TracksMode; customSmallTracks?: number; customLargeTracks?: number }) => {
     setSaving(true)
@@ -2595,37 +2847,34 @@ function Stepper({ label, value, onChange, disabled, atMax }: {
 }
 
 function FilesTab({ clientId }: { clientId: string }) {
-  const [files, setFiles] = useState<FileRow[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    // Fetch requests for this client, then fetch files for each
-    fetch(apiPath(`/api/admin/requests?clientId=${clientId}&status=all`))
-      .then(r => r.json() as Promise<{ requests: { id: string; title: string }[] }>)
-      .then(async data => {
-        const reqs = data.requests ?? []
-        const allFiles: FileRow[] = []
-        // Fetch files for each request in parallel (batched)
-        const results = await Promise.all(
-          reqs.map(async req => {
-            try {
-              const res = await fetch(apiPath(`/api/admin/requests/${req.id}/files`))
-              if (!res.ok) return []
-              const json = await res.json() as { items: FileRow[] }
-              return (json.items ?? []).map(f => ({ ...f, requestTitle: req.title }))
-            } catch {
-              return []
-            }
-          })
-        )
-        for (const batch of results) allFiles.push(...batch)
-        allFiles.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        setFiles(allFiles)
-      })
-      .catch(() => setFiles([]))
-      .finally(() => setLoading(false))
-  }, [clientId])
+  // Files live across many requests; this fetches the client's requests then
+  // each request's files and merges them. An inline SWR fetcher keeps that
+  // multi-request transform intact while caching the merged result.
+  const { data: files = [], isLoading: loading } = useSWR<FileRow[]>(
+    `client-files:${clientId}`,
+    async () => {
+      const r = await fetch(apiPath(`/api/admin/requests?clientId=${clientId}&status=all`))
+      const data = await r.json() as { requests: { id: string; title: string }[] }
+      const reqs = data.requests ?? []
+      const allFiles: FileRow[] = []
+      // Fetch files for each request in parallel (batched)
+      const results = await Promise.all(
+        reqs.map(async req => {
+          try {
+            const res = await fetch(apiPath(`/api/admin/requests/${req.id}/files`))
+            if (!res.ok) return []
+            const json = await res.json() as { items: FileRow[] }
+            return (json.items ?? []).map(f => ({ ...f, requestTitle: req.title }))
+          } catch {
+            return []
+          }
+        })
+      )
+      for (const batch of results) allFiles.push(...batch)
+      allFiles.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      return allFiles
+    },
+  )
 
   function formatSize(bytes: number | null): string {
     if (!bytes) return '--'
@@ -2734,8 +2983,6 @@ interface BrandRow {
 }
 
 function BrandsTab({ clientId }: { clientId: string }) {
-  const [brands, setBrands] = useState<BrandRow[]>([])
-  const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -2749,21 +2996,10 @@ function BrandsTab({ clientId }: { clientId: string }) {
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/brands?orgId=${clientId}`))
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as { items: BrandRow[] }
-      setBrands(json.items ?? [])
-    } catch {
-      setBrands([])
-    } finally {
-      setLoading(false)
-    }
-  }, [clientId])
-
-  useEffect(() => { void load() }, [load])
+  const { data, isLoading: loading, mutate: load } = useSWR<{ items: BrandRow[] }>(
+    `/api/admin/brands?orgId=${clientId}`,
+  )
+  const brands = data?.items ?? []
 
   const resetForm = () => {
     setFormName('')
@@ -3115,24 +3351,10 @@ const CONTRACT_STATUS_TONES: Record<string, BadgeTone> = {
 }
 
 function ContractsTab({ clientId }: { clientId: string }) {
-  const [contracts, setContracts] = useState<ContractRow[]>([])
-  const [loading, setLoading] = useState(true)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/contracts?orgId=${clientId}`))
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as { items: ContractRow[] }
-      setContracts(json.items ?? [])
-    } catch {
-      setContracts([])
-    } finally {
-      setLoading(false)
-    }
-  }, [clientId])
-
-  useEffect(() => { void load() }, [load])
+  const { data, isLoading: loading } = useSWR<{ items: ContractRow[] }>(
+    `/api/admin/contracts?orgId=${clientId}`,
+  )
+  const contracts = data?.items ?? []
 
   const columns: DataTableColumn<ContractRow>[] = [
     {
@@ -3238,8 +3460,6 @@ const CALL_STATUS_TONES: Record<string, BadgeTone> = {
 }
 
 function CallsTab({ clientId, orgName }: { clientId: string; orgName: string }) {
-  const [calls, setCalls] = useState<ScheduledCallRow[]>([])
-  const [loadingCalls, setLoadingCalls] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [formTitle, setFormTitle] = useState('')
   const [formDate, setFormDate] = useState('')
@@ -3248,21 +3468,10 @@ function CallsTab({ clientId, orgName }: { clientId: string; orgName: string }) 
   const [formUrl, setFormUrl] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const fetchCalls = useCallback(async () => {
-    setLoadingCalls(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/calls?orgId=${clientId}`))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { calls: ScheduledCallRow[] }
-      setCalls(data.calls ?? [])
-    } catch {
-      setCalls([])
-    } finally {
-      setLoadingCalls(false)
-    }
-  }, [clientId])
-
-  useEffect(() => { void fetchCalls() }, [fetchCalls])
+  const { data, isLoading: loadingCalls, mutate: fetchCalls } = useSWR<{ calls: ScheduledCallRow[] }>(
+    `/api/admin/calls?orgId=${clientId}`,
+  )
+  const calls = data?.calls ?? []
 
   async function handleCreate() {
     if (!formTitle.trim() || !formDate) return
@@ -3533,17 +3742,10 @@ interface TimeEntryRow {
 }
 
 function TimeTab({ clientId }: { clientId: string }) {
-  const [entries, setEntries] = useState<TimeEntryRow[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    fetch(apiPath(`/api/admin/time?orgId=${clientId}`))
-      .then(r => r.json() as Promise<{ items: TimeEntryRow[] }>)
-      .then(data => setEntries(data.items ?? []))
-      .catch(() => setEntries([]))
-      .finally(() => setLoading(false))
-  }, [clientId])
+  const { data, isLoading: loading } = useSWR<{ items: TimeEntryRow[] }>(
+    `/api/admin/time?orgId=${clientId}`,
+  )
+  const entries = data?.items ?? []
 
   const totalHours = entries.reduce((s, e) => s + e.hours, 0)
   const billableHours = entries.filter(e => e.billable).reduce((s, e) => s + e.hours, 0)
@@ -3649,18 +3851,12 @@ interface DealRow {
 const DEAL_STAGE_FALLBACK = { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text)' }
 
 function DealsTab({ clientId, orgName }: { clientId: string; orgName: string }) {
-  const [deals, setDeals] = useState<DealRow[]>([])
-  const [loading, setLoading] = useState(true)
   const router = useRouter()
 
-  useEffect(() => {
-    setLoading(true)
-    fetch(apiPath(`/api/admin/deals?orgId=${clientId}`))
-      .then(r => r.json() as Promise<{ items: DealRow[] }>)
-      .then(data => setDeals(data.items ?? []))
-      .catch(() => setDeals([]))
-      .finally(() => setLoading(false))
-  }, [clientId])
+  const { data, isLoading: loading } = useSWR<{ items: DealRow[] }>(
+    `/api/admin/deals?orgId=${clientId}`,
+  )
+  const deals = data?.items ?? []
 
   if (loading) {
     return (
@@ -3774,22 +3970,14 @@ interface CrmActivityRow {
 // (components/tahi/activity-timeline.tsx, ACTIVITY_TYPE_META).
 
 function CrmActivitiesTab({ clientId }: { clientId: string }) {
-  const [items, setItems] = useState<CrmActivityRow[]>([])
-  const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ type: 'note', title: '', description: '' })
 
-  const fetchActivities = useCallback(() => {
-    setLoading(true)
-    fetch(apiPath(`/api/admin/activities?orgId=${clientId}`))
-      .then(r => r.json() as Promise<{ items: CrmActivityRow[] }>)
-      .then(data => setItems(data.items ?? []))
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false))
-  }, [clientId])
-
-  useEffect(() => { fetchActivities() }, [fetchActivities])
+  const { data, isLoading: loading, mutate: fetchActivities } = useSWR<{ items: CrmActivityRow[] }>(
+    `/api/admin/activities?orgId=${clientId}`,
+  )
+  const items = data?.items ?? []
 
   const handleSubmit = async () => {
     if (!form.title.trim()) return
@@ -3932,26 +4120,26 @@ interface RevenueTimeEntry {
 }
 
 function RevenueTab({ clientId }: { clientId: string }) {
-  const [invoices, setInvoices] = useState<RevenueInvoice[]>([])
-  const [timeEntries, setTimeEntries] = useState<RevenueTimeEntry[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    Promise.all([
-      fetch(apiPath(`/api/admin/invoices?orgId=${clientId}`))
-        .then(r => r.json() as Promise<{ items: RevenueInvoice[] }>)
-        .then(d => d.items ?? [])
-        .catch(() => [] as RevenueInvoice[]),
-      fetch(apiPath(`/api/admin/time?orgId=${clientId}`))
-        .then(r => r.json() as Promise<{ items: RevenueTimeEntry[] }>)
-        .then(d => d.items ?? [])
-        .catch(() => [] as RevenueTimeEntry[]),
-    ]).then(([inv, time]) => {
-      setInvoices(inv)
-      setTimeEntries(time)
-    }).finally(() => setLoading(false))
-  }, [clientId])
+  // Invoices + time entries load together via an inline SWR fetcher; each side
+  // swallows its own error and falls back to an empty list, just like before.
+  const { data, isLoading: loading } = useSWR<{ invoices: RevenueInvoice[]; timeEntries: RevenueTimeEntry[] }>(
+    `client-revenue:${clientId}`,
+    async () => {
+      const [inv, time] = await Promise.all([
+        fetch(apiPath(`/api/admin/invoices?orgId=${clientId}`))
+          .then(r => r.json() as Promise<{ items: RevenueInvoice[] }>)
+          .then(d => d.items ?? [])
+          .catch(() => [] as RevenueInvoice[]),
+        fetch(apiPath(`/api/admin/time?orgId=${clientId}`))
+          .then(r => r.json() as Promise<{ items: RevenueTimeEntry[] }>)
+          .then(d => d.items ?? [])
+          .catch(() => [] as RevenueTimeEntry[]),
+      ])
+      return { invoices: inv, timeEntries: time }
+    },
+  )
+  const invoices = data?.invoices ?? []
+  const timeEntries = data?.timeEntries ?? []
 
   if (loading) {
     return (
@@ -4084,9 +4272,6 @@ interface ClientCostRow {
 }
 
 function ProfitabilityTab({ clientId }: { clientId: string }) {
-  const [data, setData] = useState<ProfitabilityData | null>(null)
-  const [costs, setCosts] = useState<ClientCostRow[]>([])
-  const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({
     description: '',
@@ -4099,23 +4284,23 @@ function ProfitabilityTab({ clientId }: { clientId: string }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const loadAll = useCallback(async () => {
-    setLoading(true)
-    try {
+  // Profitability + costs load together (both must succeed) via an inline SWR
+  // fetcher. `mutate` (aliased loadAll) refetches after a cost is added/removed.
+  const { data: combined, isLoading: loading, mutate: loadAll } = useSWR<{ profit: ProfitabilityData; costs: ClientCostRow[] }>(
+    `client-profitability:${clientId}`,
+    async () => {
       const [profitRes, costsRes] = await Promise.all([
         fetch(apiPath(`/api/admin/clients/${clientId}/profitability`)).then(r => r.ok ? r.json() : Promise.reject()),
         fetch(apiPath(`/api/admin/clients/${clientId}/costs`)).then(r => r.ok ? r.json() : Promise.reject()),
       ])
-      setData(profitRes as ProfitabilityData)
-      setCosts(((costsRes as { costs?: ClientCostRow[] }).costs) ?? [])
-    } catch {
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [clientId])
-
-  useEffect(() => { loadAll() }, [loadAll])
+      return {
+        profit: profitRes as ProfitabilityData,
+        costs: ((costsRes as { costs?: ClientCostRow[] }).costs) ?? [],
+      }
+    },
+  )
+  const data = combined?.profit ?? null
+  const costs = combined?.costs ?? []
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
@@ -4370,17 +4555,10 @@ interface AuditEntry {
 }
 
 function ActivityTab({ clientId }: { clientId: string }) {
-  const [entries, setEntries] = useState<AuditEntry[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    fetch(apiPath(`/api/admin/audit-log?orgId=${clientId}&limit=50`))
-      .then(r => r.json() as Promise<{ items: AuditEntry[] }>)
-      .then(data => setEntries(data.items ?? []))
-      .catch(() => setEntries([]))
-      .finally(() => setLoading(false))
-  }, [clientId])
+  const { data, isLoading: loading } = useSWR<{ items: AuditEntry[] }>(
+    `/api/admin/audit-log?orgId=${clientId}&limit=50`,
+  )
+  const entries = data?.items ?? []
 
   if (loading) {
     return (

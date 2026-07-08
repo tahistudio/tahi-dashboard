@@ -8,7 +8,9 @@
    ============================================================ */
 
 @theme {
-  /* Typography */
+  /* Typography. Manrope is loaded via the Google Fonts @import above; the
+     codebase references the 'Manrope' family name literally throughout, so we
+     keep the named family rather than a next/font hashed name. */
   --font-sans: 'Manrope', ui-sans-serif, system-ui, sans-serif;
 
   /* Brand Colours
@@ -777,6 +779,16 @@ input[type="radio"]:focus-visible {
    that sat right up against the search text. */
 .search-palette-input:focus-visible {
   box-shadow: none;
+  border-radius: 0;
+}
+
+/* Time-tracker picker search (top-nav dropdown). The .tt-search wrapper owns
+   the focus affordance via :focus-within, so the inner input must not also
+   paint the global brand ring - same artefact the search palette avoids above.
+   Unlayered so it beats the layered .tt-search input rule in app-shell.css. */
+.tt-search input:focus-visible {
+  box-shadow: none;
+  border-color: transparent;
   border-radius: 0;
 }
 

@@ -16,8 +16,8 @@
 // aria-live="polite" announces each new event to assistive tech. Money + client
 // event text can carry amounts/names, so those rows carry data-private.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { apiPath } from '@/lib/api'
+import { useEffect, useRef, useState } from 'react'
+import useSWR from 'swr'
 
 type WireDomain = 'content' | 'social' | 'sales' | 'money' | 'client' | 'ops'
 
@@ -71,7 +71,6 @@ function relativeTime(at: string, now: number): string {
 }
 
 export function TheWire({ className }: { className?: string }) {
-  const [events, setEvents] = useState<WireEvent[]>([])
   const [index, setIndex] = useState(0)
   const [phase, setPhase] = useState<'in' | 'out'>('in')
   const [paused, setPaused] = useState(false)
@@ -86,23 +85,14 @@ export function TheWire({ className }: { className?: string }) {
     setReduced(prefersReducedMotion())
   }, [])
 
-  const fetchEvents = useCallback(async () => {
-    try {
-      const res = await fetch(apiPath('/api/admin/overview/wire'))
-      if (!res.ok) throw new Error('Failed')
-      const json = (await res.json()) as { events?: WireEvent[] }
-      const next = json.events ?? []
-      setEvents(next)
-      setIndex(0)
-      setNow(Date.now())
-    } catch {
-      setEvents([])
-    }
-  }, [])
+  const { data: wireData } = useSWR<{ events?: WireEvent[] }>('/api/admin/overview/wire')
+  const events = wireData?.events ?? []
 
+  // Reset the ticker to the first event and refresh "now" when fresh data arrives.
   useEffect(() => {
-    fetchEvents()
-  }, [fetchEvents])
+    setIndex(0)
+    setNow(Date.now())
+  }, [wireData])
 
   // Pause whenever the tab is hidden; resume (and refresh "now") when visible.
   useEffect(() => {

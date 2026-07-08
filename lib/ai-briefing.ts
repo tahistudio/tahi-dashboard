@@ -10,6 +10,7 @@
  */
 
 import { db } from '@/lib/db'
+import { SONNET_MODEL } from '@/lib/ai-models'
 import { schema } from '@/db/d1'
 import { eq, and, lt, not, inArray } from 'drizzle-orm'
 
@@ -110,6 +111,8 @@ export async function generateBriefing(): Promise<BriefingResponse> {
     name: schema.teamMembers.name,
     weeklyCapacityHours: schema.teamMembers.weeklyCapacityHours,
   }).from(schema.teamMembers)
+    // Defensive bound: never render an unbounded table into the prompt.
+    .limit(50)
 
   const contextText = buildBriefingContext({
     overdueInvoices,
@@ -265,7 +268,7 @@ If there are no items for today or this week, include an empty <today></today> o
 Maximum 5 items for today, 8 items for this week.`
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-5',
+    model: SONNET_MODEL,
     max_tokens: 2048,
     system: systemPrompt,
     messages: [{ role: 'user', content: contextText }],

@@ -16,9 +16,9 @@
 // See SPECS/homepage-studio-ledger.md.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { Calendar, ExternalLink, FileText, RotateCcw } from 'lucide-react'
-import { apiPath } from '@/lib/api'
 import { useSharedTick } from '@/lib/use-homepage-motion'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import type { DeliveryStatus } from '@/lib/delivery-status'
@@ -81,9 +81,6 @@ export interface NeedsYouProps {
 }
 
 export function NeedsYou({ oldest, className }: NeedsYouProps) {
-  const [offTrack, setOffTrack] = useState<OffTrackEngagement[]>([])
-  const [calls, setCalls] = useState<UpcomingCall[]>([])
-  const [loading, setLoading] = useState(true)
   // Mount gate: relative time + clocks differ server vs client.
   const [now, setNow] = useState<number | null>(null)
   const { format } = useDisplayCurrency()
@@ -95,27 +92,11 @@ export function NeedsYou({ oldest, className }: NeedsYouProps) {
     setNow(Date.now())
   }, [tick])
 
-  useEffect(() => {
-    let cancelled = false
-    Promise.all([
-      fetch(apiPath('/api/admin/engagements/off-track'))
-        .then(r => (r.ok ? (r.json() as Promise<{ engagements?: OffTrackEngagement[] }>) : { engagements: [] }))
-        .then(d => d.engagements ?? [])
-        .catch(() => [] as OffTrackEngagement[]),
-      fetch(apiPath('/api/admin/discovery-calls/upcoming?limit=5&includePast=1'))
-        .then(r => (r.ok ? (r.json() as Promise<{ calls?: UpcomingCall[] }>) : { calls: [] }))
-        .then(d => d.calls ?? [])
-        .catch(() => [] as UpcomingCall[]),
-    ]).then(([eng, cl]) => {
-      if (cancelled) return
-      setOffTrack(eng)
-      setCalls(cl)
-      setLoading(false)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const { data: offTrackData, isLoading: offTrackLoading } = useSWR<{ engagements?: OffTrackEngagement[] }>('/api/admin/engagements/off-track')
+  const { data: callsData, isLoading: callsLoading } = useSWR<{ calls?: UpcomingCall[] }>('/api/admin/discovery-calls/upcoming?limit=5&includePast=1')
+  const loading = offTrackLoading || callsLoading
+  const offTrack = offTrackData?.engagements ?? []
+  const calls = callsData?.calls ?? []
 
   // The single most-imminent upcoming call (soonest future call overall).
   const nextCall = useMemo(() => {

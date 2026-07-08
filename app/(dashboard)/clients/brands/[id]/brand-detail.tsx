@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
+import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
-import { apiPath } from '@/lib/api'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import {
   Globe,
@@ -44,28 +44,21 @@ interface BrandData {
 
 export function BrandDetail({ brandId }: { brandId: string }) {
   const router = useRouter()
-  const [brand, setBrand] = useState<BrandData | null>(null)
-  const [loading, setLoading] = useState(true)
   // A remote logo URL can 404/expire; on load failure fall back to the swatch.
   const [logoError, setLogoError] = useState(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/brands/${brandId}`))
-      if (!res.ok) {
-        router.push('/clients')
-        return
-      }
-      setBrand(await res.json() as BrandData)
-      setLogoError(false)
-    } finally {
-      setLoading(false)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [brandId])
+  // Cached via SWR so back-nav is instant. The global fetcher throws on a
+  // non-2xx response; we treat any error as "not found" and bounce to /clients.
+  const { data: brand, isLoading: loading, error } = useSWR<BrandData>(
+    `/api/admin/brands/${brandId}`,
+  )
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    if (error) router.push('/clients')
+  }, [error, router])
+
+  // Reset the logo fallback whenever the underlying logo URL changes.
+  useEffect(() => { setLogoError(false) }, [brand?.logoUrl])
 
   if (loading) return <LoadingSkeleton />
   if (!brand) return null

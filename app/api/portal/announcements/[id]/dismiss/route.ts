@@ -17,6 +17,18 @@ export async function POST(req: NextRequest, { params }: Params) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
+  // Validate the announcement exists before recording a dismissal, so a client
+  // cannot insert unbounded dismissal rows referencing arbitrary/non-existent
+  // ids (invalid-FK table bloat).
+  const [announcement] = await drizzle
+    .select({ id: schema.announcements.id })
+    .from(schema.announcements)
+    .where(eq(schema.announcements.id, announcementId))
+    .limit(1)
+  if (!announcement) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+
   // Check if already dismissed
   const existing = await drizzle
     .select()

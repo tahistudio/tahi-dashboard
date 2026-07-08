@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import useSWR from 'swr'
 import {
   Plus, Megaphone, RefreshCw, Calendar, Target,
 } from 'lucide-react'
@@ -88,30 +89,12 @@ function getStatus(a: Announcement): Status {
 // -- Main Component --
 
 export function AnnouncementsContent() {
-  const [announcements, setAnnouncements] = useState<Announcement[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: announcementsData, isLoading: loading, mutate: mutateAnnouncements } = useSWR<{ announcements: Announcement[] }>('/api/admin/announcements')
+  const announcements = announcementsData?.announcements ?? []
   const [showCreate, setShowCreate] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([])
-
-  const fetchAnnouncements = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/announcements'))
-      if (!res.ok) throw new Error('Failed to fetch')
-      const data = await res.json() as { announcements: Announcement[] }
-      setAnnouncements(data.announcements ?? [])
-    } catch {
-      setAnnouncements([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchAnnouncements()
-  }, [fetchAnnouncements])
 
   const selected = useMemo(
     () => announcements.find(a => a.id === selectedId) ?? null,
@@ -292,7 +275,7 @@ export function AnnouncementsContent() {
           <TahiButton
             variant="secondary"
             size="sm"
-            onClick={fetchAnnouncements}
+            onClick={() => void mutateAnnouncements()}
             iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
           >
             Refresh
@@ -418,7 +401,7 @@ export function AnnouncementsContent() {
       <CreateAnnouncementSlideOver
         open={showCreate}
         onClose={() => setShowCreate(false)}
-        onCreated={fetchAnnouncements}
+        onCreated={() => void mutateAnnouncements()}
       />
 
     </div>

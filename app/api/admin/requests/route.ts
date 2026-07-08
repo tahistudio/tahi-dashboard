@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, ne, inArray, isNull, sql } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
+import { dispatchDomainEvent } from '@/lib/events'
 
 // ── GET /api/admin/requests ─────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -140,6 +141,23 @@ export async function POST(req: NextRequest) {
       ${now}
     )
   `)
+
+  // Fire the domain event (automations + outgoing webhooks). Non-blocking.
+  await dispatchDomainEvent(drizzle, {
+    type: 'request_created',
+    entityId: id,
+    entityType: 'request',
+    orgId: clientOrgId,
+    data: {
+      title: title.trim(),
+      type: type ?? 'small_task',
+      category: category ?? 'development',
+      priority: priority ?? 'standard',
+      status: 'submitted',
+      isInternal: body.isInternal ? 1 : 0,
+      source: 'admin',
+    },
+  })
 
   return NextResponse.json({ id }, { status: 201 })
 }

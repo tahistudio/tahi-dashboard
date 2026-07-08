@@ -11,25 +11,18 @@
 
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import {
+  filterRecipientsByInAppPref,
+  isEventChannelEnabled,
+} from './notification-preferences'
+
+// The event / entity vocabulary and the deep-link resolver live in a
+// client-safe module so the bell and this helper share one source of truth.
+// Re-exported here so existing importers of these types keep working.
+export type { NotificationEventType, NotificationEntityType } from './notification-links'
+import type { NotificationEventType, NotificationEntityType } from './notification-links'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
-
-export type NotificationEventType =
-  | 'request_status_changed'
-  | 'new_message'
-  | 'task_assigned'
-  | 'invoice_created'
-  | 'request_created'
-  | 'retainer_churn_risk'
-  | 'retainer_upsell_opportunity'
-  | 'delivery_off_track'
-
-export type NotificationEntityType =
-  | 'request'
-  | 'message'
-  | 'task'
-  | 'invoice'
-  | 'organisation'
 
 interface CreateNotificationParams {
   userId: string
@@ -50,6 +43,17 @@ export async function createNotification(
   params: CreateNotificationParams,
 ): Promise<void> {
   try {
+    // Honour the recipient's in-app preference for this event. A muted user
+    // gets no bell row; on any lookup failure isEventChannelEnabled fails open.
+    const allowed = await isEventChannelEnabled(
+      database,
+      params.userId,
+      params.userType,
+      params.type,
+      'in_app',
+    )
+    if (!allowed) return
+
     await database.insert(schema.notifications).values({
       id: crypto.randomUUID(),
       userId: params.userId,
@@ -153,8 +157,16 @@ export async function createNotifications(
 ): Promise<void> {
   if (recipients.length === 0) return
   try {
+    // Drop recipients who muted this event's in-app channel before inserting.
+    const targets = await filterRecipientsByInAppPref(
+      database,
+      recipients,
+      shared.type,
+    )
+    if (targets.length === 0) return
+
     const now = new Date().toISOString()
-    const rows = recipients.map((r) => ({
+    const rows = targets.map((r) => ({
       id: crypto.randomUUID(),
       userId: r.userId,
       userType: r.userType,
@@ -169,5 +181,59 @@ export async function createNotifications(
     await database.insert(schema.notifications).values(rows)
   } catch (err) {
     console.error('[createNotifications] failed to insert notifications:', err)
+  }
+}
+
+type NotificationPayload = {
+  type: NotificationEventType
+  title: string
+  body?: string | null
+  entityType?: NotificationEntityType | null
+  entityId?: string | null
+}
+
+/**
+ * Notify every Tahi team member with a linked Clerk account. The audience
+ * emitter for internal events (new request, delivery off track, invoice paid).
+ * One call, no recipient plumbing at the call site.
+ */
+export async function notifyAllAdmins(
+  database: DrizzleDB,
+  payload: NotificationPayload,
+): Promise<void> {
+  try {
+    const members = await database
+      .select({ clerkUserId: schema.teamMembers.clerkUserId })
+      .from(schema.teamMembers)
+    const recipients = members
+      .filter((m): m is { clerkUserId: string } => !!m.clerkUserId)
+      .map((m) => ({ userId: m.clerkUserId, userType: 'team_member' as const }))
+    await createNotifications(database, recipients, payload)
+  } catch (err) {
+    console.error('[notifyAllAdmins] failed:', err)
+  }
+}
+
+/**
+ * Notify every contact at a client org with a linked Clerk account. The
+ * audience emitter for client-facing events (status changed, message posted,
+ * invoice sent). Contacts without a Clerk login yet are skipped.
+ */
+export async function notifyOrgContacts(
+  database: DrizzleDB,
+  orgId: string,
+  payload: NotificationPayload,
+): Promise<void> {
+  try {
+    const contacts = await database
+      .select({ clerkUserId: schema.contacts.clerkUserId })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.orgId, orgId))
+    const recipients = contacts
+      .filter((c): c is { clerkUserId: string } => !!c.clerkUserId)
+      .map((c) => ({ userId: c.clerkUserId, userType: 'contact' as const }))
+    await createNotifications(database, recipients, payload)
+  } catch (err) {
+    console.error('[notifyOrgContacts] failed:', err)
   }
 }

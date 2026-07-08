@@ -18,10 +18,10 @@
 // See SPECS/homepage-studio-ledger.md.
 
 import { useEffect, useState } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { Video, ExternalLink, ArrowRight } from 'lucide-react'
 import { CardDeck } from '@/components/tahi/card-deck'
-import { apiPath } from '@/lib/api'
 
 const AUCKLAND_TZ = 'Pacific/Auckland'
 const JOIN_WINDOW_MS = 10 * 60000 // [Join] appears within ~10 min of the start
@@ -93,11 +93,6 @@ function humanise(value: string): string {
 // ─── Component ─────────────────────────────────────────────────────────────────
 
 export function TodayRail({ className }: { className?: string }) {
-  const [calls, setCalls] = useState<UpcomingCall[]>([])
-  const [tasks, setTasks] = useState<OverviewTask[]>([])
-  const [callsLoading, setCallsLoading] = useState(true)
-  const [tasksLoading, setTasksLoading] = useState(true)
-
   // Mount-gated clock: time differs server vs client, so resolve the viewer's
   // zone after mount (and re-render once) to avoid a hydration mismatch.
   const [localTz, setLocalTz] = useState<string | null>(null)
@@ -108,21 +103,10 @@ export function TodayRail({ className }: { className?: string }) {
     setLocalTz(Intl.DateTimeFormat().resolvedOptions().timeZone)
   }, [])
 
-  useEffect(() => {
-    fetch(apiPath('/api/admin/discovery-calls/upcoming?limit=5&includePast=1'))
-      .then(r => (r.ok ? (r.json() as Promise<{ calls: UpcomingCall[] }>) : { calls: [] }))
-      .then(d => setCalls(d.calls ?? []))
-      .catch(() => setCalls([]))
-      .finally(() => setCallsLoading(false))
-  }, [])
-
-  useEffect(() => {
-    fetch(apiPath('/api/admin/tasks'))
-      .then(r => (r.ok ? (r.json() as Promise<{ tasks: OverviewTask[] }>) : { tasks: [] }))
-      .then(d => setTasks(d.tasks ?? []))
-      .catch(() => setTasks([]))
-      .finally(() => setTasksLoading(false))
-  }, [])
+  const { data: callsData, isLoading: callsLoading } = useSWR<{ calls: UpcomingCall[] }>('/api/admin/discovery-calls/upcoming?limit=5&includePast=1')
+  const { data: tasksData, isLoading: tasksLoading } = useSWR<{ tasks: OverviewTask[] }>('/api/admin/tasks')
+  const calls = callsData?.calls ?? []
+  const tasks = tasksData?.tasks ?? []
 
   const openTasks = tasks
     .filter(t => !TASK_CLOSED.has(t.status))

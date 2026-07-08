@@ -11,7 +11,7 @@ import { apiPath } from '@/lib/api'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface BriefingItem {
+export interface BriefingItem {
   category: 'invoice' | 'request' | 'health' | 'pipeline' | 'capacity' | 'task'
   priority: 'high' | 'medium' | 'low'
   title: string
@@ -19,7 +19,7 @@ interface BriefingItem {
   href?: string
 }
 
-interface BriefingData {
+export interface BriefingData {
   generatedAt: string
   todayItems: BriefingItem[]
   weekItems: BriefingItem[]
@@ -352,7 +352,7 @@ export function AIDailyBriefing() {
 
 // ── Briefing row (separate component for clean Link/div handling) ──────────
 
-function BriefingRow({ item, isLast }: { item: BriefingItem; isLast: boolean }) {
+export function BriefingRow({ item, isLast }: { item: BriefingItem; isLast: boolean }) {
   const pStyle = PRIORITY_STYLES[item.priority] ?? PRIORITY_STYLES.low
   const rowStyle: React.CSSProperties = {
     padding: 'var(--space-3) var(--space-5)',

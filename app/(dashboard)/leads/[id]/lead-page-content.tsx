@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -168,10 +169,34 @@ function toDraft(lead: Lead): LeadDraft {
 
 export function LeadPageContent({ leadId }: { leadId: string }) {
   const router = useRouter()
-  const [lead, setLead] = useState<Lead | null>(null)
-  const [activities, setActivities] = useState<LeadActivity[]>([])
-  const [discoveryTemplate, setDiscoveryTemplate] = useState<string[]>([])
-  const [loading, setLoading] = useState(true)
+  // Main data: lead + activities + template + pending reply draft
+  const { data, isLoading: loading, mutate } = useSWR<{
+    lead: Lead
+    activities: LeadActivity[]
+    discoveryQuestionsTemplate: string[]
+    pendingReplyDraft: PendingReplyDraft | null
+  }>(
+    `/api/admin/leads/${leadId}`,
+    async () => {
+      const res = await fetch(apiPath(`/api/admin/leads/${leadId}`))
+      if (!res.ok) return { lead: null as unknown as Lead, activities: [], discoveryQuestionsTemplate: [], pendingReplyDraft: null }
+      return await res.json() as {
+        lead: Lead
+        activities: LeadActivity[]
+        discoveryQuestionsTemplate: string[]
+        pendingReplyDraft: PendingReplyDraft | null
+      }
+    }
+  )
+  const lead = data?.lead ?? null
+  const activities = data?.activities ?? []
+  const discoveryTemplate = data?.discoveryQuestionsTemplate ?? []
+  const replyDraft = data?.pendingReplyDraft ?? null
+
+  // Team members for owner dropdown
+  const { data: teamData } = useSWR<{ items?: TeamMemberLite[]; members?: TeamMemberLite[] }>('/api/admin/team-members')
+  const teamMembers = (teamData?.items ?? teamData?.members ?? []).filter(m => m && m.id && m.name)
+
   const [enriching, setEnriching] = useState(false)
   const [enrichError, setEnrichError] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState(false)
@@ -182,14 +207,11 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
   const [draft, setDraft] = useState<LeadDraft | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  // Team members for owner dropdown
-  const [teamMembers, setTeamMembers] = useState<TeamMemberLite[]>([])
   // Activity composer state
   const [newActivityNote, setNewActivityNote] = useState('')
   const [savingActivity, setSavingActivity] = useState(false)
   const [activityError, setActivityError] = useState<string | null>(null)
   // AI reply draft state
-  const [replyDraft, setReplyDraft] = useState<PendingReplyDraft | null>(null)
   const [draftingReply, setDraftingReply] = useState(false)
   const [sendingReply, setSendingReply] = useState(false)
   const [replyError, setReplyError] = useState<string | null>(null)
@@ -197,50 +219,18 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
   const [replySubjectEdit, setReplySubjectEdit] = useState('')
   const [replyBodyEdit, setReplyBodyEdit] = useState('')
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch(apiPath(`/api/admin/leads/${leadId}`))
-      if (!res.ok) {
-        setLead(null)
-        return
-      }
-      const data = await res.json() as {
-        lead: Lead
-        activities?: LeadActivity[]
-        discoveryQuestionsTemplate?: string[]
-        pendingReplyDraft?: PendingReplyDraft | null
-      }
-      setLead(data.lead)
-      setActivities(data.activities ?? [])
-      setDiscoveryTemplate(data.discoveryQuestionsTemplate ?? [])
-      const pending = data.pendingReplyDraft ?? null
-      setReplyDraft(pending)
-      if (pending) {
-        setReplySubjectEdit(pending.finalSubject ?? pending.aiDraftSubject ?? '')
-        setReplyBodyEdit(pending.finalBody ?? pending.aiDraftBody)
-      } else {
-        setReplySubjectEdit('')
-        setReplyBodyEdit('')
-      }
-    } finally {
-      setLoading(false)
-    }
-  }, [leadId])
-
-  useEffect(() => { void load() }, [load])
-
-  // Team members for owner dropdown — fetch once
+  // Sync reply edit fields whenever the server draft changes (after load or
+  // after generating a new draft). Keeps user edits in sync with the latest
+  // AI content while the user is on this page.
   useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch(apiPath('/api/admin/team-members'))
-        if (!res.ok) return
-        const data = await res.json() as { items?: TeamMemberLite[]; members?: TeamMemberLite[] }
-        const items = data.items ?? data.members ?? []
-        setTeamMembers(items.filter(m => m && m.id && m.name))
-      } catch { /* ignore */ }
-    })()
-  }, [])
+    if (replyDraft) {
+      setReplySubjectEdit(replyDraft.finalSubject ?? replyDraft.aiDraftSubject ?? '')
+      setReplyBodyEdit(replyDraft.finalBody ?? replyDraft.aiDraftBody)
+    } else {
+      setReplySubjectEdit('')
+      setReplyBodyEdit('')
+    }
+  }, [replyDraft])
 
   async function saveActivity() {
     if (!lead || !newActivityNote.trim()) return
@@ -262,7 +252,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
         throw new Error(err.error ?? 'Failed to save note')
       }
       setNewActivityNote('')
-      await load()
+      await mutate()
     } catch (err) {
       setActivityError(err instanceof Error ? err.message : 'Failed to save note')
     } finally {
@@ -278,7 +268,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
       })
-      await load()
+      await mutate()
     } catch {
       // ignore — UI will show stale state until next refresh
     }
@@ -341,7 +331,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
         const err = await res.json().catch(() => ({})) as { error?: string }
         throw new Error(err.error ?? 'Save failed')
       }
-      await load()
+      await mutate()
       setEditing(false)
       setDraft(null)
     } catch (err) {
@@ -361,7 +351,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
         const err = await res.json().catch(() => ({})) as { error?: string; detail?: string }
         throw new Error(err.detail ?? err.error ?? 'Draft generation failed')
       }
-      await load()
+      await mutate()
     } catch (err) {
       setReplyError(err instanceof Error ? err.message : 'Draft generation failed')
     } finally {
@@ -389,7 +379,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
         const err = await res.json().catch(() => ({})) as { error?: string; detail?: string }
         throw new Error(err.detail ?? err.error ?? 'Send failed')
       }
-      await load()
+      await mutate()
     } catch (err) {
       setReplyError(err instanceof Error ? err.message : 'Send failed')
     } finally {
@@ -401,7 +391,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
     if (!replyDraft) return
     try {
       await fetch(apiPath(`/api/admin/ai-reply-drafts/${replyDraft.id}`), { method: 'DELETE' })
-      await load()
+      await mutate()
     } catch {
       // ignore
     }
@@ -417,7 +407,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
         const err = await res.json().catch(() => ({})) as { error?: string; detail?: string }
         throw new Error(err.detail ?? err.error ?? 'Enrichment failed')
       }
-      await load()
+      await mutate()
     } catch (err) {
       setEnrichError(err instanceof Error ? err.message : 'Enrichment failed')
     } finally {
@@ -869,7 +859,7 @@ export function LeadPageContent({ leadId }: { leadId: string }) {
               parentType="lead"
               parentId={lead.id}
               parentAlreadyPromoted={!!lead.promotedDealId}
-              onChanged={load}
+              onChanged={() => { void mutate() }}
             />
           )}
 

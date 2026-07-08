@@ -21,6 +21,13 @@ export async function sendSlackNotification({
   eventType,
   message,
 }: SlackNotifyParams): Promise<void> {
+  // Notification-preference gating (Domain C): intentionally NOT gated.
+  // This posts to a shared workspace channel resolved from the integrations
+  // config (channel_new_request / channel_status_change / channel_overdue),
+  // not to an identifiable individual, so there is no single team-member whose
+  // per-user Slack preference could apply. If the config is ever changed to
+  // target one recipient, resolve their teamMembers.clerkUserId and gate on
+  // isEventChannelEnabled(db, userId, 'team_member', <eventType>, 'slack').
   const token = process.env.SLACK_BOT_TOKEN
   if (!token) return
 
@@ -72,6 +79,11 @@ export async function postSlackMessage(params: {
   channelKey?: string        // config key to look up, e.g. 'channel_covers'
   channelId?: string         // or a literal channel id, takes precedence
 }): Promise<{ sent: boolean; error?: string }> {
+  // Notification-preference gating (Domain C): intentionally NOT gated. This is
+  // a workspace-level post to a shared channel (e.g. #covers), addressed to a
+  // team channel rather than a single user, so no individual's Slack preference
+  // maps to it. Gating would require a configured single recipient, which this
+  // channel-broadcast helper does not have.
   const token = process.env.SLACK_BOT_TOKEN
   if (!token) return { sent: false, error: 'SLACK_BOT_TOKEN not configured' }
 

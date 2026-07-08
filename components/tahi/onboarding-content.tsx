@@ -20,6 +20,7 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
+import { useClerk } from '@clerk/nextjs'
 import { cn } from '@/lib/utils'
 import {
   SceneShell,
@@ -209,17 +210,58 @@ export function OnboardingContent({
   entry,
   lead,
   redirectTo,
+  inviteToken,
 }: {
   entry: ClientEntry
   lead: OnboardingLead
   redirectTo: string
+  inviteToken?: string
 }) {
   const router = useRouter()
+  const { setActive } = useClerk()
+  const [provisioning, setProvisioning] = React.useState(false)
+  const [joinError, setJoinError] = React.useState<string | null>(null)
   const onComplete = () => {
     // Best-effort: mark onboarding done so re-entry skips to the dashboard.
     fetch('/api/onboarding/complete', { method: 'POST' }).catch(() => {})
     router.push(redirectTo)
   }
+
+  // Invited clients (token link) join their pre-created org with no payment.
+  // Consume the token once on mount and activate the org for this session, so
+  // the rest of onboarding and the portal can scope to it. We do NOT gate on
+  // activeClerkOrgId: the Clerk org-creation sign-up task may have handed the
+  // user a throwaway org of their own, but the invite must still join (and
+  // setActive) the pre-created studio org. A ref guards against a double run.
+  const inviteHandledRef = React.useRef(false)
+  React.useEffect(() => {
+    if (!inviteToken || inviteHandledRef.current) return
+    inviteHandledRef.current = true
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/portal/accept-invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: inviteToken }),
+        })
+        const json = (await res.json()) as { clerkOrgId?: string; error?: string }
+        if (cancelled) return
+        if (res.ok && json.clerkOrgId) {
+          if (setActive) await setActive({ organization: json.clerkOrgId })
+        } else {
+          inviteHandledRef.current = false // allow a retry on a transient failure
+          setJoinError(json.error ?? 'We could not open your workspace. Please contact the studio.')
+        }
+      } catch {
+        if (!cancelled) {
+          inviteHandledRef.current = false
+          setJoinError('We could not open your workspace. Please contact the studio.')
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [inviteToken, setActive])
   const contact = {
     name: entry.contactName ?? 'there',
     email: entry.contactEmail ?? '',
@@ -243,6 +285,14 @@ export function OnboardingContent({
   const [videoOpen, setVideoOpen] = React.useState(false)
   const [invites, setInvites] = React.useState<string[]>([])
   const [inviteEmail, setInviteEmail] = React.useState('')
+  // Self-serve project enquiry form (controlled, so it actually submits).
+  const [enqCompany, setEnqCompany] = React.useState('')
+  const [enqWebsite, setEnqWebsite] = React.useState('')
+  const [enqBrief, setEnqBrief] = React.useState('')
+  const [enqBudget, setEnqBudget] = React.useState('Not sure yet')
+  const [enqDiscipline, setEnqDiscipline] = React.useState('Both design and development')
+  const [enqSubmitting, setEnqSubmitting] = React.useState(false)
+  const [enqError, setEnqError] = React.useState<string | null>(null)
 
   const calDays = React.useMemo(() => upcomingDays(4), [])
   const steps = React.useMemo(() => buildSteps(engagement, clientType), [engagement, clientType])
@@ -255,7 +305,59 @@ export function OnboardingContent({
   const next = () => { setDir(1); if (idx >= steps.length - 1) onComplete(); else setIdx(idx + 1) }
   const back = () => { setDir(-1); setIdx(Math.max(0, idx - 1)) }
   const goSelf = (v: 'choose' | 'proposal' | 'done', d = 1) => { setDir(d); setSelfView(v) }
+
+  // Submit the one-off project enquiry: required fields, then POST (records a
+  // lead + emails business@tahi.studio), then show the "we're on it" screen.
+  const submitEnquiry = async () => {
+    setEnqError(null)
+    if (!enqCompany.trim()) { setEnqError('Please add your company name.'); return }
+    if (!enqBrief.trim()) { setEnqError('Tell us a little about the project.'); return }
+    setEnqSubmitting(true)
+    try {
+      const res = await fetch('/api/portal/enquiry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company: enqCompany, website: enqWebsite, brief: enqBrief, budget: enqBudget, disciplines: enqDiscipline }),
+      })
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        setEnqError(j.error ?? 'Something went wrong. Please try again.')
+        return
+      }
+      goSelf('done', 1)
+    } catch {
+      setEnqError('Something went wrong. Please try again.')
+    } finally {
+      setEnqSubmitting(false)
+    }
+  }
   const pickRetainer = () => { setDir(1); setEngagement('retainer'); setChosen(true); setIdx(0) }
+
+  // Self-serve clients need a linked D1 org before the pay step. Clerk may have
+  // already created their Clerk org during sign-up (the org-creation task), so
+  // we do NOT gate on !activeClerkOrgId: /api/portal/provision is idempotent and
+  // creates the linked D1 row for whichever Clerk org they have (or makes one if
+  // none). Without this, a Clerk-created org leaves no D1 row and checkout 403s.
+  const needsProvision = clientType === 'new' && entry.entry === 'selfserve'
+  const ensureOrg = async (): Promise<boolean> => {
+    setProvisioning(true)
+    try {
+      const res = await fetch('/api/portal/provision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: entry.companyName || undefined }),
+      })
+      const json = (await res.json()) as { clerkOrgId?: string }
+      if (!res.ok || !json.clerkOrgId) return false
+      if (setActive) await setActive({ organization: json.clerkOrgId })
+      return true
+    } catch {
+      return false
+    } finally {
+      setProvisioning(false)
+    }
+  }
+  const planContinue = async () => { if (await ensureOrg()) next() }
 
   // Send any pending invites (Clerk org invitations) then advance.
   const sendInvitesAndNext = async () => {
@@ -295,13 +397,14 @@ export function OnboardingContent({
           <h1 className="ob-h1">Tell us about the project.</h1>
           <p className="ob-sub">A few details so we come prepared. We&apos;ll reach out to learn more and set up a quick call. No commitment.</p>
           <div className="ob-identity"><span className="ob-identity-av">{contact.initials}</span><span className="ob-identity-t"><b>{contact.name}</b><small>{contact.email}</small></span><span className="ob-identity-tag">From your sign-up</span></div>
-          <div className="ob-row2 ob-field"><div><label className="ob-label">Company name</label><input className="ob-input" placeholder="Company name" /></div><div><label className="ob-label">Website <span style={{ color: '#9b9a94' }}>(if you have one)</span></label><input className="ob-input" placeholder="yourcompany.com" /></div></div>
-          <div className="ob-field"><label className="ob-label">What are you after?</label><textarea className="ob-textarea" placeholder="A new site, a rebrand, a product surface. A sentence or two is enough." /></div>
+          <div className="ob-row2 ob-field"><div><label className="ob-label">Company name <span style={{ color: '#b3261e' }}>*</span></label><input className="ob-input" placeholder="Company name" value={enqCompany} onChange={e => setEnqCompany(e.target.value)} autoComplete="organization" /></div><div><label className="ob-label">Website <span style={{ color: '#9b9a94' }}>(if you have one)</span></label><input className="ob-input" placeholder="yourcompany.com" value={enqWebsite} onChange={e => setEnqWebsite(e.target.value)} /></div></div>
+          <div className="ob-field"><label className="ob-label">What are you after? <span style={{ color: '#b3261e' }}>*</span></label><textarea className="ob-textarea" placeholder="A new site, a rebrand, a product surface. A sentence or two is enough." value={enqBrief} onChange={e => setEnqBrief(e.target.value)} /></div>
           <div className="ob-row2 ob-field">
-            <div><label className="ob-label">Rough budget</label><select className="ob-select" defaultValue="Not sure yet">{BUDGETS.map(b => <option key={b} value={b}>{b}</option>)}</select></div>
-            <div><label className="ob-label">You&apos;re after</label><select className="ob-select" defaultValue="Both design and development">{DISCIPLINES.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
+            <div><label className="ob-label">Rough budget</label><select className="ob-select" value={enqBudget} onChange={e => setEnqBudget(e.target.value)}>{BUDGETS.map(b => <option key={b} value={b}>{b}</option>)}</select></div>
+            <div><label className="ob-label">You&apos;re after</label><select className="ob-select" value={enqDiscipline} onChange={e => setEnqDiscipline(e.target.value)}>{DISCIPLINES.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
           </div>
-          <div className="ob-footer"><button className="ob-back" onClick={() => goSelf('choose', -1)}>Back</button><button className="ob-next" onClick={() => goSelf('done', 1)}>Send and we&apos;ll be in touch</button></div>
+          {enqError && <div className="ob-decline" role="alert">{enqError}</div>}
+          <div className="ob-footer"><button className="ob-back" onClick={() => goSelf('choose', -1)} disabled={enqSubmitting}>Back</button><button className="ob-next" onClick={submitEnquiry} disabled={enqSubmitting}>{enqSubmitting ? 'Sending...' : "Send and we'll be in touch"}</button></div>
         </>
       )
     } else {
@@ -363,6 +466,9 @@ export function OnboardingContent({
     }
   } else if (stepId === 'plan') {
     wide = true
+    // Self-serve clients have no org yet; provision one before advancing to pay
+    // so the checkout call on the next step can scope to it.
+    if (needsProvision) onPrimary = planContinue
     title = 'Choose how we&apos;ll work together.'.replace('&apos;', "'")
     sub = 'Pick the pace that fits. Change or pause it any time.'
     body = (
@@ -498,13 +604,14 @@ export function OnboardingContent({
                 <div className={cn('ob-body', dir > 0 ? 'ob-in-up' : 'ob-in-down')} key={inChooser ? 'self:' + selfView : stepId} ref={growInner}>
                   {title && <h1 className="ob-h1">{title}</h1>}
                   {sub && <p className="ob-sub">{sub}</p>}
+                  {joinError && <div className="ob-decline" role="alert">{joinError}</div>}
                   {body}
                 </div>
               </div>
               {footer && (
                 <div className={cn('ob-footer', idx === 0 && 'end')}>
-                  {idx > 0 && <button className="ob-back" onClick={back}>Back</button>}
-                  {primary && <button className="ob-next" onClick={onPrimary}>{primary}</button>}
+                  {idx > 0 && <button className="ob-back" onClick={back} disabled={provisioning}>Back</button>}
+                  {primary && <button className="ob-next" onClick={onPrimary} disabled={provisioning}>{provisioning ? 'Setting up your workspace' : primary}</button>}
                 </div>
               )}
               {skip && <div style={{ marginTop: '14px', textAlign: 'center' }}><button className="ob-skip" onClick={next}>{skip} &rarr;</button></div>}

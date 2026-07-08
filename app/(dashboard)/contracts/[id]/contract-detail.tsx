@@ -19,6 +19,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -154,7 +155,6 @@ export function ContractDetail({ id }: { id: string }) {
   const [contract, setContract] = useState<ContractDoc | null>(null)
   const [signers, setSigners] = useState<Signer[]>([])
   const [signatures, setSignatures] = useState<Signature[]>([])
-  const [loading, setLoading] = useState(true)
   const [activeView, setActiveView] = useState<ActiveView>('body')
 
   // Controlled fields backed by contract doc (save on blur)
@@ -187,34 +187,28 @@ export function ContractDetail({ id }: { id: string }) {
 
   // ── Data fetching ────────────────────────────────────────────────────
 
-  const fetchAll = useCallback(async (opts: { silent?: boolean } = {}) => {
-    if (!opts.silent) setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/contracts/${id}`))
-      if (!res.ok) throw new Error('not found')
-      const data = await res.json() as { contract: ContractDoc; signers: Signer[]; signatures: Signature[] }
-      setContract(data.contract)
-      setSigners(data.signers ?? [])
-      setSignatures(data.signatures ?? [])
-      setName(data.contract.name)
-      setBodyHtml(data.contract.bodyHtml)
-      if (data.contract.publicShareToken) {
-        const links: Record<string, string> = {}
-        for (const s of data.signers ?? []) {
-          links[s.id] = `${window.location.origin}/p/contract/${data.contract.publicShareToken}/sign/${s.id}`
-        }
-        setSignerLinks(links)
-      } else {
-        setSignerLinks({})
+  const { data: swrData, isLoading: loading, mutate } = useSWR<{
+    contract: ContractDoc
+    signers: Signer[]
+    signatures: Signature[]
+  }>(`/api/admin/contracts/${id}`)
+  useEffect(() => {
+    if (!swrData) return
+    setContract(swrData.contract)
+    setSigners(swrData.signers ?? [])
+    setSignatures(swrData.signatures ?? [])
+    setName(swrData.contract.name)
+    setBodyHtml(swrData.contract.bodyHtml)
+    if (swrData.contract.publicShareToken) {
+      const links: Record<string, string> = {}
+      for (const s of swrData.signers ?? []) {
+        links[s.id] = `${window.location.origin}/p/contract/${swrData.contract.publicShareToken}/sign/${s.id}`
       }
-    } catch {
-      if (!opts.silent) setContract(null)
-    } finally {
-      if (!opts.silent) setLoading(false)
+      setSignerLinks(links)
+    } else {
+      setSignerLinks({})
     }
-  }, [id])
-
-  useEffect(() => { void fetchAll() }, [fetchAll])
+  }, [swrData])
 
   // ── Mutations ────────────────────────────────────────────────────────
 
@@ -259,7 +253,7 @@ export function ContractDetail({ id }: { id: string }) {
       } else {
         showToast('No emails sent.', 'error')
       }
-      void fetchAll({ silent: true })
+      void mutate()
     } catch {
       showToast('Could not send signing emails.', 'error')
     }
@@ -274,7 +268,7 @@ export function ContractDetail({ id }: { id: string }) {
       })
       if (!res.ok) throw new Error()
       showToast('Signing link emailed.')
-      void fetchAll({ silent: true })
+      void mutate()
     } catch {
       showToast('Could not resend.', 'error')
     }
@@ -285,7 +279,7 @@ export function ContractDetail({ id }: { id: string }) {
       const res = await fetch(apiPath(`/api/admin/contracts/${id}/send`), { method: 'POST' })
       if (!res.ok) throw new Error()
       showToast('Public link ready.')
-      void fetchAll({ silent: true })
+      void mutate()
     } catch {
       showToast('Could not generate link.', 'error')
     }
@@ -296,7 +290,7 @@ export function ContractDetail({ id }: { id: string }) {
       const res = await fetch(apiPath(`/api/admin/contracts/${id}/send?rotate=1`), { method: 'POST' })
       if (!res.ok) throw new Error()
       showToast('Share token rotated.')
-      void fetchAll({ silent: true })
+      void mutate()
     } catch {
       showToast('Could not rotate.', 'error')
     }
@@ -308,7 +302,7 @@ export function ContractDetail({ id }: { id: string }) {
       const res = await fetch(apiPath(`/api/admin/contracts/${id}/send`), { method: 'DELETE' })
       if (!res.ok) throw new Error()
       showToast('Share revoked.')
-      void fetchAll({ silent: true })
+      void mutate()
     } catch {
       showToast('Could not revoke.', 'error')
     }
@@ -329,7 +323,7 @@ export function ContractDetail({ id }: { id: string }) {
     try {
       const res = await fetch(apiPath(`/api/admin/contracts/${id}/signers/${signerId}`), { method: 'DELETE' })
       if (!res.ok) throw new Error()
-      void fetchAll({ silent: true })
+      void mutate()
     } catch {
       showToast('Could not remove signer.', 'error')
     }
@@ -686,7 +680,7 @@ export function ContractDetail({ id }: { id: string }) {
               orgId={contract.orgId}
               dealId={contract.dealId}
               proposalId={contract.proposalId}
-              onChanged={() => void fetchAll({ silent: true })}
+              onChanged={() => void mutate()}
             />
           </RailSection>
 
@@ -743,7 +737,7 @@ export function ContractDetail({ id }: { id: string }) {
         <AddSignerDialog
           contractId={id}
           onClose={() => setShowAddSigner(false)}
-          onAdded={() => { setShowAddSigner(false); void fetchAll({ silent: true }) }}
+          onAdded={() => { setShowAddSigner(false); void mutate() }}
         />
       )}
 
@@ -796,7 +790,7 @@ export function ContractDetail({ id }: { id: string }) {
         onSent={({ sent }) => {
           if (sent > 0) {
             showToast(`Sent ${sent} signing email${sent === 1 ? '' : 's'}.`)
-            void fetchAll({ silent: true })
+            void mutate()
           }
         }}
       />

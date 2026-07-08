@@ -1,7 +1,9 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import {
   Inbox, FileText,
   Plus,
@@ -17,24 +19,68 @@ import { LedgerMasthead, type LedgerData } from '@/components/tahi/overview/ledg
 import { NeedsYou } from '@/components/tahi/overview/needs-you'
 import { InTheStudio } from '@/components/tahi/overview/in-the-studio'
 import { TodayRail } from '@/components/tahi/overview/today-rail'
-import { PipelineAhead } from '@/components/tahi/overview/pipeline-ahead'
 import { StudioCapacity } from '@/components/tahi/overview/studio-capacity'
 import { CashRunway } from '@/components/tahi/overview/cash-runway'
 import { ReceivablesTide } from '@/components/tahi/overview/receivables-tide'
 import { TheWire } from '@/components/tahi/overview/the-wire'
 import { TimeTracker } from '@/components/tahi/overview/time-tracker'
 import { WorldClock } from '@/components/tahi/overview/world-clock'
-import { ContentEngine } from '@/components/tahi/overview/content-engine'
-import { SocialCadence } from '@/components/tahi/overview/social-cadence'
-import { HotLeads } from '@/components/tahi/overview/hot-leads'
-import { ProposalsLive } from '@/components/tahi/overview/proposals-live'
-import { RetainerHealth } from '@/components/tahi/overview/retainer-health'
-import { ContractsCard } from '@/components/tahi/overview/contracts-card'
-import { TakeHomeGauges } from '@/components/tahi/overview/take-home-gauges'
-import { CashFlowRibbon } from '@/components/tahi/overview/cash-flow-ribbon'
 import { apiPath } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
+
+// ── Lightweight pulse skeleton for recharts cards (shown while chunk loads) ───
+function OverviewCardSkeleton() {
+  return (
+    <div
+      className="animate-pulse"
+      style={{
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-lg)',
+        minHeight: '12rem',
+      }}
+    />
+  )
+}
+
+// ── Recharts-bearing overview cards -- deferred to reduce first-paint JS ──────
+const ContentEngine = dynamic(
+  () => import('@/components/tahi/overview/content-engine').then(m => ({ default: m.ContentEngine })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const SocialCadence = dynamic(
+  () => import('@/components/tahi/overview/social-cadence').then(m => ({ default: m.SocialCadence })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const PipelineAhead = dynamic(
+  () => import('@/components/tahi/overview/pipeline-ahead').then(m => ({ default: m.PipelineAhead })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const HotLeads = dynamic(
+  () => import('@/components/tahi/overview/hot-leads').then(m => ({ default: m.HotLeads })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const ProposalsLive = dynamic(
+  () => import('@/components/tahi/overview/proposals-live').then(m => ({ default: m.ProposalsLive })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const RetainerHealth = dynamic(
+  () => import('@/components/tahi/overview/retainer-health').then(m => ({ default: m.RetainerHealth })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const ContractsCard = dynamic(
+  () => import('@/components/tahi/overview/contracts-card').then(m => ({ default: m.ContractsCard })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const TakeHomeGauges = dynamic(
+  () => import('@/components/tahi/overview/take-home-gauges').then(m => ({ default: m.TakeHomeGauges })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
+const CashFlowRibbon = dynamic(
+  () => import('@/components/tahi/overview/cash-flow-ribbon').then(m => ({ default: m.CashFlowRibbon })),
+  { ssr: false, loading: () => <OverviewCardSkeleton /> }
+)
 
 // ─── Accent colour map (CSS var references for dark mode compat) ─────────────
 //
@@ -119,34 +165,17 @@ export function OverviewSwitcher({ userName, orgName }: { userName: string; orgN
 
 export function AdminOverview({ userName }: { userName: string }) {
   const { features } = usePermissions()
-  const [ledger, setLedger] = useState<LedgerData | null>(null)
-  const [kpis, setKpis] = useState<KPIs | null>(null)
-  const [recentRequests, setRecentRequests] = useState<RecentRequest[]>([])
-  const [loading, setLoading] = useState(true)
-  const [fetchError, setFetchError] = useState(false)
 
   // The shared overview payload only feeds the KPI cells, Recent Requests and
   // Getting Started. Skip the fetch entirely when none of them are visible.
   const needsOverviewData = KPI_DATA_FEATURES.some(key => features[key] !== false)
-
-  useEffect(() => {
-    if (!needsOverviewData) {
-      setLoading(false)
-      return
-    }
-    fetch(apiPath('/api/admin/overview'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to fetch overview')
-        return r.json() as Promise<LedgerData & { recentRequests: RecentRequest[] }>
-      })
-      .then(data => {
-        setLedger(data)
-        setKpis(data.kpis)
-        setRecentRequests(data.recentRequests)
-      })
-      .catch(() => setFetchError(true))
-      .finally(() => setLoading(false))
-  }, [needsOverviewData])
+  const { data: overviewData, isLoading: loading, error: overviewError } = useSWR<LedgerData & { recentRequests: RecentRequest[] }>(
+    needsOverviewData ? '/api/admin/overview' : null
+  )
+  const ledger = overviewData ?? null
+  const kpis = overviewData?.kpis ?? null
+  const recentRequests = overviewData?.recentRequests ?? []
+  const fetchError = !!overviewError
 
   const hasAnyCard = CARD_FEATURES.some(key => features[key] !== false)
 
@@ -394,20 +423,9 @@ interface CapacityData {
 // ─── Client Overview ──────────────────────────────────────────────────────────
 
 export function ClientOverview({ userName, orgName }: { userName: string; orgName: string }) {
-  const [requests, setRequests] = useState<RecentRequest[]>([])
-  const [loading, setLoading] = useState(true)
-  const [fetchError, setFetchError] = useState(false)
-
-  useEffect(() => {
-    fetch(apiPath('/api/portal/requests?status=active&page=1'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to fetch requests')
-        return r.json() as Promise<{ requests: RecentRequest[] }>
-      })
-      .then(data => setRequests(data.requests ?? []))
-      .catch(() => setFetchError(true))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data: requestsData, isLoading: loading, error: requestsError } = useSWR<{ requests: RecentRequest[] }>('/api/portal/requests?status=active&page=1')
+  const requests = requestsData?.requests ?? []
+  const fetchError = !!requestsError
 
   const open = requests.filter(r => !['delivered', 'archived'].includes(r.status))
   const inReview = requests.filter(r => r.status === 'client_review')
@@ -559,38 +577,23 @@ export function ClientOverview({ userName, orgName }: { userName: string; orgNam
 // ─── Onboarding Checklist Wrapper ──────────────────────────────────────────────
 
 function OnboardingChecklistWrapper() {
-  const [state, setState] = useState<Record<string, boolean> | null>(null)
-  const [loomUrl, setLoomUrl] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [dismissed, setDismissed] = useState(false)
+  const [dismissed, setDismissed] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('tahi-onboarding-dismissed') === '1'
+    return false
+  })
 
-  const fetchOnboarding = useCallback(async () => {
-    if (typeof window !== 'undefined' && localStorage.getItem('tahi-onboarding-dismissed') === '1') {
-      setDismissed(true)
-      setLoading(false)
-      return
-    }
-    try {
-      const res = await fetch(apiPath('/api/portal/onboarding'))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as {
-        onboardingState: Record<string, boolean>
-        onboardingLoomUrl: string | null
-      }
-      setState(data.onboardingState)
-      setLoomUrl(data.onboardingLoomUrl)
-    } catch {
-      setState(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const { data: onboardingData, isLoading: loading, mutate } = useSWR<{
+    onboardingState: Record<string, boolean>
+    onboardingLoomUrl: string | null
+  }>(dismissed ? null : '/api/portal/onboarding')
 
-  useEffect(() => { void fetchOnboarding() }, [fetchOnboarding])
+  const state = onboardingData?.onboardingState ?? null
+  const loomUrl = onboardingData?.onboardingLoomUrl ?? null
 
   async function handleToggleStep(step: string, completed: boolean) {
-    if (!state) return
-    setState(prev => prev ? { ...prev, [step]: completed } : prev)
+    if (!onboardingData) return
+    // Optimistic update
+    void mutate({ ...onboardingData, onboardingState: { ...onboardingData.onboardingState, [step]: completed } }, { revalidate: false })
     try {
       await fetch(apiPath('/api/portal/onboarding'), {
         method: 'PATCH',
@@ -598,7 +601,8 @@ function OnboardingChecklistWrapper() {
         body: JSON.stringify({ step, completed }),
       })
     } catch {
-      setState(prev => prev ? { ...prev, [step]: !completed } : prev)
+      // Revert
+      void mutate(onboardingData, { revalidate: false })
     }
   }
 
@@ -975,21 +979,10 @@ function GettingStarted() {
 // ─── Schedule Call Widget (client portal, T88) ──────────────────────────────
 
 function ScheduleCallWidget() {
-  const [bookingUrl, setBookingUrl] = useState<string | null>(null)
-  const [loaded, setLoaded] = useState(false)
+  const { data: bookingData } = useSWR<{ url: string | null }>('/api/portal/settings/booking')
+  const bookingUrl = bookingData?.url ?? null
 
-  useEffect(() => {
-    fetch(apiPath('/api/portal/settings/booking'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ url: string | null }>
-      })
-      .then(data => setBookingUrl(data.url ?? null))
-      .catch(() => setBookingUrl(null))
-      .finally(() => setLoaded(true))
-  }, [])
-
-  if (!loaded || !bookingUrl) return null
+  if (!bookingData || !bookingUrl) return null
 
   return (
     <div
@@ -1054,21 +1047,10 @@ interface CapacityData {
 }
 
 function TrackCapacityCard() {
-  const [data, setData] = useState<CapacityData | null>(null)
-  const [loaded, setLoaded] = useState(false)
+  const { data: capacityData } = useSWR<CapacityData>('/api/portal/capacity')
+  const data = capacityData ?? null
 
-  useEffect(() => {
-    fetch(apiPath('/api/portal/capacity'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<CapacityData>
-      })
-      .then(d => setData(d))
-      .catch(() => setData(null))
-      .finally(() => setLoaded(true))
-  }, [])
-
-  if (!loaded || !data?.subscription) return null
+  if (!capacityData || !data?.subscription) return null
 
   const plan = data.subscription
 
@@ -1212,32 +1194,24 @@ function TrackCapacityCard() {
 // ─── Review Outreach Banner (T107) ───────────────────────────────────────────
 
 function ReviewOutreachBanner() {
-  const [show, setShow] = useState(false)
+  const [dismissed, setDismissed] = useState(false)
   const [responding, setResponding] = useState(false)
-
-  useEffect(() => {
-    fetch(apiPath('/api/portal/review-outreach'))
-      .then(r => {
-        if (!r.ok) throw new Error('Failed')
-        return r.json() as Promise<{ pending: boolean }>
-      })
-      .then(data => setShow(data.pending))
-      .catch(() => setShow(false))
-  }, [])
+  const { data: outreachData } = useSWR<{ pending: boolean }>('/api/portal/review-outreach')
+  const show = !dismissed && (outreachData?.pending ?? false)
 
   if (!show) return null
 
   const handleResponse = async (action: 'yes' | 'defer' | 'no') => {
     setResponding(true)
+    setDismissed(true)
     try {
       await fetch(apiPath('/api/portal/review-outreach'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       })
-      setShow(false)
     } catch {
-      // silent
+      setDismissed(false)
     } finally {
       setResponding(false)
     }

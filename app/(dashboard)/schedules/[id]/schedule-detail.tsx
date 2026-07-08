@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -119,7 +120,6 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   const { showToast } = useToast()
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [sections, setSections] = useState<ScheduleSection[]>([])
-  const [loading, setLoading] = useState(true)
   // Delivery spine (#148): live per-row status + engagement rollup.
   const [statusByRow, setStatusByRow] = useState<Record<string, DeliveryStatus>>({})
   const [engagement, setEngagement] = useState<EngagementRollup | null>(null)
@@ -177,53 +177,49 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
     } catch { /* silent */ }
   }
 
-  const fetchAll = useCallback(async (opts: { silent?: boolean } = {}) => {
-    if (!opts.silent) setLoading(true)
-    try {
-      const res = await fetch(apiPath(`/api/admin/schedules/${scheduleId}`))
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { schedule: Schedule; sections?: ScheduleSection[]; rows?: GanttRow[] }
-      setSchedule(data.schedule)
-      // New shape: sections (post 0026). Fall back to a synthetic gantt
-      // section built from flat rows if the server is older.
-      if (data.sections && data.sections.length > 0) {
-        setSections(data.sections)
-      } else if (data.rows) {
-        setSections([{
-          id: 'fallback-gantt',
-          type: 'gantt',
-          title: 'Project schedule',
-          subtitle: null,
-          startWeek: null,
-          endWeek: null,
-          data: null,
-          position: 0,
-          rows: data.rows,
-        }])
-      } else {
-        setSections([])
-      }
-      // Delivery spine (#148): live per-row status from linked requests/tasks.
-      // Non-fatal — a schedule with nothing linked just shows no dots.
-      try {
-        const dsRes = await fetch(apiPath(`/api/admin/schedules/${scheduleId}/delivery-status`))
-        if (dsRes.ok) {
-          const ds = await dsRes.json() as {
-            rows: Array<{ rowId: string; status: DeliveryStatus }>
-            engagement: EngagementRollup
-          }
-          setStatusByRow(Object.fromEntries(ds.rows.map(r => [r.rowId, r.status])))
-          setEngagement(ds.engagement)
-        }
-      } catch { /* non-fatal */ }
-    } catch {
-      // silent
-    } finally {
-      if (!opts.silent) setLoading(false)
-    }
-  }, [scheduleId])
+  const { data: swrData, isLoading: loading, mutate } = useSWR<{
+    schedule: Schedule
+    sections?: ScheduleSection[]
+    rows?: GanttRow[]
+  }>(`/api/admin/schedules/${scheduleId}`)
 
-  useEffect(() => { void fetchAll() }, [fetchAll])
+  const { data: dsData } = useSWR<{
+    rows: Array<{ rowId: string; status: DeliveryStatus }>
+    engagement: EngagementRollup
+  }>(`/api/admin/schedules/${scheduleId}/delivery-status`)
+
+  // Sync SWR data into local state. Local state is kept for optimistic
+  // updates (patchSchedule, patchSection, row mutations) so the UI
+  // doesn't flicker on every keystroke.
+  useEffect(() => {
+    if (!swrData) return
+    setSchedule(swrData.schedule)
+    // New shape: sections (post 0026). Fall back to a synthetic gantt
+    // section built from flat rows if the server is older.
+    if (swrData.sections && swrData.sections.length > 0) {
+      setSections(swrData.sections)
+    } else if (swrData.rows) {
+      setSections([{
+        id: 'fallback-gantt',
+        type: 'gantt',
+        title: 'Project schedule',
+        subtitle: null,
+        startWeek: null,
+        endWeek: null,
+        data: null,
+        position: 0,
+        rows: swrData.rows,
+      }])
+    } else {
+      setSections([])
+    }
+  }, [swrData])
+
+  useEffect(() => {
+    if (!dsData) return
+    setStatusByRow(Object.fromEntries(dsData.rows.map(r => [r.rowId, r.status])))
+    setEngagement(dsData.engagement)
+  }, [dsData])
 
   // If the active view points to a section that's been deleted, fall back
   // to the cover so we never render a stale id.
@@ -295,7 +291,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       })
       if (!res.ok) throw new Error('Failed')
       const created = await res.json() as { id: string }
-      await fetchAll({ silent: true })
+      await mutate()
       setActiveView(`section:${created.id}`)
     } catch {
       showToast('Failed to add section', 'error')
@@ -364,7 +360,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       })
       if (!res.ok) throw new Error('Failed')
     } catch {
-      await fetchAll({ silent: true })
+      await mutate()
       showToast('Failed to reorder', 'error')
     }
   }
@@ -402,7 +398,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       const data = await res.json() as { id: string }
       setEditingRowId(data.id)
       setDraft(defaults)
-      await fetchAll({ silent: true })
+      await mutate()
     } catch {
       showToast('Failed to add row', 'error')
     }
@@ -452,7 +448,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       setDraft(null)
     } catch {
       showToast('Failed to save row', 'error')
-      await fetchAll({ silent: true })
+      await mutate()
     } finally {
       setSavingDraft(false)
     }
@@ -706,7 +702,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
           orgName={schedule.orgName}
           dealTitle={schedule.dealTitle}
           leadName={schedule.leadName}
-          onChanged={() => void fetchAll({ silent: true })}
+          onChanged={() => void mutate()}
         />
       </RailSection>
 
@@ -924,7 +920,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
               onDeleteRow={() => editingRowId && deleteRow(editingRowId)}
               onCancelRowEdit={() => { setEditingRowId(null); setDraft(null) }}
               onChangeRowDraft={setDraft}
-              onWorkChanged={() => { void fetchAll({ silent: true }) }}
+              onWorkChanged={() => { void mutate() }}
               statusByRow={statusByRow}
             />
           )}

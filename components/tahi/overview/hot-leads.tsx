@@ -20,9 +20,9 @@
 // Fields used: id, name, company, source, estimatedValue, currency, aiScore,
 // aiScoreReason, createdAt, status.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import useSWR from 'swr'
 import { Flame } from 'lucide-react'
-import { apiPath } from '@/lib/api'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { DomainCard, CountPill } from '@/components/tahi/overview/domain-card'
 import { CardDeck } from '@/components/tahi/card-deck'
@@ -124,30 +124,12 @@ function isThisWeek(iso: string | null): boolean {
 export function HotLeads({ className }: { className?: string }) {
   const { formatNative } = useDisplayCurrency()
 
-  const [leads, setLeads] = useState<Lead[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-    fetch(apiPath('/api/admin/leads?status=new'))
-      .then(r => (r.ok ? (r.json() as Promise<{ leads: Lead[] }>) : { leads: [] }))
-      .then(data => {
-        if (cancelled) return
-        const rows = data.leads ?? []
-        // Highest AI score first so the swipeable stack leads with the hottest.
-        rows.sort((a, b) => (b.aiScore ?? 0) - (a.aiScore ?? 0))
-        setLeads(rows)
-      })
-      .catch(() => {
-        if (!cancelled) setLeads([])
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const { data: leadsData, isLoading: loading } = useSWR<{ leads: Lead[] }>('/api/admin/leads?status=new')
+  const leads = useMemo(() => {
+    const rows = leadsData?.leads ?? []
+    // Highest AI score first so the swipeable stack leads with the hottest.
+    return [...rows].sort((a, b) => (b.aiScore ?? 0) - (a.aiScore ?? 0))
+  }, [leadsData])
 
   const newThisWeek = useMemo(() => leads.filter(l => isThisWeek(l.createdAt)).length, [leads])
 

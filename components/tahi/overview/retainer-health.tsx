@@ -23,12 +23,12 @@
 // immediately under reduced motion, so figures paint at their final value).
 
 import { useEffect, useRef, useState } from 'react'
+import useSWR from 'swr'
 import { HeartPulse } from 'lucide-react'
 import { DomainCard, IconChip, CountPill } from './domain-card'
 import { CardDeck } from '@/components/tahi/card-deck'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { useReveal } from '@/lib/use-homepage-motion'
-import { apiPath } from '@/lib/api'
 
 interface RetainerClient {
   orgId: string
@@ -109,27 +109,8 @@ const LABEL_STYLE: React.CSSProperties = {
 
 export function RetainerHealth({ className }: { className?: string }) {
   const { format } = useDisplayCurrency()
-  const [clients, setClients] = useState<RetainerClient[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-    fetch(apiPath('/api/admin/reports/retainer-health'))
-      .then(r => (r.ok ? (r.json() as Promise<{ clients: RetainerClient[] }>) : { clients: [] }))
-      .then(data => {
-        if (cancelled) return
-        setClients(data.clients ?? [])
-      })
-      .catch(() => {
-        if (!cancelled) setClients([])
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const { data: retainerData, isLoading: loading } = useSWR<{ clients: RetainerClient[] }>('/api/admin/reports/retainer-health')
+  const clients = retainerData?.clients ?? []
 
   // Loading: shimmer the shell so the card holds its place in the grid.
   if (loading) {

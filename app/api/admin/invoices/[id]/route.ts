@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { callXeroAPI } from '@/lib/xero'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { dispatchDomainEvent } from '@/lib/events'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -134,6 +135,23 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         // Xero void failed silently, local status already updated
       }
     }
+  }
+
+  // Fire lifecycle events on a paid / overdue transition (automations +
+  // outgoing webhooks). Non-blocking. Other status changes are not lifecycle
+  // events, so they emit nothing.
+  const lifecycleType =
+    body.status === 'paid' ? 'invoice_paid' as const
+    : body.status === 'overdue' ? 'invoice_overdue' as const
+    : null
+  if (lifecycleType) {
+    await dispatchDomainEvent(drizzle, {
+      type: lifecycleType,
+      entityId: id,
+      entityType: 'invoice',
+      orgId: currentOwner?.orgId ?? null,
+      data: { status: body.status },
+    })
   }
 
   return NextResponse.json({ success: true })

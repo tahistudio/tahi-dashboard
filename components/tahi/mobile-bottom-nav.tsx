@@ -1,426 +1,222 @@
 'use client'
 
 /**
- * <MobileBottomNav>. Fixed bottom tab bar on mobile.
+ * MobileBottomNav - Tahi App Shell forest mobile navigation.
  *
- *   Tabs (admin):  Overview | Requests | Tasks | Messages | More
- *   Tabs (client): Overview | Requests | Messages | Files    | More
+ * A bottom tab bar (4 primary destinations + More) plus a "More" bottom sheet
+ * that lists all nav groups from the shared nav model. Navigation items, labels,
+ * icons, and visibility rules are driven entirely by nav-model.tsx, so the mobile
+ * surface stays in sync with the desktop forest rail automatically.
  *
- *   "More" opens a bottom-sheet drawer with the full nav, styled to
- *   match the desktop sidebar (cream surface, sidebar-style active
- *   state, brand-deepest text, leaf-radius selection). No collapsing
- *   on mobile, just flat group headers + items. User profile card
- *   pinned to the bottom of the drawer.
+ * Hidden on md+ breakpoints (desktop uses the persistent forest rail sidebar).
+ * Styling tokens live in app/(dashboard)/app-shell.css (.mtabs, .mtab, .mt-ic,
+ * .msheet-overlay, .msheet, .msheet-grab, .ms-glabel, .ms-item, .msi-ic,
+ * .ms-count). No hardcoded hex in this file.
  */
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
-import {
-  LayoutDashboard, Inbox, MessageSquare, FileText, Users, FolderOpen,
-  Menu, X, CheckSquare, TrendingUp, Star, CreditCard, Clock, BarChart2,
-  Gauge, UserCog, FileSignature, BookOpen, ShoppingBag, Calendar,
-  Megaphone, UserPlus, Share2, Phone, PenLine, Map,
-} from 'lucide-react'
+import { ShellIcon, type ShellIconName } from '@/components/tahi/shell-icons'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
-import { SidebarUserCard } from '@/components/tahi/sidebar-user-card'
-import { FocusTrap } from '@/components/tahi/focus-trap'
 import { useUser } from '@clerk/nextjs'
+import { usePermissions } from '@/components/tahi/permissions-context'
+import {
+  ADMIN_NAV,
+  CLIENT_NAV,
+  filterNav,
+  isRouteActive,
+  type NavItem,
+} from '@/components/tahi/nav-model'
 
-// Mirrors the desktop sidebar gate so /sitemap stays Liam+Staci only.
-const SITEMAP_ALLOWLIST_EMAILS = new Set(['business@tahi.studio', 'staci@tahi.studio'])
+// ── Primary tab hrefs per audience ──────────────────────────────────────────
+// Admin: the 4 core workspace destinations.
+// Client: the 4 most-visited portal destinations.
+const ADMIN_PRIMARY_HREFS = ['/overview', '/requests', '/tasks', '/messages']
+const CLIENT_PRIMARY_HREFS = ['/overview', '/requests', '/messages', '/files']
 
-const ADMIN_BOTTOM = [
-  { label: 'Overview', href: '/overview', icon: LayoutDashboard },
-  { label: 'Requests', href: '/requests', icon: Inbox },
-  { label: 'Tasks',    href: '/tasks',    icon: CheckSquare },
-  { label: 'Messages', href: '/messages', icon: MessageSquare },
-] as const
-
-const CLIENT_BOTTOM = [
-  { label: 'Overview', href: '/overview', icon: LayoutDashboard },
-  { label: 'Requests', href: '/requests', icon: Inbox },
-  { label: 'Messages', href: '/messages', icon: MessageSquare },
-  { label: 'Files',    href: '/files',    icon: FolderOpen },
-] as const
-
-interface DrawerNavItem {
-  label: string
-  href: string
-  icon: React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties; 'aria-hidden'?: boolean | 'true' | 'false' }>
-  /** Hidden unless current user's email is in this allowlist. */
-  emailAllowlist?: Set<string>
+// Fallback icon names used only when an item is absent from the filtered nav
+// (e.g. if features are eventually passed and gate a primary tab).
+const ADMIN_FALLBACK_ICONS: Record<string, ShellIconName> = {
+  '/overview': 'overview',
+  '/requests': 'requests',
+  '/tasks':    'tasks',
+  '/messages': 'messages',
 }
-interface DrawerNavGroup {
-  group: string
-  items: DrawerNavItem[]
+const CLIENT_FALLBACK_ICONS: Record<string, ShellIconName> = {
+  '/overview': 'overview',
+  '/requests': 'requests',
+  '/messages': 'messages',
+  '/files':    'files',
 }
-
-const ADMIN_DRAWER: DrawerNavGroup[] = [
-  {
-    group: 'Workspace',
-    items: [
-      { label: 'Overview', href: '/overview', icon: LayoutDashboard },
-      { label: 'Requests', href: '/requests', icon: Inbox },
-      { label: 'Tasks',    href: '/tasks',    icon: CheckSquare },
-      { label: 'Messages', href: '/messages', icon: MessageSquare },
-    ],
-  },
-  {
-    group: 'Sales',
-    items: [
-      { label: 'Leads',           href: '/leads',           icon: UserPlus },
-      { label: 'Calls',           href: '/calls',           icon: Phone },
-      { label: 'Deals',           href: '/deals',           icon: TrendingUp },
-      { label: 'Proposals',       href: '/proposals',       icon: FileText },
-      { label: 'Schedules',       href: '/schedules',       icon: Calendar },
-      { label: 'Contracts',       href: '/contracts',       icon: FileSignature },
-      { label: 'Sales analytics', href: '/sales-analytics', icon: BarChart2 },
-    ],
-  },
-  {
-    group: 'Clients',
-    items: [{ label: 'Clients', href: '/clients', icon: Users }],
-  },
-  {
-    group: 'Marketing',
-    items: [
-      { label: 'Content studio', href: '/content-studio', icon: PenLine },
-      { label: 'Sitemap',        href: '/sitemap',        icon: Map, emailAllowlist: SITEMAP_ALLOWLIST_EMAILS },
-      { label: 'Social',         href: '/social',         icon: Share2 },
-      { label: 'Reviews',        href: '/reviews',        icon: Star },
-      { label: 'Announcements',  href: '/announcements',  icon: Megaphone },
-    ],
-  },
-  {
-    group: 'Finance',
-    items: [
-      { label: 'Financial reports', href: '/financial-reports', icon: BarChart2 },
-      { label: 'Invoices',          href: '/invoices',          icon: FileText },
-      { label: 'Billing',           href: '/billing',           icon: CreditCard },
-      { label: 'Time',              href: '/time',              icon: Clock },
-      { label: 'Reports',           href: '/reports',           icon: BarChart2 },
-    ],
-  },
-  {
-    group: 'Operations',
-    items: [
-      { label: 'Capacity', href: '/capacity', icon: Gauge },
-      { label: 'Team',     href: '/team',     icon: UserCog },
-    ],
-  },
-  {
-    group: 'Knowledge',
-    items: [{ label: 'Docs Hub', href: '/docs', icon: BookOpen }],
-  },
-  // Settings intentionally absent here — it lives in the user card popup
-  // pinned to the bottom of the drawer to avoid two links to the same place.
-]
-
-const CLIENT_DRAWER: DrawerNavGroup[] = [
-  {
-    group: 'Your project',
-    items: [
-      { label: 'Overview', href: '/overview', icon: LayoutDashboard },
-      { label: 'Requests', href: '/requests', icon: Inbox },
-      { label: 'Messages', href: '/messages', icon: MessageSquare },
-    ],
-  },
-  {
-    group: 'Library',
-    items: [
-      { label: 'Files',    href: '/files',    icon: FolderOpen },
-      { label: 'Services', href: '/services', icon: ShoppingBag },
-    ],
-  },
-  {
-    group: 'Billing',
-    items: [
-      { label: 'Invoices', href: '/invoices', icon: FileText },
-      { label: 'Billing',  href: '/billing',  icon: CreditCard },
-    ],
-  },
-]
 
 interface MobileBottomNavProps {
   isAdmin?: boolean
+  features?: Record<string, boolean>
 }
 
-export function MobileBottomNav({ isAdmin = false }: MobileBottomNavProps) {
-  const pathname = usePathname()
-  const { isImpersonatingClient } = useImpersonation()
-  const [drawerOpen, setDrawerOpen] = useState(false)
+export function MobileBottomNav({ isAdmin = false, features }: MobileBottomNavProps) {
+  const pathname  = usePathname()
+  const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
+  const [sheetOpen, setSheetOpen] = useState(false)
 
-  // Local theme state for the user card's theme toggle. Mirrors the
-  // sidebar's logic so toggling from either surface stays in sync.
-  const [darkMode, setDarkMode] = useState(false)
-  useEffect(() => {
-    try {
-      setDarkMode(localStorage.getItem('tahi-theme') === 'dark')
-    } catch { /* localStorage unavailable */ }
-  }, [])
-  const toggleDarkMode = () => {
-    const next = !darkMode
-    setDarkMode(next)
-    try {
-      document.documentElement.classList.toggle('dark', next)
-      localStorage.setItem('tahi-theme', next ? 'dark' : 'light')
-    } catch { /* localStorage unavailable */ }
-  }
-
+  // Mirror the sidebar's showAsAdmin / isViewerRole derivation exactly so
+  // the same items appear on both surfaces.
   const showAsAdmin = isAdmin && !isImpersonatingClient
-  const bottomItems = showAsAdmin ? ADMIN_BOTTOM : CLIENT_BOTTOM
+  const isViewerRole =
+    isImpersonatingTeamMember &&
+    impersonatedAccessRules.length > 0 &&
+    impersonatedAccessRules.every(r => r.role === 'viewer')
+
+  // Defer the Clerk email read until after mount so the first client render
+  // matches the server (avoids hydration mismatch on the email-gated Sitemap
+  // entry). This is the same mounted gate used by the sidebar.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
   const { user } = useUser()
-  const userEmail = user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? null
-  const drawerGroups = (showAsAdmin ? ADMIN_DRAWER : CLIENT_DRAWER)
-    .map(group => ({
-      ...group,
-      items: group.items.filter(item =>
-        !item.emailAllowlist || (userEmail !== null && item.emailAllowlist.has(userEmail)),
-      ),
-    }))
-    .filter(group => group.items.length > 0)
+  const userEmail = mounted
+    ? (user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? null)
+    : null
+  const { canManagePermissions } = usePermissions()
 
-  // Close drawer on route change.
-  useEffect(() => { setDrawerOpen(false) }, [pathname])
+  // Feature flags come from the server-resolved permission map (passed by the
+  // layout), so the mobile nav hides the same feature-gated items as the rail.
+  const visibleGroups = filterNav(showAsAdmin ? ADMIN_NAV : CLIENT_NAV, {
+    showAsAdmin,
+    isViewerRole,
+    userEmail,
+    canManagePermissions,
+    features,
+  })
 
-  // Lock scroll while drawer is open.
-  useEffect(() => {
-    if (drawerOpen) {
-      const prev = document.body.style.overflow
-      document.body.style.overflow = 'hidden'
-      return () => { document.body.style.overflow = prev }
+  // Flat lookup: href -> NavItem. Lets primary tabs pull label + icon from the
+  // live filtered nav so labels always match the desktop sidebar.
+  const itemMap = new Map<string, NavItem>(
+    visibleGroups.flatMap(g => g.items.map(it => [it.href, it] as const)),
+  )
+
+  const fallbackIcons = showAsAdmin ? ADMIN_FALLBACK_ICONS : CLIENT_FALLBACK_ICONS
+  const primaryHrefs  = showAsAdmin ? ADMIN_PRIMARY_HREFS  : CLIENT_PRIMARY_HREFS
+  const primaryTabs   = primaryHrefs.map(href => {
+    const item = itemMap.get(href)
+    return {
+      href,
+      label: item?.label ?? href.slice(1),
+      icon:  (item?.icon ?? fallbackIcons[href] ?? 'overview') as ShellIconName,
     }
-  }, [drawerOpen])
+  })
 
-  // Active route detection mirrors the desktop sidebar's logic so
-  // both surfaces highlight the same items.
-  const exactOnly = new Set(['/requests', '/overview', '/proposals'])
-  const isItemActive = (href: string) =>
-    pathname === href || (!exactOnly.has(href) && pathname.startsWith(href))
+  const active     = (href: string) => isRouteActive(pathname, href)
+  const closeSheet = () => setSheetOpen(false)
+
+  // Close sheet when the route changes (link was tapped inside the sheet).
+  useEffect(() => { closeSheet() }, [pathname])
+
+  // Dismiss sheet on Escape for keyboard accessibility.
+  useEffect(() => {
+    if (!sheetOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeSheet() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [sheetOpen])
+
+  // Lock body scroll while sheet is open.
+  useEffect(() => {
+    if (!sheetOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [sheetOpen])
 
   return (
     <>
+      {/* ── Bottom tab bar ─────────────────────────────────────────────
+          Fixed to the bottom of the viewport. Hidden on md+ breakpoints
+          where the forest rail takes over.                              */}
       <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 flex items-stretch justify-around"
+        className="mtabs fixed bottom-0 inset-x-0 md:hidden"
+        style={{ zIndex: 50 }}
         aria-label="Primary"
-        style={{
-          height: '3.75rem',
-          background: 'var(--color-bg-cream)',
-          borderTop: '1px solid var(--color-border-subtle)',
-          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-          zIndex: 50,
-        }}
       >
-        {bottomItems.map(item => {
-          const Icon = item.icon
-          const active = isItemActive(item.href)
+        {primaryTabs.map(t => {
+          const isActive = active(t.href)
           return (
             <Link
-              key={item.href}
-              href={item.href}
-              aria-current={active ? 'page' : undefined}
-              className="flex flex-col items-center justify-center flex-1 gap-0.5"
-              style={{
-                textDecoration: 'none',
-                color: active ? 'var(--color-text-active)' : 'var(--color-text-muted)',
-                minHeight: '2.75rem',
-                fontWeight: active ? 600 : 500,
-                transition: 'color var(--motion-quick, 220ms) var(--ease-out, ease-out)',
-              }}
+              key={t.href}
+              href={t.href}
+              className={'mtab' + (isActive ? ' active' : '')}
+              aria-current={isActive ? 'page' : undefined}
             >
-              <Icon
-                size={20}
-                aria-hidden="true"
-                className="flex-shrink-0"
-                style={{ color: active ? 'var(--color-brand)' : 'var(--color-text-muted)' }}
-              />
-              <span style={{
-                fontSize: '0.625rem',
-                lineHeight: 1,
-              }}>
-                {item.label}
-              </span>
+              <span className="mt-ic" aria-hidden="true"><ShellIcon n={t.icon} s={20} /></span>
+              {t.label}
             </Link>
           )
         })}
 
-        {/* More button. Opens the bottom-sheet drawer with the full nav. */}
         <button
-          onClick={() => setDrawerOpen(true)}
-          className="flex flex-col items-center justify-center flex-1 gap-0.5"
+          className="mtab"
+          onClick={() => setSheetOpen(true)}
+          aria-expanded={sheetOpen}
           aria-label="Open full navigation menu"
-          aria-expanded={drawerOpen}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: drawerOpen ? 'var(--color-text-active)' : 'var(--color-text-muted)',
-            minHeight: '2.75rem',
-            fontWeight: drawerOpen ? 600 : 500,
-            transition: 'color var(--motion-quick, 220ms) var(--ease-out, ease-out)',
-          }}
         >
-          <Menu
-            size={20}
-            aria-hidden="true"
-            className="flex-shrink-0"
-            style={{ color: drawerOpen ? 'var(--color-brand)' : 'var(--color-text-muted)' }}
-          />
-          <span style={{ fontSize: '0.625rem', lineHeight: 1 }}>More</span>
+          <span className="mt-ic" aria-hidden="true"><ShellIcon n="more" s={20} /></span>
+          More
         </button>
       </nav>
 
-      {/* Bottom-sheet drawer. Matches the sidebar's cream surface,
-          sidebar-style active state. Flat groups, no collapsing
-          (mobile users want everything visible). User card pinned
-          to the bottom. */}
-      {drawerOpen && (
-        <div
-          className="md:hidden fixed inset-0"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Navigation menu"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setDrawerOpen(false)
-          }}
-          style={{
-            background: 'rgba(18, 26, 15, 0.5)',
-            zIndex: 60,
-          }}
-        >
-          <FocusTrap
-            active={drawerOpen}
-            onEscape={() => setDrawerOpen(false)}
-            className="absolute bottom-0 left-0 right-0 flex flex-col"
-            style={{
-              background: 'var(--color-bg-cream)',
-              borderTopLeftRadius: 'var(--radius-xl)',
-              borderTopRightRadius: 'var(--radius-xl)',
-              maxHeight: '90vh',
-              paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-              animation: 'slideUp 320ms cubic-bezier(0.22, 1, 0.36, 1)',
-            }}
+      {/* ── More bottom sheet ───────────────────────────────────────────
+          Lists ALL filtered nav groups (same filterNav pass as the tabs)
+          so nothing is hidden. Settings row pinned at the bottom.
+          Overlay click and Escape both dismiss.                          */}
+      {sheetOpen && (
+        <div className="msheet-overlay md:hidden" onClick={closeSheet}>
+          <div
+            className="msheet"
+            onClick={e => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="More navigation"
           >
-            {/* Drawer header: grab handle + title + close */}
-            <div className="flex-shrink-0" style={{ padding: '0.75rem 0 0' }}>
-              <div
-                aria-hidden="true"
-                style={{
-                  width: '2.5rem',
-                  height: '0.25rem',
-                  background: 'var(--color-border-strong)',
-                  borderRadius: '9999px',
-                  margin: '0 auto',
-                }}
-              />
-            </div>
-            <div
-              className="flex items-center justify-between flex-shrink-0"
-              style={{
-                padding: '0.75rem 1.25rem 0.5rem',
-              }}
-            >
-              <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>
-                Menu
-              </h2>
-              <button
-                onClick={() => setDrawerOpen(false)}
-                aria-label="Close menu"
-                className="flex items-center justify-center"
-                style={{
-                  width: '2.25rem',
-                  height: '2.25rem',
-                  background: 'transparent',
-                  border: 'none',
-                  borderRadius: 'var(--radius-md)',
-                  color: 'var(--color-text-muted)',
-                  cursor: 'pointer',
-                  transition: 'background var(--motion-quick, 220ms) var(--ease-out, ease-out)',
-                }}
-                onTouchStart={e => { e.currentTarget.style.background = 'var(--color-hover-tint)' }}
-                onTouchEnd={e => { e.currentTarget.style.background = 'transparent' }}
-              >
-                <X size={18} aria-hidden="true" />
-              </button>
-            </div>
+            <div className="msheet-grab" aria-hidden="true" />
 
-            {/* Nav groups */}
-            <div
-              className="overflow-y-auto flex-1"
-              style={{
-                padding: '0.25rem 0.75rem 1rem',
-              }}
-            >
-              {drawerGroups.map((group) => (
-                <div key={group.group} style={{ marginTop: '0.75rem' }}>
-                  <p style={{
-                    fontSize: '0.6875rem',
-                    fontWeight: 600,
-                    color: 'var(--color-text-subtle)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
-                    padding: '0 0.625rem 0.375rem',
-                    margin: 0,
-                  }}>
-                    {group.group}
-                  </p>
-                  <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-                    {group.items.map(item => {
-                      const Icon = item.icon
-                      const active = isItemActive(item.href)
-                      return (
-                        <li key={item.href} style={{ marginBottom: '0.125rem' }}>
-                          <Link
-                            href={item.href}
-                            aria-current={active ? 'page' : undefined}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '0.75rem',
-                              padding: '0.6875rem 0.625rem',
-                              borderRadius: 'var(--radius-md)',
-                              fontSize: '0.9375rem',
-                              fontWeight: active ? 600 : 500,
-                              color: active ? 'var(--color-text-active)' : 'var(--color-text-muted)',
-                              background: active ? 'var(--color-bg)' : 'transparent',
-                              boxShadow: active ? 'inset 0 0 0 1px var(--color-border-subtle)' : 'none',
-                              textDecoration: 'none',
-                              minHeight: '2.75rem',
-                              transition: 'background var(--motion-quick, 220ms) var(--ease-out, ease-out), color var(--motion-quick, 220ms) var(--ease-out, ease-out)',
-                            }}
-                          >
-                            <Icon
-                              size={18}
-                              aria-hidden="true"
-                              className="flex-shrink-0"
-                              style={{ color: active ? 'var(--color-brand)' : 'var(--color-text-muted)' }}
-                            />
-                            {item.label}
-                          </Link>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                </div>
-              ))}
-            </div>
+            {visibleGroups.map(g => (
+              <div key={g.group}>
+                <div className="ms-glabel">{g.group}</div>
+                {g.items.map(it => {
+                  const isActive = active(it.href)
+                  return (
+                    <Link
+                      key={it.href}
+                      href={it.href}
+                      className={'ms-item' + (isActive ? ' active' : '')}
+                      aria-current={isActive ? 'page' : undefined}
+                      onClick={closeSheet}
+                    >
+                      <span className="msi-ic" aria-hidden="true"><ShellIcon n={it.icon} s={20} /></span>
+                      {it.label}
+                      {it.count != null && (
+                        <span className="ms-count">{it.count}</span>
+                      )}
+                    </Link>
+                  )
+                })}
+              </div>
+            ))}
 
-            {/* User card pinned to the bottom of the drawer */}
-            <div
-              style={{
-                flexShrink: 0,
-                padding: '0.5rem 0.75rem',
-                borderTop: '1px solid var(--color-border-subtle)',
-                background: 'var(--color-bg-cream)',
-              }}
+            {/* Settings row pinned below a blank group label divider. */}
+            <div className="ms-glabel">&nbsp;</div>
+            <Link
+              href="/settings"
+              className={'ms-item' + (active('/settings') ? ' active' : '')}
+              aria-current={active('/settings') ? 'page' : undefined}
+              onClick={closeSheet}
             >
-              <SidebarUserCard
-                collapsed={false}
-                darkMode={darkMode}
-                onToggleDarkMode={toggleDarkMode}
-              />
-            </div>
-          </FocusTrap>
+              <span className="msi-ic" aria-hidden="true">
+                <ShellIcon n="settings" s={18} />
+              </span>
+              Settings
+            </Link>
+          </div>
         </div>
       )}
     </>

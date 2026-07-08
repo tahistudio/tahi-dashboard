@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useMemo } from 'react'
+import useSWR from 'swr'
 import {
   Users, Link2, DollarSign, RefreshCw, Search,
 } from 'lucide-react'
@@ -12,7 +13,6 @@ import { Avatar } from '@/components/tahi/avatar'
 import { Input } from '@/components/tahi/input'
 import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
-import { apiPath } from '@/lib/api'
 
 // -- Types --
 
@@ -73,26 +73,9 @@ function stateLabel(state: string | undefined): string {
 // -- Main Component --
 
 export function AffiliatesContent() {
-  const [data, setData] = useState<AffiliateData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data, isLoading: loading, mutate } = useSWR<AffiliateData>('/api/admin/integrations/rewardful')
   const [search, setSearch] = useState('')
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([])
-
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/integrations/rewardful'))
-      if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as AffiliateData
-      setData(json)
-    } catch {
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchData() }, [fetchData])
 
   // Memoise so dependents of `affiliates` (filtered list + stat tiles)
   // don't churn on every render when the payload reference is stable.
@@ -273,7 +256,7 @@ export function AffiliatesContent() {
         <TahiButton
           variant="secondary"
           size="sm"
-          onClick={fetchData}
+          onClick={() => void mutate()}
           iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
         >
           Refresh

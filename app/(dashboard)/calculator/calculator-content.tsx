@@ -11,7 +11,8 @@
  * `/api/admin/calculator` so it can be reopened from the deal detail
  * page or piped into a proposal / schedule / contract draft.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, Calculator as CalcIcon, Check, FileSignature, FileText, Calendar, Save } from 'lucide-react'
@@ -98,20 +99,29 @@ export function CalculatorContent({ dealId, orgId }: { dealId: string | null; or
   const [saving, setSaving] = useState(false)
   const [computing, setComputing] = useState(false)
   const [savedId, setSavedId] = useState<string | null>(null)
-  const [history, setHistory] = useState<SavedCalculation[]>([])
   const [savedAt, setSavedAt] = useState<number | null>(null)
 
-  // Load any prior calc anchored to this deal.
-  const fetchHistory = useCallback(async () => {
-    if (!dealId && !orgId) return
+  // Build the SWR key only when a deal or org context is present.
+  const historyKey = useMemo(() => {
+    if (!dealId && !orgId) return null
     const params = new URLSearchParams()
     if (dealId) params.set('dealId', dealId)
     else if (orgId) params.set('orgId', orgId)
-    const res = await fetch(apiPath(`/api/admin/calculator?${params.toString()}`))
-    if (!res.ok) return
-    const data = await res.json() as { calculations: SavedCalculation[] }
-    setHistory(data.calculations)
-    const active = data.calculations.find(c => c.isActive === 1) ?? data.calculations[0]
+    return `/api/admin/calculator?${params.toString()}`
+  }, [dealId, orgId])
+
+  const { data: historyData } = useSWR<{ calculations: SavedCalculation[] }>(historyKey)
+  const history = historyData?.calculations ?? []
+
+  // One-time initialisation: load the active (or first) saved calc into
+  // local form state. Runs once after first fetch; SWR cache prevents
+  // re-running on back-nav.
+  const initializedRef = useRef(false)
+  useEffect(() => {
+    if (!historyData || initializedRef.current) return
+    initializedRef.current = true
+    const calculations = historyData.calculations ?? []
+    const active = calculations.find(c => c.isActive === 1) ?? calculations[0]
     if (active) {
       try {
         setName(active.name)
@@ -120,9 +130,7 @@ export function CalculatorContent({ dealId, orgId }: { dealId: string | null; or
         setSavedId(active.id)
       } catch { /* ignore */ }
     }
-  }, [dealId, orgId])
-
-  useEffect(() => { void fetchHistory() }, [fetchHistory])
+  }, [historyData])
 
   // Compute on input blur, debounced 400ms so typing doesn't thrash
   // the server.

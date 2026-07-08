@@ -34,8 +34,28 @@ export async function resolveAccessScoping(
 
   const teamMember = teamMemberRows[0]
 
-  // Admins bypass all scoping
-  if (teamMember.role === 'admin') return null
+  // The new team_member_roles system is the source of truth. Decide by the
+  // NAMES of the member's new-system roles:
+  //   - admin / super_admin role in the new system -> unrestricted (assigning
+  //     the Admin role must never downgrade a legacy admin to deny-all).
+  //   - any scoped (non-admin) role -> the legacy 'admin' column must NOT
+  //     short-circuit to unrestricted; the member was deliberately downgraded
+  //     and their teamMemberAccess rules govern.
+  //   - no new-system rows -> genuinely-legacy member; the legacy column
+  //     counts (documented no-lockout default).
+  const newSystemRoles = await database
+    .select({ name: schema.roles.name })
+    .from(schema.teamMemberRoles)
+    .innerJoin(schema.roles, eq(schema.teamMemberRoles.roleId, schema.roles.id))
+    .where(eq(schema.teamMemberRoles.teamMemberId, teamMember.id))
+  const roleNames = newSystemRoles.map((r) => r.name)
+  if (roleNames.includes('admin') || roleNames.includes('super_admin')) return null
+  const hasScopedNewRole = roleNames.length > 0
+
+  // Legacy admins with no new-system rows: fail open (documented no-lockout
+  // default). Members holding a scoped new-system role fall through to their
+  // scoping rules regardless of the legacy column.
+  if (teamMember.role === 'admin' && !hasScopedNewRole) return null
 
   // Look up access rules for this team member
   const accessRules = await database

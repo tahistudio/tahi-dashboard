@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from 'react'
+import useSWR from 'swr'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import {
   Plus, Users, Globe, MessageSquare, Clock, ArrowUpRight,
@@ -104,8 +105,6 @@ export function ClientList() {
   )
 
   const [searchInput, setSearchInput] = useState(urlSearch)
-  const [orgs, setOrgs] = useState<Organisation[]>([])
-  const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(() => searchParams.get('new') === '1')
 
   // New-client form draft. Shape mirrors the POST /api/admin/clients
@@ -156,7 +155,7 @@ export function ClientList() {
       const data = await res.json() as { id?: string }
       showToast('Client created successfully')
       closeDialog()
-      await fetchClients()
+      await mutateClients()
       if (data.id) {
         router.push(`/clients/${data.id}`)
       }
@@ -226,30 +225,26 @@ export function ClientList() {
     }, 300)
   }
 
-  // Fetch. We let the server filter on `search` and `status=archived`
-  // (because archived rows aren't returned by default) and do everything
-  // else client-side so the FilterBar feels instant.
-  // When the user selects only archived statuses, hit the archived
-  // endpoint variant; otherwise fetch the default (non-archived) set.
+  // Fetch via SWR so back-nav + filter toggles are cached (no spinner flash;
+  // keepPreviousData shows the prior rows while revalidating). Archived rows
+  // aren't returned by default, so "only archived" hits the archived bucket
+  // and "archived + others" merges two fetches. The key encodes (search, mode)
+  // so SWR caches each view independently; the inline fetcher handles the merge.
   const needsArchived = urlStatuses.includes('archived')
   const onlyArchived = needsArchived && urlStatuses.length === 1
-  const fetchClients = useCallback(async () => {
-    setLoading(true)
-    try {
-      // If only archived is selected, ask the API for the archived bucket.
-      // If archived is part of a wider selection, we do two fetches and
-      // merge (one default, one archived) so the user can see "active plus
-      // archived" together. This keeps the existing API contract.
+  const clientsMode = onlyArchived ? 'archived' : needsArchived ? 'both' : 'default'
+  const { data: orgsData, isLoading: loading, mutate: mutateClients } = useSWR(
+    `admin/clients?search=${urlSearch}&mode=${clientsMode}`,
+    async () => {
       const baseParams = new URLSearchParams()
       if (urlSearch) baseParams.set('search', urlSearch)
-
       if (onlyArchived) {
         baseParams.set('status', 'archived')
         const res = await fetch(apiPath(`/api/admin/clients?${baseParams}`))
         if (!res.ok) throw new Error('Failed to fetch')
-        const data = await res.json() as { organisations?: Organisation[] }
-        setOrgs(data.organisations ?? [])
-      } else if (needsArchived) {
+        return ((await res.json()) as { organisations?: Organisation[] }).organisations ?? []
+      }
+      if (needsArchived) {
         const [defaultRes, archivedRes] = await Promise.all([
           fetch(apiPath(`/api/admin/clients?${baseParams}`)),
           fetch(apiPath(`/api/admin/clients?${new URLSearchParams({
@@ -258,23 +253,16 @@ export function ClientList() {
           })}`)),
         ])
         if (!defaultRes.ok || !archivedRes.ok) throw new Error('Failed to fetch')
-        const a = await defaultRes.json() as { organisations?: Organisation[] }
-        const b = await archivedRes.json() as { organisations?: Organisation[] }
-        setOrgs([...(a.organisations ?? []), ...(b.organisations ?? [])])
-      } else {
-        const res = await fetch(apiPath(`/api/admin/clients?${baseParams}`))
-        if (!res.ok) throw new Error('Failed to fetch')
-        const data = await res.json() as { organisations?: Organisation[] }
-        setOrgs(data.organisations ?? [])
+        const a = (await defaultRes.json()) as { organisations?: Organisation[] }
+        const b = (await archivedRes.json()) as { organisations?: Organisation[] }
+        return [...(a.organisations ?? []), ...(b.organisations ?? [])]
       }
-    } catch {
-      setOrgs([])
-    } finally {
-      setLoading(false)
-    }
-  }, [urlSearch, needsArchived, onlyArchived])
-
-  useEffect(() => { fetchClients() }, [fetchClients])
+      const res = await fetch(apiPath(`/api/admin/clients?${baseParams}`))
+      if (!res.ok) throw new Error('Failed to fetch')
+      return ((await res.json()) as { organisations?: Organisation[] }).organisations ?? []
+    },
+  )
+  const orgs = orgsData ?? []
 
   const { isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
 

@@ -1892,6 +1892,81 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE organisations ADD COLUMN custom_large_tracks integer DEFAULT 0`,
     ],
   },
+  {
+    name: '0080',
+    description: 'Onboarding access + invite links. organisations.clerk_org_id links a D1 client to its Clerk org (getPortalAuth resolves a caller\'s Clerk org -> this D1 row, so the D1 primary key never has to equal the Clerk org id). New onboarding_invites table holds opaque, non-guessable link tokens that join an invited client to a pre-created org with no payment step, carrying optional contract / schedule / proposal context and the persona (server-trusted, not a spoofable query param). Duplicate-column / already-exists errors are caught upstream so re-runs are idempotent.',
+    statements: [
+      `ALTER TABLE organisations ADD COLUMN clerk_org_id text`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_orgs_clerk_org ON organisations(clerk_org_id)`,
+      `CREATE TABLE IF NOT EXISTS onboarding_invites (
+        id text PRIMARY KEY NOT NULL,
+        token text NOT NULL,
+        flow text NOT NULL DEFAULT 'client',
+        org_id text REFERENCES organisations(id) ON DELETE CASCADE,
+        persona text,
+        contract_id text,
+        schedule_id text,
+        proposal_id text,
+        contact_email text,
+        contact_name text,
+        expires_at text,
+        used_at text,
+        used_by_user_id text,
+        created_by_id text,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_onboarding_invites_token ON onboarding_invites(token)`,
+      `CREATE INDEX IF NOT EXISTS idx_onboarding_invites_org ON onboarding_invites(org_id)`,
+    ],
+  },
+  {
+    name: '0081',
+    description: 'Notification preferences + client-admin portal role. contacts.portal_role (admin|member, default member) is the client-admin authority signal, backfilled to admin where is_primary=1 so current primary contacts keep working; it stays separate from is_primary (email-targeting) and the free-text role (job title). New notification_preferences table stores per-user x per-event x per-channel toggles (user_id, user_type team_member|contact, event_type = a NotificationEventType value or "*" default row, channel in_app|email|slack, enabled). Resolution: exact row -> event_type="*" row -> hardcoded default. Duplicate-column / already-exists errors are caught upstream so re-runs are idempotent.',
+    statements: [
+      `ALTER TABLE contacts ADD COLUMN portal_role text NOT NULL DEFAULT 'member'`,
+      `UPDATE contacts SET portal_role = 'admin' WHERE is_primary = 1`,
+      `CREATE TABLE IF NOT EXISTS notification_preferences (
+        id text PRIMARY KEY NOT NULL,
+        user_id text NOT NULL,
+        user_type text NOT NULL,
+        event_type text NOT NULL,
+        channel text NOT NULL,
+        enabled integer NOT NULL DEFAULT 1,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_notif_pref ON notification_preferences (user_id, user_type, event_type, channel)`,
+      `CREATE INDEX IF NOT EXISTS idx_notif_pref_user ON notification_preferences (user_id, user_type)`,
+    ],
+  },
+  {
+    name: '0082',
+    description: 'Event engine: webhook_deliveries log. One row per attempted delivery of a domain event (request/invoice/client lifecycle) to a registered outgoing webhook endpoint, written best-effort by lib/webhooks.ts fireWebhook. endpoint_id is the opaque settings-store id (key prefix webhook_endpoint_), not an FK. Powers a delivery history in settings > integrations. Additive only.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS webhook_deliveries (
+        id text PRIMARY KEY NOT NULL,
+        endpoint_id text,
+        event text NOT NULL,
+        url text NOT NULL,
+        status text NOT NULL,
+        status_code integer,
+        error_message text,
+        attempted_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_event ON webhook_deliveries(event)`,
+      `CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_endpoint ON webhook_deliveries(endpoint_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_attempted ON webhook_deliveries(attempted_at)`,
+    ],
+  },
+  {
+    name: '0083',
+    description: 'Overdue-invoice chase drafts reuse the ai_reply_drafts table. Adds a nullable invoice_id column (exactly one of lead_id / invoice_id is set per row) plus an index so a pending chase draft can be looked up per invoice. Additive only; the duplicate-column error is swallowed upstream so re-runs are idempotent.',
+    statements: [
+      `ALTER TABLE ai_reply_drafts ADD COLUMN invoice_id text`,
+      `CREATE INDEX IF NOT EXISTS idx_ai_reply_drafts_invoice ON ai_reply_drafts(invoice_id)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

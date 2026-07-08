@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import { eq, and, asc, count, gt, isNull, inArray } from 'drizzle-orm'
 import { createNotifications } from '@/lib/notifications'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { dispatchDomainEvent } from '@/lib/events'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -287,6 +288,19 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         body: `Status is now "${statusLabel}"`,
         entityType: 'request',
         entityId: id,
+      })
+
+      // Fire the domain event (automations + outgoing webhooks). Non-blocking.
+      await dispatchDomainEvent(drizzle, {
+        type: 'request_status_changed',
+        entityId: id,
+        entityType: 'request',
+        orgId: updatedReq.orgId,
+        data: {
+          status: body.status,
+          title: updatedReq.title,
+          assigneeId: updatedReq.assigneeId ?? null,
+        },
       })
     }
   }

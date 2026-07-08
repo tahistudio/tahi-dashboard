@@ -19,7 +19,8 @@
  *  - Source-of-truth chips on bank rows (Stripe, Xero, Airwallex).
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
+import useSWR from 'swr'
 import { RefreshCw, Play, Plus, Pencil, Trash2, AlertCircle, TrendingDown, Receipt, Users, Wifi, ChevronRight } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { PageHeader } from '@/components/tahi/page-header'
@@ -193,25 +194,8 @@ export function FinancialReportsContent() {
     if (currency === 'NZD') return formatDisplay(amount)
     return formatNativeRaw(amount, currency)
   }, [formatDisplay, formatNativeRaw])
-  const [data, setData] = useState<SummaryResponse | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data, isLoading: loading, mutate } = useSWR<SummaryResponse>('/api/admin/financial-reports/summary')
   const [syncing, setSyncing] = useState(false)
-
-  const fetchSummary = useCallback(async () => {
-    setLoading(true)
-    try {
-      const r = await fetch(apiPath('/api/admin/financial-reports/summary'))
-      if (!r.ok) throw new Error('Failed')
-      const json = await r.json() as SummaryResponse
-      setData(json)
-    } catch {
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchSummary() }, [fetchSummary])
 
   async function backfillMrr() {
     try {
@@ -219,7 +203,7 @@ export function FinancialReportsContent() {
       const j = await r.json() as { updated?: number; unchanged?: number; error?: string }
       if (r.ok) {
         showToast(`MRR backfilled. ${j.updated ?? 0} clients updated, ${j.unchanged ?? 0} unchanged`, 'success')
-        await fetchSummary()
+        await mutate()
       } else {
         showToast(`Backfill failed: ${j.error ?? 'unknown'}`, 'error')
       }
@@ -235,7 +219,7 @@ export function FinancialReportsContent() {
       const j = await r.json() as { balances?: number; transactions?: { fetched?: number }; error?: string }
       if (r.ok) {
         showToast(`Airwallex synced. ${j.balances ?? 0} balances, ${j.transactions?.fetched ?? 0} txns`, 'success')
-        await fetchSummary()
+        await mutate()
       } else {
         showToast(`Sync failed: ${j.error ?? 'unknown'}`, 'error')
       }
@@ -263,7 +247,7 @@ export function FinancialReportsContent() {
     return (
       <div className="space-y-4">
         <PageHeader title="Financial reports" subtitle="Could not load financial summary." />
-        <TahiButton variant="secondary" onClick={() => void fetchSummary()}>Retry</TahiButton>
+        <TahiButton variant="secondary" onClick={() => void mutate()}>Retry</TahiButton>
       </div>
     )
   }
@@ -349,7 +333,7 @@ export function FinancialReportsContent() {
         <TahiButton
           variant="secondary"
           size="sm"
-          onClick={() => void fetchSummary()}
+          onClick={() => void mutate()}
           iconLeft={<Play className="w-3.5 h-3.5" />}
         >
           Reload
@@ -511,7 +495,7 @@ export function FinancialReportsContent() {
             yearEnd={data.yearEnd}
             ytdRevenue={data.ytdRevenue}
             effectiveMonthly={data.effectiveMonthlyRevenue}
-            onSavedTarget={() => void fetchSummary()}
+            onSavedTarget={() => void mutate()}
             formatNative={formatNative}
           />
           <YoyCard
@@ -731,7 +715,7 @@ export function FinancialReportsContent() {
         <TakeHomeCard
           takeHome={data.takeHome}
           formatNative={formatNative}
-          onSaved={() => void fetchSummary()}
+          onSaved={() => void mutate()}
         />
       </div>
 
@@ -741,7 +725,7 @@ export function FinancialReportsContent() {
         <ReserveTargetCard
           config={data.reserveConfig}
           formatNative={formatNative}
-          onSaved={() => void fetchSummary()}
+          onSaved={() => void mutate()}
         />
         <SpendImpactCard
           startingCash={data.disposableCash}
@@ -2289,25 +2273,11 @@ interface Anomaly {
 }
 
 function AnomaliesCard() {
-  const [items, setItems] = useState<Anomaly[]>([])
-  const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
   const { showToast } = useToast()
 
-  const fetchAnomalies = useCallback(async () => {
-    setLoading(true)
-    try {
-      const r = await fetch(apiPath('/api/admin/financial-reports/anomalies'))
-      if (r.ok) {
-        const d = await r.json() as { items?: Anomaly[] }
-        setItems(d.items ?? [])
-      }
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void fetchAnomalies() }, [fetchAnomalies])
+  const { data: anomaliesData, isLoading: loading, mutate } = useSWR<{ items?: Anomaly[] }>('/api/admin/financial-reports/anomalies')
+  const items = anomaliesData?.items ?? []
 
   async function runScan() {
     setRunning(true)
@@ -2316,7 +2286,7 @@ function AnomaliesCard() {
       const d = await r.json() as { inserted?: number; findingsRaw?: number; error?: string }
       if (r.ok) {
         showToast(`Scan ran. ${d.inserted ?? 0} new ${d.inserted === 1 ? 'finding' : 'findings'} (${(d.findingsRaw ?? 0) - (d.inserted ?? 0)} deduped)`, 'success')
-        await fetchAnomalies()
+        await mutate()
       } else {
         showToast(`Scan failed: ${d.error ?? 'unknown'}`, 'error')
       }
@@ -2330,7 +2300,8 @@ function AnomaliesCard() {
   async function resolve(id: string) {
     // Optimistic remove. Marks the notification read so it drops out of
     // the unresolved query on next fetch.
-    setItems(prev => prev.filter(x => x.id !== id))
+    const prev = anomaliesData
+    void mutate({ items: (anomaliesData?.items ?? []).filter(x => x.id !== id) }, { revalidate: false })
     try {
       await fetch(apiPath(`/api/admin/notifications/${id}`), {
         method: 'PATCH',
@@ -2339,7 +2310,7 @@ function AnomaliesCard() {
       })
     } catch {
       // Restore on failure.
-      await fetchAnomalies()
+      void mutate(prev, { revalidate: false })
     }
   }
 
@@ -2477,8 +2448,6 @@ function monthlyEquivNative(c: CommitmentRow): number {
 function RecurringOutflowsCard({ formatNative }: {
   formatNative: (amount: number, currency: string) => string
 }) {
-  const [items, setItems] = useState<CommitmentRow[]>([])
-  const [loading, setLoading] = useState(true)
   const [showInactive, setShowInactive] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -2488,9 +2457,9 @@ function RecurringOutflowsCard({ formatNative }: {
   const [error, setError] = useState<string | null>(null)
   const { showToast } = useToast()
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
+  const { data: commitmentItems, isLoading: loading, mutate } = useSWR<CommitmentRow[]>(
+    'commitments+audit',
+    async () => {
       const [commitRes, auditRes] = await Promise.all([
         fetch(apiPath('/api/admin/commitments')),
         fetch(apiPath('/api/admin/financial-reports/subscriptions-audit')),
@@ -2498,20 +2467,14 @@ function RecurringOutflowsCard({ formatNative }: {
       const commitJson = commitRes.ok ? (await commitRes.json() as { commitments?: CommitmentRow[] }) : { commitments: [] }
       const auditJson = auditRes.ok ? (await auditRes.json() as { items?: Array<{ id: string; annualisedNzd?: number; lastBankHit?: CommitmentRow['lastBankHit'] }> }) : { items: [] }
       const auditMap = new Map((auditJson.items ?? []).map(a => [a.id, a]))
-      const merged: CommitmentRow[] = (commitJson.commitments ?? []).map(c => ({
+      return (commitJson.commitments ?? []).map(c => ({
         ...c,
         annualisedNative: auditMap.get(c.id)?.annualisedNzd, // misnamed upstream; it's actually native annualised
         lastBankHit: auditMap.get(c.id)?.lastBankHit ?? null,
       }))
-      setItems(merged)
-    } catch {
-      setItems([])
-    } finally {
-      setLoading(false)
     }
-  }, [])
-
-  useEffect(() => { void load() }, [load])
+  )
+  const items = commitmentItems ?? []
 
   function openCreate() {
     setForm(emptyCommitmentForm())
@@ -2577,7 +2540,7 @@ function RecurringOutflowsCard({ formatNative }: {
       }
       showToast(editingId ? 'Commitment updated' : 'Commitment added', 'success')
       setDrawerOpen(false)
-      await load()
+      await mutate()
     } catch {
       setError('Network error')
     } finally {
@@ -2591,7 +2554,7 @@ function RecurringOutflowsCard({ formatNative }: {
       await fetch(apiPath(`/api/admin/commitments/${confirmDelete.id}`), { method: 'DELETE' })
       showToast('Commitment deleted', 'success')
       setConfirmDelete(null)
-      await load()
+      await mutate()
     } catch {
       showToast('Delete failed', 'error')
     }
@@ -2599,14 +2562,15 @@ function RecurringOutflowsCard({ formatNative }: {
 
   async function toggleActive(c: CommitmentRow) {
     // Optimistic flip so the table updates instantly.
-    setItems(prev => prev.map(x => x.id === c.id ? { ...x, active: !c.active } : x))
+    const prev = commitmentItems
+    void mutate(items.map(x => x.id === c.id ? { ...x, active: !c.active } : x), { revalidate: false })
     try {
       await fetch(apiPath(`/api/admin/commitments/${c.id}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ active: !c.active }),
       })
-    } catch { await load() }
+    } catch { void mutate(prev, { revalidate: false }) }
   }
 
   // ── Auto-detect cadence (Airwallex matching) ─────────────────────
@@ -2629,7 +2593,7 @@ function RecurringOutflowsCard({ formatNative }: {
       if (apply) {
         showToast(`Updated ${json.applied ?? 0} commitments from bank history`, 'success')
         setDetectPreview(null)
-        await load()
+        await mutate()
       } else {
         setDetectPreview(json.plans ?? [])
       }

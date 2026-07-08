@@ -18,9 +18,8 @@
 //   - /api/admin/deals + /api/admin/pipeline/stages  (summary / closing-this-month)
 //   - /api/admin/reports/pipeline-forecast           (weighted forecast / funnel)
 
-import { useEffect, useState } from 'react'
+import useSWR from 'swr'
 import { TrendingUp } from 'lucide-react'
-import { apiPath } from '@/lib/api'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { calculatePipelineTotals } from '@/lib/pipeline-math'
 import { CountUp } from '@/components/tahi/count-up'
@@ -97,37 +96,13 @@ const CARD_PROPS = {
 export function PipelineAhead({ className }: { className?: string }) {
   const { format } = useDisplayCurrency()
 
-  const [deals, setDeals] = useState<DealSummary[]>([])
-  const [stages, setStages] = useState<StageSummary[]>([])
-  const [forecast, setForecast] = useState<ForecastResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-    Promise.all([
-      fetch(apiPath('/api/admin/deals?limit=100')).then(r => (r.ok ? (r.json() as Promise<{ items: DealSummary[] }>) : { items: [] })),
-      fetch(apiPath('/api/admin/pipeline/stages')).then(r => (r.ok ? (r.json() as Promise<{ stages: StageSummary[] }>) : { stages: [] })),
-      fetch(apiPath('/api/admin/reports/pipeline-forecast')).then(r => (r.ok ? (r.json() as Promise<ForecastResponse>) : null)),
-    ])
-      .then(([dealsData, stagesData, forecastData]) => {
-        if (cancelled) return
-        setDeals(dealsData.items ?? [])
-        setStages(stagesData.stages ?? [])
-        setForecast(forecastData ?? null)
-      })
-      .catch(() => {
-        if (cancelled) return
-        setDeals([])
-        setStages([])
-        setForecast(null)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const { data: dealsData, isLoading: dealsLoading } = useSWR<{ items: DealSummary[] }>('/api/admin/deals?limit=100')
+  const { data: stagesData, isLoading: stagesLoading } = useSWR<{ stages: StageSummary[] }>('/api/admin/pipeline/stages')
+  const { data: forecastData, isLoading: forecastLoading } = useSWR<ForecastResponse>('/api/admin/reports/pipeline-forecast')
+  const loading = dealsLoading || stagesLoading || forecastLoading
+  const deals = dealsData?.items ?? []
+  const stages = stagesData?.stages ?? []
+  const forecast = forecastData ?? null
 
   if (loading) {
     return (
