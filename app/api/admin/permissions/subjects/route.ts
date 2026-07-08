@@ -16,13 +16,13 @@ export async function GET(req: NextRequest) {
   const { denied } = await requireManagePermissions(drizzle, auth)
   if (denied) return denied
 
-  const [members, orgs, roles, assignments] = await Promise.all([
+  const [members, orgs, roles, assignments, accessRules, accessOrgs] = await Promise.all([
     drizzle
       .select({ id: schema.teamMembers.id, name: schema.teamMembers.name, email: schema.teamMembers.email })
       .from(schema.teamMembers)
       .orderBy(asc(schema.teamMembers.name)),
     drizzle
-      .select({ id: schema.organisations.id, name: schema.organisations.name })
+      .select({ id: schema.organisations.id, name: schema.organisations.name, planType: schema.organisations.planType })
       .from(schema.organisations)
       .orderBy(asc(schema.organisations.name)),
     drizzle
@@ -34,6 +34,18 @@ export async function GET(req: NextRequest) {
       .from(schema.teamMemberRoles)
       .innerJoin(schema.roles, eq(schema.teamMemberRoles.roleId, schema.roles.id))
       .where(isNull(schema.teamMemberRoles.endedAt)),
+    drizzle
+      .select({
+        id: schema.teamMemberAccess.id,
+        teamMemberId: schema.teamMemberAccess.teamMemberId,
+        scopeType: schema.teamMemberAccess.scopeType,
+        planType: schema.teamMemberAccess.planType,
+        trackType: schema.teamMemberAccess.trackType,
+      })
+      .from(schema.teamMemberAccess),
+    drizzle
+      .select({ accessId: schema.teamMemberAccessOrgs.accessId, orgId: schema.teamMemberAccessOrgs.orgId })
+      .from(schema.teamMemberAccessOrgs),
   ])
 
   const rolesByMember = new Map<string, Array<{ roleId: string; roleName: string }>>()
@@ -43,8 +55,33 @@ export async function GET(req: NextRequest) {
     else rolesByMember.set(a.teamMemberId, [{ roleId: a.roleId, roleName: a.roleName }])
   }
 
+  // Data-scope rule per member (one rule per member in practice; the PUT
+  // replaces). orgIds only populate for specific_clients rules.
+  const orgIdsByAccess = new Map<string, string[]>()
+  for (const ao of accessOrgs) {
+    const list = orgIdsByAccess.get(ao.accessId)
+    if (list) list.push(ao.orgId)
+    else orgIdsByAccess.set(ao.accessId, [ao.orgId])
+  }
+  const scopeByMember = new Map<
+    string,
+    { scopeType: string; planType: string | null; trackType: string; orgIds: string[] }
+  >()
+  for (const rule of accessRules) {
+    scopeByMember.set(rule.teamMemberId, {
+      scopeType: rule.scopeType,
+      planType: rule.planType,
+      trackType: rule.trackType,
+      orgIds: orgIdsByAccess.get(rule.id) ?? [],
+    })
+  }
+
   return NextResponse.json({
-    teamMembers: members.map(m => ({ ...m, roles: rolesByMember.get(m.id) ?? [] })),
+    teamMembers: members.map(m => ({
+      ...m,
+      roles: rolesByMember.get(m.id) ?? [],
+      scope: scopeByMember.get(m.id) ?? null,
+    })),
     orgs,
     roles,
   })

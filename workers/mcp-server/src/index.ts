@@ -323,6 +323,23 @@ const TOOLS: ToolDef[] = [
     teamMemberId: prop('string', 'Team member ID'),
     roleId: prop('string', 'Role ID, or omit/null to clear'),
   }, ['teamMemberId']),
+  tool('get_permission_matrix', 'The role-by-feature grid: every team-audience FEATURE_TREE key crossed with every role (role .view baseline plus role-level overrides), as the resolver enforces it.'),
+  tool('copy_access', 'Replace a subject\'s access with a copy of another\'s. Team members: role + data scope + feature overrides. Organisations: feature overrides. Audit logged.', {
+    subjectType: prop('string', 'team_member | organisation'),
+    sourceId: prop('string', 'Subject to copy FROM'),
+    targetId: prop('string', 'Subject to copy ONTO (replaced wholesale)'),
+  }, ['subjectType', 'sourceId', 'targetId']),
+  tool('get_permission_history', 'The permission change trail (permission.* audit entries with actor and target names resolved). Optional page (50 per page).', {
+    page: prop('number', 'Page number, default 1'),
+  }),
+  tool('set_team_access_scope', 'Set a team member\'s data scope rule: which clients they see. scopeType all_clients | plan_type (with planType) | specific_clients (with orgIds). role is the scoped role the rule applies under (project_manager | task_handler | viewer).', {
+    teamMemberId: prop('string', 'Team member ID'),
+    role: prop('string', 'project_manager | task_handler | viewer'),
+    scopeType: prop('string', 'all_clients | plan_type | specific_clients'),
+    planType: prop('string', 'Plan type when scopeType = plan_type'),
+    trackType: prop('string', 'all | small | large (default all)'),
+    orgIds: { type: 'array', description: 'Org IDs when scopeType = specific_clients', items: { type: 'string' } },
+  }, ['teamMemberId', 'role', 'scopeType']),
 
   // ── Write: Team ───────────────────────────────────────────────────────
   tool('create_team_member', 'Create a new team member', {
@@ -586,6 +603,9 @@ const TOOLS: ToolDef[] = [
   // ── Deals / Pipeline ──────────────────────────────────────────────────
   tool('list_deals', 'List all sales pipeline deals with stage, value, owner, company'),
   tool('get_pipeline_stages', 'Get all pipeline stages'),
+  tool('update_pipeline_stages', 'Full reconciliation of pipeline stages. Pass the COMPLETE ordered list (fetch it with get_pipeline_stages first): entries with an id update name/colour/position/probability, entries without an id are created, and stored stages missing from the list are deleted. Deletion is refused (400/409, nothing written) for core stages or stages that still have deals.', {
+    stages: prop('array', 'Complete stage list in display order: [{id?, name?, colour?, position?, probability?}]. Omit id to create a stage (name required); omit a stored stage entirely to delete it.'),
+  }, ['stages']),
   tool('create_deal', 'Create a new deal. Split-value model: upfrontValue (one-off project portion) + monthlyValue (recurring retainer). Either or both can be set. Range on upfront via valueMin/valueMax (uses midpoint as upfrontValue when set). recurringStartDate optional — when null, falls back to engagementEndDate, then expectedCloseDate.', {
     title: prop('string', 'Deal title'),
     orgId: prop('string', 'Client organisation ID'),
@@ -1034,7 +1054,25 @@ const TOOLS: ToolDef[] = [
     type: prop('string', 'Type: info, warning, success, maintenance'),
     targetType: prop('string', 'Target: all, plan_type, org'),
     targetValue: prop('string', 'Plan type or org ID when targeting specific audience'),
+    emoji: prop('string', 'Emoji shown at the start of the banner'),
+    ctaLabel: prop('string', 'Optional call-to-action button label'),
+    ctaUrl: prop('string', 'Optional call-to-action button URL'),
   }, ['title', 'body']),
+  tool('update_announcement', 'Update an announcement (fields, publish or unpublish)', {
+    announcementId: prop('string', 'Announcement ID'),
+    title: prop('string', 'Announcement title'),
+    body: prop('string', 'Announcement body text'),
+    type: prop('string', 'Type: info, warning, success, maintenance'),
+    targetType: prop('string', 'Target: all, plan_type, org'),
+    targetValue: prop('string', 'Plan type or org ID when targeting specific audience'),
+    emoji: prop('string', 'Emoji shown at the start of the banner'),
+    ctaLabel: prop('string', 'Optional call-to-action button label'),
+    ctaUrl: prop('string', 'Optional call-to-action button URL'),
+    published: prop('boolean', 'true publishes, false reverts to draft'),
+  }, ['announcementId']),
+  tool('delete_announcement', 'Delete an announcement', {
+    announcementId: prop('string', 'Announcement ID'),
+  }, ['announcementId']),
   tool('send_announcement', 'Send an announcement to its target audience via email', {
     announcementId: prop('string', 'Announcement ID'),
   }, ['announcementId']),
@@ -1473,6 +1511,20 @@ async function executeTool(
       return json(await apiWrite('/api/admin/permissions/assign-role', token, 'POST', {
         teamMemberId: s('teamMemberId'), roleId: typeof args.roleId === 'string' && args.roleId ? args.roleId : null,
       }))
+    case 'get_permission_matrix':
+      return json(await apiGet('/api/admin/permissions/matrix', token))
+    case 'copy_access':
+      return json(await apiWrite('/api/admin/permissions/copy-access', token, 'POST', {
+        subjectType: s('subjectType'), sourceId: s('sourceId'), targetId: s('targetId'),
+      }))
+    case 'get_permission_history': {
+      const page = typeof args.page === 'number' ? args.page : 1
+      return json(await apiGet(`/api/admin/audit?actionPrefix=permission.&resolveNames=1&page=${page}`, token))
+    }
+    case 'set_team_access_scope': {
+      const { teamMemberId: scopeMemberId, ...scopeBody } = args
+      return json(await apiWrite(`/api/admin/team/${scopeMemberId}/access`, token, 'PUT', scopeBody))
+    }
     case 'create_team_member':
       return json(await apiWrite('/api/admin/team', token, 'POST', args as Record<string, unknown>))
     case 'update_team_member': {
@@ -1691,6 +1743,8 @@ async function executeTool(
       return json(await apiGet('/api/admin/deals', token))
     case 'get_pipeline_stages':
       return json(await apiGet('/api/admin/pipeline/stages', token))
+    case 'update_pipeline_stages':
+      return json(await apiWrite('/api/admin/pipeline/stages', token, 'PUT', args as Record<string, unknown>))
     case 'create_deal':
       return json(await apiWrite('/api/admin/deals', token, 'POST', args as Record<string, unknown>))
     case 'update_deal': {
@@ -1973,6 +2027,12 @@ async function executeTool(
     // ── Announcements ─────────────────────────────────────────────────
     case 'create_announcement':
       return json(await apiWrite('/api/admin/announcements', token, 'POST', args as Record<string, unknown>))
+    case 'update_announcement': {
+      const { announcementId: annId, ...annPatch } = args as Record<string, unknown>
+      return json(await apiWrite(`/api/admin/announcements/${annId}`, token, 'PATCH', annPatch))
+    }
+    case 'delete_announcement':
+      return json(await apiWrite(`/api/admin/announcements/${s('announcementId')}`, token, 'DELETE'))
     case 'send_announcement':
       return json(await apiWrite(`/api/admin/announcements/${s('announcementId')}/send`, token, 'POST'))
 

@@ -33,11 +33,11 @@ async function requireClientAdmin(
  * previewing Client view (impersonating) is read-only, mirroring
  * /api/portal/requests and /api/portal/profile.
  *
- * Brand colour: the organisations table has no brand-colour column today, so the
- * client's brand colour is NOT persisted here. It lives per sub-brand in the
- * `brands` table (see /api/portal/brands). TODO(org-brand-colour): if a single
- * org-level accent is ever wanted, add an accent_colour column + migration and
- * accept it below.
+ * Brand colour: persisted as organisations.accent_colour (migration 0084) and
+ * accepted here as `accentColour` (validated #rrggbb hex; empty string clears).
+ * Note: the portal shell tint currently reads the Tahi-level settings key
+ * `portal_primary_color` (see app/(dashboard)/layout.tsx), not this per-org
+ * accent; wiring the shell to prefer accentColour is a layout-level change.
  */
 
 export async function GET(req: NextRequest) {
@@ -56,6 +56,7 @@ export async function GET(req: NextRequest) {
       website: schema.organisations.website,
       industry: schema.organisations.industry,
       logoUrl: schema.organisations.logoUrl,
+      accentColour: schema.organisations.accentColour,
     })
     .from(schema.organisations)
     .where(eq(schema.organisations.id, orgId))
@@ -90,6 +91,7 @@ export async function PATCH(req: NextRequest) {
     website?: string
     industry?: string
     logoUrl?: string
+    accentColour?: string
   }
 
   const updates: Record<string, string | null> = {}
@@ -104,6 +106,21 @@ export async function PATCH(req: NextRequest) {
   if (body.website !== undefined) updates.website = body.website.trim() || null
   if (body.industry !== undefined) updates.industry = body.industry.trim() || null
   if (body.logoUrl !== undefined) updates.logoUrl = body.logoUrl.trim() || null
+  if (body.accentColour !== undefined) {
+    const raw = body.accentColour.trim()
+    if (!raw) {
+      updates.accentColour = null
+    } else {
+      const hex = raw.startsWith('#') ? raw : '#' + raw
+      if (!/^#[0-9a-fA-F]{6}$/.test(hex)) {
+        return NextResponse.json(
+          { error: 'Brand colour must be a hex value like #5A824E' },
+          { status: 400 },
+        )
+      }
+      updates.accentColour = hex
+    }
+  }
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'No fields to update' }, { status: 400 })

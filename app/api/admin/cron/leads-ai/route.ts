@@ -21,7 +21,9 @@
  *
  * Settings consulted (sensible defaults if missing):
  *   leads.cronEnabled            (bool, default true) master kill switch
- *   leads.scoreModelOverride     (string, default unset) override Haiku
+ *   leads.scoringModel           (balanced | growth | retainer) scoring emphasis
+ *   leads.enrichmentEnabled      (bool, default true) auto-enrichment gate
+ *   leads.autoAssignHot          (bool, default false) route unowned hot leads
  *   leads.notifyOnHighIntent     (bool, default true)
  *   leads.notifyOnIdleQualifying (bool, default true)
  *   leads.notifyOnEnriched       (bool, default true)
@@ -93,6 +95,14 @@ Do not invent facts. Use what is in the input. Output ONLY:
 <score>0-100</score>
 <score_reason>One concise line (under 25 words). Mention which axis drove the score.</score_reason>`
 
+// Optional scoring emphasis appended to the system prompt, driven by the
+// leads.scoringModel setting (Settings > Lead automations). 'balanced' adds
+// nothing and keeps the base rubric.
+const SCORING_MODEL_EMPHASIS: Record<string, string> = {
+  growth: `SCORING EMPHASIS: GROWTH-FOCUSED. The workspace has chosen a growth-focused scoring model. Weight URGENCY + BUDGET and ENGAGEMENT roughly 1.5x heavier than the base rubric: leads with explicit budget, urgent timelines, or active inbound engagement should score noticeably higher even when ICP fit is only moderate. One-off project leads that can start soon deserve a boost.`,
+  retainer: `SCORING EMPHASIS: RETAINER-FIT. The workspace has chosen a retainer-fit scoring model. Weight FIT roughly 1.5x heavier than the base rubric: favour leads with ongoing needs that suit a monthly retainer (continuous design and dev support, content, SEO / AEO), an in-house team to collaborate with, and stable mid-market size. One-off quick projects with no ongoing need should score lower even when budget is explicit.`,
+}
+
 // ── Route ─────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
@@ -156,7 +166,7 @@ export async function POST(req: NextRequest) {
   // already run today (via the lead_enriched activity rows) so we
   // bound spend even when many leads score above the threshold.
   let autoEnrichmentsToday = 0
-  if (settings.autoEnrichScoreThreshold > 0 && settings.maxAutoEnrichmentsPerDay > 0) {
+  if (settings.enrichmentEnabled && settings.autoEnrichScoreThreshold > 0 && settings.maxAutoEnrichmentsPerDay > 0) {
     const todayStart = new Date()
     todayStart.setHours(0, 0, 0, 0)
     const cutoff = todayStart.toISOString()
@@ -188,6 +198,7 @@ export async function POST(req: NextRequest) {
   // DB writes + notifications stay serial after scoring to keep D1
   // transactions clean.
   const SCORE_CONCURRENCY = 5
+  const scoringEmphasis = SCORING_MODEL_EMPHASIS[settings.scoringModel] ?? null
   interface ScoreOutcome {
     lead: typeof candidates[number]
     score: number | null
@@ -205,7 +216,7 @@ export async function POST(req: NextRequest) {
     }
     const batch = candidates.slice(i, i + SCORE_CONCURRENCY)
     const batchResults = await Promise.allSettled(
-      batch.map(lead => scoreLead(lead).then(r => ({ ...r, lead })))
+      batch.map(lead => scoreLead(lead, scoringEmphasis).then(r => ({ ...r, lead })))
     )
     for (let j = 0; j < batchResults.length; j++) {
       const r = batchResults[j]
@@ -277,7 +288,8 @@ export async function POST(req: NextRequest) {
       let autoEnriched = false
       const alreadyEnrichedThisTick = results.filter(r => r.autoEnriched).length
       const crossedAutoEnrich =
-        settings.autoEnrichScoreThreshold > 0
+        settings.enrichmentEnabled
+        && settings.autoEnrichScoreThreshold > 0
         && score != null
         && score >= settings.autoEnrichScoreThreshold
         && !lead.enrichedAt
@@ -316,6 +328,27 @@ export async function POST(req: NextRequest) {
       const notifyTarget = lead.ownerId ?? settings.defaultLeadOwnerId
       const highIntent = score != null && score >= settings.highIntentThreshold
       const wasNotHighIntent = prevScore == null || prevScore < settings.highIntentThreshold
+
+      // Auto-assign hot leads: route unowned leads scoring at or above the
+      // high-intent threshold straight to the default owner. Opt-in via the
+      // leads.autoAssignHot settings toggle (Settings > Lead automations).
+      if (settings.autoAssignHot && highIntent && !lead.ownerId && settings.defaultLeadOwnerId) {
+        await database
+          .update(schema.leads)
+          .set({ ownerId: settings.defaultLeadOwnerId, updatedAt: now })
+          .where(eq(schema.leads.id, lead.id))
+        await database.insert(schema.activities).values({
+          id: crypto.randomUUID(),
+          type: 'lead_assigned',
+          title: 'Auto-assigned to the default owner (hot lead)',
+          description: `Score ${score} crossed the high-intent threshold (${settings.highIntentThreshold}).`,
+          leadId: lead.id,
+          createdById: 'system',
+          createdAt: now,
+          updatedAt: now,
+        })
+        transitions.push('auto_assigned')
+      }
 
       // High intent — fires on the run that crosses the threshold.
       if (highIntent && wasNotHighIntent && settings.notifyOnHighIntent && notifyTarget) {
@@ -430,6 +463,14 @@ interface LeadSettings {
    *  cron from spending more than ~N × $0.30 per day even if many
    *  leads score above the threshold simultaneously. Default 10. */
   maxAutoEnrichmentsPerDay: number
+  /** Master gate on cron-driven auto-enrichment (Settings > Lead
+   *  automations toggle). Default true. Manual enrichment is unaffected. */
+  enrichmentEnabled: boolean
+  /** Route unowned leads scoring >= highIntentThreshold straight to the
+   *  default owner. Default false. */
+  autoAssignHot: boolean
+  /** Scoring emphasis: 'balanced' (base rubric), 'growth' or 'retainer'. */
+  scoringModel: string
 }
 
 async function readLeadSettings(database: Awaited<ReturnType<typeof db>>): Promise<LeadSettings> {
@@ -445,6 +486,11 @@ async function readLeadSettings(database: Awaited<ReturnType<typeof db>>): Promi
       'leads.idleQualifyingDays',
       'leads.autoNurturingAfterDays',
       'leads.defaultLeadOwnerId',
+      'leads.autoEnrichScoreThreshold',
+      'leads.maxAutoEnrichmentsPerDay',
+      'leads.enrichmentEnabled',
+      'leads.autoAssignHot',
+      'leads.scoringModel',
     ]))
 
   const get = (key: string) => rows.find(r => r.key === key)?.value ?? null
@@ -471,6 +517,12 @@ async function readLeadSettings(database: Awaited<ReturnType<typeof db>>): Promi
     defaultLeadOwnerId: get('leads.defaultLeadOwnerId'),
     autoEnrichScoreThreshold: num('leads.autoEnrichScoreThreshold', 60),
     maxAutoEnrichmentsPerDay: num('leads.maxAutoEnrichmentsPerDay', 10),
+    enrichmentEnabled: bool('leads.enrichmentEnabled', true),
+    autoAssignHot: bool('leads.autoAssignHot', false),
+    scoringModel: (() => {
+      const v = get('leads.scoringModel')
+      return v === 'growth' || v === 'retainer' ? v : 'balanced'
+    })(),
   }
 }
 
@@ -487,7 +539,7 @@ interface ScoreInput {
   status: string
 }
 
-async function scoreLead(lead: ScoreInput): Promise<{
+async function scoreLead(lead: ScoreInput, emphasis: string | null): Promise<{
   score: number | null
   scoreReason: string | null
   tokensSpent: number
@@ -508,12 +560,16 @@ async function scoreLead(lead: ScoreInput): Promise<{
   const { loadAiContext } = await import('@/lib/ai-context')
   const contextText = await loadAiContext(['icp', 'services'])
 
+  const promptText = emphasis
+    ? `${SYSTEM_PROMPT_SCORE}\n\n${emphasis}`
+    : SYSTEM_PROMPT_SCORE
+
   const systemBlocks = contextText
     ? [
         { type: 'text' as const, text: contextText, cache_control: { type: 'ephemeral' as const } },
-        { type: 'text' as const, text: SYSTEM_PROMPT_SCORE },
+        { type: 'text' as const, text: promptText },
       ]
-    : [{ type: 'text' as const, text: SYSTEM_PROMPT_SCORE }]
+    : [{ type: 'text' as const, text: promptText }]
 
   const response = await client.messages.create({
     model: SCORE_MODEL,

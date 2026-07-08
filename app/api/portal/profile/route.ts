@@ -24,6 +24,8 @@ export async function GET(req: NextRequest) {
       email: schema.contacts.email,
       role: schema.contacts.role,
       isPrimary: schema.contacts.isPrimary,
+      portalRole: schema.contacts.portalRole,
+      phone: schema.contacts.phone,
     })
     .from(schema.contacts)
     .where(and(
@@ -45,7 +47,7 @@ export async function GET(req: NextRequest) {
 
 /**
  * PATCH /api/portal/profile
- * Update the current user's contact info (name, role).
+ * Update the current user's contact info (name, role, phone).
  */
 export async function PATCH(req: NextRequest) {
   const { orgId, userId, impersonating } = await getPortalAuth(req)
@@ -59,6 +61,7 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json() as {
     name?: string
     role?: string
+    phone?: string
   }
 
   const database = await db()
@@ -80,6 +83,7 @@ export async function PATCH(req: NextRequest) {
   const updates: Record<string, string> = {}
   if (body.name?.trim()) updates.name = body.name.trim()
   if (body.role !== undefined) updates.role = body.role?.trim() ?? ''
+  if (body.phone !== undefined) updates.phone = typeof body.phone === 'string' ? body.phone.trim() : ''
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'No fields to update' }, { status: 400 })

@@ -3,17 +3,27 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq } from 'drizzle-orm'
-import {
-  PREF_EVENT_TYPES,
-  type NotificationChannel,
-} from '@/lib/notification-preferences'
-import type { NotificationEventType } from '@/lib/notification-links'
+import { PREF_EVENT_TYPES } from '@/lib/notification-preferences'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 // Clients may set their own in-app and email preferences. Slack is a
 // workspace/team channel and is not offered to portal users.
-const PORTAL_CHANNELS: NotificationChannel[] = ['in_app', 'email']
+const PORTAL_CHANNELS: readonly string[] = ['in_app', 'email']
+
+/**
+ * Design-driven event types the portal settings UI persists ahead of their
+ * send paths (delivery-ready and weekly-summary alerts adopt the stored rows
+ * when they ship). Kept local to the route so lib/notification-preferences.ts
+ * keeps describing only the events the send paths resolve today.
+ */
+const EXTRA_CLIENT_EVENT_TYPES: readonly string[] = ['delivery_ready', 'weekly_summary']
+
+/**
+ * Per-user quiet-hours flag, stored as a single row with the wildcard
+ * channel '*'. Enabled means "hold non-urgent notifications overnight".
+ */
+const QUIET_EVENT = 'quiet_hours'
 
 interface PrefUpdate {
   eventType: string
@@ -21,16 +31,13 @@ interface PrefUpdate {
   enabled: boolean
 }
 
-function isValidUpdate(u: PrefUpdate): u is {
-  eventType: NotificationEventType
-  channel: NotificationChannel
-  enabled: boolean
-} {
-  return (
-    typeof u.enabled === 'boolean' &&
-    PORTAL_CHANNELS.includes(u.channel as NotificationChannel) &&
-    (PREF_EVENT_TYPES as readonly string[]).includes(u.eventType)
-  )
+function isValidUpdate(u: PrefUpdate): boolean {
+  if (typeof u.enabled !== 'boolean') return false
+  if (u.eventType === QUIET_EVENT) return u.channel === '*'
+  const eventOk =
+    (PREF_EVENT_TYPES as readonly string[]).includes(u.eventType) ||
+    EXTRA_CLIENT_EVENT_TYPES.includes(u.eventType)
+  return eventOk && PORTAL_CHANNELS.includes(u.channel)
 }
 
 /**

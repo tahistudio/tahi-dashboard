@@ -24,6 +24,7 @@ export async function PATCH(
     defaultPriority?: string
     subtasks?: string[] | null
     estimatedHours?: number | null
+    defaultAssignee?: string | null
   }
 
   const database = await db()
@@ -59,7 +60,8 @@ export async function PATCH(
   if (body.category !== undefined) updates.category = body.category
   if (body.description !== undefined) updates.description = body.description
   if (body.defaultPriority !== undefined) {
-    const validPriorities = ['standard', 'high', 'urgent']
+    // Design vocabulary plus the legacy 'standard' value from older rows.
+    const validPriorities = ['none', 'low', 'medium', 'standard', 'high', 'urgent']
     if (!validPriorities.includes(body.defaultPriority)) {
       return NextResponse.json({ error: 'Invalid priority' }, { status: 400 })
     }
@@ -69,6 +71,7 @@ export async function PATCH(
     updates.subtasks = JSON.stringify(body.subtasks ?? [])
   }
   if (body.estimatedHours !== undefined) updates.estimatedHours = body.estimatedHours
+  if (body.defaultAssignee !== undefined) updates.defaultAssignee = body.defaultAssignee?.trim() || null
 
   await drizzle
     .update(schema.taskTemplates)

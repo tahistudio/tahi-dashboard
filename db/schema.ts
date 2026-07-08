@@ -30,6 +30,8 @@ export const organisations = sqliteTable('organisations', {
   name: text('name').notNull(),
   website: text('website'),
   logoUrl: text('logo_url'),
+  // Client-editable brand accent hex used across their portal (migration 0084)
+  accentColour: text('accent_colour'),
   industry: text('industry'),
   // prospect | active | paused | churned | archived
   status: text('status').notNull().default('prospect'),
@@ -109,6 +111,7 @@ export const contacts = sqliteTable('contacts', {
   // free-text `role` (job title). Backfilled to 'admin' where isPrimary=1.
   // 'admin' | 'member'
   portalRole: text('portal_role').notNull().default('member'),
+  phone: text('phone'),
   lastLoginAt: text('last_login_at'),
   ...timestamps,
 }, (table) => [
@@ -184,6 +187,7 @@ export const teamMembers = sqliteTable('team_members', {
   isContractor: integer('is_contractor', { mode: 'boolean' }).default(false),
   slackUserId: text('slack_user_id'),
   avatarUrl: text('avatar_url'),
+  phone: text('phone'),
   reportsToId: text('reports_to_id'),
   department: text('department'),
   // S20: JSON array of role strings, e.g. ["CEO","Developer"]
@@ -884,8 +888,14 @@ export const taskTemplates = sqliteTable('task_templates', {
   subtasks: text('subtasks').default('[]'),
   estimatedHours: real('estimated_hours'),
   createdById: text('created_by_id').notNull(),
+  // Per-client override: null = global template (migration 0084)
+  orgId: text('org_id'),
+  // Free-text default assignee label, e.g. 'On-call PM' (migration 0084)
+  defaultAssignee: text('default_assignee'),
   ...timestamps,
-})
+}, (table) => [
+  index('idx_task_templates_org').on(table.orgId),
+])
 
 // ============================================================
 // TASK SUBTASKS
@@ -957,6 +967,11 @@ export const announcements = sqliteTable('announcements', {
   sentByEmail: integer('sent_by_email').default(0),
   emailSentAt: text('email_sent_at'),
   createdById: text('created_by_id'),
+  // Composer emoji shown at the start of the banner (migration 0084)
+  emoji: text('emoji'),
+  // Optional call-to-action button (migration 0084)
+  ctaLabel: text('cta_label'),
+  ctaUrl: text('cta_url'),
   ...timestamps,
 })
 
@@ -1496,6 +1511,12 @@ export const requestForms = sqliteTable('request_forms', {
   // JSON: [{id, type, label, required, options?}]
   questions: text('questions').notNull().default('[]'),
   isDefault: integer('is_default').notNull().default(0),
+  // Shown to clients above the form (migration 0084)
+  description: text('description'),
+  // all_clients | retainer_clients | internal_only (migration 0084)
+  audience: text('audience').notNull().default('all_clients'),
+  // Target turnaround label, e.g. '2 business days' (migration 0084)
+  sla: text('sla'),
   ...timestamps,
 }, (table) => [
   index('idx_request_forms_org_cat').on(table.orgId, table.category),

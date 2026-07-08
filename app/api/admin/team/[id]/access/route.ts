@@ -2,7 +2,10 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import type { DB } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { requireFeature } from '@/lib/require-feature'
+import { logAudit } from '@/lib/audit'
 
 // -- GET /api/admin/team/[id]/access --
 // Returns access rules for a specific team member.
@@ -52,10 +55,14 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
-  if (!isTahiAdmin(orgId)) {
+  const auth = await getRequestAuth(req)
+  if (!isTahiAdmin(auth.orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  // Data scope IS a permission change: same feature gate as the builder, so an
+  // admin denied the permissions surface cannot widen scope through this route.
+  const featureDenied = await requireFeature(auth, 'settings.permissions')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
 
@@ -83,13 +90,21 @@ export async function PUT(
   const database = await db()
   const now = new Date().toISOString()
 
-  // Delete existing access rules for this team member
+  // Snapshot the current rule (before) for the audit trail, then delete.
   const existingRules = await database
-    .select({ id: schema.teamMemberAccess.id })
+    .select()
     .from(schema.teamMemberAccess)
     .where(eq(schema.teamMemberAccess.teamMemberId, id))
 
+  let beforeOrgIds: string[] = []
   for (const rule of existingRules) {
+    if (rule.scopeType === 'specific_clients') {
+      const rows = await database
+        .select({ orgId: schema.teamMemberAccessOrgs.orgId })
+        .from(schema.teamMemberAccessOrgs)
+        .where(eq(schema.teamMemberAccessOrgs.accessId, rule.id))
+      beforeOrgIds = rows.map((r) => r.orgId)
+    }
     await database
       .delete(schema.teamMemberAccessOrgs)
       .where(eq(schema.teamMemberAccessOrgs.accessId, rule.id))
@@ -121,6 +136,30 @@ export async function PUT(
       })
     }
   }
+
+  const prev = existingRules[0]
+  await logAudit(database as unknown as DB, {
+    action: 'permission.scope_changed',
+    userId: auth.userId,
+    entityType: 'team_member',
+    entityId: id,
+    metadata: {
+      before: prev
+        ? {
+            scopeType: prev.scopeType,
+            planType: prev.planType,
+            trackType: prev.trackType,
+            orgIds: beforeOrgIds,
+          }
+        : null,
+      after: {
+        scopeType: body.scopeType,
+        planType: body.planType ?? null,
+        trackType: body.trackType ?? 'all',
+        orgIds: body.scopeType === 'specific_clients' ? body.orgIds ?? [] : [],
+      },
+    },
+  })
 
   return NextResponse.json({ success: true })
 }

@@ -79,6 +79,11 @@ export async function GET(req: NextRequest) {
       type: a.type,
       publishedAt: a.publishedAt,
       expiresAt: a.expiresAt,
+      // Composer extras: the banner falls back to a per-type emoji when null
+      // and only renders the CTA button when both label and url are present.
+      emoji: a.emoji,
+      ctaLabel: a.ctaLabel,
+      ctaUrl: a.ctaUrl,
     }))
 
   return NextResponse.json({ announcements })

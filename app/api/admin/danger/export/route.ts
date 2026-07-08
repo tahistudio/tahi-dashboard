@@ -12,10 +12,13 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  * Super-admin-only JSON export of the core business tables. Powers the Danger
  * Zone "Export all data" action (components/tahi/settings/sections/danger-zone.tsx).
  *
- * Scope is deliberately narrow: the tables a workspace owner would want to walk
- * away with. It EXCLUDES `integrations` and `settings` (they hold connection
- * config / tokens / keys) and any other secret-bearing surface. Each table is
- * row-capped so a large workspace can't blow the worker's memory / response size.
+ * Scope: every core business table a workspace owner would want to walk away
+ * with, including team, projects, messaging, files (R2 references only, not
+ * the binary objects), contracts, docs and the audit log. It EXCLUDES
+ * `integrations` and `settings` (they hold connection config / tokens / keys)
+ * and any other secret-bearing surface. Each table is row-capped so a large
+ * workspace can't blow the worker's memory / response size; the payload's
+ * `counts` + `rowCap` let the client surface truncation honestly.
  *
  * Gated on super-admin explicitly (not just Tahi-org admin) because a full data
  * dump is the most sensitive read in the product.
@@ -42,35 +45,68 @@ export async function POST(req: NextRequest) {
   const [
     organisations,
     contacts,
+    teamMembers,
+    projects,
+    tracks,
     requests,
     tasks,
+    taskSubtasks,
     invoices,
     invoiceItems,
     subscriptions,
     deals,
     timeEntries,
+    messages,
+    files,
+    contracts,
+    tags,
+    announcements,
+    docPages,
+    auditLog,
   ] = await Promise.all([
     drizzle.select().from(schema.organisations).limit(ROW_CAP),
     drizzle.select().from(schema.contacts).limit(ROW_CAP),
+    drizzle.select().from(schema.teamMembers).limit(ROW_CAP),
+    drizzle.select().from(schema.projects).limit(ROW_CAP),
+    drizzle.select().from(schema.tracks).limit(ROW_CAP),
     drizzle.select().from(schema.requests).limit(ROW_CAP),
     drizzle.select().from(schema.tasks).limit(ROW_CAP),
+    drizzle.select().from(schema.taskSubtasks).limit(ROW_CAP),
     drizzle.select().from(schema.invoices).limit(ROW_CAP),
     drizzle.select().from(schema.invoiceItems).limit(ROW_CAP),
     drizzle.select().from(schema.subscriptions).limit(ROW_CAP),
     drizzle.select().from(schema.deals).limit(ROW_CAP),
     drizzle.select().from(schema.timeEntries).limit(ROW_CAP),
+    drizzle.select().from(schema.messages).limit(ROW_CAP),
+    drizzle.select().from(schema.files).limit(ROW_CAP),
+    drizzle.select().from(schema.contracts).limit(ROW_CAP),
+    drizzle.select().from(schema.tags).limit(ROW_CAP),
+    drizzle.select().from(schema.announcements).limit(ROW_CAP),
+    drizzle.select().from(schema.docPages).limit(ROW_CAP),
+    drizzle.select().from(schema.auditLog).limit(ROW_CAP),
   ])
 
   const tables = {
     organisations,
     contacts,
+    teamMembers,
+    projects,
+    tracks,
     requests,
     tasks,
+    taskSubtasks,
     invoices,
     invoiceItems,
     subscriptions,
     deals,
     timeEntries,
+    messages,
+    files,
+    contracts,
+    tags,
+    announcements,
+    docPages,
+    auditLog,
   }
 
   const counts: Record<string, number> = {}

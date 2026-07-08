@@ -69,17 +69,20 @@ export default function RootLayout({
           <link rel="apple-touch-icon" href="/favicon.png" />
           <script
             dangerouslySetInnerHTML={{
-              __html: `try{if(localStorage.getItem('tahi-theme')==='dark'){document.documentElement.classList.add('dark')}}catch(e){}`,
+              __html: `try{if(localStorage.getItem('tahi-theme')==='dark'){document.documentElement.classList.add('dark')}if(localStorage.getItem('tahi-reduce-motion')==='true'){document.documentElement.classList.add('reduce-motion')}}catch(e){}`,
             }}
           />
           {/* Sidebar collapsed-state persistence. Runs before body
               parses so the data attribute is set on <html> before the
               sidebar is even in the DOM. Mirrors the theme script
               above. Setting an unused attribute on sign-in routes is
-              harmless. */}
+              harmless. The 'tahi-sidebar-start-collapsed' preference
+              (Settings > Appearance) seeds each new browser session
+              collapsed exactly once (sessionStorage guard), so the
+              user's in-session chevron toggle is never overridden. */}
           <script
             dangerouslySetInnerHTML={{
-              __html: `try{if(localStorage.getItem('tahi-sidebar')==='collapsed'){document.documentElement.setAttribute('data-sidebar','collapsed')}}catch(e){}`,
+              __html: `try{if(localStorage.getItem('tahi-sidebar-start-collapsed')==='true'&&!sessionStorage.getItem('tahi-sidebar-seeded')){sessionStorage.setItem('tahi-sidebar-seeded','1');localStorage.setItem('tahi-sidebar','collapsed')}if(localStorage.getItem('tahi-sidebar')==='collapsed'){document.documentElement.setAttribute('data-sidebar','collapsed')}}catch(e){}`,
             }}
           />
           <script

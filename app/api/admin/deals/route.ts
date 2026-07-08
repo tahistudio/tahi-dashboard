@@ -238,7 +238,35 @@ export async function POST(req: NextRequest) {
   // headline number per deal.
   const legacyValue = upfrontValue + monthlyValue * 12
 
-  const dealCurrency = body.currency ?? 'NZD'
+  // Workspace defaults (settings K/V, managed in Settings > Pipeline
+  // defaults). Only consulted when the request omits the field, so explicit
+  // values always win.
+  let settingsCurrency: string | null = null
+  let settingsCloseWindowDays: number | null = null
+  if (!body.currency || !body.expectedCloseDate) {
+    const defaultRows = await database
+      .select({ key: schema.settings.key, value: schema.settings.value })
+      .from(schema.settings)
+      .where(inArray(schema.settings.key, ['pipeline.defaultCurrency', 'pipeline.defaultCloseWindowDays']))
+    for (const row of defaultRows) {
+      if (row.key === 'pipeline.defaultCurrency' && row.value?.trim()) {
+        settingsCurrency = row.value.trim()
+      }
+      if (row.key === 'pipeline.defaultCloseWindowDays') {
+        const parsed = parseInt(row.value ?? '', 10)
+        if (Number.isFinite(parsed) && parsed > 0) settingsCloseWindowDays = parsed
+      }
+    }
+  }
+
+  const dealCurrency = body.currency ?? settingsCurrency ?? 'NZD'
+
+  // Default close window: when no expectedCloseDate is supplied, project one
+  // out from today using the configured window (date-only ISO string).
+  const resolvedExpectedCloseDate = body.expectedCloseDate
+    ?? (settingsCloseWindowDays != null
+      ? new Date(Date.now() + settingsCloseWindowDays * 86_400_000).toISOString().slice(0, 10)
+      : null)
 
   // Convert to NZD using exchange rates
   async function toNzd(amount: number): Promise<number> {
@@ -272,7 +300,7 @@ export async function POST(req: NextRequest) {
     recurringStartDate: body.recurringStartDate ?? null,
     source: body.source ?? null,
     estimatedHoursPerWeek: body.estimatedHoursPerWeek ?? 0,
-    expectedCloseDate: body.expectedCloseDate ?? null,
+    expectedCloseDate: resolvedExpectedCloseDate,
     notes: body.notes ?? null,
     createdAt: now,
     updatedAt: now,
@@ -340,7 +368,7 @@ export async function POST(req: NextRequest) {
         source: body.source ?? null,
         ownerId: resolvedOwnerId,
         orgId: body.orgId ?? null,
-        expectedCloseDate: body.expectedCloseDate ?? null,
+        expectedCloseDate: resolvedExpectedCloseDate,
       },
     },
   })

@@ -7,9 +7,11 @@
  * daily cron uses to auto-top-up, and an accrued balance.
  *
  * Data is real: it reads /api/admin/reserves (GET) and writes through POST
- * (create), PATCH /[id] (edit) and DELETE /[id]. New pots are created with
- * sensible defaults, then opened straight into the edit dialog (same flow as
- * the task-templates and kanban sections).
+ * (create) and PATCH /[id] (edit). New pots are created with sensible
+ * defaults, then opened straight into the edit dialog (same flow as the
+ * task-templates and kanban sections); the fresh row gets the design's
+ * lrow-enter entrance. Removal is a soft-deactivate (PATCH active: false) so
+ * historical accrual records survive; the GET already filters to active pots.
  *
  * accrualRate is stored as a fraction (0.28 = 28%). The edit dialog reads and
  * writes it as a percent string. The accrued balance is driven by the cron and
@@ -27,6 +29,8 @@ import {
   EditDialog,
   RowActions,
   EmptyRow,
+  useToasts,
+  Toasts,
 } from '@/components/tahi/settings/primitives'
 
 interface Reserve {
@@ -74,7 +78,7 @@ function formatAmount(amount: number, currency: string): string {
   return prefix + n
 }
 
-// fraction (0.28) -> display string ("28%"); null -> em-free dash
+// fraction (0.28) -> display string ("28%"); null -> plain hyphen
 function rateToLabel(rate: number | null): string {
   if (rate == null) return '-'
   return Math.round(rate * 1000) / 10 + '%'
@@ -89,9 +93,33 @@ function labelToRate(raw: string): number | null {
   return pct / 100
 }
 
+function SkeletonRow({ divider }: { divider?: boolean }) {
+  return (
+    <div
+      className="lrow"
+      aria-hidden="true"
+      style={divider ? { borderTop: '1px solid var(--border-subtle)' } : undefined}
+    >
+      <span
+        className="animate-pulse"
+        style={{ width: 34, height: 34, background: 'var(--bg-secondary)', borderRadius: '0 10px 0 10px', flexShrink: 0 }}
+      />
+      <div className="lrow-t" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <span className="animate-pulse" style={{ display: 'block', width: 120, height: 13, background: 'var(--bg-secondary)', borderRadius: 6 }} />
+        <span className="animate-pulse" style={{ display: 'block', width: 170, height: 11, background: 'var(--bg-secondary)', borderRadius: 6 }} />
+      </div>
+      <div className="lrow-r">
+        <span className="animate-pulse" style={{ display: 'block', width: 72, height: 14, background: 'var(--bg-secondary)', borderRadius: 6 }} />
+      </div>
+    </div>
+  )
+}
+
 export function ReservesSection(_props: { isAdmin?: boolean } = {}) {
   const [editId, setEditId] = useState<string | null>(null)
+  const [newId, setNewId] = useState<string | null>(null) // drives lrow-enter
   const [busy, setBusy] = useState(false)
+  const { toasts, toast } = useToasts()
 
   const { data, isLoading, mutate } = useResource<ReservesResponse>('/api/admin/reserves')
   const rows = data?.reserves ?? data?.items ?? []
@@ -114,8 +142,10 @@ export function ReservesSection(_props: { isAdmin?: boolean } = {}) {
       if (!res.ok) throw new Error('Failed to create reserve')
       const json = (await res.json()) as { id: string }
       await mutate()
+      setNewId(json.id)
       setEditId(json.id)
     } catch {
+      toast('Could not create the pot', 'err')
       await mutate()
     } finally {
       setBusy(false)
@@ -135,18 +165,26 @@ export function ReservesSection(_props: { isAdmin?: boolean } = {}) {
         }),
       })
       if (!res.ok) throw new Error('Failed to save reserve')
-    } finally {
       setEditId(null)
       await mutate()
+    } catch {
+      // Keep the dialog open so nothing typed is lost.
+      toast('Could not save the pot. Please try again.', 'err')
     }
   }
 
-  async function deleteReserve(id: string) {
+  // Soft-deactivate: the pot drops out of the disposable-cash math but its
+  // accrual history survives (the GET only returns active pots).
+  async function removeReserve(id: string) {
     try {
       const res = await fetch(apiPath(`/api/admin/reserves/${id}`), {
-        method: 'DELETE',
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: false }),
       })
-      if (!res.ok) throw new Error('Failed to delete reserve')
+      if (!res.ok) throw new Error('Failed to remove reserve')
+    } catch {
+      toast('Could not remove the pot', 'err')
     } finally {
       await mutate()
     }
@@ -174,14 +212,18 @@ export function ReservesSection(_props: { isAdmin?: boolean } = {}) {
     >
       <div className="set-card lrow-wrap">
         {isLoading ? (
-          <EmptyRow text="Loading reserves..." />
+          <>
+            <SkeletonRow />
+            <SkeletonRow divider />
+            <SkeletonRow divider />
+          </>
         ) : rows.length === 0 ? (
-          <EmptyRow text="No reserve pots yet." />
+          <EmptyRow text="No reserve pots yet. Add one to start ringfencing cash." />
         ) : (
           rows.map((r, i) => (
             <div
               key={r.id}
-              className="lrow"
+              className={'lrow' + (r.id === newId ? ' lrow-enter' : '')}
               style={i ? { borderTop: '1px solid var(--border-subtle)' } : undefined}
             >
               <span className="lrow-ic leaf">
@@ -194,12 +236,13 @@ export function ReservesSection(_props: { isAdmin?: boolean } = {}) {
                 </small>
               </div>
               <div className="lrow-r">
-                <b style={{ font: '600 14px Manrope', color: 'var(--text)' }}>
+                {/* data-private: blurs under Private view, same convention as <Money sensitive> */}
+                <b data-private style={{ font: '600 14px Manrope', color: 'var(--text)' }}>
                   {formatAmount(r.accruedAmount, r.currency)}
                 </b>
                 <RowActions
                   onEdit={() => setEditId(r.id)}
-                  onDelete={() => deleteReserve(r.id)}
+                  onDelete={() => removeReserve(r.id)}
                 />
               </div>
             </div>
@@ -225,6 +268,7 @@ export function ReservesSection(_props: { isAdmin?: boolean } = {}) {
           onClose={() => setEditId(null)}
         />
       )}
+      <Toasts toasts={toasts} />
     </SectionShell>
   )
 }

@@ -12,9 +12,13 @@ import {
   type BillingInterval,
 } from '@/lib/billing'
 import { getPlanLabel } from '@/lib/plan-utils'
+import { loadPlanCatalog } from '@/lib/plan-catalog'
 
 // ── GET /api/portal/subscription ────────────────────────────────────────────
-// Returns the client's active subscription with billing tier details.
+// Returns the client's active subscription with billing tier details, plus
+// the shared retainer catalogue (settings K/V `plan_catalog`, admin-edited in
+// Settings > Client plans, with lib/billing fallbacks) so the Plan & billing
+// tab renders exactly what the studio sells.
 export async function GET(req: NextRequest) {
   const { orgId, userId } = await getPortalAuth(req)
 
@@ -25,6 +29,17 @@ export async function GET(req: NextRequest) {
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const catalog = await loadPlanCatalog(drizzle)
+  const plans = catalog.map((p) => ({
+    id: p.id,
+    name: p.name,
+    tag: p.tag,
+    feats: p.feats,
+    rec: p.rec,
+    monthlyRate: p.monthlyRate,
+    trackRate: p.trackRate,
+  }))
 
   const [sub] = await drizzle
     .select()
@@ -37,11 +52,12 @@ export async function GET(req: NextRequest) {
     .limit(1)
 
   if (!sub) {
-    return NextResponse.json({ subscription: null })
+    return NextResponse.json({ subscription: null, plans })
   }
 
   const interval = (sub.billingInterval ?? 'monthly') as BillingInterval
-  const monthlyRate = PLAN_MONTHLY_RATES[sub.planType] ?? 0
+  const catalogPlan = catalog.find((p) => p.id === sub.planType)
+  const monthlyRate = catalogPlan?.monthlyRate ?? PLAN_MONTHLY_RATES[sub.planType] ?? 0
   const cycleMonths = CYCLE_MONTHS[interval]
   const cycleTotal = monthlyRate * cycleMonths
   const monthlySavings = calculateBundledSavings(interval)
@@ -66,11 +82,19 @@ export async function GET(req: NextRequest) {
   // Calculate commitment end date from currentPeriodStart if available
   const commitmentEndDate: string | null = sub.currentPeriodEnd ?? null
 
+  // How many capacity tracks the retainer currently runs (drives the extra
+  // tracks stepper on the client Plan & billing tab).
+  const trackRows = await drizzle
+    .select({ id: schema.tracks.id })
+    .from(schema.tracks)
+    .where(eq(schema.tracks.subscriptionId, sub.id))
+  const trackCount = trackRows.length
+
   return NextResponse.json({
     subscription: {
       id: sub.id,
       planType: sub.planType,
-      planLabel: getPlanLabel(sub.planType),
+      planLabel: catalogPlan?.name ?? getPlanLabel(sub.planType),
       status: sub.status,
       billingInterval: interval,
       includedAddons: parsedAddons,
@@ -80,6 +104,7 @@ export async function GET(req: NextRequest) {
       currentPeriodStart: sub.currentPeriodStart ?? null,
       currentPeriodEnd: sub.currentPeriodEnd ?? null,
       commitmentEndDate,
+      trackCount,
       createdAt: sub.createdAt,
     },
     billing: {
@@ -91,5 +116,6 @@ export async function GET(req: NextRequest) {
       gst,
       billingCountry: sub.billingCountry ?? null,
     },
+    plans,
   })
 }

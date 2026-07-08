@@ -1967,6 +1967,24 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_ai_reply_drafts_invoice ON ai_reply_drafts(invoice_id)`,
     ],
   },
+  {
+    name: '0084',
+    description: 'Settings redesign column adds: request_forms description/audience/sla, task_templates org_id/default_assignee, organisations accent_colour, announcements emoji/cta_label/cta_url, contacts phone, team_members phone. Additive only; duplicate-column errors are swallowed upstream so re-runs are idempotent.',
+    statements: [
+      `ALTER TABLE request_forms ADD COLUMN description text`,
+      `ALTER TABLE request_forms ADD COLUMN audience text NOT NULL DEFAULT 'all_clients'`,
+      `ALTER TABLE request_forms ADD COLUMN sla text`,
+      `ALTER TABLE task_templates ADD COLUMN org_id text`,
+      `ALTER TABLE task_templates ADD COLUMN default_assignee text`,
+      `CREATE INDEX IF NOT EXISTS idx_task_templates_org ON task_templates(org_id)`,
+      `ALTER TABLE organisations ADD COLUMN accent_colour text`,
+      `ALTER TABLE announcements ADD COLUMN emoji text`,
+      `ALTER TABLE announcements ADD COLUMN cta_label text`,
+      `ALTER TABLE announcements ADD COLUMN cta_url text`,
+      `ALTER TABLE contacts ADD COLUMN phone text`,
+      `ALTER TABLE team_members ADD COLUMN phone text`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
