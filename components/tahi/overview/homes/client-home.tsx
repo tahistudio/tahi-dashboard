@@ -859,7 +859,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       </div>
 
       <Zone label="Your work">
-        <div className="col-12">
+        <div className="ov-col-12">
           {isProject ? (
             <ProjectBoard project={projectData} ro={ro} go={go} />
           ) : (

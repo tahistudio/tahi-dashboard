@@ -262,7 +262,7 @@
 .ov-zone-rail span{ flex-shrink:0; transform:rotate(180deg); writing-mode:vertical-rl; font:700 10.5px 'Manrope',sans-serif; letter-spacing:.14em; text-transform:uppercase; color:var(--text-faint); white-space:nowrap; padding-top:2px; }
 .ov-zone-rail .zr-line{ flex:1; width:1px; margin:10px 0 4px; background:linear-gradient(var(--border), transparent); }
 .ov-grid{ display:grid; grid-template-columns:repeat(12,1fr); gap:14px; }
-.col-12{ grid-column:span 12; } .col-7{ grid-column:span 7; } .col-5{ grid-column:span 5; } .col-6{ grid-column:span 6; } .col-4{ grid-column:span 4; } .col-8{ grid-column:span 8; } .col-3{ grid-column:span 3; }
+.ov-col-12{ grid-column:span 12; } .ov-col-7{ grid-column:span 7; } .ov-col-5{ grid-column:span 5; } .ov-col-6{ grid-column:span 6; } .ov-col-4{ grid-column:span 4; } .ov-col-8{ grid-column:span 8; } .ov-col-3{ grid-column:span 3; }
 
 /* ---------- card ---------- */
 .ov-card{ background:var(--bg); border:1px solid var(--border); border-radius:14px; box-shadow:var(--shadow); padding:22px; display:flex; flex-direction:column; min-width:0; }
@@ -406,10 +406,10 @@
 
 /* ---------- container-query responsiveness ---------- */
 @container (max-width: 66rem){
-  .col-3,.col-4,.col-5,.col-7,.col-8{ grid-column:span 6; }
+  .ov-col-3,.ov-col-4,.ov-col-5,.ov-col-7,.ov-col-8{ grid-column:span 6; }
 }
 @container (max-width: 46rem){
-  .col-3,.col-4,.col-5,.col-6,.col-7,.col-8{ grid-column:span 12; }
+  .ov-col-3,.ov-col-4,.ov-col-5,.ov-col-6,.ov-col-7,.ov-col-8{ grid-column:span 12; }
   .ov-topgrid{ grid-template-columns:1fr; }
   .ov-vitals{ flex-wrap:wrap; }
   .ov-vital{ flex:1 1 45%; min-width:0; }

@@ -384,7 +384,7 @@ export interface CardProps {
 /** The ledger card. `span` = 12-col grid span, `tone` re-themes local tokens
  *  (ink = dark forest), `edge` = subtle attention border. */
 export function Card({ span, className = '', children, style, tone, edge }: CardProps) {
-  const cls = 'ov-card ' + (span ? 'col-' + span : '') + (tone ? ' ' + tone : '') + (edge ? ' edge-' + edge : '') + ' ' + className
+  const cls = 'ov-card ' + (span ? 'ov-col-' + span : '') + (tone ? ' ' + tone : '') + (edge ? ' edge-' + edge : '') + ' ' + className
   return (
     <div className={cls} style={style}>
       {children}
