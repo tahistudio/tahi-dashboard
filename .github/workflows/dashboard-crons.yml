@@ -53,7 +53,9 @@ on:
     - cron: '0 19 * * MON'
     # Airwallex bank sync — daily 18:00 UTC = 06:00 NZT (next-day NZST/
     # NZDT). Pulls current balances + last 30 days of transactions.
-    # Powers the disposable-cash strip on /financial-reports.
+    # Powers the disposable-cash strip on /financial-reports. The financial
+    # snapshot (snapshot-metrics) fires in the same slot, right after, so it
+    # freezes this month's cash / MRR / owed against the freshest balances.
     - cron: '0 18 * * *'
     # Finance anomaly scan (AI) — Monday 21:00 UTC + 1st of month
     # 21:00 UTC (offset from affiliate-reactivation @ 19:00 so the
@@ -101,6 +103,7 @@ on:
           - sync-airwallex
           - sync-xero
           - sync-stripe
+          - snapshot-metrics
           - finance-anomaly-scan
           - content-auto-backfill
           - content-gap-hunt
@@ -135,7 +138,7 @@ jobs:
               "7,37 * * * *")                    targets="sync-drive-transcripts" ;;
               "0 19 * * *"|"0 20 * * *")         targets="daily-summary ai-briefing overview-brief" ;;
               "0 19 * * MON")                    targets="affiliate-reactivation" ;;
-              "0 18 * * *")                      targets="sync-airwallex" ;;
+              "0 18 * * *")                      targets="sync-airwallex snapshot-metrics" ;;
               "0 21 * * MON"|"0 21 1 * *")       targets="finance-anomaly-scan" ;;
               "0 22 * * SUN")                    targets="content-auto-backfill" ;;
               "30 19 * * SUN")                   targets="content-gap-hunt" ;;

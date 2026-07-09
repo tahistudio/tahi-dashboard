@@ -1281,6 +1281,51 @@ export const airwallexTransactions = sqliteTable('airwallex_transactions', {
 ])
 
 // ============================================================
+// FINANCIAL SNAPSHOTS (monthly point-in-time metric history, migration 0085)
+// ============================================================
+//
+// The dashboard recomputes cash / MRR / owed / runway live on every page
+// load, and the bank syncs overwrite the underlying balances each run, so
+// nothing is ever kept for "last month". This table freezes the
+// point-in-time metrics once per month (keyed on month_key, YYYY-MM UTC)
+// so the overview can show real trends and honest month-over-month deltas
+// instead of borrowing a mismatched series.
+//
+// Written by POST /api/admin/cron/snapshot-metrics (fired daily, after the
+// bank syncs): each run upserts the CURRENT month's row. When the month
+// rolls over, that month's last write becomes its frozen month-end value.
+// Twelve rows a year.
+//
+// Flow metrics (revenue / expenses / profit) deliberately live in
+// xero_pnl_snapshots, not here: those already retain monthly history and
+// get corrected by late-arriving invoices. This table holds only the
+// point-in-time figures that would otherwise be lost.
+//
+// Backfilled rows (source = 'backfill') carry only cash_nzd, reconstructed
+// by walking the Airwallex transaction ledger backwards from today's
+// balance. MRR / owed / active_clients cannot be honestly reconstructed,
+// so they stay null for backfilled months.
+export const financialSnapshots = sqliteTable('financial_snapshots', {
+  monthKey: text('month_key').primaryKey(),          // YYYY-MM (UTC)
+  // Real bank cash at month end, NZD, Airwallex-first (matches the Cash card).
+  cashNzd: real('cash_nzd'),
+  // Outstanding invoices (sent + overdue) in NZD: money owed to us.
+  owedNzd: real('owed_nzd'),
+  // Sum of active orgs' custom_mrr, converted to NZD.
+  mrrNzd: real('mrr_nzd'),
+  activeClients: integer('active_clients'),
+  // Trailing-3-month average monthly burn, NZD (from xero_pnl_snapshots).
+  burnNzd: real('burn_nzd'),
+  // cash / burn. Null when burn is unknown or not positive.
+  runwayMonths: real('runway_months'),
+  // 'cron' = full monthly snapshot; 'backfill' = cash-only reconstruction.
+  source: text('source').notNull().default('cron'),
+  // ISO timestamp of the write that produced this row's values.
+  capturedAt: text('captured_at').notNull(),
+  createdAt: text('created_at').notNull(),
+})
+
+// ============================================================
 // RESERVES (tax + custom pots, migration 0055)
 // ============================================================
 //

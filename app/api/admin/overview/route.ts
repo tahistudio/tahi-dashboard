@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, ne, count, and, inArray, gte, sql, desc } from 'drizzle-orm'
+import { eq, ne, count, and, inArray, gte, lt, isNotNull, sql, desc } from 'drizzle-orm'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
 import { resolvePermissions, can } from '@/lib/permissions'
 import {
@@ -170,18 +170,6 @@ export async function GET(req: NextRequest) {
     total: Math.round(total * 100) / 100,
   }))
 
-  // Month-over-month delta for the Hero's "vs last month" chip. Derived from
-  // the monthly paid-revenue series (last bucket = this month). Null when there
-  // is no prior-month baseline to divide by (honest: no fabricated trend).
-  let mrrDeltaPct: number | null = null
-  if (monthlyRevenue.length >= 2) {
-    const thisMonth = monthlyRevenue[monthlyRevenue.length - 1].total
-    const lastMonth = monthlyRevenue[monthlyRevenue.length - 2].total
-    if (lastMonth > 0) {
-      mrrDeltaPct = Math.round(((thisMonth - lastMonth) / lastMonth) * 1000) / 10
-    }
-  }
-
   // MRR from custom_mrr field, converted per-org currency to NZD
   let mrr = 0
   try {
@@ -193,6 +181,32 @@ export async function GET(req: NextRequest) {
     }
   } catch {
     // Column doesn't exist yet
+  }
+
+  // Month-over-month delta for the Hero's "vs last month" chip. Compares the
+  // live MRR against the previous month's STORED MRR from financial_snapshots
+  // (written daily by the snapshot-metrics cron), so it is a like-for-like
+  // recurring-revenue comparison rather than the old proxy that divided this
+  // month's paid invoices by last month's. Null until a prior month's snapshot
+  // exists (honest: no fabricated trend).
+  let mrrDeltaPct: number | null = null
+  try {
+    const currentMonthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+    const priorRows = await drizzle
+      .select({ mrrNzd: schema.financialSnapshots.mrrNzd })
+      .from(schema.financialSnapshots)
+      .where(and(
+        lt(schema.financialSnapshots.monthKey, currentMonthKey),
+        isNotNull(schema.financialSnapshots.mrrNzd),
+      ))
+      .orderBy(desc(schema.financialSnapshots.monthKey))
+      .limit(1)
+    const priorMrr = priorRows[0]?.mrrNzd ?? null
+    if (priorMrr != null && priorMrr > 0) {
+      mrrDeltaPct = Math.round(((mrr - priorMrr) / priorMrr) * 1000) / 10
+    }
+  } catch {
+    // financial_snapshots not migrated yet; leave delta null.
   }
 
   // ── Studio Ledger additions (Slice 0) ───────────────────────────────────

@@ -1985,6 +1985,24 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE team_members ADD COLUMN phone text`,
     ],
   },
+  {
+    name: '0085',
+    description: 'financial_snapshots: monthly point-in-time metric history (cash / owed / MRR / active clients / burn / runway) so the overview can show real trends and honest month-over-month deltas. Point-in-time only; flow metrics stay in xero_pnl_snapshots. Keyed on month_key so the daily snapshot cron and re-runs upsert the current month idempotently.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS financial_snapshots (
+        month_key text PRIMARY KEY NOT NULL,
+        cash_nzd real,
+        owed_nzd real,
+        mrr_nzd real,
+        active_clients integer,
+        burn_nzd real,
+        runway_months real,
+        source text NOT NULL DEFAULT 'cron',
+        captured_at text NOT NULL,
+        created_at text NOT NULL
+      )`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
