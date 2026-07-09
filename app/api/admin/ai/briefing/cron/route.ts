@@ -62,78 +62,119 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // Only fire on weekdays (Mon\u2013Fri) in NZ local time.
-  const dow = currentNzDayOfWeek()
-  if (dow < 1 || dow > 5) {
-    return NextResponse.json({ skipped: true, reason: 'not a weekday in NZ' })
-  }
+  // Manual test override: a valid cron caller (already past the secret check)
+  // may pass ?force=1 or the x-cron-force header to bypass the weekday/hour/
+  // dedup gates so the generation path can be exercised on demand. Scheduled
+  // fires never set it, so production timing is unchanged.
+  const forced =
+    new URL(req.url).searchParams.get('force') === '1' ||
+    req.headers.get('x-cron-force') === '1'
 
-  // Only fire during the 7am/8am window in NZ local time. GitHub Actions
-  // will hit this twice a day to cover both NZDT and NZST \u2014 the other
-  // one silently no-ops.
-  const hour = currentNzHour()
-  if (!TARGET_HOURS.has(hour)) {
-    return NextResponse.json({ skipped: true, reason: `NZ local hour ${hour} outside target window` })
-  }
+  if (!forced) {
+    // Only fire on weekdays (Mon-Fri) in NZ local time.
+    const dow = currentNzDayOfWeek()
+    if (dow < 1 || dow > 5) {
+      return NextResponse.json({ skipped: true, reason: 'not a weekday in NZ' })
+    }
 
-  // Dedup against the cached briefing \u2014 don't regenerate if one was
-  // produced in the last 3 hours.
-  const database = await db()
-  const cached = await database.select()
-    .from(schema.settings)
-    .where(eq(schema.settings.key, 'ai_briefing_latest'))
-    .limit(1)
+    // Only fire during the 7am/8am window in NZ local time. GitHub Actions
+    // will hit this twice a day to cover both NZDT and NZST - the other one
+    // silently no-ops.
+    const hour = currentNzHour()
+    if (!TARGET_HOURS.has(hour)) {
+      return NextResponse.json({ skipped: true, reason: `NZ local hour ${hour} outside target window` })
+    }
 
-  if (cached.length > 0 && cached[0].value) {
-    try {
-      const data = JSON.parse(cached[0].value) as { generatedAt?: string }
-      if (data.generatedAt) {
-        const ageHours = (Date.now() - new Date(data.generatedAt).getTime()) / (1000 * 60 * 60)
-        if (ageHours < DEDUP_WINDOW_HOURS) {
-          return NextResponse.json({
-            skipped: true,
-            reason: `briefing generated ${ageHours.toFixed(1)}h ago`,
-            generatedAt: data.generatedAt,
-          })
+    // Dedup against the cached briefing - don't regenerate if one was
+    // produced in the last 3 hours.
+    const database = await db()
+    const cached = await database.select()
+      .from(schema.settings)
+      .where(eq(schema.settings.key, 'ai_briefing_latest'))
+      .limit(1)
+
+    if (cached.length > 0 && cached[0].value) {
+      try {
+        const data = JSON.parse(cached[0].value) as { generatedAt?: string }
+        if (data.generatedAt) {
+          const ageHours = (Date.now() - new Date(data.generatedAt).getTime()) / (1000 * 60 * 60)
+          if (ageHours < DEDUP_WINDOW_HOURS) {
+            return NextResponse.json({
+              skipped: true,
+              reason: `briefing generated ${ageHours.toFixed(1)}h ago`,
+              generatedAt: data.generatedAt,
+            })
+          }
         }
+      } catch {
+        // Corrupt cache - fall through and regenerate.
       }
-    } catch {
-      // Corrupt cache \u2014 fall through and regenerate.
     }
   }
 
-  // Call the shared generator directly. We used to self-fetch the POST
-  // handler over HTTP, but Cloudflare rejects workers looping back through
-  // their own public hostname with error 1014, so the shared function is
-  // the right pattern.
-  try {
-    const briefing = await generateBriefing()
-    return NextResponse.json({
-      generated: true,
-      nzHour: hour,
-      dayOfWeek: dow,
-      briefing,
-    })
-  } catch (err) {
-    return NextResponse.json(
-      { error: 'Briefing generation failed', detail: err instanceof Error ? err.message : 'Unknown' },
-      { status: 500 },
+  // generateBriefing() calls Claude Sonnet, which routinely runs longer than
+  // Webflow Cloud's edge gateway timeout (~20s). Awaiting it here returns a
+  // 504 to the caller even though the worker finishes server-side, and when
+  // the client disconnects Cloudflare can tear down the in-flight generation
+  // before it caches - so some mornings nothing is produced at all.
+  //
+  // Hand the work to ctx.waitUntil so the worker stays alive after we respond,
+  // then answer immediately with 202. The result is cached to
+  // settings.ai_briefing_latest for the UI's GET to read. Same pattern as the
+  // Xero webhook reconcile and dispatchDomainEvent.
+  const work = generateBriefing().catch((err) => {
+    console.error(
+      '[ai-briefing-cron] generation failed:',
+      err instanceof Error ? err.message : err,
     )
+  })
+  try {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare')
+    const cfCtx = await getCloudflareContext({ async: true })
+    if (cfCtx?.ctx?.waitUntil) {
+      cfCtx.ctx.waitUntil(work)
+    } else {
+      void work
+    }
+  } catch {
+    // No execution context (local dev): let it run detached.
+    void work
   }
+
+  return NextResponse.json({ scheduled: true, forced }, { status: 202 })
 }
 
-// GET returns a status heartbeat for debugging.
+// GET returns a status heartbeat for debugging. It also surfaces when the
+// cached briefing was last produced (timestamp only) so a forced test run's
+// background generation can be confirmed through this same secret-gated route.
 export async function GET(req: NextRequest) {
   const expected = process.env.TAHI_CRON_SECRET
   const provided = req.headers.get('x-cron-secret')
   if (!expected || provided !== expected) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  let cachedGeneratedAt: string | null = null
+  try {
+    const database = await db()
+    const cached = await database.select()
+      .from(schema.settings)
+      .where(eq(schema.settings.key, 'ai_briefing_latest'))
+      .limit(1)
+    if (cached.length > 0 && cached[0].value) {
+      const data = JSON.parse(cached[0].value) as { generatedAt?: string }
+      cachedGeneratedAt = data.generatedAt ?? null
+    }
+  } catch {
+    cachedGeneratedAt = null
+  }
+
   return NextResponse.json({
     ok: true,
     nzHour: currentNzHour(),
     nzDayOfWeek: currentNzDayOfWeek(),
     targetHours: Array.from(TARGET_HOURS),
     dedupWindowHours: DEDUP_WINDOW_HOURS,
+    cachedGeneratedAt,
   })
 }

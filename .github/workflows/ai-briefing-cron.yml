@@ -12,8 +12,14 @@ on:
   schedule:
     - cron: '0 19 * * SUN-THU'
     - cron: '0 20 * * SUN-THU'
-  # Manual trigger for testing.
+  # Manual trigger for testing. Set force=true to bypass the NZ 7-8am window
+  # and the dedup guard so a briefing is generated on demand.
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Bypass the NZ 7-8am window + dedup and generate now (testing)'
+        type: boolean
+        default: false
 
 jobs:
   generate:
@@ -26,6 +32,7 @@ jobs:
           # not a secret). The cron secret is stored as a secret.
           DASHBOARD_URL: ${{ vars.TAHI_DASHBOARD_URL }}
           CRON_SECRET: ${{ secrets.TAHI_CRON_SECRET }}
+          FORCE: ${{ github.event.inputs.force }}
         run: |
           if [ -z "$DASHBOARD_URL" ] || [ -z "$CRON_SECRET" ]; then
             echo "::error::Missing TAHI_DASHBOARD_URL or TAHI_CRON_SECRET secret"
@@ -39,7 +46,14 @@ jobs:
             */dashboard) url="$base/api/admin/ai/briefing/cron" ;;
             *)           url="$base/dashboard/api/admin/ai/briefing/cron" ;;
           esac
+          if [ "$FORCE" = "true" ]; then
+            url="$url?force=1"
+            echo "FORCE run: bypassing the NZ time window and dedup guard"
+          fi
           echo "POSTing to $url"
+          # The endpoint hands generation to ctx.waitUntil and answers
+          # immediately with 202 (or 200 when it skips/dedups), so this returns
+          # fast instead of blocking on the ~20s+ Claude call and timing out.
           response=$(curl -sS -w "\n%{http_code}" -X POST \
             "$url" \
             -H "x-cron-secret: ${CRON_SECRET}" \
@@ -48,7 +62,28 @@ jobs:
           code=$(echo "$response" | tail -n1)
           echo "HTTP $code"
           echo "$body"
-          if [ "$code" != "200" ]; then
-            echo "::error::Briefing cron returned $code"
-            exit 1
-          fi
+          case "$code" in
+            200|202) echo "Briefing cron accepted ($code)." ;;
+            *) echo "::error::Briefing cron returned $code"; exit 1 ;;
+          esac
+
+      # Only on a forced manual run: give the background generation a moment,
+      # then read the secret-gated heartbeat to confirm a fresh briefing landed.
+      - name: Confirm generation (forced runs only)
+        if: ${{ github.event.inputs.force == 'true' }}
+        env:
+          DASHBOARD_URL: ${{ vars.TAHI_DASHBOARD_URL }}
+          CRON_SECRET: ${{ secrets.TAHI_CRON_SECRET }}
+        run: |
+          base="${DASHBOARD_URL%/}"
+          case "$base" in
+            */dashboard) url="$base/api/admin/ai/briefing/cron" ;;
+            *)           url="$base/dashboard/api/admin/ai/briefing/cron" ;;
+          esac
+          echo "Waiting 60s for background generation to finish..."
+          sleep 60
+          resp=$(curl -sS "$url" -H "x-cron-secret: ${CRON_SECRET}")
+          echo "$resp"
+          echo "$resp" | grep -o '"cachedGeneratedAt":"[^"]*"' \
+            && echo "Fresh briefing cached above." \
+            || echo "::warning::cachedGeneratedAt not present - check Worker logs"
