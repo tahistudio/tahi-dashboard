@@ -1,7 +1,19 @@
 # Tahi Dashboard — Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-07-08** by Claude (Settings pixel-perfect rebuild from the claude.ai/design "Tahi Settings" import)
+> Last updated: **2026-07-09** by Claude (Overview home rebuilt to the design import; Settings rebuild the day prior)
+
+## Overview home rebuild (2026-07-09)
+
+The home page (`/overview`) was rebuilt to the imported claude.ai/design "Tahi App Shell" overview surface at the same bar as Settings, on staging (commits up to `a79ff6a`).
+
+- **Shared OVKit kit** (`components/tahi/overview/ov-kit.tsx`) + full `overview.css` port: typed primitives (Spark hover-sparkline, Ribbon, Gauge, MicroBar, Card ink/sand tones, CardH, Row, Hero forest/plain/warm, Vitals, NeedsYou, TheWire, Zone) with `useOvFormat()` binding money to the real DisplayCurrency provider (design's hardcoded FX deleted).
+- **Three role homes** (`components/tahi/overview/homes/{owner,teammate,client}-home.tsx`) + a switcher (`overview-home.tsx`) that picks owner/teammate/client by resolved permission level + impersonation, maps `go()` to real routes, and threads read-only through a shared `ctx`. `page.tsx` mounts it for all audiences; the old 1336-line `overview-content.tsx` + 20 orphaned June "Studio Ledger" components removed.
+- **Data APIs**: extended `/api/admin/overview` (mrrDeltaPct, clientsByPlan), new `/api/admin/overview/{brief,me,replies-waiting}` + `/api/admin/reports/worklog` + scope=me on wire/tasks/time; new portal reads `/api/portal/{activity,calls,files,team,project}` + subscription clientType/nextInvoice. All honest empties, no fabricated figures.
+- **Verified live on staging**: owner home (light + dark, real data across all zones, clean console), client home (desktop + mobile 458px, real data, honest empties, read-only preview, project-type board full-width). Four bugs caught live and fixed: raw Tiptap markup in the messages card, a misleading "down 100%" MRR delta (suppressed when current-month invoiced revenue is 0), a `col-12` class collision with a Tailwind `grid-column:12` utility (renamed grid classes to `ov-col-*`), and a missing `.ov` container wrapper on owner+client that killed the mobile `@container` responsiveness.
+- **Not yet verified visually**: the teammate home (type-clean, built on the verified kit) needs a scoped non-admin team-member login staging doesn't have. Known limit: preview-as-teammate resolves the `/me` routes to the signed-in admin, so it shows the teammate LAYOUT with the admin's own scoped data until those routes take a preview-member param.
+- **Honest-data follow-ups** (render omitted/empty rather than faked): owner social "reach" (no Buffer analytics source), owner cash-runway historical sparkline (only a current-balance snapshot exists), teammate "pinned docs" (no per-member pin model; shows recent docs), teammate "today's calls" (org-level, no per-member attendee scope).
+- **Prod**: staging-only; not promoted. Migration 0084 was already applied to staging D1 (settings work); the overview APIs add no new columns.
 
 ## Settings rebuild (2026-07-08)
 
