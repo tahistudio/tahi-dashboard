@@ -10,7 +10,12 @@ import { overnightCutoff, daysPastDue } from '@/lib/overview-aggregates'
 
 export const dynamic = 'force-dynamic'
 
-type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+export type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+// Settings key for the once-per-day cached brief. Mirrors the AI briefing's
+// 'ai_briefing_latest' cadence: computed once each morning (7/8am NZ cron),
+// re-runnable on demand, and served from cache on every page load in between.
+export const BRIEF_CACHE_KEY = 'overview_brief_latest'
 
 // Each brief row maps to the design's DailyBrief accordion row:
 //   tone -> the coloured status dot ('' = neutral, used by "While you slept")
@@ -24,6 +29,16 @@ interface BriefRow {
   text: string
 }
 
+export interface BriefResult {
+  urgent: BriefRow[]
+  week: BriefRow[]
+  slept: BriefRow[]
+}
+
+interface CachedBrief extends BriefResult {
+  generatedAt: string
+}
+
 // Server-side NZD formatting. Amounts are already converted to NZD upstream
 // (this is presentation, NOT an FX rate). Mirrors TheWire's NZD-baked labels.
 function fmtNzd(n: number): string {
@@ -34,26 +49,20 @@ function plural(n: number, one: string, many: string): string {
   return n === 1 ? one : many
 }
 
-// ── GET /api/admin/overview/brief ─────────────────────────────────────────────
+// ── computeBrief ──────────────────────────────────────────────────────────────
 // Assembles the owner "Daily brief" from REAL signals, permission-gated per
 // source. Every section returns an honest empty array when nothing qualifies;
 // nothing is fabricated. Every query is wrapped so a missing table/column can
-// never 500 the home page.
+// never blow up the caller. Shared by the GET recompute path and the refresh
+// endpoint so there is exactly one source of truth.
 //
-// Response: {
-//   urgent: BriefRow[],  // needs you today  (overdue invoices, unpreppped calls)
-//   week:   BriefRow[],  // before they bite (expiring contracts, overdue requests)
-//   slept:  BriefRow[],  // while you slept  (payments cleared, deliveries, replies)
-// }
-export async function GET(req: NextRequest) {
-  const auth = await getRequestAuth(req)
-  if (!isTahiAdmin(auth.orgId)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
-  const database = await db()
-  const drizzle = database as D1
-
+// `auth` is the resolved (userId, orgId). The scheduled cron passes the
+// unrestricted owner identity (api-service + Tahi org) so it produces the full
+// owner brief; a live admin GET passes their own auth (same gating as before).
+export async function computeBrief(
+  drizzle: D1,
+  auth: { userId: string | null; orgId: string | null },
+): Promise<BriefResult> {
   const access = await resolvePermissions(drizzle, auth)
   const canSeeInvoices = can(access, 'invoices')
   const canSeeContracts = can(access, 'contracts')
@@ -334,7 +343,96 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ urgent, week, slept })
+  return { urgent, week, slept }
+}
+
+// ── Cache helpers ─────────────────────────────────────────────────────────────
+
+// Read the cached brief from settings. Returns null on a missing / corrupt /
+// shape-mismatched row so the caller safely falls through to a recompute.
+export async function readBriefCache(drizzle: D1): Promise<CachedBrief | null> {
+  try {
+    const [row] = await drizzle
+      .select({ value: schema.settings.value })
+      .from(schema.settings)
+      .where(eq(schema.settings.key, BRIEF_CACHE_KEY))
+      .limit(1)
+    if (!row?.value) return null
+    const parsed = JSON.parse(row.value) as Partial<CachedBrief>
+    if (
+      typeof parsed.generatedAt !== 'string' ||
+      !Array.isArray(parsed.urgent) ||
+      !Array.isArray(parsed.week) ||
+      !Array.isArray(parsed.slept)
+    ) {
+      return null
+    }
+    return { urgent: parsed.urgent, week: parsed.week, slept: parsed.slept, generatedAt: parsed.generatedAt }
+  } catch {
+    return null
+  }
+}
+
+// Upsert the computed brief into settings (select-then-update/insert, matching
+// the AI briefing cache write, since settings.key is the primary key).
+export async function writeBriefCache(drizzle: D1, result: BriefResult, generatedAt: string): Promise<void> {
+  const value = JSON.stringify({ ...result, generatedAt })
+  const existing = await drizzle
+    .select({ key: schema.settings.key })
+    .from(schema.settings)
+    .where(eq(schema.settings.key, BRIEF_CACHE_KEY))
+    .limit(1)
+  if (existing.length > 0) {
+    await drizzle
+      .update(schema.settings)
+      .set({ value, updatedAt: generatedAt })
+      .where(eq(schema.settings.key, BRIEF_CACHE_KEY))
+  } else {
+    await drizzle.insert(schema.settings).values({ key: BRIEF_CACHE_KEY, value, updatedAt: generatedAt })
+  }
+}
+
+// Fresh when generated within ~20h OR on the same UTC calendar day. A future
+// timestamp (clock skew) is treated as stale so we recompute rather than trust
+// it. Keeps the once-daily cadence: one morning generation carries the whole day.
+export function isBriefFresh(generatedAt: string, now: Date): boolean {
+  const gen = new Date(generatedAt)
+  if (!Number.isFinite(gen.getTime())) return false
+  const ageHours = (now.getTime() - gen.getTime()) / (1000 * 60 * 60)
+  if (ageHours < 0) return false
+  if (ageHours <= 20) return true
+  return gen.toISOString().slice(0, 10) === now.toISOString().slice(0, 10)
+}
+
+// ── GET /api/admin/overview/brief ─────────────────────────────────────────────
+// Serves the cached brief when it was generated today (same UTC day or <20h).
+// Otherwise recomputes with the caller's own permissions, caches it, and
+// returns it. Response shape is unchanged ({ urgent, week, slept }) plus a
+// generatedAt stamp the card uses for its "Updated ..." line.
+export async function GET(req: NextRequest) {
+  const auth = await getRequestAuth(req)
+  if (!isTahiAdmin(auth.orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const database = await db()
+  const drizzle = database as D1
+  const now = new Date()
+
+  const cached = await readBriefCache(drizzle)
+  if (cached && isBriefFresh(cached.generatedAt, now)) {
+    return NextResponse.json({
+      urgent: cached.urgent,
+      week: cached.week,
+      slept: cached.slept,
+      generatedAt: cached.generatedAt,
+    })
+  }
+
+  const result = await computeBrief(drizzle, auth)
+  const generatedAt = now.toISOString()
+  await writeBriefCache(drizzle, result, generatedAt)
+  return NextResponse.json({ ...result, generatedAt })
 }
 
 // Small helper so the contract row assembly stays out of the main flow.

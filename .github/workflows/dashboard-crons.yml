@@ -36,11 +36,16 @@ on:
     # Auto-promote completed calls — every 15 min. Scans calls with
     # outcome='promote' and auto-creates a deal if not already promoted.
     - cron: '5,20,35,50 * * * *'
-    # Lead AI scoring + transitions — every 30 min. Picks up new leads
-    # and re-scores stale ones using the ICP-aware rubric.
-    - cron: '0,30 * * * *'
-    # Daily summary — fires at 19:00 UTC + 20:00 UTC (7-9am NZ across
-    # DST). Dedup window inside the endpoint prevents double-push.
+    # Lead AI scoring + transitions — daily at 17:00 UTC (~5am NZ, ahead of
+    # the morning briefing). Picks up new leads + re-scores stale ones.
+    - cron: '0 17 * * *'
+    # Xero + Stripe sync — daily 15:00 UTC (~3am NZ, before the briefing) so
+    # invoices, payments and balances are fresh for MRR / receivables / take-home.
+    - cron: '0 15 * * *'
+    # Morning briefing — fires at 19:00 UTC + 20:00 UTC (7-9am NZ across DST).
+    # Regenerates the AI briefing + the overview daily-brief cache and posts the
+    # daily summary. Each endpoint self-gates to NZ 7-8am + dedups, so the user
+    # gets exactly one briefing per morning.
     - cron: '0 19 * * *'
     - cron: '0 20 * * *'
     # Weekly affiliate reactivation — Monday 19:00 UTC = Mon 7am NZST
@@ -88,10 +93,14 @@ on:
           - auto-promote-calls
           - leads-ai
           - daily-summary
+          - ai-briefing
+          - overview-brief
           - affiliate-reactivation
           - sync-calendar
           - sync-drive-transcripts
           - sync-airwallex
+          - sync-xero
+          - sync-stripe
           - finance-anomaly-scan
           - content-auto-backfill
           - content-gap-hunt
@@ -120,10 +129,11 @@ jobs:
             case "$schedule" in
               "*/10 * * * *")                    targets="pre-call-digest" ;;
               "5,20,35,50 * * * *")              targets="auto-promote-calls" ;;
-              "0,30 * * * *")                    targets="leads-ai" ;;
+              "0 17 * * *")                      targets="leads-ai" ;;
+              "0 15 * * *")                      targets="sync-xero sync-stripe" ;;
               "2,17,32,47 * * * *")              targets="sync-calendar" ;;
               "7,37 * * * *")                    targets="sync-drive-transcripts" ;;
-              "0 19 * * *"|"0 20 * * *")         targets="daily-summary" ;;
+              "0 19 * * *"|"0 20 * * *")         targets="daily-summary ai-briefing overview-brief" ;;
               "0 19 * * MON")                    targets="affiliate-reactivation" ;;
               "0 18 * * *")                      targets="sync-airwallex" ;;
               "0 21 * * MON"|"0 21 1 * *")       targets="finance-anomaly-scan" ;;
@@ -166,6 +176,8 @@ jobs:
             case "$target" in
               sync-calendar|sync-drive-transcripts) url="$root/integrations/google/$target" ;;
               sync-airwallex)                       url="$root/integrations/airwallex/sync" ;;
+              ai-briefing)                          url="$root/ai/briefing/cron" ;;
+              overview-brief)                       url="$root/overview/brief/refresh" ;;
               *)                                    url="$root/cron/$target" ;;
             esac
             echo "POST $url"

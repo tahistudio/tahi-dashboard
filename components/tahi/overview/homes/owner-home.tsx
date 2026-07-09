@@ -17,9 +17,10 @@
  * formats through useOvFormat (never a hardcoded FX rate).
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useResource } from '@/lib/use-resource'
+import { apiPath } from '@/lib/api'
 import type { OverviewCtx } from '@/components/tahi/overview/ctx'
 import {
   Icon,
@@ -305,7 +306,7 @@ export function OwnerHome({ ctx }: { ctx: OverviewCtx }) {
 
         <div className="ov-topstack">
           <NeedsYouBlock go={go} ro={ro} oldest={ov?.arAging?.oldest ?? null} />
-          <DailyBrief go={go} />
+          <DailyBrief go={go} ro={ro} />
         </div>
       </div>
 
@@ -527,15 +528,36 @@ function NeedsYouBlock({
   return <NeedsYou items={items} ro={ro} onMore={() => go('requests')} />
 }
 
-function DailyBrief({ go }: { go: (id: string) => void }) {
-  const { data } = useResource<BriefData>('/api/admin/overview/brief')
+function DailyBrief({ go, ro }: { go: (id: string) => void; ro: boolean }) {
+  const { data, mutate } = useResource<BriefData & { generatedAt?: string }>('/api/admin/overview/brief')
   const [mounted, setMounted] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [open, setOpen] = useState<Record<string, boolean>>({ urgent: true, week: false, slept: false })
   useEffect(() => setMounted(true), [])
 
   const urgent = data?.urgent ?? []
   const week = data?.week ?? []
   const slept = data?.slept ?? []
+
+  // The brief is computed once per morning and cached; POST /refresh?force=1
+  // regenerates on demand, then we revalidate to pull the fresh cache.
+  const onRefresh = useCallback(async () => {
+    if (ro || refreshing) return
+    setRefreshing(true)
+    try {
+      await fetch(apiPath('/api/admin/overview/brief/refresh?force=1'), { method: 'POST' })
+      await mutate()
+    } catch {
+      /* network error - leave the existing brief in place */
+    } finally {
+      setRefreshing(false)
+    }
+  }, [ro, refreshing, mutate])
+
+  // "Updated 3h ago" style relative label off the cached generatedAt stamp.
+  // Guarded on `mounted` so Date.now() never runs during SSR hydration.
+  const rel = mounted && data?.generatedAt ? relTime(data.generatedAt, Date.now()) : ''
+  const updatedStr = !rel ? '' : rel === 'just now' ? 'Updated just now' : `Updated ${rel} ago`
 
   const sections: { key: string; lbl: string; tone: string; rows: BriefRow[] }[] = [
     { key: 'urgent', lbl: 'Urgent today', tone: 'risk', rows: urgent },
@@ -559,6 +581,21 @@ function DailyBrief({ go }: { go: (id: string) => void }) {
       <div className="ov-brief-h">
         <h3>Daily brief</h3>
         {timeStr && <span className="ov-brief-time">{timeStr}</span>}
+        {updatedStr && (
+          <span style={{ font: "500 11.5px 'Manrope',sans-serif", color: 'var(--text-faint)' }}>{updatedStr}</span>
+        )}
+        {!ro && (
+          <button
+            type="button"
+            className="bs-act"
+            onClick={onRefresh}
+            disabled={refreshing}
+            aria-label="Refresh daily brief"
+            title="Refresh daily brief"
+          >
+            {refreshing ? 'Refreshing' : 'Refresh'}
+          </button>
+        )}
       </div>
       <p className="ov-brief-lede">{lede}</p>
       <div className="ov-brief-accs">
