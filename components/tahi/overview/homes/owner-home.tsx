@@ -312,13 +312,13 @@ export function OwnerHome({ ctx }: { ctx: OverviewCtx }) {
       <Zone label="Books">
         <TakeHomeInk />
         <CashRunway cash={ov?.cash ?? null} loading={!ov} go={go} />
-        <CashFlowRibbon />
+        <CashFlowRibbon go={go} />
         <Receivables arAging={ov?.arAging ?? null} loading={!ov} />
       </Zone>
 
       <Zone label="Ahead">
         <PipelineAhead go={go} />
-        <StudioCapacity />
+        <StudioCapacity go={go} />
         <HotLeads go={go} />
         <ProposalsLive go={go} />
       </Zone>
@@ -756,7 +756,7 @@ function CashRunway({
 interface CashFlowData {
   months?: { month: string; net: number }[]
 }
-function CashFlowRibbon() {
+function CashFlowRibbon({ go }: { go: (id: string) => void }) {
   const { moneyCompact } = useOvFormat()
   const { data } = useResource<CashFlowData>('/api/admin/reports/cash-flow-forecast?months=12')
   const months = useMemo(() => data?.months ?? [], [data])
@@ -768,7 +768,7 @@ function CashFlowRibbon() {
 
   return (
     <Card span={7}>
-      <CardH ic="chart" title="Cash-flow ribbon" />
+      <CardH ic="chart" title="Cash-flow ribbon" link="Open books" onLink={() => go('financialreports')} />
       {!data ? (
         <Shim h={64} />
       ) : months.length < 1 ? (
@@ -890,7 +890,7 @@ interface CapacityData {
   availableCapacity: number
 }
 
-function StudioCapacity() {
+function StudioCapacity({ go }: { go: (id: string) => void }) {
   const { data } = useResource<CapacityData>('/api/admin/pipeline/capacity')
   const members = data?.teamMembers ?? []
   const util =
@@ -898,7 +898,7 @@ function StudioCapacity() {
 
   return (
     <Card span={5}>
-      <CardH ic="gauge" title="Studio capacity" />
+      <CardH ic="gauge" title="Studio capacity" link="Capacity" onLink={() => go('capacity')} />
       {!data ? (
         <Shim h={120} />
       ) : members.length === 0 ? (
@@ -976,6 +976,8 @@ function HotLeads({ go }: { go: (id: string) => void }) {
         ic="spark"
         title="Hot leads"
         badge={warm > 0 ? <span className="ov-chip warn">{warm} warm</span> : undefined}
+        link="All leads"
+        onLink={() => go('leads')}
       />
       {!data ? (
         <Shim h={90} />
@@ -1511,7 +1513,7 @@ function SocialCadence({ go }: { go: (id: string) => void }) {
 
   return (
     <Card span={5}>
-      <CardH ic="share" title="Social cadence" />
+      <CardH ic="share" title="Social cadence" link="Social" onLink={() => go('social')} />
       {!status ? (
         <Shim h={80} />
       ) : !configured || channels.length === 0 ? (
