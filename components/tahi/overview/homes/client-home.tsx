@@ -848,7 +848,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   const payDisabled: CSSProperties = ro ? { opacity: 0.5, pointerEvents: 'none' } : {}
 
   return (
-    <>
+    <div className="ov" data-ro={ro ? '1' : '0'}>
       <ClientFirstRun ctx={ctx} />
 
       <div className="ov-mast">
@@ -1103,6 +1103,6 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
           </Card>
         )}
       </Zone>
-    </>
+    </div>
   )
 }

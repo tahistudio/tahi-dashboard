@@ -285,7 +285,7 @@ export function OwnerHome({ ctx }: { ctx: OverviewCtx }) {
     ) : undefined
 
   return (
-    <>
+    <div className="ov" data-ro={ro ? '1' : '0'}>
       <div className="ov-mast">
         <WireStrip />
 
@@ -341,7 +341,7 @@ export function OwnerHome({ ctx }: { ctx: OverviewCtx }) {
         <Reviews go={go} />
         <DocsHub go={go} />
       </Zone>
-    </>
+    </div>
   )
 }
 
