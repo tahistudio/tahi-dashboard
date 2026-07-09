@@ -193,6 +193,37 @@ function titleCase(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
+// Message bodies are stored as Tiptap (HTML or JSON). Reduce either to a short
+// plain-text snippet for the card preview so raw <p> tags never show.
+function plainSnippet(body: string | null | undefined, max = 90): string {
+  if (!body) return ''
+  let text = body.trim()
+  if (text.startsWith('{') || text.startsWith('[')) {
+    try {
+      const collected: string[] = []
+      const walk = (node: unknown): void => {
+        if (!node || typeof node !== 'object') return
+        const n = node as { text?: unknown; content?: unknown }
+        if (typeof n.text === 'string') collected.push(n.text)
+        if (Array.isArray(n.content)) n.content.forEach(walk)
+      }
+      walk(JSON.parse(text))
+      text = collected.join(' ')
+    } catch {
+      // fall through to tag stripping
+    }
+  }
+  text = text
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text.length > max ? text.slice(0, max - 1).trimEnd() + '…' : text
+}
+
 // Buckets `count` timestamps into `weeks` trailing 7-day windows (oldest first).
 function weeklyBuckets(isos: (string | null)[], weeks: number): number[] {
   const now = Date.now()
@@ -233,8 +264,13 @@ export function OwnerHome({ ctx }: { ctx: OverviewCtx }) {
   // ── Hero: MRR forest gradient + 12-month spark + New menu ──
   const kpis = ov?.kpis
   const mrr = kpis?.mrr
-  const delta = ov?.mrrDeltaPct
   const series = ov?.monthlyRevenue ?? []
+  // mrrDeltaPct compares invoiced revenue month-over-month; when the current
+  // month has no invoiced revenue yet (common early in the month, or on a fresh
+  // workspace) that reads as a misleading -100%, so only surface the delta when
+  // there is real current-month revenue to compare against.
+  const currentMonthTotal = series[series.length - 1]?.total ?? 0
+  const delta = currentMonthTotal > 0 ? ov?.mrrDeltaPct : null
   const heroFigure =
     series.length >= 2 ? (
       <Spark
@@ -1161,7 +1197,7 @@ function UnreadMessages({ go }: { go: (id: string) => void }) {
                 key={c.id}
                 avText={initials(name)}
                 title={name}
-                sub={c.lastMessage?.body || 'New message'}
+                sub={plainSnippet(c.lastMessage?.body) || 'New message'}
                 right={<span className="ov-chip brand">{c.unreadCount}</span>}
                 onClick={() => go('messages')}
               />
