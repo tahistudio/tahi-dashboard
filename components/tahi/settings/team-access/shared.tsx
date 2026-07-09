@@ -31,10 +31,21 @@ export interface SubjectMember {
   scope: MemberScope | null
 }
 
+export interface SubjectContact {
+  id: string
+  name: string
+  email: string
+  title: string | null
+  portalRole: string // 'admin' | 'member'
+  isPrimary: boolean
+  pending: boolean
+}
+
 export interface SubjectOrg {
   id: string
   name: string
   planType: string | null
+  contacts: SubjectContact[]
 }
 
 export interface RoleSummary {
@@ -189,6 +200,8 @@ export function humaniseAudit(item: AuditItem): string {
     }
     case 'permission.access_copied':
       return 'Copied access from ' + String(meta.sourceName ?? 'another subject')
+    case 'permission.portal_role_changed':
+      return after.portalRole === 'admin' ? 'Set to workspace admin' : 'Set to member'
     default:
       return item.action.replace('permission.', '').replace(/_/g, ' ')
   }
@@ -220,7 +233,10 @@ export function humanisePlan(planType: string | null | undefined): string {
 
 /** SWR key for a subject's permission change-history teaser. Shared by the
  *  detail card (reader) and the pane (revalidates it after each change). */
-export function permissionTeaserKey(subjectType: 'team_member' | 'organisation', subjectId: string): string {
+export function permissionTeaserKey(
+  subjectType: 'team_member' | 'organisation' | 'contact',
+  subjectId: string,
+): string {
   return (
     '/api/admin/audit?actionPrefix=permission.&entityType=' +
     encodeURIComponent(subjectType) +

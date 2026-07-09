@@ -83,8 +83,13 @@ export async function GET(req: NextRequest) {
       items.filter((i) => i.entityType === 'role' && i.entityId).map((i) => i.entityId as string),
     ),
   ]
+  const contactEntityIds = [
+    ...new Set(
+      items.filter((i) => i.entityType === 'contact' && i.entityId).map((i) => i.entityId as string),
+    ),
+  ]
 
-  const [actorRows, memberRows, orgRows, roleRows] = await Promise.all([
+  const [actorRows, memberRows, orgRows, roleRows, contactRows] = await Promise.all([
     actorIds.length
       ? drizzle
           .select({ clerkUserId: schema.teamMembers.clerkUserId, name: schema.teamMembers.name })
@@ -109,6 +114,12 @@ export async function GET(req: NextRequest) {
           .from(schema.roles)
           .where(inArray(schema.roles.id, roleEntityIds))
       : Promise.resolve([]),
+    contactEntityIds.length
+      ? drizzle
+          .select({ id: schema.contacts.id, name: schema.contacts.name })
+          .from(schema.contacts)
+          .where(inArray(schema.contacts.id, contactEntityIds))
+      : Promise.resolve([]),
   ])
 
   const actorNames = new Map(actorRows.map((r) => [r.clerkUserId, r.name]))
@@ -116,6 +127,7 @@ export async function GET(req: NextRequest) {
   for (const r of memberRows) entityNames.set('team_member|' + r.id, r.name)
   for (const r of orgRows) entityNames.set('organisation|' + r.id, r.name)
   for (const r of roleRows) entityNames.set('role|' + r.id, r.name)
+  for (const r of contactRows) entityNames.set('contact|' + r.id, r.name)
 
   const resolved = items.map((i) => ({
     ...i,

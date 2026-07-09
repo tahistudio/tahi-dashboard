@@ -40,6 +40,7 @@ import {
   type MemberScope,
   type Override,
   type RoleSummary,
+  type SubjectContact,
   type SubjectMember,
   type SubjectOrg,
 } from './shared'
@@ -401,6 +402,138 @@ export function SubjectDetail({
               ? 'No overrides - inherits the client-safe defaults.'
               : 'No overrides - inherits the ' + (roleName ? humaniseRole(roleName) : 'full admin') + ' defaults.'}
           </p>
+        ) : (
+          <>
+            {overrides.slice(0, 3).map((o) => (
+              <div key={o.featureKey} className="ta-ovr">
+                <b>{getFeatureNode(o.featureKey)?.label ?? o.featureKey}</b>
+                <span className={'st ' + (o.effect === 'deny' ? 'deny' : 'allow')}>
+                  - {o.effect === 'deny' ? 'denied' : 'allowed'}
+                </span>
+              </div>
+            ))}
+            {overrides.length > 3 && <div className="ta-ovr-more">+{overrides.length - 3} more</div>}
+          </>
+        )}
+        <button type="button" className="btn2" style={{ marginTop: 12 }} onClick={onConfigure}>
+          <SlidersHorizontal size={15} aria-hidden="true" />
+          Configure features
+        </button>
+      </div>
+
+      <div className="ta-block">
+        <span className="led">Change history</span>
+        <button type="button" className="btn-ghost" style={{ float: 'right', marginTop: -22 }} onClick={onHistory}>
+          View all
+        </button>
+        <div className="ta-teaser">
+          {teaser.map((h) => {
+            const who = h.actorName?.split(' ')[0] ?? 'System'
+            return (
+              <div key={h.id} className="ta-teaser-row">
+                <span className="tt-when">{formatWhen(h.createdAt).split(',')[0]}</span>
+                <span className="tt-txt">
+                  <b>{who}</b> - {humaniseAudit(h)}
+                </span>
+              </div>
+            )
+          })}
+          {teaser.length === 0 && (
+            <div className="ta-teaser-row">
+              <span className="tt-txt" style={{ color: 'var(--text-faint)' }}>
+                No changes yet.
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Contact (person within a client org) detail ───────────────────────────────
+
+const PORTAL_ROLE_SEG = [
+  { v: 'admin', label: 'Admin' },
+  { v: 'member', label: 'Member' },
+]
+
+export function ContactDetail({
+  contact,
+  orgName,
+  onBack,
+  onSetPortalRole,
+  onConfigure,
+  onHistory,
+}: {
+  contact: SubjectContact
+  orgName: string
+  onBack: () => void
+  onSetPortalRole: (role: 'admin' | 'member') => void
+  onConfigure: () => void
+  onHistory: () => void
+}) {
+  const subject: OverrideSubject = useMemo(
+    () => ({ type: 'contact', id: contact.id, name: contact.name, audience: 'client' }),
+    [contact.id, contact.name],
+  )
+
+  const { data: ovData } = useSWR<{ overrides: Override[] }>(overridesKey(subject))
+  const overrides = ovData?.overrides ?? []
+
+  const { data: teaserData } = useSWR<{ items: AuditItem[] }>(permissionTeaserKey('contact', contact.id))
+  const teaser = (teaserData?.items ?? []).slice(0, 2)
+
+  return (
+    <div className="ta-detail">
+      <button type="button" className="btn2 mb-back" onClick={onBack}>
+        <ArrowLeft size={16} aria-hidden="true" />
+        Back
+      </button>
+      <div className="ta-idhead">
+        <div className="ih-top">
+          <SubjAvatar name={contact.name} size={40} />
+          <div className="ih-top-r">
+            <span className={'chip ' + (contact.portalRole === 'admin' ? 'brand' : 'neutral')}>
+              {contact.portalRole === 'admin' ? 'Admin' : 'Member'}
+            </span>
+            {contact.pending && <span className="chip outline">Pending</span>}
+          </div>
+        </div>
+        <div className="ih-t">
+          <div className="ih-name">
+            <b>{contact.name}</b>
+          </div>
+          <span className="ih-sub">
+            {contact.email}
+            {orgName ? ' - ' + orgName : ''}
+          </span>
+        </div>
+      </div>
+      <div className="ta-rule" />
+
+      <div className="ta-block">
+        <span className="led">Portal role</span>
+        <SlideSeg
+          ariaLabel="Portal role"
+          value={contact.portalRole === 'admin' ? 'admin' : 'member'}
+          onChange={(v) => onSetPortalRole(v === 'admin' ? 'admin' : 'member')}
+          opts={PORTAL_ROLE_SEG}
+        />
+        <p className="ta-empty-note" style={{ marginTop: 10, marginBottom: 0 }}>
+          {contact.portalRole === 'admin'
+            ? 'Administers the portal for their org - manages people and sees billing.'
+            : 'Sees their own scoped portal view only.'}
+        </p>
+      </div>
+
+      <div className="ta-block">
+        <span className="led">
+          Feature overrides
+          {overrides.length > 0 && <span className="cbadge">{overrides.length}</span>}
+        </span>
+        {overrides.length === 0 ? (
+          <p className="ta-empty-note">No overrides - inherits {orgName || 'the org'}&apos;s client access.</p>
         ) : (
           <>
             {overrides.slice(0, 3).map((o) => (

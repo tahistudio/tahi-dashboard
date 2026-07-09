@@ -22,7 +22,7 @@ import { SlideOverShell, Tri, type TriValue } from '@/components/tahi/settings/p
 import { groupsFor, childrenFor } from './groups'
 import { type Effect, type Override } from './shared'
 
-export type OverrideSubjectType = 'team_member' | 'organisation' | 'role'
+export type OverrideSubjectType = 'team_member' | 'organisation' | 'role' | 'contact'
 
 export interface OverrideSubject {
   type: OverrideSubjectType
@@ -78,7 +78,13 @@ export function FeatureSlideOver({
   const featureCount = useMemo(() => groups.reduce((a, g) => a + g.nodes.length, 0), [groups])
 
   const subjectTypeLabel =
-    subject.type === 'team_member' ? 'Team member' : subject.type === 'organisation' ? 'Client' : 'Role'
+    subject.type === 'team_member'
+      ? 'Team member'
+      : subject.type === 'organisation'
+        ? 'Client'
+        : subject.type === 'contact'
+          ? 'Person'
+          : 'Role'
 
   const persist = useCallback(
     async (featureKey: string, effect: TriValue, reason: string | null) => {

@@ -307,18 +307,22 @@ const TOOLS: ToolDef[] = [
   tool('get_org_chart', 'Get the team org chart with reporting structure'),
 
   // ── Granular permissions ───────────────────────────────────────────────
-  tool('list_permission_subjects', 'List everything the permissions builder needs: team members (with roles), client orgs, and the role catalogue.'),
-  tool('get_feature_visibility', 'List a subject\'s feature-visibility overrides. subjectType is role | team_member | organisation.', {
-    subjectType: prop('string', 'role | team_member | organisation'),
-    subjectId: prop('string', 'Role ID, team member ID, or org ID'),
+  tool('list_permission_subjects', 'List everything the permissions builder needs: team members (with roles), client orgs (each with its contacts / people), and the role catalogue.'),
+  tool('get_feature_visibility', 'List a subject\'s feature-visibility overrides. subjectType is role | team_member | organisation | contact.', {
+    subjectType: prop('string', 'role | team_member | organisation | contact'),
+    subjectId: prop('string', 'Role ID, team member ID, org ID, or contact ID'),
   }, ['subjectType', 'subjectId']),
-  tool('set_feature_visibility', 'Turn a feature on/off for a subject (page > tab > card key from the FEATURE_TREE). effect allow | deny | inherit (inherit clears the override). Optional free-text reason.', {
-    subjectType: prop('string', 'role | team_member | organisation'),
-    subjectId: prop('string', 'Role ID, team member ID, or org ID'),
+  tool('set_feature_visibility', 'Turn a feature on/off for a subject (page > tab > card key from the FEATURE_TREE). effect allow | deny | inherit (inherit clears the override). Optional free-text reason. subjectType contact refines a single client person on top of their org baseline.', {
+    subjectType: prop('string', 'role | team_member | organisation | contact'),
+    subjectId: prop('string', 'Role ID, team member ID, org ID, or contact ID'),
     featureKey: prop('string', 'Dotted feature key, e.g. requests, requests.board, clients.billing_card'),
     effect: prop('string', 'allow | deny | inherit'),
     reason: prop('string', 'Optional free-text why'),
   }, ['subjectType', 'subjectId', 'featureKey', 'effect']),
+  tool('set_contact_portal_role', 'Set a client contact\'s portal role: admin (administers the org portal - contacts, billing) or member (their own scoped view). Audit-logged into the permission change history.', {
+    contactId: prop('string', 'Contact ID'),
+    portalRole: prop('string', 'admin | member'),
+  }, ['contactId', 'portalRole']),
   tool('assign_team_role', 'Set a team member\'s level role (super_admin | admin | project_manager | task_handler | viewer). Pass roleId null to clear (-> default admin level).', {
     teamMemberId: prop('string', 'Team member ID'),
     roleId: prop('string', 'Role ID, or omit/null to clear'),
@@ -1510,6 +1514,10 @@ async function executeTool(
     case 'assign_team_role':
       return json(await apiWrite('/api/admin/permissions/assign-role', token, 'POST', {
         teamMemberId: s('teamMemberId'), roleId: typeof args.roleId === 'string' && args.roleId ? args.roleId : null,
+      }))
+    case 'set_contact_portal_role':
+      return json(await apiWrite('/api/admin/permissions/contact-role', token, 'POST', {
+        contactId: s('contactId'), portalRole: s('portalRole'),
       }))
     case 'get_permission_matrix':
       return json(await apiGet('/api/admin/permissions/matrix', token))

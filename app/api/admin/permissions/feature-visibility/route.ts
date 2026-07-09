@@ -11,7 +11,7 @@ import { isFeatureKey } from '@/lib/feature-tree'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-const SUBJECT_TYPES = new Set(['role', 'team_member', 'organisation'])
+const SUBJECT_TYPES = new Set(['role', 'team_member', 'organisation', 'contact'])
 
 // GET /api/admin/permissions/feature-visibility?subjectType=&subjectId=
 // List the overrides for one subject. Admin+ only.

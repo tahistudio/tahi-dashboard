@@ -282,6 +282,11 @@ a.chip:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .subj:hover { background: var(--bg-secondary); }
 .subj.sel { background: var(--brand-100); box-shadow: inset 0 0 0 1px var(--border); }
 .subj:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+/* nested person row under a client org: indented, with a hairline guide */
+.subj.nested { padding-left: 30px; position: relative; }
+.subj.nested::before { content: ""; position: absolute; left: 21px; top: 0; bottom: 0; width: 1px; background: var(--border-subtle); }
+.subj.nested .subj-av { width: 26px; height: 26px; font-size: 10px; }
+.subj.nested .subj-l1 b { font-size: 13px; font-weight: 500; }
 .subj-av { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; background: var(--brand-100); color: var(--brand-strong); font: 700 12px 'Manrope', sans-serif; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .subj-av img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 28%; }
 .subj-t { flex: 1; min-width: 0; }

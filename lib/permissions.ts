@@ -204,14 +204,41 @@ export async function resolvePermissions(
   if (!isTeam) {
     const overrides = new Map<string, Effect>()
     if (auth.orgId) {
-      const rows = await drizzle
+      // Org-level overrides are the baseline for everyone at this org.
+      const orgRows = await drizzle
         .select({ featureKey: schema.featureVisibility.featureKey, effect: schema.featureVisibility.effect })
         .from(schema.featureVisibility)
         .where(and(
           eq(schema.featureVisibility.subjectType, 'organisation'),
           eq(schema.featureVisibility.subjectId, auth.orgId),
         ))
-      for (const r of rows) overrides.set(r.featureKey, r.effect as Effect)
+      for (const r of orgRows) overrides.set(r.featureKey, r.effect as Effect)
+
+      // Per-contact overrides refine the org baseline for THIS person, most
+      // specific wins (contact beats org, exactly like team_member beats role).
+      // Resolved by the caller's Clerk user id within their org. An admin
+      // previewing a client (impersonation) has no contact row here, so they
+      // see the org baseline, never a specific person's refinements.
+      if (auth.userId && auth.userId !== 'api-service') {
+        const [contact] = await drizzle
+          .select({ id: schema.contacts.id })
+          .from(schema.contacts)
+          .where(and(
+            eq(schema.contacts.orgId, auth.orgId),
+            eq(schema.contacts.clerkUserId, auth.userId),
+          ))
+          .limit(1)
+        if (contact) {
+          const contactRows = await drizzle
+            .select({ featureKey: schema.featureVisibility.featureKey, effect: schema.featureVisibility.effect })
+            .from(schema.featureVisibility)
+            .where(and(
+              eq(schema.featureVisibility.subjectType, 'contact'),
+              eq(schema.featureVisibility.subjectId, contact.id),
+            ))
+          for (const r of contactRows) overrides.set(r.featureKey, r.effect as Effect) // most specific
+        }
+      }
     }
     return {
       userId: auth.userId, orgId: auth.orgId, level: 'client', audience,

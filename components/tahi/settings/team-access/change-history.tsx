@@ -24,6 +24,7 @@ const ENTITY_LABELS: Record<string, string> = {
   team_member: 'Team member',
   organisation: 'Client',
   role: 'Role',
+  contact: 'Person',
 }
 
 export function ChangeHistory({ onBack }: { onBack: () => void }) {

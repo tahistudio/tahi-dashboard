@@ -31,7 +31,7 @@ import { FeatureSlideOver, overridesKey, type OverrideSubject } from './feature-
 import { RolesMatrix } from './roles-matrix'
 import { ChangeHistory } from './change-history'
 import { CopyDialog } from './copy-dialog'
-import { SubjectDetail, scopeLine } from './subject-detail'
+import { SubjectDetail, ContactDetail, scopeLine } from './subject-detail'
 import {
   RoleChip,
   SubjAvatar,
@@ -57,6 +57,9 @@ export function TeamAccessPane() {
   const [view, setView] = useState<'list' | 'history'>('list')
   const [selTeam, setSelTeam] = useState<string | null>(null)
   const [selClient, setSelClient] = useState<string | null>(null)
+  // A person (contact) selected within the active client org. null = the org
+  // itself is the active subject; set = drilled into that person.
+  const [selContact, setSelContact] = useState<string | null>(null)
   const [slideOver, setSlideOver] = useState(false)
   const [copyOpen, setCopyOpen] = useState(false)
   const [showDetail, setShowDetail] = useState(false) // mobile push
@@ -77,19 +80,33 @@ export function TeamAccessPane() {
       .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
       .filter((m) => !q || m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q))
   }, [members, q])
+  // A client org matches if its name OR any of its people match the search, so
+  // searching a person surfaces their org (with that person still listed).
   const clientList = useMemo(
-    () => [...orgs].sort((a, b) => a.name.localeCompare(b.name)).filter((o) => !q || o.name.toLowerCase().includes(q)),
+    () =>
+      [...orgs]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .filter(
+          (o) =>
+            !q ||
+            o.name.toLowerCase().includes(q) ||
+            o.contacts.some((c) => c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q)),
+        ),
     [orgs, q],
   )
 
   const curMember = tab === 'team' ? members.find((m) => m.id === (selTeam ?? teamList[0]?.id)) ?? null : null
   const curOrg = tab === 'clients' ? orgs.find((o) => o.id === (selClient ?? clientList[0]?.id)) ?? null : null
-  const curId = tab === 'clients' ? curOrg?.id : curMember?.id
-  const curName = tab === 'clients' ? curOrg?.name : curMember?.name
+  // The active client person, when one is drilled into (must belong to curOrg).
+  const curContact =
+    tab === 'clients' && selContact ? curOrg?.contacts.find((c) => c.id === selContact) ?? null : null
+
+  const curId = tab === 'clients' ? (curContact?.id ?? curOrg?.id) : curMember?.id
+  const curName = tab === 'clients' ? (curContact?.name ?? curOrg?.name) : curMember?.name
 
   const overrideSubject: OverrideSubject | null = curId
     ? {
-        type: tab === 'clients' ? 'organisation' : 'team_member',
+        type: tab === 'clients' ? (curContact ? 'contact' : 'organisation') : 'team_member',
         id: curId,
         name: curName ?? '',
         audience: tab === 'clients' ? 'client' : 'team',
@@ -181,6 +198,39 @@ export function TeamAccessPane() {
         void mutateKey(permissionTeaserKey('team_member', member.id))
       } catch {
         toast('Could not save data scope', 'err')
+        void mutate()
+      }
+    },
+    [mutate, mutateKey, toast],
+  )
+
+  const setPortalRole = useCallback(
+    async (contactId: string, portalRole: 'admin' | 'member') => {
+      void mutate(
+        (prev) =>
+          prev
+            ? {
+                ...prev,
+                orgs: prev.orgs.map((o) => ({
+                  ...o,
+                  contacts: o.contacts.map((c) => (c.id === contactId ? { ...c, portalRole } : c)),
+                })),
+              }
+            : prev,
+        { revalidate: false },
+      )
+      try {
+        const res = await fetch(apiPath('/api/admin/permissions/contact-role'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contactId, portalRole }),
+        })
+        if (!res.ok) throw new Error('Failed')
+        toast(portalRole === 'admin' ? 'Set to workspace admin' : 'Set to member', 'ok')
+        void mutate()
+        void mutateKey(permissionTeaserKey('contact', contactId))
+      } catch {
+        toast('Could not update portal role', 'err')
         void mutate()
       }
     },
@@ -317,29 +367,65 @@ export function TeamAccessPane() {
               )}
               {tab === 'clients' &&
                 clientList.map((o) => {
-                  const sel = o.id === curOrg?.id
+                  const orgSel = o.id === curOrg?.id && !curContact
                   return (
-                    <button
-                      key={o.id}
-                      type="button"
-                      className={'subj' + (sel ? ' sel' : '')}
-                      aria-current={sel}
-                      onClick={() => {
-                        setSelClient(o.id)
-                        setShowDetail(true)
-                      }}
-                    >
-                      <SubjAvatar name={o.name} />
-                      <div className="subj-t">
-                        <div className="subj-l1">
-                          <b>{o.name}</b>
+                    <div key={o.id}>
+                      <button
+                        type="button"
+                        className={'subj' + (orgSel ? ' sel' : '')}
+                        aria-current={orgSel}
+                        onClick={() => {
+                          setSelClient(o.id)
+                          setSelContact(null)
+                          setShowDetail(true)
+                        }}
+                      >
+                        <SubjAvatar name={o.name} />
+                        <div className="subj-t">
+                          <div className="subj-l1">
+                            <b>{o.name}</b>
+                          </div>
+                          <span className="subj-l2">
+                            {o.contacts.length
+                              ? o.contacts.length + ' ' + (o.contacts.length === 1 ? 'person' : 'people')
+                              : 'Client portal access'}
+                          </span>
                         </div>
-                        <span className="subj-l2">Client portal access</span>
-                      </div>
-                      <span className="subj-chip">
-                        <span className="chip neutral">{humanisePlan(o.planType)}</span>
-                      </span>
-                    </button>
+                        <span className="subj-chip">
+                          <span className="chip neutral">{humanisePlan(o.planType)}</span>
+                        </span>
+                      </button>
+                      {o.contacts.map((c) => {
+                        const personSel = c.id === curContact?.id
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            className={'subj nested' + (personSel ? ' sel' : '')}
+                            aria-current={personSel}
+                            onClick={() => {
+                              setSelClient(o.id)
+                              setSelContact(c.id)
+                              setShowDetail(true)
+                            }}
+                          >
+                            <SubjAvatar name={c.name} />
+                            <div className="subj-t">
+                              <div className="subj-l1">
+                                <b>{c.name}</b>
+                                {c.pending && <span className="chip outline">Pending</span>}
+                              </div>
+                              <span className="subj-l2">{c.title || c.email}</span>
+                            </div>
+                            <span className="subj-chip">
+                              <span className={'chip ' + (c.portalRole === 'admin' ? 'brand' : 'neutral')}>
+                                {c.portalRole === 'admin' ? 'Admin' : 'Member'}
+                              </span>
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
                   )
                 })}
               {tab === 'clients' && clientList.length === 0 && (
@@ -350,20 +436,31 @@ export function TeamAccessPane() {
             </div>
 
             <div className="ta-detail-wrap">
-              <SubjectDetail
-                tab={tab}
-                member={curMember}
-                org={curOrg}
-                roles={roles}
-                orgs={orgs}
-                onBack={() => setShowDetail(false)}
-                onAssignRole={(m, roleId) => void assignRole(m, roleId)}
-                onSaveScope={(m, scope) => void saveScope(m, scope)}
-                onConfigure={() => setSlideOver(true)}
-                onPreview={() => void previewAs()}
-                onCopy={() => setCopyOpen(true)}
-                onHistory={() => setView('history')}
-              />
+              {curContact ? (
+                <ContactDetail
+                  contact={curContact}
+                  orgName={curOrg?.name ?? ''}
+                  onBack={() => setShowDetail(false)}
+                  onSetPortalRole={(role) => void setPortalRole(curContact.id, role)}
+                  onConfigure={() => setSlideOver(true)}
+                  onHistory={() => setView('history')}
+                />
+              ) : (
+                <SubjectDetail
+                  tab={tab}
+                  member={curMember}
+                  org={curOrg}
+                  roles={roles}
+                  orgs={orgs}
+                  onBack={() => setShowDetail(false)}
+                  onAssignRole={(m, roleId) => void assignRole(m, roleId)}
+                  onSaveScope={(m, scope) => void saveScope(m, scope)}
+                  onConfigure={() => setSlideOver(true)}
+                  onPreview={() => void previewAs()}
+                  onCopy={() => setCopyOpen(true)}
+                  onHistory={() => setView('history')}
+                />
+              )}
             </div>
           </div>
         )}

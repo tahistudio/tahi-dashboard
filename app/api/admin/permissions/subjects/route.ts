@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   const { denied } = await requireManagePermissions(drizzle, auth)
   if (denied) return denied
 
-  const [members, orgs, roles, assignments, accessRules, accessOrgs] = await Promise.all([
+  const [members, orgs, roles, assignments, accessRules, accessOrgs, contacts] = await Promise.all([
     drizzle
       .select({ id: schema.teamMembers.id, name: schema.teamMembers.name, email: schema.teamMembers.email })
       .from(schema.teamMembers)
@@ -46,6 +46,19 @@ export async function GET(req: NextRequest) {
     drizzle
       .select({ accessId: schema.teamMemberAccessOrgs.accessId, orgId: schema.teamMemberAccessOrgs.orgId })
       .from(schema.teamMemberAccessOrgs),
+    drizzle
+      .select({
+        id: schema.contacts.id,
+        orgId: schema.contacts.orgId,
+        name: schema.contacts.name,
+        email: schema.contacts.email,
+        title: schema.contacts.role,
+        portalRole: schema.contacts.portalRole,
+        isPrimary: schema.contacts.isPrimary,
+        clerkUserId: schema.contacts.clerkUserId,
+      })
+      .from(schema.contacts)
+      .orderBy(asc(schema.contacts.name)),
   ])
 
   const rolesByMember = new Map<string, Array<{ roleId: string; roleName: string }>>()
@@ -76,13 +89,43 @@ export async function GET(req: NextRequest) {
     })
   }
 
+  // People per org: the contacts (client-portal users) at each client. A
+  // contact with no clerkUserId is a pending invite - they cannot resolve a
+  // session yet, so their per-person overrides only bite once they log in.
+  const contactsByOrg = new Map<
+    string,
+    Array<{
+      id: string
+      name: string
+      email: string
+      title: string | null
+      portalRole: string
+      isPrimary: boolean
+      pending: boolean
+    }>
+  >()
+  for (const c of contacts) {
+    const entry = {
+      id: c.id,
+      name: c.name,
+      email: c.email,
+      title: c.title ?? null,
+      portalRole: c.portalRole,
+      isPrimary: !!c.isPrimary,
+      pending: !c.clerkUserId,
+    }
+    const list = contactsByOrg.get(c.orgId)
+    if (list) list.push(entry)
+    else contactsByOrg.set(c.orgId, [entry])
+  }
+
   return NextResponse.json({
     teamMembers: members.map(m => ({
       ...m,
       roles: rolesByMember.get(m.id) ?? [],
       scope: scopeByMember.get(m.id) ?? null,
     })),
-    orgs,
+    orgs: orgs.map(o => ({ ...o, contacts: contactsByOrg.get(o.id) ?? [] })),
     roles,
   })
 }
