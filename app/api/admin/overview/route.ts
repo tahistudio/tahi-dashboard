@@ -10,6 +10,7 @@ import {
   daysPastDue,
   bucketArAging,
   computeRunwayMonths,
+  aggregateCashNzd,
   trailingThreeMonthKey,
   activeTimerLabel,
   type ArAging,
@@ -201,14 +202,24 @@ export async function GET(req: NextRequest) {
 
   const since = overnightCutoff(now)
 
-  // Cash + runway (gated on financial_reports). Mirrors reports/bank-balances.
+  // Cash + runway (gated on financial_reports). Uses the same Airwallex-first
+  // aggregation as /financial-reports so the Cash card shows real bank cash,
+  // not Xero's BankSummary (which overstates foreign accounts by counting
+  // invoiced-but-unsettled amounts as cash).
   let cash: { totalNzd: number; runwayMonths: number | null; burnNzd: number } | null = null
   if (canSeeMrr) {
     try {
-      const balances = await drizzle.select().from(schema.xeroBankBalances)
-      const totalNzd = balances.reduce(
-        (sum, b) => sum + toNzd(b.balance, b.currency ?? 'NZD', rateMap),
-        0,
+      let airwallexBalances: Array<{ currency: string | null; availableBalance: number }> = []
+      try {
+        airwallexBalances = await drizzle.select().from(schema.airwallexBalances)
+      } catch {
+        // Airwallex table missing — fall back to Xero-only via empty array.
+      }
+      const xeroBalances = await drizzle.select().from(schema.xeroBankBalances)
+      const totalNzd = aggregateCashNzd(
+        airwallexBalances,
+        xeroBalances,
+        (amount, currency) => toNzd(amount, currency, rateMap),
       )
 
       let burnNzd = 0
