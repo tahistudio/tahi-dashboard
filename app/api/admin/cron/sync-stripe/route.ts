@@ -17,6 +17,7 @@
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { stripeSecretKey } from '@/lib/stripe-key'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest) {
   const database = (await db()) as unknown as D1
   const steps: StepResult[] = []
 
-  const stripeKey = process.env.STRIPE_SECRET_KEY
+  const stripeKey = stripeSecretKey()
   if (!stripeKey) {
     const reason = 'Stripe not configured (STRIPE_SECRET_KEY missing)'
     steps.push({ name: 'import-payments', ok: false, error: reason })

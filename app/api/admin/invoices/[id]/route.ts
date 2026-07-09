@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { stripeSecretKey } from '@/lib/stripe-key'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -188,18 +189,19 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   if (denied) return denied
 
   // Void in Stripe if linked (draft = delete, finalized = void)
-  if (invoice.stripeInvoiceId && process.env.STRIPE_SECRET_KEY) {
+  const stripeKey = stripeSecretKey()
+  if (invoice.stripeInvoiceId && stripeKey) {
     try {
       // Try to void first (for finalized invoices)
       const voidRes = await fetch(`https://api.stripe.com/v1/invoices/${invoice.stripeInvoiceId}/void`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}` },
+        headers: { Authorization: `Bearer ${stripeKey}` },
       })
       if (!voidRes.ok) {
         // If void fails (e.g. draft), try delete
         await fetch(`https://api.stripe.com/v1/invoices/${invoice.stripeInvoiceId}`, {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}` },
+          headers: { Authorization: `Bearer ${stripeKey}` },
         })
       }
     } catch { /* Stripe cleanup failed silently */ }

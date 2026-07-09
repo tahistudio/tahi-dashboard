@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import Stripe from 'stripe'
+import { stripeSecretKey } from '@/lib/stripe-key'
 
 /**
  * GET /api/portal/billing/session
@@ -18,7 +19,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  if (!process.env.STRIPE_SECRET_KEY) {
+  const stripeKey = stripeSecretKey()
+  if (!stripeKey) {
     return NextResponse.json({ error: 'Stripe not configured' }, { status: 503 })
   }
 
@@ -38,7 +40,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+    const stripe = new Stripe(stripeKey, {
       apiVersion: '2025-02-24.acacia',
     })
 

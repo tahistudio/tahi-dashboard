@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { stripeSecretKey } from '@/lib/stripe-key'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json() as { invoiceId: string }
   if (!body.invoiceId) return NextResponse.json({ error: 'invoiceId is required' }, { status: 400 })
 
-  const stripeKey = process.env.STRIPE_SECRET_KEY
+  const stripeKey = stripeSecretKey()
   if (!stripeKey) return NextResponse.json({ error: 'Stripe not configured' }, { status: 503 })
 
   const database = await db() as unknown as D1

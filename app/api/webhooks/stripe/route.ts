@@ -1,5 +1,6 @@
 import { headers } from 'next/headers'
 import Stripe from 'stripe'
+import { stripeSecretKey } from '@/lib/stripe-key'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
@@ -63,8 +64,9 @@ export const dynamic = 'force-dynamic'
 let _stripe: Stripe | null = null
 function getStripe(): Stripe {
   if (!_stripe) {
-    if (!process.env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY is not set')
-    _stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+    const key = stripeSecretKey()
+    if (!key) throw new Error('STRIPE_SECRET_KEY is not set')
+    _stripe = new Stripe(key, {
       apiVersion: '2025-02-24.acacia',
     })
   }

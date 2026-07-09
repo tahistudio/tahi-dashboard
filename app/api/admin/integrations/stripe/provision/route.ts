@@ -5,14 +5,16 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import Stripe from 'stripe'
+import { stripeSecretKey } from '@/lib/stripe-key'
 
 export const dynamic = 'force-dynamic'
 
 let _stripe: Stripe | null = null
 function getStripe(): Stripe | null {
-  if (!process.env.STRIPE_SECRET_KEY) return null
+  const key = stripeSecretKey()
+  if (!key) return null
   if (!_stripe) {
-    _stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+    _stripe = new Stripe(key, {
       apiVersion: '2025-02-24.acacia',
     })
   }

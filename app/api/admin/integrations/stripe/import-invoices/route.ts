@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { stripeSecretKey } from '@/lib/stripe-key'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -20,6 +21,6 @@ export async function POST(req: NextRequest) {
   if (denied) return denied
 
   const database = (await db()) as D1
-  const outcome = await importStripeInvoices(database, process.env.STRIPE_SECRET_KEY)
+  const outcome = await importStripeInvoices(database, stripeSecretKey())
   return NextResponse.json(outcome.body, { status: outcome.status })
 }
