@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, like, and } from 'drizzle-orm'
+import { eq, desc, like, and, inArray } from 'drizzle-orm'
 
 // GET /api/admin/docs - list all doc pages
 // Query: ?category=brand&search=onboarding
@@ -42,7 +42,67 @@ export async function GET(req: NextRequest) {
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(schema.docPages.updatedAt))
 
-  return NextResponse.json({ pages })
+  // Resolve the last editor's display name for the Docs hub card subline
+  // ("Edited by <name>"). The latest doc_versions row per page carries the
+  // editor (savedById); we fall back to the page author when no version
+  // exists. savedById/authorId are Clerk user ids, resolved to a team member
+  // name via clerkUserId. Any resolution failure degrades to null (honest:
+  // the card then shows just the relative time).
+  const pageIds = pages.map(p => p.id)
+  const latestEditorId = new Map<string, string>()
+  const latestEditedAt = new Map<string, string>()
+  if (pageIds.length) {
+    try {
+      const versions = await drizzle
+        .select({
+          pageId: schema.docVersions.pageId,
+          savedById: schema.docVersions.savedById,
+          savedAt: schema.docVersions.savedAt,
+        })
+        .from(schema.docVersions)
+        .where(inArray(schema.docVersions.pageId, pageIds))
+        .orderBy(desc(schema.docVersions.savedAt))
+      for (const v of versions) {
+        if (!latestEditedAt.has(v.pageId)) {
+          latestEditedAt.set(v.pageId, v.savedAt)
+          if (v.savedById) latestEditorId.set(v.pageId, v.savedById)
+        }
+      }
+    } catch {
+      // Versions table missing — fall back to authorId / updatedAt.
+    }
+  }
+
+  const clerkIds = new Set<string>()
+  for (const p of pages) {
+    const editorId = latestEditorId.get(p.id) ?? p.authorId
+    if (editorId) clerkIds.add(editorId)
+  }
+  const nameByClerkId = new Map<string, string>()
+  if (clerkIds.size) {
+    try {
+      const tms = await drizzle
+        .select({ clerkUserId: schema.teamMembers.clerkUserId, name: schema.teamMembers.name })
+        .from(schema.teamMembers)
+        .where(inArray(schema.teamMembers.clerkUserId, Array.from(clerkIds)))
+      for (const tm of tms) {
+        if (tm.clerkUserId) nameByClerkId.set(tm.clerkUserId, tm.name)
+      }
+    } catch {
+      // Team members table missing — leave names unresolved.
+    }
+  }
+
+  const pagesWithEditor = pages.map(p => {
+    const editorId = latestEditorId.get(p.id) ?? p.authorId ?? null
+    return {
+      ...p,
+      lastEditedBy: editorId ? (nameByClerkId.get(editorId) ?? null) : null,
+      lastEditedAt: latestEditedAt.get(p.id) ?? p.updatedAt,
+    }
+  })
+
+  return NextResponse.json({ pages: pagesWithEditor })
 }
 
 // POST /api/admin/docs - create a new doc page

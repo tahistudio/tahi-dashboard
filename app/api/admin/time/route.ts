@@ -8,14 +8,14 @@ import { eq, desc, and, gte, lte, sql } from 'drizzle-orm'
 // Returns paginated time entries with joins (org name, team member name, request title).
 // Query params: orgId, teamMemberId, billable (0|1), dateFrom, dateTo, page (default 1)
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const url = new URL(req.url)
   const orgIdFilter = url.searchParams.get('orgId')
-  const teamMemberIdFilter = url.searchParams.get('teamMemberId')
+  const teamMemberIdParam = url.searchParams.get('teamMemberId')
   const billableFilter = url.searchParams.get('billable')
   const dateFrom = url.searchParams.get('dateFrom')
   const dateTo = url.searchParams.get('dateTo')
@@ -25,6 +25,32 @@ export async function GET(req: NextRequest) {
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Resolve teamMemberId=me to the signed-in member (teamMembers.clerkUserId).
+  // Also carries the member's weekly capacity target back for the week meter.
+  let teamMemberIdFilter = teamMemberIdParam
+  let capacityHours: number | null = null
+  if (teamMemberIdParam === 'me') {
+    const [me] = await drizzle
+      .select({ id: schema.teamMembers.id, weeklyCapacityHours: schema.teamMembers.weeklyCapacityHours })
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.clerkUserId, userId ?? ''))
+      .limit(1)
+    if (!me) {
+      return NextResponse.json({
+        items: [], page, limit, totalHours: 0, billableHours: 0, entryCount: 0, capacityHours: null,
+      })
+    }
+    teamMemberIdFilter = me.id
+    capacityHours = me.weeklyCapacityHours ?? null
+  } else if (teamMemberIdParam) {
+    const [member] = await drizzle
+      .select({ weeklyCapacityHours: schema.teamMembers.weeklyCapacityHours })
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.id, teamMemberIdParam))
+      .limit(1)
+    capacityHours = member?.weeklyCapacityHours ?? null
+  }
 
   // Build conditions array
   const conditions = []
@@ -78,6 +104,7 @@ export async function GET(req: NextRequest) {
     totalHours: summary?.totalHours ?? 0,
     billableHours: summary?.billableHours ?? 0,
     entryCount: summary?.entryCount ?? 0,
+    capacityHours,
   })
 }
 

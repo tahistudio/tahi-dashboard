@@ -121,16 +121,24 @@ export async function GET(req: NextRequest) {
       .select({
         totalUsd: schema.invoices.totalUsd,
         currency: schema.invoices.currency,
+        status: schema.invoices.status,
+        dueDate: schema.invoices.dueDate,
       })
       .from(schema.invoices)
       .where(inArray(schema.invoices.status, ['sent', 'overdue'])),
   ])
 
-  // Outstanding invoices total in NZD
+  // Outstanding invoices total in NZD, plus counts for the Owed vital sub
+  // ("N invoices · M overdue"). Overdue = explicit status OR past its due date.
   let outstandingNzd = 0
+  let overdueInvoicesCount = 0
   for (const inv of outstandingInvoiceRows) {
     outstandingNzd += toNzd(inv.totalUsd, inv.currency ?? 'USD', rateMap)
+    if (inv.status === 'overdue' || daysPastDue(inv.dueDate ?? null, now) > 0) {
+      overdueInvoicesCount++
+    }
   }
+  const outstandingInvoicesCount = outstandingInvoiceRows.length
 
   // Aggregate paid invoices into monthly buckets (converted to NZD)
   const monthlyMap = new Map<string, number>()
@@ -160,6 +168,18 @@ export async function GET(req: NextRequest) {
     month,
     total: Math.round(total * 100) / 100,
   }))
+
+  // Month-over-month delta for the Hero's "vs last month" chip. Derived from
+  // the monthly paid-revenue series (last bucket = this month). Null when there
+  // is no prior-month baseline to divide by (honest: no fabricated trend).
+  let mrrDeltaPct: number | null = null
+  if (monthlyRevenue.length >= 2) {
+    const thisMonth = monthlyRevenue[monthlyRevenue.length - 1].total
+    const lastMonth = monthlyRevenue[monthlyRevenue.length - 2].total
+    if (lastMonth > 0) {
+      mrrDeltaPct = Math.round(((thisMonth - lastMonth) / lastMonth) * 1000) / 10
+    }
+  }
 
   // MRR from custom_mrr field, converted per-org currency to NZD
   let mrr = 0
@@ -369,14 +389,37 @@ export async function GET(req: NextRequest) {
     // Leave openByStatus empty on any error.
   }
 
+  // Active subscriptions grouped by plan type for the Clients vital sub
+  // ("5 Scale · 4 Maintain"). e.g. { scale: 5, maintain: 4 }.
+  const clientsByPlan: Record<string, number> = {}
+  try {
+    const planned = await drizzle
+      .select({ planType: schema.subscriptions.planType, count: count() })
+      .from(schema.subscriptions)
+      .where(eq(schema.subscriptions.status, 'active'))
+      .groupBy(schema.subscriptions.planType)
+    for (const row of planned) {
+      if (row.planType) clientsByPlan[row.planType] = row.count
+    }
+  } catch {
+    // Leave clientsByPlan empty on any error (table/column missing).
+  }
+
   return NextResponse.json({
     kpis: {
       activeClients: activeClientsResult[0]?.count ?? 0,
       openRequests: openRequestsResult[0]?.count ?? 0,
       inProgress: inProgressResult[0]?.count ?? 0,
-      ...(canSeeInvoices ? { outstandingInvoicesNzd: Math.round(outstandingNzd) } : {}),
+      ...(canSeeInvoices
+        ? {
+            outstandingInvoicesNzd: Math.round(outstandingNzd),
+            outstandingInvoicesCount,
+            overdueInvoicesCount,
+          }
+        : {}),
       ...(canSeeMrr ? { mrr: Math.round(mrr) } : {}),
     },
+    ...(canSeeMrr ? { mrrDeltaPct } : {}),
     recentRequests,
     monthlyRevenue,
     cash,
@@ -384,5 +427,6 @@ export async function GET(req: NextRequest) {
     overnight,
     activeTimer,
     openByStatus,
+    clientsByPlan,
   })
 }

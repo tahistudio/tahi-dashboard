@@ -52,7 +52,9 @@ export async function GET(req: NextRequest) {
     .limit(1)
 
   if (!sub) {
-    return NextResponse.json({ subscription: null, plans })
+    // No active retainer -> this is a project-type client. The home uses
+    // clientType to pick ProjectBoard vs TrackBoard (and to read /api/portal/project).
+    return NextResponse.json({ subscription: null, plans, clientType: 'project' })
   }
 
   const interval = (sub.billingInterval ?? 'monthly') as BillingInterval
@@ -91,6 +93,9 @@ export async function GET(req: NextRequest) {
   const trackCount = trackRows.length
 
   return NextResponse.json({
+    // Active retainer -> TrackBoard / "Your plan". The overview home reads this
+    // signal (present subscription => retainer) to branch the client home.
+    clientType: 'retainer',
     subscription: {
       id: sub.id,
       planType: sub.planType,
@@ -104,6 +109,11 @@ export async function GET(req: NextRequest) {
       currentPeriodStart: sub.currentPeriodStart ?? null,
       currentPeriodEnd: sub.currentPeriodEnd ?? null,
       commitmentEndDate,
+      // Convenience mirrors for the overview "Your plan" card (NZD base rate;
+      // the client formats via useDisplayCurrency). nextInvoiceDate is the
+      // current period end, i.e. when the next retainer invoice falls due.
+      nextInvoiceDate: sub.currentPeriodEnd ?? null,
+      monthlyRate,
       trackCount,
       createdAt: sub.createdAt,
     },
