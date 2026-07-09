@@ -46,8 +46,13 @@ jobs:
             */dashboard) url="$base/api/admin/ai/briefing/cron" ;;
             *)           url="$base/dashboard/api/admin/ai/briefing/cron" ;;
           esac
+          force_header=()
           if [ "$FORCE" = "true" ]; then
+            # Send both the query param and the header. On Webflow Cloud the
+            # /dashboard basePath rewrite strips the query string, so the header
+            # is what actually reaches the handler.
             url="$url?force=1"
+            force_header=(-H "x-cron-force: 1")
             echo "FORCE run: bypassing the NZ time window and dedup guard"
           fi
           echo "POSTing to $url"
@@ -57,7 +62,8 @@ jobs:
           response=$(curl -sS -w "\n%{http_code}" -X POST \
             "$url" \
             -H "x-cron-secret: ${CRON_SECRET}" \
-            -H "Content-Type: application/json")
+            -H "Content-Type: application/json" \
+            "${force_header[@]}")
           body=$(echo "$response" | sed '$d')
           code=$(echo "$response" | tail -n1)
           echo "HTTP $code"
