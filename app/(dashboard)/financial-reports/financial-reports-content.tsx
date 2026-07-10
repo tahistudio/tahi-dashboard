@@ -481,6 +481,9 @@ export function FinancialReportsContent() {
           </Card>
         </div>
 
+        {/* Month-end cash trend from the monthly snapshot history. */}
+        <FinancialTrendsCard />
+
         {/* AI anomaly findings sit just below the cash split, since most
             findings are about unusual cash movement. */}
         <AnomaliesCard />
@@ -2270,6 +2273,67 @@ interface Anomaly {
   body: string | null
   entityId: string | null
   createdAt: string
+}
+
+interface TrendSnapshot {
+  monthKey: string
+  cashNzd: number | null
+  owedNzd: number | null
+  mrrNzd: number | null
+  runwayMonths: number | null
+  source: string
+}
+
+// Month-end cash history from financial_snapshots (migration 0085). Point-in-
+// time cash is captured monthly by the snapshot-metrics cron; older months can
+// be reconstructed from the Airwallex ledger (source 'backfill'). Values are
+// NZD, matching how cash is stored and shown across the dashboard.
+function FinancialTrendsCard() {
+  const { data } = useSWR<{ snapshots?: TrendSnapshot[] }>('/api/admin/reports/financial-trends')
+  const snapshots = data?.snapshots ?? []
+  const cashPoints = snapshots.filter((s): s is TrendSnapshot & { cashNzd: number } => s.cashNzd != null)
+  if (cashPoints.length === 0) return null
+
+  const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const ymLabel = (ym: string): string => {
+    const [yStr, mStr] = ym.split('-')
+    const m = parseInt(mStr ?? '0', 10)
+    const y = parseInt(yStr ?? '0', 10)
+    if (!m || !y) return ym
+    return `${MONTHS_SHORT[m - 1]} ${String(y).slice(2)}`
+  }
+  const compactFmt = (v: number): string =>
+    Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : Math.round(v).toString()
+
+  const reconstructed = cashPoints.filter(s => s.source === 'backfill').length
+  const first = cashPoints[0]
+  const last = cashPoints[cashPoints.length - 1]
+  const meta = cashPoints.length < 2
+    ? `${cashPoints.length} month captured`
+    : `NZ$${compactFmt(first.cashNzd)} to NZ$${compactFmt(last.cashNzd)}${reconstructed ? ` · ${reconstructed} reconstructed` : ''}`
+
+  return (
+    <Card>
+      <div className="p-4 sm:p-6">
+        <SubSectionHeader title="Cash trend, month-end (NZD)" meta={meta} />
+        {cashPoints.length < 2 ? (
+          <p className="text-sm text-[var(--color-text-muted)]">
+            Month-end cash is captured automatically each month. The trend line fills in as history accrues.
+          </p>
+        ) : (
+          <LineChart
+            data={cashPoints.map(s => ({ label: ymLabel(s.monthKey), value: s.cashNzd }))}
+            height={200}
+            area
+            tone="positive"
+            dots
+            formatValue={(v) => `NZ$${compactFmt(v)}`}
+            ariaLabel="Month-end cash over time, NZD"
+          />
+        )}
+      </div>
+    </Card>
+  )
 }
 
 function AnomaliesCard() {
