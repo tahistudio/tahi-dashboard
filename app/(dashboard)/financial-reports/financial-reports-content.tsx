@@ -2327,6 +2327,7 @@ function FinancialTrendsCard() {
             variant="pill"
             tone="positive"
             formatValue={compactFmt}
+            animate={false}
             ariaLabel="Month-end cash over time, NZD"
           />
         )}
