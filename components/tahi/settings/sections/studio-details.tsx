@@ -7,21 +7,30 @@ import { apiPath } from '@/lib/api'
 
 type SettingsMap = Record<string, string | null>
 
+const CURRENCIES = ['NZD', 'USD', 'AUD', 'GBP', 'EUR']
+const LEDE =
+  'Legal name, address and tax details - shown on the invoices and contracts your clients receive.'
+
 /**
- * Studio details: the studio's legal name, GST number, and address as they
- * appear on invoices. Admin-only. There is no dedicated backend table yet, so
- * these persist to the settings key-value store under studio_legal_name,
- * studio_gst_number, and studio_address via PATCH /api/admin/settings (one
- * call per key). Save-only.
+ * Studio details (design: `function Studio(){...}` in settings-app.jsx).
+ *
+ * Legal name, GST number, registered address, billing currency, invoice
+ * number prefix and invoice footer note. Batch-saved to the settings K/V
+ * store (studio_legal_name, studio_gst_number, studio_address,
+ * studio_billing_currency, invoice_number_prefix, invoice_footer_note)
+ * via PATCH /api/admin/settings, one call per key.
  */
-export function StudioDetailsSection(_props: { isAdmin?: boolean } = {}) {
+export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
   const { data, isLoading, mutate } = useResource<{ settings: SettingsMap }>(
-    '/api/admin/settings',
+    isAdmin === false ? null : '/api/admin/settings',
   )
 
   const [legalName, setLegalName] = useState('')
   const [gstNumber, setGstNumber] = useState('')
   const [address, setAddress] = useState('')
+  const [currency, setCurrency] = useState('NZD')
+  const [invoicePrefix, setInvoicePrefix] = useState('INV-')
+  const [invoiceFooter, setInvoiceFooter] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -31,6 +40,9 @@ export function StudioDetailsSection(_props: { isAdmin?: boolean } = {}) {
       setLegalName(data.settings.studio_legal_name ?? '')
       setGstNumber(data.settings.studio_gst_number ?? '')
       setAddress(data.settings.studio_address ?? '')
+      setCurrency(data.settings.studio_billing_currency ?? 'NZD')
+      setInvoicePrefix(data.settings.invoice_number_prefix ?? 'INV-')
+      setInvoiceFooter(data.settings.invoice_footer_note ?? '')
     }
   }, [data])
 
@@ -51,6 +63,9 @@ export function StudioDetailsSection(_props: { isAdmin?: boolean } = {}) {
         saveKey('studio_legal_name', legalName.trim()),
         saveKey('studio_gst_number', gstNumber.trim()),
         saveKey('studio_address', address.trim()),
+        saveKey('studio_billing_currency', currency),
+        saveKey('invoice_number_prefix', invoicePrefix.trim()),
+        saveKey('invoice_footer_note', invoiceFooter.trim()),
       ])
       setSaved(true)
       await mutate()
@@ -62,31 +77,35 @@ export function StudioDetailsSection(_props: { isAdmin?: boolean } = {}) {
     }
   }
 
+  if (isAdmin === false) return null
+
   if (isLoading) {
     return (
-      <SectionShell title="Studio details" lede="Legal name, address, and tax details on invoices.">
+      <SectionShell title="Studio details" lede={LEDE}>
         <div className="set-card">
           <div className="set-grid2">
-            {[0, 1, 2].map((i) => (
+            {[0, 1, 2, 3, 4, 5].map((i) => (
               <div
                 key={i}
                 className="set-field"
-                style={i === 2 ? { gridColumn: '1 / -1' } : undefined}
+                style={i === 2 || i === 5 ? { gridColumn: '1 / -1' } : undefined}
               >
                 <div
+                  className="animate-pulse"
                   style={{
                     height: 14,
                     width: '40%',
                     borderRadius: 6,
                     marginBottom: 8,
-                    background: 'var(--color-bg-tertiary)',
+                    background: 'var(--bg-tertiary)',
                   }}
                 />
                 <div
+                  className="animate-pulse"
                   style={{
-                    height: 40,
+                    height: i === 5 ? 70 : 40,
                     borderRadius: 9,
-                    background: 'var(--color-bg-tertiary)',
+                    background: 'var(--bg-tertiary)',
                   }}
                 />
               </div>
@@ -98,7 +117,7 @@ export function StudioDetailsSection(_props: { isAdmin?: boolean } = {}) {
   }
 
   return (
-    <SectionShell title="Studio details" lede="Legal name, address, and tax details on invoices.">
+    <SectionShell title="Studio details" lede={LEDE}>
       <div className="set-card">
         <div className="set-grid2">
           <div className="set-field">
@@ -122,13 +141,49 @@ export function StudioDetailsSection(_props: { isAdmin?: boolean } = {}) {
             />
           </div>
           <div className="set-field" style={{ gridColumn: '1 / -1' }}>
-            <label htmlFor="studio-address">Address</label>
+            <label htmlFor="studio-address">Registered address</label>
             <input
               id="studio-address"
               className="set-input"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
               placeholder="12 Vulcan Lane, Auckland 1010, New Zealand"
+            />
+          </div>
+          <div className="set-field">
+            <label htmlFor="studio-currency">Billing currency</label>
+            <select
+              id="studio-currency"
+              className="set-input"
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+            >
+              {CURRENCIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="set-field">
+            <label htmlFor="studio-invoice-prefix">Invoice number prefix</label>
+            <input
+              id="studio-invoice-prefix"
+              className="set-input"
+              value={invoicePrefix}
+              onChange={(e) => setInvoicePrefix(e.target.value)}
+              placeholder="INV-"
+            />
+          </div>
+          <div className="set-field" style={{ gridColumn: '1 / -1' }}>
+            <label htmlFor="studio-invoice-footer">Invoice footer note</label>
+            <textarea
+              id="studio-invoice-footer"
+              className="set-input"
+              style={{ height: 70, padding: '10px 12px', resize: 'vertical', lineHeight: 1.5 }}
+              value={invoiceFooter}
+              onChange={(e) => setInvoiceFooter(e.target.value)}
+              placeholder="Thank you for working with Tahi Studio. Payment is due within 14 days."
             />
           </div>
         </div>
@@ -150,6 +205,10 @@ export function StudioDetailsSection(_props: { isAdmin?: boolean } = {}) {
           </button>
         </div>
       </div>
+      <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>
+        Invoices pick these details up when they are generated - Xero-synced invoices keep
+        Xero&apos;s own numbering.
+      </p>
     </SectionShell>
   )
 }

@@ -19,6 +19,12 @@ export async function GET(req: NextRequest) {
 
   const url = new URL(req.url)
   const typeFilter = url.searchParams.get('type')
+  // Optional filters for the overview "Unread messages" card so it can request
+  // only unread conversations, capped — instead of over-fetching and filtering
+  // client-side. Defaults (no params) preserve the full-list behaviour.
+  const onlyUnread = url.searchParams.get('unread') === '1'
+  const limitParam = parseInt(url.searchParams.get('limit') ?? '', 10)
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 50) : null
 
   const database = await db()
 
@@ -160,7 +166,11 @@ export async function GET(req: NextRequest) {
     })
   )
 
-  return NextResponse.json({ conversations: conversationsWithMeta })
+  let output = conversationsWithMeta
+  if (onlyUnread) output = output.filter(c => c.unreadCount > 0)
+  if (limit != null) output = output.slice(0, limit)
+
+  return NextResponse.json({ conversations: output })
 }
 
 // ── POST /api/admin/conversations ───────────────────────────────────────────

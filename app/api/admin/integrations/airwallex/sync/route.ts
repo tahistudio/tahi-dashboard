@@ -7,7 +7,7 @@
  * Window: by default, last 30 days of transactions. Pass ?days=N to
  * widen the window (e.g. ?days=90 on the first sync to backfill).
  *
- * Idempotent — uses Airwallex's own transaction id as the primary key,
+ * Idempotent: uses Airwallex's own transaction id as the primary key,
  * so a re-sync of an existing window just refreshes the same rows.
  *
  * Auth: admin session OR Bearer cron secret (so the daily GH Action
@@ -19,7 +19,7 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, inArray } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import { listBalances, listTransactions, AirwallexNotConfiguredError, getAirwallexToken } from '@/lib/airwallex'
 import { logCronRun } from '@/lib/cron-runs'
 
@@ -74,108 +74,125 @@ export async function POST(req: NextRequest) {
   const database = await db() as unknown as D1
   const nowIso = new Date().toISOString()
 
-  // Balances: upsert one row per currency. We key on accountId (the
-  // env-configured one) + currency since Airwallex returns one balance
-  // entry per currency under a single account.
+  // D1 caps bound parameters at 100 per statement, so size each multi-row
+  // upsert by its column count to stay safely under that (a 90-param budget
+  // leaves margin). Batching the writes this way is the whole fix: the old
+  // per-row SELECT-then-UPDATE/INSERT fired ~2 D1 round-trips per balance and
+  // per transaction, so once the window widened past ~14 days the cumulative
+  // round-trips blew the Worker execution budget and threw an unhandled
+  // (unlogged, empty-body 500) error.
+  const PARAM_BUDGET = 90
+  const balChunk = Math.max(1, Math.floor(PARAM_BUDGET / 7))   // 7 cols/row -> 12
+  const txnChunk = Math.max(1, Math.floor(PARAM_BUDGET / 10))  // 10 cols/row -> 9
+
   let balanceUpserts = 0
-  for (const b of balances) {
-    const id = `${accountId ?? 'default'}:${b.currency}`
-    const existing = await database
-      .select({ accountId: schema.airwallexBalances.accountId })
-      .from(schema.airwallexBalances)
-      .where(eq(schema.airwallexBalances.accountId, id))
-      .limit(1)
-    if (existing.length > 0) {
-      await database.update(schema.airwallexBalances).set({
-        accountName: `Airwallex ${b.currency}`,
-        balance: b.total_amount,
-        availableBalance: b.available_amount,
-        asOf: nowIso,
-        updatedAt: nowIso,
-      }).where(eq(schema.airwallexBalances.accountId, id))
-    } else {
-      await database.insert(schema.airwallexBalances).values({
-        accountId: id,
-        accountName: `Airwallex ${b.currency}`,
-        currency: b.currency,
-        balance: b.total_amount,
-        availableBalance: b.available_amount,
-        asOf: nowIso,
-        updatedAt: nowIso,
-      })
-    }
-    balanceUpserts++
-  }
-
-  // Transactions: upsert by Airwallex id. We pre-fetch existing ids in
-  // chunks of 200 to keep query size sane.
-  const txnIds = transactions.map(t => t.id)
-  const existingTxnIds = new Set<string>()
-  for (let i = 0; i < txnIds.length; i += 200) {
-    const chunk = txnIds.slice(i, i + 200)
-    if (chunk.length === 0) break
-    const rows = await database
-      .select({ id: schema.airwallexTransactions.id })
-      .from(schema.airwallexTransactions)
-      .where(inArray(schema.airwallexTransactions.id, chunk))
-    rows.forEach(r => existingTxnIds.add(r.id))
-  }
-
   let created = 0
   let updated = 0
-  for (const t of transactions) {
-    // Airwallex transaction direction: deposits positive, withdrawals
-    // negative. Their API sometimes returns absolute values with a
-    // separate sign — normalise here.
-    const signedAmount = (t.transaction_type ?? t.source_type ?? '').toLowerCase().includes('with')
-      || (t.transaction_type ?? '').toLowerCase().includes('fee')
-      || (t.transaction_type ?? '').toLowerCase().includes('payout')
-      ? -Math.abs(t.amount)
-      : t.amount
-    const desc = t.description ?? t.reference ?? null
-    const counterparty = t.source ?? null
-    const txnType = (t.transaction_type ?? t.source_type ?? 'unknown').toLowerCase()
-    const settledAt = t.posted_at ?? null
+  try {
+    // Balances: one row per currency, keyed on accountId. Bulk upsert in
+    // chunks; on conflict refresh the amounts + timestamps from the new row.
+    const balanceRows = balances.map(b => ({
+      accountId: `${accountId ?? 'default'}:${b.currency}`,
+      accountName: `Airwallex ${b.currency}`,
+      currency: b.currency,
+      balance: b.total_amount,
+      availableBalance: b.available_amount,
+      asOf: nowIso,
+      updatedAt: nowIso,
+    }))
+    for (let i = 0; i < balanceRows.length; i += balChunk) {
+      const slice = balanceRows.slice(i, i + balChunk)
+      if (slice.length === 0) break
+      await database.insert(schema.airwallexBalances).values(slice).onConflictDoUpdate({
+        target: schema.airwallexBalances.accountId,
+        set: {
+          accountName: sql`excluded.account_name`,
+          balance: sql`excluded.balance`,
+          availableBalance: sql`excluded.available_balance`,
+          asOf: sql`excluded.as_of`,
+          updatedAt: sql`excluded.updated_at`,
+        },
+      })
+    }
+    balanceUpserts = balanceRows.length
 
-    if (existingTxnIds.has(t.id)) {
-      await database.update(schema.airwallexTransactions).set({
-        amount: signedAmount,
-        currency: t.currency,
-        type: txnType,
-        description: desc,
-        counterparty,
-        settledAt,
-      }).where(eq(schema.airwallexTransactions.id, t.id))
-      updated++
-    } else {
-      await database.insert(schema.airwallexTransactions).values({
+    // Transactions: pre-fetch existing ids (chunked SELECTs, cheap) purely to
+    // report created-vs-updated counts; the writes themselves are bulk
+    // upserts keyed on the Airwallex transaction id. On conflict we refresh
+    // the mutable fields but never reset reconciliation_status / created_at.
+    const txnIds = transactions.map(t => t.id)
+    const existingTxnIds = new Set<string>()
+    for (let i = 0; i < txnIds.length; i += PARAM_BUDGET) {
+      const chunk = txnIds.slice(i, i + PARAM_BUDGET)
+      if (chunk.length === 0) break
+      const rows = await database
+        .select({ id: schema.airwallexTransactions.id })
+        .from(schema.airwallexTransactions)
+        .where(inArray(schema.airwallexTransactions.id, chunk))
+      rows.forEach(r => existingTxnIds.add(r.id))
+    }
+
+    const txnRows = transactions.map(t => {
+      // Airwallex transaction direction: deposits positive, withdrawals
+      // negative. Their API sometimes returns absolute values with a
+      // separate sign, so normalise here.
+      const signedAmount = (t.transaction_type ?? t.source_type ?? '').toLowerCase().includes('with')
+        || (t.transaction_type ?? '').toLowerCase().includes('fee')
+        || (t.transaction_type ?? '').toLowerCase().includes('payout')
+        ? -Math.abs(t.amount)
+        : t.amount
+      if (existingTxnIds.has(t.id)) updated++
+      else created++
+      return {
         id: t.id,
         accountId: accountId ?? 'default',
         amount: signedAmount,
         currency: t.currency,
-        type: txnType,
-        description: desc,
-        counterparty,
-        settledAt,
+        type: (t.transaction_type ?? t.source_type ?? 'unknown').toLowerCase(),
+        description: t.description ?? t.reference ?? null,
+        counterparty: t.source ?? null,
+        settledAt: t.posted_at ?? null,
         reconciliationStatus: 'orphan',
         createdAt: t.created_at ?? nowIso,
+      }
+    })
+    for (let i = 0; i < txnRows.length; i += txnChunk) {
+      const slice = txnRows.slice(i, i + txnChunk)
+      if (slice.length === 0) break
+      await database.insert(schema.airwallexTransactions).values(slice).onConflictDoUpdate({
+        target: schema.airwallexTransactions.id,
+        set: {
+          amount: sql`excluded.amount`,
+          currency: sql`excluded.currency`,
+          type: sql`excluded.type`,
+          description: sql`excluded.description`,
+          counterparty: sql`excluded.counterparty`,
+          settledAt: sql`excluded.settled_at`,
+        },
       })
-      created++
     }
-  }
 
-  // Stamp lastSyncedAt on the integration row so /settings/crons +
-  // anomaly checks can spot stale data.
-  const [existingInt] = await database
-    .select({ id: schema.integrations.id })
-    .from(schema.integrations)
-    .where(eq(schema.integrations.service, 'airwallex'))
-    .limit(1)
-  if (existingInt) {
-    await database
-      .update(schema.integrations)
-      .set({ lastSyncedAt: nowIso, updatedAt: nowIso })
-      .where(eq(schema.integrations.id, existingInt.id))
+    // Stamp lastSyncedAt on the integration row so /settings/crons +
+    // anomaly checks can spot stale data.
+    const [existingInt] = await database
+      .select({ id: schema.integrations.id })
+      .from(schema.integrations)
+      .where(eq(schema.integrations.service, 'airwallex'))
+      .limit(1)
+    if (existingInt) {
+      await database
+        .update(schema.integrations)
+        .set({ lastSyncedAt: nowIso, updatedAt: nowIso })
+        .where(eq(schema.integrations.id, existingInt.id))
+    }
+  } catch (err) {
+    // The DB-write section used to be unguarded, so any failure here surfaced
+    // as an opaque empty-body 500 and never reached logCronRun (which is why
+    // cron_runs went silent after the last success). Record it and return a
+    // real error instead.
+    const msg = err instanceof Error ? err.message : String(err)
+    await logCronRun(database, 'sync-airwallex', 'error', Date.now() - t0, { days, phase: 'db-write' }, msg)
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 
   const summary = {

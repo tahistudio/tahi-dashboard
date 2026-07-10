@@ -129,7 +129,74 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ stages: stagesWithHistory })
 }
 
-// PUT /api/admin/pipeline/stages - bulk update (reorder, rename, change colors, probabilities)
+// POST /api/admin/pipeline/stages - create a new stage, appended at the end.
+// Slug is derived from the name (deduped against existing slugs) and the
+// probability defaults low; the historical model takes over once deals
+// actually move through the stage.
+export async function POST(req: NextRequest) {
+  const { orgId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const body = await req.json() as {
+    name?: string
+    colour?: string | null
+    probability?: number
+  }
+
+  const name = body.name?.trim()
+  if (!name) {
+    return NextResponse.json({ error: 'name is required' }, { status: 400 })
+  }
+
+  const database = await db() as unknown as D1
+
+  const existing = await database
+    .select({ slug: schema.pipelineStages.slug, position: schema.pipelineStages.position })
+    .from(schema.pipelineStages)
+
+  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'stage'
+  const taken = new Set(existing.map(s => s.slug))
+  let slug = base
+  let n = 2
+  while (taken.has(slug)) slug = `${base}_${n++}`
+
+  const position = existing.reduce((max, s) => Math.max(max, s.position), -1) + 1
+  const rawProbability = body.probability
+  const probability = typeof rawProbability === 'number' && Number.isFinite(rawProbability)
+    ? Math.max(0, Math.min(100, Math.round(rawProbability)))
+    : 10
+
+  const id = crypto.randomUUID()
+  await database.insert(schema.pipelineStages).values({
+    id,
+    name,
+    slug,
+    probability,
+    position,
+    colour: body.colour ?? null,
+    isDefault: 0,
+    isClosedWon: 0,
+    isClosedLost: 0,
+    createdAt: new Date().toISOString(),
+  })
+
+  const [stage] = await database
+    .select()
+    .from(schema.pipelineStages)
+    .where(eq(schema.pipelineStages.id, id))
+    .limit(1)
+
+  return NextResponse.json({ stage }, { status: 201 })
+}
+
+// PUT /api/admin/pipeline/stages - full reconciliation of the stage list.
+// Entries WITH an id update the stored row (name, colour, position, etc).
+// Entries WITHOUT an id are inserted as new stages (slug derived from name,
+// position taken from the payload order). Stored stages missing from the
+// payload are deleted - unless any deal still references them, in which case
+// the whole request is rejected with 409 before any write (all-or-nothing).
 export async function PUT(req: NextRequest) {
   const { orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
@@ -138,7 +205,7 @@ export async function PUT(req: NextRequest) {
 
   const body = await req.json() as {
     stages?: Array<{
-      id: string
+      id?: string
       name?: string
       slug?: string
       probability?: number
@@ -154,16 +221,56 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: 'stages array is required' }, { status: 400 })
   }
 
-  // Validate all entries have an id
+  // New rows (no id) must carry a non-empty name - it seeds the slug.
   for (const stage of body.stages) {
-    if (!stage.id) {
-      return NextResponse.json({ error: 'Each stage must have an id' }, { status: 400 })
+    if (!stage.id && !stage.name?.trim()) {
+      return NextResponse.json({ error: 'New stages must have a name' }, { status: 400 })
     }
   }
 
   const database = await db() as unknown as D1
 
+  const existing = await database
+    .select()
+    .from(schema.pipelineStages)
+
+  const payloadIds = new Set(
+    body.stages.map(s => s.id).filter((id): id is string => Boolean(id)),
+  )
+  const toDelete = existing.filter(s => !payloadIds.has(s.id))
+
+  // All-or-nothing guards: nothing is written until every deletion is safe.
+  // Core stages (default entry, Closed Won, Closed Lost) can never be
+  // deleted, and a stage still referenced by any deal (deals.stageId is a
+  // NOT NULL FK, so archived deals count too) blocks the whole request.
+  if (toDelete.length > 0) {
+    const core = toDelete.find(s => s.isDefault || s.isClosedWon || s.isClosedLost)
+    if (core) {
+      return NextResponse.json(
+        { error: `Stage "${core.name}" is required by the pipeline and cannot be deleted.` },
+        { status: 400 },
+      )
+    }
+
+    const referenced = await database
+      .select({ stageId: schema.deals.stageId })
+      .from(schema.deals)
+      .where(inArray(schema.deals.stageId, toDelete.map(s => s.id)))
+
+    if (referenced.length > 0) {
+      const referencedIds = new Set(referenced.map(r => r.stageId))
+      const blocked = toDelete.find(s => referencedIds.has(s.id))
+      return NextResponse.json(
+        { error: `Stage "${blocked?.name ?? 'unknown'}" still has deals - move them first` },
+        { status: 409 },
+      )
+    }
+  }
+
+  // Updates for entries with an id.
   for (const stage of body.stages) {
+    if (!stage.id) continue
+
     const updates: Record<string, unknown> = {}
 
     if (stage.name !== undefined) updates.name = stage.name.trim()
@@ -183,7 +290,48 @@ export async function PUT(req: NextRequest) {
     }
   }
 
-  // Return the updated stages
+  // Inserts for entries without an id. Slug derives from the name, deduped
+  // against stored slugs and the other inserts in this payload.
+  const takenSlugs = new Set(existing.map(s => s.slug))
+  const now = new Date().toISOString()
+  for (let i = 0; i < body.stages.length; i++) {
+    const stage = body.stages[i]
+    if (stage.id) continue
+
+    const name = (stage.name as string).trim()
+    const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'stage'
+    let slug = base
+    let n = 2
+    while (takenSlugs.has(slug)) slug = `${base}_${n++}`
+    takenSlugs.add(slug)
+
+    const rawProbability = stage.probability
+    const probability = typeof rawProbability === 'number' && Number.isFinite(rawProbability)
+      ? Math.max(0, Math.min(100, Math.round(rawProbability)))
+      : 10
+
+    await database.insert(schema.pipelineStages).values({
+      id: crypto.randomUUID(),
+      name,
+      slug,
+      probability,
+      position: stage.position ?? i,
+      colour: stage.colour ?? null,
+      isDefault: 0,
+      isClosedWon: 0,
+      isClosedLost: 0,
+      createdAt: now,
+    })
+  }
+
+  // Deletions last - the guard above guarantees none are referenced.
+  if (toDelete.length > 0) {
+    await database
+      .delete(schema.pipelineStages)
+      .where(inArray(schema.pipelineStages.id, toDelete.map(s => s.id)))
+  }
+
+  // Return the reconciled stages
   const stages = await database
     .select()
     .from(schema.pipelineStages)

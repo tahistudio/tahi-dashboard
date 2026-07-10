@@ -18,15 +18,37 @@ export async function GET(req: NextRequest) {
   const clientId = url.searchParams.get('orgId')
   const trackId = url.searchParams.get('trackId')
   const requestId = url.searchParams.get('requestId')
+  const assignee = url.searchParams.get('assignee') // 'me' | a team member id
   const sortBy = url.searchParams.get('sortBy') // 'position' | 'updatedAt' (default)
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
+  // Resolve assignee=me to the signed-in team member (teamMembers.clerkUserId).
+  // A pure admin with no team_members row has no assigned tasks -> honest empty.
+  let assigneeId: string | null = null
+  if (assignee) {
+    if (assignee === 'me') {
+      const [me] = await drizzle
+        .select({ id: schema.teamMembers.id })
+        .from(schema.teamMembers)
+        .where(eq(schema.teamMembers.clerkUserId, userId ?? ''))
+        .limit(1)
+      if (!me) return NextResponse.json({ tasks: [] })
+      assigneeId = me.id
+    } else {
+      assigneeId = assignee
+    }
+  }
+
   // Apply team member access scoping
   const scopedOrgIds = await resolveAccessScoping(drizzle, userId)
 
   const conditions = []
+
+  if (assigneeId) {
+    conditions.push(eq(schema.tasks.assigneeId, assigneeId))
+  }
 
   // If scoping returned a specific set of org IDs, filter to those
   if (scopedOrgIds !== null) {

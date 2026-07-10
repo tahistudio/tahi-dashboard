@@ -1967,6 +1967,42 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_ai_reply_drafts_invoice ON ai_reply_drafts(invoice_id)`,
     ],
   },
+  {
+    name: '0084',
+    description: 'Settings redesign column adds: request_forms description/audience/sla, task_templates org_id/default_assignee, organisations accent_colour, announcements emoji/cta_label/cta_url, contacts phone, team_members phone. Additive only; duplicate-column errors are swallowed upstream so re-runs are idempotent.',
+    statements: [
+      `ALTER TABLE request_forms ADD COLUMN description text`,
+      `ALTER TABLE request_forms ADD COLUMN audience text NOT NULL DEFAULT 'all_clients'`,
+      `ALTER TABLE request_forms ADD COLUMN sla text`,
+      `ALTER TABLE task_templates ADD COLUMN org_id text`,
+      `ALTER TABLE task_templates ADD COLUMN default_assignee text`,
+      `CREATE INDEX IF NOT EXISTS idx_task_templates_org ON task_templates(org_id)`,
+      `ALTER TABLE organisations ADD COLUMN accent_colour text`,
+      `ALTER TABLE announcements ADD COLUMN emoji text`,
+      `ALTER TABLE announcements ADD COLUMN cta_label text`,
+      `ALTER TABLE announcements ADD COLUMN cta_url text`,
+      `ALTER TABLE contacts ADD COLUMN phone text`,
+      `ALTER TABLE team_members ADD COLUMN phone text`,
+    ],
+  },
+  {
+    name: '0085',
+    description: 'financial_snapshots: monthly point-in-time metric history (cash / owed / MRR / active clients / burn / runway) so the overview can show real trends and honest month-over-month deltas. Point-in-time only; flow metrics stay in xero_pnl_snapshots. Keyed on month_key so the daily snapshot cron and re-runs upsert the current month idempotently.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS financial_snapshots (
+        month_key text PRIMARY KEY NOT NULL,
+        cash_nzd real,
+        owed_nzd real,
+        mrr_nzd real,
+        active_clients integer,
+        burn_nzd real,
+        runway_months real,
+        source text NOT NULL DEFAULT 'cron',
+        captured_at text NOT NULL,
+        created_at text NOT NULL
+      )`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

@@ -127,6 +127,13 @@ interface BarChartProps {
   /** Show grid lines. Default true. */
   showGrid?: boolean
   ariaLabel?: string
+  /**
+   * Entrance animation. Default true (bars grow in on viewport entry).
+   * Pass false for charts whose data arrives asynchronously after mount:
+   * the grow-from-zero animation can stall at height 0 when the data (and
+   * thus the chart) mounts after the viewport-visibility has already fired.
+   */
+  animate?: boolean
 }
 
 export function BarChart({
@@ -139,6 +146,7 @@ export function BarChart({
   showYAxis = true,
   showGrid = true,
   ariaLabel,
+  animate = true,
 }: BarChartProps) {
   // Pill rounds the TOP corners only; bars still sit flat on the axis
   // so the baseline reads as a baseline, not a floating capsule.
@@ -190,7 +198,7 @@ export function BarChart({
             dataKey="value"
             radius={radius}
             maxBarSize={variant === 'pill' ? 32 : 48}
-            isAnimationActive={visible}
+            isAnimationActive={animate && visible}
             animationBegin={0}
             animationDuration={650}
             animationEasing="ease-out"

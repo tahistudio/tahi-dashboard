@@ -8,6 +8,14 @@
  *
  * The sidebar component itself reads + writes both. The top nav reads
  * mobileOpen + setMobileOpen so it can render the hamburger.
+ *
+ * "Start with sidebar collapsed" (Settings > Appearance) is honoured
+ * upstream: the pre-hydration script in app/layout.tsx reads the
+ * 'tahi-sidebar-start-collapsed' preference and, once per browser
+ * session (sessionStorage guard), rewrites STORAGE_KEY to 'collapsed'
+ * before this provider mounts. This provider then picks it up through
+ * its normal data-sidebar / localStorage read below, and the user's
+ * in-session toggle wins for the rest of the session.
  */
 
 import * as React from 'react'

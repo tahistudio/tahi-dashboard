@@ -2209,3 +2209,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   }
 }
 
+
+/* Reduce motion (Settings > Appearance). The .reduce-motion class is applied
+   to <html> pre-hydration in app/layout.tsx from the 'tahi-reduce-motion'
+   localStorage key, mirroring the OS-level prefers-reduced-motion opt-outs. */
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}

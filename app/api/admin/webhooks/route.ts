@@ -3,7 +3,7 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { like } from 'drizzle-orm'
+import { eq, like } from 'drizzle-orm'
 
 const WEBHOOK_KEY_PREFIX = 'webhook_endpoint_'
 
@@ -12,6 +12,8 @@ interface WebhookEndpoint {
   url: string
   secret: string
   events: string[]
+  /** Paused endpoints keep their record + secret but should not receive deliveries. */
+  active: boolean
   createdAt: string
 }
 
@@ -38,7 +40,9 @@ export async function GET(req: NextRequest) {
   const endpoints: WebhookEndpoint[] = rows
     .map(row => {
       try {
-        return JSON.parse(row.value ?? '{}') as WebhookEndpoint
+        const parsed = JSON.parse(row.value ?? '{}') as WebhookEndpoint
+        // Records written before the active flag existed count as active.
+        return { ...parsed, active: parsed.active !== false }
       } catch {
         return null
       }
@@ -91,7 +95,7 @@ export async function POST(req: NextRequest) {
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 
-  const endpoint: WebhookEndpoint = { id, url, secret, events, createdAt: now }
+  const endpoint: WebhookEndpoint = { id, url, secret, events, active: true, createdAt: now }
 
   await drizzle
     .insert(schema.settings)
@@ -102,6 +106,76 @@ export async function POST(req: NextRequest) {
     })
 
   return NextResponse.json({ success: true, endpoint }, { status: 201 })
+}
+
+/**
+ * PATCH /api/admin/webhooks
+ * Update an endpoint in place (url, events, active), preserving its id, signing
+ * secret, createdAt and delivery history correlation.
+ */
+export async function PATCH(req: NextRequest) {
+  const { userId, orgId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  if (denied) return denied
+
+  const body = await req.json() as {
+    id?: string
+    url?: string
+    events?: string[]
+    active?: boolean
+  }
+
+  if (!body.id) {
+    return NextResponse.json({ error: 'id is required' }, { status: 400 })
+  }
+  if (body.url !== undefined) {
+    try {
+      new URL(body.url)
+    } catch {
+      return NextResponse.json({ error: 'url must be a valid URL' }, { status: 400 })
+    }
+  }
+  if (body.events !== undefined && (!Array.isArray(body.events) || body.events.length === 0)) {
+    return NextResponse.json({ error: 'events must be a non-empty array' }, { status: 400 })
+  }
+
+  const database = await db()
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  const key = `${WEBHOOK_KEY_PREFIX}${body.id}`
+
+  const [row] = await drizzle
+    .select()
+    .from(schema.settings)
+    .where(eq(schema.settings.key, key))
+    .limit(1)
+
+  if (!row) {
+    return NextResponse.json({ error: 'Endpoint not found' }, { status: 404 })
+  }
+
+  let existing: WebhookEndpoint
+  try {
+    existing = JSON.parse(row.value ?? '{}') as WebhookEndpoint
+  } catch {
+    return NextResponse.json({ error: 'Stored endpoint record is corrupt' }, { status: 500 })
+  }
+
+  const endpoint: WebhookEndpoint = {
+    ...existing,
+    url: body.url ?? existing.url,
+    events: body.events ?? existing.events,
+    active: body.active ?? existing.active !== false,
+  }
+
+  await drizzle
+    .update(schema.settings)
+    .set({ value: JSON.stringify(endpoint), updatedAt: new Date().toISOString() })
+    .where(eq(schema.settings.key, key))
+
+  return NextResponse.json({ success: true, endpoint })
 }
 
 /**
@@ -126,7 +200,6 @@ export async function DELETE(req: NextRequest) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  const { eq } = await import('drizzle-orm')
   await drizzle
     .delete(schema.settings)
     .where(eq(schema.settings.key, `${WEBHOOK_KEY_PREFIX}${id}`))

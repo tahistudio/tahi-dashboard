@@ -40,7 +40,7 @@
   --text-faint: var(--color-text-subtle);
   --border: var(--color-border);
   --border-subtle: var(--color-border-subtle);
-  --border-strong: var(--color-border);
+  --border-strong: var(--color-border-strong);
   --brand: var(--color-brand);
   --brand-strong: var(--color-brand-dark);
   --brand-100: var(--color-brand-100);

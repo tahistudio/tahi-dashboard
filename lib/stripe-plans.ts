@@ -1,4 +1,5 @@
 import Stripe from 'stripe'
+import { stripeSecretKey } from '@/lib/stripe-key'
 
 /**
  * Tahi retainer plans + the parallel-track ("Priority Support") add-on, as
@@ -107,9 +108,10 @@ export function allLookupKeys(): string[] {
 let _stripe: Stripe | null = null
 /** Shared Stripe client, or null when STRIPE_SECRET_KEY is not configured. */
 export function getStripe(): Stripe | null {
-  if (!process.env.STRIPE_SECRET_KEY) return null
+  const key = stripeSecretKey()
+  if (!key) return null
   if (!_stripe) {
-    _stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+    _stripe = new Stripe(key, {
       apiVersion: '2025-02-24.acacia',
     })
   }

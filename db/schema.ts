@@ -30,6 +30,8 @@ export const organisations = sqliteTable('organisations', {
   name: text('name').notNull(),
   website: text('website'),
   logoUrl: text('logo_url'),
+  // Client-editable brand accent hex used across their portal (migration 0084)
+  accentColour: text('accent_colour'),
   industry: text('industry'),
   // prospect | active | paused | churned | archived
   status: text('status').notNull().default('prospect'),
@@ -109,6 +111,7 @@ export const contacts = sqliteTable('contacts', {
   // free-text `role` (job title). Backfilled to 'admin' where isPrimary=1.
   // 'admin' | 'member'
   portalRole: text('portal_role').notNull().default('member'),
+  phone: text('phone'),
   lastLoginAt: text('last_login_at'),
   ...timestamps,
 }, (table) => [
@@ -184,6 +187,7 @@ export const teamMembers = sqliteTable('team_members', {
   isContractor: integer('is_contractor', { mode: 'boolean' }).default(false),
   slackUserId: text('slack_user_id'),
   avatarUrl: text('avatar_url'),
+  phone: text('phone'),
   reportsToId: text('reports_to_id'),
   department: text('department'),
   // S20: JSON array of role strings, e.g. ["CEO","Developer"]
@@ -884,8 +888,14 @@ export const taskTemplates = sqliteTable('task_templates', {
   subtasks: text('subtasks').default('[]'),
   estimatedHours: real('estimated_hours'),
   createdById: text('created_by_id').notNull(),
+  // Per-client override: null = global template (migration 0084)
+  orgId: text('org_id'),
+  // Free-text default assignee label, e.g. 'On-call PM' (migration 0084)
+  defaultAssignee: text('default_assignee'),
   ...timestamps,
-})
+}, (table) => [
+  index('idx_task_templates_org').on(table.orgId),
+])
 
 // ============================================================
 // TASK SUBTASKS
@@ -957,6 +967,11 @@ export const announcements = sqliteTable('announcements', {
   sentByEmail: integer('sent_by_email').default(0),
   emailSentAt: text('email_sent_at'),
   createdById: text('created_by_id'),
+  // Composer emoji shown at the start of the banner (migration 0084)
+  emoji: text('emoji'),
+  // Optional call-to-action button (migration 0084)
+  ctaLabel: text('cta_label'),
+  ctaUrl: text('cta_url'),
   ...timestamps,
 })
 
@@ -1266,6 +1281,51 @@ export const airwallexTransactions = sqliteTable('airwallex_transactions', {
 ])
 
 // ============================================================
+// FINANCIAL SNAPSHOTS (monthly point-in-time metric history, migration 0085)
+// ============================================================
+//
+// The dashboard recomputes cash / MRR / owed / runway live on every page
+// load, and the bank syncs overwrite the underlying balances each run, so
+// nothing is ever kept for "last month". This table freezes the
+// point-in-time metrics once per month (keyed on month_key, YYYY-MM UTC)
+// so the overview can show real trends and honest month-over-month deltas
+// instead of borrowing a mismatched series.
+//
+// Written by POST /api/admin/cron/snapshot-metrics (fired daily, after the
+// bank syncs): each run upserts the CURRENT month's row. When the month
+// rolls over, that month's last write becomes its frozen month-end value.
+// Twelve rows a year.
+//
+// Flow metrics (revenue / expenses / profit) deliberately live in
+// xero_pnl_snapshots, not here: those already retain monthly history and
+// get corrected by late-arriving invoices. This table holds only the
+// point-in-time figures that would otherwise be lost.
+//
+// Backfilled rows (source = 'backfill') carry only cash_nzd, reconstructed
+// by walking the Airwallex transaction ledger backwards from today's
+// balance. MRR / owed / active_clients cannot be honestly reconstructed,
+// so they stay null for backfilled months.
+export const financialSnapshots = sqliteTable('financial_snapshots', {
+  monthKey: text('month_key').primaryKey(),          // YYYY-MM (UTC)
+  // Real bank cash at month end, NZD, Airwallex-first (matches the Cash card).
+  cashNzd: real('cash_nzd'),
+  // Outstanding invoices (sent + overdue) in NZD: money owed to us.
+  owedNzd: real('owed_nzd'),
+  // Sum of active orgs' custom_mrr, converted to NZD.
+  mrrNzd: real('mrr_nzd'),
+  activeClients: integer('active_clients'),
+  // Trailing-3-month average monthly burn, NZD (from xero_pnl_snapshots).
+  burnNzd: real('burn_nzd'),
+  // cash / burn. Null when burn is unknown or not positive.
+  runwayMonths: real('runway_months'),
+  // 'cron' = full monthly snapshot; 'backfill' = cash-only reconstruction.
+  source: text('source').notNull().default('cron'),
+  // ISO timestamp of the write that produced this row's values.
+  capturedAt: text('captured_at').notNull(),
+  createdAt: text('created_at').notNull(),
+})
+
+// ============================================================
 // RESERVES (tax + custom pots, migration 0055)
 // ============================================================
 //
@@ -1496,6 +1556,12 @@ export const requestForms = sqliteTable('request_forms', {
   // JSON: [{id, type, label, required, options?}]
   questions: text('questions').notNull().default('[]'),
   isDefault: integer('is_default').notNull().default(0),
+  // Shown to clients above the form (migration 0084)
+  description: text('description'),
+  // all_clients | retainer_clients | internal_only (migration 0084)
+  audience: text('audience').notNull().default('all_clients'),
+  // Target turnaround label, e.g. '2 business days' (migration 0084)
+  sla: text('sla'),
   ...timestamps,
 }, (table) => [
   index('idx_request_forms_org_cat').on(table.orgId, table.category),

@@ -10,9 +10,10 @@
  * automationRules.triggerEvent, the action to the first entry of the actions
  * JSON array, the switch to enabled, and the runs count to executionCount.
  *
- * Backend gap: the execution engine that would actually fire these rules is not
- * wired yet, so executionCount stays at 0 until that lands. The management
- * surface here is complete regardless.
+ * Execution is live: lib/events.ts emitDomainEvent fires lib/automation-executor
+ * from the request / invoice / client routes, which bumps executionCount per
+ * run. Time-based triggers (request_overdue, client_inactive) are swept by
+ * POST /api/admin/crons/sweep on a schedule or via Run now in Scheduled jobs.
  *
  * Admin-only. Rendered inside the settings shell which already gates on admin.
  */
@@ -80,26 +81,33 @@ function actionValue(label: string): string {
   return ACTIONS.find(([, l]) => l === label)?.[0] ?? 'send_notification'
 }
 
-// Pull the first action's type out of the actions JSON, defensively.
-function firstActionType(actions: string): string {
+// Parse the actions JSON defensively into an array of action objects.
+function parseActions(actions: string): Record<string, unknown>[] {
   try {
     const parsed = JSON.parse(actions) as unknown
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      const first = parsed[0]
-      if (first && typeof first === 'object' && 'type' in first) {
-        const t = (first as { type: unknown }).type
-        if (typeof t === 'string') return t
-      }
+    if (Array.isArray(parsed)) {
+      return parsed.filter(
+        (a): a is Record<string, unknown> => !!a && typeof a === 'object' && !Array.isArray(a),
+      )
     }
   } catch {
-    // fall through to default
+    // fall through to empty
   }
-  return 'send_notification'
+  return []
+}
+
+// Pull the first action's type out of the actions JSON, defensively.
+function firstActionType(actions: string): string {
+  const first = parseActions(actions)[0]
+  const t = first?.type
+  return typeof t === 'string' ? t : 'send_notification'
 }
 
 export function AutomationsSection(_props: { isAdmin?: boolean } = {}) {
   const [editId, setEditId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // The last rule created this session, so its row gets the insert animation.
+  const [justAddedId, setJustAddedId] = useState<string | null>(null)
 
   const { data, isLoading, mutate } = useResource<RulesResponse>('/api/admin/automations')
   const rows = data?.items ?? []
@@ -120,6 +128,7 @@ export function AutomationsSection(_props: { isAdmin?: boolean } = {}) {
       })
       if (!res.ok) throw new Error('Failed to create rule')
       const json = (await res.json()) as { id: string }
+      setJustAddedId(json.id)
       await mutate()
       setEditId(json.id)
     } catch {
@@ -132,6 +141,13 @@ export function AutomationsSection(_props: { isAdmin?: boolean } = {}) {
   async function saveRule(id: string, values: Record<string, string>) {
     const trigger = triggerValue(values.trigger ?? '')
     const action = actionValue(values.action ?? '')
+    // Preserve any richer action params created elsewhere: keep the first
+    // action's config when its type is unchanged, and keep trailing actions.
+    const existing = rows.find(r => r.id === id)
+    const prevActions = existing ? parseActions(existing.actions) : []
+    const first =
+      prevActions[0] && prevActions[0].type === action ? prevActions[0] : { type: action }
+    const actions = [first, ...prevActions.slice(1)]
     try {
       const res = await fetch(apiPath(`/api/admin/automations/${id}`), {
         method: 'PATCH',
@@ -139,7 +155,7 @@ export function AutomationsSection(_props: { isAdmin?: boolean } = {}) {
         body: JSON.stringify({
           name: `${triggerLabel(trigger)} -> ${actionLabel(action)}`,
           triggerEvent: trigger,
-          actions: [{ type: action }],
+          actions,
         }),
       })
       if (!res.ok) throw new Error('Failed to save rule')
@@ -200,7 +216,34 @@ export function AutomationsSection(_props: { isAdmin?: boolean } = {}) {
     >
       <div className="set-card lrow-wrap">
         {isLoading ? (
-          <EmptyRow text="Loading rules..." />
+          [0, 1, 2].map(i => (
+            <div
+              key={i}
+              className="lrow"
+              style={i ? { borderTop: '1px solid var(--border-subtle)' } : undefined}
+              aria-hidden="true"
+            >
+              <span className="lrow-ic leaf" style={{ opacity: 0.4 }}>
+                <Zap size={16} />
+              </span>
+              <div className="lrow-t">
+                <span
+                  className="animate-pulse"
+                  style={{ display: 'block', height: 12, width: 200, borderRadius: 6, background: 'var(--border-subtle)' }}
+                />
+                <span
+                  className="animate-pulse"
+                  style={{ display: 'block', height: 9, width: 60, borderRadius: 6, background: 'var(--border-subtle)', marginTop: 7 }}
+                />
+              </div>
+              <div className="lrow-r">
+                <span
+                  className="animate-pulse"
+                  style={{ display: 'block', height: 20, width: 34, borderRadius: 999, background: 'var(--border-subtle)' }}
+                />
+              </div>
+            </div>
+          ))
         ) : rows.length === 0 ? (
           <EmptyRow text="No rules yet." />
         ) : (
@@ -209,7 +252,7 @@ export function AutomationsSection(_props: { isAdmin?: boolean } = {}) {
             return (
               <div
                 key={r.id}
-                className="lrow"
+                className={'lrow' + (r.id === justAddedId ? ' lrow-enter' : '')}
                 style={i ? { borderTop: '1px solid var(--border-subtle)' } : undefined}
               >
                 <span className="lrow-ic leaf">

@@ -2,30 +2,35 @@
 
 /**
  * RequestFormsSection - the intake forms clients fill in when they open a
- * request. Global by default (orgId null); a client override replaces the global
- * set for that client. Each form carries a list of typed questions.
+ * request. Global by default (orgId null); editing a global form while in
+ * Per-client mode copies it for that client (copy-on-write) so the global set
+ * is never mutated from a client view. Each form carries a list of typed
+ * questions plus the design's description / audience / SLA metadata.
  *
- * Data is real and matches the previous FormsSection + FormEditor wiring:
- *   GET    /api/admin/forms            (optional ?orgId=)  - list templates
- *   POST   /api/admin/forms            - create a template
- *   PATCH  /api/admin/forms/[id]       - rename / recategorise / save questions
+ * Data is real:
+ *   GET    /api/admin/forms            (optional ?orgId=)  - global list, or
+ *          the client's overrides plus inherited globals
+ *   POST   /api/admin/forms            - create a template (or an override)
+ *   PATCH  /api/admin/forms/[id]       - meta / questions
  *   DELETE /api/admin/forms/[id]       - delete a template
  * Question types: text, textarea, url, select, multiselect, checkbox, file.
  *
  * Admin-only. Rendered inside the settings shell which already gates on admin.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileText, GripVertical, Plus, Trash2 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useResource } from '@/lib/use-resource'
 import {
   SectionShell,
-  Seg,
+  PerClientHeader,
   EditDialog,
   RowActions,
   EmptyRow,
   Chip,
+  Toasts,
+  useToasts,
 } from '@/components/tahi/settings/primitives'
 
 interface FormQuestion {
@@ -43,6 +48,9 @@ interface FormTemplate {
   orgId: string | null
   questions: FormQuestion[]
   isDefault: number
+  description: string | null
+  audience: string
+  sla: string | null
 }
 
 interface FormsResponse {
@@ -55,9 +63,9 @@ interface ClientsResponse {
 
 type Mode = 'global' | 'client'
 
-// Category value <-> label. Empty value = global (all categories).
+// Category value <-> label. Empty value = General (all categories).
 const CATEGORIES: Array<{ value: string; label: string }> = [
-  { value: '', label: 'Global (all categories)' },
+  { value: '', label: 'General' },
   { value: 'design', label: 'Design' },
   { value: 'development', label: 'Development' },
   { value: 'content', label: 'Content' },
@@ -65,16 +73,30 @@ const CATEGORIES: Array<{ value: string; label: string }> = [
   { value: 'admin', label: 'Admin' },
   { value: 'bug', label: 'Bug' },
 ]
-
 const CATEGORY_LABELS = CATEGORIES.map(c => c.label)
 
 function categoryLabel(value: string | null): string {
-  return CATEGORIES.find(c => c.value === (value ?? ''))?.label ?? CATEGORIES[0].label
+  return CATEGORIES.find(c => c.value === (value ?? ''))?.label ?? 'General'
 }
-
 function categoryValue(label: string): string {
   return CATEGORIES.find(c => c.label === label)?.value ?? ''
 }
+
+const AUDIENCES: Array<{ value: string; label: string }> = [
+  { value: 'all_clients', label: 'All clients' },
+  { value: 'retainer_clients', label: 'Retainer clients' },
+  { value: 'internal_only', label: 'Internal only' },
+]
+const AUDIENCE_LABELS = AUDIENCES.map(a => a.label)
+
+function audienceLabel(value: string | null): string {
+  return AUDIENCES.find(a => a.value === value)?.label ?? 'All clients'
+}
+function audienceValue(label: string): string {
+  return AUDIENCES.find(a => a.label === label)?.value ?? 'all_clients'
+}
+
+const SLA_OPTS = ['Same day', '2 business days', '3 business days', '1 week', 'No SLA']
 
 const QUESTION_TYPES: Array<{ value: string; label: string }> = [
   { value: 'text', label: 'Short text' },
@@ -91,12 +113,21 @@ export function RequestFormsSection(_props: { isAdmin?: boolean } = {}) {
   const [orgId, setOrgId] = useState('')
   const [metaId, setMetaId] = useState<string | null>(null)
   const [questionsId, setQuestionsId] = useState<string | null>(null)
+  const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [newId, setNewId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const newTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { toasts, toast } = useToasts()
+
+  useEffect(() => () => {
+    if (newTimer.current) clearTimeout(newTimer.current)
+  }, [])
 
   const { data: clientsData } = useResource<ClientsResponse>(
     mode === 'client' ? '/api/admin/clients' : null,
   )
-  const clients = clientsData?.organisations ?? []
+  const clients = useMemo(() => clientsData?.organisations ?? [], [clientsData])
+  const clientName = clients.find(c => c.id === orgId)?.name ?? ''
 
   // Default the client selection to the first org once the list loads.
   useEffect(() => {
@@ -114,9 +145,17 @@ export function RequestFormsSection(_props: { isAdmin?: boolean } = {}) {
 
   const { data, isLoading, mutate } = useResource<FormsResponse>(listUrl)
   const rows = data?.forms ?? []
+  const waiting = isLoading || (mode === 'client' && !clientsData)
+
+  function markNew(id: string) {
+    setNewId(id)
+    if (newTimer.current) clearTimeout(newTimer.current)
+    newTimer.current = setTimeout(() => setNewId(null), 1400)
+  }
 
   async function createForm() {
     if (busy) return
+    if (mode === 'client' && !orgId) return
     setBusy(true)
     try {
       const res = await fetch(apiPath('/api/admin/forms'), {
@@ -127,13 +166,16 @@ export function RequestFormsSection(_props: { isAdmin?: boolean } = {}) {
           category: undefined,
           orgId: mode === 'client' ? orgId : undefined,
           questions: [],
+          audience: 'all_clients',
         }),
       })
       if (!res.ok) throw new Error('Failed to create form')
       const json = (await res.json()) as { id: string }
+      markNew(json.id)
       await mutate()
       setMetaId(json.id)
     } catch {
+      toast('Could not create the form', 'err')
       await mutate()
     } finally {
       setBusy(false)
@@ -141,26 +183,94 @@ export function RequestFormsSection(_props: { isAdmin?: boolean } = {}) {
   }
 
   async function saveMeta(id: string, values: Record<string, string>) {
+    const target = rows.find(r => r.id === id)
+    const payload = {
+      name: values.name?.trim() || 'Untitled form',
+      category: categoryValue(values.cat ?? ''),
+      description: values.desc?.trim() || null,
+      audience: audienceValue(values.audience ?? ''),
+      sla: values.sla && values.sla !== 'No SLA' ? values.sla : null,
+    }
+    setMetaId(null)
     try {
-      const res = await fetch(apiPath(`/api/admin/forms/${id}`), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: values.name?.trim() || undefined,
-          category: categoryValue(values.category ?? ''),
-        }),
-      })
-      if (!res.ok) throw new Error('Failed to save form')
+      if (mode === 'client' && orgId && target && !target.orgId) {
+        // Copy-on-write: editing an inherited global form from a client view
+        // creates an override for this client instead of mutating the global.
+        const res = await fetch(apiPath('/api/admin/forms'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, orgId, questions: target.questions }),
+        })
+        if (!res.ok) throw new Error('Failed to save form')
+        const json = (await res.json()) as { id: string }
+        markNew(json.id)
+      } else {
+        const res = await fetch(apiPath(`/api/admin/forms/${id}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) throw new Error('Failed to save form')
+      }
+    } catch {
+      toast('Could not save the form', 'err')
     } finally {
-      setMetaId(null)
       await mutate()
     }
   }
 
+  async function saveQuestions(r: FormTemplate, questions: FormQuestion[]) {
+    try {
+      if (mode === 'client' && orgId && !r.orgId) {
+        // Copy-on-write: new questions on an inherited global form become a
+        // client override rather than a global edit.
+        const res = await fetch(apiPath('/api/admin/forms'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: r.name,
+            category: r.category ?? undefined,
+            description: r.description,
+            audience: r.audience,
+            sla: r.sla,
+            orgId,
+            questions,
+          }),
+        })
+        if (!res.ok) throw new Error('Failed to save questions')
+        const json = (await res.json()) as { id: string }
+        markNew(json.id)
+      } else {
+        const res = await fetch(apiPath(`/api/admin/forms/${r.id}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ questions }),
+        })
+        if (!res.ok) throw new Error('Failed to save questions')
+      }
+      setQuestionsId(null)
+      await mutate()
+    } catch {
+      toast('Could not save the questions', 'err')
+      throw new Error('save-questions-failed')
+    }
+  }
+
+  function requestDelete(r: FormTemplate) {
+    if (mode === 'client' && !r.orgId) {
+      toast('This is a global form. Switch to All clients to remove it for everyone.', 'err')
+      return
+    }
+    setConfirmId(r.id)
+  }
+
   async function deleteForm(id: string) {
+    setConfirmId(null)
     try {
       const res = await fetch(apiPath(`/api/admin/forms/${id}`), { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed to delete form')
+    } catch {
+      toast('Could not delete the form', 'err')
     } finally {
       if (questionsId === id) setQuestionsId(null)
       await mutate()
@@ -168,6 +278,7 @@ export function RequestFormsSection(_props: { isAdmin?: boolean } = {}) {
   }
 
   const editingMeta = metaId ? rows.find(r => r.id === metaId) ?? null : null
+  const confirming = confirmId ? rows.find(r => r.id === confirmId) ?? null : null
 
   return (
     <SectionShell
@@ -180,53 +291,22 @@ export function RequestFormsSection(_props: { isAdmin?: boolean } = {}) {
         </button>
       }
     >
-      <div className="set-card" style={{ marginBottom: 16 }}>
-        <div className="set-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
-          <div className="sr-t">
-            <b>Applies to</b>
-            <small>
-              {mode === 'global'
-                ? 'These forms apply to every client.'
-                : 'Overrides just this client; others keep the global set.'}
-            </small>
-          </div>
-          <div className="ctl-line">
-            <Seg
-              aria="Scope"
-              value={mode}
-              onChange={v => setMode(v as Mode)}
-              opts={[
-                ['global', 'All clients'],
-                ['client', 'Per client'],
-              ]}
-            />
-            {mode === 'client' && (
-              <select
-                className="set-input"
-                style={{ maxWidth: 240 }}
-                value={orgId}
-                onChange={e => setOrgId(e.target.value)}
-                aria-label="Client"
-                disabled={clients.length === 0}
-              >
-                {clients.length === 0 ? (
-                  <option value="">No clients yet</option>
-                ) : (
-                  clients.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))
-                )}
-              </select>
-            )}
-          </div>
-        </div>
-      </div>
+      <PerClientHeader
+        mode={mode}
+        setMode={v => setMode(v as Mode)}
+        client={clientName}
+        setClient={name => {
+          const hit = clients.find(c => c.name === name)
+          if (hit) setOrgId(hit.id)
+        }}
+        clients={clients.map(c => c.name)}
+      />
 
       <div className="set-card lrow-wrap">
-        {isLoading ? (
-          <EmptyRow text="Loading forms..." />
+        {waiting ? (
+          <SkeletonRows />
+        ) : mode === 'client' && clients.length === 0 ? (
+          <EmptyRow text="No clients yet - add a client first." />
         ) : rows.length === 0 ? (
           <EmptyRow text="No forms yet - add one to get started." />
         ) : (
@@ -236,7 +316,7 @@ export function RequestFormsSection(_props: { isAdmin?: boolean } = {}) {
             return (
               <div key={r.id}>
                 <div
-                  className="lrow"
+                  className={'lrow' + (r.id === newId ? ' lrow-enter' : '')}
                   style={i ? { borderTop: '1px solid var(--border-subtle)' } : undefined}
                 >
                   <span className="lrow-ic leaf">
@@ -245,12 +325,11 @@ export function RequestFormsSection(_props: { isAdmin?: boolean } = {}) {
                   <div className="lrow-t">
                     <b>{r.name}</b>
                     <small>
-                      {categoryLabel(r.category)} &middot; {count} question{count === 1 ? '' : 's'}
-                      {r.isDefault ? ' (default)' : ''}
+                      {categoryLabel(r.category)} &middot; {count} questions
                     </small>
                   </div>
                   <div className="lrow-r">
-                    <Chip tone={r.orgId ? 'info' : 'neutral'}>{r.orgId ? 'Override' : 'Global'}</Chip>
+                    <Chip tone="neutral">{r.orgId ? 'Override' : 'Global'}</Chip>
                     <button
                       type="button"
                       className="btn2 sm"
@@ -261,7 +340,7 @@ export function RequestFormsSection(_props: { isAdmin?: boolean } = {}) {
                     </button>
                     <RowActions
                       onEdit={() => setMetaId(r.id)}
-                      onDelete={() => deleteForm(r.id)}
+                      onDelete={() => requestDelete(r)}
                     />
                   </div>
                 </div>
@@ -269,10 +348,7 @@ export function RequestFormsSection(_props: { isAdmin?: boolean } = {}) {
                   <QuestionEditor
                     key={r.id + ':' + count}
                     form={r}
-                    onSaved={async () => {
-                      setQuestionsId(null)
-                      await mutate()
-                    }}
+                    onSave={qs => saveQuestions(r, qs)}
                   />
                 )}
               </div>
@@ -284,22 +360,157 @@ export function RequestFormsSection(_props: { isAdmin?: boolean } = {}) {
       {metaId && editingMeta && (
         <EditDialog
           heading="Edit request form"
-          row={{ name: editingMeta.name, category: categoryLabel(editingMeta.category) }}
+          row={{
+            name: editingMeta.name,
+            cat: categoryLabel(editingMeta.category),
+            desc: editingMeta.description ?? '',
+            audience: audienceLabel(editingMeta.audience),
+            sla: editingMeta.sla ?? 'No SLA',
+          }}
           fields={[
             { key: 'name', label: 'Form name' },
-            { key: 'category', label: 'Category', type: 'select', opts: CATEGORY_LABELS },
+            { key: 'cat', label: 'Category', type: 'select', opts: CATEGORY_LABELS },
+            {
+              key: 'desc',
+              label: 'Description',
+              type: 'textarea',
+              ph: 'What is this form for?',
+              help: 'Shown to clients above the form.',
+            },
+            { key: 'audience', label: 'Who can submit', type: 'select', opts: AUDIENCE_LABELS },
+            { key: 'sla', label: 'Target turnaround', type: 'select', opts: SLA_OPTS },
           ]}
           onSave={v => saveMeta(metaId, v)}
           onClose={() => setMetaId(null)}
         />
       )}
+
+      {confirming && (
+        <ConfirmDialog
+          heading="Delete this form?"
+          body={`"${confirming.name}" will be removed${confirming.orgId ? ' for this client' : ' for every client'}. This cannot be undone.`}
+          confirmLabel="Delete"
+          onConfirm={() => deleteForm(confirming.id)}
+          onClose={() => setConfirmId(null)}
+        />
+      )}
+
+      <Toasts toasts={toasts} />
     </SectionShell>
   )
 }
 
-// -- Inline question editor (ports the previous FormEditor behaviour) --
+// -- Loading skeleton (animate-pulse blocks in the row chrome) --
 
-function QuestionEditor({ form, onSaved }: { form: FormTemplate; onSaved: () => void }) {
+function SkeletonRows() {
+  return (
+    <>
+      {[0, 1, 2].map(i => (
+        <div
+          key={i}
+          className="lrow"
+          style={i ? { borderTop: '1px solid var(--border-subtle)' } : undefined}
+          aria-hidden="true"
+        >
+          <span
+            className="animate-pulse"
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: '0 .625rem 0 .625rem',
+              background: 'var(--bg-tertiary)',
+              flexShrink: 0,
+            }}
+          />
+          <div className="lrow-t animate-pulse">
+            <span
+              style={{
+                display: 'block',
+                width: 150,
+                maxWidth: '60%',
+                height: 12,
+                borderRadius: 6,
+                background: 'var(--bg-tertiary)',
+              }}
+            />
+            <span
+              style={{
+                display: 'block',
+                width: 96,
+                maxWidth: '40%',
+                height: 9,
+                borderRadius: 6,
+                background: 'var(--bg-secondary)',
+                marginTop: 7,
+              }}
+            />
+          </div>
+        </div>
+      ))}
+    </>
+  )
+}
+
+// -- Delete confirmation (uses the shared .dlg chrome) --
+
+function ConfirmDialog({
+  heading,
+  body,
+  confirmLabel,
+  onConfirm,
+  onClose,
+}: {
+  heading: string
+  body: string
+  confirmLabel: string
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', k)
+    return () => document.removeEventListener('keydown', k)
+  }, [onClose])
+  return (
+    <div className="dlg-backdrop" onClick={onClose}>
+      <div
+        className="dlg"
+        onClick={e => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={heading}
+      >
+        <h3>{heading}</h3>
+        <p className="dlg-warn" style={{ margin: 0 }}>{body}</p>
+        <div className="dlg-foot">
+          <button type="button" className="btn2" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn1"
+            style={{ background: 'var(--danger-fill)' }}
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// -- Inline question editor (repo capability beyond the design, kept) --
+
+function QuestionEditor({
+  form,
+  onSave,
+}: {
+  form: FormTemplate
+  onSave: (questions: FormQuestion[]) => Promise<void>
+}) {
   const [questions, setQuestions] = useState<FormQuestion[]>(
     Array.isArray(form.questions) ? form.questions : [],
   )
@@ -323,13 +534,7 @@ function QuestionEditor({ form, onSaved }: { form: FormTemplate; onSaved: () => 
   async function save() {
     setSaving(true)
     try {
-      const res = await fetch(apiPath(`/api/admin/forms/${form.id}`), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ questions }),
-      })
-      if (!res.ok) throw new Error('Failed to save questions')
-      onSaved()
+      await onSave(questions)
     } catch {
       setSaving(false)
     }

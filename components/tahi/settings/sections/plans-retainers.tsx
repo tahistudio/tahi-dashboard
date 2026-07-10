@@ -1,230 +1,255 @@
 'use client'
 
 /*
- * Plans and retainers settings section.
+ * Client plans - the retainer catalogue Tahi sells.
  *
- * The retainer catalogue Tahi SELLS: the Maintain and Scale plans, each with a
- * base monthly price and a parallel-track ("Priority Support") add-on priced
- * per plan. This replaces the design's generic Subscription section with the
- * real commercial catalogue.
+ * Design shape (settings-app.jsx PlansAdmin): one row per plan with a coins
+ * leaf icon, name + exclusive "Most popular" chip, a base/track/features
+ * subline, RowActions, an Add plan header button and a 6-field EditDialog.
  *
- * The catalogue mirrored below is the source of truth in lib/stripe-plans.ts
- * (STRIPE_PLANS + STRIPE_CURRENCY + PRESENTMENT_CURRENCIES). It is duplicated as
- * a plain constant here on purpose: lib/stripe-plans.ts imports the Stripe Node
- * SDK at module scope, so importing it into this client component would drag the
- * whole SDK into the browser bundle. Keep the two in sync by hand until the
- * catalogue moves to a table.
+ * The catalogue persists as JSON under the `plan_catalog` settings key
+ * ({ id, name, base, track, rec, tag, feats[] }) and drives what every client
+ * sees on their Plan & billing tab: GET /api/portal/subscription embeds the
+ * same catalogue (lib/plan-catalog.ts, with lib/billing fallbacks for legacy
+ * copies that omit prices).
  *
- * Sync status is read live from GET /api/admin/integrations/stripe/setup-plans,
- * which reports, per lookup key, whether a Stripe price currently resolves.
+ * The Stripe sync chip stays as a secondary indicator in the subline: it
+ * reports whether a matching Stripe product exists for the plan id
+ * (GET /api/admin/integrations/stripe/setup-plans).
  *
- * Backend gap: editing here mutates local state only. Persisting an edited
- * catalogue needs a `plans` table plus a Stripe sync step (create/update the
- * product + recurring price for the changed lookup key). Until that lands the
- * EditDialog is a scaffold and the note below says so. Admin-only surface.
+ * Super-admin-only section (registry gate) + admin-gated settings API.
  */
 
-import { useState } from 'react'
-import { CreditCard, Layers, Pencil } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Coins, Plus } from 'lucide-react'
 import { useResource } from '@/lib/use-resource'
+import { apiPath } from '@/lib/api'
 import { Money } from '@/components/tahi/money'
+import { PLAN_MONTHLY_RATES } from '@/lib/billing'
+import {
+  DEFAULT_PLAN_COPY,
+  PLAN_CATALOG_KEY,
+  PLAN_TRACK_RATES,
+  sanitisePlanCopy,
+  type PlanCopy,
+} from '@/lib/plan-catalog-shared'
 import {
   SectionShell,
   EditDialog,
   EmptyRow,
   Chip,
-  useManaged,
+  RowActions,
+  useToasts,
+  Toasts,
   type ChipTone,
 } from '@/components/tahi/settings/primitives'
-
-// Base/settlement currency for the catalogue (mirrors STRIPE_CURRENCY).
-const CATALOGUE_CURRENCY = 'USD'
-
-// Presentment currencies a client can be billed in (mirrors PRESENTMENT_CURRENCIES).
-const CURRENCY_OPTIONS = ['USD', 'NZD', 'AUD', 'GBP', 'EUR', 'CAD'] as const
-
-type PlanKind = 'base' | 'track'
-
-// A single sellable line: either a plan's base retainer or its parallel-track
-// add-on. `amount` is in minor units (cents), matching lib/stripe-plans.ts.
-interface PlanRow extends Record<string, unknown> {
-  planName: string
-  kind: PlanKind
-  label: string
-  lookupKey: string
-  amount: number
-  currency: string
-}
-
-// Mirror of STRIPE_PLANS, flattened into one row per sellable price.
-const CATALOGUE: PlanRow[] = [
-  {
-    planName: 'Maintain',
-    kind: 'base',
-    label: 'Maintain',
-    lookupKey: 'tahi_maintain_base',
-    amount: 150000,
-    currency: CATALOGUE_CURRENCY,
-  },
-  {
-    planName: 'Maintain',
-    kind: 'track',
-    label: 'Maintain parallel track',
-    lookupKey: 'tahi_maintain_track',
-    amount: 100000,
-    currency: CATALOGUE_CURRENCY,
-  },
-  {
-    planName: 'Scale',
-    kind: 'base',
-    label: 'Scale',
-    lookupKey: 'tahi_scale_base',
-    amount: 400000,
-    currency: CATALOGUE_CURRENCY,
-  },
-  {
-    planName: 'Scale',
-    kind: 'track',
-    label: 'Scale parallel track',
-    lookupKey: 'tahi_scale_track',
-    amount: 150000,
-    currency: CATALOGUE_CURRENCY,
-  },
-]
 
 // Shape of GET /api/admin/integrations/stripe/setup-plans.
 interface SetupPlansResponse {
   configured: boolean
   currency?: string
-  // lookup key -> resolved Stripe price id (or null when it does not resolve).
   prices?: Record<string, string | null>
   error?: string
 }
 
-function syncChip(
-  configured: boolean,
-  priceId: string | null | undefined,
-): { tone: ChipTone; label: string } {
+function syncChip(configured: boolean, priceId: string | null | undefined): { tone: ChipTone; label: string } {
   if (!configured) return { tone: 'neutral', label: 'Stripe off' }
   if (priceId) return { tone: 'brand', label: 'In Stripe' }
   return { tone: 'warning', label: 'Not synced' }
 }
 
+function genId(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 24) || 'plan-' + Math.random().toString(36).slice(2, 6)
+  )
+}
+
+/** Resolved display prices: stored value wins, lib/billing fallback otherwise. */
+function planBase(p: PlanCopy): number {
+  return p.base ?? PLAN_MONTHLY_RATES[p.id] ?? 0
+}
+function planTrack(p: PlanCopy): number {
+  return p.track ?? PLAN_TRACK_RATES[p.id] ?? 0
+}
+
 export function PlansRetainersSection({ isAdmin }: { isAdmin?: boolean } = {}) {
-  // Admin-only: non-admins skip the fetch and never sit on a spinner.
   const shouldFetch = isAdmin !== false
-  const { data, isLoading } = useResource<SetupPlansResponse>(
+  const { toasts, toast } = useToasts()
+
+  const { data: stripe, isLoading: stripeLoading } = useResource<SetupPlansResponse>(
     shouldFetch ? '/api/admin/integrations/stripe/setup-plans' : null,
   )
+  const { data: settingsData, mutate } = useResource<{ settings: Record<string, string | null> }>(
+    shouldFetch ? '/api/admin/settings' : null,
+  )
 
-  const L = useManaged<PlanRow>(CATALOGUE)
-  const [ed, setEd] = useState<string | null>(null)
+  const [plans, setPlans] = useState<PlanCopy[]>(DEFAULT_PLAN_COPY)
+  const [ed, setEd] = useState<string | null>(null) // plan id | 'new' | null
+  const [newId, setNewId] = useState<string | null>(null) // drives lrow-enter
 
-  const loading = shouldFetch ? isLoading && !data : false
-  const configured = data?.configured === true
-  const prices = data?.prices ?? {}
+  // Seed from the persisted catalogue whenever the settings payload lands.
+  useEffect(() => {
+    const raw = settingsData?.settings?.[PLAN_CATALOG_KEY]
+    if (!raw) return
+    try {
+      const parsed = sanitisePlanCopy(JSON.parse(raw))
+      if (parsed) setPlans(parsed)
+    } catch {
+      // Malformed stored copy: keep the defaults on screen.
+    }
+  }, [settingsData])
 
-  function patchRow(rowId: string, values: Record<string, string>) {
-    const major = Number(values.price)
-    const amount = Number.isFinite(major) ? Math.round(major * 100) : 0
-    L.patch(rowId, {
-      label: values.label,
-      amount,
-      currency: values.currency || CATALOGUE_CURRENCY,
-    })
+  async function persist(next: PlanCopy[]) {
+    setPlans(next)
+    try {
+      const res = await fetch(apiPath('/api/admin/settings'), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: PLAN_CATALOG_KEY, value: JSON.stringify(next) }),
+      })
+      if (!res.ok) throw new Error('Failed')
+      toast('Client plans saved', 'ok')
+      void mutate()
+    } catch {
+      toast('Could not save the catalogue', 'err')
+      void mutate()
+    }
+  }
+
+  const configured = stripe?.configured === true
+  const prices = stripe?.prices ?? {}
+
+  const editing = ed && ed !== 'new' ? plans.find((p) => p.id === ed) : null
+  const dialogRow = editing
+    ? {
+        name: editing.name,
+        tag: editing.tag,
+        base: planBase(editing),
+        track: planTrack(editing),
+        rec: editing.rec ? 'Yes' : 'No',
+        feats: editing.feats.join('\n'),
+      }
+    : { rec: 'No' }
+
+  function onSave(v: Record<string, string>) {
+    const feats = (v.feats ?? '')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    const rec = v.rec === 'Yes'
+    const patch = {
+      name: v.name || 'Untitled plan',
+      tag: v.tag ?? '',
+      base: Math.max(0, Number(v.base) || 0),
+      track: Math.max(0, Number(v.track) || 0),
+      rec,
+      feats,
+    }
+    let next: PlanCopy[]
+    let savedId: string
+    if (ed === 'new') {
+      savedId = genId(patch.name)
+      if (plans.some((p) => p.id === savedId)) savedId = savedId + '-' + Math.random().toString(36).slice(2, 5)
+      next = [...plans, { id: savedId, ...patch }]
+      setNewId(savedId)
+    } else if (ed) {
+      savedId = ed
+      next = plans.map((p) => (p.id === ed ? { ...p, ...patch } : p))
+    } else {
+      return
+    }
+    // Only one plan can carry the "Most popular" flag.
+    if (rec) next = next.map((p) => ({ ...p, rec: p.id === savedId }))
+    void persist(next)
     setEd(null)
   }
 
-  const editing = ed ? L.rows.find((r) => r._id === ed) : undefined
-  // EditDialog reads plain string/number fields, so hand it price in major units.
-  const editingForDialog = editing
-    ? {
-        label: editing.label,
-        price: (editing.amount / 100).toString(),
-        currency: editing.currency,
-      }
-    : undefined
+  const fields = [
+    { key: 'name', label: 'Plan name' },
+    { key: 'tag', label: 'One-line summary', ph: 'e.g. Ongoing design & build, handled.' },
+    { key: 'base', label: 'Base price ($/month)', type: 'number' as const },
+    { key: 'track', label: 'Extra track price ($/month each)', type: 'number' as const },
+    { key: 'rec', label: 'Most popular?', type: 'select' as const, opts: ['No', 'Yes'] },
+    {
+      key: 'feats',
+      label: 'Included (one per line)',
+      type: 'textarea' as const,
+      ph: 'Multiple tracks in parallel\nPriority design & build',
+    },
+  ]
 
   return (
     <SectionShell
-      title="Plans and retainers"
-      lede="The retainer catalogue you sell: each plan's base price and its parallel-track add-on, billed monthly through Stripe."
+      title="Client plans"
+      lede="The retainer tiers clients choose from. Edits here update what every client sees in Plan & billing."
+      action={
+        <button className="btn1" type="button" onClick={() => setEd('new')}>
+          <Plus size={15} aria-hidden="true" />
+          Add plan
+        </button>
+      }
     >
       <div className="set-card lrow-wrap">
-        {L.rows.map((r, i) => {
-          const { tone, label } = loading
+        {plans.map((p, i) => {
+          const chip = stripeLoading
             ? { tone: 'neutral' as ChipTone, label: 'Checking...' }
-            : syncChip(configured, prices[r.lookupKey])
+            : syncChip(configured, prices['tahi_' + p.id + '_base'])
           return (
             <div
-              key={r._id}
-              className={'lrow' + (r._new ? ' lrow-enter' : '')}
+              key={p.id}
+              className={'lrow' + (p.id === newId ? ' lrow-enter' : '')}
               style={i ? { borderTop: '1px solid var(--border-subtle)' } : undefined}
             >
               <span className="lrow-ic leaf" aria-hidden="true">
-                {r.kind === 'base' ? <CreditCard size={16} /> : <Layers size={16} />}
+                <Coins size={16} />
               </span>
               <div className="lrow-t">
-                <b>{r.label}</b>
+                <b>
+                  {p.name}
+                  {p.rec && (
+                    <span className="chip brand" style={{ marginLeft: 8 }}>
+                      Most popular
+                    </span>
+                  )}
+                </b>
                 <small>
-                  {(r.kind === 'base' ? 'Base retainer' : 'Parallel-track add-on') +
-                    ' · ' +
-                    r.lookupKey}
+                  <Money nzd={planBase(p)} sensitive />
+                  {'/mo base · '}
+                  <Money nzd={planTrack(p)} sensitive />
+                  {'/mo per extra track · ' + p.feats.length + ' feature' + (p.feats.length === 1 ? '' : 's') + ' '}
+                  <Chip tone={chip.tone}>{chip.label}</Chip>
                 </small>
               </div>
               <div className="lrow-r">
-                <b style={{ font: '600 13.5px Manrope' }}>
-                  <Money native={r.amount / 100} currency={r.currency} />
-                  <span style={{ color: 'var(--text-faint)', fontWeight: 500 }}>/mo</span>
-                </b>
-                <Chip tone={tone}>{label}</Chip>
-                <div className="lrow-acts">
-                  <button
-                    type="button"
-                    className="ta-icobtn sm"
-                    aria-label={'Edit ' + r.label}
-                    onClick={() => setEd(r._id)}
-                  >
-                    <Pencil size={15} />
-                  </button>
-                </div>
+                <RowActions
+                  onEdit={() => setEd(p.id)}
+                  onDelete={() => void persist(plans.filter((x) => x.id !== p.id))}
+                />
               </div>
             </div>
           )
         })}
-        {!L.rows.length && <EmptyRow text="No plans in the catalogue yet." />}
+        {!plans.length && <EmptyRow text="No plans yet. Add your first retainer tier." />}
       </div>
 
       <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>
-        Editing here is a preview only. Persisting a changed catalogue needs a
-        plans table plus a Stripe sync step to create or update the product and
-        recurring price for each lookup key. Run the setup route once per Stripe
-        environment to create the prices these keys resolve to.
+        Extra tracks let a client run more work in parallel - priced per plan above.
       </p>
 
       {ed && (
         <EditDialog
-          heading="Edit plan"
-          row={editingForDialog}
-          fields={[
-            { key: 'label', label: 'Plan name' },
-            {
-              key: 'price',
-              label: 'Price per month',
-              type: 'number',
-              help: 'Amount in the selected currency, charged monthly.',
-            },
-            {
-              key: 'currency',
-              label: 'Currency',
-              type: 'select',
-              opts: [...CURRENCY_OPTIONS],
-            },
-          ]}
-          onSave={(v) => patchRow(ed, v)}
+          heading={ed === 'new' ? 'Add plan' : 'Edit plan'}
+          row={dialogRow}
+          fields={fields}
+          onSave={onSave}
           onClose={() => setEd(null)}
         />
       )}
+      <Toasts toasts={toasts} />
     </SectionShell>
   )
 }

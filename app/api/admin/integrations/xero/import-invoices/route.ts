@@ -2,228 +2,27 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { schema } from '@/db/d1'
-import { eq, sql } from 'drizzle-orm'
-import { callXeroAPI } from '@/lib/xero'
+import { importXeroInvoices } from '@/lib/xero-sync'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-interface XeroInvoice {
-  InvoiceID: string
-  InvoiceNumber: string
-  Type: string
-  Status: string
-  Contact: { ContactID: string; Name: string }
-  DateString: string
-  DueDateString: string
-  SubTotal: number
-  Total: number
-  CurrencyCode: string
-  AmountDue: number
-  AmountPaid: number
-  FullyPaidOnDate?: string
-  LineItems?: Array<{
-    Description: string
-    Quantity: number
-    UnitAmount: number
-    LineAmount: number
-    AccountCode: string
-  }>
-}
-
-interface XeroInvoicesResponse {
-  Invoices: XeroInvoice[]
-}
-
-function mapXeroStatus(xeroStatus: string): string {
-  switch (xeroStatus) {
-    case 'DRAFT': return 'draft'
-    case 'SUBMITTED':
-    case 'AUTHORISED': return 'sent'
-    case 'PAID': return 'paid'
-    case 'VOIDED':
-    case 'DELETED': return 'written_off'
-    default: return 'draft'
-  }
-}
-
-// POST /api/admin/integrations/xero/import-invoices
+/**
+ * POST /api/admin/integrations/xero/import-invoices
+ * Import a page of ACCREC invoices from Xero (default page 1).
+ *
+ * Core logic lives in lib/xero-sync.ts so the daily orchestrator cron
+ * (POST /api/admin/cron/sync-xero) can reuse it without an HTTP self-call.
+ */
 export async function POST(req: NextRequest) {
-  try {
   const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
   if (denied) return denied
 
-  const database = await db() as unknown as D1
-
-  // Fetch ACCREC invoices from Xero (paginated, summaries only for speed)
   const url = new URL(req.url)
   const page = parseInt(url.searchParams.get('page') ?? '1')
 
-  const data = await callXeroAPI<XeroInvoicesResponse>(
-    'GET',
-    `/Invoices?where=Type%3D%3D%22ACCREC%22&order=DateString%20DESC&page=${page}&summaryOnly=false`,
-  )
-
-  if (!data?.Invoices) {
-    return NextResponse.json({ error: 'Failed to fetch invoices from Xero' }, { status: 502 })
-  }
-
-  // Get existing xeroInvoiceIds to skip duplicates
-  const existing = await database
-    .select({ xeroInvoiceId: schema.invoices.xeroInvoiceId })
-    .from(schema.invoices)
-    .where(sql`${schema.invoices.xeroInvoiceId} IS NOT NULL`)
-
-  const existingIds = new Set(existing.map(e => e.xeroInvoiceId))
-
-  // Get all orgs for contact matching
-  const allOrgs = await database
-    .select({ id: schema.organisations.id, name: schema.organisations.name, xeroContactId: schema.organisations.xeroContactId })
-    .from(schema.organisations)
-
-  const now = new Date().toISOString()
-  let imported = 0
-  let skipped = 0
-  const results: Array<{ invoiceNumber: string; status: string; orgMatch?: string }> = []
-
-  for (const inv of data.Invoices) {
-    if (existingIds.has(inv.InvoiceID)) {
-      skipped++
-      results.push({ invoiceNumber: inv.InvoiceNumber, status: 'already_exists' })
-      continue
-    }
-
-    // Match Xero contact to dashboard org
-    let matchedOrgId: string | null = null
-    const xeroContactName = inv.Contact?.Name?.toLowerCase() ?? ''
-
-    // First: exact xeroContactId match
-    const exactMatch = allOrgs.find(o => o.xeroContactId === inv.Contact?.ContactID)
-    if (exactMatch) {
-      matchedOrgId = exactMatch.id
-    } else {
-      // Fuzzy name match
-      const nameMatch = allOrgs.find(o =>
-        o.name.toLowerCase() === xeroContactName ||
-        xeroContactName.includes(o.name.toLowerCase()) ||
-        o.name.toLowerCase().includes(xeroContactName)
-      )
-      if (nameMatch) {
-        matchedOrgId = nameMatch.id
-        // Auto-link the xeroContactId for future matches
-        try {
-          await database.update(schema.organisations).set({
-            xeroContactId: inv.Contact.ContactID,
-            updatedAt: now,
-          }).where(eq(schema.organisations.id, nameMatch.id))
-        } catch { /* column may not exist yet */ }
-      }
-    }
-
-    // If no org matched, auto-create one from the Xero contact
-    if (!matchedOrgId && inv.Contact?.Name) {
-      const newOrgId = crypto.randomUUID()
-      try {
-        await database.insert(schema.organisations).values({
-          id: newOrgId,
-          name: inv.Contact.Name,
-          status: 'active',
-          healthStatus: 'green',
-          onboardingState: '{}',
-          brands: '[]',
-          customFields: '{}',
-          preferredCurrency: inv.CurrencyCode ?? 'NZD',
-          createdAt: now,
-          updatedAt: now,
-        })
-        matchedOrgId = newOrgId
-        // Also add to allOrgs so subsequent invoices for same contact match
-        allOrgs.push({ id: newOrgId, name: inv.Contact.Name, xeroContactId: inv.Contact.ContactID })
-        // Link the xeroContactId
-        try {
-          await database.update(schema.organisations).set({
-            xeroContactId: inv.Contact.ContactID,
-            updatedAt: now,
-          }).where(eq(schema.organisations.id, newOrgId))
-        } catch { /* column may not exist */ }
-      } catch {
-        // Org creation failed, skip this invoice
-        results.push({ invoiceNumber: inv.InvoiceNumber, status: 'error', orgMatch: 'Failed to create org' })
-        continue
-      }
-    }
-
-    // Skip if we still have no org (shouldn't happen, but safety)
-    if (!matchedOrgId) {
-      results.push({ invoiceNumber: inv.InvoiceNumber, status: 'error', orgMatch: 'No Xero contact name' })
-      continue
-    }
-
-    const localStatus = mapXeroStatus(inv.Status)
-    const invoiceId = crypto.randomUUID()
-
-    try {
-      await database.insert(schema.invoices).values({
-        id: invoiceId,
-        orgId: matchedOrgId,
-        xeroInvoiceId: inv.InvoiceID,
-        source: 'xero',
-        status: localStatus,
-        amountUsd: inv.SubTotal,
-        totalUsd: inv.Total,
-        currency: inv.CurrencyCode ?? 'NZD',
-        dueDate: inv.DueDateString?.split('T')[0] ?? null,
-        paidAt: inv.FullyPaidOnDate ?? null,
-        notes: `Imported from Xero: ${inv.InvoiceNumber}`,
-        createdAt: inv.DateString ?? now,
-        updatedAt: now,
-      })
-
-      // Import line items if available
-      if (inv.LineItems?.length) {
-        for (const line of inv.LineItems) {
-          await database.insert(schema.invoiceItems).values({
-            id: crypto.randomUUID(),
-            invoiceId,
-            description: line.Description ?? 'Line item',
-            quantity: line.Quantity ?? 1,
-            unitPriceUsd: line.UnitAmount ?? 0,
-            totalUsd: line.LineAmount ?? 0,
-          })
-        }
-      }
-
-      imported++
-      results.push({
-        invoiceNumber: inv.InvoiceNumber,
-        status: 'imported',
-        orgMatch: matchedOrgId ? allOrgs.find(o => o.id === matchedOrgId)?.name : undefined,
-      })
-    } catch (insertErr) {
-      results.push({
-        invoiceNumber: inv.InvoiceNumber,
-        status: 'error',
-        orgMatch: insertErr instanceof Error ? insertErr.message : 'Insert failed',
-      })
-    }
-  }
-
-  return NextResponse.json({
-    success: true,
-    imported,
-    skipped,
-    total: data.Invoices.length,
-    page,
-    hasMore: data.Invoices.length >= 100, // Xero returns max 100 per page
-    results,
-  })
-  } catch (err) {
-    console.error('Xero import error:', err)
-    return NextResponse.json({
-      error: 'Import failed',
-      message: err instanceof Error ? err.message : 'Unknown error',
-    }, { status: 500 })
-  }
+  const database = (await db()) as D1
+  const outcome = await importXeroInvoices(database, page)
+  return NextResponse.json(outcome.body, { status: outcome.status })
 }

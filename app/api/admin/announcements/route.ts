@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { desc } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import { fanOutAnnouncementEmails } from '@/lib/announcement-emails'
 
 // ── GET /api/admin/announcements ────────────────────────────────────────────
@@ -40,7 +40,8 @@ export async function GET(req: NextRequest) {
 
 // ── POST /api/admin/announcements ───────────────────────────────────────────
 // Create a new announcement.
-// Body: { title, content, type?, targetType, targetValue?, targetIds?, expiresAt? }
+// Body: { title, content, type?, targetType, targetValue?, targetIds?,
+//         expiresAt?, emoji?, ctaLabel?, ctaUrl?, publish?, sendEmail? }
 export async function POST(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
@@ -55,9 +56,12 @@ export async function POST(req: NextRequest) {
     content?: string
     type?: string
     targetType?: string
-    targetValue?: string
-    targetIds?: string[]
-    expiresAt?: string
+    targetValue?: string | null
+    targetIds?: string[] | null
+    expiresAt?: string | null
+    emoji?: string | null
+    ctaLabel?: string | null
+    ctaUrl?: string | null
     publish?: boolean
     sendEmail?: boolean
   }
@@ -77,6 +81,17 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  const targetValue = body.targetValue ?? null
+  const targetIds = body.targetIds ?? null
+
+  // An org-targeted announcement nobody can see is a publish that lies.
+  if (targetType === 'org' && (!Array.isArray(targetIds) || targetIds.length === 0)) {
+    return NextResponse.json(
+      { error: 'targetIds must include at least one organisation when targetType is org' },
+      { status: 400 }
+    )
+  }
+
   const database = await db()
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
@@ -84,8 +99,12 @@ export async function POST(req: NextRequest) {
   const title = body.title.trim()
   const content = body.content.trim()
   const type = body.type ?? 'info'
-  const targetValue = body.targetValue ?? null
-  const targetIds = body.targetIds ?? null
+  // Emoji can span several UTF-16 units (ZWJ sequences, variation selectors),
+  // so the cap is generous while still rejecting pasted paragraphs.
+  const emoji = body.emoji?.trim().slice(0, 16) || null
+  const ctaLabel = body.ctaLabel?.trim() || null
+  const ctaUrl = body.ctaUrl?.trim() || null
+  const sendEmail = body.sendEmail === true
 
   await database.insert(schema.announcements).values({
     id,
@@ -97,6 +116,12 @@ export async function POST(req: NextRequest) {
     targetIds: targetIds ? JSON.stringify(targetIds) : null,
     expiresAt: body.expiresAt ?? null,
     publishedAt: body.publish ? now : null,
+    emoji,
+    ctaLabel,
+    ctaUrl,
+    // Recorded so the [id]/send route can honour the email request when a
+    // draft is published later (guarded there by emailSentAt).
+    sentByEmail: sendEmail ? 1 : 0,
     createdById: userId,
     createdAt: now,
     updatedAt: now,
@@ -106,7 +131,7 @@ export async function POST(req: NextRequest) {
   // published (a draft stays silent) and email delivery was requested. Best
   // effort: any failure here is swallowed so the announcement still succeeds.
   let emailed = 0
-  if (body.sendEmail === true && body.publish === true) {
+  if (sendEmail && body.publish === true) {
     try {
       emailed = await fanOutAnnouncementEmails(database, {
         title,
@@ -119,6 +144,11 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       console.error('[announcements] email fan-out failed', err)
     }
+    // Mark the attempt so [id]/send can never double-deliver this one.
+    await database
+      .update(schema.announcements)
+      .set({ emailSentAt: now, updatedAt: now })
+      .where(eq(schema.announcements.id, id))
   }
 
   return NextResponse.json({ id, emailed }, { status: 201 })

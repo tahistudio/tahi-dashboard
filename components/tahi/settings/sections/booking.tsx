@@ -3,15 +3,15 @@
 /*
  * BookingSection - Account > Booking link
  *
- * Design source: the `function Booking(){...}` block in settings-app.jsx renders
+ * Design source: the `function Booking(){...}` block in settings-app.jsx:
  * booking links as a managed add / edit / delete list (label, duration, URL,
- * copy). Our backend today persists a SINGLE value under the `booking.google_cal_url`
- * setting (the same one the client portal reads for its "Schedule a Call" button).
+ * copy) with the lrow-enter insert animation and the shared EditDialog.
  *
- * So the list UI is built faithfully, but persistence maps to that one slot: the
- * top row is the live link clients see. Adding a link prepends it (making it the
- * live one on save); deleting the top link promotes the next. Multiple typed,
- * separately persisted booking links are a later backend gap - see note below.
+ * Persistence is real and complete: the whole list is stored as JSON under
+ * the `booking.links` settings key ([{name,dur,url}]), and the top row's URL
+ * is mirrored into the legacy `booking.google_cal_url` key in the same save
+ * so the client portal's "Schedule a Call" button (which reads that key via
+ * /api/portal/settings/booking) always points at the top link.
  */
 
 import { useState } from 'react'
@@ -24,10 +24,15 @@ import {
   EditDialog,
   RowActions,
   EmptyRow,
+  Toasts,
+  useToasts,
 } from '@/components/tahi/settings/primitives'
 
-const BOOKING_KEY = 'booking.google_cal_url'
+const LINKS_KEY = 'booking.links'
+const LEGACY_URL_KEY = 'booking.google_cal_url'
 const DURATIONS = ['15 min', '20 min', '30 min', '45 min', '60 min']
+const LEDE =
+  'Share the right link for the moment - discovery, kickoff, a retainer check-in, or a client-specific slot.'
 
 interface BookingRow extends Record<string, unknown> {
   name: string
@@ -39,6 +44,28 @@ interface SettingsResponse {
   settings: Record<string, string | null>
 }
 
+function parseLinks(raw: string | null | undefined): BookingRow[] | null {
+  if (!raw) return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return null
+    const rows: BookingRow[] = []
+    for (const item of parsed) {
+      if (item && typeof item === 'object') {
+        const o = item as Record<string, unknown>
+        rows.push({
+          name: typeof o.name === 'string' ? o.name : 'Booking link',
+          dur: typeof o.dur === 'string' ? o.dur : '30 min',
+          url: typeof o.url === 'string' ? o.url : '',
+        })
+      }
+    }
+    return rows
+  } catch {
+    return null
+  }
+}
+
 export function BookingSection({ isAdmin }: { isAdmin?: boolean } = {}) {
   const { data, error, isLoading, mutate } = useResource<SettingsResponse>(
     isAdmin === false ? null : '/api/admin/settings',
@@ -48,19 +75,47 @@ export function BookingSection({ isAdmin }: { isAdmin?: boolean } = {}) {
 
   if (isLoading) {
     return (
-      <SectionShell
-        title="Booking links"
-        lede="Share the right link for the moment - discovery, kickoff, a retainer check-in, or a client-specific slot."
-      >
+      <SectionShell title="Booking links" lede={LEDE}>
         <div className="set-card lrow-wrap">
-          <div className="lrow" style={{ opacity: 0.6 }}>
-            <span className="lrow-ic leaf">
-              <Calendar size={16} />
-            </span>
-            <div className="lrow-t">
-              <b style={{ color: 'var(--text-faint)' }}>Loading booking links...</b>
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="lrow"
+              style={i ? { borderTop: '1px solid var(--border-subtle)' } : undefined}
+            >
+              <div
+                className="animate-pulse"
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: '0 .625rem 0 .625rem',
+                  background: 'var(--bg-tertiary)',
+                  flexShrink: 0,
+                }}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  className="animate-pulse"
+                  style={{
+                    height: 13,
+                    width: '34%',
+                    borderRadius: 6,
+                    background: 'var(--bg-tertiary)',
+                  }}
+                />
+                <div
+                  className="animate-pulse"
+                  style={{
+                    height: 11,
+                    width: '58%',
+                    borderRadius: 6,
+                    background: 'var(--bg-tertiary)',
+                    marginTop: 6,
+                  }}
+                />
+              </div>
             </div>
-          </div>
+          ))}
         </div>
       </SectionShell>
     )
@@ -68,23 +123,24 @@ export function BookingSection({ isAdmin }: { isAdmin?: boolean } = {}) {
 
   if (error) {
     return (
-      <SectionShell
-        title="Booking links"
-        lede="Share the right link for the moment - discovery, kickoff, a retainer check-in, or a client-specific slot."
-      >
+      <SectionShell title="Booking links" lede={LEDE}>
         <div className="set-card lrow-wrap">
-          <EmptyRow text="Could not load your booking link. Try again shortly." />
+          <EmptyRow text="Could not load your booking links. Try again shortly." />
         </div>
       </SectionShell>
     )
   }
 
-  const storedUrl = data?.settings?.[BOOKING_KEY]?.trim() || ''
+  // Prefer the full persisted list; fall back to the legacy single-URL key
+  // (pre-list installs) so an existing live link still shows up.
+  const parsed = parseLinks(data?.settings?.[LINKS_KEY])
+  const legacyUrl = data?.settings?.[LEGACY_URL_KEY]?.trim() || ''
+  const initialRows: BookingRow[] =
+    parsed ?? (legacyUrl ? [{ name: 'Booking link', dur: '30 min', url: legacyUrl }] : [])
 
   return (
     <BookingList
-      key={storedUrl}
-      initialUrl={storedUrl}
+      initialRows={initialRows}
       onMutate={async () => {
         await mutate()
       }}
@@ -93,56 +149,79 @@ export function BookingSection({ isAdmin }: { isAdmin?: boolean } = {}) {
 }
 
 function BookingList({
-  initialUrl,
+  initialRows,
   onMutate,
 }: {
-  initialUrl: string
+  initialRows: BookingRow[]
   onMutate: () => Promise<void>
 }) {
-  const seed: BookingRow[] = initialUrl
-    ? [{ name: 'Booking link', dur: '30 min', url: initialUrl }]
-    : []
-  const L = useManaged<BookingRow>(seed)
+  const L = useManaged<BookingRow>(initialRows)
   const [ed, setEd] = useState<string | null>(null)
-  const [copiedId, setCopiedId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const { toasts, toast } = useToasts()
 
-  // Persist the top row's URL into the single backend slot clients read.
-  const persist = async (value: string) => {
+  // Persist the full list (booking.links) and mirror the top row's URL into
+  // the legacy key the portal reads. Both writes go through the existing
+  // single-key PATCH contract.
+  const persist = async (rows: BookingRow[]) => {
     setSaving(true)
     try {
-      await fetch(apiPath('/api/admin/settings'), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: BOOKING_KEY, value }),
-      })
+      const links = rows.map((r) => ({ name: r.name, dur: r.dur, url: r.url }))
+      const patch = (key: string, value: string) =>
+        fetch(apiPath('/api/admin/settings'), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key, value }),
+        })
+      const [a, b] = await Promise.all([
+        patch(LINKS_KEY, JSON.stringify(links)),
+        patch(LEGACY_URL_KEY, links[0]?.url ?? ''),
+      ])
+      if (!a.ok || !b.ok) throw new Error('save failed')
       await onMutate()
+    } catch {
+      toast('Could not save booking links', 'err')
     } finally {
       setSaving(false)
     }
   }
 
+  const handleAdd = () => {
+    const row: BookingRow = { name: 'New link', dur: '30 min', url: 'https://calendar.app.google/' }
+    const snapshot = L.rows
+    const id = L.add(row)
+    setEd(id)
+    void persist([row, ...snapshot])
+  }
+
   const handleSave = (values: Record<string, string>) => {
     if (!ed) return
-    L.patch(ed, values)
-    const topRow = L.rows[0]
-    const nextTopUrl = topRow?._id === ed ? values.url : topRow?.url ?? ''
+    const patch: Partial<BookingRow> = {
+      name: values.name,
+      dur: values.dur,
+      url: values.url,
+    }
+    const next = L.rows.map((r) => (r._id === ed ? { ...r, ...patch } : r))
+    L.patch(ed, patch)
     setEd(null)
-    void persist(nextTopUrl)
+    void persist(next)
   }
 
   const handleDelete = (id: string) => {
+    const next = L.rows.filter((r) => r._id !== id)
     L.remove(id)
-    const remaining = L.rows.filter((r) => r._id !== id)
-    void persist(remaining[0]?.url ?? '')
+    void persist(next)
   }
 
-  const handleCopy = (row: BookingRow & { _id: string }) => {
+  const handleCopy = (url: string) => {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      void navigator.clipboard.writeText(row.url)
+      navigator.clipboard
+        .writeText(url)
+        .then(() => toast('Link copied'))
+        .catch(() => toast('Could not copy link', 'err'))
+    } else {
+      toast('Could not copy link', 'err')
     }
-    setCopiedId(row._id)
-    window.setTimeout(() => setCopiedId((c) => (c === row._id ? null : c)), 1600)
   }
 
   const editingRow = ed ? L.rows.find((r) => r._id === ed) ?? null : null
@@ -150,21 +229,9 @@ function BookingList({
   return (
     <SectionShell
       title="Booking links"
-      lede="Share the right link for the moment - discovery, kickoff, a retainer check-in, or a client-specific slot."
+      lede={LEDE}
       action={
-        <button
-          type="button"
-          className="btn1"
-          disabled={saving}
-          onClick={() => {
-            const id = L.add({
-              name: 'New link',
-              dur: '30 min',
-              url: 'https://calendar.app.google/',
-            })
-            setEd(id)
-          }}
-        >
+        <button type="button" className="btn1" disabled={saving} onClick={handleAdd}>
           <Plus size={15} />
           New link
         </button>
@@ -188,9 +255,9 @@ function BookingList({
               <small style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{r.url}</small>
             </div>
             <div className="lrow-r">
-              <button type="button" className="btn2 sm" onClick={() => handleCopy(r)}>
+              <button type="button" className="btn2 sm" onClick={() => handleCopy(r.url)}>
                 <Copy size={14} />
-                {copiedId === r._id ? 'Copied' : 'Copy'}
+                Copy
               </button>
               <RowActions onEdit={() => setEd(r._id)} onDelete={() => handleDelete(r._id)} />
             </div>
@@ -198,10 +265,6 @@ function BookingList({
         ))}
         {!L.rows.length && <EmptyRow text="No booking links yet." />}
       </div>
-      <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>
-        The top link is the one clients see on their portal. Separate links per
-        moment are saved on this device for now.
-      </p>
       {editingRow && (
         <EditDialog
           heading="Edit booking link"
@@ -215,6 +278,7 @@ function BookingList({
           onClose={() => setEd(null)}
         />
       )}
+      <Toasts toasts={toasts} />
     </SectionShell>
   )
 }

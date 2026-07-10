@@ -108,6 +108,13 @@ const CRONS: CronDef[] = [
     schedule: 'Daily (or every few hours)',
   },
   {
+    cron: 'automation-sweep',
+    label: 'Automation time sweep',
+    description: 'Evaluates the time-based automation triggers: fires request_overdue as a request crosses its due date and client_inactive when an active client has had no request activity for 30 days. Feeds the same rules engine (and outgoing webhooks) as live events, and dedupes by only firing entities that crossed the line since the previous sweep.',
+    endpoint: '/api/admin/crons/sweep',
+    schedule: 'Hourly',
+  },
+  {
     cron: 'round-table-advance',
     label: 'Round table drafting',
     description: 'Drives the whole round-table drafting pipeline. First seeds queued drafts for approved content ideas that have no draft yet (gated by content.draftingEnabled, max 1-3 per tick), then advances every draft one stage (oldest first, up to 3 drafts per tick) through researching, strategising, headline_lab, drafting, reviewing, editing, signing_off, covering until ready_for_publish, failed, or cost_capped. Safe to run frequently - each stage has its own cost cap check. Replaces the retired draft-approved-ideas cron.',

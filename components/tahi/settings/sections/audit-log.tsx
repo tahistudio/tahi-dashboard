@@ -3,35 +3,34 @@
 /**
  * AuditLogSection - the immutable action log, searchable and filterable.
  *
- * Data is real: it reads /api/admin/audit (GET), which returns raw auditLog
- * rows (actorId, actorType, action, entityType, entityId, metadata, createdAt).
- * The action filter maps to the endpoint's ?action= query param; the search box
- * filters the loaded page client-side across when / who / action / target,
- * because the endpoint has no free-text search parameter.
+ * Pixel-perfect port of the design's Audit pane: .ta-switchrow toolbar with a
+ * .ta-search pill + "All actions" select, then a .hist-wrap/.hist table
+ * (When / Who / Action / Target) closed by a .hist-foot count line.
  *
- * The endpoint resolves neither actor nor target to a display name, so "Who"
- * shows the actor id (falling back to actor type) and "Target" shows the entity
- * type and a short id. That is the honest shape of what /api/admin/audit gives.
- *
- * The design mocked a `.hist` table and a `.ta-search` control that do not
- * exist in settings.css, so the table and search field are built with inline
- * styles that reference existing CSS variables (no hardcoded hex).
+ * Data is real: it reads /api/admin/audit?resolveNames=1 (GET), which returns
+ * auditLog rows with actorName/entityName resolved server-side (team members
+ * by Clerk id; team_member / organisation / role entities by id). The select
+ * filters server-side via the endpoint's ?actionPrefix= param using the
+ * prefixes the app actually writes (permission.*, subscription.*, contract*).
+ * The text box filters the loaded page client-side, debounced.
  *
  * Admin-only. Rendered inside the settings shell which already gates on admin.
  */
 
-import { useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 import { useResource } from '@/lib/use-resource'
-import { SectionShell, EmptyRow } from '@/components/tahi/settings/primitives'
+import { SectionShell } from '@/components/tahi/settings/primitives'
 
 interface AuditRow {
   id: string
   actorId: string | null
   actorType: string | null
+  actorName?: string | null
   action: string
   entityType: string | null
   entityId: string | null
+  entityName?: string | null
   metadata: string | null
   ipAddress: string | null
   createdAt: string
@@ -39,14 +38,19 @@ interface AuditRow {
 
 interface AuditResponse {
   items: AuditRow[]
+  page: number
+  limit: number
 }
 
-// Filter select values map to distinct auditLog.action values.
+// Filter options map to real auditLog.action prefixes written by the app
+// (permission.* from the Team & access surfaces, subscription.* from portal
+// change requests, contract* from the signing emailer). The endpoint matches
+// them server-side via ?actionPrefix=.
 const ACTION_FILTERS: [string, string][] = [
   ['', 'All actions'],
-  ['created', 'Created'],
-  ['updated', 'Updated'],
-  ['deleted', 'Deleted'],
+  ['permission.', 'Permissions'],
+  ['subscription.', 'Subscriptions'],
+  ['contract', 'Contracts'],
 ]
 
 function formatWhen(iso: string): string {
@@ -68,102 +72,104 @@ function formatWhen(iso: string): string {
 }
 
 function whoLabel(r: AuditRow): string {
-  return r.actorId ?? r.actorType ?? 'System'
+  if (r.actorName) return r.actorName
+  if (!r.actorId || r.actorType === 'system') return 'System'
+  // Unresolved Clerk id: show a short honest form rather than the full token.
+  return r.actorId.length > 14 ? r.actorId.slice(0, 14) + '…' : r.actorId
 }
 
 function actionLabel(action: string): string {
   if (!action) return 'Unknown'
-  return action.charAt(0).toUpperCase() + action.slice(1).replace(/_/g, ' ')
+  // 'permission.feature_override_set' -> 'Feature override set'
+  const dot = action.indexOf('.')
+  const tail = dot >= 0 ? action.slice(dot + 1) : action
+  const words = tail.replace(/[._]/g, ' ').trim()
+  if (!words) return 'Unknown'
+  return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
 function targetLabel(r: AuditRow): string {
-  if (r.entityType && r.entityId) {
-    return `${r.entityType} ${r.entityId.slice(0, 8)}`
-  }
-  return r.entityType ?? r.entityId ?? '-'
+  if (r.entityName) return r.entityName
+  const type = r.entityType ? r.entityType.replace(/_/g, ' ') : null
+  if (type && r.entityId) return `${type} ${r.entityId.slice(0, 8)}`
+  return type ?? r.entityId ?? '-'
 }
 
-const TH_STYLE: CSSProperties = {
-  textAlign: 'left',
-  font: "700 11px 'Manrope', sans-serif",
-  letterSpacing: '.05em',
-  textTransform: 'uppercase',
-  color: 'var(--text-faint)',
-  padding: '0 14px 10px',
-  whiteSpace: 'nowrap',
-}
+const SKELETON_WIDTHS: [number, number, number, number][] = [
+  [86, 64, 190, 96],
+  [92, 52, 150, 110],
+  [80, 70, 210, 88],
+  [88, 58, 170, 102],
+]
 
-const TD_STYLE: CSSProperties = {
-  padding: '11px 14px',
-  borderTop: '1px solid var(--border-subtle)',
-  font: "500 13px 'Manrope', sans-serif",
-  color: 'var(--text)',
-  verticalAlign: 'top',
+function SkeletonCell({ width }: { width: number }) {
+  return (
+    <span
+      className="animate-pulse"
+      style={{
+        display: 'block',
+        height: 11,
+        width,
+        maxWidth: '100%',
+        borderRadius: 6,
+        background: 'var(--border-subtle)',
+      }}
+    />
+  )
 }
 
 export function AuditLogSection(_props: { isAdmin?: boolean } = {}) {
   const [query, setQuery] = useState('')
-  const [action, setAction] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+  const [actionPrefix, setActionPrefix] = useState('')
 
-  const url = action ? `/api/admin/audit?action=${encodeURIComponent(action)}` : '/api/admin/audit'
+  // Debounce the free-text filter so typing doesn't churn the table.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query), 200)
+    return () => clearTimeout(t)
+  }, [query])
+
+  const url =
+    '/api/admin/audit?resolveNames=1' +
+    (actionPrefix ? `&actionPrefix=${encodeURIComponent(actionPrefix)}` : '')
   const { data, isLoading } = useResource<AuditResponse>(url)
   const rows = useMemo(() => data?.items ?? [], [data])
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
+    const q = debouncedQuery.trim().toLowerCase()
     if (!q) return rows
-    return rows.filter(r => {
-      const haystack = [
-        formatWhen(r.createdAt),
-        whoLabel(r),
-        actionLabel(r.action),
-        targetLabel(r),
-      ]
+    return rows.filter((r) => {
+      const haystack = [formatWhen(r.createdAt), whoLabel(r), actionLabel(r.action), targetLabel(r)]
         .join(' ')
         .toLowerCase()
       return haystack.includes(q)
     })
-  }, [rows, query])
+  }, [rows, debouncedQuery])
+
+  const searching = debouncedQuery.trim().length > 0
+  const footText = searching
+    ? `Showing ${filtered.length} of the last ${rows.length} action${rows.length === 1 ? '' : 's'}.`
+    : rows.length === 1
+      ? 'Showing the last action.'
+      : `Showing the last ${rows.length} actions.`
 
   return (
     <SectionShell title="Audit log" lede="Every action, logged and searchable.">
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          flexWrap: 'wrap',
-          marginBottom: 14,
-        }}
-      >
-        <div style={{ position: 'relative', flex: '1 1 200px', minWidth: 180 }}>
-          <span
-            style={{
-              position: 'absolute',
-              left: 12,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              display: 'flex',
-              color: 'var(--text-faint)',
-              pointerEvents: 'none',
-            }}
-          >
-            <Search size={16} />
-          </span>
+      <div className="ta-switchrow" style={{ marginBottom: 14 }}>
+        <div className="ta-search">
+          <Search size={16} aria-hidden="true" />
           <input
-            className="set-input"
-            style={{ paddingLeft: 36 }}
             placeholder="Filter actions"
-            aria-label="Filter actions"
+            aria-label="Filter"
             value={query}
-            onChange={e => setQuery(e.target.value)}
+            onChange={(e) => setQuery(e.target.value)}
           />
         </div>
         <select
           className="set-input"
           style={{ maxWidth: 160 }}
-          value={action}
-          onChange={e => setAction(e.target.value)}
+          value={actionPrefix}
+          onChange={(e) => setActionPrefix(e.target.value)}
           aria-label="Filter by action type"
         >
           {ACTION_FILTERS.map(([value, label]) => (
@@ -174,52 +180,64 @@ export function AuditLogSection(_props: { isAdmin?: boolean } = {}) {
         </select>
       </div>
 
-      <div className="set-card" style={{ padding: 0, overflow: 'hidden' }}>
-        {isLoading ? (
-          <EmptyRow text="Loading audit log..." />
-        ) : filtered.length === 0 ? (
-          <EmptyRow text={query ? 'No actions match your filter.' : 'No actions logged yet.'} />
-        ) : (
-          <>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 520 }}>
-                <thead>
-                  <tr>
-                    <th style={{ ...TH_STYLE, paddingTop: 14 }}>When</th>
-                    <th style={{ ...TH_STYLE, paddingTop: 14 }}>Who</th>
-                    <th style={{ ...TH_STYLE, paddingTop: 14 }}>Action</th>
-                    <th style={{ ...TH_STYLE, paddingTop: 14 }}>Target</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map(r => (
-                    <tr key={r.id}>
-                      <td style={{ ...TD_STYLE, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                        {formatWhen(r.createdAt)}
-                      </td>
-                      <td style={{ ...TD_STYLE, whiteSpace: 'nowrap' }}>{whoLabel(r)}</td>
-                      <td style={TD_STYLE}>
-                        <b style={{ fontWeight: 600 }}>{actionLabel(r.action)}</b>
-                      </td>
-                      <td style={{ ...TD_STYLE, color: 'var(--text-muted)' }}>{targetLabel(r)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div
-              style={{
-                padding: '11px 14px',
-                borderTop: '1px solid var(--border-subtle)',
-                font: "500 12px 'Manrope', sans-serif",
-                color: 'var(--text-faint)',
-              }}
-            >
-              Showing the {filtered.length === 1 ? 'only' : `most recent ${filtered.length}`}{' '}
-              {filtered.length === 1 ? 'action' : 'actions'}.
-            </div>
-          </>
-        )}
+      <div className="hist-wrap">
+        <table className="hist">
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Who</th>
+              <th>Action</th>
+              <th>Target</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+              SKELETON_WIDTHS.map((w, i) => (
+                <tr key={i} aria-hidden="true">
+                  <td className="h-when">
+                    <SkeletonCell width={w[0]} />
+                  </td>
+                  <td className="h-who">
+                    <SkeletonCell width={w[1]} />
+                  </td>
+                  <td className="h-change">
+                    <SkeletonCell width={w[2]} />
+                  </td>
+                  <td className="h-target">
+                    <SkeletonCell width={w[3]} />
+                  </td>
+                </tr>
+              ))
+            ) : filtered.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={4}
+                  style={{
+                    textAlign: 'center',
+                    padding: '28px 14px',
+                    color: 'var(--text-faint)',
+                  }}
+                >
+                  {searching || actionPrefix
+                    ? 'No actions match your filter.'
+                    : 'No actions logged yet.'}
+                </td>
+              </tr>
+            ) : (
+              filtered.map((r) => (
+                <tr key={r.id}>
+                  <td className="h-when">{formatWhen(r.createdAt)}</td>
+                  <td className="h-who">{whoLabel(r)}</td>
+                  <td className="h-change">
+                    <b>{actionLabel(r.action)}</b>
+                  </td>
+                  <td className="h-target">{targetLabel(r)}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+        {!isLoading && filtered.length > 0 && <div className="hist-foot">{footText}</div>}
       </div>
     </SectionShell>
   )

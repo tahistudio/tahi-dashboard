@@ -8,6 +8,7 @@ import {
   Seg,
   Chip,
   EmptyRow,
+  RowActions,
   type ChipTone,
 } from '@/components/tahi/settings/primitives'
 import { useResource } from '@/lib/use-resource'
@@ -16,22 +17,20 @@ import { apiPath } from '@/lib/api'
 /**
  * Announcements settings section (admin only).
  *
- * Compose a portal banner (title, body, emoji, tone, cta, audience, active),
- * then publish it to the workspace. Instead of localStorage, this posts to
- * `/api/admin/announcements` and lists past announcements from the same GET.
+ * Compose a portal banner (title, body, emoji, tone, cta label + link,
+ * audience, expiry, active), preview it with the real .ann-bar markup, then
+ * publish it. Everything persists through the announcements API:
  *
- * Endpoint contract (confirmed in app/api/admin/announcements/route.ts):
- *   GET  -> { announcements: AnnouncementRow[] }
- *   POST -> body { title, content, type, targetType, targetValue?, targetIds?,
- *                  publish? } -> { id }
+ *   GET    /api/admin/announcements        -> { announcements: AnnouncementRow[] }
+ *   POST   /api/admin/announcements        -> create (+ optional email fan-out)
+ *   PATCH  /api/admin/announcements/[id]   -> edit fields, publish/unpublish
+ *   DELETE /api/admin/announcements/[id]   -> remove
+ *   POST   /api/admin/announcements/[id]/send -> publish a draft (+ guarded email)
  *
- * Notes on the mock-vs-data gap:
- *   - `emoji` and `cta` (button label) drive the live preview but are NOT
- *     persisted by the current POST (no columns / body keys). The live banner
- *     falls back to a per-type emoji.
- *   - The "also send email" toggle now drives a real email fan-out: when on and
- *     the announcement is published, the POST carries `sendEmail: true` and the
- *     route emails the targeted contacts, returning how many were reached.
+ * emoji / ctaLabel / ctaUrl are real columns (migration 0084) and flow through
+ * to the live portal banner (components/tahi/announcement-banner.tsx), which
+ * renders the CTA only when both label and link are present - hence the
+ * link validation before publishing.
  */
 
 interface AnnouncementRow {
@@ -41,9 +40,13 @@ interface AnnouncementRow {
   type: string
   targetType: string
   targetValue: string | null
+  targetIds: string | null
   publishedAt: string | null
   createdAt: string
   expiresAt: string | null
+  emoji: string | null
+  ctaLabel: string | null
+  ctaUrl: string | null
 }
 
 interface Org {
@@ -88,20 +91,42 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+/** ISO timestamp -> value for <input type="datetime-local"> in local time. */
+function isoToLocalInput(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/** datetime-local value (local time) -> ISO timestamp, or null when unset/invalid. */
+function localInputToIso(value: string): string | null {
+  if (!value) return null
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toISOString()
+}
+
 export function AnnouncementsSection() {
   const [title, setTitle] = useState('Client portal, refreshed')
   const [body, setBody] = useState(
-    "We have rebuilt how your projects are presented: calmer, clearer, and faster to scan.",
+    'We have rebuilt how your projects are presented: calmer, clearer, and faster to scan.',
   )
   const [emoji, setEmoji] = useState(EMOJI[0])
   const [tone, setTone] = useState('info')
   const [cta, setCta] = useState('See what is new')
+  const [ctaUrl, setCtaUrl] = useState('')
+  const [expires, setExpires] = useState('')
   const [targetType, setTargetType] = useState('all')
   const [plan, setPlan] = useState(PLAN_OPTS[0])
   const [orgIds, setOrgIds] = useState<string[]>([])
   const [active, setActive] = useState(true)
   const [sendEmail, setSendEmail] = useState(false)
 
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [newId, setNewId] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [flash, setFlash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -121,67 +146,180 @@ export function AnnouncementsSection() {
     setOrgIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]))
   }
 
-  async function publish() {
+  function flashFor(message: string) {
+    setFlash(message)
+    setTimeout(() => setFlash(null), 3600)
+  }
+
+  function beginEdit(a: AnnouncementRow) {
+    setEditingId(a.id)
+    setTitle(a.title)
+    setBody(a.body)
+    setEmoji(a.emoji || EMOJI[0])
+    setTone(a.type === 'warning' ? 'maintenance' : a.type)
+    setCta(a.ctaLabel ?? '')
+    setCtaUrl(a.ctaUrl ?? '')
+    setExpires(isoToLocalInput(a.expiresAt))
+    setTargetType(a.targetType)
+    if (a.targetType === 'plan_type') setPlan(a.targetValue ?? PLAN_OPTS[0])
+    if (a.targetType === 'org') {
+      try {
+        const parsed: unknown = a.targetIds ? JSON.parse(a.targetIds) : []
+        setOrgIds(
+          Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [],
+        )
+      } catch {
+        setOrgIds([])
+      }
+    }
+    setActive(!!a.publishedAt)
+    setSendEmail(false)
+    setError(null)
+    setFlash(null)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setError(null)
+  }
+
+  function validate(): boolean {
     if (!title.trim()) {
       setError('Add a title before publishing.')
-      return
+      return false
     }
     if (!body.trim()) {
       setError('Add a message before publishing.')
-      return
+      return false
+    }
+    if (cta.trim() && !/^https?:\/\//.test(ctaUrl.trim())) {
+      setError('Add a button link (https://...) so the button works, or clear the label.')
+      return false
+    }
+    if (targetType === 'org' && orgIds.length === 0) {
+      setError('Pick at least one client to show this banner to.')
+      return false
     }
     setError(null)
+    return true
+  }
+
+  async function publish() {
+    if (!validate()) return
     setSaving(true)
     try {
-      const payload: {
-        title: string
-        content: string
-        type: string
-        targetType: string
-        targetValue?: string
-        targetIds?: string[]
-        publish: boolean
-        sendEmail?: boolean
-      } = {
+      const ctaLabel = cta.trim() || null
+      const link = ctaUrl.trim() || null
+      const base = {
         title: title.trim(),
         content: body.trim(),
         type: tone,
         targetType,
+        targetValue: targetType === 'plan_type' ? plan : null,
+        targetIds: targetType === 'org' ? orgIds : null,
+        emoji: emoji.trim() || null,
+        ctaLabel,
+        ctaUrl: link,
+        expiresAt: localInputToIso(expires),
         publish: active,
       }
-      if (targetType === 'plan_type') payload.targetValue = plan
-      if (targetType === 'org') payload.targetIds = orgIds
-      // Email only fans out for a published announcement; a draft stays silent.
-      if (sendEmail && active) payload.sendEmail = true
 
-      const res = await fetch(apiPath('/api/admin/announcements'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) {
-        const j = (await res.json().catch(() => null)) as { error?: string } | null
-        throw new Error(j?.error ?? 'Failed to publish')
-      }
-      const result = (await res.json().catch(() => null)) as { emailed?: number } | null
-      const emailed = result?.emailed ?? 0
-      if (!active) {
-        setFlash('Saved as a draft.')
-      } else if (sendEmail) {
-        setFlash(
-          emailed > 0
-            ? `Published to the workspace and emailed ${emailed} ${emailed === 1 ? 'client' : 'clients'}.`
-            : 'Published to the workspace. No clients were emailed.',
-        )
+      if (editingId) {
+        const res = await fetch(apiPath(`/api/admin/announcements/${editingId}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(base),
+        })
+        if (!res.ok) {
+          const j = (await res.json().catch(() => null)) as { error?: string } | null
+          throw new Error(j?.error ?? 'Failed to save changes')
+        }
+        setEditingId(null)
+        flashFor(active ? 'Announcement updated.' : 'Draft updated.')
       } else {
-        setFlash('Published to the workspace.')
+        // Email only fans out for a published announcement; a draft stays silent.
+        const payload = { ...base, sendEmail: sendEmail && active ? true : undefined }
+        const res = await fetch(apiPath('/api/admin/announcements'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) {
+          const j = (await res.json().catch(() => null)) as { error?: string } | null
+          throw new Error(j?.error ?? 'Failed to publish')
+        }
+        const result = (await res.json().catch(() => null)) as
+          | { id?: string; emailed?: number }
+          | null
+        setNewId(result?.id ?? null)
+        const emailed = result?.emailed ?? 0
+        if (!active) {
+          flashFor('Saved as a draft.')
+        } else if (sendEmail) {
+          flashFor(
+            emailed > 0
+              ? `Published to the workspace and emailed ${emailed} ${emailed === 1 ? 'client' : 'clients'}.`
+              : 'Published to the workspace. No clients were emailed.',
+          )
+        } else {
+          flashFor('Published to the workspace.')
+        }
       }
-      setTimeout(() => setFlash(null), 3600)
       await mutate()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function unpublishRow(a: AnnouncementRow) {
+    setBusyId(a.id)
+    try {
+      const res = await fetch(apiPath(`/api/admin/announcements/${a.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ publish: false }),
+      })
+      if (!res.ok) throw new Error('Failed to unpublish')
+      await mutate()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to unpublish.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function publishRow(a: AnnouncementRow) {
+    setBusyId(a.id)
+    try {
+      // The send route publishes and, when the draft was created with email
+      // delivery on, fans the email out once (guarded against double-sends).
+      const res = await fetch(apiPath(`/api/admin/announcements/${a.id}/send`), {
+        method: 'POST',
+      })
+      if (!res.ok) throw new Error('Failed to publish')
+      await mutate()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to publish.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function deleteRow(a: AnnouncementRow) {
+    setBusyId(a.id)
+    try {
+      const res = await fetch(apiPath(`/api/admin/announcements/${a.id}`), {
+        method: 'DELETE',
+      })
+      if (!res.ok) throw new Error('Failed to delete')
+      if (editingId === a.id) setEditingId(null)
+      await mutate()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete.')
+    } finally {
+      setBusyId(null)
     }
   }
 
@@ -305,6 +443,32 @@ export function AnnouncementsSection() {
           </div>
         </div>
 
+        <div
+          className="set-grid2"
+          style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 16 }}
+        >
+          <div className="set-field">
+            <label>Button link</label>
+            <input
+              className="set-input"
+              value={ctaUrl}
+              onChange={(e) => setCtaUrl(e.target.value)}
+              placeholder="https://"
+              inputMode="url"
+            />
+          </div>
+          <div className="set-field">
+            <label>Expires (optional)</label>
+            <input
+              className="set-input"
+              type="datetime-local"
+              value={expires}
+              onChange={(e) => setExpires(e.target.value)}
+              aria-label="Expiry date and time"
+            />
+          </div>
+        </div>
+
         {targetType === 'plan_type' && (
           <div
             className="set-row"
@@ -399,17 +563,19 @@ export function AnnouncementsSection() {
           <Toggle on={active} onClick={() => setActive((a) => !a)} ariaLabel="Active" />
         </div>
 
-        <div className="set-row" style={{ borderTop: '1px solid var(--border-subtle)' }}>
-          <div className="sr-t">
-            <b>Also send email</b>
-            <small>Email the announcement to the audience as well when you publish.</small>
+        {!editingId && (
+          <div className="set-row" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+            <div className="sr-t">
+              <b>Also send email</b>
+              <small>Email the announcement to the audience as well when you publish.</small>
+            </div>
+            <Toggle
+              on={sendEmail}
+              onClick={() => setSendEmail((s) => !s)}
+              ariaLabel="Also send email"
+            />
           </div>
-          <Toggle
-            on={sendEmail}
-            onClick={() => setSendEmail((s) => !s)}
-            ariaLabel="Also send email"
-          />
-        </div>
+        )}
       </div>
 
       <div className="set-sub-label">Live preview</div>
@@ -440,23 +606,64 @@ export function AnnouncementsSection() {
             {flash}
           </span>
         )}
+        {editingId && (
+          <button type="button" className="btn-ghost" onClick={cancelEdit}>
+            Cancel edit
+          </button>
+        )}
         <button className="btn1" onClick={publish} disabled={saving}>
           <Check size={15} />
-          {saving ? 'Publishing...' : active ? 'Publish announcement' : 'Save draft'}
+          {saving
+            ? 'Saving...'
+            : editingId
+              ? 'Save changes'
+              : active
+                ? 'Publish announcement'
+                : 'Save draft'}
         </button>
       </div>
 
       <div className="set-sub-label">Past announcements</div>
       <div className="set-card lrow-wrap">
         {isLoading ? (
-          <EmptyRow text="Loading announcements..." />
+          [0, 1].map((i) => (
+            <div
+              key={i}
+              className="lrow"
+              style={i ? { borderTop: '1px solid var(--border-subtle)' } : undefined}
+            >
+              <div className="lrow-t">
+                <span
+                  className="animate-pulse"
+                  style={{
+                    display: 'block',
+                    width: '38%',
+                    height: 13,
+                    borderRadius: 6,
+                    background: 'var(--bg-tertiary)',
+                  }}
+                />
+                <span
+                  className="animate-pulse"
+                  style={{
+                    display: 'block',
+                    width: '22%',
+                    height: 10,
+                    borderRadius: 6,
+                    background: 'var(--bg-tertiary)',
+                    marginTop: 7,
+                  }}
+                />
+              </div>
+            </div>
+          ))
         ) : !announcements.length ? (
           <EmptyRow text="No announcements yet. Compose one above to get started." />
         ) : (
           announcements.map((a, i) => (
             <div
               key={a.id}
-              className="lrow"
+              className={'lrow' + (a.id === newId ? ' lrow-enter' : '')}
               style={i ? { borderTop: '1px solid var(--border-subtle)' } : undefined}
             >
               <div className="lrow-t">
@@ -470,6 +677,26 @@ export function AnnouncementsSection() {
                 <Chip tone={a.publishedAt ? 'brand' : 'neutral'}>
                   {a.publishedAt ? 'Published' : 'Draft'}
                 </Chip>
+                {a.publishedAt ? (
+                  <button
+                    type="button"
+                    className="btn2 sm"
+                    onClick={() => void unpublishRow(a)}
+                    disabled={busyId === a.id}
+                  >
+                    Unpublish
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn2 sm"
+                    onClick={() => void publishRow(a)}
+                    disabled={busyId === a.id}
+                  >
+                    Publish
+                  </button>
+                )}
+                <RowActions onEdit={() => beginEdit(a)} onDelete={() => void deleteRow(a)} />
               </div>
             </div>
           ))

@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { stripeSecretKey } from '@/lib/stripe-key'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -18,7 +19,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     stripe: {
-      configured: !!process.env.STRIPE_SECRET_KEY,
+      configured: !!stripeSecretKey(),
       webhookConfigured: !!process.env.STRIPE_WEBHOOK_SECRET,
     },
     resend: {

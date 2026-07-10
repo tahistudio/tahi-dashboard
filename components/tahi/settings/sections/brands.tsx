@@ -1,17 +1,17 @@
 'use client'
 
 /*
- * BrandsSection - Client portal > Brand
+ * BrandsSection - Client portal > Brand.
  *
- * Each row is one real brand record from the `brands` table for the signed-in
- * client's org (name, primary colour, website, notes, single logo URL). Add /
- * edit / delete persist through /api/portal/brands, scoped to the caller's own
- * org. Workspace admins (contacts.portalRole === 'admin') can manage; members
- * get a read-only view.
+ * The design's brand-asset list: each row is a titled asset link (name +
+ * format line + Linked chip) backed by a real row in the `brands` table for
+ * the signed-in client's org (name -> asset name, notes -> format / detail,
+ * website -> the link, primaryColour kept as an optional extra). Add / edit /
+ * delete persist through /api/portal/brands, scoped to the caller's own org.
+ * Workspace admins (contacts.portalRole === 'admin') manage; members read.
  *
- * Not yet stored: multiple logos, full colour palettes, uploaded typefaces and
- * guideline PDFs - those need R2 storage + a brand_assets table (called out in
- * the note below).
+ * Add asset follows the design flow: the row is created immediately (with the
+ * lrow-enter animation) and the editor opens on it.
  */
 
 import { useState } from 'react'
@@ -23,9 +23,12 @@ import {
   EditDialog,
   RowActions,
   EmptyRow,
+  Chip,
+  Toasts,
+  useToasts,
 } from '@/components/tahi/settings/primitives'
 
-const TITLE = 'Brand'
+const TITLE = 'Brands'
 const LEDE =
   'Your logos, colours, fonts and guidelines - so the studio always uses the right assets.'
 
@@ -46,29 +49,39 @@ function LoadingShell() {
   return (
     <SectionShell title={TITLE} lede={LEDE}>
       <div className="set-card lrow-wrap">
-        <div className="lrow" style={{ color: 'var(--text-faint)', font: '500 13px Manrope' }}>
-          Loading brand assets...
-        </div>
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="lrow animate-pulse"
+            style={i ? { borderTop: '1px solid var(--border-subtle)' } : undefined}
+            aria-hidden="true"
+          >
+            <span className="lrow-ic" />
+            <div className="lrow-t">
+              <span
+                style={{ display: 'block', width: 120, height: 13, background: 'var(--bg-secondary)', borderRadius: 6 }}
+              />
+              <span
+                style={{ display: 'block', width: 90, height: 11, marginTop: 5, background: 'var(--bg-secondary)', borderRadius: 6 }}
+              />
+            </div>
+          </div>
+        ))}
       </div>
     </SectionShell>
   )
 }
 
-interface EditState {
-  id: string | null // null = creating a new brand
-  name: string
-  primaryColour: string
-  website: string
-  notes: string
-}
-
 export function BrandsSection({ isClientAdmin }: { isAdmin?: boolean; isClientAdmin?: boolean } = {}) {
   const { data, error, isLoading, mutate } = useResource<BrandsResponse>('/api/portal/brands')
-  const [ed, setEd] = useState<EditState | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState('')
+  const [newId, setNewId] = useState<string | null>(null)
+  const { toasts, toast } = useToasts()
 
   const canManage = !!isClientAdmin
+  const brands = data?.items ?? []
+  const editing = editingId ? brands.find((b) => b.id === editingId) : null
 
   if (isLoading && !data) return <LoadingShell />
 
@@ -82,58 +95,67 @@ export function BrandsSection({ isClientAdmin }: { isAdmin?: boolean; isClientAd
     )
   }
 
-  const brands = data?.items ?? []
-
-  function flash(msg: string) {
-    setNote(msg)
-    window.setTimeout(() => setNote(''), 4600)
-  }
-
-  function startAdd() {
-    setEd({ id: null, name: '', primaryColour: '#5A824E', website: '', notes: '' })
-  }
-
-  function startEdit(b: PortalBrand) {
-    setEd({
-      id: b.id,
-      name: b.name,
-      primaryColour: b.primaryColour ?? '#5A824E',
-      website: b.website ?? '',
-      notes: b.notes ?? '',
-    })
+  // Design flow: Add asset inserts the row first (lrow-enter), then opens the
+  // editor on it.
+  async function addAsset() {
+    setBusy(true)
+    try {
+      const res = await fetch(apiPath('/api/portal/brands'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'New asset', notes: 'Link' }),
+      })
+      if (res.ok) {
+        const created = (await res.json().catch(() => null)) as { id?: string } | null
+        await mutate()
+        if (created?.id) {
+          setNewId(created.id)
+          window.setTimeout(() => setNewId(null), 1400)
+          setEditingId(created.id)
+        }
+      } else if (res.status === 403) {
+        toast('Only workspace admins can manage brand assets.', 'err')
+      } else {
+        toast('Could not add the asset. Please try again shortly.', 'err')
+      }
+    } catch {
+      toast('Could not add the asset. Please try again shortly.', 'err')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function saveEdit(values: Record<string, string>) {
-    if (!ed) return
+    if (!editing) return
     const name = (values.name ?? '').trim()
     if (!name) {
-      flash('Brand name is required.')
+      toast('Asset name is required.', 'err')
       return
     }
     setBusy(true)
     try {
-      const isNew = ed.id === null
       const res = await fetch(apiPath('/api/portal/brands'), {
-        method: isNew ? 'POST' : 'PATCH',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...(isNew ? {} : { id: ed.id }),
+          id: editing.id,
           name,
+          notes: values.format ?? '',
+          website: values.url ?? '',
           primaryColour: values.primaryColour ?? '',
-          website: values.website ?? '',
-          notes: values.notes ?? '',
         }),
       })
       if (res.ok) {
-        setEd(null)
+        setEditingId(null)
         await mutate()
+        toast('Asset saved.')
       } else if (res.status === 403) {
-        flash('Only workspace admins can manage brands.')
+        toast('Only workspace admins can manage brand assets.', 'err')
       } else {
-        flash('Could not save this brand. Please try again shortly.')
+        toast('Could not save this asset. Please try again shortly.', 'err')
       }
     } catch {
-      flash('Could not save this brand. Please try again shortly.')
+      toast('Could not save this asset. Please try again shortly.', 'err')
     } finally {
       setBusy(false)
     }
@@ -147,13 +169,14 @@ export function BrandsSection({ isClientAdmin }: { isAdmin?: boolean; isClientAd
       })
       if (res.ok) {
         await mutate()
+        toast('Asset removed.')
       } else if (res.status === 403) {
-        flash('Only workspace admins can manage brands.')
+        toast('Only workspace admins can manage brand assets.', 'err')
       } else {
-        flash('Could not remove this brand. Please try again shortly.')
+        toast('Could not remove this asset. Please try again shortly.', 'err')
       }
     } catch {
-      flash('Could not remove this brand. Please try again shortly.')
+      toast('Could not remove this asset. Please try again shortly.', 'err')
     } finally {
       setBusy(false)
     }
@@ -165,9 +188,9 @@ export function BrandsSection({ isClientAdmin }: { isAdmin?: boolean; isClientAd
       lede={LEDE}
       action={
         canManage ? (
-          <button type="button" className="btn1" onClick={startAdd} disabled={busy}>
+          <button type="button" className="btn1" onClick={addAsset} disabled={busy}>
             <Plus size={15} />
-            Add brand
+            Add asset
           </button>
         ) : undefined
       }
@@ -176,63 +199,69 @@ export function BrandsSection({ isClientAdmin }: { isAdmin?: boolean; isClientAd
         {brands.map((b, i) => (
           <div
             key={b.id}
-            className="lrow"
+            className={'lrow' + (b.id === newId ? ' lrow-enter' : '')}
             style={i ? { borderTop: '1px solid var(--border-subtle)' } : undefined}
           >
-            {b.primaryColour ? (
-              <span
-                className="lrow-ic"
-                aria-hidden="true"
-                style={{ background: b.primaryColour, boxShadow: 'inset 0 0 0 1px rgba(0,0,0,.12)' }}
-              />
-            ) : (
-              <span className="lrow-ic leaf">
-                <Palette size={16} />
-              </span>
-            )}
+            <span className="lrow-ic leaf">
+              <Palette size={16} />
+            </span>
             <div className="lrow-t">
               <b>{b.name}</b>
-              <small style={b.website ? { fontFamily: 'ui-monospace, monospace', fontSize: 12 } : undefined}>
-                {b.website || (b.primaryColour ? b.primaryColour.toUpperCase() : 'No colour set')}
+              <small>
+                {b.notes || (b.primaryColour ? b.primaryColour.toUpperCase() : 'Link')}
               </small>
             </div>
-            {canManage && (
-              <div className="lrow-r">
-                <RowActions onEdit={() => startEdit(b)} onDelete={() => remove(b.id)} />
-              </div>
-            )}
+            <div className="lrow-r">
+              {b.website ? (
+                <a
+                  className="chip neutral"
+                  href={b.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={'Open ' + b.name}
+                >
+                  Linked
+                </a>
+              ) : (
+                <Chip tone="outline">No link</Chip>
+              )}
+              {canManage && (
+                <RowActions onEdit={() => setEditingId(b.id)} onDelete={() => remove(b.id)} />
+              )}
+            </div>
           </div>
         ))}
-        {!brands.length && <EmptyRow text="No brands yet." />}
+        {!brands.length && <EmptyRow text="No brand assets yet." />}
       </div>
 
-      <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>
-        {canManage
-          ? 'Uploaded typefaces, full colour palettes and guideline files are coming soon - they need file storage.'
-          : 'Only workspace admins can add or edit brands. Ask your Tahi contact if something needs changing.'}
-      </p>
+      {!canManage && (
+        <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>
+          Only workspace admins can add or edit brand assets. Ask your Tahi contact if something
+          needs changing.
+        </p>
+      )}
 
-      {note && <div className="plan-note">{note}</div>}
-
-      {ed && (
+      {editing && (
         <EditDialog
-          heading={ed.id === null ? 'Add brand' : 'Edit brand'}
+          heading="Edit brand asset"
           row={{
-            name: ed.name,
-            primaryColour: ed.primaryColour,
-            website: ed.website,
-            notes: ed.notes,
+            name: editing.name,
+            format: editing.notes ?? '',
+            url: editing.website ?? '',
+            primaryColour: editing.primaryColour ?? '',
           }}
           fields={[
-            { key: 'name', label: 'Brand name' },
+            { key: 'name', label: 'Asset name' },
+            { key: 'format', label: 'Format / detail', ph: 'e.g. SVG + PNG' },
+            { key: 'url', label: 'Link (Figma / Drive / Notion)', ph: 'https://' },
             { key: 'primaryColour', label: 'Primary colour', type: 'color' },
-            { key: 'website', label: 'Website', ph: 'https://' },
-            { key: 'notes', label: 'Notes', type: 'textarea' },
           ]}
           onSave={saveEdit}
-          onClose={() => (busy ? undefined : setEd(null))}
+          onClose={() => (busy ? undefined : setEditingId(null))}
         />
       )}
+
+      <Toasts toasts={toasts} />
     </SectionShell>
   )
 }

@@ -7,8 +7,8 @@ import { useResource } from '@/lib/use-resource'
 import {
   User, SunMoon, Bell, CalendarClock, Paintbrush, LayoutGrid, Megaphone,
   Building2, FileText, Columns3, ClipboardList, Target, GitBranch, Sparkles,
-  Plug, Webhook, Workflow, Clock, Bot, Users, CreditCard, PiggyBank,
-  ScrollText, AlertTriangle, Palette, ChevronDown, Wallet,
+  Plug, Webhook, Workflow, Clock, Bot, Users, CreditCard, Coins, PiggyBank,
+  ScrollText, AlertTriangle, Palette, ChevronDown, Wallet, Shield,
 } from 'lucide-react'
 import '@/app/(dashboard)/settings/settings.css'
 
@@ -40,6 +40,7 @@ import { BrandsSection } from '@/components/tahi/settings/sections/brands'
 import { OrgSettingsSection } from '@/components/tahi/settings/sections/org'
 import { PeopleSection } from '@/components/tahi/settings/sections/people'
 import { PlanBillingSection } from '@/components/tahi/settings/sections/plan'
+import { SubscriptionSection } from '@/components/tahi/settings/sections/subscription'
 
 type Audience = 'both' | 'admin' | 'client'
 
@@ -67,7 +68,7 @@ const SECTIONS: SectionDef[] = [
   { id: 'profile', label: 'Profile', icon: User, group: 'Account', audience: 'both', Component: ProfileSection },
   { id: 'appearance', label: 'Appearance', icon: SunMoon, group: 'Account', audience: 'both', Component: AppearanceSection },
   { id: 'notifications', label: 'Notifications', icon: Bell, group: 'Account', audience: 'both', Component: NotificationsSection },
-  { id: 'booking', label: 'Booking', icon: CalendarClock, group: 'Account', audience: 'admin', Component: BookingSection },
+  { id: 'booking', label: 'Booking link', icon: CalendarClock, group: 'Account', audience: 'admin', Component: BookingSection },
 
   { id: 'branding', label: 'Branding', icon: Paintbrush, group: 'Workspace', audience: 'admin', Component: BrandingSection },
   { id: 'modules', label: 'Modules', icon: LayoutGrid, group: 'Workspace', audience: 'admin', superAdminOnly: true, Component: ModulesSection },
@@ -88,9 +89,10 @@ const SECTIONS: SectionDef[] = [
   { id: 'crons', label: 'Scheduled jobs', icon: Clock, group: 'Automations & integrations', audience: 'admin', superAdminOnly: true, Component: ScheduledJobsSection },
   { id: 'aicontext', label: 'AI context', icon: Bot, group: 'Automations & integrations', audience: 'admin', Component: AiContextSection },
 
-  { id: 'teamaccess', label: 'Team & access', icon: Users, group: 'Team & access', audience: 'admin', superAdminOnly: true, Component: TeamAccessSection },
+  { id: 'teamaccess', label: 'Team & access', icon: Shield, group: 'Team & access', audience: 'admin', superAdminOnly: true, Component: TeamAccessSection },
 
-  { id: 'plans', label: 'Client plans', icon: CreditCard, group: 'Billing', audience: 'admin', superAdminOnly: true, Component: PlansRetainersSection },
+  { id: 'subscription', label: 'Subscription', icon: CreditCard, group: 'Billing', audience: 'admin', superAdminOnly: true, Component: SubscriptionSection },
+  { id: 'plans', label: 'Client plans', icon: Coins, group: 'Billing', audience: 'admin', superAdminOnly: true, Component: PlansRetainersSection },
   { id: 'reserves', label: 'Reserves', icon: PiggyBank, group: 'Billing', audience: 'admin', superAdminOnly: true, Component: ReservesSection },
 
   { id: 'audit', label: 'Audit log', icon: ScrollText, group: 'Advanced', audience: 'admin', Component: AuditLogSection },
@@ -114,6 +116,17 @@ interface Visibility {
   isAdmin: boolean
   isSuperAdmin: boolean
   isClientAdmin: boolean
+  /** Resolved FEATURE_TREE map from PermissionsProvider (server-computed). */
+  features: Record<string, boolean>
+}
+
+// Sections gated by a granular feature key on top of the audience rules, so a
+// scoped teammate type (project manager, task handler, viewer) only sees the
+// settings surfaces their role or overrides grant. Cosmetic layer - the API
+// routes behind each section enforce the same keys server-side.
+const SECTION_FEATURE_KEYS: Readonly<Record<string, string>> = {
+  integrations: 'settings.integrations',
+  teamaccess: 'settings.permissions',
 }
 
 function isVisible(section: SectionDef, v: Visibility): boolean {
@@ -122,6 +135,9 @@ function isVisible(section: SectionDef, v: Visibility): boolean {
     if (section.audience !== 'admin') return false
     // Sensitive admin surfaces are super-admin only in the sub-nav.
     if (section.superAdminOnly && !v.isSuperAdmin) return false
+    // Granular feature gate (fail-open when the map has no entry).
+    const featureKey = SECTION_FEATURE_KEYS[section.id]
+    if (featureKey && v.features[featureKey] === false) return false
     return true
   }
   // Client portal.
@@ -141,9 +157,10 @@ interface PortalProfileResponse {
 export function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
   const groupOrder = isAdmin ? ADMIN_GROUPS : CLIENT_GROUPS
 
-  // Super-admin flag drives the admin sub-nav gate (#7). Resolved server-side in
-  // the dashboard layout and surfaced through PermissionsProvider (no flash).
-  const { isSuperAdmin } = usePermissions()
+  // Super-admin flag + resolved feature map drive the admin sub-nav gates.
+  // Resolved server-side in the dashboard layout and surfaced through
+  // PermissionsProvider (no flash).
+  const { isSuperAdmin, features } = usePermissions()
 
   // Client-admin flag drives the client sub-nav gate (#6). The signal is
   // contacts.portalRole === 'admin'; until the portal profile endpoint exposes
@@ -163,8 +180,8 @@ export function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
   }, [isAdmin, profile])
 
   const visibility = useMemo<Visibility>(
-    () => ({ isAdmin, isSuperAdmin, isClientAdmin }),
-    [isAdmin, isSuperAdmin, isClientAdmin],
+    () => ({ isAdmin, isSuperAdmin, isClientAdmin, features: features ?? {} }),
+    [isAdmin, isSuperAdmin, isClientAdmin, features],
   )
 
   // Sections this audience may see, kept in registry order.
@@ -190,6 +207,27 @@ export function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
     () => visibleSections[0]?.id ?? 'profile',
   )
 
+  // Deep-linking: /settings?section=<id> selects that section on load (only if
+  // the caller may see it), and switching sections keeps the URL in sync via
+  // replaceState so links, refreshes, and integration callbacks land on the
+  // right pane. Applied post-mount to avoid a server/client hydration mismatch.
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get('section')
+    if (wanted && visibleSections.some((s) => s.id === wanted)) {
+      setActiveId(wanted)
+    }
+    // Run once on mount; visibility changes after load should not yank the
+    // user away from the section they are on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const selectSection = (id: string) => {
+    setActiveId(id)
+    const url = new URL(window.location.href)
+    url.searchParams.set('section', id)
+    window.history.replaceState(null, '', url.toString())
+  }
+
   // Scroll the content region back to the top on every section switch, so you
   // never land mid-scroll on the previous panel. #main-content is the scroll
   // container (the dashboard layout's <main overflow-y-auto>).
@@ -205,7 +243,7 @@ export function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
   return (
     <div className="set-frame">
       {/* Desktop sub-nav */}
-      <aside className="set-nav hidden md:flex" aria-label="Settings sections">
+      <nav className="set-nav hidden md:flex" aria-label="Settings sections">
         {groups.map((group) => (
           <div key={group.label} className="set-navgroup">
             <div className="set-navlabel">{group.label}</div>
@@ -218,7 +256,7 @@ export function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
                   type="button"
                   className={on ? 'set-navitem on' : 'set-navitem'}
                   aria-current={on ? 'page' : undefined}
-                  onClick={() => setActiveId(section.id)}
+                  onClick={() => selectSection(section.id)}
                 >
                   <span className="sn-ic">
                     <Icon size={16} strokeWidth={1.9} aria-hidden="true" />
@@ -229,11 +267,14 @@ export function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
             })}
           </div>
         ))}
-      </aside>
+      </nav>
 
       <div className="set-content">
         {/* Mobile section picker */}
         <div className="set-mobilepick md:hidden">
+          <label className="led" htmlFor="secpick">
+            Settings section
+          </label>
           <div className="set-mselect">
             <span className="sn-ic">
               {ActiveIcon ? (
@@ -245,8 +286,9 @@ export function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
               <ChevronDown size={16} aria-hidden="true" />
             </span>
             <select
+              id="secpick"
               value={active?.id ?? ''}
-              onChange={(e) => setActiveId(e.target.value)}
+              onChange={(e) => selectSection(e.target.value)}
               aria-label="Select settings section"
             >
               {groups.map((group) => (

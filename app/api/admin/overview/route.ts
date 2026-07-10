@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, ne, count, and, inArray, gte, sql, desc } from 'drizzle-orm'
+import { eq, ne, count, and, inArray, gte, lt, isNotNull, sql, desc } from 'drizzle-orm'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
 import { resolvePermissions, can } from '@/lib/permissions'
 import {
@@ -10,6 +10,7 @@ import {
   daysPastDue,
   bucketArAging,
   computeRunwayMonths,
+  aggregateCashNzd,
   trailingThreeMonthKey,
   activeTimerLabel,
   type ArAging,
@@ -121,16 +122,24 @@ export async function GET(req: NextRequest) {
       .select({
         totalUsd: schema.invoices.totalUsd,
         currency: schema.invoices.currency,
+        status: schema.invoices.status,
+        dueDate: schema.invoices.dueDate,
       })
       .from(schema.invoices)
       .where(inArray(schema.invoices.status, ['sent', 'overdue'])),
   ])
 
-  // Outstanding invoices total in NZD
+  // Outstanding invoices total in NZD, plus counts for the Owed vital sub
+  // ("N invoices · M overdue"). Overdue = explicit status OR past its due date.
   let outstandingNzd = 0
+  let overdueInvoicesCount = 0
   for (const inv of outstandingInvoiceRows) {
     outstandingNzd += toNzd(inv.totalUsd, inv.currency ?? 'USD', rateMap)
+    if (inv.status === 'overdue' || daysPastDue(inv.dueDate ?? null, now) > 0) {
+      overdueInvoicesCount++
+    }
   }
+  const outstandingInvoicesCount = outstandingInvoiceRows.length
 
   // Aggregate paid invoices into monthly buckets (converted to NZD)
   const monthlyMap = new Map<string, number>()
@@ -174,6 +183,32 @@ export async function GET(req: NextRequest) {
     // Column doesn't exist yet
   }
 
+  // Month-over-month delta for the Hero's "vs last month" chip. Compares the
+  // live MRR against the previous month's STORED MRR from financial_snapshots
+  // (written daily by the snapshot-metrics cron), so it is a like-for-like
+  // recurring-revenue comparison rather than the old proxy that divided this
+  // month's paid invoices by last month's. Null until a prior month's snapshot
+  // exists (honest: no fabricated trend).
+  let mrrDeltaPct: number | null = null
+  try {
+    const currentMonthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+    const priorRows = await drizzle
+      .select({ mrrNzd: schema.financialSnapshots.mrrNzd })
+      .from(schema.financialSnapshots)
+      .where(and(
+        lt(schema.financialSnapshots.monthKey, currentMonthKey),
+        isNotNull(schema.financialSnapshots.mrrNzd),
+      ))
+      .orderBy(desc(schema.financialSnapshots.monthKey))
+      .limit(1)
+    const priorMrr = priorRows[0]?.mrrNzd ?? null
+    if (priorMrr != null && priorMrr > 0) {
+      mrrDeltaPct = Math.round(((mrr - priorMrr) / priorMrr) * 1000) / 10
+    }
+  } catch {
+    // financial_snapshots not migrated yet; leave delta null.
+  }
+
   // ── Studio Ledger additions (Slice 0) ───────────────────────────────────
   // Every aggregate below is wrapped in its own try/catch so a missing Xero
   // table, a column that hasn't been migrated yet, or empty data can never
@@ -181,14 +216,24 @@ export async function GET(req: NextRequest) {
 
   const since = overnightCutoff(now)
 
-  // Cash + runway (gated on financial_reports). Mirrors reports/bank-balances.
+  // Cash + runway (gated on financial_reports). Uses the same Airwallex-first
+  // aggregation as /financial-reports so the Cash card shows real bank cash,
+  // not Xero's BankSummary (which overstates foreign accounts by counting
+  // invoiced-but-unsettled amounts as cash).
   let cash: { totalNzd: number; runwayMonths: number | null; burnNzd: number } | null = null
   if (canSeeMrr) {
     try {
-      const balances = await drizzle.select().from(schema.xeroBankBalances)
-      const totalNzd = balances.reduce(
-        (sum, b) => sum + toNzd(b.balance, b.currency ?? 'NZD', rateMap),
-        0,
+      let airwallexBalances: Array<{ currency: string | null; availableBalance: number }> = []
+      try {
+        airwallexBalances = await drizzle.select().from(schema.airwallexBalances)
+      } catch {
+        // Airwallex table missing — fall back to Xero-only via empty array.
+      }
+      const xeroBalances = await drizzle.select().from(schema.xeroBankBalances)
+      const totalNzd = aggregateCashNzd(
+        airwallexBalances,
+        xeroBalances,
+        (amount, currency) => toNzd(amount, currency, rateMap),
       )
 
       let burnNzd = 0
@@ -369,14 +414,37 @@ export async function GET(req: NextRequest) {
     // Leave openByStatus empty on any error.
   }
 
+  // Active subscriptions grouped by plan type for the Clients vital sub
+  // ("5 Scale · 4 Maintain"). e.g. { scale: 5, maintain: 4 }.
+  const clientsByPlan: Record<string, number> = {}
+  try {
+    const planned = await drizzle
+      .select({ planType: schema.subscriptions.planType, count: count() })
+      .from(schema.subscriptions)
+      .where(eq(schema.subscriptions.status, 'active'))
+      .groupBy(schema.subscriptions.planType)
+    for (const row of planned) {
+      if (row.planType) clientsByPlan[row.planType] = row.count
+    }
+  } catch {
+    // Leave clientsByPlan empty on any error (table/column missing).
+  }
+
   return NextResponse.json({
     kpis: {
       activeClients: activeClientsResult[0]?.count ?? 0,
       openRequests: openRequestsResult[0]?.count ?? 0,
       inProgress: inProgressResult[0]?.count ?? 0,
-      ...(canSeeInvoices ? { outstandingInvoicesNzd: Math.round(outstandingNzd) } : {}),
+      ...(canSeeInvoices
+        ? {
+            outstandingInvoicesNzd: Math.round(outstandingNzd),
+            outstandingInvoicesCount,
+            overdueInvoicesCount,
+          }
+        : {}),
       ...(canSeeMrr ? { mrr: Math.round(mrr) } : {}),
     },
+    ...(canSeeMrr ? { mrrDeltaPct } : {}),
     recentRequests,
     monthlyRevenue,
     cash,
@@ -384,5 +452,6 @@ export async function GET(req: NextRequest) {
     overnight,
     activeTimer,
     openByStatus,
+    clientsByPlan,
   })
 }

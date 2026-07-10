@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, gte, isNotNull, desc } from 'drizzle-orm'
+import { eq, and, gte, isNotNull, isNull, inArray, ne, desc } from 'drizzle-orm'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
 import { resolvePermissions, can } from '@/lib/permissions'
 import {
@@ -36,6 +36,15 @@ export async function GET(req: NextRequest) {
 
   const database = await db()
   const drizzle = database as D1
+
+  // ── scope=me ──────────────────────────────────────────────────────────────
+  // Teammate home wants a member-scoped pulse (assignments to me, comments on
+  // my requests, my tasks moved) rather than the studio-wide feed. Resolved via
+  // teamMembers.clerkUserId; honest empty when the caller has no member row.
+  if (new URL(req.url).searchParams.get('scope') === 'me') {
+    const events = await memberWire(drizzle, auth.userId)
+    return NextResponse.json({ events })
+  }
 
   // Feature-level access: omit money events without financial_reports and
   // client events without clients (mirrors the overview endpoint's gating).
@@ -83,7 +92,7 @@ export async function GET(req: NextRequest) {
       })
     }
   } catch {
-    // publish_history table missing — skip content events.
+    // publish_history table missing - skip content events.
   }
 
   // ── Social posts sent (no Buffer/social posts table in schema) ─────────────
@@ -114,7 +123,7 @@ export async function GET(req: NextRequest) {
       })
     }
   } catch {
-    // automation_log table missing — skip ops events.
+    // automation_log table missing - skip ops events.
   }
 
   // ── Leads scored (leads with aiScore, recently run) ───────────────────────
@@ -142,10 +151,10 @@ export async function GET(req: NextRequest) {
       })
     }
   } catch {
-    // leads table / AI columns missing — skip sales events.
+    // leads table / AI columns missing - skip sales events.
   }
 
-  // ── Payments cleared (invoices paidAt recent) — money, gated ──────────────
+  // ── Payments cleared (invoices paidAt recent) - money, gated ──────────────
   if (canSeeMoney) {
     try {
       const rows = await drizzle
@@ -173,11 +182,11 @@ export async function GET(req: NextRequest) {
         })
       }
     } catch {
-      // invoices table missing — skip money events.
+      // invoices table missing - skip money events.
     }
   }
 
-  // ── Reviews / testimonials landed (case_study_submissions) — client, gated ─
+  // ── Reviews / testimonials landed (case_study_submissions) - client, gated ─
   if (canSeeClients) {
     try {
       const rows = await drizzle
@@ -207,11 +216,163 @@ export async function GET(req: NextRequest) {
         })
       }
     } catch {
-      // case_study_submissions table missing — skip client events.
+      // case_study_submissions table missing - skip client events.
     }
   }
 
   const events = mergeWireEvents(candidates)
 
   return NextResponse.json({ events })
+}
+
+// ── Member-scoped wire (scope=me) ───────────────────────────────────────────
+// Builds a pulse of what touched THIS member's work in the last 7 days:
+// requests they were added to, comments on their requests, and their own tasks
+// moving forward. Reuses the studio wire's WireDomain palette so the-wire.tsx
+// renders it unchanged ('client' ink for a client reply, 'ops' otherwise).
+// Every source is isolated so a missing table can never break the rail.
+async function memberWire(drizzle: D1, userId: string | null): Promise<WireEvent[]> {
+  if (!userId) return []
+
+  let memberId: string | null = null
+  try {
+    const [m] = await drizzle
+      .select({ id: schema.teamMembers.id })
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.clerkUserId, userId))
+      .limit(1)
+    memberId = m?.id ?? null
+  } catch {
+    memberId = null
+  }
+  if (!memberId) return []
+
+  const since = wireSince(new Date(), 7)
+  const PER_SOURCE = 12
+  const candidates: WireEvent[] = []
+
+  // Request ids the member owns or participates on - shared by two sources.
+  const reqIds = new Set<string>()
+  try {
+    const direct = await drizzle
+      .select({ id: schema.requests.id })
+      .from(schema.requests)
+      .where(eq(schema.requests.assigneeId, memberId))
+    for (const r of direct) reqIds.add(r.id)
+    const parts = await drizzle
+      .select({ requestId: schema.requestParticipants.requestId })
+      .from(schema.requestParticipants)
+      .where(and(
+        eq(schema.requestParticipants.participantId, memberId),
+        eq(schema.requestParticipants.participantType, 'team_member'),
+        isNull(schema.requestParticipants.removedAt),
+      ))
+    for (const p of parts) reqIds.add(p.requestId)
+  } catch {
+    // requests / participants missing - no request-derived events.
+  }
+
+  // ── Assignments to me (recently added as assignee/pm) ─────────────────────
+  try {
+    const rows = await drizzle
+      .select({
+        id: schema.requestParticipants.id,
+        addedAt: schema.requestParticipants.addedAt,
+        title: schema.requests.title,
+      })
+      .from(schema.requestParticipants)
+      .innerJoin(schema.requests, eq(schema.requestParticipants.requestId, schema.requests.id))
+      .where(and(
+        eq(schema.requestParticipants.participantId, memberId),
+        eq(schema.requestParticipants.participantType, 'team_member'),
+        inArray(schema.requestParticipants.role, ['assignee', 'pm']),
+        isNull(schema.requestParticipants.removedAt),
+        gte(schema.requestParticipants.addedAt, since),
+      ))
+      .orderBy(desc(schema.requestParticipants.addedAt))
+      .limit(PER_SOURCE)
+    for (const r of rows) {
+      const title = r.title?.trim()
+      candidates.push({
+        id: `assign:${r.id}`,
+        type: 'ops',
+        text: title ? `You were added to ${title}` : 'You were added to a request',
+        at: r.addedAt,
+      })
+    }
+  } catch {
+    // request_participants missing - skip assignment events.
+  }
+
+  // ── Comments on my requests (by anyone other than me) ─────────────────────
+  if (reqIds.size > 0) {
+    try {
+      const rows = await drizzle
+        .select({
+          id: schema.messages.id,
+          createdAt: schema.messages.createdAt,
+          authorType: schema.messages.authorType,
+          title: schema.requests.title,
+        })
+        .from(schema.messages)
+        .innerJoin(schema.requests, eq(schema.messages.requestId, schema.requests.id))
+        .where(and(
+          inArray(schema.messages.requestId, [...reqIds]),
+          isNull(schema.messages.deletedAt),
+          ne(schema.messages.authorId, memberId),
+          gte(schema.messages.createdAt, since),
+        ))
+        .orderBy(desc(schema.messages.createdAt))
+        .limit(PER_SOURCE)
+      for (const r of rows) {
+        const title = r.title?.trim()
+        const isClient = r.authorType === 'contact'
+        candidates.push({
+          id: `comment:${r.id}`,
+          type: isClient ? 'client' : 'ops',
+          text: title
+            ? `${isClient ? 'New reply' : 'New comment'} on ${title}`
+            : (isClient ? 'New client reply' : 'New comment'),
+          at: r.createdAt,
+        })
+      }
+    } catch {
+      // messages missing - skip comment events.
+    }
+  }
+
+  // ── My tasks moving forward ───────────────────────────────────────────────
+  try {
+    const rows = await drizzle
+      .select({
+        id: schema.tasks.id,
+        title: schema.tasks.title,
+        status: schema.tasks.status,
+        updatedAt: schema.tasks.updatedAt,
+      })
+      .from(schema.tasks)
+      .where(and(
+        eq(schema.tasks.assigneeId, memberId),
+        inArray(schema.tasks.status, ['in_progress', 'blocked', 'done']),
+        gte(schema.tasks.updatedAt, since),
+      ))
+      .orderBy(desc(schema.tasks.updatedAt))
+      .limit(PER_SOURCE)
+    for (const r of rows) {
+      const title = r.title?.trim() || 'a task'
+      const text = r.status === 'done'
+        ? `You completed ${title}`
+        : `Task now ${r.status === 'in_progress' ? 'in progress' : 'blocked'}: ${title}`
+      candidates.push({
+        id: `task:${r.id}`,
+        type: 'ops',
+        text,
+        at: r.updatedAt,
+      })
+    }
+  } catch {
+    // tasks missing - skip task events.
+  }
+
+  return mergeWireEvents(candidates)
 }

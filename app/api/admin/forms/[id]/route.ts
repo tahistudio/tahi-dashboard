@@ -21,6 +21,13 @@ export async function PATCH(
     orgId?: string
     questions?: Array<{ id: string; type: string; label: string; required: boolean; options?: string[] }>
     isDefault?: boolean
+    description?: string | null
+    audience?: string
+    sla?: string | null
+  }
+
+  if (body.audience !== undefined && !['all_clients', 'retainer_clients', 'internal_only'].includes(body.audience)) {
+    return NextResponse.json({ error: 'Invalid audience' }, { status: 400 })
   }
 
   const database = await db()
@@ -35,6 +42,9 @@ export async function PATCH(
   if (body.orgId !== undefined) updates.orgId = body.orgId || null
   if (body.questions !== undefined) updates.questions = JSON.stringify(body.questions)
   if (body.isDefault !== undefined) updates.isDefault = body.isDefault ? 1 : 0
+  if (body.description !== undefined) updates.description = body.description?.trim() || null
+  if (body.audience !== undefined) updates.audience = body.audience
+  if (body.sla !== undefined) updates.sla = body.sla?.trim() || null
 
   await drizzle
     .update(schema.requestForms)
