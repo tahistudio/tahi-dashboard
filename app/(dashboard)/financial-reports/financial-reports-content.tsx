@@ -2318,16 +2318,15 @@ function FinancialTrendsCard() {
         <SubSectionHeader title="Cash trend, month-end (NZD)" meta={meta} />
         {cashPoints.length < 2 ? (
           <p className="text-sm text-[var(--color-text-muted)]">
-            Month-end cash is captured automatically each month. The trend line fills in as history accrues.
+            Month-end cash is captured automatically each month. The trend fills in as history accrues.
           </p>
         ) : (
-          <LineChart
+          <BarChart
             data={cashPoints.map(s => ({ label: ymLabel(s.monthKey), value: s.cashNzd }))}
             height={200}
-            area
+            variant="pill"
             tone="positive"
-            dots
-            formatValue={(v) => `NZ$${compactFmt(v)}`}
+            formatValue={compactFmt}
             ariaLabel="Month-end cash over time, NZD"
           />
         )}
