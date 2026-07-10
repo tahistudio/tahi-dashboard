@@ -108,19 +108,25 @@ export async function backfillCashFromLedger(drizzle: D1, now: Date = new Date()
       accountId: schema.airwallexTransactions.accountId,
       amount: schema.airwallexTransactions.amount,
       settledAt: schema.airwallexTransactions.settledAt,
+      createdAt: schema.airwallexTransactions.createdAt,
     })
     .from(schema.airwallexTransactions)
 
+  // Prefer the settlement time (posted_at); Airwallex frequently leaves that
+  // null, so fall back to created_at, which is always present and is a close
+  // proxy for when the transaction hit the ledger. Without this fallback the
+  // whole backfill is a no-op whenever posted_at is unset (the common case).
   const settled: Array<{ accountId: string; amount: number; time: number }> = []
   let earliestTime = Infinity
   for (const t of txns) {
-    if (!t.settledAt) continue
-    const time = new Date(t.settledAt).getTime()
+    const ts = t.settledAt ?? t.createdAt
+    if (!ts) continue
+    const time = new Date(ts).getTime()
     if (!Number.isFinite(time)) continue
     settled.push({ accountId: t.accountId, amount: t.amount, time })
     if (time < earliestTime) earliestTime = time
   }
-  if (!Number.isFinite(earliestTime)) return empty('No settled Airwallex transactions to reconstruct from.')
+  if (!Number.isFinite(earliestTime)) return empty('No Airwallex transactions with a usable timestamp to reconstruct from.')
 
   // Pre-fetch P&L once for trailing-3-month burn / runway per historical month.
   const pnl = await drizzle.select().from(schema.xeroPnlSnapshots)
