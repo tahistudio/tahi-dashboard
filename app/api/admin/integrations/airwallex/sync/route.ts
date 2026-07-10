@@ -74,14 +74,16 @@ export async function POST(req: NextRequest) {
   const database = await db() as unknown as D1
   const nowIso = new Date().toISOString()
 
-  // Chunk size for multi-row upserts. Kept well under D1's bound-parameter
-  // ceiling (balances ~7 cols/row, txns ~10 cols/row) and small enough that a
-  // single statement stays cheap. Batching the writes this way is the whole
-  // fix: the old per-row SELECT-then-UPDATE/INSERT fired ~2 D1 round-trips per
-  // balance and per transaction, so once the window widened past ~14 days the
-  // cumulative round-trips blew the Worker execution budget and threw an
-  // unhandled (unlogged, empty-body 500) error.
-  const CHUNK = 15
+  // D1 caps bound parameters at 100 per statement, so size each multi-row
+  // upsert by its column count to stay safely under that (a 90-param budget
+  // leaves margin). Batching the writes this way is the whole fix: the old
+  // per-row SELECT-then-UPDATE/INSERT fired ~2 D1 round-trips per balance and
+  // per transaction, so once the window widened past ~14 days the cumulative
+  // round-trips blew the Worker execution budget and threw an unhandled
+  // (unlogged, empty-body 500) error.
+  const PARAM_BUDGET = 90
+  const balChunk = Math.max(1, Math.floor(PARAM_BUDGET / 7))   // 7 cols/row -> 12
+  const txnChunk = Math.max(1, Math.floor(PARAM_BUDGET / 10))  // 10 cols/row -> 9
 
   let balanceUpserts = 0
   let created = 0
@@ -98,8 +100,8 @@ export async function POST(req: NextRequest) {
       asOf: nowIso,
       updatedAt: nowIso,
     }))
-    for (let i = 0; i < balanceRows.length; i += CHUNK) {
-      const slice = balanceRows.slice(i, i + CHUNK)
+    for (let i = 0; i < balanceRows.length; i += balChunk) {
+      const slice = balanceRows.slice(i, i + balChunk)
       if (slice.length === 0) break
       await database.insert(schema.airwallexBalances).values(slice).onConflictDoUpdate({
         target: schema.airwallexBalances.accountId,
@@ -120,8 +122,8 @@ export async function POST(req: NextRequest) {
     // the mutable fields but never reset reconciliation_status / created_at.
     const txnIds = transactions.map(t => t.id)
     const existingTxnIds = new Set<string>()
-    for (let i = 0; i < txnIds.length; i += 200) {
-      const chunk = txnIds.slice(i, i + 200)
+    for (let i = 0; i < txnIds.length; i += PARAM_BUDGET) {
+      const chunk = txnIds.slice(i, i + PARAM_BUDGET)
       if (chunk.length === 0) break
       const rows = await database
         .select({ id: schema.airwallexTransactions.id })
@@ -154,8 +156,8 @@ export async function POST(req: NextRequest) {
         createdAt: t.created_at ?? nowIso,
       }
     })
-    for (let i = 0; i < txnRows.length; i += CHUNK) {
-      const slice = txnRows.slice(i, i + CHUNK)
+    for (let i = 0; i < txnRows.length; i += txnChunk) {
+      const slice = txnRows.slice(i, i + txnChunk)
       if (slice.length === 0) break
       await database.insert(schema.airwallexTransactions).values(slice).onConflictDoUpdate({
         target: schema.airwallexTransactions.id,
