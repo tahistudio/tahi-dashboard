@@ -82,8 +82,9 @@ export interface BackfillResult {
  * with large foreign holdings carry a small FX approximation.
  *
  * Only months whose month-end is at or after the earliest transaction we
- * hold are reconstructed (before that the ledger is incomplete). Existing
- * rows are never overwritten, so a real cron snapshot always wins.
+ * hold are reconstructed (before that the ledger is incomplete). A month with
+ * a full 'cron' snapshot is never overwritten; a prior backfill row is
+ * refreshed, so re-running corrects earlier reconstructions.
  */
 export async function backfillCashFromLedger(drizzle: D1, now: Date = new Date()): Promise<BackfillResult> {
   const empty = (note: string): BackfillResult => ({
@@ -93,19 +94,22 @@ export async function backfillCashFromLedger(drizzle: D1, now: Date = new Date()
   const rates = await drizzle.select().from(schema.exchangeRates)
   const rateMap = buildRateMap(rates)
 
-  // Anchor: current per-account TOTAL balance.
+  // Anchor: current TOTAL balance per currency. airwallex_balances keys each
+  // row as "<accountId>:<currency>", while airwallex_transactions carries a
+  // bare accountId plus a currency, so the two only reconcile on CURRENCY: a
+  // USD transaction moves the USD balance.
   const balances = await drizzle.select().from(schema.airwallexBalances)
   if (balances.length === 0) return empty('No Airwallex balances to anchor reconstruction.')
-  const accounts = balances.map(b => ({
-    accountId: b.accountId,
-    currency: b.currency ?? 'NZD',
-    balance: b.balance,
-  }))
+  const balByCurrency = new Map<string, number>()
+  for (const b of balances) {
+    const cur = b.currency ?? 'NZD'
+    balByCurrency.set(cur, (balByCurrency.get(cur) ?? 0) + b.balance)
+  }
 
-  // Ledger: signed settled transactions.
+  // Ledger: signed transactions, tagged by currency + time.
   const txns = await drizzle
     .select({
-      accountId: schema.airwallexTransactions.accountId,
+      currency: schema.airwallexTransactions.currency,
       amount: schema.airwallexTransactions.amount,
       settledAt: schema.airwallexTransactions.settledAt,
       createdAt: schema.airwallexTransactions.createdAt,
@@ -116,14 +120,14 @@ export async function backfillCashFromLedger(drizzle: D1, now: Date = new Date()
   // null, so fall back to created_at, which is always present and is a close
   // proxy for when the transaction hit the ledger. Without this fallback the
   // whole backfill is a no-op whenever posted_at is unset (the common case).
-  const settled: Array<{ accountId: string; amount: number; time: number }> = []
+  const ledger: Array<{ currency: string; amount: number; time: number }> = []
   let earliestTime = Infinity
   for (const t of txns) {
     const ts = t.settledAt ?? t.createdAt
     if (!ts) continue
     const time = new Date(ts).getTime()
     if (!Number.isFinite(time)) continue
-    settled.push({ accountId: t.accountId, amount: t.amount, time })
+    ledger.push({ currency: t.currency ?? 'NZD', amount: t.amount, time })
     if (time < earliestTime) earliestTime = time
   }
   if (!Number.isFinite(earliestTime)) return empty('No Airwallex transactions with a usable timestamp to reconstruct from.')
@@ -135,11 +139,13 @@ export async function backfillCashFromLedger(drizzle: D1, now: Date = new Date()
     pnlByMonth.set(p.monthKey, { burn: p.totalExpenses + p.totalCostOfSales, currency: p.currency ?? 'NZD' })
   }
 
-  // Months that already have a snapshot; never clobber those.
+  // Full 'cron' snapshots are authoritative; never overwrite those. Rows we
+  // previously backfilled (or months with no row yet) can be (re)written, so a
+  // re-run corrects earlier reconstructions.
   const existing = await drizzle
-    .select({ monthKey: schema.financialSnapshots.monthKey })
+    .select({ monthKey: schema.financialSnapshots.monthKey, source: schema.financialSnapshots.source })
     .from(schema.financialSnapshots)
-  const existingKeys = new Set(existing.map(r => r.monthKey))
+  const cronMonths = new Set(existing.filter(r => r.source === 'cron').map(r => r.monthKey))
 
   const MAX_MONTHS = 24
   const nowIso = now.toISOString()
@@ -155,16 +161,17 @@ export async function backfillCashFromLedger(drizzle: D1, now: Date = new Date()
     if (monthEnd <= earliestTime) break // ledger doesn't reach this far back
 
     const monthKey = monthKeyOf(md)
-    if (existingKeys.has(monthKey)) { monthsSkippedExisting++; continue }
+    if (cronMonths.has(monthKey)) { monthsSkippedExisting++; continue }
 
-    // Reconstruct each account's month-end balance, sum to NZD.
+    // Reconstruct each currency's month-end balance, then convert to NZD.
+    // balance(T) = balance_now minus the sum of same-currency txns after T.
     let cashNzd = 0
-    for (const acct of accounts) {
-      let bal = acct.balance
-      for (const s of settled) {
-        if (s.accountId === acct.accountId && s.time > monthEnd) bal -= s.amount
+    for (const [cur, curBalance] of balByCurrency) {
+      let bal = curBalance
+      for (const s of ledger) {
+        if (s.currency === cur && s.time > monthEnd) bal -= s.amount
       }
-      cashNzd += toNzd(bal, acct.currency, rateMap)
+      cashNzd += toNzd(bal, cur, rateMap)
     }
     cashNzd = Math.round(cashNzd)
 
@@ -196,7 +203,10 @@ export async function backfillCashFromLedger(drizzle: D1, now: Date = new Date()
         capturedAt: nowIso,
         createdAt: nowIso,
       })
-      .onConflictDoNothing({ target: schema.financialSnapshots.monthKey })
+      .onConflictDoUpdate({
+        target: schema.financialSnapshots.monthKey,
+        set: { cashNzd, burnNzd, runwayMonths, source: 'backfill', capturedAt: nowIso },
+      })
 
     monthsWritten++
     if (!latestMonth) latestMonth = monthKey // i=1 is the most recent month
