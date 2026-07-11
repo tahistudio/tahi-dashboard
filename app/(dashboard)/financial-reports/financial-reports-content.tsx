@@ -102,6 +102,10 @@ interface SummaryResponse {
     taxYearStart: string
     taxYearRevenue: number
     monthsIntoTaxYear: number
+    terminalTaxOwed: number
+    provisionalTaxOwed: number
+    totalTaxOwed: number
+    paymentSchedule: Array<{ label: string; amount: number; dueDate: string; kind: 'terminal' | 'provisional' }>
   }
   spendSplit: { discretionary: number; essential: number }
   takeHome: {
@@ -2108,6 +2112,19 @@ function TaxSummaryCard({ taxes, reserves, primaryCurrency, toCur, formatNative 
   const coveragePct = taxOwed > 0 ? Math.min(100, Math.round((reserved / taxOwed) * 100)) : reserved > 0 ? 100 : 0
   const tone: 'positive' | 'warning' | 'danger' = coveragePct >= 80 ? 'positive' : coveragePct >= 40 ? 'warning' : 'danger'
   const toneColour = tone === 'positive' ? '#5A824E' : tone === 'warning' ? '#fb923c' : '#f87171'
+
+  // Real IRD position (from the filed IR4, settings-driven). Only renders
+  // when a figure or schedule is present, so the card stays clean for anyone
+  // who hasn't entered their assessed tax yet.
+  const schedule = taxes.paymentSchedule ?? []
+  const hasIrdData = taxes.totalTaxOwed > 0 || schedule.length > 0
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const nextDueIdx = schedule.findIndex(p => p.dueDate >= todayIso)
+  const fmtDue = (iso: string) => {
+    const d = new Date(iso)
+    return isNaN(d.getTime()) ? iso : d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
+  }
+
   return (
     <Card>
       <div className="p-4 sm:p-6">
@@ -2174,6 +2191,93 @@ function TaxSummaryCard({ taxes, reserves, primaryCurrency, toCur, formatNative 
             />
           </div>
         </div>
+
+        {/* ── Owed to IRD: real assessed tax + instalment schedule ─── */}
+        {hasIrdData && (
+          <div style={{ marginTop: 'var(--space-5)', borderTop: '1px solid var(--color-border-subtle)', paddingTop: 'var(--space-4)' }}>
+            <div className="flex items-baseline justify-between" style={{ flexWrap: 'wrap', gap: '0.5rem', marginBottom: 'var(--space-3)' }}>
+              <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
+                Owed to IRD
+              </div>
+              <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
+                Assessed from your filed IR4. Not deducted from disposable cash.
+              </div>
+            </div>
+            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(8rem, 1fr))', gap: 'var(--space-4)', marginBottom: schedule.length > 0 ? 'var(--space-4)' : 0 }}>
+              <MetricBlock
+                label="Total balance"
+                value={formatNative(taxes.totalTaxOwed, 'NZD')}
+                sub="Terminal + provisional"
+                compact
+                accent
+              />
+              <MetricBlock
+                label="Terminal tax (last year)"
+                value={formatNative(taxes.terminalTaxOwed, 'NZD')}
+                sub="Assessed, due next terminal date"
+                compact
+              />
+              <MetricBlock
+                label="Provisional (this year)"
+                value={formatNative(taxes.provisionalTaxOwed, 'NZD')}
+                sub="Prepays this year's tax"
+                compact
+              />
+            </div>
+            {schedule.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+                {schedule.map((p, i) => {
+                  const isNext = i === nextDueIdx
+                  const isPaid = p.dueDate < todayIso
+                  return (
+                    <div
+                      key={`${p.dueDate}-${i}`}
+                      className="flex items-center justify-between"
+                      style={{
+                        gap: '0.75rem',
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: 'var(--radius-sm)',
+                        background: isNext ? 'var(--color-brand-50)' : 'var(--color-bg-secondary)',
+                        border: isNext ? '1px solid var(--color-brand-100)' : '1px solid transparent',
+                        opacity: isPaid ? 0.55 : 1,
+                      }}
+                    >
+                      <div className="flex items-center" style={{ gap: '0.625rem', minWidth: 0 }}>
+                        <span
+                          className="text-xs font-medium"
+                          style={{ color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}
+                        >
+                          {fmtDue(p.dueDate)}
+                        </span>
+                        <span
+                          className="text-xs"
+                          style={{ color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          title={p.label}
+                        >
+                          {p.label}
+                        </span>
+                        {isNext && (
+                          <span
+                            className="text-[0.625rem] font-bold uppercase tracking-wider"
+                            style={{ color: 'var(--color-brand-dark)', flexShrink: 0, letterSpacing: '0.04em' }}
+                          >
+                            Next due
+                          </span>
+                        )}
+                      </div>
+                      <span
+                        className="text-sm font-semibold"
+                        style={{ color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}
+                      >
+                        {formatNative(p.amount, 'NZD')}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </Card>
   )

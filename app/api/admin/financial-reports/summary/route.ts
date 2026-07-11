@@ -105,6 +105,8 @@ export async function GET(req: NextRequest) {
         'finance.reserveTargetMonths',
         'finance.monthlyBurnNzd',
         'finance.lastYearTaxOwed',
+        'finance.provisionalTaxOwed',
+        'finance.taxPaymentSchedule',
         'finance.quarterlyTargetNzd',
         'finance.liamTakeHomeAnnual',
         'finance.staciTakeHomeAnnual',
@@ -373,6 +375,38 @@ export async function GET(req: NextRequest) {
   const reserveTargetMonths = Math.max(1, Math.min(24, parseFloat(settingsMap.get('finance.reserveTargetMonths') ?? '4')))
   const monthlyBurnNzd = parseFloat(settingsMap.get('finance.monthlyBurnNzd') ?? '0') || null
   const lastYearTaxOwed = parseFloat(settingsMap.get('finance.lastYearTaxOwed') ?? '0') || 0
+  // Real assessed tax owed to IRD, sourced from the filed IR4 (editable in
+  // settings). `lastYearTaxOwed` is the terminal tax for the closed year;
+  // `provisionalTaxOwed` is next year's provisional. The payment schedule is
+  // a JSON array of the actual IRD instalment dates. These are display-only
+  // planning figures; they do NOT feed the disposable-cash ring-fence (only
+  // lastYearTaxOwed does), because provisional tax prepays the same current
+  // year liability the 28%-of-revenue accrual already estimates. Surfacing
+  // both without double-counting the cash.
+  const provisionalTaxOwed = parseFloat(settingsMap.get('finance.provisionalTaxOwed') ?? '0') || 0
+  type TaxPayment = { label: string; amount: number; dueDate: string; kind: 'terminal' | 'provisional' }
+  let taxPaymentSchedule: TaxPayment[] = []
+  try {
+    const raw = settingsMap.get('finance.taxPaymentSchedule')
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        taxPaymentSchedule = parsed
+          .filter((p): p is { label?: unknown; amount: number; dueDate: string; kind?: unknown } =>
+            !!p && typeof p === 'object'
+            && typeof (p as { amount?: unknown }).amount === 'number'
+            && typeof (p as { dueDate?: unknown }).dueDate === 'string')
+          .map((p): TaxPayment => ({
+            label: String(p.label ?? ''),
+            amount: Number(p.amount),
+            dueDate: String(p.dueDate),
+            kind: p.kind === 'terminal' ? 'terminal' : 'provisional',
+          }))
+          .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+      }
+    }
+  } catch { taxPaymentSchedule = [] }
+  const totalTaxOwed = lastYearTaxOwed + provisionalTaxOwed
   // Quarterly target (NZD). Operator sets one figure for the current
   // quarter; the page shows progress against it.
   const quarterlyTargetNzd = parseFloat(settingsMap.get('finance.quarterlyTargetNzd') ?? '0') || 0
@@ -847,6 +881,13 @@ export async function GET(req: NextRequest) {
       taxYearStart,
       taxYearRevenue,
       monthsIntoTaxYear,
+      // Real IRD position from the filed IR4 (settings-driven). Terminal =
+      // last-closed-year assessed tax; provisional = next year's instalments;
+      // schedule = actual IRD due dates. Display-only (see parsing note above).
+      terminalTaxOwed: lastYearTaxOwed,
+      provisionalTaxOwed,
+      totalTaxOwed,
+      paymentSchedule: taxPaymentSchedule,
     },
     yoy: {
       thisMonth: yoyThisMonth,
