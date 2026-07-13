@@ -11,6 +11,12 @@ interface Env {
   TAHI_API_TOKEN: string
   OAUTH_CLIENT_ID: string
   OAUTH_CLIENT_SECRET: string
+  // Many Request Dashboard (the OLD client dashboard we are replacing).
+  // Both optional: when unset, the committed defaults below are used.
+  // Set the MANYREQUESTS_API_TOKEN secret to rotate the key without a code
+  // change (the env value wins over the committed default when present).
+  MANYREQUESTS_API_TOKEN?: string
+  MANYREQUESTS_BASE_URL?: string
 }
 
 // Direct Cloudflare production (Oceania). Root path, no /dashboard basePath.
@@ -77,6 +83,82 @@ function apiWrite(path: string, token: string, method: string, body?: Record<str
 }
 
 // ---------------------------------------------------------------------------
+// Many Request Dashboard (the OLD client dashboard we are replacing)
+// ---------------------------------------------------------------------------
+// Direct calls to the ManyRequests REST API (v1). This is real, live client
+// data on the system we are migrating away from. Reads are safe; writes
+// mutate live data and are flagged for user confirmation in their tool text.
+//
+// The token is committed as a working default at the owner's instruction.
+// Rotate it by setting the MANYREQUESTS_API_TOKEN worker secret (it wins
+// over this default) or by editing the constant below.
+
+const MANYREQUESTS_DEFAULT_BASE_URL = 'https://tahistudio.manyrequests.com/api/v1'
+const MANYREQUESTS_DEFAULT_TOKEN = '2|bQxtsSRI8T2lo0lcoZAxSMKXUDM7s3PCX8gCQx202e8ebf08'
+
+type MrConfig = { token: string; baseUrl: string }
+
+/** Resolve the ManyRequests config from env, falling back to the committed defaults. */
+function mrConfigFromEnv(env: Env): MrConfig {
+  return {
+    token: env.MANYREQUESTS_API_TOKEN || MANYREQUESTS_DEFAULT_TOKEN,
+    baseUrl: env.MANYREQUESTS_BASE_URL || MANYREQUESTS_DEFAULT_BASE_URL,
+  }
+}
+
+/** Fetch against the ManyRequests API with the Bearer token. */
+async function mrFetch(
+  path: string,
+  cfg: MrConfig,
+  opts?: { method?: string; body?: Record<string, unknown>; params?: Record<string, string> },
+): Promise<unknown> {
+  const url = new URL(`${cfg.baseUrl}${path}`)
+  if (opts?.params) {
+    for (const [k, v] of Object.entries(opts.params)) {
+      if (v) url.searchParams.set(k, v)
+    }
+  }
+
+  const res = await fetch(url.toString(), {
+    method: opts?.method ?? 'GET',
+    headers: {
+      Authorization: `Bearer ${cfg.token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: opts?.body ? JSON.stringify(opts.body) : undefined,
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`ManyRequests ${opts?.method ?? 'GET'} ${path} returned ${res.status}: ${text}`)
+  }
+
+  // Soft-deletes and some writes may return 204 / empty body.
+  const text = await res.text()
+  return text ? JSON.parse(text) : { ok: true }
+}
+
+/** Build a ManyRequests query string from common list args plus a passthrough. */
+function mrQueryParams(args: Record<string, unknown>): Record<string, string> {
+  const p: Record<string, string> = {}
+  const set = (key: string, argKey: string) => {
+    const v = args[argKey]
+    if (v !== undefined && v !== null && v !== '') p[key] = String(v)
+  }
+  set('page', 'page')
+  set('per_page', 'perPage')
+  set('search', 'search')
+  const q = args.query
+  if (q && typeof q === 'object' && !Array.isArray(q)) {
+    for (const [k, v] of Object.entries(q as Record<string, unknown>)) {
+      if (v !== undefined && v !== null) p[k] = String(v)
+    }
+  }
+  return p
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -105,6 +187,19 @@ function tool(name: string, description: string, properties: Record<string, unkn
 // ---------------------------------------------------------------------------
 // Tool definitions (60+ tools, matching stdio server)
 // ---------------------------------------------------------------------------
+
+// Many Request Dashboard tag prefixes. Every ManyRequests tool description
+// opens with one of these so any assistant knows exactly what it is touching.
+const MR_READ = '[Many Request Dashboard: the OLD client dashboard we are replacing. Real live client data. Read-only.]'
+const MR_WRITE = '[Many Request Dashboard: the OLD client dashboard we are replacing. Real live client data. MUTATES LIVE DATA, confirm with the user before calling.]'
+
+// Shared pagination / passthrough props for ManyRequests list tools.
+const mrListProps = {
+  page: prop('number', 'Page number for pagination'),
+  perPage: prop('number', 'Results per page'),
+  search: prop('string', 'Free-text search term'),
+  query: prop('object', 'Additional ManyRequests query params (filters, sort, etc.) passed through as-is'),
+}
 
 const TOOLS: ToolDef[] = [
   // ── Read: Overview & Reports ──────────────────────────────────────────
@@ -1352,6 +1447,32 @@ const TOOLS: ToolDef[] = [
   tool('seed_sitemap', 'Seed or reseed the sitemap with the planned redesign structure. Pass force=true to wipe all existing nodes + reviews first, otherwise refuses if nodes already exist.', {
     force: prop('boolean', 'Wipe existing nodes + reviews before seeding. Default false.'),
   }),
+
+  // ── Many Request Dashboard (OLD dashboard being replaced) ─────────────
+  // Reads first, then writes. Writes mutate real live client data.
+  tool('manyrequests_list_clients', `${MR_READ} List client users (paginated), each with its organization embedded.`, { ...mrListProps }),
+  tool('manyrequests_get_client', `${MR_READ} Get a single client user by ID.`, { clientId: prop('string', 'ManyRequests client ID') }, ['clientId']),
+  tool('manyrequests_list_invoices', `${MR_READ} List invoices (paginated) with filtering and sorting.`, { ...mrListProps }),
+  tool('manyrequests_get_invoice', `${MR_READ} Get a single invoice by UID, with line items and taxes.`, { invoiceId: prop('string', 'ManyRequests invoice UID') }, ['invoiceId']),
+  tool('manyrequests_list_organizations', `${MR_READ} List organizations (paginated), each with its owner embedded.`, { ...mrListProps }),
+  tool('manyrequests_get_organization', `${MR_READ} Get a single organization by ID.`, { organizationId: prop('string', 'ManyRequests organization ID') }, ['organizationId']),
+  tool('manyrequests_list_org_brands', `${MR_READ} List brands belonging to an organization.`, { organizationId: prop('string', 'Organization ID'), ...mrListProps }, ['organizationId']),
+  tool('manyrequests_get_org_brand', `${MR_READ} Get a single brand within an organization.`, { organizationId: prop('string', 'Organization ID'), brandId: prop('string', 'Brand ID') }, ['organizationId', 'brandId']),
+  tool('manyrequests_list_org_members', `${MR_READ} List client users belonging to an organization.`, { organizationId: prop('string', 'Organization ID'), ...mrListProps }, ['organizationId']),
+  tool('manyrequests_list_org_services', `${MR_READ} List subscriptions (services) for an organization.`, { organizationId: prop('string', 'Organization ID'), ...mrListProps }, ['organizationId']),
+
+  tool('manyrequests_create_client', `${MR_WRITE} Create a new client user. Provide name and email (plus any other ManyRequests client fields).`, { name: prop('string', 'Client name'), email: prop('string', 'Client email') }, ['name', 'email']),
+  tool('manyrequests_update_client', `${MR_WRITE} Update a client's name and/or email.`, { clientId: prop('string', 'Client ID'), name: prop('string', 'New name'), email: prop('string', 'New email') }, ['clientId']),
+  tool('manyrequests_delete_client', `${MR_WRITE} Soft-delete a client from their organization.`, { clientId: prop('string', 'Client ID') }, ['clientId']),
+  tool('manyrequests_mark_invoice_paid', `${MR_WRITE} Mark a manually created invoice as paid.`, { invoiceId: prop('string', 'Invoice UID') }, ['invoiceId']),
+  tool('manyrequests_create_organization', `${MR_WRITE} Create a new organization and its owner client. Provide the organization name plus owner details per the ManyRequests API.`, { name: prop('string', 'Organization name') }, ['name']),
+  tool('manyrequests_update_organization', `${MR_WRITE} Update an organization's name.`, { organizationId: prop('string', 'Organization ID'), name: prop('string', 'New name') }, ['organizationId', 'name']),
+  tool('manyrequests_delete_organization', `${MR_WRITE} Soft-delete an organization and all of its members.`, { organizationId: prop('string', 'Organization ID') }, ['organizationId']),
+  tool('manyrequests_create_org_brand', `${MR_WRITE} Create a new brand within an organization.`, { organizationId: prop('string', 'Organization ID'), name: prop('string', 'Brand name') }, ['organizationId', 'name']),
+  tool('manyrequests_update_org_brand', `${MR_WRITE} Update a brand's name.`, { organizationId: prop('string', 'Organization ID'), brandId: prop('string', 'Brand ID'), name: prop('string', 'New name') }, ['organizationId', 'brandId', 'name']),
+  tool('manyrequests_delete_org_brand', `${MR_WRITE} Soft-delete a brand.`, { organizationId: prop('string', 'Organization ID'), brandId: prop('string', 'Brand ID') }, ['organizationId', 'brandId']),
+  tool('manyrequests_add_org_member', `${MR_WRITE} Add a member to an organization, or create a new client as a member. Pass clientId to add an existing client, or name and email to create one.`, { organizationId: prop('string', 'Organization ID'), clientId: prop('string', 'Existing client ID to add (optional)'), name: prop('string', 'New member name (optional)'), email: prop('string', 'New member email (optional)') }, ['organizationId']),
+  tool('manyrequests_add_org_one_off_service', `${MR_WRITE} Add a one-off service to an organization's stock. Provide the service fields per the ManyRequests API.`, { organizationId: prop('string', 'Organization ID') }, ['organizationId']),
 ]
 
 // ---------------------------------------------------------------------------
@@ -1362,6 +1483,7 @@ async function executeTool(
   name: string,
   args: Record<string, unknown>,
   token: string,
+  mr: MrConfig,
 ): Promise<string> {
   const json = (data: unknown) => JSON.stringify(data, null, 2)
   const s = (key: string) => args[key] ? String(args[key]) : undefined
@@ -2273,6 +2395,71 @@ async function executeTool(
     case 'seed_sitemap':
       return json(await apiWrite('/api/admin/sitemap/seed-current', token, 'POST', { force: args.force === true }))
 
+    // ── Many Request Dashboard (OLD dashboard being replaced) ──────────
+    // Direct ManyRequests REST API. Reads are safe; writes mutate real
+    // live client data and are confirmed with the user via their tool text.
+    case 'manyrequests_list_clients':
+      return json(await mrFetch('/clients', mr, { params: mrQueryParams(args) }))
+    case 'manyrequests_get_client':
+      return json(await mrFetch(`/clients/${s('clientId')}`, mr))
+    case 'manyrequests_create_client':
+      return json(await mrFetch('/clients', mr, { method: 'POST', body: { ...args } }))
+    case 'manyrequests_update_client': {
+      const { clientId, ...body } = args
+      return json(await mrFetch(`/clients/${clientId}`, mr, { method: 'PATCH', body }))
+    }
+    case 'manyrequests_delete_client':
+      return json(await mrFetch(`/clients/${s('clientId')}`, mr, { method: 'DELETE' }))
+
+    case 'manyrequests_list_invoices':
+      return json(await mrFetch('/invoices', mr, { params: mrQueryParams(args) }))
+    case 'manyrequests_get_invoice':
+      return json(await mrFetch(`/invoices/${s('invoiceId')}`, mr))
+    case 'manyrequests_mark_invoice_paid':
+      return json(await mrFetch(`/invoices/${s('invoiceId')}/mark-as-paid`, mr, { method: 'PATCH' }))
+
+    case 'manyrequests_list_organizations':
+      return json(await mrFetch('/organizations', mr, { params: mrQueryParams(args) }))
+    case 'manyrequests_get_organization':
+      return json(await mrFetch(`/organizations/${s('organizationId')}`, mr))
+    case 'manyrequests_create_organization':
+      return json(await mrFetch('/organizations', mr, { method: 'POST', body: { ...args } }))
+    case 'manyrequests_update_organization': {
+      const { organizationId, ...body } = args
+      return json(await mrFetch(`/organizations/${organizationId}`, mr, { method: 'PATCH', body }))
+    }
+    case 'manyrequests_delete_organization':
+      return json(await mrFetch(`/organizations/${s('organizationId')}`, mr, { method: 'DELETE' }))
+
+    case 'manyrequests_list_org_brands':
+      return json(await mrFetch(`/organizations/${s('organizationId')}/brands`, mr, { params: mrQueryParams(args) }))
+    case 'manyrequests_get_org_brand':
+      return json(await mrFetch(`/organizations/${s('organizationId')}/brands/${s('brandId')}`, mr))
+    case 'manyrequests_create_org_brand': {
+      const { organizationId, ...body } = args
+      return json(await mrFetch(`/organizations/${organizationId}/brands`, mr, { method: 'POST', body }))
+    }
+    case 'manyrequests_update_org_brand': {
+      const { organizationId, brandId, ...body } = args
+      return json(await mrFetch(`/organizations/${organizationId}/brands/${brandId}`, mr, { method: 'PATCH', body }))
+    }
+    case 'manyrequests_delete_org_brand':
+      return json(await mrFetch(`/organizations/${s('organizationId')}/brands/${s('brandId')}`, mr, { method: 'DELETE' }))
+
+    case 'manyrequests_list_org_members':
+      return json(await mrFetch(`/organizations/${s('organizationId')}/members`, mr, { params: mrQueryParams(args) }))
+    case 'manyrequests_add_org_member': {
+      const { organizationId, ...body } = args
+      return json(await mrFetch(`/organizations/${organizationId}/members`, mr, { method: 'POST', body }))
+    }
+
+    case 'manyrequests_list_org_services':
+      return json(await mrFetch(`/organizations/${s('organizationId')}/services`, mr, { params: mrQueryParams(args) }))
+    case 'manyrequests_add_org_one_off_service': {
+      const { organizationId, ...body } = args
+      return json(await mrFetch(`/organizations/${organizationId}/one-off-services`, mr, { method: 'POST', body }))
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`)
   }
@@ -2343,6 +2530,7 @@ async function handleJsonRpc(body: JsonRpcRequest, env: Env): Promise<Response> 
           toolParams.name,
           toolParams.arguments ?? {},
           env.TAHI_API_TOKEN,
+          mrConfigFromEnv(env),
         )
         return jsonRpcSuccess(body.id, {
           content: [{ type: 'text', text }],
