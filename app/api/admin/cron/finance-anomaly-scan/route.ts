@@ -17,8 +17,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { and, eq, sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { assertCronAuth, logCronRun } from '@/lib/cron-runs'
+import { computeBankDrift } from '@/lib/bank-drift'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,11 +39,6 @@ export async function POST(req: NextRequest) {
   if (!auth.ok) return auth.response!
 
   const database = await db() as unknown as D1
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    await logCronRun(database, 'finance-anomaly-scan', 'skipped', Date.now() - t0, { skipped: 'ANTHROPIC_API_KEY missing' }, null)
-    return NextResponse.json({ skipped: 'ANTHROPIC_API_KEY missing' })
-  }
 
   // Resolve default lead owner so we know who to ping.
   const [ownerRow] = await database
@@ -54,6 +50,88 @@ export async function POST(req: NextRequest) {
   if (!recipient) {
     await logCronRun(database, 'finance-anomaly-scan', 'skipped', Date.now() - t0, { skipped: 'No leads.defaultLeadOwnerId' }, null)
     return NextResponse.json({ skipped: 'No leads.defaultLeadOwnerId — nowhere to send findings' })
+  }
+
+  const nowIso = new Date().toISOString()
+
+  // Dedup against finance_anomaly notifications raised in the last 30
+  // days, read or not. Same entityRef + same title = skip, so a
+  // persisting anomaly re-alerts once the window lapses. Shared by the
+  // deterministic drift check below and the AI findings at the end.
+  const recentNotifs = await database.all<{ entityId: string | null; title: string }>(sql`
+    SELECT entity_id AS entityId, title FROM notifications
+    WHERE event_type = 'finance_anomaly'
+      AND created_at > datetime('now', '-30 days')
+  `)
+  const seen = new Set(recentNotifs.map(n => `${n.entityId ?? ''}|${n.title.toLowerCase()}`))
+
+  // ── Deterministic pre-check: bank of truth vs Xero ledger ──────────
+  // Airwallex holds the actual money; Xero is the accounting view. When
+  // a currency drifts apart the bookkeeping has fallen behind (missed
+  // reconciliation, unbooked wallet-to-yield transfer). This check is
+  // pure arithmetic and runs even when the AI half is unavailable. It
+  // exists because in Aug 2026 Xero silently overstated total cash by
+  // 57k NZD and nothing flagged it.
+  let driftFound = 0
+  let driftInserted = 0
+  let driftError: string | null = null
+  try {
+    // Compare on the available/cleared basis: Xero's ledger books settled
+    // bank-feed lines, and every display surface (bank-balances, overview
+    // Cash card, summary) reports wallets on availableBalance. Comparing
+    // total-including-pending would false-alarm on any large pending
+    // settlement and burn the 30-day dedup window for that currency.
+    const [awxBalRows, xeroBalRows] = await Promise.all([
+      database
+        .select({
+          accountId: schema.airwallexBalances.accountId,
+          currency: schema.airwallexBalances.currency,
+          balance: schema.airwallexBalances.availableBalance,
+        })
+        .from(schema.airwallexBalances),
+      database
+        .select({
+          currency: schema.xeroBankBalances.currency,
+          balance: schema.xeroBankBalances.balance,
+        })
+        .from(schema.xeroBankBalances),
+    ])
+    const drift = computeBankDrift(awxBalRows, xeroBalRows)
+    driftFound = drift.length
+    const fmt = (n: number) => n.toLocaleString('en-NZ', { maximumFractionDigits: 2 })
+    for (const d of drift) {
+      // Title is deliberately amount-free so the 30-day dedup holds while
+      // a drift persists; the body carries the current numbers.
+      const title = `Xero ledger drift: ${d.currency}`
+      const key = `bank_drift_${d.currency}|${title.toLowerCase()}`
+      if (seen.has(key)) continue
+      await database.insert(schema.notifications).values({
+        id: crypto.randomUUID(),
+        userId: recipient,
+        userType: 'team_member',
+        eventType: 'finance_anomaly',
+        title,
+        body: `Xero's ledger shows ${fmt(d.xeroBalance)} ${d.currency} in the bank but Airwallex actually holds ${fmt(d.airwallexBalance)} ${d.currency} (Xero ${d.diff > 0 ? 'over' : 'under'} by ${fmt(Math.abs(d.diff))}). Reconcile the Airwallex feed in Xero, and book any wallet-to-yield transfers to an asset account.`,
+        entityType: 'finance_anomaly',
+        entityId: `bank_drift_${d.currency}`,
+        read: false,
+        createdAt: nowIso,
+      })
+      seen.add(key)
+      driftInserted++
+    }
+  } catch (err) {
+    // The watchdog must never die silently: a failed read or insert is
+    // recorded so /settings/crons shows a broken check, not a quiet one.
+    // The AI half still runs.
+    driftError = err instanceof Error ? err.message : String(err)
+  }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) {
+    const summary = { driftFound, driftInserted, driftError, ai: 'skipped: ANTHROPIC_API_KEY missing' }
+    await logCronRun(database, 'finance-anomaly-scan', 'success', Date.now() - t0, summary, null)
+    return NextResponse.json(summary)
   }
 
   // Gather context. Each block is intentionally compact — Sonnet works
@@ -72,10 +150,17 @@ export async function POST(req: NextRequest) {
     wonDealsRows,
     overdueInvoiceRows,
   ] = await Promise.all([
-    database.all<{ currency: string; available: number }>(sql`
-      SELECT currency, available_balance AS available FROM airwallex_balances
+    // Labeled per source so the model never sums the same cash twice:
+    // 'airwallex' wallet rows and 'xero_ledger' rows describe the SAME
+    // accounts from two systems; 'airwallex_yield' is additional money
+    // held in Airwallex Capital.
+    database.all<{ currency: string; source: string; balance: number }>(sql`
+      SELECT currency,
+             CASE WHEN account_id LIKE 'yield:%' THEN 'airwallex_yield' ELSE 'airwallex' END AS source,
+             available_balance AS balance
+      FROM airwallex_balances
       UNION ALL
-      SELECT currency, balance AS available FROM xero_bank_balances
+      SELECT currency, 'xero_ledger' AS source, balance FROM xero_bank_balances
     `),
     database.all<{ name: string; category: string; accruedAmount: number; targetAmount: number | null; accrualRate: number | null }>(sql`
       SELECT name, category, accrued_amount AS accruedAmount, target_amount AS targetAmount, accrual_rate AS accrualRate
@@ -162,6 +247,10 @@ What counts as an anomaly:
 
 Don't flag normal operating state. Don't flag the same anomaly twice with different wording.
 Don't suggest hiring — the owner runs the spend calculator for that themselves.
+Don't flag Airwallex-vs-Xero balance differences: bank-ledger drift is checked
+deterministically before you run. In the banks list, 'airwallex' (bank of truth)
+and 'xero_ledger' describe the SAME accounts from two systems; never add them
+together. 'airwallex_yield' is real additional money held in Airwallex Capital.
 
 Output format: STRICT JSON array. No other text. Each item:
 {
@@ -185,9 +274,12 @@ If no anomalies, return [].`
     const block = response.content.find(b => b.type === 'text')
     rawText = block && 'text' in block ? block.text : '[]'
   } catch (err) {
+    // The deterministic drift half already ran (and possibly inserted
+    // notifications); keep its results in the cron record so an Anthropic
+    // outage doesn't read as a total failure.
     const msg = err instanceof Error ? err.message : String(err)
-    await logCronRun(database, 'finance-anomaly-scan', 'error', Date.now() - t0, null, msg)
-    return NextResponse.json({ error: msg }, { status: 502 })
+    await logCronRun(database, 'finance-anomaly-scan', 'error', Date.now() - t0, { driftFound, driftInserted, driftError, phase: 'ai' }, msg)
+    return NextResponse.json({ error: msg, driftFound, driftInserted }, { status: 502 })
   }
 
   // Parse — accept either a fenced ```json block or raw JSON.
@@ -206,16 +298,6 @@ If no anomalies, return [].`
     // Sonnet returned malformed JSON. Log + skip; next run will retry.
   }
 
-  // Dedup against unresolved finance_anomaly notifications from the
-  // last 30 days. Same entityRef + same title = skip.
-  const recentNotifs = await database.all<{ entityId: string | null; title: string }>(sql`
-    SELECT entity_id AS entityId, title FROM notifications
-    WHERE event_type = 'finance_anomaly'
-      AND created_at > datetime('now', '-30 days')
-  `)
-  const seen = new Set(recentNotifs.map(n => `${n.entityId ?? ''}|${n.title.toLowerCase()}`))
-
-  const nowIso = new Date().toISOString()
   let inserted = 0
   for (const f of findings) {
     const key = `${f.entityRef ?? ''}|${f.title.toLowerCase()}`
@@ -236,6 +318,9 @@ If no anomalies, return [].`
   }
 
   const summary = {
+    driftFound,
+    driftInserted,
+    driftError,
     findingsRaw: findings.length,
     inserted,
     deduped: findings.length - inserted,

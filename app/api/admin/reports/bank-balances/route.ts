@@ -12,18 +12,29 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 /**
  * GET /api/admin/reports/bank-balances
  *
- * Returns the last-synced bank balances from Xero plus a runway
- * calculation (months of runway at current burn rate).
+ * Bank truth, Airwallex-first. Balances come from airwallex_balances:
+ * wallet rows synced daily from the Airwallex API plus operator-maintained
+ * yield rows (Airwallex Capital, materialised from the finance.yieldHoldings
+ * setting by the sync). Wallet rows are reported on the available/cleared
+ * basis, matching the Airwallex UI and the overview Cash card.
  *
- * Runway = total bank balance (NZD) / avg monthly expenses (last 3 months)
+ * Xero bank accounts fill in ONLY for currencies Airwallex does not report,
+ * so the same cash is never counted twice. Xero's ledger view of the
+ * Airwallex accounts is deliberately ignored: it drifts whenever
+ * reconciliation falls behind (in Aug 2026 it silently overstated total
+ * cash by 67 percent). Same source policy as financial-reports/summary and
+ * lib/overview-aggregates aggregateCashNzd; the deterministic drift alarm
+ * in the finance-anomaly-scan cron watches the two sources for divergence.
+ *
+ * Runway = total balance (NZD) / avg monthly expenses (last 3 months).
  *
  * Response:
- *   asOf (date of last Xero sync)
- *   accounts: [{ accountId, accountName, currency, balance, balanceNzd }]
+ *   asOf (latest as_of across the rows used)
+ *   accounts: [{ accountId, accountName, currency, balance, balanceNzd, source }]
  *   totalBalanceNzd: sum across all accounts
  *   avgMonthlyBurnNzd: trailing 3-month average from xero_pnl_snapshots
  *   runwayMonths: totalBalance / avgMonthlyBurn (null if no burn data)
- *   lastSyncedAt: max(updatedAt) across bank rows
+ *   lastSyncedAt: max(updatedAt) across the rows used
  */
 export async function GET(req: NextRequest) {
   const auth = await getRequestAuth(req)
@@ -42,12 +53,51 @@ export async function GET(req: NextRequest) {
 
   const rateMap = buildRateMap(await drizzle.select().from(schema.exchangeRates))
 
-  const balances = await drizzle
-    .select()
-    .from(schema.xeroBankBalances)
-    .catch(() => [] as Array<typeof schema.xeroBankBalances.$inferSelect>)
+  // The Airwallex read fails LOUD (500), same as financial-reports/summary.
+  // Swallowing it would empty airwallexCurrencies and let every Xero row
+  // through the fallback filter, silently serving the drifted ledger
+  // numbers this endpoint exists to distrust. Losing the Xero read only
+  // loses fallback currencies, so that one degrades quietly.
+  const [airwallexRows, xeroRows] = await Promise.all([
+    drizzle.select().from(schema.airwallexBalances),
+    drizzle
+      .select()
+      .from(schema.xeroBankBalances)
+      .catch(() => [] as Array<typeof schema.xeroBankBalances.$inferSelect>),
+  ])
 
-  if (balances.length === 0) {
+  const airwallexCurrencies = new Set(
+    airwallexRows.map(b => (b.currency ?? 'NZD').toUpperCase()),
+  )
+
+  const accounts = [
+    ...airwallexRows.map(b => {
+      const isYield = b.accountId.startsWith('yield:')
+      // Wallet rows report available (cleared) funds; for yield rows the
+      // two figures are identical by construction.
+      const amount = isYield ? b.balance : b.availableBalance
+      return {
+        accountId: b.accountId,
+        accountName: b.accountName,
+        currency: b.currency,
+        balance: amount,
+        balanceNzd: toNzd(amount, b.currency ?? 'NZD', rateMap),
+        source: isYield ? 'airwallex_yield' : 'airwallex',
+      }
+    }),
+    ...xeroRows
+      .filter(b => !airwallexCurrencies.has((b.currency ?? 'NZD').toUpperCase()))
+      .map(b => ({
+        accountId: b.accountId,
+        accountName: b.accountName,
+        currency: b.currency,
+        balance: b.balance,
+        balanceNzd: toNzd(b.balance, b.currency ?? 'NZD', rateMap),
+        source: 'xero',
+      })),
+  ].sort((a, b) => b.balanceNzd - a.balanceNzd)
+
+  if (accounts.length === 0) {
     return NextResponse.json({
       asOf: null,
       accounts: [],
@@ -57,14 +107,6 @@ export async function GET(req: NextRequest) {
       lastSyncedAt: null,
     })
   }
-
-  const accounts = balances.map(b => ({
-    accountId: b.accountId,
-    accountName: b.accountName,
-    currency: b.currency,
-    balance: b.balance,
-    balanceNzd: toNzd(b.balance, b.currency ?? 'NZD', rateMap),
-  }))
 
   const totalBalanceNzd = accounts.reduce((s, a) => s + a.balanceNzd, 0)
 
@@ -94,13 +136,17 @@ export async function GET(req: NextRequest) {
     ? totalBalanceNzd / avgMonthlyBurnNzd
     : null
 
-  const lastSyncedAt = balances.reduce<string | null>((max, b) => {
-    if (!max || b.updatedAt > max) return b.updatedAt
-    return max
-  }, null)
+  const usedRows: Array<{ asOf: string; updatedAt: string }> = [
+    ...airwallexRows.map(b => ({ asOf: b.asOf, updatedAt: b.updatedAt })),
+    ...xeroRows
+      .filter(b => !airwallexCurrencies.has((b.currency ?? 'NZD').toUpperCase()))
+      .map(b => ({ asOf: b.asOf, updatedAt: b.updatedAt })),
+  ]
+  const asOf = usedRows.reduce<string | null>((max, r) => (!max || r.asOf > max ? r.asOf : max), null)
+  const lastSyncedAt = usedRows.reduce<string | null>((max, r) => (!max || r.updatedAt > max ? r.updatedAt : max), null)
 
   return NextResponse.json({
-    asOf: balances[0].asOf,
+    asOf,
     accounts,
     totalBalanceNzd,
     avgMonthlyBurnNzd,

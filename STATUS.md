@@ -1,7 +1,16 @@
 # Tahi Dashboard — Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-07-09** by Claude (Overview home rebuilt to the design import; Settings rebuild the day prior)
+> Last updated: **2026-08-10** by Claude (bank truth fix: Airwallex-first everywhere + yield holdings + Xero drift alarm)
+
+## Bank truth (2026-08-10)
+
+Xero's ledger had silently drifted 57k NZD above the real Airwallex position, and no surface was alerting. reports/bank-balances (backing the MCP `get_bank_balances` tool) was reading `xero_bank_balances` and reporting 142.9k NZD; the Airwallex-first surfaces (overview Cash, /financial-reports) were blind to Airwallex Capital yield and reporting 49.7k. Real position: 85.6k NZD. Fixes shipped:
+
+- **reports/bank-balances** now aggregates Airwallex-first (available basis + yield rows), Xero per-currency fallback only, failing loud if the Airwallex read errors. Same source policy as summary + overview.
+- **Yield holdings**: the public Airwallex API has no yield endpoint, so positions live in the settings key `finance.yieldHoldings` (JSON `[{"currency":"USD","amount":20014.13}]`, editable via `update_settings` MCP tool). The daily Airwallex sync materialises them as `yield:CUR` rows in `airwallex_balances`; every cash reader includes them automatically. Snapshot BACKFILL excludes them (wallet-ledger rewind would double-count); forward snapshots include them.
+- **Drift alarm**: finance-anomaly-scan now runs a deterministic per-currency Airwallex-vs-Xero comparison (`lib/bank-drift.ts`, 10 tests) before the AI half, raising `finance_anomaly` notifications past 5% + 100 native units. This is the alarm that was missing while Xero drifted for months.
+- Liam reconciled Xero the same day; the Monday scan verifies it stays quiet.
 
 ## Overview home rebuild (2026-07-09)
 

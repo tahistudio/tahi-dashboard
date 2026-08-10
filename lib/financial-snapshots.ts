@@ -98,7 +98,14 @@ export async function backfillCashFromLedger(drizzle: D1, now: Date = new Date()
   // row as "<accountId>:<currency>", while airwallex_transactions carries a
   // bare accountId plus a currency, so the two only reconcile on CURRENCY: a
   // USD transaction moves the USD balance.
-  const balances = await drizzle.select().from(schema.airwallexBalances)
+  //
+  // Wallet rows only: yield rows (accountId 'yield:CUR', materialised from
+  // the finance.yieldHoldings setting) are excluded because the wallet
+  // ledger already records the outbound transfer when funds moved into
+  // yield. Rewinding a wallet-plus-yield anchor past that transfer would
+  // double-count the amount in every reconstructed month.
+  const balances = (await drizzle.select().from(schema.airwallexBalances))
+    .filter(b => !b.accountId.startsWith('yield:'))
   if (balances.length === 0) return empty('No Airwallex balances to anchor reconstruction.')
   const balByCurrency = new Map<string, number>()
   for (const b of balances) {

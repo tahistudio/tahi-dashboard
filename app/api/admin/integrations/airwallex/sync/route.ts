@@ -19,7 +19,7 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, inArray, sql } from 'drizzle-orm'
+import { eq, inArray, like, sql } from 'drizzle-orm'
 import { listBalances, listTransactions, AirwallexNotConfiguredError, getAirwallexToken } from '@/lib/airwallex'
 import { logCronRun } from '@/lib/cron-runs'
 
@@ -88,6 +88,8 @@ export async function POST(req: NextRequest) {
   let balanceUpserts = 0
   let created = 0
   let updated = 0
+  let yieldRows = 0
+  let yieldMalformed = false
   try {
     // Balances: one row per currency, keyed on accountId. Bulk upsert in
     // chunks; on conflict refresh the amounts + timestamps from the new row.
@@ -172,6 +174,90 @@ export async function POST(req: NextRequest) {
       })
     }
 
+    // Yield holdings (Airwallex Capital). The public Airwallex API only
+    // exposes wallet balances, so yield positions are operator-maintained
+    // via the settings key finance.yieldHoldings, a JSON array like
+    // [{"currency":"USD","amount":20014.13}]. Each sync materialises them
+    // as extra airwallex_balances rows (accountId 'yield:CUR') so every
+    // reader (overview cash, financial-reports summary, bank-balances,
+    // forward snapshots) includes them with no special cases. Rows for
+    // currencies removed from the setting are deleted. The snapshot
+    // BACKFILL and the Xero drift check both exclude 'yield:' rows by key.
+    const [yieldSetting] = await database
+      .select({ value: schema.settings.value })
+      .from(schema.settings)
+      .where(eq(schema.settings.key, 'finance.yieldHoldings'))
+      .limit(1)
+    // A missing setting or an empty array means "no yield held" and clears
+    // the materialised rows. A document that fails to parse, or contains
+    // ANY invalid entry, means "don't touch anything": the last good
+    // holdings keep counting until the setting is fixed. One typo'd entry
+    // must never silently delete a real position from every cash surface.
+    // Multiple tranches of the same currency sum into one 'yield:CUR' row.
+    const holdingsByCurrency = new Map<string, number>()
+    let holdingsReadable = true
+    if (yieldSetting?.value) {
+      try {
+        const parsed = JSON.parse(yieldSetting.value) as unknown
+        if (Array.isArray(parsed)) {
+          for (const entry of parsed) {
+            const rec = entry && typeof entry === 'object'
+              ? entry as { currency?: unknown; amount?: unknown }
+              : null
+            const cur = String(rec?.currency ?? '').toUpperCase()
+            const amt = Number(rec?.amount)
+            if (!rec || !/^[A-Z]{3}$/.test(cur) || !Number.isFinite(amt) || amt < 0) {
+              holdingsReadable = false
+              break
+            }
+            holdingsByCurrency.set(cur, (holdingsByCurrency.get(cur) ?? 0) + amt)
+          }
+        } else {
+          holdingsReadable = false
+        }
+      } catch {
+        holdingsReadable = false
+      }
+    }
+    yieldMalformed = !holdingsReadable
+    if (holdingsReadable) {
+      const wanted = new Set([...holdingsByCurrency.keys()].map(cur => `yield:${cur}`))
+      const existingYield = await database
+        .select({ accountId: schema.airwallexBalances.accountId })
+        .from(schema.airwallexBalances)
+        .where(like(schema.airwallexBalances.accountId, 'yield:%'))
+      const stale = existingYield.map(r => r.accountId).filter(id => !wanted.has(id))
+      for (let i = 0; i < stale.length; i += PARAM_BUDGET) {
+        await database
+          .delete(schema.airwallexBalances)
+          .where(inArray(schema.airwallexBalances.accountId, stale.slice(i, i + PARAM_BUDGET)))
+      }
+      const yieldRowValues = [...holdingsByCurrency.entries()].map(([cur, amount]) => ({
+        accountId: `yield:${cur}`,
+        accountName: `Airwallex ${cur} Yield`,
+        currency: cur,
+        balance: amount,
+        availableBalance: amount,
+        asOf: nowIso,
+        updatedAt: nowIso,
+      }))
+      for (let i = 0; i < yieldRowValues.length; i += balChunk) {
+        const slice = yieldRowValues.slice(i, i + balChunk)
+        await database.insert(schema.airwallexBalances).values(slice).onConflictDoUpdate({
+          target: schema.airwallexBalances.accountId,
+          set: {
+            accountName: sql`excluded.account_name`,
+            currency: sql`excluded.currency`,
+            balance: sql`excluded.balance`,
+            availableBalance: sql`excluded.available_balance`,
+            asOf: sql`excluded.as_of`,
+            updatedAt: sql`excluded.updated_at`,
+          },
+        })
+      }
+      yieldRows = yieldRowValues.length
+    }
+
     // Stamp lastSyncedAt on the integration row so /settings/crons +
     // anomaly checks can spot stale data.
     const [existingInt] = await database
@@ -199,6 +285,8 @@ export async function POST(req: NextRequest) {
     days,
     balances: balanceUpserts,
     transactions: { fetched: transactions.length, created, updated },
+    yieldRows,
+    yieldMalformed,
   }
   await logCronRun(database, 'sync-airwallex', 'success', Date.now() - t0, summary, null)
   return NextResponse.json(summary)
