@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, inArray, sql } from 'drizzle-orm'
-import { resolveAccessScoping } from '@/lib/access-scoping'
+import { scopedOrgIds } from '@/lib/access-scope'
+import { orgColumnInScope, isOrgInScope } from '../_scoping/org-scope'
 import { convertToNzd } from '@/lib/currency'
 import { logActivity, formatMoney } from '@/lib/deal-activity'
 import { readForecastHorizonMonths } from '@/lib/pipeline-settings'
@@ -28,16 +29,17 @@ export async function GET(req: NextRequest) {
 
   const database = await db() as unknown as D1
 
-  // Access scoping
-  const scopedOrgIds = await resolveAccessScoping(database, userId)
+  // Access scoping. Unlinked deals (org_id IS NULL) stay on the board for a
+  // scoped member: see the NULL-ORG RULE in ./_access.ts.
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (scope.kind === 'none') {
+    return NextResponse.json({ items: [], page, limit })
+  }
 
   const conditions = []
 
-  if (scopedOrgIds !== null) {
-    if (scopedOrgIds.length === 0) {
-      return NextResponse.json({ items: [], page, limit })
-    }
-    conditions.push(inArray(schema.deals.orgId, scopedOrgIds))
+  if (scope.kind === 'some') {
+    conditions.push(orgColumnInScope(schema.deals.orgId, scope.orgIds, { includeNull: true }))
   }
   // Exclude archived (soft-deleted) deals
   conditions.push(sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`)
@@ -189,6 +191,13 @@ export async function POST(req: NextRequest) {
   }
   if (!body.stageId) {
     return NextResponse.json({ error: 'stageId is required' }, { status: 400 })
+  }
+
+  // A scoped member may only open a deal against a client they can see, or
+  // leave it unlinked (NULL-ORG RULE in ./_access.ts).
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (!isOrgInScope(scope, body.orgId ?? null, 'allow-if-any-scope')) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const database = await db() as unknown as D1

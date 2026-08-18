@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, inArray } from 'drizzle-orm'
+import { requireScheduleAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 import {
   computeRowStatus,
   computeEngagementStatus,
@@ -15,13 +16,16 @@ type Params = { params: Promise<{ id: string }> }
 // Returns live per-row delivery status + an engagement rollup, derived from the
 // requests/tasks linked to each gantt row (scheduleRowId) vs the planned window.
 export async function GET(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const { id: scheduleId } = await params
   const drizzle = (await db()) as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const denied = await requireScheduleAccess(drizzle, { userId, orgId }, scheduleId)
+  if (denied) return denied
 
   const [schedule] = await drizzle
     .select({ id: schema.projectSchedules.id, effectiveDate: schema.projectSchedules.effectiveDate })

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, asc } from 'drizzle-orm'
+import { requireContractAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -14,11 +15,14 @@ type RouteContext = { params: Promise<{ id: string }> }
  * Mirrors the public endpoint shape but doesn't require a public token.
  */
 export async function GET(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
   const database = await db() as unknown as D1
+
+  const denied = await requireContractAccess(database, { userId, orgId }, id)
+  if (denied) return denied
 
   const [doc] = await database
     .select({

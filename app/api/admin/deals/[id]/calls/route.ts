@@ -9,20 +9,25 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
 import { createCallForParent, listCallsForParent } from '@/lib/calls'
+import { requireDealAccess } from '../../_access'
+
+type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 type Params = { params: Promise<{ id: string }> }
 
 export async function GET(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const { id } = await params
   const database = await db()
+
+  const denied = await requireDealAccess(database as unknown as D1, { userId, orgId }, id)
+  if (denied) return denied
+
   const calls = await listCallsForParent(database, 'deal', id)
   return NextResponse.json({ calls })
 }
@@ -54,14 +59,8 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const database = await db()
 
-  const dealExists = await database
-    .select({ id: schema.deals.id })
-    .from(schema.deals)
-    .where(eq(schema.deals.id, id))
-    .limit(1)
-  if (dealExists.length === 0) {
-    return NextResponse.json({ error: 'Deal not found' }, { status: 404 })
-  }
+  const denied = await requireDealAccess(database as unknown as D1, { userId, orgId }, id)
+  if (denied) return denied
 
   try {
     const { id: callId } = await createCallForParent(database, 'deal', id, {

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { desc, eq, asc } from 'drizzle-orm'
+import { requireProposalAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -48,6 +49,12 @@ export async function POST(req: NextRequest) {
 
   let snapshot: unknown
   if (body.fromProposalId) {
+    // Snapshotting copies one client's content into a reusable template, so it
+    // needs the same access as reading that proposal. The template itself stays
+    // global once created.
+    const denied = await requireProposalAccess(database, { userId, orgId }, body.fromProposalId)
+    if (denied) return denied
+
     const [proposal] = await database
       .select({
         title: schema.proposals.title,

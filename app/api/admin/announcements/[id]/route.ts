@@ -3,6 +3,12 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { scopedOrgIds } from '@/lib/access-scope'
+import {
+  BROADCAST_DENIED,
+  canWriteAnnouncement,
+  parseTargetIds,
+} from '../_access'
 
 // ── PATCH /api/admin/announcements/[id] ─────────────────────────────────────
 // Edit an announcement. Any subset of fields may be sent; omitted keys are
@@ -14,7 +20,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -31,6 +37,16 @@ export async function PATCH(
     return NextResponse.json({ error: 'Announcement not found' }, { status: 404 })
   }
   const existing = rows[0]
+
+  // The caller must be allowed to write the announcement as it stands today,
+  // and (checked once the patch is resolved) as it will stand afterwards.
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (!canWriteAnnouncement(scope, {
+    targetType: existing.targetType,
+    targetIds: parseTargetIds(existing.targetIds),
+  })) {
+    return NextResponse.json({ error: BROADCAST_DENIED }, { status: 403 })
+  }
 
   const body = await req.json() as {
     title?: string
@@ -101,6 +117,15 @@ export async function PATCH(
     }
   }
 
+  if (!canWriteAnnouncement(scope, {
+    targetType: finalTargetType,
+    targetIds: parseTargetIds(
+      update.targetIds !== undefined ? update.targetIds ?? null : existing.targetIds,
+    ),
+  })) {
+    return NextResponse.json({ error: BROADCAST_DENIED }, { status: 403 })
+  }
+
   if (body.expiresAt !== undefined) update.expiresAt = body.expiresAt ?? null
   if (body.emoji !== undefined) update.emoji = body.emoji?.trim().slice(0, 16) || null
   if (body.ctaLabel !== undefined) update.ctaLabel = body.ctaLabel?.trim() || null
@@ -130,7 +155,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -139,12 +164,24 @@ export async function DELETE(
   const database = await db()
 
   const rows = await database
-    .select({ id: schema.announcements.id })
+    .select({
+      id: schema.announcements.id,
+      targetType: schema.announcements.targetType,
+      targetIds: schema.announcements.targetIds,
+    })
     .from(schema.announcements)
     .where(eq(schema.announcements.id, id))
     .limit(1)
   if (rows.length === 0) {
     return NextResponse.json({ error: 'Announcement not found' }, { status: 404 })
+  }
+
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (!canWriteAnnouncement(scope, {
+    targetType: rows[0].targetType,
+    targetIds: parseTargetIds(rows[0].targetIds),
+  })) {
+    return NextResponse.json({ error: BROADCAST_DENIED }, { status: 403 })
   }
 
   // Explicit dismissal cleanup: D1 does not always enforce FK cascades.

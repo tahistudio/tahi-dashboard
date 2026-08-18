@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { requireScheduleAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -25,12 +26,15 @@ function mintShareToken(): string {
 // Mint (or rotate) a public share token for the schedule. Returns the
 // token; caller composes the URL on the client side.
 export async function POST(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
   const database = await db() as unknown as D1
   const now = new Date().toISOString()
+
+  const denied = await requireScheduleAccess(database, { userId, orgId }, id)
+  if (denied) return denied
 
   // If a token already exists, return it (idempotent share). Pass ?rotate=1
   // to force a new token (revokes the previous one).
@@ -71,11 +75,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 // ── DELETE /api/admin/schedules/[id]/share ─────────────────────────────
 // Revoke the public share token. Existing public links will 404 after this.
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
   const database = await db() as unknown as D1
+
+  const denied = await requireScheduleAccess(database, { userId, orgId }, id)
+  if (denied) return denied
+
   await database
     .update(schema.projectSchedules)
     .set({

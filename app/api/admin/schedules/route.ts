@@ -3,6 +3,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, asc, inArray } from 'drizzle-orm'
+import {
+  filterArtifactsByScope,
+  requireArtifactAccess,
+  scopedOrgCondition,
+  scopedOrgIds,
+} from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -11,10 +17,13 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 // `includeRows=1` additionally returns each schedule's deliverable gantt
 // rows (task / gate / critical_gate) for delivery-phase pickers.
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (scope.kind === 'none') return NextResponse.json({ items: [] })
 
   const url = new URL(req.url)
   const filterOrgId = url.searchParams.get('orgId')
@@ -32,8 +41,12 @@ export async function GET(req: NextRequest) {
   if (filterLeadId) conditions.push(eq(schema.projectSchedules.leadId, filterLeadId))
   if (filterProposalId) conditions.push(eq(schema.projectSchedules.proposalId, filterProposalId))
   if (filterStatus) conditions.push(eq(schema.projectSchedules.status, filterStatus))
+  if (scope.kind === 'some') {
+    const scopeCondition = scopedOrgCondition(schema.projectSchedules.orgId, scope.orgIds)
+    if (scopeCondition) conditions.push(scopeCondition)
+  }
 
-  const items = await database
+  const scopedRows = await database
     .select({
       id: schema.projectSchedules.id,
       orgId: schema.projectSchedules.orgId,
@@ -61,6 +74,12 @@ export async function GET(req: NextRequest) {
     .leftJoin(schema.leads, eq(schema.projectSchedules.leadId, schema.leads.id))
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(schema.projectSchedules.updatedAt))
+
+  // The SQL condition above is only a pre-filter: a deal-linked row with a null
+  // org_id still needs its owning org resolved before it can be trusted.
+  const items = scope.kind === 'some'
+    ? await filterArtifactsByScope(database, scopedRows, scope.orgIds)
+    : scopedRows
 
   if (!includeRows || items.length === 0) {
     return NextResponse.json({ items })
@@ -190,6 +209,13 @@ export async function POST(req: NextRequest) {
   }
 
   const database = await db() as unknown as D1
+
+  const denied = await requireArtifactAccess(database, { userId, orgId }, {
+    orgId: body.orgId ?? null,
+    dealId: body.dealId ?? null,
+  })
+  if (denied) return denied
+
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 

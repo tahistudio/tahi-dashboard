@@ -3,13 +3,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, asc } from 'drizzle-orm'
+import { requireArtifactAccess, requireContractAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
 
 // GET /api/admin/contracts/documents/[id] — full detail with signers + signatures
 export async function GET(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
@@ -21,6 +22,9 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     .where(eq(schema.contractDocuments.id, id))
     .limit(1)
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  const denied = await requireArtifactAccess(database, { userId, orgId }, doc)
+  if (denied) return denied
 
   const [signers, signatures] = await Promise.all([
     database.select()
@@ -59,10 +63,27 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
   // Read current state so we can log link/unlink activity if dealId changes.
   const [current] = await database
-    .select({ dealId: schema.contractDocuments.dealId, name: schema.contractDocuments.name })
+    .select({
+      orgId: schema.contractDocuments.orgId,
+      dealId: schema.contractDocuments.dealId,
+      name: schema.contractDocuments.name,
+    })
     .from(schema.contractDocuments)
     .where(eq(schema.contractDocuments.id, id))
     .limit(1)
+
+  const denied = await requireArtifactAccess(database, { userId, orgId }, current)
+  if (denied) return denied
+
+  // Re-linking has to land on a client the caller can also reach, so a scoped
+  // member cannot move a contract into or out of an org outside their scope.
+  if (body.orgId !== undefined || body.dealId !== undefined) {
+    const deniedTarget = await requireArtifactAccess(database, { userId, orgId }, {
+      orgId: body.orgId !== undefined ? body.orgId : current?.orgId ?? null,
+      dealId: body.dealId !== undefined ? body.dealId : current?.dealId ?? null,
+    })
+    if (deniedTarget) return deniedTarget
+  }
 
   if (body.name !== undefined) updates.name = body.name.trim()
   if (body.status !== undefined) updates.status = body.status
@@ -112,10 +133,12 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
 // DELETE — cascades to signers + signatures via FK
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { id } = await ctx.params
   const database = await db() as unknown as D1
+  const denied = await requireContractAccess(database, { userId, orgId }, id)
+  if (denied) return denied
   await database.delete(schema.contractDocuments).where(eq(schema.contractDocuments.id, id))
   return NextResponse.json({ success: true })
 }

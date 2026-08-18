@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, asc, and } from 'drizzle-orm'
+import { requireArtifactAccess, requireProposalAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -10,7 +11,7 @@ type RouteContext = { params: Promise<{ id: string }> }
 // ── GET /api/admin/proposals/[id] ─────────────────────────────────────
 // Returns proposal + sections + variants + recent acceptances (for audit).
 export async function GET(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
@@ -49,6 +50,9 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     .limit(1)
 
   if (!proposal) return NextResponse.json({ error: 'Proposal not found' }, { status: 404 })
+
+  const denied = await requireArtifactAccess(database, { userId, orgId }, proposal)
+  if (denied) return denied
 
   const [sections, variants, acceptances] = await Promise.all([
     database.select().from(schema.proposalSections)
@@ -91,10 +95,27 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
   // Read current dealId so we can log link/unlink activity if it changes.
   const [current] = await database
-    .select({ dealId: schema.proposals.dealId, title: schema.proposals.title })
+    .select({
+      orgId: schema.proposals.orgId,
+      dealId: schema.proposals.dealId,
+      title: schema.proposals.title,
+    })
     .from(schema.proposals)
     .where(eq(schema.proposals.id, id))
     .limit(1)
+
+  const denied = await requireArtifactAccess(database, { userId, orgId }, current)
+  if (denied) return denied
+
+  // Re-linking has to land on a client the caller can also reach, so a scoped
+  // member cannot move a proposal into or out of an org outside their scope.
+  if (body.orgId !== undefined || body.dealId !== undefined) {
+    const deniedTarget = await requireArtifactAccess(database, { userId, orgId }, {
+      orgId: body.orgId !== undefined ? body.orgId : current?.orgId ?? null,
+      dealId: body.dealId !== undefined ? body.dealId : current?.dealId ?? null,
+    })
+    if (deniedTarget) return deniedTarget
+  }
 
   if (body.title !== undefined) updates.title = body.title.trim()
   if (body.subtitle !== undefined) updates.subtitle = body.subtitle?.trim() ?? null
@@ -150,11 +171,15 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 // ── DELETE /api/admin/proposals/[id] ───────────────────────────────────
 // Cascades to sections + variants + acceptances via FK CASCADE.
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
   const database = await db() as unknown as D1
+
+  const denied = await requireProposalAccess(database, { userId, orgId }, id)
+  if (denied) return denied
+
   await database.delete(schema.proposals).where(eq(schema.proposals.id, id))
   return NextResponse.json({ success: true })
 }

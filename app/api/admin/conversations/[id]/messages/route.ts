@@ -5,6 +5,9 @@ import { schema } from '@/db/d1'
 import { eq, desc, and, ne, inArray } from 'drizzle-orm'
 import { createNotifications, notifyMentionedPerson, resolveParticipants } from '@/lib/notifications'
 import { parseMentions } from '@/lib/parse-mentions'
+import { requireConversationAccess } from '../../_access'
+
+type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 // ── GET /api/admin/conversations/[id]/messages ──────────────────────────────
 // Paginated messages for a conversation. Joins sender info.
@@ -30,30 +33,10 @@ export async function GET(
 
   const database = await db()
 
-  // Resolve team member ID
-  const teamMemberRows = await database
-    .select({ id: schema.teamMembers.id })
-    .from(schema.teamMembers)
-    .where(eq(schema.teamMembers.clerkUserId, userId))
-    .limit(1)
-
-  const participantId = teamMemberRows.length > 0 ? teamMemberRows[0].id : userId
-
-  // Verify the user is a participant
-  const participantCheck = await database
-    .select({ id: schema.conversationParticipants.id })
-    .from(schema.conversationParticipants)
-    .where(
-      and(
-        eq(schema.conversationParticipants.conversationId, conversationId),
-        eq(schema.conversationParticipants.participantId, participantId)
-      )
-    )
-    .limit(1)
-
-  if (participantCheck.length === 0) {
-    return NextResponse.json({ error: 'Not a participant' }, { status: 403 })
-  }
+  // Participation + org scope
+  const access = await requireConversationAccess(database as unknown as D1, { userId, orgId }, conversationId)
+  if (!access.ok) return access.response
+  const { participantId } = access
 
   // Get messages
   const messages = await database
@@ -193,43 +176,11 @@ export async function POST(
 
     const database = await db()
 
-    // Resolve team member ID
-    const teamMemberRows = await database
-      .select({ id: schema.teamMembers.id })
-      .from(schema.teamMembers)
-      .where(eq(schema.teamMembers.clerkUserId, userId))
-      .limit(1)
+    // Participation + org scope
+    const access = await requireConversationAccess(database as unknown as D1, { userId, orgId }, conversationId)
+    if (!access.ok) return access.response
+    const { participantId, conversation: conv } = access
 
-    const participantId = teamMemberRows.length > 0 ? teamMemberRows[0].id : userId
-
-    // Verify the user is a participant
-    const participantCheck = await database
-      .select({ id: schema.conversationParticipants.id })
-      .from(schema.conversationParticipants)
-      .where(
-        and(
-          eq(schema.conversationParticipants.conversationId, conversationId),
-          eq(schema.conversationParticipants.participantId, participantId)
-        )
-      )
-      .limit(1)
-
-    if (participantCheck.length === 0) {
-      return NextResponse.json({ error: 'Not a participant' }, { status: 403 })
-    }
-
-    // Get the conversation to find its orgId
-    const convRows = await database
-      .select()
-      .from(schema.conversations)
-      .where(eq(schema.conversations.id, conversationId))
-      .limit(1)
-
-    if (convRows.length === 0) {
-      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
-    }
-
-    const conv = convRows[0]
     const now = new Date().toISOString()
     const msgId = crypto.randomUUID()
 
@@ -413,6 +364,11 @@ export async function PATCH(
     }
 
     const database = await db()
+
+    // Participation + org scope. Without this any Tahi-org caller could
+    // soft-delete a message in a thread they are not part of.
+    const access = await requireConversationAccess(database as unknown as D1, { userId, orgId }, conversationId)
+    if (!access.ok) return access.response
 
     // Verify the message belongs to this conversation
     const msgRows = await database

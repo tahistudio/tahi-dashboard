@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { dispatchDomainEvent } from '@/lib/events'
+import { denyIfDealOrgOutOfScope } from '../../_access'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -13,7 +14,7 @@ interface RouteContext {
 
 // POST /api/admin/deals/[id]/convert-to-client
 export async function POST(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -38,6 +39,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   if (!deal) {
     return NextResponse.json({ error: 'Deal not found' }, { status: 404 })
   }
+
+  const denied = await denyIfDealOrgOutOfScope({ userId, orgId }, deal.orgId)
+  if (denied) return denied
 
   // If the deal already has an orgId, check if that org is active
   if (deal.orgId) {

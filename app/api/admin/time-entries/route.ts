@@ -24,6 +24,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -94,6 +95,9 @@ export async function POST(req: NextRequest) {
   if (!entryOrgId) {
     return NextResponse.json({ error: 'Cannot log time on this target (no org attached)' }, { status: 400 })
   }
+
+  const denied = await requireAccessToOrg(drizzle, userId, entryOrgId)
+  if (denied) return denied
 
   const newId = crypto.randomUUID()
   await drizzle.insert(schema.timeEntries).values({

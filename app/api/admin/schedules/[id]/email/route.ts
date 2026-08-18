@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm'
 import { render } from '@react-email/render'
 import { ScheduleShareEmail } from '@/emails/schedule-share'
 import { publicUrl } from '@/lib/app-url'
+import { requireScheduleAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -18,7 +19,7 @@ interface Recipient { name: string; email: string }
  * Requires the schedule to have a publicShareToken minted already.
  */
 export async function POST(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
@@ -40,6 +41,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   }
 
   const database = await db() as unknown as D1
+
+  const denied = await requireScheduleAccess(database, { userId, orgId }, id)
+  if (denied) return denied
+
   const [schedule] = await database
     .select({
       id: schema.projectSchedules.id,

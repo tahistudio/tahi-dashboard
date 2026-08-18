@@ -4,6 +4,12 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { fanOutAnnouncementEmails } from '@/lib/announcement-emails'
+import { scopedOrgIds } from '@/lib/access-scope'
+import {
+  BROADCAST_DENIED,
+  canWriteAnnouncement,
+  parseTargetIds,
+} from '../../_access'
 
 // POST /api/admin/announcements/[id]/send
 // Publishes a previously-created (draft) announcement and, when the
@@ -15,7 +21,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -35,6 +41,14 @@ export async function POST(
   }
 
   const announcement = rows[0]
+
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (!canWriteAnnouncement(scope, {
+    targetType: announcement.targetType,
+    targetIds: parseTargetIds(announcement.targetIds),
+  })) {
+    return NextResponse.json({ error: BROADCAST_DENIED }, { status: 403 })
+  }
 
   // Mark as published.
   await database

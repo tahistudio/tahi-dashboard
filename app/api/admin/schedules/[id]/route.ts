@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, asc } from 'drizzle-orm'
+import { requireArtifactAccess, requireScheduleAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -10,7 +11,7 @@ type RouteContext = { params: Promise<{ id: string }> }
 // ── GET /api/admin/schedules/[id] ──────────────────────────────────────
 // Returns the schedule + all its rows in display order.
 export async function GET(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
@@ -49,6 +50,9 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     .limit(1)
 
   if (!scheduleRow) return NextResponse.json({ error: 'Schedule not found' }, { status: 404 })
+
+  const denied = await requireArtifactAccess(database, { userId, orgId }, scheduleRow)
+  if (denied) return denied
 
   // Sectioned schedules (migration 0026): fetch sections + their rows in
   // one batched read, then nest the rows under each section. Rows without
@@ -120,10 +124,27 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
   // Read current dealId so we can log link/unlink activity if it changes.
   const [current] = await database
-    .select({ dealId: schema.projectSchedules.dealId, title: schema.projectSchedules.title })
+    .select({
+      orgId: schema.projectSchedules.orgId,
+      dealId: schema.projectSchedules.dealId,
+      title: schema.projectSchedules.title,
+    })
     .from(schema.projectSchedules)
     .where(eq(schema.projectSchedules.id, id))
     .limit(1)
+
+  const denied = await requireArtifactAccess(database, { userId, orgId }, current)
+  if (denied) return denied
+
+  // Re-linking has to land on a client the caller can also reach, so a scoped
+  // member cannot move a schedule into or out of an org outside their scope.
+  if (body.orgId !== undefined || body.dealId !== undefined) {
+    const deniedTarget = await requireArtifactAccess(database, { userId, orgId }, {
+      orgId: body.orgId !== undefined ? body.orgId : current?.orgId ?? null,
+      dealId: body.dealId !== undefined ? body.dealId : current?.dealId ?? null,
+    })
+    if (deniedTarget) return deniedTarget
+  }
 
   if (body.title !== undefined) updates.title = body.title.trim()
   if (body.subtitle !== undefined) updates.subtitle = body.subtitle?.trim() ?? null
@@ -181,11 +202,15 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 // ── DELETE /api/admin/schedules/[id] ───────────────────────────────────
 // Hard delete. Cascades to schedule_rows (FK ON DELETE CASCADE).
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
   const database = await db() as unknown as D1
+
+  const denied = await requireScheduleAccess(database, { userId, orgId }, id)
+  if (denied) return denied
+
   await database.delete(schema.projectSchedules).where(eq(schema.projectSchedules.id, id))
   return NextResponse.json({ success: true })
 }

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
+import { requireScheduleAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string; rowId: string }> }
@@ -10,7 +11,7 @@ type RouteContext = { params: Promise<{ id: string; rowId: string }> }
 // ── PATCH /api/admin/schedules/[id]/rows/[rowId] ───────────────────────
 // Partial update of a row. Pass the fields you want to change.
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id: scheduleId, rowId } = await ctx.params
@@ -25,6 +26,10 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   }
 
   const database = await db() as unknown as D1
+
+  const denied = await requireScheduleAccess(database, { userId, orgId }, scheduleId)
+  if (denied) return denied
+
   const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() }
 
   if (body.rowType !== undefined) updates.rowType = body.rowType
@@ -70,11 +75,14 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
 // ── DELETE /api/admin/schedules/[id]/rows/[rowId] ──────────────────────
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id: scheduleId, rowId } = await ctx.params
   const database = await db() as unknown as D1
+
+  const denied = await requireScheduleAccess(database, { userId, orgId }, scheduleId)
+  if (denied) return denied
 
   await database
     .delete(schema.scheduleRows)

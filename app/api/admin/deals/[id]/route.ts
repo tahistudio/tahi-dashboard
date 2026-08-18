@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import { eq, desc, sql, and } from 'drizzle-orm'
 import { convertToNzd } from '@/lib/currency'
 import { logActivity, valueChanged, valueChangeTitle, valueChangeMetadata, formatMoney } from '@/lib/deal-activity'
+import { denyIfDealOrgOutOfScope } from '../_access'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -14,7 +15,7 @@ interface RouteContext {
 
 // GET /api/admin/deals/[id]
 export async function GET(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -76,6 +77,9 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
   if (!deal) {
     return NextResponse.json({ error: 'Deal not found' }, { status: 404 })
   }
+
+  const denied = await denyIfDealOrgOutOfScope({ userId, orgId }, deal.orgId)
+  if (denied) return denied
 
   // Fetch value_min/value_max via raw SQL (migration 0017).
   let valueRange: { valueMin: number | null; valueMax: number | null; valueMinNzd: number | null; valueMaxNzd: number | null } = {
@@ -296,6 +300,16 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
   if (!existing) {
     return NextResponse.json({ error: 'Deal not found' }, { status: 404 })
+  }
+
+  // The deal's current org, and (when the body relinks it) the destination
+  // org, must both be in scope so a deal cannot be moved into or out of a
+  // client the caller cannot see.
+  const deniedCurrent = await denyIfDealOrgOutOfScope({ userId, orgId }, existing.orgId)
+  if (deniedCurrent) return deniedCurrent
+  if ('orgId' in body && (body.orgId ?? null) !== existing.orgId) {
+    const deniedTarget = await denyIfDealOrgOutOfScope({ userId, orgId }, body.orgId ?? null)
+    if (deniedTarget) return deniedTarget
   }
 
   // Fetch current range via raw SQL.
@@ -761,6 +775,9 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
   if (!deal) {
     return NextResponse.json({ error: 'Deal not found' }, { status: 404 })
   }
+
+  const denied = await denyIfDealOrgOutOfScope({ userId, orgId }, deal.orgId)
+  if (denied) return denied
 
   // Soft delete: set closedAt and closeReason to 'archived'
   await database

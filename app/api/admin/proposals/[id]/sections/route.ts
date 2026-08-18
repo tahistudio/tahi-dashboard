@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, sql } from 'drizzle-orm'
+import { requireProposalAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -21,7 +22,7 @@ const SECTION_TYPES = [
 
 // POST /api/admin/proposals/[id]/sections
 export async function POST(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id: proposalId } = await ctx.params
@@ -40,6 +41,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   const themeMode = body.themeMode && (THEMES as ReadonlyArray<string>).includes(body.themeMode) ? body.themeMode : 'light'
 
   const database = await db() as unknown as D1
+
+  const denied = await requireProposalAccess(database, { userId, orgId }, proposalId)
+  if (denied) return denied
+
   let position = body.position
   if (position == null) {
     const [maxRow] = await database

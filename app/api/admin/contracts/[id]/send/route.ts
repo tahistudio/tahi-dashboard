@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { requireContractAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -22,13 +23,16 @@ function mintToken(): string {
 // own email, or we'll add automated send in a follow-up). The route
 // returns each signer's per-signer URL.
 export async function POST(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
   const database = await db() as unknown as D1
   const url = new URL(req.url)
   const rotate = url.searchParams.get('rotate') === '1'
+
+  const denied = await requireContractAccess(database, { userId, orgId }, id)
+  if (denied) return denied
 
   const [doc] = await database
     .select({ id: schema.contractDocuments.id, token: schema.contractDocuments.publicShareToken, status: schema.contractDocuments.status })
@@ -67,10 +71,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
 // DELETE — revoke (back to draft, clear token, cancel pending signers).
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { id } = await ctx.params
   const database = await db() as unknown as D1
+  const denied = await requireContractAccess(database, { userId, orgId }, id)
+  if (denied) return denied
   await database.update(schema.contractDocuments).set({
     publicShareToken: null,
     publicSharedAt: null,

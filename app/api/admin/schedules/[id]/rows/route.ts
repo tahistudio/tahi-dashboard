@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, asc, sql } from 'drizzle-orm'
+import { requireScheduleAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -12,7 +13,7 @@ type RouteContext = { params: Promise<{ id: string }> }
 // not provided, the row attaches to the schedule's first gantt section
 // (back-compat for callers that predate the section model).
 export async function POST(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id: scheduleId } = await ctx.params
@@ -31,6 +32,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   if (!body.label?.trim()) return NextResponse.json({ error: 'label is required' }, { status: 400 })
 
   const database = await db() as unknown as D1
+
+  const denied = await requireScheduleAccess(database, { userId, orgId }, scheduleId)
+  if (denied) return denied
 
   // Resolve target section. Explicit sectionId wins; otherwise fall back
   // to the schedule's first gantt section. This back-compat path means

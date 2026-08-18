@@ -6,6 +6,7 @@ import { eq, and } from 'drizzle-orm'
 import { render } from '@react-email/render'
 import { ContractSignEmail } from '@/emails/contract-sign'
 import { publicUrl } from '@/lib/app-url'
+import { requireContractAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -31,7 +32,7 @@ function mintToken(): string {
  * }
  */
 export async function POST(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
@@ -52,6 +53,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
   const database = await db() as unknown as D1
   const now = new Date().toISOString()
+
+  const denied = await requireContractAccess(database, { userId, orgId }, id)
+  if (denied) return denied
 
   // Load contract
   const [doc] = await database

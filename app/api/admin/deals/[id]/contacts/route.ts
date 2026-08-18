@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
+import { requireDealAccess } from '../../_access'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -13,13 +14,16 @@ interface RouteContext {
 // -- GET /api/admin/deals/[id]/contacts ------------------------------------
 // List all contacts linked to this deal via dealContacts junction table.
 export async function GET(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const { id: dealId } = await ctx.params
   const database = await db() as unknown as D1
+
+  const denied = await requireDealAccess(database, { userId, orgId }, dealId)
+  if (denied) return denied
 
   const items = await database
     .select({
@@ -42,7 +46,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
 // -- POST /api/admin/deals/[id]/contacts -----------------------------------
 // Add a contact to this deal. Body: { contactId, role? }
 export async function POST(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -55,6 +59,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   }
 
   const database = await db() as unknown as D1
+
+  const denied = await requireDealAccess(database, { userId, orgId }, dealId)
+  if (denied) return denied
+
   const id = crypto.randomUUID()
 
   await database.insert(schema.dealContacts).values({
@@ -70,7 +78,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 // -- DELETE /api/admin/deals/[id]/contacts ---------------------------------
 // Remove a contact from this deal. Body: { contactId }
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -83,6 +91,9 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
   }
 
   const database = await db() as unknown as D1
+
+  const denied = await requireDealAccess(database, { userId, orgId }, dealId)
+  if (denied) return denied
 
   await database
     .delete(schema.dealContacts)

@@ -3,13 +3,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 // PATCH /api/admin/calls/[id] - update call
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -27,6 +28,17 @@ export async function PATCH(
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const [call] = await drizzle
+    .select({ orgId: schema.scheduledCalls.orgId })
+    .from(schema.scheduledCalls)
+    .where(eq(schema.scheduledCalls.id, id))
+    .limit(1)
+  if (!call) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+  const denied = await requireAccessToOrg(drizzle, userId, call.orgId)
+  if (denied) return denied
 
   const updates: Record<string, unknown> = {
     updatedAt: new Date().toISOString(),

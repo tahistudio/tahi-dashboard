@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, gte, lte, sql } from 'drizzle-orm'
+import { scopedOrgIds } from '@/lib/access-scope'
+import { requireAccessToOrg } from '@/lib/require-access'
+import { orgColumnInScope } from '../_scoping/org-scope'
 
 // ── GET /api/admin/time ──────────────────────────────────────────────────────
 // Returns paginated time entries with joins (org name, team member name, request title).
@@ -22,6 +25,13 @@ export async function GET(req: NextRequest) {
   const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10))
   const limit = 50
   const offset = (page - 1) * limit
+
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (scope.kind === 'none') {
+    return NextResponse.json({
+      items: [], page, limit, totalHours: 0, billableHours: 0, entryCount: 0, capacityHours: null,
+    })
+  }
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -54,6 +64,9 @@ export async function GET(req: NextRequest) {
 
   // Build conditions array
   const conditions = []
+  if (scope.kind === 'some') {
+    conditions.push(orgColumnInScope(schema.timeEntries.orgId, scope.orgIds))
+  }
   if (orgIdFilter) conditions.push(eq(schema.timeEntries.orgId, orgIdFilter))
   if (teamMemberIdFilter) conditions.push(eq(schema.timeEntries.teamMemberId, teamMemberIdFilter))
   if (billableFilter === '1') conditions.push(eq(schema.timeEntries.billable, true))
@@ -112,7 +125,7 @@ export async function GET(req: NextRequest) {
 // Creates a new time entry.
 // Body: { orgId, requestId?, teamMemberId, hours, notes?, billable?, date }
 export async function POST(req: NextRequest) {
-  const { orgId: authOrgId } = await getRequestAuth(req)
+  const { orgId: authOrgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(authOrgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -145,6 +158,9 @@ export async function POST(req: NextRequest) {
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const denied = await requireAccessToOrg(drizzle, userId, body.orgId)
+  if (denied) return denied
 
   await drizzle.insert(schema.timeEntries).values({
     id,

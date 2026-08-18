@@ -3,12 +3,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
+import { requireProposalAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string; sectionId: string }> }
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id: proposalId, sectionId } = await ctx.params
@@ -21,6 +22,10 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     position?: number
   }
   const database = await db() as unknown as D1
+
+  const denied = await requireProposalAccess(database, { userId, orgId }, proposalId)
+  if (denied) return denied
+
   const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() }
   if (body.type !== undefined) updates.type = body.type
   if (body.title !== undefined) updates.title = body.title?.trim() ?? null
@@ -42,11 +47,15 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 }
 
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id: proposalId, sectionId } = await ctx.params
   const database = await db() as unknown as D1
+
+  const denied = await requireProposalAccess(database, { userId, orgId }, proposalId)
+  if (denied) return denied
+
   await database.delete(schema.proposalSections)
     .where(and(eq(schema.proposalSections.id, sectionId), eq(schema.proposalSections.proposalId, proposalId)))
   await database.update(schema.proposals).set({ updatedAt: new Date().toISOString() }).where(eq(schema.proposals.id, proposalId))

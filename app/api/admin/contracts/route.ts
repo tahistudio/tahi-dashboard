@@ -3,6 +3,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, count, sql, inArray } from 'drizzle-orm'
+import {
+  filterArtifactsByScope,
+  requireArtifactAccess,
+  scopedOrgCondition,
+  scopedOrgIds,
+} from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -25,8 +31,11 @@ function substituteVariables(bodyHtml: string, values: Record<string, string>): 
 
 // GET /api/admin/contracts/documents — list, filter by orgId/dealId/status
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (scope.kind === 'none') return NextResponse.json({ items: [] })
 
   const url = new URL(req.url)
   const filterOrg = url.searchParams.get('orgId')
@@ -37,7 +46,11 @@ export async function GET(req: NextRequest) {
   if (filterOrg) conditions.push(eq(schema.contractDocuments.orgId, filterOrg))
   if (filterDeal) conditions.push(eq(schema.contractDocuments.dealId, filterDeal))
   if (filterStatus) conditions.push(eq(schema.contractDocuments.status, filterStatus))
-  const items = await database
+  if (scope.kind === 'some') {
+    const scopeCondition = scopedOrgCondition(schema.contractDocuments.orgId, scope.orgIds)
+    if (scopeCondition) conditions.push(scopeCondition)
+  }
+  const scopedRows = await database
     .select({
       id: schema.contractDocuments.id,
       orgId: schema.contractDocuments.orgId,
@@ -58,6 +71,12 @@ export async function GET(req: NextRequest) {
     .leftJoin(schema.organisations, eq(schema.contractDocuments.orgId, schema.organisations.id))
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(schema.contractDocuments.updatedAt))
+
+  // The SQL condition above is only a pre-filter: a deal-linked row with a null
+  // org_id still needs its owning org resolved before it can be trusted.
+  const items = scope.kind === 'some'
+    ? await filterArtifactsByScope(database, scopedRows, scope.orgIds)
+    : scopedRows
 
   // Signer progress per contract for the homepage card: one grouped count over
   // contract_signers (NOT N+1). Each contract gets signedCount + totalSigners.
@@ -122,6 +141,12 @@ export async function POST(req: NextRequest) {
   if (!body.name?.trim()) return NextResponse.json({ error: 'name required' }, { status: 400 })
 
   const database = await db() as unknown as D1
+
+  const denied = await requireArtifactAccess(database, { userId, orgId }, {
+    orgId: body.orgId ?? null,
+    dealId: body.dealId ?? null,
+  })
+  if (denied) return denied
 
   // If templateId given, load template + substitute variables to render
   // the final bodyHtml.

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc } from 'drizzle-orm'
+import { requireDealAccess } from '../../_access'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -13,13 +14,16 @@ interface RouteContext {
 // -- GET /api/admin/deals/[id]/activities ----------------------------------
 // List all activities scoped to this deal, ordered newest first.
 export async function GET(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const { id: dealId } = await ctx.params
   const database = await db() as unknown as D1
+
+  const denied = await requireDealAccess(database, { userId, orgId }, dealId)
+  if (denied) return denied
 
   const items = await database
     .select({

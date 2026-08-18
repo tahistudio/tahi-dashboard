@@ -4,17 +4,21 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc } from 'drizzle-orm'
 import { logActivity } from '@/lib/deal-activity'
+import { requireDealAccess } from '../../_access'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
 
 // GET /api/admin/deals/[id]/nudges
 export async function GET(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
   const database = await db() as unknown as D1
+
+  const denied = await requireDealAccess(database, { userId, orgId }, id)
+  if (denied) return denied
 
   const nudges = await database
     .select()
@@ -45,6 +49,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   }
 
   const database = await db() as unknown as D1
+
+  const denied = await requireDealAccess(database, { userId, orgId }, dealId)
+  if (denied) return denied
+
   const now = new Date().toISOString()
   const nudgeId = crypto.randomUUID()
 

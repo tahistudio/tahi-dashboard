@@ -3,14 +3,20 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, asc } from 'drizzle-orm'
+import { scopedOrgIds } from '@/lib/access-scope'
+import { requireAccessToOrg } from '@/lib/require-access'
+import { orgColumnInScope } from '../_scoping/org-scope'
 
 // GET /api/admin/calls - list calls
 // Query: ?orgId=xxx&status=scheduled
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (scope.kind === 'none') return NextResponse.json({ calls: [] })
 
   const url = new URL(req.url)
   const filterOrgId = url.searchParams.get('orgId')
@@ -21,6 +27,9 @@ export async function GET(req: NextRequest) {
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
   const conditions = []
+  if (scope.kind === 'some') {
+    conditions.push(orgColumnInScope(schema.scheduledCalls.orgId, scope.orgIds))
+  }
   if (filterOrgId) {
     conditions.push(eq(schema.scheduledCalls.orgId, filterOrgId))
   }
@@ -85,6 +94,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'scheduledAt is required' }, { status: 400 })
   }
 
+  const database = await db()
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const denied = await requireAccessToOrg(drizzle, userId, body.orgId.trim())
+  if (denied) return denied
+
   const now = new Date().toISOString()
   const id = crypto.randomUUID()
   const duration = body.durationMinutes ?? 30
@@ -98,7 +113,6 @@ export async function POST(req: NextRequest) {
   // Push to Google Calendar first so we can save the event id and the
   // auto-generated Meet link with the row. Failures don't block the
   // local insert — we still create the call and surface a warning.
-  const database = await db()
   try {
     const { getGoogleAccessToken, createCalendarEvent, GoogleNotConnectedError } =
       await import('@/lib/google')
@@ -130,8 +144,6 @@ export async function POST(req: NextRequest) {
     // Module import failure — treat as disconnected.
     calendarPushError = 'google_unavailable'
   }
-
-  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
   // Insert into legacy scheduled_calls (existing readers depend on it).
   await drizzle.insert(schema.scheduledCalls).values({

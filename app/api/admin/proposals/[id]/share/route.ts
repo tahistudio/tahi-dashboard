@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { requireProposalAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -17,7 +18,7 @@ function mintShareToken(): string {
 
 // POST /api/admin/proposals/[id]/share — mint or rotate a public token.
 export async function POST(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
@@ -26,6 +27,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
   const database = await db() as unknown as D1
   const now = new Date().toISOString()
+
+  const denied = await requireProposalAccess(database, { userId, orgId }, id)
+  if (denied) return denied
 
   const [existing] = await database
     .select({ token: schema.proposals.publicShareToken })
@@ -53,11 +57,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 }
 
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await ctx.params
   const database = await db() as unknown as D1
+
+  const denied = await requireProposalAccess(database, { userId, orgId }, id)
+  if (denied) return denied
+
   await database.update(schema.proposals).set({
     publicShareToken: null,
     publicSharedAt: null,

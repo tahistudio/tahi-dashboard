@@ -3,6 +3,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and } from 'drizzle-orm'
+import {
+  filterArtifactsByScope,
+  requireArtifactAccess,
+  scopedOrgCondition,
+  scopedOrgIds,
+} from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -60,8 +66,11 @@ function substituteInTree(node: unknown, values: Record<string, string>): unknow
 // ── GET /api/admin/proposals ──────────────────────────────────────────
 // List with filters: orgId, dealId, status. Joins org + deal names.
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (scope.kind === 'none') return NextResponse.json({ items: [] })
 
   const url = new URL(req.url)
   const filterOrgId = url.searchParams.get('orgId')
@@ -73,8 +82,12 @@ export async function GET(req: NextRequest) {
   if (filterOrgId) conditions.push(eq(schema.proposals.orgId, filterOrgId))
   if (filterDealId) conditions.push(eq(schema.proposals.dealId, filterDealId))
   if (filterStatus) conditions.push(eq(schema.proposals.status, filterStatus))
+  if (scope.kind === 'some') {
+    const scopeCondition = scopedOrgCondition(schema.proposals.orgId, scope.orgIds)
+    if (scopeCondition) conditions.push(scopeCondition)
+  }
 
-  const items = await database
+  const scopedRows = await database
     .select({
       id: schema.proposals.id,
       orgId: schema.proposals.orgId,
@@ -99,6 +112,12 @@ export async function GET(req: NextRequest) {
     .leftJoin(schema.deals, eq(schema.proposals.dealId, schema.deals.id))
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(schema.proposals.updatedAt))
+
+  // The SQL condition above is only a pre-filter: a deal-linked row with a null
+  // org_id still needs its owning org resolved before it can be trusted.
+  const items = scope.kind === 'some'
+    ? await filterArtifactsByScope(database, scopedRows, scope.orgIds)
+    : scopedRows
 
   return NextResponse.json({ items })
 }
@@ -134,6 +153,13 @@ export async function POST(req: NextRequest) {
   }
 
   const database = await db() as unknown as D1
+
+  const denied = await requireArtifactAccess(database, { userId, orgId }, {
+    orgId: body.orgId ?? null,
+    dealId: body.dealId ?? null,
+  })
+  if (denied) return denied
+
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 

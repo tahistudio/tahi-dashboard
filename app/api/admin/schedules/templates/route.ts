@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { desc, eq, asc } from 'drizzle-orm'
+import { requireScheduleAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -49,6 +50,12 @@ export async function POST(req: NextRequest) {
 
   let snapshot: unknown
   if (body.fromScheduleId) {
+    // Snapshotting copies one client's plan into a reusable template, so it
+    // needs the same access as reading that schedule. The template itself stays
+    // global once created.
+    const denied = await requireScheduleAccess(database, { userId, orgId }, body.fromScheduleId)
+    if (denied) return denied
+
     const [scheduleRow] = await database
       .select({
         title: schema.projectSchedules.title,

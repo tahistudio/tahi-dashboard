@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, desc, notInArray } from 'drizzle-orm'
-import { requireAccessToOrg } from '@/lib/require-access'
+import { requireArtifactAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -36,6 +36,11 @@ export async function GET(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Schedule not found' }, { status: 404 })
   }
 
+  // Resolves org_id, then the linked deal's org, and denies a scoped member on
+  // a schedule that belongs to no client at all.
+  const denied = await requireArtifactAccess(drizzle, { userId, orgId }, schedule)
+  if (denied) return denied
+
   let resolvedOrgId = schedule.orgId
   if (!resolvedOrgId && schedule.dealId) {
     const [deal] = await drizzle
@@ -49,9 +54,6 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!resolvedOrgId) {
     return NextResponse.json({ orgId: null, requests: [], tasks: [] })
   }
-
-  const denied = await requireAccessToOrg(drizzle, userId, resolvedOrgId)
-  if (denied) return denied
 
   const [requests, tasks] = await Promise.all([
     drizzle

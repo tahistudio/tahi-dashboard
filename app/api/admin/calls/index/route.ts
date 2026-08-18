@@ -15,12 +15,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, desc, eq, gte, lte } from 'drizzle-orm'
+import { scopedOrgIds } from '@/lib/access-scope'
+import { columnInIds, isOrgInScope, orgColumnInScope } from '../../_scoping/org-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (scope.kind === 'none') return NextResponse.json({ items: [] })
 
   const url = new URL(req.url)
   const since = url.searchParams.get('since')
@@ -46,6 +51,12 @@ export async function GET(req: NextRequest) {
     lte(schema.discoveryCalls.scheduledAt, until ?? defaultUntil),
   ]
   if (type) conditions.push(eq(schema.discoveryCalls.meetingType, type))
+  // A call with no orgId is a pre-client call (lead / deal / unclassified), so
+  // it follows the same rule as an unlinked deal: visible to anyone with a
+  // scope. Rows linked to a deal are re-checked against that deal's org below.
+  if (scope.kind === 'some') {
+    conditions.push(orgColumnInScope(schema.discoveryCalls.orgId, scope.orgIds, { includeNull: true }))
+  }
 
   const dRows = await database
     .select({
@@ -73,8 +84,29 @@ export async function GET(req: NextRequest) {
     .where(and(...conditions))
     .orderBy(desc(schema.discoveryCalls.scheduledAt))
 
+  // A deal-linked call can carry a null orgId while its deal points at a
+  // client. Resolve those deals so a restricted caller cannot read another
+  // client's call through the deal join.
+  let visibleRows = dRows
+  if (scope.kind === 'some') {
+    const dealIds = [...new Set(
+      dRows.filter(r => !r.orgId && r.dealId).map(r => r.dealId as string),
+    )]
+    if (dealIds.length > 0) {
+      const dealOrgRows = await database
+        .select({ id: schema.deals.id, orgId: schema.deals.orgId })
+        .from(schema.deals)
+        .where(columnInIds(schema.deals.id, dealIds))
+      const dealOrgById = new Map(dealOrgRows.map(d => [d.id, d.orgId]))
+      visibleRows = dRows.filter(r => {
+        if (r.orgId || !r.dealId) return true
+        return isOrgInScope(scope, dealOrgById.get(r.dealId) ?? null, 'allow-if-any-scope')
+      })
+    }
+  }
+
   // Surface lifecycle hints: hasTranscript bool, isClassified bool.
-  const items = dRows.map(r => ({
+  const items = visibleRows.map(r => ({
     ...r,
     source: 'discovery_calls' as const,
     hasTranscript: !!r.hasTranscript,

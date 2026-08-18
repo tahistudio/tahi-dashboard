@@ -4,15 +4,24 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { desc, eq } from 'drizzle-orm'
 import { fanOutAnnouncementEmails } from '@/lib/announcement-emails'
+import { scopedOrgIds } from '@/lib/access-scope'
+import {
+  BROADCAST_DENIED,
+  canReadAnnouncement,
+  canWriteAnnouncement,
+  parseTargetIds,
+} from './_access'
 
 // ── GET /api/admin/announcements ────────────────────────────────────────────
 // List announcements, most recent first.
 // Supports ?active=true for only non-expired announcements.
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+
+  const scope = await scopedOrgIds({ userId, orgId })
 
   const url = new URL(req.url)
   const activeOnly = url.searchParams.get('active') === 'true'
@@ -23,6 +32,11 @@ export async function GET(req: NextRequest) {
     .select()
     .from(schema.announcements)
     .orderBy(desc(schema.announcements.createdAt))
+
+  rows = rows.filter(a => canReadAnnouncement(scope, {
+    targetType: a.targetType,
+    targetIds: parseTargetIds(a.targetIds),
+  }))
 
   if (activeOnly) {
     const now = new Date().toISOString()
@@ -90,6 +104,11 @@ export async function POST(req: NextRequest) {
       { error: 'targetIds must include at least one organisation when targetType is org' },
       { status: 400 }
     )
+  }
+
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (!canWriteAnnouncement(scope, { targetType, targetIds })) {
+    return NextResponse.json({ error: BROADCAST_DENIED }, { status: 403 })
   }
 
   const database = await db()

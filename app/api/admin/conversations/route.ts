@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, sql } from 'drizzle-orm'
+import { scopedOrgIds } from '@/lib/access-scope'
+import { isOrgInScope } from '../_scoping/org-scope'
+
+type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 // ── GET /api/admin/conversations ────────────────────────────────────────────
 // List conversations the current user participates in.
@@ -58,6 +62,14 @@ export async function GET(req: NextRequest) {
 
   // Filter to only conversations the user participates in
   allConvs = allConvs.filter(c => convIds.includes(c.id))
+
+  // INTERNAL-CONVERSATION RULE: participation is the primary gate. A thread
+  // with no orgId is Tahi-internal and stays governed by participation alone.
+  // A thread that carries an orgId is client data, so it additionally has to
+  // clear the member's org scope (a participant row left behind after their
+  // scope was narrowed must not keep the client thread readable).
+  const scope = await scopedOrgIds({ userId, orgId })
+  allConvs = allConvs.filter(c => isOrgInScope(scope, c.orgId, 'allow'))
 
   // Apply type filter
   if (typeFilter) {
@@ -217,6 +229,24 @@ export async function POST(req: NextRequest) {
     }
 
     const database = await db()
+
+    // A conversation may only be attached to a client (directly, or through a
+    // request) the caller can see. Internal threads carry no orgId and are
+    // always allowed.
+    const scope = await scopedOrgIds({ userId, orgId })
+    if (!isOrgInScope(scope, convOrgId ?? null, 'allow')) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (requestId) {
+      const [linkedRequest] = await (database as unknown as D1)
+        .select({ orgId: schema.requests.orgId })
+        .from(schema.requests)
+        .where(eq(schema.requests.id, requestId))
+        .limit(1)
+      if (linkedRequest && !isOrgInScope(scope, linkedRequest.orgId, 'allow')) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
 
     // Resolve the current user's team member ID
     const teamMemberRows = await database
