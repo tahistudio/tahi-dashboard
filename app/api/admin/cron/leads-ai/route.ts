@@ -49,6 +49,8 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { logCronRun } from '@/lib/cron-runs'
+import { createNotification } from '@/lib/notifications'
+import type { NotificationEventType, NotificationEntityType } from '@/lib/notifications'
 
 export const dynamic = 'force-dynamic'
 
@@ -623,11 +625,13 @@ function buildScoreMessage(lead: ScoreInput): string {
 }
 
 interface NotificationInput {
+  /** lead.ownerId or the leads.defaultLeadOwnerId setting value: either a
+   *  teamMembers.id or a raw Clerk user id. Resolved tolerantly on insert. */
   userId: string
-  eventType: string
+  eventType: NotificationEventType
   title: string
   body: string
-  entityType: string
+  entityType: NotificationEntityType
   entityId: string
 }
 
@@ -635,18 +639,17 @@ async function pushNotification(
   database: Awaited<ReturnType<typeof db>>,
   n: NotificationInput,
 ): Promise<void> {
-  await database.insert(schema.notifications).values({
-    id: crypto.randomUUID(),
-    userId: n.userId,
-    userType: 'team_member',
-    eventType: n.eventType,
-    title: n.title,
-    body: n.body,
-    entityType: n.entityType,
-    entityId: n.entityId,
-    read: false,
-    createdAt: new Date().toISOString(),
-  })
+  await createNotification(
+    database as unknown as ReturnType<typeof import('drizzle-orm/d1').drizzle>,
+    {
+      recipient: { ownerSettingValue: n.userId },
+      type: n.eventType,
+      title: n.title,
+      body: n.body,
+      entityType: n.entityType,
+      entityId: n.entityId,
+    },
+  )
 }
 
 function daysBetween(fromIso: string | null, toIso: string): number {

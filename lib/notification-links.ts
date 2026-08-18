@@ -34,6 +34,13 @@ export type NotificationEventType =
   | 'retainer_upsell_opportunity'
   | 'delivery_off_track'
   | 'subscription_change_requested'
+  | 'lead_high_intent'
+  | 'lead_idle_qualifying'
+  | 'affiliate_reactivation'
+  | 'finance_anomaly'
+  | 'daily_summary'
+  | 'content_ideation'
+  | 'cron_failed'
 
 export type NotificationEntityType =
   | 'request'
@@ -49,6 +56,11 @@ export type NotificationEntityType =
   | 'schedule'
   | 'announcement'
   | 'subscription'
+  | 'affiliate'
+  | 'finance_anomaly'
+  | 'system'
+  | 'content_week'
+  | 'cron'
 
 /**
  * Resolve where a notification click should take the user. Returns null when
@@ -75,6 +87,13 @@ export function notificationHref(
     case 'call':         return '/calls'
     case 'announcement': return '/announcements'
     case 'subscription': return '/billing'
+    // Cron / operator surfaces: entity ids are synthetic keys (cron:name,
+    // affiliate:code, week:label), so these land on the owning page.
+    case 'affiliate':       return '/leads'
+    case 'finance_anomaly': return '/financial-reports'
+    case 'content_week':    return '/content-studio?tab=ideas'
+    case 'cron':            return '/settings/crons'
+    case 'system':          return null
     default:             return null
   }
 }

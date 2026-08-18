@@ -34,6 +34,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, inArray } from 'drizzle-orm'
 import { assertCronAuth, logCronRun } from '@/lib/cron-runs'
+import { createNotification } from '@/lib/notifications'
 import {
   getGoogleAccessToken, GoogleNotConnectedError,
   runGa4Report, searchAnalytics,
@@ -502,18 +503,20 @@ export async function POST(req: NextRequest) {
           .limit(1)
         const recipient = ownerRow?.value?.trim()
         if (recipient) {
-          await realDb.insert(schema.notifications).values({
-            id: crypto.randomUUID(),
-            userId: recipient,
-            userType: 'team_member',
-            eventType: 'content_ideation',
-            title: `${inserted} new content ideas ready for triage`,
-            body: `Week ${weekLabel}. Open /content-studio?tab=ideas to approve or reject.`,
-            entityType: 'content_week',
-            entityId: `week:${weekLabel}`,
-            read: false,
-            createdAt: now,
-          })
+          // The setting may hold a teamMembers.id or a raw Clerk id; the
+          // tolerant recipient resolves either to the Clerk user id the
+          // bell queries, and no-ops when it cannot.
+          await createNotification(
+            realDb as unknown as ReturnType<typeof import('drizzle-orm/d1').drizzle>,
+            {
+              recipient: { ownerSettingValue: recipient },
+              type: 'content_ideation',
+              title: `${inserted} new content ideas ready for triage`,
+              body: `Week ${weekLabel}. Open /content-studio?tab=ideas to approve or reject.`,
+              entityType: 'content_week',
+              entityId: `week:${weekLabel}`,
+            },
+          )
         }
       } catch {
         // Notification plumbing must never break a cron.

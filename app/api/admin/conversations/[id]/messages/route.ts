@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, ne, inArray } from 'drizzle-orm'
-import { createNotifications, notifyMentionedPerson } from '@/lib/notifications'
+import { createNotifications, notifyMentionedPerson, resolveParticipants } from '@/lib/notifications'
 import { parseMentions } from '@/lib/parse-mentions'
 
 // ── GET /api/admin/conversations/[id]/messages ──────────────────────────────
@@ -354,13 +354,16 @@ export async function POST(
         )
       )
 
-    // If internal-only, only notify team members
-    const recipients = otherParticipants
-      .filter((p) => !body.isInternal || p.participantType === 'team_member')
-      .map((p) => ({
-        userId: p.participantId,
-        userType: p.participantType as 'team_member' | 'contact',
-      }))
+    // If internal-only, only notify team members. resolveParticipants maps
+    // participant row ids to Clerk user ids (the id the bell queries) and
+    // skips unlinked people; the query above already excludes the sender and
+    // excludeParticipantId keeps that true if the query ever changes.
+    const audience = otherParticipants.filter(
+      (p) => !body.isInternal || p.participantType === 'team_member'
+    )
+    const recipients = await resolveParticipants(database, audience, {
+      excludeParticipantId: participantId,
+    })
 
     if (recipients.length > 0) {
       const convName = conv.name ?? 'conversation'

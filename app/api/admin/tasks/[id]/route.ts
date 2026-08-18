@@ -112,11 +112,12 @@ export async function PATCH(
       .where(eq(schema.tasks.id, id))
       .limit(1)
 
-    const assigneeType = (body.assigneeType === 'contact' ? 'contact' : 'team_member') as 'team_member' | 'contact'
-
+    // assigneeId is a teamMembers.id or contacts.id; the typed recipient
+    // resolves it to the Clerk user id the bell queries.
     await createNotification(drizzle, {
-      userId: body.assigneeId,
-      userType: assigneeType,
+      recipient: body.assigneeType === 'contact'
+        ? { contactId: body.assigneeId }
+        : { teamMemberId: body.assigneeId },
       type: 'task_assigned',
       title: `Task assigned to you: "${task?.title ?? 'Untitled'}"`,
       body: null,

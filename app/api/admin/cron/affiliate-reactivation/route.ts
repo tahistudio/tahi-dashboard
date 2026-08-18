@@ -24,6 +24,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, isNotNull, sql } from 'drizzle-orm'
 import { logCronRun } from '@/lib/cron-runs'
+import { createNotification, resolveOwnerSetting } from '@/lib/notifications'
 
 export const dynamic = 'force-dynamic'
 
@@ -71,15 +72,17 @@ export async function POST(req: NextRequest) {
   const idleDays = Number.isFinite(Number(daysRow[0]?.value)) ? Number(daysRow[0]?.value) : 60
   const cutoff = new Date(Date.now() - idleDays * 24 * 60 * 60_000).toISOString()
 
-  // Recipient
+  // Recipient. resolveOwnerSetting tolerates a teamMembers.id or a raw Clerk
+  // id in the setting and returns the Clerk user id the bell queries.
+  const d1 = database as unknown as ReturnType<typeof import('drizzle-orm/d1').drizzle>
   const [recipientRow] = await database
     .select({ value: schema.settings.value })
     .from(schema.settings)
     .where(eq(schema.settings.key, 'leads.defaultLeadOwnerId'))
     .limit(1)
-  const recipient = recipientRow?.value?.trim()
-  if (!recipient) {
-    const summary = { skipped: 'No leads.defaultLeadOwnerId — nowhere to send notifications' }
+  const owner = await resolveOwnerSetting(d1, recipientRow?.value)
+  if (!owner) {
+    const summary = { skipped: 'No usable leads.defaultLeadOwnerId: nowhere to send notifications' }
     await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'affiliate-reactivation', 'skipped', Date.now() - t0, summary, null)
     return NextResponse.json(summary)
   }
@@ -134,26 +137,24 @@ export async function POST(req: NextRequest) {
   // Push one notification per stale affiliate (capped at 5 per run to
   // avoid notification flood on a fresh setup).
   const cappedNotify = toNotify.slice(0, 5)
+  let notifiedCount = 0
   for (const aff of cappedNotify) {
     const daysSince = Math.floor((Date.now() - new Date(aff.lastLeadAt).getTime()) / (24 * 60 * 60_000))
-    await database.insert(schema.notifications).values({
-      id: crypto.randomUUID(),
-      userId: recipient,
-      userType: 'team_member',
-      eventType: 'affiliate_reactivation',
+    const res = await createNotification(d1, {
+      recipient: owner,
+      type: 'affiliate_reactivation',
       title: `Reactivate affiliate: ${aff.affiliateCode}`,
       body: `${aff.totalLeads} total leads, ${aff.promotedLeads} promoted. Last lead ${daysSince} days ago.`,
       entityType: 'affiliate',
       entityId: `affiliate:${aff.affiliateCode}`,
-      read: false,
-      createdAt: new Date().toISOString(),
     })
+    if (res.delivered > 0) notifiedCount++
   }
 
   const summary = {
     scanned: aggregates.length,
     stale: stale.length,
-    notified: cappedNotify.length,
+    notified: notifiedCount,
     deferredToNextRun: toNotify.length - cappedNotify.length,
     idleDays,
     samples: stale.slice(0, 10).map(a => ({

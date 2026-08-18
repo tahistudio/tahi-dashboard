@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
-import { createNotification } from '@/lib/notifications'
+import { notifyTeamMember } from '@/lib/notifications'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
 type Params = { params: Promise<{ id: string }> }
@@ -88,10 +88,10 @@ export async function POST(req: NextRequest, { params }: Params) {
       .where(eq(schema.requests.id, id))
       .limit(1)
 
+    // assigneeId is a teamMembers.id; notifyTeamMember resolves it to the
+    // Clerk user id the bell queries, so the team actually sees the ping.
     if (reqInfo?.assigneeId) {
-      await createNotification(drizzle, {
-        userId: reqInfo.assigneeId,
-        userType: 'team_member',
+      await notifyTeamMember(drizzle, reqInfo.assigneeId, {
         type: 'new_message',
         title: `New client message on "${reqInfo.title}"`,
         body: safeBody.slice(0, 200),

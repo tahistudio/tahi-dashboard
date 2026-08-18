@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, ne, inArray } from 'drizzle-orm'
-import { createNotifications } from '@/lib/notifications'
+import { createNotifications, resolveParticipants } from '@/lib/notifications'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
 // ── GET /api/portal/conversations/[id]/messages ────────────────────────────
@@ -341,10 +341,12 @@ export async function POST(
         )
       )
 
-    const recipients = otherParticipants.map((p) => ({
-      userId: p.participantId,
-      userType: p.participantType as 'team_member' | 'contact',
-    }))
+    // Resolve participant rows to Clerk user ids (the id the bell queries);
+    // unlinked participants are skipped. The query above already excludes the
+    // sender; excludeParticipantId keeps that true if the query ever changes.
+    const recipients = await resolveParticipants(database, otherParticipants, {
+      excludeParticipantId: participantId,
+    })
 
     if (recipients.length > 0) {
       const convName = conv.name ?? 'conversation'

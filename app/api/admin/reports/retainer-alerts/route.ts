@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
 
   const recipients = admins
     .filter(a => a.id)
-    .map(a => ({ userId: a.id as string, userType: 'team_member' as const }))
+    .map(a => ({ clerkUserId: a.id as string, userType: 'team_member' as const }))
 
   if (recipients.length === 0) {
     return NextResponse.json({ error: 'No admin team members with clerkUserId — nothing to notify' }, { status: 400 })

@@ -20,6 +20,7 @@ import { schema } from '@/db/d1'
 import { eq, sql } from 'drizzle-orm'
 import { assertCronAuth, logCronRun } from '@/lib/cron-runs'
 import { computeBankDrift } from '@/lib/bank-drift'
+import { createNotification, resolveOwnerSetting } from '@/lib/notifications'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,19 +41,20 @@ export async function POST(req: NextRequest) {
 
   const database = await db() as unknown as D1
 
-  // Resolve default lead owner so we know who to ping.
+  // Resolve default lead owner so we know who to ping. resolveOwnerSetting
+  // tolerates a teamMembers.id or a raw Clerk id and returns the Clerk user
+  // id the bell queries; skipping here beats burning AI tokens on findings
+  // nobody would see.
   const [ownerRow] = await database
     .select({ value: schema.settings.value })
     .from(schema.settings)
     .where(eq(schema.settings.key, 'leads.defaultLeadOwnerId'))
     .limit(1)
-  const recipient = ownerRow?.value?.trim()
-  if (!recipient) {
-    await logCronRun(database, 'finance-anomaly-scan', 'skipped', Date.now() - t0, { skipped: 'No leads.defaultLeadOwnerId' }, null)
-    return NextResponse.json({ skipped: 'No leads.defaultLeadOwnerId — nowhere to send findings' })
+  const owner = await resolveOwnerSetting(database, ownerRow?.value)
+  if (!owner) {
+    await logCronRun(database, 'finance-anomaly-scan', 'skipped', Date.now() - t0, { skipped: 'No usable leads.defaultLeadOwnerId' }, null)
+    return NextResponse.json({ skipped: 'No usable leads.defaultLeadOwnerId: nowhere to send findings' })
   }
-
-  const nowIso = new Date().toISOString()
 
   // Dedup against finance_anomaly notifications raised in the last 30
   // days, read or not. Same entityRef + same title = skip, so a
@@ -105,20 +107,16 @@ export async function POST(req: NextRequest) {
       const title = `Xero ledger drift: ${d.currency}`
       const key = `bank_drift_${d.currency}|${title.toLowerCase()}`
       if (seen.has(key)) continue
-      await database.insert(schema.notifications).values({
-        id: crypto.randomUUID(),
-        userId: recipient,
-        userType: 'team_member',
-        eventType: 'finance_anomaly',
+      const res = await createNotification(database, {
+        recipient: owner,
+        type: 'finance_anomaly',
         title,
         body: `Xero's ledger shows ${fmt(d.xeroBalance)} ${d.currency} in the bank but Airwallex actually holds ${fmt(d.airwallexBalance)} ${d.currency} (Xero ${d.diff > 0 ? 'over' : 'under'} by ${fmt(Math.abs(d.diff))}). Reconcile the Airwallex feed in Xero, and book any wallet-to-yield transfers to an asset account.`,
         entityType: 'finance_anomaly',
         entityId: `bank_drift_${d.currency}`,
-        read: false,
-        createdAt: nowIso,
       })
       seen.add(key)
-      driftInserted++
+      if (res.delivered > 0) driftInserted++
     }
   } catch (err) {
     // The watchdog must never die silently: a failed read or insert is
@@ -302,19 +300,15 @@ If no anomalies, return [].`
   for (const f of findings) {
     const key = `${f.entityRef ?? ''}|${f.title.toLowerCase()}`
     if (seen.has(key)) continue
-    await database.insert(schema.notifications).values({
-      id: crypto.randomUUID(),
-      userId: recipient,
-      userType: 'team_member',
-      eventType: 'finance_anomaly',
+    const res = await createNotification(database, {
+      recipient: owner,
+      type: 'finance_anomaly',
       title: f.title,
       body: f.detail,
       entityType: 'finance_anomaly',
       entityId: f.entityRef ?? null,
-      read: false,
-      createdAt: nowIso,
     })
-    inserted++
+    if (res.delivered > 0) inserted++
   }
 
   const summary = {

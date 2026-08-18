@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, asc, inArray } from 'drizzle-orm'
-import { createNotifications, notifyMentionedPerson } from '@/lib/notifications'
+import { notifyMentionedPerson, notifyOrgContacts, notifyTeamMember } from '@/lib/notifications'
 import { parseMentions } from '@/lib/parse-mentions'
 
 type Params = { params: Promise<{ id: string }> }
@@ -190,28 +190,17 @@ export async function POST(req: NextRequest, { params }: Params) {
       }
     }
 
-    // Notify client contacts about the new message (unless internal-only)
+    // Notify client contacts about the new message (unless internal-only).
+    // notifyOrgContacts keys rows on each contact's Clerk user id (the id the
+    // bell queries) and skips contacts without a linked login.
     if (!body.isInternal) {
-      const contacts = await drizzle
-        .select({ id: schema.contacts.id })
-        .from(schema.contacts)
-        .where(eq(schema.contacts.orgId, request.orgId))
-        .limit(10)
-
-      const recipients = contacts.map((c) => ({
-        userId: c.id,
-        userType: 'contact' as const,
-      }))
-
-      if (recipients.length > 0) {
-        await createNotifications(drizzle, recipients, {
-          type: 'new_message',
-          title: 'New message on your request',
-          body: (body.body ?? '').trim().slice(0, 200),
-          entityType: 'request',
-          entityId: id,
-        })
-      }
+      await notifyOrgContacts(drizzle, request.orgId, {
+        type: 'new_message',
+        title: 'New message on your request',
+        body: (body.body ?? '').trim().slice(0, 200),
+        entityType: 'request',
+        entityId: id,
+      })
     }
 
     // Notify request assignee about the new message (if sender is not the assignee)
@@ -222,7 +211,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       .limit(1)
 
     if (reqInfo?.assigneeId && reqInfo.assigneeId !== (member?.id ?? userId)) {
-      await createNotifications(drizzle, [{ userId: reqInfo.assigneeId, userType: 'team_member' }], {
+      await notifyTeamMember(drizzle, reqInfo.assigneeId, {
         type: 'new_message',
         title: `New message on "${reqInfo.title}"`,
         body: (body.body ?? '').trim().slice(0, 200),

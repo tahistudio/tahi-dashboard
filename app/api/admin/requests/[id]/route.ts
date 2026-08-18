@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, asc, count, gt, isNull, inArray } from 'drizzle-orm'
-import { createNotifications } from '@/lib/notifications'
+import { notifyOrgContacts, notifyTeamMember } from '@/lib/notifications'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { dispatchDomainEvent } from '@/lib/events'
 
@@ -264,31 +264,22 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (updatedReq) {
       const statusLabel = body.status.replace(/_/g, ' ')
       const notifTitle = `Request "${updatedReq.title}" status changed to ${statusLabel}`
-      const recipients: Array<{ userId: string; userType: 'team_member' | 'contact' }> = []
-
-      // Notify the assignee (if one exists)
-      if (updatedReq.assigneeId) {
-        recipients.push({ userId: updatedReq.assigneeId, userType: 'team_member' })
-      }
-
-      // Notify the primary contact at the client org
-      const contacts = await drizzle
-        .select({ id: schema.contacts.id })
-        .from(schema.contacts)
-        .where(eq(schema.contacts.orgId, updatedReq.orgId))
-        .limit(5)
-
-      for (const c of contacts) {
-        recipients.push({ userId: c.id, userType: 'contact' })
-      }
-
-      await createNotifications(drizzle, recipients, {
-        type: 'request_status_changed',
+      const notifPayload = {
+        type: 'request_status_changed' as const,
         title: notifTitle,
         body: `Status is now "${statusLabel}"`,
-        entityType: 'request',
+        entityType: 'request' as const,
         entityId: id,
-      })
+      }
+
+      // Notify the assignee (if one exists). assigneeId is a teamMembers.id;
+      // notifyTeamMember resolves it to the Clerk user id the bell queries.
+      if (updatedReq.assigneeId) {
+        await notifyTeamMember(drizzle, updatedReq.assigneeId, notifPayload)
+      }
+
+      // Notify contacts at the client org (skips those without a linked login)
+      await notifyOrgContacts(drizzle, updatedReq.orgId, notifPayload)
 
       // Fire the domain event (automations + outgoing webhooks). Non-blocking.
       await dispatchDomainEvent(drizzle, {

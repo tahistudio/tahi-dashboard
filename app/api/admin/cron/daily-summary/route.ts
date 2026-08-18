@@ -27,6 +27,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, gte, lte, sql } from 'drizzle-orm'
 import { logCronRun } from '@/lib/cron-runs'
+import { createNotification, resolveOwnerSetting } from '@/lib/notifications'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,27 +48,36 @@ export async function POST(req: NextRequest) {
 
   const database = await db()
 
-  // Recipient: default lead owner (typically Liam)
+  // Recipient: default lead owner (typically Liam). resolveOwnerSetting
+  // tolerates a teamMembers.id or a raw Clerk id in the setting and returns
+  // the Clerk user id the bell queries.
+  const d1 = database as unknown as ReturnType<typeof import('drizzle-orm/d1').drizzle>
   const [recipientRow] = await database
     .select({ value: schema.settings.value })
     .from(schema.settings)
     .where(eq(schema.settings.key, 'leads.defaultLeadOwnerId'))
     .limit(1)
   const recipient = recipientRow?.value?.trim()
-  if (!recipient) {
-    const summary = { skipped: 'No leads.defaultLeadOwnerId configured' }
+  const owner = await resolveOwnerSetting(d1, recipient)
+  if (!owner) {
+    const summary = {
+      skipped: recipient
+        ? 'leads.defaultLeadOwnerId does not resolve to a Clerk login'
+        : 'No leads.defaultLeadOwnerId configured',
+    }
     await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'daily-summary', 'skipped', Date.now() - t0, summary, null)
     return NextResponse.json(summary)
   }
 
   // Idempotency: skip if a daily_summary notification was already
   // pushed in the last 23h (allows the cron to retry within the same
-  // calendar day without dup).
+  // calendar day without dup). Keyed on the resolved Clerk id, which is
+  // what notification rows store as userId.
   const [existing] = await database
     .select({ id: schema.notifications.id })
     .from(schema.notifications)
     .where(and(
-      eq(schema.notifications.userId, recipient),
+      eq(schema.notifications.userId, owner.clerkUserId),
       eq(schema.notifications.eventType, 'daily_summary'),
       sql`${schema.notifications.createdAt} > datetime('now', '-23 hours')`,
     ))
@@ -217,17 +227,13 @@ export async function POST(req: NextRequest) {
   })
 
   // Push notification
-  await database.insert(schema.notifications).values({
-    id: crypto.randomUUID(),
-    userId: recipient,
-    userType: 'team_member',
-    eventType: 'daily_summary',
+  await createNotification(d1, {
+    recipient: owner,
+    type: 'daily_summary',
     title: `Daily summary · ${dateLabel}`,
     body,
     entityType: 'system',
     entityId: 'daily-summary',
-    read: false,
-    createdAt: new Date().toISOString(),
   })
 
   const summary = { recipient, dateLabel, metrics, body }

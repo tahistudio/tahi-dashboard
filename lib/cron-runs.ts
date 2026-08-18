@@ -21,6 +21,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import { createNotification } from '@/lib/notifications'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -66,17 +67,16 @@ export async function logCronRun(
             .limit(1)
           const recipient = ownerRow?.value?.trim()
           if (recipient) {
-            await database.insert(schema.notifications).values({
-              id: crypto.randomUUID(),
-              userId: recipient,
-              userType: 'team_member',
-              eventType: 'cron_failed',
+            // The setting may hold a teamMembers.id or a raw Clerk id; the
+            // tolerant recipient resolves either to the Clerk user id the
+            // bell queries, and no-ops when it cannot.
+            await createNotification(database, {
+              recipient: { ownerSettingValue: recipient },
+              type: 'cron_failed',
               title: `Cron failed: ${cron}`,
               body: error?.slice(0, 200) ?? 'See /settings/crons for details.',
               entityType: 'cron',
               entityId: `cron:${cron}`,
-              read: false,
-              createdAt: new Date().toISOString(),
             })
           }
         }
