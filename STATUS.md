@@ -1,213 +1,83 @@
-# Tahi Dashboard — Live Status
+# Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-08-10** by Claude (bank truth fix: Airwallex-first everywhere + yield holdings + Xero drift alarm)
+> Last updated: **2026-08-18** by Claude (client-ready triage: 6-agent code audit of every client-visible surface; TASKS.md reorganised around the ManyRequests cutover)
 
-## Bank truth (2026-08-10)
+## The plan (2026-08-18)
 
-Xero's ledger had silently drifted 57k NZD above the real Airwallex position, and no surface was alerting. reports/bank-balances (backing the MCP `get_bank_balances` tool) was reading `xero_bank_balances` and reporting 142.9k NZD; the Airwallex-first surfaces (overview Cash, /financial-reports) were blind to Airwallex Capital yield and reporting 49.7k. Real position: 85.6k NZD. Fixes shipped:
+Liam's call: ship every surface a client touches first (proposals, contracts, schedules, portal), cut over from ManyRequests, then improve team/owner surfaces slowly. TASKS.md now carries five sprints: **C0 ops unblock -> C1 sell without embarrassment (deliverable money paths, ~5d) -> C2 portal truth (five blockers, ~12d) -> C3 client-facing redesign stragglers (~4d) -> C4 live QA gate.** Roughly 4-5 focused weeks to a defensible cutover.
 
-- **reports/bank-balances** now aggregates Airwallex-first (available basis + yield rows), Xero per-currency fallback only, failing loud if the Airwallex read errors. Same source policy as summary + overview.
-- **Yield holdings**: the public Airwallex API has no yield endpoint, so positions live in the settings key `finance.yieldHoldings` (JSON `[{"currency":"USD","amount":20014.13}]`, editable via `update_settings` MCP tool). The daily Airwallex sync materialises them as `yield:CUR` rows in `airwallex_balances`; every cash reader includes them automatically. Snapshot BACKFILL excludes them (wallet-ledger rewind would double-count); forward snapshots include them.
-- **Drift alarm**: finance-anomaly-scan now runs a deterministic per-currency Airwallex-vs-Xero comparison (`lib/bank-drift.ts`, 10 tests) before the AI half, raising `finance_anomaly` notifications past 5% + 100 native units. This is the alarm that was missing while Xero drifted for months.
-- Liam reconciled Xero the same day; the Monday scan verifies it stays quiet.
+## DEPLOY GATE - read this before assuming anything is live
 
-## Overview home rebuild (2026-07-09)
-
-The home page (`/overview`) was rebuilt to the imported claude.ai/design "Tahi App Shell" overview surface at the same bar as Settings, on staging (commits up to `a79ff6a`).
-
-- **Shared OVKit kit** (`components/tahi/overview/ov-kit.tsx`) + full `overview.css` port: typed primitives (Spark hover-sparkline, Ribbon, Gauge, MicroBar, Card ink/sand tones, CardH, Row, Hero forest/plain/warm, Vitals, NeedsYou, TheWire, Zone) with `useOvFormat()` binding money to the real DisplayCurrency provider (design's hardcoded FX deleted).
-- **Three role homes** (`components/tahi/overview/homes/{owner,teammate,client}-home.tsx`) + a switcher (`overview-home.tsx`) that picks owner/teammate/client by resolved permission level + impersonation, maps `go()` to real routes, and threads read-only through a shared `ctx`. `page.tsx` mounts it for all audiences; the old 1336-line `overview-content.tsx` + 20 orphaned June "Studio Ledger" components removed.
-- **Data APIs**: extended `/api/admin/overview` (mrrDeltaPct, clientsByPlan), new `/api/admin/overview/{brief,me,replies-waiting}` + `/api/admin/reports/worklog` + scope=me on wire/tasks/time; new portal reads `/api/portal/{activity,calls,files,team,project}` + subscription clientType/nextInvoice. All honest empties, no fabricated figures.
-- **Verified live on staging**: owner home (light + dark, real data across all zones, clean console), client home (desktop + mobile 458px, real data, honest empties, read-only preview, project-type board full-width). Four bugs caught live and fixed: raw Tiptap markup in the messages card, a misleading "down 100%" MRR delta (suppressed when current-month invoiced revenue is 0), a `col-12` class collision with a Tailwind `grid-column:12` utility (renamed grid classes to `ov-col-*`), and a missing `.ov` container wrapper on owner+client that killed the mobile `@container` responsiveness.
-- **Not yet verified visually**: the teammate home (type-clean, built on the verified kit) needs a scoped non-admin team-member login staging doesn't have. Known limit: preview-as-teammate resolves the `/me` routes to the signed-in admin, so it shows the teammate LAYOUT with the admin's own scoped data until those routes take a preview-member param.
-- **Honest-data follow-ups** (render omitted/empty rather than faked): owner social "reach" (no Buffer analytics source), owner cash-runway historical sparkline (only a current-balance snapshot exists), teammate "pinned docs" (no per-member pin model; shows recent docs), teammate "today's calls" (org-level, no per-member attendee scope).
-- **Prod**: staging-only; not promoted. Migration 0084 was already applied to staging D1 (settings work); the overview APIs add no new columns.
-
-## Settings rebuild (2026-07-08)
-
-The whole Settings surface was rebuilt to pixel parity with the imported Claude Design "Tahi Settings" prototype, every section wired to real APIs. Highlights:
-
-- **Full design CSS port** — settings.css now carries the complete design stylesheet (notification channel pills, Team & access master-detail, tri-state control, feature slide-over, roles matrix, change-history table, toasts, avatar uploaders), with the design's `.ash-mobile` rules translated to real `@media 767px` blocks and 44px touch targets per DoD. Breakpoints aligned to the design (840px nav stack, 1180px master-detail stack). Light `--border-strong` alias fixed to `--color-border-strong`.
-- **Team & access is the design's full pane** — SlideSeg tablist (Team members / Clients / Roles), search, master-detail with role assignment + data scope (all/plan/specific with live "will see N of M" count) + feature-override summary + history teaser, grouped feature slide-over with Inherit/Allow/Deny + reasons + parent-denied locks, roles matrix with locked super-admin column + cell popover, full change-history table (real audit_log rows with resolved names), copy-access dialog, preview-as via the real impersonation machinery. `/permissions` now redirects to `/settings?section=teamaccess`. New/changed APIs: subjects enrichment, `permissions/copy-access`, `permissions/matrix`, audit route `actionPrefix`/`resolveNames`, scope PUT audit-logged. Deliberate divergence: "No role" copy reflects the real no-lockout resolver (roleless member = admin) instead of the design's "sees nothing".
-- **New sections** — Subscription (honest K/V-backed studio plan + real seat count + Stripe dashboard link); announcements composer gained emoji + CTA columns end to end (banner, portal read, MCP tools incl. new update/delete_announcement).
-- **Sections made real** — profile (Clerk photo upload + new `/api/admin/profile`), appearance (reduce-motion + start-collapsed actually work app-wide via pre-hydration scripts), notifications (design channel pills on the real notification_preferences table + quiet-hours row), kanban (bulk reorder, per-client copy-on-write fix, default-board seeding), request forms + task templates (new columns: description/audience/sla, org_id/default_assignee), plan catalog shared between admin Client plans and the client Plan & billing view (settings K/V `plan_catalog`) with a real portal change-request flow, client People roster gained edit/remove (Clerk invitation revoke + membership removal, last-admin guard), Brands re-modeled as the design's asset-link list.
-- **Migration 0084** (`drizzle/migrations/0084_settings_design_columns.sql`, registered in the runtime runner) — request_forms.description/audience/sla, task_templates.org_id/default_assignee, organisations.accent_colour, announcements.emoji/cta_label/cta_url, contacts.phone, team_members.phone. **Must be applied to staging + prod D1 (POST /api/admin/db/migrate {"name":"0084"}) immediately after deploy** - several routes now select the new columns.
-- **Verified locally** (dev server + Chrome): desktop walkthrough of profile / teamaccess (list, detail, slide-over Tri round-trip, matrix, history) / notifications / announcements live preview / audit log / subscription / kanban seed+CRUD; dark mode clean; mobile block verified at 458px (nav -> picker swap, zero horizontal scroll, push-nav list state). Not yet done on the deployed URL: live smoke + true-375px + client-session portal sections (org/people/brands/plan) - needs a client login.
-- Known deferrals: quiet-hours enforcement in lib/notifications.ts; mention/weekly-digest/delivery-ready/weekly-summary events persist prefs but no sender emits them yet; kanban/stage drag-reorder is HTML5 DnD (no touch fallback); favicon K/V keys still unwired to link tags.
+**Pushes to main do NOT auto-deploy.** The "Deploy dashboard" workflow's production job waits on a GitHub environment approval (required reviewer: tahistudio). The Aug 10 bank-truth fix (dc41442a) sat in that gate for 8 days while prod kept serving the old code - `get_bank_balances` was still reading Xero's ledger the whole time. Approve deploys at GitHub -> Actions -> the run -> Review deployments, or remove the required-reviewer rule on the production environment. Until dc41442a is approved + sync-airwallex fires, do not trust cash/runway numbers from the MCP tools.
 
 ---
 
-## Daily-trusted surfaces
+## Triage snapshot (audited against code 2026-08-18; no commits since dc41442a / Aug 10)
 
-Features the user actively runs their workday on. Regressions here are P0.
+### Trusted 100% (daily-driven and/or live-verified)
 
-- **Sales pipeline** — deals, kanban, list, nudges, activity timeline, default owner. Closed_at now auto-set on stage moves so sales velocity is honest.
-- **Financial reports (`/financial-reports`)** — Phase H finance overhaul shipped 2026-05-27/28. Cash hero (total cash + reserve donut + dual runway), Needs-attention card, MRR breakdown + concentration, Sales velocity + pipeline funnel + AR aging, Recurring outflows full CRUD with auto-detect cadence, Cost mix donut, Tax + reserve coverage, Take-home progress, Reserve target settings, Spend impact calculator. Currency switcher in nav respected page-wide.
-- **Docs Hub** — shipped + locked 2026-05-23. Reference list-page pattern (FilterBar + DataTable + SlideOver). Notion-grade editor with bubble menu, slash commands, task lists, image, and a 56rem slide-over with clickable version history.
-- **Proposals / contracts / schedules / calculator** — built and premium, but not yet in the user's daily routine (closest to crossing the line)
-- **Settings → Cash reserves** — new CRUD section shipped 2026-05-27 for tax/buffer/deposits pots that feed the disposable-cash math.
+- **Sales pipeline** (daily-trusted; data real; UI is pre-v3 but honest except the nudge affordances below)
+- **/financial-reports** (daily-trusted; Airwallex-first fix pending the deploy approval above)
+- **Docs Hub** (locked reference pattern)
+- **Requests** admin + portal (v3 lift, live-verified June; the request loop is the portal's strongest feature: intake forms, thread, AI wizard, tenancy solid)
+- **Overview homes** (owner + client verified live July; teammate home never visually verified)
+- **Settings rebuild** (verified locally + promoted; client-session QA of portal sections still pending)
 
-## Built but not daily-trusted
+### Built and impressive, but NOT client-safe yet (sprint C1)
 
-Features that are coded and routed but haven't earned the user's trust as primary tools yet. Polish target.
+- **Proposals**: public viewer + list are premium; but share serves LIVE rows until a separate Publish click, the Publish button permanently disappears after first use in a session, accepting a proposal notifies NOBODY (no email/notification/deal move; viewer promises "we'll be in touch within one business day"), and at 375px the package tabs clip so a phone client can't select the third package.
+- **Contracts**: emailed-link signing genuinely works end to end (drawn signature, hash chain, fully-signed PDF emailed to all parties). But the signed PDF is never stored (one fire-and-forget email is the only copy), the body isn't hash-locked and stays editable after signatures, nobody is notified on partial signature, and the portal nav item silently bounces clients to /requests.
+- **Schedules**: strongest client-facing document in the codebase (snapshot semantics, dwell analytics). But share-before-publish leaks live edits, a viewer's dark-mode localStorage corrupts the public document, dark slide themes render invisible text, the gantt is a 64rem pinch-scroll strip on phones, and drafts leak phase names onto the client home.
+- **Deals** (internal): every traced button hits a real API (sales kit one-click proposal/schedule/contract creation, convert-to-client provisioning). Two lying affordances to remove or build: scheduled nudges are recorded as queued but never send; "auto-nudges active" toggles have no engine. Nothing closes the loop when a client accepts/signs. v3 lap still pending (board/list/filters/dialogs bespoke; 2-3 day composition swap).
 
-- Tasks (three-level system, AI wizard — UX still rough)
-- Requests (admin + portal — client privacy gaps, file upload / voice note bugs flagged in March QA)
-- Messages / conversations
-- Time tracking
-- Settings (some toggles broken per March QA — needs re-verification)
-- Reviews & case-study pipeline
-- Announcements — now send real audience-targeted email honouring per-user prefs (Wave 1); UI trust still to earn
+### Broken or missing for clients (sprint C2 - the five blockers, all re-verified 2026-08-18)
 
-## Automation & delivery (wired live 2026-07-07)
+1. **B1 uploads identity** - clients 403 on every team-uploaded file; /api/uploads/confirm is a cross-tenant write hole (any authed user can write files rows into another org); Clerk-vs-D1 org-id split also hides client self-uploads from the portal list. (~2.5d)
+2. **B2 notification identity** - inserts use domain row ids, queries use Clerk ids: clients never see team replies, team never sees client comments. Correct resolver helpers exist unused. (~1.5d)
+3. **B3 portal invoice dead end** - detail page always hits the admin API (403 for clients); no pay link is ever stored; "Pay" buttons just navigate to the list. (~2.5d)
+4. **B4 dead client nav** - Schedule/Contracts/Proposals nav items bounce to /requests; /files is a hardcoded "No files yet" stub (client-only page!); Book-a-call CTAs loop to /overview. Stale sub-claim: /billing now has a working client branch, it's just unlisted. (~2d)
+5. **B5 onboarding not operable** - nothing in UI/MCP mints invite links; second-seat teammates never get clerkUserId backfilled (no Clerk webhook) and are stuck at the onboarding gate forever; "invoice me" 402-strands the client; the kickoff booking step discards the chosen slot. (~3.5d)
 
-- **Automation engine** — `lib/events.ts` bus fires the previously-dead `fireAutomation` on real domain events (request created / status changed, invoice created / paid / overdue, client onboarded). Actions are human-safe (assign / status / notify / task); external sends + deletes log `skipped_unsafe`.
-- **Outgoing webhooks** — `fireWebhook` now wired to the same event bus; every delivery logged to the new `webhook_deliveries` table (migration 0082).
-- **Announcement email** — React Email template + audience-targeted fan-out (all / plan / org) honouring per-user email prefs; shared `lib/announcement-emails.ts` backs both create and `[id]/send`, double-send guarded via `emailSentAt`.
+### Redesign coverage (sweep 2026-08-18)
 
-## Stubs / not functional
-
-- SSE notification stream (`/api/notifications/stream` is a stub — Phase 11 upgrades it)
-- Web Push notifications (no service worker handler yet — Phase 11)
-- Email-to-Request intake — **in progress today** (2026-07-07, another agent)
-- Xero payment webhook receiver — **in progress today** (2026-07-07, another agent)
+**58 routes: 26 v3 / 20 partial / 8 legacy / 4 stub.** Client-facing laggards that matter: `/services` (legacy, zero primitives, client catalogue), `/billing` (legacy), `/invoices/[id]` (legacy detail behind a v3 list), `/files` (stub), `/p/contract` viewer (only public viewer off the deliverable kit). Client-facing partials: /messages, /tasks (+detail), /tracks. Better than assumed: /calls, /team, /invoices list, /affiliates, /announcements, /reviews, /sales-analytics are already v3. Biggest internal partial: /reports (10 hand-rolled tables).
 
 ---
 
 ## Known live bugs (priority order)
 
-Verified 2026-05-21 against current code. Pipeline polish backlog (5 items) all shipped — see `memory/project_pipeline_polish_2026_05.md`. March QA audit largely resolved — see `memory/project_qa_resolved_2026_05.md`.
+1. **P0 - production deploy gate**: dc41442a not deployed; every future push waits on manual approval (see DEPLOY GATE above).
+2. **P0 - `finance.yieldHoldings` stale**: yield positions grew (Xero shows Yield USD 33,956.89 / AUD 638.80 vs setting's 20,014.13 / 531.51). Confirm in Airwallex UI, update via update_settings after the deploy lands.
+3. **P1 - the five portal blockers** (sprint C2 above).
+4. **P1 - proposal/schedule share leaks live rows; proposal accept + contract sign are silent** (sprint C1).
+5. **P2 - migrations 0081/0082 apply state unverified on prod D1** (C0.4).
+6. **P2 - /tasks/[id] full page**: GET handler was missing (June note); verify whether the slide-over is still the only working task detail.
 
-1. ~~**P1 — Voice note playback is fake.**~~ **FIXED 2026-06-09 (commit 385e03f), pending live verification.** Root cause was deeper than a fake player: the conversations POST endpoint silently dropped the `voiceNote.storageKey`, so no `voice_notes` row was ever written and there was no audio URL to play. Fix persists the row on POST (admin + portal), joins it on GET to return `voiceNote.url` (=/api/uploads/serve), and renders the real `MessageBubble` `VoiceNoteInline` player. Legacy notes (no row) show "recording unavailable". Verify on the deployed URL, then flip this off the list.
-2. **P2 — Needs live verification on production:**
-   - R2 STORAGE binding (file upload end-to-end test on Webflow Cloud)
-   - Settings page tabs (team / portal branding / modules — March audit said broken; code has no obvious stubs now)
-   - Per-member docs access control (March feature request, status unknown)
-3. ~~**P3 — Stripe import**: duplicates `in_*` / `ch_*` rows; pagination caps at 100~~ **FIXED (Wave 1, T665/T666)** — `in_*`/`ch_*` dedupe + cursor pagination.
-4. ~~**P3 — Bank balance card**: statement balance missing~~ **FIXED (Wave 2, T706)** — statement balance now pulled from Xero bank summary.
-5. **P1 — Migrations 0081/0082 pending apply on staging + prod D1.** The event/webhook + portal persistence tables ship in code but the migrations have not run live (blocked on `TAHI_API_TOKEN` rotation / an admin session to hit `/api/admin/db/migrate`). Wave features degrade until applied.
+### Corrections to previous STATUS claims
 
----
-
-## Current sprint (2026-05-21 → 2026-06-04)
-
-1. ✅ Doc cleanup pass — STATUS.md, CLAUDE.md Definition of Done, roadmap memory rewrite, QA audit re-verification, pipeline polish memory archived
-2. ✅ Pipeline polish backlog — all 5 items already shipped (verified 2026-05-21)
-3. ✅ Design-system v3 primitives shipped — KanbanBoard, BoardView (Kanban/Table/Timeline tabs, infinite-scroll timeline), FilterBar multi-select, Avatar tooltip-by-default, Notion-grade TiptapDocEditor (bubble menu + slash commands + task lists + image)
-4. ✅ Docs Hub shipped + locked 2026-05-23 — first list-page lapped through the new design system
-5. ⏳ **NEXT: lead intake + discovery call workflow** — see "Next workflow" below
-6. Live Chrome verification of pipeline polish items + voice note bug + R2 uploads (awaiting deployed URL)
-7. Voice note player fix (P1 — swap fake player for `<audio>` element)
-8. Phase 11 quick wins T660–T667 — 8 items
-9. Schema migration S23–S25 (notificationPreferences + commentsLocked + xero_category_overrides + teamMembers.salaryAnnual). Note: `editedAt`/`deletedAt` on messages already exist.
-
-## Next workflow
-
-Lifecycle-order build is in progress. Docs Hub was the first list-page lap; the next surface to build is the **earliest stage of the sales lifecycle**: lead intake → discovery call → first deal. See "Discovery call" entry in `WORKFLOWS.md`. Pipeline (already daily-trusted) sits downstream of this and gets a design-system polish pass once the upstream lead/discovery flow lands.
-
-Full plan: `C:\Users\Work\.claude\plans\i-d-like-you-to-gentle-neumann.md`
+- **Voice notes**: the feature no longer exists in the tree (no recorder, no audio MIME in uploads/serve). The March bug + June fix are both moot; removed from the list.
+- **SSE notification stream**: real now, not a stub (Phase 11 note was stale).
+- **Webflow Cloud**: all "blocked on Webflow Cloud" items are stale; we're on Cloudflare direct (prod=portal.tahi.studio, staging=staging.tahi.studio).
 
 ---
 
-## Wave hardening (2026-07-07, latest)
+## Automation & delivery (wired live 2026-07-07)
 
-Four waves in one day turned dead code into live capability and hardened the trust boundaries.
+Event bus fires automations + outgoing webhooks on real domain events; announcement email fan-out honours per-user prefs; AI weaves are human-in-the-loop only. Live smoke of all of it still pending (W-QA, post-launch list).
 
-- **Permissions fail-closed + `requireFeature` rollout** — denied-by-default enforcement; legacy `teamMembers.role` no longer grants unrestricted scope when the member holds a scoped new-system role, and an admin-level new-system role can never be denied by the legacy path. Xero OAuth connect/callback now carries a single-use state nonce.
-- **Settings IA + real client portal tabs** — client portal Organization, Brand, and People tabs now persist against real data (brand tint for client sessions only, People roster with Clerk org invitations, admin-gated server-side); Plan & billing reads the honest subscription.
-- **Event engine wired** — `lib/events.ts` bus fires the previously-dead automation + outgoing-webhook engines on real domain events, non-blocking, human-safe actions only; deliveries logged to `webhook_deliveries` (migration 0082).
-- **AI weaves (human-in-the-loop)** — daily briefing surfaced in the top nav, request triage suggestions + reply drafts, overdue-invoice chase drafts, on-demand client health check, and call action items. Every weave produces suggestions or pending drafts only; a human click is the sole gate for anything that applies or sends.
-- **Dead-code sweep** — ~4,400 LOC removed (12 zero-reference files + the legacy single-prompt blog-writer path; blog pipeline cut over to the round-table driver); production console.logs removed; duplicate helpers consolidated into `lib/utils.ts`.
-- **Model migration** — moved to Sonnet 5 / Opus 4.8; hardcoded model ids centralised on `SONNET_MODEL` to prevent the retired-model class of bug that broke the briefing cron.
+## Stubs / not functional
 
-## Recent activity (2026-06-10, latest)
-
-Granular permissions (the capstone) BUILT + validated live, plus the two settings-popup view modes.
-
-- **Granular permissions** — built on #119 RBAC + new `feature_visibility` table (migration 0077, applied to prod) + `FEATURE_TREE` manifest. Resolver `lib/permissions.ts` (4 levels: super_admin un-lockable / admin all-but-deny-hides / team_member role-baseline / client audience-gated + per-org), 11 unit tests. Enforcement: layout -> PermissionsProvider, sidebar nav filter, `<Gate>` on cards, real page guards (financial-reports/team/billing redirect a denied team member). Builder UI at `/permissions` (Team/Clients/Roles tabs, per-feature allow/deny/inherit + reasons, role assignment) — admin+ only. API: /me, subjects, feature-visibility, assign-role. MCP parity (4 tools). **Validated live on prod**: override deny flips /me + inherit restores; role assignment persists; builder renders. Super-admin seed = migration `0078` (Liam + Staci), runs on the in-flight deploy; assign-role guard relaxed so managers can grant any role.
-- **Private mode + Client view** (settings popup, super-admin only) — Private mode toggles `.tahi-private` (localStorage) and blurs `[data-private]` (hover reveals); validated live (blur 8px). Client view impersonates a real client via the existing impersonation banner. Operator identity tagged data-private as initial coverage; extend by tagging more PII/financial surfaces.
-- Tracks-visualization scoping still open (#189).
-
-## Recent activity (2026-06-10, later)
-
-Portal-readiness arc pushed hard. Spine now complete (slices 0-5), requests lapped onto v3, portal leak closed; permissions design drafted for approval.
-
-- **Portal split airtight** — `/api/portal/tracks` GET + reorder now filter `isInternal=false` (the one leak; internal requests no longer reach the client track view). Tasks stay 100% admin-gated. Requests=client / tasks=internal holds (Decisions #030/#046).
-- **Spine Slice 4 (engagement health card)** — live + verified on prod. `/api/admin/engagements/delivery-status?dealId=|orgId=` rolls up across a deal/org's schedules; `EngagementHealthCard` on deal + client detail. Verified: Giant Group card showed "Delivery health · Delayed · 0/1 done · 1 off track · Discovery & sitemap".
-- **Spine Slice 5 (overview off-track widget + notify)** — live + verified. `/api/admin/engagements/off-track` + `OffTrackEngagementsWidget` (verified showing Giant Group delayed). `delivery-watch` cron (absolute + 23h dedup, no new schema) -> `delivery_off_track` notifications; registered in CRONS. MCP parity on all of it.
-- **Requests v3 lift (#129/#186)** — live + verified. PageHeader + FilterBar + DataTable (list, bulk preserved) + BoardView (kanban + timeline) + StatusChipSelect on detail. ~1270 lines of bespoke code removed; all business logic preserved (cross-client nest guard, un-nest-on-column-drop, optimistic status, custom kanban columns, AI wizard, impersonation gating). Verified live: list + board render, light + dark mode clean, mobile responsive (501px cards + bottom nav), no console errors.
-- **Granular permissions** — DESIGN written (`SPECS/granular-permissions.md`), awaiting Liam's approval before build. Build on #119 + feature_visibility table + FEATURE_TREE manifest + lib/permissions.ts + sidebar/`<Gate>` + builder UI.
-- **Tracks visualization for clients** — flagged to scope (task #189, biggest client-facing UI/UX call).
-
-QA residuals (minor, for a polish pass): board view shows both the page FilterBar and BoardView's built-in search (double search); desktop-width kanban/table visual not captured (test window was ~501px); bulk-select interaction not click-tested (DataTable supports it); portal-leak full client-session test deferred (endpoint + deploy confirmed).
-
-## Recent activity (2026-06-10, earlier)
-
-Delivery spine #148 (the ManyRequests differentiator) is live end-to-end.
-
-- **Slices 0-3 deployed + verified on prod** (dfa95f4 + migration 0076). `scheduleRowId` on requests/tasks, pure status engine (`lib/delivery-status.ts`, 13 tests), `/delivery-status` endpoint, GanttGrid status dots + schedule-editor delivery-health banner. Engine verified live: linked a request to a past-due Giant Group phase, engine computed `delayed` + correct rollup, clean unlink.
-- **In-viewer linking picker shipped + VERIFIED LIVE (0c3cb53).** Schedule row editor gets a "Linked work" panel (chips + attach picker, new `/api/admin/schedules/[id]/linked-work` endpoint with org fallback via deal + `requireAccessToOrg`); request detail + task slide-over get a "Delivery phase" selector (`/api/admin/schedules?includeRows=1`, shared `lib/schedule-phases.ts`). MCP parity on the worker: `get_schedule_delivery_status`, `get_schedule_linked_work`, `link_request_to_schedule_row`, `update_task.scheduleRowId`, `list_schedules.includeRows`. Live prod smoke (2026-06-10): attached a request to the "Visual direction" phase via the picker -> chip + "Delivery: Delayed, 0/1 done, 1 off track" banner updated live -> request detail "Delivery phase" showed "Visual direction" -> detach returned engine to clean. NOT yet checked: mobile 375px + dark mode on the new picker (functional-only verification this pass).
-- **Drive-by fixes:** delivery-status `inArray` now chunked (D1 100-bind cap would have 500'd schedules with >100 rows); requests list GET accepts `orgId` alias (the MCP `list_requests` org filter was silently a no-op); two stale Buffer unit tests updated to the intentional dueAt/client-side-filter behaviour.
-- **Bug found, not yet fixed: `/tasks/[id]` full page is dead on prod.** `app/api/admin/tasks/[id]/route.ts` exports only PATCH, so the page's GET always 405s and it renders the error state. The tasks slide-over panel is the only working task detail surface. Fix = add a scoped GET (and DELETE) handler.
-
-## Recent activity (2026-06-09)
-
-Portal-readiness sweep (direction: Liam owns portal, team owns the website redesign). Goal arc: ManyRequests parity via granular permissions + working requests/tasks + the proposal/contract/schedule/delivery spine (task #148). This session = quick wins + bug sweep first.
-
-- **T735 (P1) voice notes — fixed end-to-end** (385e03f). Was a data-loss bug, not just a fake UI: the conversations POST dropped the storageKey. Now persisted + joined + real player, admin + portal.
-- **T660 — request activity comments-only filter** (6674c1d). Segmented control, localStorage-persisted.
-- **T666 — Stripe import pagination** (07c5658). Both import-invoices + import-payments now page past the 100-record cap via `starting_after`.
-- **T661 — client tags + filter requests by client tag** (f3b1e59). orgs had no tags column and the managed tags table was never wired, so built free-form: org tags column (migration 0075), TagsCard editor on client detail, requests list tag filter. **Migration 0075 must run on prod after this deploy.**
-- **Bug-sweep finding: the quick-win backlog is ~half stale.** T665 (Stripe in_*/ch_* dedupe) already handled in code; T664 (accent sweep) effectively done, remaining hex are intentional (semantic callouts, success states, cluster palette, client PDF). Still open: T662 (email requestNumber var — needs the email layer inspected), T663 (portal noindex/robots — note the app mounts at /dashboard so /robots.txt serves under base path, may be wrong layer), T667 (Xero category overrides — needs its own migration).
-
-## Recent activity (2026-05-27 → 2026-05-28)
-
-- **Phase H finance shipped** — `/financial-reports` premium UI/UX overhaul. Hero band (cash + revenue side-by-side then stacked per user feedback), reserve donut, dual runway (worst-case + net-burn, tax-adjusted), bank-sync staleness stamp + Refresh button, currency switcher integration page-wide, Needs-attention card replacing the previous chip-style watchlist. Section tabs removed.
-- **Recurring outflows CRUD + auto-detect cadence** — add/edit/delete commitments via SlideOver. Auto/Manual burn toggle on Reserve target card. Cadence auto-detect reads 180d of Airwallex transactions and infers billing day + cadence with confidence scoring.
-- **Cash reserves CRUD** — new `/api/admin/reserves` routes + Settings section. Tax/buffer/deposits/other pots with target + accrued + accrual rate. Auto-cron accrues from daily revenue when rate is set.
-- **Calendar two-way sync** — `POST /api/admin/calls` now pushes to Google Calendar with auto-Meet link + attendee invites, writes the event id back, also lands in `discovery_calls` so home widget sees it instantly. "Next call" widget got Live-now badge + Join button.
-- **Auth shell premium rebuild** — split-pane sign-in / sign-up with `TahiStudioWordmark` SVG, brand-themed Clerk widget, client-focused copy, centred wordmark on mobile, no horizontal scroll.
-- **Data correctness fixes** — deal closed_at backfill (migration 0057) + auto-set on stage move so sales velocity reads real numbers. Inverted FX formula in summary route fixed. Retainer breakdown table on /financial-reports. Tax-adjusted runway. Monthly history chart year-aware labels.
-
-## Recent activity (2026-05-23 → 2026-05-24)
-
-- **Lead intake foundation** — `leads` table + `people` canonical identity (one human, many roles via `person_id` on leads/contacts/team_members) + `/leads` page using DataTable + FilterBar + SlideOver + LeadForm. Lead MCP tools live on the worker.
-- **Granular permissions model shipped (#119)** — RBAC + ABAC schema (roles, permissions, role_permissions with scope filters, team_member_roles, field_restrictions) via migration 0039. Seed migration 0041 populated 5 system roles (super_admin / admin / project_manager / task_handler / viewer) + ~126 permissions (27 resources × 4 base actions + 18 resource-specific verbs) + role_permission defaults. Enforcement is a per-feature runtime layer that rolls out gradually.
-- **Pipeline triage (#123)** — migration 0040 moved every Lead-stage deal and every Stalled-no-engagement deal into the new `leads` table, preserving the deal's primary contact via `person_id`, stamping `lead_demoted` activities, and deleting the deal. 23 deals remain across Closed Lost / Closed Won / Discovery / Negotiation / Proposal.
-- **Design-system enrichment pass** — ~22 surfaces lapped through the v3 primitives (FeatureCard, charts, kanban, BoardView, Avatar tooltips). FilterBar now supports `daterange` kind with 5 presets + custom from/to.
-
-## Last shipped (last 10 commits, user-visible)
-
-- `35973d5` — /financial-reports mobile: equal-width cards + win-rate row wrap
-- `5d4fd8a` — Auth shell mobile: kill horizontal scroll, centre wordmark
-- `488d534` — Watchlist redesign + Section tabs removed + Calendar push-back
-- `a0c7278` — Cash reserves CRUD + sync staleness + watchlist on /financial-reports
-- `d5342d0` — Recent activity rows: stop overflowing on mobile
-- `86ceb7f` — Hero cash card: stack donut + metrics vertically
-- `d1b73d6` — Next call widget: live-now badge + Join button
-- `15fc002` — Mobile audit fixes: auth shell, financial reports, next-call widget, deals closed_at
-- `1673b74` — Auth pages: split-panel premium layout with proper brand mark
-- `61df271` — /financial-reports premium UI/UX overhaul aligned to design system
-
----
-
-## Blocked on
-
-- **KV namespace in Webflow Cloud** — proper rate limiter (T628 / T719) blocked; interim WAF rule available
-- **Webflow Cloud deploys are slow** — tightens the live-QA loop; mitigated by the Definition of Done check (`CLAUDE.md`)
-- **R2 STORAGE binding** in Webflow Cloud may need re-verification (March QA flagged file upload failures)
+- Web Push (no service worker handler)
+- Email-to-Request intake (state unknown since 2026-07-07; verify)
+- Scheduled deal nudges + auto-nudge engine (UI exists, engine doesn't - C1.8 removes or builds)
 
 ---
 
 ## Definition of Done (enforced)
 
-Per `CLAUDE.md` Code Quality Rules. A task only flips to `[x]` once all seven steps pass — code quality + live browser verification + mobile + dark mode + commit note.
-
----
+Per `CLAUDE.md` rule 8: type-check + lint + deploy green (NOW INCLUDING the manual approval click) + live smoke + 375px + dark mode + commit note.
 
 ## Production-readiness exit criterion
 
-Original plan said: all Phase 11 blocks closed + DoD enforced 4 weeks.
-
-**Revised criterion (per user statement 2026-05-21):** the user trusts enough features to run their full workday inside the dashboard — not just pipeline + finance. Trust-crossover order in `memory/project_trust_state_2026_05.md`.
+**Client-ready cutover** (revised 2026-08-18): sprints C0-C4 complete, one full live client-session QA lap passed on prod at 375px + dark, and a real client has completed one proposal-accept and one contract-sign round-trip without a Tahi hand touching the database. Team/owner trust-crossover continues post-cutover.

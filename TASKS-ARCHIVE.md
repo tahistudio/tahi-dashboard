@@ -5,6 +5,35 @@ Active items live in `TASKS.md`. This file is the grep history for closed work +
 
 ---
 
+## Archived 2026-08-18 (client-ready reorg — full specs in git history of TASKS.md @ dc41442a)
+
+Shipped blocks moved out of TASKS.md when it was reorganised around the ManyRequests cutover:
+
+- [x] W-1 — Event engine: lib/events.ts bus wires fireAutomation + fireWebhook into real domain events — 2026-07-07
+- [x] W-2 — Outgoing webhook deliveries logged to webhook_deliveries (migration 0082) — 2026-07-07
+- [x] W-3 — Announcements send real audience-targeted email honouring per-user prefs — 2026-07-07
+- [x] W-4 — Client portal persistence: Organization + Brand + People roster + honest Plan & billing — 2026-07-07
+- [x] W-5 — Permissions fail-closed + requireFeature rollout; Xero OAuth state nonce — 2026-07-07
+- [x] W-6 — AI weaves (human-in-the-loop): briefing, triage + reply drafts, invoice chase, health check, call action items — 2026-07-07
+- [x] W-7 — Dead-code sweep (~4,400 LOC) + blog pipeline cutover to round-table driver — 2026-07-07
+- [x] W-8 — Model migration to Sonnet 5 / Opus 4.8, ids centralised on SONNET_MODEL — 2026-07-07
+- [x] PI-S1.1 — Ideation cron + signals + Ideas tab (content engine Slice 1) — 2026-05-27
+- [x] PI-S2.1 — Multi-agent drafting pipeline + content_drafts + Drafts tab (Slice 2, migration 0060) — 2026-05-27
+- [x] PI-S9.1 — Round-table orchestrator: 23 reviewers + Strategist/Editor/Sign-off + cost log (migration 0064) — 2026-05-29
+- [x] PI-S6.5.1 — Backfill existing blog posts: FAQs + takeaways + schema + hreflang (migration 0063) — 2026-05-28
+- [x] PI-S5.1 — Publish + schedule pipeline: Now/Custom/Auto slots, cooldowns, publish-scheduled cron (migration 0062) — 2026-05-27
+- [x] LIT-BOOKS.1 — Take-Home vs Target gauges card on /overview — 2026-06-12
+- [x] LIT-BOOKS.2 — Cash-Flow Forecast ribbon card on /overview — 2026-06-12
+- [x] T665 — Stripe import dedupe (in_*/ch_*) — 2026-07-07
+- [x] T666 — Stripe import pagination via starting_after — 2026-07-07
+- [x] T706 — Bank balance statement + cash from Xero bank summary — 2026-07-07
+- [x] T660 — Comments-only filter in request activity — 2026-06-09 (6674c1d)
+- [x] T661 — Client org tags + requests tag filter (migration 0075) — 2026-06-09 (f3b1e59)
+- [x] T735 — Voice note playback fix (385e03f) — SUPERSEDED: the voice-note recorder/player was later removed from the tree entirely (no MediaRecorder path, no audio MIME in uploads/serve as of 2026-08-18); feature no longer exists
+- [x] T664 — Accent colour sweep — closed 2026-06-09 bug-sweep: remaining hex intentional
+
+---
+
 
 Last updated: 2026-04-16 (Session: Phase 11 planned, 75 new tasks T660-T734)
 Total tasks: 698 (S1-S11 schema + S23-S25 phase 11 schema + T1-T495 feature + T546-T557 integration + T558-T652 post-launch + T660-T734 phase 11)
