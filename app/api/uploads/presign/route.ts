@@ -1,6 +1,8 @@
-import { getRequestAuth } from '@/lib/server-auth'
+import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCloudflareContext } from '@opennextjs/cloudflare'
+import { db } from '@/lib/db'
+import { resolveOwnerOrgForUpload } from '@/lib/upload-access'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,7 +12,9 @@ export const dynamic = 'force-dynamic'
  * Generates an R2 presigned URL for direct browser upload.
  * The browser uploads directly to R2 : the file never passes through this server.
  *
- * Body: { filename: string, mimeType: string, requestId?: string }
+ * Body: { filename: string, mimeType: string, requestId?: string, orgId?: string }
+ * `orgId` is an admin-only target org (D1 organisations.id) so team uploads
+ * land under the client's prefix; it is ignored for clients.
  * Returns: { uploadUrl: string, storageKey: string, fileId: string }
  *
  * Flow:
@@ -29,11 +33,27 @@ export async function POST(req: NextRequest) {
       filename?: string
       mimeType?: string
       requestId?: string
+      orgId?: string
     }
 
     if (!body.filename) {
       return NextResponse.json({ error: 'filename is required' }, { status: 400 })
     }
+
+    // The key prefix is the OWNING org's D1 id (or the Tahi Clerk org id
+    // for Tahi-internal files): same resolution as confirm, so the prefix
+    // that proxy/serve check always matches the files row that confirm
+    // writes.
+    const isAdmin = isTahiAdmin(orgId)
+    const drizzle = (await db()) as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+    const resolution = await resolveOwnerOrgForUpload(drizzle, {
+      isAdmin,
+      userId,
+      callerClerkOrgId: orgId,
+      targetOrgId: isAdmin ? body.orgId ?? null : null,
+      requestId: body.requestId ?? null,
+    })
+    if (!resolution.ok) return resolution.response
 
     const { env } = await getCloudflareContext({ async: true })
 
@@ -45,11 +65,11 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Build a scoped storage key: orgId/requestId?/timestamp-filename
+    // Build a scoped storage key: ownerOrgId/requestId?/timestamp-filename
     const timestamp = Date.now()
     const safeFilename = body.filename.replace(/[^a-zA-Z0-9._-]/g, '_')
     const storageKey = [
-      orgId ?? 'anon',
+      resolution.ownerOrgId,
       body.requestId ?? 'general',
       `${timestamp}-${safeFilename}`,
     ].join('/')

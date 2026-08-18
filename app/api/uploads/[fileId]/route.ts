@@ -5,14 +5,44 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { decideUploadRead, resolveD1OrgId } from '@/lib/upload-access'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ fileId: string }> }
 
+/**
+ * Shared org-scoping for GET/DELETE: authorize off the files row
+ * (files.orgId is the canonical D1 organisations.id; legacy rows may
+ * carry a Clerk org id, which decideUploadRead also accepts).
+ * Returns a NextResponse when denied, null when allowed.
+ */
+async function denyUnlessFileAccess(
+  drizzle: D1,
+  userId: string,
+  authOrgId: string | null,
+  fileOrgId: string,
+): Promise<NextResponse | null> {
+  const isAdmin = isTahiAdmin(authOrgId)
+  const decision = decideUploadRead({
+    isAdmin,
+    fileOrgId,
+    keyOrgId: null,
+    requesterClerkOrgId: authOrgId,
+    requesterD1OrgId: isAdmin ? null : await resolveD1OrgId(drizzle, authOrgId),
+  })
+  if (decision.outcome === 'admin_scope_check') {
+    return requireAccessToOrg(drizzle, userId, decision.targetOrgId)
+  }
+  if (decision.outcome === 'deny') {
+    return NextResponse.json({ error: decision.error }, { status: decision.status })
+  }
+  return null
+}
+
 export const dynamic = 'force-dynamic'
 
 /**
- * GET /api/uploads/[fileId] — file metadata (for preview UIs)
+ * GET /api/uploads/[fileId] - file metadata (for preview UIs)
  *
  * Returns { id, filename, mimeType, sizeBytes, storageKey, requestId, orgId, uploadedAt }
  * Used by the message attachment menu so the View / Download buttons can
@@ -26,12 +56,8 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
   const [file] = await drizzle.select().from(schema.files).where(eq(schema.files.id, fileId)).limit(1)
   if (!file) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   // Same org-scoping as serve.
-  if (isTahiAdmin(authOrgId)) {
-    const denied = await requireAccessToOrg(drizzle, userId, file.orgId)
-    if (denied) return denied
-  } else if (authOrgId !== file.orgId) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  const denied = await denyUnlessFileAccess(drizzle, userId, authOrgId, file.orgId)
+  if (denied) return denied
   return NextResponse.json({ file })
 }
 
@@ -41,7 +67,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
  * Hard-deletes the file from both R2 and the files table. Caller must
  * have access to the file's org (admin team-member scoping enforced).
  *
- * The row is gone entirely — message attachments referencing this file
+ * The row is gone entirely - message attachments referencing this file
  * will have their fileId resolve to null on next render. Keep that in
  * mind: this is destructive.
  */
@@ -55,12 +81,8 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
   if (!file) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   // Org-scoping
-  if (isTahiAdmin(authOrgId)) {
-    const denied = await requireAccessToOrg(drizzle, userId, file.orgId)
-    if (denied) return denied
-  } else if (authOrgId !== file.orgId) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  const denied = await denyUnlessFileAccess(drizzle, userId, authOrgId, file.orgId)
+  if (denied) return denied
 
   // Best-effort R2 delete. Even if R2 has already lost the object, we
   // still drop the DB row so it stops appearing in lists.

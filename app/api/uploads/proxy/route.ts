@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCloudflareContext } from '@opennextjs/cloudflare'
 import { db } from '@/lib/db'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { resolveD1OrgId } from '@/lib/upload-access'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,7 +31,9 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Missing storage key' }, { status: 400 })
     }
 
-    // The first segment of the key must match the caller's org.
+    // The first segment of the key must match the caller's org. New keys
+    // are prefixed with the owning D1 organisations.id, legacy keys with a
+    // Clerk org id, so clients may match with either of their ids.
     const [keyOrgId] = key.split('/', 1)
     if (!keyOrgId || keyOrgId === 'anon') {
       return NextResponse.json({ error: 'Invalid storage key' }, { status: 400 })
@@ -39,8 +42,16 @@ export async function PUT(req: NextRequest) {
       const drizzle = (await db()) as ReturnType<typeof import('drizzle-orm/d1').drizzle>
       const denied = await requireAccessToOrg(drizzle, userId, keyOrgId)
       if (denied) return denied
-    } else if (authOrgId !== keyOrgId) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    } else {
+      let allowed = authOrgId === keyOrgId
+      if (!allowed) {
+        const drizzle = (await db()) as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+        const d1OrgId = await resolveD1OrgId(drizzle, authOrgId)
+        allowed = !!d1OrgId && d1OrgId === keyOrgId
+      }
+      if (!allowed) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     const { env } = await getCloudflareContext({ async: true })

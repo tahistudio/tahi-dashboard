@@ -1,7 +1,9 @@
-import { getRequestAuth } from '@/lib/server-auth'
+import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import { eq } from 'drizzle-orm'
+import { resolveOwnerOrgForUpload } from '@/lib/upload-access'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +20,9 @@ export const dynamic = 'force-dynamic'
  *   mimeType: string
  *   sizeBytes: number
  *   requestId?: string   : link file to a specific request
- *   orgId?: string       : required if admin uploading on behalf of a client
+ *   orgId?: string       : admin-only target org (D1 organisations.id);
+ *                          ignored for clients, who are always forced to
+ *                          their own resolved D1 org
  * }
  */
 export async function POST(req: NextRequest) {
@@ -42,20 +46,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'storageKey and filename are required' }, { status: 400 })
     }
 
-    // Resolve the org ID: clients use their own, admins pass an orgId
-    const resolvedOrgId = body.orgId ?? orgId
-    if (!resolvedOrgId) {
-      return NextResponse.json({ error: 'Cannot determine org' }, { status: 400 })
-    }
-
-    const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
-    const uploaderType = isAdmin ? 'team_member' : 'contact'
-
-    // Look up team member or contact ID
+    const isAdmin = isTahiAdmin(orgId)
     const database = await db()
     const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-    const { eq } = await import('drizzle-orm')
+    // Canonical file identity is the D1 organisations.id. Clients can never
+    // pick the owning org (body.orgId is ignored for them); admins may name
+    // a target org, validated + access-scoped inside the resolver.
+    const resolution = await resolveOwnerOrgForUpload(drizzle, {
+      isAdmin,
+      userId,
+      callerClerkOrgId: orgId,
+      targetOrgId: isAdmin ? body.orgId ?? null : null,
+      requestId: body.requestId ?? null,
+    })
+    if (!resolution.ok) return resolution.response
+    const ownerOrgId = resolution.ownerOrgId
+
+    // The row must describe a key the caller could legitimately have
+    // written: the key's org prefix has to be the owning org or the
+    // caller's own Clerk org (legacy presigns in flight). Without this a
+    // caller could register a row in their own org pointing at another
+    // tenant's R2 key and read it through serve.
+    const [keyOrgId] = body.storageKey.split('/', 1)
+    const prefixOk = keyOrgId === ownerOrgId || (orgId !== null && keyOrgId === orgId)
+    if (!prefixOk) {
+      return NextResponse.json({ error: 'Storage key does not match the target org' }, { status: 403 })
+    }
+
+    const uploaderType = isAdmin ? 'team_member' : 'contact'
     let uploaderId = userId
     if (isAdmin) {
       const [member] = await drizzle
@@ -74,10 +93,40 @@ export async function POST(req: NextRequest) {
     }
 
     const id = body.fileId ?? crypto.randomUUID()
+
+    // Idempotent: a retried confirm updates the existing row (also
+    // normalising a legacy Clerk-id orgId to the D1 id) instead of failing
+    // on the primary key. Non-admins may only touch rows already in their
+    // own org (either id space, for legacy rows).
+    const [existing] = await drizzle
+      .select({ id: schema.files.id, orgId: schema.files.orgId })
+      .from(schema.files)
+      .where(eq(schema.files.id, id))
+      .limit(1)
+
+    if (existing) {
+      const ownsExisting = existing.orgId === ownerOrgId || (orgId !== null && existing.orgId === orgId)
+      if (!isAdmin && !ownsExisting) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+      await drizzle
+        .update(schema.files)
+        .set({
+          requestId: body.requestId ?? null,
+          orgId: ownerOrgId,
+          filename: body.filename,
+          storageKey: body.storageKey,
+          mimeType: body.mimeType ?? null,
+          sizeBytes: body.sizeBytes ?? null,
+        })
+        .where(eq(schema.files.id, id))
+      return NextResponse.json({ id }, { status: 200 })
+    }
+
     await drizzle.insert(schema.files).values({
       id,
       requestId: body.requestId ?? null,
-      orgId: resolvedOrgId,
+      orgId: ownerOrgId,
       uploadedById: uploaderId,
       uploadedByType: uploaderType,
       filename: body.filename,
