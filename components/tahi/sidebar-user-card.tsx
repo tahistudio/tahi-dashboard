@@ -11,8 +11,9 @@
  *
  * Wiring: Clerk useUser() / signOut(); Client view previews the portal via
  * impersonation; Private mode blurs data-private surfaces for screen-shares.
- * Client view + Private mode stay gated to the super-admin allowlist - that is
- * the real boundary, not a cosmetic one.
+ * Client view + Private mode are gated on the server-resolved super_admin
+ * role (usePermissions, resolved in the dashboard layout), so this menu can
+ * never drift from what the API actually authorises.
  */
 
 import * as React from 'react'
@@ -25,18 +26,13 @@ import { apiPath } from '@/lib/api'
 import { setImpersonation } from '@/components/tahi/impersonation-banner'
 import { usePrivateMode } from '@/components/tahi/private-mode-context'
 import { useToast } from '@/components/tahi/toast'
+import { usePermissions } from '@/components/tahi/permissions-context'
 
 interface SidebarUserCardProps {
   collapsed: boolean
   darkMode: boolean
   onToggleDarkMode: () => void
 }
-
-// Super-admin allowlist. Only these emails see Client view / Private mode.
-const SUPER_ADMIN_EMAILS = new Set([
-  'business@tahi.studio',
-  'staci@tahi.studio',
-])
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
@@ -51,6 +47,9 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
   const router = useRouter()
   const { privateMode, togglePrivateMode } = usePrivateMode()
   const { showToast } = useToast()
+  // Server-resolved in app/(dashboard)/layout.tsx via resolvePermissions;
+  // replaces the old client-side email allowlist (dead duplicate).
+  const { isSuperAdmin } = usePermissions()
   const [open, setOpen] = React.useState(false)
   const [loadingClientView, setLoadingClientView] = React.useState(false)
   const [imgError, setImgError] = React.useState(false)
@@ -96,7 +95,6 @@ export function SidebarUserCard({ collapsed, darkMode, onToggleDarkMode }: Sideb
   const email = user.primaryEmailAddress?.emailAddress ?? ''
   const imageUrl = user.imageUrl ?? undefined
   const initials = initialsOf(fullName)
-  const isSuperAdmin = email ? SUPER_ADMIN_EMAILS.has(email.toLowerCase()) : false
 
   const handleSignOut = async () => {
     setOpen(false)

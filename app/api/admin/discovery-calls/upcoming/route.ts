@@ -2,13 +2,21 @@
  * GET /api/admin/discovery-calls/upcoming
  *
  * Returns the next N scheduled discovery calls (any parent: lead, deal,
- * request, task, org). This is what the homepage widget consumes — the
+ * request, task, org). This is what the homepage widget consumes: the
  * legacy /api/admin/calls only reads scheduled_calls (manual entries),
  * which misses everything Google Calendar sync writes into discovery_calls.
  *
  * Each row carries a denormalised `with` field for display ("Discovery
  * call with Acme") and a `meetingUrl` (Google Meet link). Parent type
  * is included so the UI can deep-link to the right page.
+ *
+ * ORG SCOPING (audit T1.19): results follow the caller's team-member access
+ * rules via scopedOrgIds, matching app/api/admin/calls/index. Owners /
+ * admins / the service token resolve to { kind: 'all' } and see everything,
+ * unchanged. Restricted members only see calls whose org (direct, or via a
+ * linked deal / request / task) is in their scope; pre-client calls with no
+ * client linkage stay visible to anyone holding a scope. Deny-by-default
+ * members get an empty list. See scope-upcoming.ts for the row decision.
  *
  * Query:
  *   ?limit=N  (default 5, max 50)
@@ -20,7 +28,10 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, asc, gte } from 'drizzle-orm'
+import { and, asc, gte } from 'drizzle-orm'
+import { scopedOrgIds } from '@/lib/access-scope'
+import { columnInIds, orgColumnInScope } from '../../_scoping/org-scope'
+import { keepUpcomingCallForScope, type ParentOrgIndex } from './scope-upcoming'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,10 +42,13 @@ interface AttendeeLite {
 }
 
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (scope.kind === 'none') return NextResponse.json({ calls: [] })
 
   const url = new URL(req.url)
   const limitRaw = parseInt(url.searchParams.get('limit') ?? '', 10)
@@ -61,6 +75,15 @@ export async function GET(req: NextRequest) {
   // filter below catches any straggler the lex pass let through.
   const lexCutoff = new Date(cutoffMs - 36 * 60 * 60_000).toISOString()
 
+  // A call with no orgId is kept by the SQL pass (includeNull) because it may
+  // be pre-client (lead / unclassified); rows reaching an org through a linked
+  // deal / request / task are re-checked in JS below, same shape as the
+  // calls/index route.
+  const conditions = [gte(schema.discoveryCalls.scheduledAt, lexCutoff)]
+  if (scope.kind === 'some') {
+    conditions.push(orgColumnInScope(schema.discoveryCalls.orgId, scope.orgIds, { includeNull: true }))
+  }
+
   const calls = await database
     .select({
       id: schema.discoveryCalls.id,
@@ -71,7 +94,7 @@ export async function GET(req: NextRequest) {
       googleCalendarEventId: schema.discoveryCalls.googleCalendarEventId,
       attendees: schema.discoveryCalls.attendees,
       status: schema.discoveryCalls.status,
-      // Parent identifiers — all nullable; one will be set
+      // Parent identifiers: all nullable; one will be set
       leadId: schema.discoveryCalls.leadId,
       dealId: schema.discoveryCalls.dealId,
       requestId: schema.discoveryCalls.requestId,
@@ -79,14 +102,52 @@ export async function GET(req: NextRequest) {
       orgId: schema.discoveryCalls.orgId,
     })
     .from(schema.discoveryCalls)
-    .where(gte(schema.discoveryCalls.scheduledAt, lexCutoff))
+    .where(and(...conditions))
     .orderBy(asc(schema.discoveryCalls.scheduledAt))
-    .limit(limit * 6)  // overfetch — JS filter strips past + non-scheduled
+    .limit(limit * 6)  // overfetch: JS filter strips past + non-scheduled
 
-  // Real "is it past?" check in JS, plus status filter — see comment above.
-  const upcoming = calls
-    .filter(c => c.status === 'scheduled' && new Date(c.scheduledAt).getTime() >= cutoffMs)
-    .slice(0, limit)
+  // Real "is it past?" check in JS, plus status filter (see comment above).
+  let candidates = calls.filter(
+    c => c.status === 'scheduled' && new Date(c.scheduledAt).getTime() >= cutoffMs,
+  )
+
+  // Restricted caller: a null-orgId row can still reach a client through a
+  // linked deal / request / task, so resolve those parents' orgs and drop any
+  // row whose resolved orgs are not all in scope. Runs before the slice so a
+  // scoped member still gets a full page of THEIR calls.
+  if (scope.kind === 'some') {
+    const nullOrg = candidates.filter(c => !c.orgId)
+    const parentDealIds = [...new Set(nullOrg.map(c => c.dealId).filter((x): x is string => !!x))]
+    const parentRequestIds = [...new Set(nullOrg.map(c => c.requestId).filter((x): x is string => !!x))]
+    const parentTaskIds = [...new Set(nullOrg.map(c => c.taskId).filter((x): x is string => !!x))]
+
+    type OrgRef = { id: string; orgId: string | null }
+    const [parentDeals, parentRequests, parentTasks] = await Promise.all([
+      parentDealIds.length > 0
+        ? database.select({ id: schema.deals.id, orgId: schema.deals.orgId })
+            .from(schema.deals)
+            .where(columnInIds(schema.deals.id, parentDealIds))
+        : Promise.resolve([] as OrgRef[]),
+      parentRequestIds.length > 0
+        ? database.select({ id: schema.requests.id, orgId: schema.requests.orgId })
+            .from(schema.requests)
+            .where(columnInIds(schema.requests.id, parentRequestIds))
+        : Promise.resolve([] as OrgRef[]),
+      parentTaskIds.length > 0
+        ? database.select({ id: schema.tasks.id, orgId: schema.tasks.orgId })
+            .from(schema.tasks)
+            .where(columnInIds(schema.tasks.id, parentTaskIds))
+        : Promise.resolve([] as OrgRef[]),
+    ])
+    const parents: ParentOrgIndex = {
+      dealOrgById: new Map(parentDeals.map(r => [r.id, r.orgId])),
+      requestOrgById: new Map(parentRequests.map(r => [r.id, r.orgId])),
+      taskOrgById: new Map(parentTasks.map(r => [r.id, r.orgId])),
+    }
+    candidates = candidates.filter(c => keepUpcomingCallForScope(scope, c, parents))
+  }
+
+  const upcoming = candidates.slice(0, limit)
 
   // Denormalise the parent "with" field. Batch one query per parent type
   // for the rows we actually returned (max 5 typically).
@@ -165,7 +226,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Parse attendees (JSON array) and pull email-bearing entries that
-    // aren't the host — these are the "with X" candidates if we lack a
+    // aren't the host: these are the "with X" candidates if we lack a
     // parent name (e.g. uncategorised Google Calendar import).
     let attendeesParsed: AttendeeLite[] = []
     try {

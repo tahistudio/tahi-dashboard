@@ -13,10 +13,13 @@
  *              Vitals    <- me + tasks (Overdue / Due today / Timer / Replies)
  *              NeedsYou  <- overdue task + next call + oldest reply
  *   My day   : My work   <- GET /api/admin/tasks?assignee=me
- *              Calls      <- GET /api/admin/discovery-calls/upcoming (today, studio-wide)
+ *              Calls      <- GET /api/admin/discovery-calls/upcoming (today; the
+ *                            route org-scopes rows to the member's access rules)
  *   Waiting  : Replies    <- GET /api/admin/overview/replies-waiting?scope=me
  *   My week  : Time        <- me.timer (live tick) + GET /api/admin/time?teamMemberId=me
- *              Docs         <- GET /api/admin/docs  (recent, honest: no pin model yet)
+ *              Studio docs  <- GET /api/admin/docs (Docs Hub is shared studio
+ *                            knowledge with no org linkage, so the card is
+ *                            labelled honestly instead of scoped)
  *
  * There is no currency on this home, so useOvFormat() is intentionally not
  * called. Honest empty / loading states everywhere; never a fabricated number.
@@ -277,7 +280,7 @@ export function TeammateHome({ ctx }: { ctx: OverviewCtx }) {
   const overdueTasks = openTasks.filter(t => t.overdue)
   const dueTodayTasks = openTasks.filter(t => t.delta === 0)
 
-  /* ---- today's calls (studio-wide; no per-member attendee scope yet) ---- */
+  /* ---- today's calls (route filters to the member's org access scope) ---- */
   const todaysCalls = (callsRes.data?.calls ?? []).filter(c => ymdLocal(new Date(c.scheduledAt)) === today).slice(0, 4)
 
   /* ---- replies waiting ---- */
@@ -635,13 +638,17 @@ function MyTimeCard({
   )
 }
 
-/* ---------- Recent docs card (honest: no per-member pin model yet) --------- */
+/* ---------- Studio docs card ------------------------------------------------
+ * doc_pages has no orgId: the Docs Hub is shared studio knowledge (brand /
+ * services / sales / operations / team / product), not client data, so this
+ * card is deliberately labelled "Studio docs" rather than org-scoped or
+ * hidden (audit T1.19). Still honest: no per-member pin model yet. */
 function RecentDocsCard({ go }: { go: (id: string) => void }) {
   const docsRes = useResource<{ pages: DocRow[] }>('/api/admin/docs')
   const docs = (docsRes.data?.pages ?? []).slice(0, 4)
   return (
     <Card span={6}>
-      <CardH ic="book" title="Recent docs" link="Docs hub" onLink={() => go('docs')} />
+      <CardH ic="book" title="Studio docs" link="Docs hub" onLink={() => go('docs')} />
       {docsRes.isLoading && !docsRes.data ? (
         <RowsSkeleton n={3} />
       ) : docs.length === 0 ? (

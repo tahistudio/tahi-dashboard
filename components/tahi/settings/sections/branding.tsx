@@ -17,8 +17,8 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { useUser } from '@clerk/nextjs'
 import { apiPath } from '@/lib/api'
+import { usePermissions } from '@/components/tahi/permissions-context'
 import { useResource } from '@/lib/use-resource'
 import {
   SectionShell,
@@ -34,9 +34,6 @@ const DEFAULT_COLOR = '#5A824E'
 const SWATCHES = ['#5A824E', '#2A6FDB', '#1F8A5B', '#B4531F', '#6D4FA3', '#0E7C86']
 const HEX_RE = /^#[0-9a-fA-F]{6}$/
 const LEDE = 'How your portal looks to clients - logo, name and accent.'
-
-// Favicon is a platform-level (Tahi) asset, so only super admins may change it.
-const SUPER_ADMIN_EMAILS = new Set(['business@tahi.studio', 'staci@tahi.studio'])
 
 type AssetKind = 'logo' | 'fav_light' | 'fav_dark'
 
@@ -107,9 +104,10 @@ export function BrandingSection({ isAdmin }: { isAdmin?: boolean } = {}) {
   const [faviconDark, setFaviconDark] = useState('')
   const [busy, setBusy] = useState<AssetKind | null>(null)
 
-  const { user } = useUser()
-  const email = user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? null
-  const isSuperAdmin = email ? SUPER_ADMIN_EMAILS.has(email) : false
+  // Favicon is a platform-level (Tahi) asset, so only super admins may change
+  // it. Server-resolved in app/(dashboard)/layout.tsx via resolvePermissions;
+  // replaces the old client-side email allowlist (dead duplicate).
+  const { isSuperAdmin } = usePermissions()
 
   // Seed the editors ONCE from the loaded settings. Later mutate() refreshes
   // must not clobber text the admin is mid-way through typing.
