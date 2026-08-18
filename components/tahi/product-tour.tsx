@@ -37,12 +37,6 @@ const ADMIN_STEPS: TourStep[] = [
     description: 'Create invoices, track payments, and sync with Stripe and Xero for automated billing.',
     position: 'right',
   },
-  {
-    target: '[data-tour="nav-messages"]',
-    title: 'Message your clients',
-    description: 'Communicate directly with clients. All messages are tied to their org for easy context.',
-    position: 'right',
-  },
 ]
 
 const CLIENT_STEPS: TourStep[] = [
@@ -56,12 +50,6 @@ const CLIENT_STEPS: TourStep[] = [
     target: '[data-tour="nav-requests"]',
     title: 'Submit and track requests',
     description: 'Submit new design or development requests and track their progress in real time.',
-    position: 'right',
-  },
-  {
-    target: '[data-tour="nav-messages"]',
-    title: 'Chat with your team',
-    description: 'Send messages, share files, and get updates on your requests.',
     position: 'right',
   },
 ]

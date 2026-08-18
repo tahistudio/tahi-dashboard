@@ -156,10 +156,11 @@ export function AppSidebar({
   React.useEffect(() => { setMounted(true) }, [])
   const { user } = useUser()
   const userEmail = mounted ? (user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? null) : null
-  const { canManagePermissions } = usePermissions()
+  const { canManagePermissions, isAdmin: isEffectiveAdmin } = usePermissions()
 
   const visibleNav = filterNav(showAsAdmin ? ADMIN_NAV : CLIENT_NAV, {
     showAsAdmin,
+    isEffectiveAdmin,
     isViewerRole,
     userEmail,
     canManagePermissions,

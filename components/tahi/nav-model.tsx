@@ -44,7 +44,8 @@ export const ADMIN_NAV: NavGroup[] = [
       { label: 'Overview', href: '/overview', icon: 'overview' },
       { label: 'Requests', href: '/requests', icon: 'requests' },
       { label: 'Tasks',    href: '/tasks',    icon: 'tasks' },
-      { label: 'Messages', href: '/messages', icon: 'messages' },
+      // Messages is hidden for V1: restore by re-adding the item here, in
+      // CLIENT_NAV, and in app/(dashboard)/messages/page.tsx.
     ],
   },
   {
@@ -108,7 +109,7 @@ export const CLIENT_NAV: NavGroup[] = [
     items: [
       { label: 'Overview', href: '/overview',  icon: 'overview',  clientVisible: true },
       { label: 'Requests', href: '/requests',  icon: 'requests',  clientVisible: true },
-      { label: 'Messages', href: '/messages',  icon: 'messages',  clientVisible: true },
+      // Messages is hidden for V1 (see the ADMIN_NAV note above).
       { label: 'Schedule', href: '/schedules', icon: 'schedules', clientVisible: true },
     ],
   },
@@ -131,6 +132,10 @@ export const CLIENT_NAV: NavGroup[] = [
 
 export interface FilterNavOpts {
   showAsAdmin: boolean
+  /** Admin or super_admin permission LEVEL (PermissionsValue.isAdmin), NOT
+   *  Tahi-org membership: showAsAdmin is true for every team login, so a
+   *  scoped team member must not pass this. Gates `adminOnly` items. */
+  isEffectiveAdmin: boolean
   isViewerRole: boolean
   userEmail: string | null
   canManagePermissions: boolean
@@ -139,13 +144,14 @@ export interface FilterNavOpts {
 
 /** Apply audience + permission visibility to a nav model. Empty groups drop. */
 export function filterNav(nav: NavGroup[], opts: FilterNavOpts): NavGroup[] {
-  const { showAsAdmin, isViewerRole, userEmail, canManagePermissions, features } = opts
+  const { showAsAdmin, isEffectiveAdmin, isViewerRole, userEmail, canManagePermissions, features } = opts
   return nav
     .map(group => ({
       ...group,
       items: group.items.filter(item => {
         if (item.emailAllowlist && (!userEmail || !item.emailAllowlist.has(userEmail))) return false
         if (item.requiresManage && !canManagePermissions) return false
+        if (item.adminOnly && !isEffectiveAdmin) return false
         if (features) {
           const key = featureKeyForRoute(item.href)
           if (key && features[key] === false) return false

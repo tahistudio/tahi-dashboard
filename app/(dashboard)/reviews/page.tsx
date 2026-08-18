@@ -1,5 +1,6 @@
 import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
+import { requirePageFeature } from '@/lib/page-guard'
 import { ReviewsContent } from './reviews-content'
 
 export const metadata = { title: 'Reviews and Testimonials - Tahi Dashboard' }
@@ -9,5 +10,7 @@ export default async function ReviewsPage() {
   if (!userId) redirect('/sign-in')
   const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
   if (!isAdmin) redirect('/overview')
+  // Granular permissions: a team member denied reviews is redirected.
+  await requirePageFeature('reviews')
   return <ReviewsContent />
 }

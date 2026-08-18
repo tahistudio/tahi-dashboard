@@ -7,6 +7,7 @@ import {
   type Effect,
 } from '@/lib/permissions'
 import { schema } from '@/db/d1'
+import { ADMIN_NAV, CLIENT_NAV, filterNav, type NavGroup } from '@/components/tahi/nav-model'
 
 // Build a ResolvedAccess for a given level. `overrides` is a plain object for brevity.
 function access(
@@ -326,5 +327,118 @@ describe('resolvePermissions - deny by default', () => {
     expect(decideFeature(resolved, 'financial_reports')).toBe(false)
     // A role that holds a grant keeps the ungated surfaces it always had.
     expect(decideFeature(resolved, 'overview')).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Audit T1.18: adminOnly nav gating + the newly mapped admin surfaces, and the
+// V1 messaging hide. filterNav is pure, so the nav model is tested directly.
+// ---------------------------------------------------------------------------
+
+function navHrefs(nav: NavGroup[]): string[] {
+  return nav.flatMap(g => g.items.map(i => i.href))
+}
+
+describe('filterNav - adminOnly gating (audit T1.18)', () => {
+  const base = {
+    showAsAdmin: true,
+    isViewerRole: false,
+    userEmail: null,
+    canManagePermissions: false,
+  }
+  const ADMIN_ONLY_HREFS = ADMIN_NAV.flatMap(g => g.items).filter(i => i.adminOnly).map(i => i.href)
+
+  it('the model actually carries adminOnly items (guards the fixture)', () => {
+    expect(ADMIN_ONLY_HREFS.length).toBeGreaterThanOrEqual(15)
+    for (const href of ['/billing', '/capacity', '/affiliates', '/content-studio', '/social', '/reviews', '/announcements']) {
+      expect(ADMIN_ONLY_HREFS).toContain(href)
+    }
+  })
+
+  it('hides every adminOnly item from a non-admin team member (showAsAdmin alone is not enough)', () => {
+    const visible = navHrefs(filterNav(ADMIN_NAV, { ...base, isEffectiveAdmin: false }))
+    for (const href of ADMIN_ONLY_HREFS) expect(visible).not.toContain(href)
+    // Non-adminOnly workspace items survive for a roled team member.
+    expect(visible).toContain('/overview')
+    expect(visible).toContain('/requests')
+    expect(visible).toContain('/tasks')
+  })
+
+  it('shows adminOnly items to an admin-level viewer (sitemap stays email-gated)', () => {
+    const visible = navHrefs(filterNav(ADMIN_NAV, { ...base, isEffectiveAdmin: true, canManagePermissions: true }))
+    for (const href of ADMIN_ONLY_HREFS.filter(h => h !== '/sitemap')) {
+      expect(visible).toContain(href)
+    }
+    expect(visible).not.toContain('/sitemap') // email allowlist, userEmail is null here
+  })
+
+  it('a features-map deny still hides a mapped item from an admin-level viewer', () => {
+    const visible = navHrefs(filterNav(ADMIN_NAV, {
+      ...base, isEffectiveAdmin: true, features: { billing: false },
+    }))
+    expect(visible).not.toContain('/billing')
+    expect(visible).toContain('/capacity')
+  })
+})
+
+describe('nav model - messaging hidden for V1', () => {
+  it('neither nav set carries a /messages item', () => {
+    expect(navHrefs(ADMIN_NAV)).not.toContain('/messages')
+    expect(navHrefs(CLIENT_NAV)).not.toContain('/messages')
+  })
+
+  it('the client nav keeps everything else', () => {
+    const visible = navHrefs(filterNav(CLIENT_NAV, {
+      showAsAdmin: false, isEffectiveAdmin: false, isViewerRole: false,
+      userEmail: null, canManagePermissions: false,
+    }))
+    expect(visible).toEqual([
+      '/overview', '/requests', '/schedules',
+      '/files', '/services',
+      '/invoices', '/contracts', '/proposals',
+    ])
+  })
+})
+
+describe('decideFeature - newly mapped admin surfaces (audit T1.18)', () => {
+  const NEW_KEYS = ['billing', 'capacity', 'content_studio', 'social', 'reviews', 'announcements', 'affiliates']
+
+  it('denies a task_handler-style role and a roleless member; allows admin and super_admin', () => {
+    const handler = access('team_member', {
+      viewableResources: ['tasks', 'requests', 'time_entries', 'messages', 'docs', 'activities'],
+    })
+    const roleless = access('team_member', { viewableResources: [] })
+    for (const key of NEW_KEYS) {
+      expect(decideFeature(handler, key)).toBe(false)
+      expect(decideFeature(roleless, key)).toBe(false)
+      expect(decideFeature(access('admin'), key)).toBe(true)
+      expect(decideFeature(access('super_admin'), key)).toBe(true)
+    }
+  })
+
+  it('a viewer-style role (view on the whole seeded catalogue) gets exactly the catalogued two', () => {
+    // The seeded permission catalogue has affiliates + announcements rows but
+    // none for billing / capacity / content_studio / social / reviews, so even
+    // view-on-everything cannot reach those five.
+    const viewer = access('team_member', {
+      viewableResources: [
+        'leads', 'deals', 'contacts', 'people', 'organisations', 'requests', 'tasks',
+        'messages', 'files', 'time_entries', 'invoices', 'contracts', 'proposals',
+        'schedules', 'calls', 'activities', 'docs', 'subscribers', 'campaigns',
+        'affiliates', 'reports', 'sales_analytics', 'settings', 'team',
+        'integrations', 'calculator', 'announcements',
+      ],
+    })
+    expect(decideFeature(viewer, 'affiliates')).toBe(true)
+    expect(decideFeature(viewer, 'announcements')).toBe(true)
+    for (const key of ['billing', 'capacity', 'content_studio', 'social', 'reviews']) {
+      expect(decideFeature(viewer, key)).toBe(false)
+    }
+  })
+
+  it('an explicit allow override still grants one of them to a team member', () => {
+    const a = access('team_member', { viewableResources: ['tasks'], overrides: { reviews: 'allow' } })
+    expect(decideFeature(a, 'reviews')).toBe(true)
+    expect(decideFeature(a, 'social')).toBe(false)
   })
 })

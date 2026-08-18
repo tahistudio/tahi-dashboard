@@ -61,6 +61,17 @@ const FEATURE_RESOURCE: Readonly<Record<string, string>> = {
   clients: 'organisations',
   calculator: 'calculator',
   sales_analytics: 'sales_analytics',
+  affiliates: 'affiliates',
+  announcements: 'announcements',
+  // The next five have no rows in the seeded permission catalogue (migrate
+  // route seed 0041), so no role baseline can grant them: every team_member
+  // is denied unless a feature_visibility allow lifts one. Deny by default
+  // per audit finding T1.18.
+  billing: 'billing',
+  capacity: 'capacity',
+  content_studio: 'content_studio',
+  social: 'social',
+  reviews: 'reviews',
   time: 'time_entries',
   reports: 'reports',
   financial_reports: 'reports',

@@ -32,8 +32,10 @@ import {
 // ── Primary tab hrefs per audience ──────────────────────────────────────────
 // Admin: the 4 core workspace destinations.
 // Client: the 4 most-visited portal destinations.
-const ADMIN_PRIMARY_HREFS = ['/overview', '/requests', '/tasks', '/messages']
-const CLIENT_PRIMARY_HREFS = ['/overview', '/requests', '/messages', '/files']
+// '/messages' is dropped from both sets while messaging is hidden for V1
+// (see components/tahi/nav-model.tsx).
+const ADMIN_PRIMARY_HREFS = ['/overview', '/requests', '/tasks']
+const CLIENT_PRIMARY_HREFS = ['/overview', '/requests', '/files']
 
 // Fallback icon names used only when an item is absent from the filtered nav
 // (e.g. if features are eventually passed and gate a primary tab).
@@ -77,12 +79,13 @@ export function MobileBottomNav({ isAdmin = false, features }: MobileBottomNavPr
   const userEmail = mounted
     ? (user?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? null)
     : null
-  const { canManagePermissions } = usePermissions()
+  const { canManagePermissions, isAdmin: isEffectiveAdmin } = usePermissions()
 
   // Feature flags come from the server-resolved permission map (passed by the
   // layout), so the mobile nav hides the same feature-gated items as the rail.
   const visibleGroups = filterNav(showAsAdmin ? ADMIN_NAV : CLIENT_NAV, {
     showAsAdmin,
+    isEffectiveAdmin,
     isViewerRole,
     userEmail,
     canManagePermissions,

@@ -52,6 +52,7 @@ export const FEATURE_TREE: ReadonlyArray<FeatureNode> = [
   { key: 'deals.engagement_health', label: 'Engagement health card', description: 'Live delivery rollup on the deal.', parent: 'deals', appliesTo: ['team'] },
   { key: 'calculator', label: 'Calculator', description: 'Internal pricing calculator.', parent: null, appliesTo: ['team'], route: '/calculator' },
   { key: 'sales_analytics', label: 'Sales analytics', description: 'Pipeline + sales reporting.', parent: null, appliesTo: ['team'], route: '/sales-analytics' },
+  { key: 'affiliates', label: 'Affiliates', description: 'Affiliate partners + commission payouts.', parent: null, appliesTo: ['team'], route: '/affiliates' },
   { key: 'clients', label: 'Clients', description: 'Client / organisation management.', parent: null, appliesTo: ['team'], route: '/clients' },
   { key: 'clients.billing_card', label: 'Client billing card', description: 'MRR / billing details on the client detail.', parent: 'clients', appliesTo: ['team'] },
   { key: 'clients.engagement_health', label: 'Client engagement health card', description: 'Live delivery rollup on the client.', parent: 'clients', appliesTo: ['team'] },
