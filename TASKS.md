@@ -1,12 +1,16 @@
 # tahi-dashboard - Active Task List
 
-Last updated: 2026-08-18 (client-ready triage: 6-agent code audit of every client-visible surface; file reorganised around the ManyRequests cutover)
+Last updated: 2026-08-18 (re-tiered to Liam's confidence order: security + auth foundation -> request platform -> sales artifacts)
 
 **Active block: CLIENT-READY LAUNCH - replace ManyRequests.**
-Strategy (Liam, 2026-08-18): ship every surface a client touches first (proposals, contracts, schedules, the portal). Team and owner surfaces improve slowly after cutover. Stop building sideways; work the sprints below in order.
 
-Read `STATUS.md` first: it carries the triage snapshot and the deploy-approval gotcha.
-Closed items live in `TASKS-ARCHIVE.md`.
+Liam's confidence tiers (stated 2026-08-18, supersede the earlier C1/C2/C3 ordering):
+- **Tier 1 - Trust.** Design consistency; sign in / sign up / forgot password / invites completely handled and robust; impenetrable tenancy: a client can NEVER reach Tahi-internal data or another client's data; financial data visible only to admins of their own org.
+- **Tier 2 - The working platform.** Once trustworthy: how easy is it for a client to make requests, contact us, see their tasks, see progress. Requests/tasks/messages polish. "Less focused on cash flow/receivables/runway, more on how this runs as a request platform for users, clients, and team members."
+- **Tier 3 - Getting new clients.** Proposals, contracts, schedules money paths.
+
+Read `STATUS.md` for the triage snapshot. Closed items live in `TASKS-ARCHIVE.md`.
+Old C-sprint ids kept in parens for traceability.
 
 Format:
 - `[ ]` open, `[x]` shipped (move to TASKS-ARCHIVE.md once verified live)
@@ -15,72 +19,73 @@ Format:
 
 ---
 
-## Sprint C0 - Ops unblock (hours, do first)
+## Sprint T0 - Ops (in flight)
 
-- [ ] C0.1 - [Liam] **Approve the stuck production deploy.** Run 31355118401 (the Aug 10 bank-truth fix, commit dc41442a) has sat in GitHub's production environment approval gate for 8 days. GitHub -> Actions -> Deploy dashboard -> Review deployments -> approve. NOTE: every push to main waits on this gate; nothing "auto-deploys". Either keep approving per-push or remove the required-reviewer rule on the production environment.
-- [ ] C0.2 - [QA] After the deploy lands: fire sync-airwallex (`gh workflow run "Dashboard cron triggers" -f target=sync-airwallex`), then verify `get_bank_balances` returns Airwallex wallet rows + `yield:CUR` rows matching the Airwallex UI, and honest runway.
-- [ ] C0.3 - [Liam+BE] **Refresh `finance.yieldHoldings`.** Yield has grown since the setting was seeded (Xero now carries Yield USD 33,956.89 / AUD 638.80 vs the setting's 20,014.13 / 531.51). Confirm the real numbers in the Airwallex UI, then update via the `update_settings` MCP tool.
-- [ ] C0.4 - [BE/Ops] Apply migrations 0081 + 0082 to prod D1 and verify apply state of everything since (list_migrations). Was blocked on TAHI_API_TOKEN rotation.
-
----
-
-## Sprint C1 - Sell without embarrassment (proposal / contract / schedule money paths, ~5 days)
-
-Audit findings 2026-08-18: the three deliverable surfaces are premium at the craft level but have defects sitting directly on the money path. Shared fixes first, then per-surface.
-
-- [ ] C1.1 - [BE] **Publish-before-share, proposals + schedules.** Share POST writes `publishedSnapshot`; email POST rejects when no `publishedAt`; revoke clears the snapshot. Today the standard journey (Generate link -> Email) serves LIVE rows: proposals `share/route.ts:38-51` never snapshots and public GET falls through to live tables; schedules identical.
-- [ ] C1.2 - [FE] **Proposal Publish button resurrection.** `hasUnpublished` compares updatedAt vs publishedAt but patchSection/patchVariant/patchProposal/moveSection/deleteSection never `mutate()`, so after the first publish the button disappears for the whole session and later edits silently never reach the client. proposal-detail.tsx:245-367,448-450.
-- [ ] C1.3 - [BE] **Close the accept/sign loop.** Proposal accept/decline/question and every contract signature currently produce NO notification, email, deal activity, or stage move (the viewer promises "we'll be in touch within one business day"). Emit: notifications row (`proposal_signed` / `contract_signed` types already declared in lib/notification-links.ts, never emitted), Resend email to Liam, deal activity entry, optional auto stage bump. accept/route.ts + contracts sign route.
-- [ ] C1.4 - [FE] **Deliverable kit theme integrity.** Consume `--page-chrome-text` in AccentTitle/SectionHeader/prose (fixes invisible dark-slide text in BOTH the proposal and schedule viewers); add `app/p/layout.tsx` pinning light tokens so a viewer's `tahi-theme=dark` localStorage can't corrupt the public documents (GanttGrid + risk/RACI tables consume var(--color-*)); hide the slide-theme picker options that aren't wired.
-- [ ] C1.5 - [FE] **Mobile money path.** VariantTabStrip gets `overflowX:auto` (at 375px the third package tab is clipped and unreachable, proposal-viewer.tsx:871-887); gantt gets a narrow-mode card stack under 720px (fixed minWidth 64rem today, the risk register already proves the pattern); contract signature canvas re-sizes on rotation (buffer set once on mount, contract-viewer.tsx:746-760).
-- [ ] C1.6 - [BE] **Contract artifact persistence.** Write the signed PDF to R2 `signedStorageKey` at full-sign time (column exists, zero writers), add a download button on the signed viewer state, and an admin "resend signed PDF" action. Today the PDF exists only inside one fire-and-forget email.
-- [ ] C1.7 - [BE] **Contract tamper anchor.** Hash bodyHtml into the signature chain and block bodyHtml PATCH once status leaves draft (currently editable through sent/partially_signed while the viewer claims "locked at signature"); stop revoke from resetting a partially_signed contract to draft with signatures intact.
-- [ ] C1.8 - [FE/BE] **Deals honesty.** Scheduled nudges are written with status='scheduled' and NOTHING ever sends them (timeline still logs "Nudge scheduled for..."); auto-nudge toggles exist with no engine. Remove both affordances or build the cron sender. Also: stop marking nudges 'sent' when RESEND_API_KEY is absent; surface errors in the New Deal + Nudge dialogs (currently silent catch).
-- [ ] C1.9 - [FE] **Small-fix batch (single pass).** alert() -> toast in proposal viewer accept path; EmailShareModal syncs preselection when suggestions load (Send is dead until manual ticking today); compress founders-placeholder.jpg (2.5 MB -> under 200 KB) + lazy/decoding attrs; public tab titles ("Proposal · Tahi Studio", OG tags, drop the "| Tahi Dashboard" leak); em-dash metadata titles violate repo rule 6; legacy /pipeline/ hrefs -> /deals; accept validates variantId against the snapshot not live rows; enforce expiresAt (cron or check at accept); client-detail ContractsTab wired to contract_documents shape (Download column is /api/uploads/serve/undefined today); "Save as template" on contract detail 400s every time; global search reads legacy contracts table so e-sign contracts are unsearchable.
-- [ ] C1.QA - [QA] Playwright: share -> publish -> view at 375px -> accept -> admin notified (proposals); send -> sign on phone viewport -> both parties get PDF (contracts). Zero coverage exists on either surface today. Then ONE live round-trip on prod with a personal email before the first real client send.
+- [x] T0.1 (C0.1) - Approve the stuck production deploys - Liam approved both runs 2026-08-18. Standing note: EVERY push to main waits on this manual gate.
+- [ ] T0.2 (C0.2) - [QA] After deploy lands: fire sync-airwallex, verify get_bank_balances returns Airwallex wallet + yield:CUR rows matching the Airwallex UI. - [CLAUDE] 2026-08-18
+- [ ] T0.3 (C0.3) - [Liam+BE] Refresh finance.yieldHoldings against the Airwallex UI (Xero suggests Yield USD 33,956.89 / AUD 638.80 vs setting's 20,014.13 / 531.51).
+- [ ] T0.4 (C0.4) - [BE/Ops] Verify migration apply state on prod D1 (0081/0082 and everything since; list_migrations).
 
 ---
 
-## Sprint C2 - Portal truth (the five audited blockers, ~12 days)
+## Sprint T1 - Security & auth foundation (Tier 1, ~1.5 weeks)
 
-Re-verified 2026-08-18 against current code: all five still present. Two sub-claims stale (noted). Full evidence in `memory/project_portal_readiness_audit_2026_08_10.md` + the 2026-08-18 re-verify.
+Full auth + tenancy audit ran 2026-08-18 (423 routes). Verdict: the CLIENT-facing portal boundary is strong (38/38 portal routes scoped, no IDOR, no client-supplied-org trust, share tokens validated, resolver cannot promote a client). Breaches were unauthenticated side doors bypassing that boundary. Batch 1 fixed + committed (3 commits, 2026-08-18), pending deploy approval.
 
-- [ ] C2.1 - [BE] **B1 uploads identity (~2.5d).** `/api/uploads/confirm` honours `body.orgId` from ANY authed user (cross-tenant write hole, reachable from the shipped composer) - only honour it for Tahi admins passing requireAccessToOrg. Presign keys under the OWNING org, not the uploader's Clerk org (clients 403 on every team-uploaded deliverable today). serve/proxy authorize off the files row against getPortalAuth's D1 org id (getRequestAuth returns the Clerk id: two different id spaces today, which also silently hides client self-uploads from /api/portal/files). One-off backfill/dual-read for existing keys. NOTE: the old audit's voice-note claim is stale - no voice-note code exists in the tree anymore.
-- [ ] C2.2 - [BE] **B2 notification identity (~1.5d).** Six insert sites pass contacts.id / teamMembers.id / participant row ids where the bell + SSE query by Clerk userId, so clients never see team replies and the team never sees client comments. Route them through the resolvers that already exist (notifyOrgContacts, notifyMentionedPerson pattern; add notifyTeamMember), and resolve participantId -> clerkUserId inside createNotifications so future call sites can't regress.
-- [ ] C2.3 - [BE/FE] **B3 portal invoice + pay (~2.5d).** Add GET /api/portal/invoices/[id] (org-scoped, exclude drafts); invoice-detail branches its SWR key on isAdmin (today it always hits /api/admin and 403s clients); add hosted_invoice_url column, persist from stripe-create + Stripe webhook; render a real Pay link with /api/portal/billing/session as fallback.
-- [ ] C2.4 - [FE] **B4 nav + files (~2d).** CLIENT_NAV: remove Schedule/Contracts/Proposals or point them at real client routes (see C2.6); /files renders /api/portal/files (payload already carries name/type/uploader/url - the page is a hardcoded "No files yet" stub that admins never see); Book-a-call CTAs -> booking-widget (currently loop to /overview); add Billing to CLIENT_NAV (stale audit claim: the /billing client branch works now, it's just unlisted).
-- [ ] C2.5 - [BE/FE] **B5 onboarding surface (~3.5d).** Invite-mint panel on client detail calling the existing POST /api/admin/onboarding-invites + an MCP create_client_invite tool; Clerk webhook (svix, organizationMembership.created / user.created) backfills contacts.clerkUserId (second-seat teammates are stuck at the onboarding gate forever today); portal/invites also inserts pending contact rows; "invoice me" records a billing preference and entitles instead of 402-stranding; kickoff booking step actually books the chosen slot (POST /api/portal/calls or reuse booking-widget - the slot is discarded today).
-- [ ] C2.6 - [Liam decision + FE] **Portal read pages for Contracts + Schedule?** If the nav items stay: thin client pages listing the org's contracts (link to /p viewer + signed PDF) and rendering the published schedule snapshot. If not, C2.4 removes the items and Overview gets a "View your timeline" link. Decide before C2.4 lands.
-- [ ] C2.7 - [BE] **Portal project card reads published schedules only.** /api/portal/project takes the newest schedule by createdAt with no status/publishedAt filter, so a half-built draft's phase names surface on the client home immediately.
-
----
-
-## Sprint C3 - Client-facing redesign stragglers (~4 days)
-
-Coverage sweep 2026-08-18: 58 routes = 26 v3 / 20 partial / 8 legacy / 4 stub. These are the legacy/stub pages a client can actually reach, plus the deals lap.
-
-- [ ] C3.1 - [FE] **/services v3 lap.** Worst offender: 978 lines, zero design-system imports, 2 raw tables, 2 hand-rolled modals, and it's the client-facing service catalogue (PortalServicesContent).
-- [ ] C3.2 - [FE] **/billing v3 lap.** Three raw tables; client-reachable (works, just legacy).
-- [ ] C3.3 - [FE] **/invoices/[id] v3 lap.** Legacy detail page behind the v3 list; pairs with C2.3.
-- [ ] C3.4 - [FE] **/p/contract viewer onto the deliverable kit.** The only public viewer that skipped components/tahi/deliverable (~30 inline hexes); brings contracts visually in line with proposals + schedules.
-- [ ] C3.5 - [FE] **/messages + /tasks client-facing polish.** PageHeader instead of bespoke h1s; replace the three hand-rolled fixed modals in tasks with SlideOver/ConfirmDialog; both pages are client-visible partials.
-- [ ] C3.6 - [FE] **Deals v3 lap (internal - can slide past cutover).** Board/list/filter/dialogs are pre-v3 bespoke while BoardView/DataTable/FilterBar/SlideOver sit unused; tokens already clean so it's a 2-3 day composition swap. Includes touch targets + drag on touch.
+- [x] T1.1 (C2.1/B1) - [BE] **Uploads identity + cross-tenant write hole.** Fixed: files identity unified on D1 org id, serve/proxy authorize off the files row, confirm ignores non-admin body.orgId, admin override access-scoped, legacy dual-read. lib/upload-access.ts + 43 tests. - [BE] 2026-08-18
+- [x] T1.2 (C2.2/B2) - [BE] **Notification identity.** Fixed: typed NotificationRecipient union resolved inside createNotifications; seven insert sites (audit found a 7th) rerouted; cron recipients tolerant-resolved so the invisible drift/summary alerts deliver again. +10 tests. - [BE] 2026-08-18
+- [x] T1.9 (audit A1/B1/A5/A3/A4/A6/A9) - [BE] **Unauthenticated side doors closed.** /api/mcp POST now admin-gated (was open, proxied to admin API with the server token); leads draft-reply GET + rich health GET gated; Google OAuth state nonce (CSRF/takeover); /review allowlisted (broken funnel); authorizedParties prod-only; ended admin roles lose data scope. +15 tests. - [BE] 2026-08-18
+- [x] T1.10 (audit B4) - [BE] **Portal financials gated to org admins.** invoices/subscription/billing-session/checkout now require an org admin (lib/portal-access.ts, primary-contact fallback so owners aren't locked out). Meets the "financial data only to admins of their own org" bar. - [BE] 2026-08-18
+- [ ] T1.11 (audit A2) - [Liam+BE] **Worker MCP /authorize hardening (APPROVED, Liam will reconnect).** workers/mcp-server/src/index.ts:2675 auto-approves on client_id alone (not a secret) -> anyone can mint full admin. Require an authenticated Tahi session before minting a code, or drop authorization_code/none for client_credentials + secret. Deploys via mcp-worker-deploy.yml; Liam re-approves the connector once after.
+- [ ] T1.12 (audit B2) - [Liam+BE] **Rotate the committed ManyRequests token (APPROVED).** workers/mcp-server/src/index.ts:97 hardcodes a live token, now in git history. Liam rotates at ManyRequests -> I set MANYREQUESTS_API_TOKEN as a Worker secret + delete the constant. Blocked on Liam providing the rotated value (or setting the secret himself).
+- [ ] T1.13 (audit finding) - [Ops] **Fix the GH Actions crons.** Agent flagged TAHI_DASHBOARD_URL repo variable still points at the retired webflow.io host (404s), and cron paths aren't allowlisted while workflows send x-cron-secret not Bearer. VERIFY FIRST: sync-airwallex fired fine on 2026-08-18 and bank data refreshed, which contradicts a fully-broken cron path - check whether "Dashboard cron triggers" and dashboard-crons.yml differ, then fix the repo variable + switch workflows to Authorization: Bearer $TAHI_CRON_SECRET (already accepted by assertCronAuth).
+- [ ] T1.14 (audit, defer to T1.4 sprint) - [BE] Write-path portalRole gap: portal brands/organisation/people/change-request use the same primary-contact-not-admin assumption; a fresh owner can't invite teammates or edit org settings until portalRole is set. Fold into onboarding work.
+- [ ] T1.3 - [QA/BE] **Auth flow robustness.** Sign in / sign up / forgot password verified reachable + correct in code (audit confirmed Clerk catch-all routing, reset path not hidden, invite tokens 192-bit single-use atomic, entitlement not self-grantable, Ship Studio backdoor prod-gated). REMAINING: one manual click-through of forgot-password on the live Clerk build; branded error/verification states at 375px.
+- [ ] T1.4 (C2.5/B5) - [BE/FE] **Invited-client onboarding operable** (this IS the client sign-up path): invite-mint panel on client detail + MCP create_client_invite; Clerk webhook (svix) backfills contacts.clerkUserId (second-seat teammates stuck at the gate forever today); portal/invites inserts pending contact rows; "invoice me" records preference + entitles instead of 402-stranding; kickoff booking step actually books the slot.
+- [ ] T1.5 (C4.1) - [QA] **Cross-org isolation proof.** Playwright e2e: seed two orgs, verify A cannot fetch B across requests/files/conversations/invoices/contracts/calls; plus an adversarial IDOR pass over portal/public/uploads routes. Financial endpoints unreachable by clients, verified.
+- [ ] T1.6 - [BE] **Permissions invariant enforcement.** Client feature_visibility denies are nav-cosmetic only; enforce at route level so denied = 403, not just hidden (memory/project_permissions_vision: visible = permitted, absent = denied).
+- [ ] T1.7 (C4.3/C4.4) - [Ops/BE] Portal noindex + robots; WAF rate rules (60/min /api/portal/*, 20/min /api/uploads/*) or KV limiter.
+- [ ] T1.8 - [UIUX] Design-consistency pass on the auth-adjacent path: forgot-password + error + verification states match the v3 auth shell; onboarding screens consistent.
 
 ---
 
-## Sprint C4 - QA gate before the first real client
+## Sprint T2 - The request platform (Tier 2, ~1.5 weeks)
 
-- [ ] C4.1 - [QA] Un-skip portal e2e; cross-org isolation spec (was T718): seed two orgs, verify A can't fetch B across conversations/time/contracts/calls/deals/files.
-- [ ] C4.2 - [QA] **Full live client-session lap on prod as a real client org.** 375px + dark mode: every nav item, file download, invoice pay, request thread round-trip, proposal accept, contract sign. This has NEVER been done (zero live client-session QA on record).
-- [ ] C4.3 - [FE/BE] PWA manifest icons to install criteria + portal noindex/robots (was T663).
-- [ ] C4.4 - [Ops] WAF rate rule 60 req/min /api/portal/*, 20 req/min /api/uploads/* (was T719), or KV limiter now that we're off Webflow Cloud.
+- [ ] T2.1 (C2.3/B3) - [BE/FE] **Portal invoice detail + real Pay.** GET /api/portal/invoices/[id]; detail page branches SWR on isAdmin (always 403s clients today); hosted_invoice_url column persisted from stripe-create + webhook; real Pay link with billing-portal session fallback.
+- [ ] T2.2 (C2.4/B4) - [FE] **Nav truth + files.** CLIENT_NAV: remove or make real Schedule/Contracts/Proposals (see T2.3); /files renders /api/portal/files (hardcoded "No files yet" stub today, client-only page); Book-a-call CTAs -> booking-widget (loop to /overview today); add Billing to CLIENT_NAV.
+- [ ] T2.3 (C2.6) - [Liam decision + FE] Portal read pages for Contracts + Schedule (list + signed PDF / published snapshot) OR remove the nav items. Decide before T2.2 lands.
+- [ ] T2.4 (C2.7) - [BE] Portal project card reads published schedules only (newest-draft leak today).
+- [ ] T2.5 (C3.5a) - [FE] **Tasks polish.** PageHeader; replace the three hand-rolled fixed modals with SlideOver/ConfirmDialog; add the missing GET on /api/admin/tasks/[id] so the full task page works; client task view verified.
+- [ ] T2.6 (C3.5b) - [FE] **Messages polish.** PageHeader instead of bespoke h1; thread UX pass; client-visible partials brought to v3.
+- [ ] T2.7 - [FE/BE] **Daily-briefing dedup** (Liam 2026-08-18): the home-page brief card and the nav-bar briefing are two surfaces that don't overlap well. One source of truth, one refresh cycle, consistent content; nav popover summarises, home card expands.
+- [ ] T2.8 (C3.1) - [FE] /services v3 lap (client catalogue; worst legacy page, zero primitives).
+- [ ] T2.9 (C3.2) - [FE] /billing v3 lap (3 raw tables, client-reachable).
+- [ ] T2.10 (C3.3) - [FE] /invoices/[id] v3 lap (pairs with T2.1).
+- [ ] T2.QA (C4.2) - [QA] **Full live client-session lap on prod** as a real client org at 375px + dark: every nav item, file download, invoice pay, request thread round-trip. Never been done.
 
 ---
 
-## Post-launch backlog (team/owner side - untouched priorities, work AFTER cutover)
+## Sprint T3 - Sales artifacts (Tier 3, ~1 week)
+
+- [ ] T3.1 (C1.1) - [BE] Publish-before-share, proposals + schedules: share POST snapshots; email POST rejects unpublished; revoke clears snapshot. (Standard journey serves LIVE rows today.)
+- [ ] T3.2 (C1.2) - [FE] Proposal Publish button resurrection (mutate() after every patch/move/delete; dies after first publish today).
+- [ ] T3.3 (C1.3) - [BE] Close the accept/sign loop: notifications row + Resend email to Liam + deal activity (+ optional stage bump) on proposal accept/decline/question and every contract signature. All silent today.
+- [ ] T3.4 (C1.4) - [FE] Deliverable kit theme integrity: consume --page-chrome-text (invisible dark-slide text in both viewers); app/p/layout.tsx pins light tokens (viewer's dark localStorage corrupts public docs); hide unwired slide-theme options.
+- [ ] T3.5 (C1.5) - [FE] Mobile money path: VariantTabStrip overflow (375px third package unreachable); gantt narrow-mode card stack; contract canvas rotation.
+- [ ] T3.6 (C1.6) - [BE] Contract artifact persistence: signed PDF to R2 signedStorageKey + download button + admin resend action.
+- [ ] T3.7 (C1.7) - [BE] Contract tamper anchor: hash bodyHtml into chain; block body PATCH after draft; fix revoke-resets-partially-signed.
+- [ ] T3.8 (C1.8) - [FE/BE] Deals honesty: remove or implement scheduled + auto nudges; no fake 'sent' without RESEND_API_KEY; dialog error surfacing.
+- [ ] T3.9 (C1.9) - [FE] Small-fix batch: alert()->toast; EmailShareModal preselect; founders image compress; public tab titles + OG; em-dash metadata; /pipeline hrefs; accept validates against snapshot; expiresAt enforcement; client-detail ContractsTab data shape; save-as-template 400; search reads contract_documents.
+- [ ] T3.10 (C3.4) - [FE] /p/contract viewer onto the deliverable kit (only public viewer off-kit).
+- [ ] T3.11 (C3.6) - [FE] Deals v3 lap (internal; 2-3 day composition swap; can slide).
+- [ ] T3.QA (C1.QA) - [QA] Playwright: share->publish->view 375px->accept->admin notified; send->sign->PDF both inboxes. Then one live round-trip with a personal email before the first real client send.
+
+---
+
+## Post-launch backlog (team/owner side - work AFTER cutover)
 
 ### Notifications overhaul remainder (was T682-T699)
-C2.2 fixes identity; the rest (preferences page S23/T682-3, rich content T684-5, SSE hook T687, email dispatcher T688-690, /notifications page T691-2, sidebar badges T693, Web Push T694-697 + W-PUSH, weekly digest T698-9) stays post-launch.
+T1.2 fixes identity; the rest (preferences page S23/T682-3, rich content T684-5, SSE hook T687, email dispatcher T688-690, /notifications page T691-2, sidebar badges T693, Web Push T694-697 + W-PUSH, weekly digest T698-9) stays post-launch.
 
 ### Retainer & billing model (T668-T676)
 customMrr/billingModel editors, retainer health filter, MRR forecast end-date awareness, auto-churn, team salary/rate fields, time cost/revenue/margin columns. Needs S25.
@@ -100,20 +105,17 @@ notificationPreferences, commentsLocked, xero_category_overrides + salary column
 ### Content engine ops (Phase I residue)
 Verify migrations 0060-0063 applied to prod; PI-S1/S2/S5/S6.5 live QA passes; Slice 7 signal expansion, Slice 8 citation tracker (deferred).
 
-### UIUX + QA sweeps (was T720-T734)
-Now largely covered by C3/C4; keep for reference: financial health spacing, invoice dialog, client archive UI, expense dashboard, calculator premium pass, notification surfaces, time cost columns; regression specs T728-T734.
-
 ### Carry-overs
-- [ ] T568 - Google Calendar booking links for scheduled calls (partially superseded by booking-widget; verify then close)
-- [ ] T570 - Zapier outgoing webhooks (engine shipped in W-2; needs Zapier-facing config surface)
+- [ ] T568 - Google Calendar booking links for scheduled calls (verify vs booking-widget; likely close)
+- [ ] T570 - Zapier outgoing webhooks (engine shipped in W-2; needs config surface)
 - [ ] T571 - Deal-to-Client LTV link (fold into T711-T713)
-- [ ] T594b - Apply migration 0012 (client_costs) to prod D1 (verify - likely long done; confirm via list_migrations with C0.4)
-- [ ] T600 - Cash flow runway indicator (largely shipped on /financial-reports; verify then close)
-- [ ] T618 - Worker MCP finance tools (verify coverage; several shipped)
+- [ ] T594b - Verify migration 0012 applied to prod (with T0.4)
+- [ ] T600 - Cash flow runway indicator (largely shipped; verify then close)
+- [ ] T618 - Worker MCP finance tools (verify coverage)
 - [ ] T662 - {{requestNumber}} email variable + [REQ-n] subject prefix
 - [ ] T667 - Xero category overrides (needs S25)
-- [ ] T716 - Email-to-Request intake (was "in progress" 2026-07-07; verify state, finish or park)
-- [ ] W-QA - Live smoke of Wave 1-4 features (automation fire, webhook delivery row, announcement email fan-out, portal Org/Brand/People persistence, AI weave drafts)
+- [ ] T716 - Email-to-Request intake (verify state since 2026-07-07; finish or park)
+- [ ] W-QA - Live smoke of Wave 1-4 features (automation fire, webhook delivery, announcement fan-out, portal Org/Brand/People, AI weaves)
 - [ ] LIT-BOOKS.UIUX / LIT-BOOKS.QA - overview BOOKS cards review + live smoke
 
 ### North-star phases (queued, unchanged)
@@ -123,4 +125,5 @@ N1 discovery workflow, N2 auto-onboarding, N3 portal tour, N4 permission roles c
 
 ## Superseded framing (for the record)
 
-The "trust-crossover order" (Tasks -> Requests -> Messages -> Time -> Contracts, memory/project_trust_state_2026_05.md) is superseded by the client-first strategy above: client-visible surfaces ship first, team/owner surfaces earn trust after cutover. The Aug 1 portal deadline passed; the sprints above are the honest path to cutover.
+- The "trust-crossover order" (memory/project_trust_state_2026_05.md) is superseded by the tiers above.
+- The finance-first emphasis of earlier sprints is superseded: Liam is "less focused on cash flow / receivables / runway, more on how this runs as a request platform" (2026-08-18). Finance surfaces stay maintained but get no new investment until post-cutover.
