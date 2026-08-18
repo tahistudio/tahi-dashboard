@@ -17,12 +17,17 @@ export const dynamic = 'force-dynamic'
 // route list). The cross-origin redirect from accounts.google.com strips
 // the Clerk session cookie under some SameSite + cookie-prefix policies,
 // which used to leave the user bounced to /sign-in instead of completing
-// the connection. Auth is implicitly provided by:
-//   1. The single-use Google authorization code (bound to our registered
+// the connection. Auth is provided by:
+//   1. The single-use CSRF state nonce minted by the admin-gated /start
+//      route and verified + consumed below BEFORE the token exchange, so
+//      an attacker cannot trick an admin into completing a callback that
+//      stores the attacker's Google tokens.
+//   2. The single-use Google authorization code (bound to our registered
 //      redirect_uri — an attacker cannot forge one).
-//   2. The token exchange itself, which fails for any non-genuine code.
-//   3. The org-wide integrations row (only one google_workspace per
-//      install), so token storage doesn't need to identify a user.
+//   3. The token exchange itself, which fails for any non-genuine code.
+
+// Must match the key written by the /start route.
+const GOOGLE_STATE_KEY = 'google_oauth_state'
 
 interface GoogleTokenResponse {
   access_token?: string
@@ -56,6 +61,35 @@ export async function GET(req: NextRequest) {
   }
   if (!code) {
     return NextResponse.redirect(settingsUrl('?error=no_code'))
+  }
+
+  // Verify + consume the single-use CSRF state nonce BEFORE exchanging the
+  // code (same mechanism as the Xero callback). Reject any mismatch
+  // (missing, wrong, expired, or already consumed nonce) so a forged
+  // callback can never trigger a token exchange.
+  const returnedState = url.searchParams.get('state')
+  const stateDb = await db()
+  const [stateRow] = await stateDb
+    .select({ value: schema.settings.value })
+    .from(schema.settings)
+    .where(eq(schema.settings.key, GOOGLE_STATE_KEY))
+    .limit(1)
+  // Consume immediately (single-use): delete the stored nonce regardless of
+  // whether it matches, so a leaked/guessed nonce can't be replayed.
+  await stateDb.delete(schema.settings).where(eq(schema.settings.key, GOOGLE_STATE_KEY))
+
+  let stateValid = false
+  if (returnedState && stateRow?.value) {
+    try {
+      const stored = JSON.parse(stateRow.value) as { nonce?: string; expiresAt?: string }
+      const notExpired = stored.expiresAt ? Date.parse(stored.expiresAt) > Date.now() : false
+      stateValid = stored.nonce === returnedState && notExpired
+    } catch {
+      stateValid = false
+    }
+  }
+  if (!stateValid) {
+    return NextResponse.json({ error: 'Invalid OAuth state' }, { status: 400 })
   }
 
   const clientId = process.env.GOOGLE_CLIENT_ID

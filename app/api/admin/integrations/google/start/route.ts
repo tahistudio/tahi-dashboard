@@ -22,8 +22,21 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import { schema } from '@/db/d1'
+import { eq } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
+
+// Settings key that holds the short-lived, single-use OAuth state nonce.
+// The callback verifies + consumes it before exchanging the code, which
+// prevents CSRF (an attacker cannot forge a callback carrying our nonce).
+// Same mechanism as the Xero connect/callback pair: a settings row rather
+// than a signed cookie, because the cross-origin redirect back from
+// accounts.google.com strips SameSite cookies under some policies.
+const GOOGLE_STATE_KEY = 'google_oauth_state'
+// Nonce lifetime: the user should complete consent well within 10 minutes.
+const GOOGLE_STATE_TTL_MS = 10 * 60 * 1000
 
 const SCOPES = [
   'https://www.googleapis.com/auth/calendar.events.readonly',
@@ -54,6 +67,34 @@ export async function GET(req: NextRequest) {
   const defaultRedirect = `${proto}://${host}/api/admin/integrations/google/callback`
   const redirectUri = process.env.GOOGLE_REDIRECT_URI ?? defaultRedirect
 
+  // Generate a random single-use state nonce and persist it (short-lived
+  // settings row). The callback verifies + deletes it before the token
+  // exchange, so a forged callback can never overwrite the stored tokens.
+  const stateNonce = crypto.randomUUID()
+  const database = await db()
+  const nowIso = new Date().toISOString()
+  const stateValue = JSON.stringify({
+    nonce: stateNonce,
+    expiresAt: new Date(Date.now() + GOOGLE_STATE_TTL_MS).toISOString(),
+  })
+  const existingState = await database
+    .select({ key: schema.settings.key })
+    .from(schema.settings)
+    .where(eq(schema.settings.key, GOOGLE_STATE_KEY))
+    .limit(1)
+  if (existingState.length > 0) {
+    await database
+      .update(schema.settings)
+      .set({ value: stateValue, updatedAt: nowIso })
+      .where(eq(schema.settings.key, GOOGLE_STATE_KEY))
+  } else {
+    await database.insert(schema.settings).values({
+      key: GOOGLE_STATE_KEY,
+      value: stateValue,
+      updatedAt: nowIso,
+    })
+  }
+
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -62,6 +103,7 @@ export async function GET(req: NextRequest) {
     access_type: 'offline',          // get a refresh token
     prompt: 'consent',               // force refresh-token issuance on re-auth
     include_granted_scopes: 'true',
+    state: stateNonce,
   })
 
   const url = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`

@@ -6,11 +6,21 @@ import { eq, and, gte, sql } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
 
-// -- GET /api/admin/health — diagnostic endpoint (no auth needed) -----------
-export async function GET() {
+// -- GET /api/admin/health: liveness + admin diagnostics ---------------------
+// Unauthenticated callers get a minimal liveness ack only. The rich payload
+// (env binding names, org count, table schema) leaks infrastructure detail,
+// so it is Tahi-admin gated, matching the sibling POST.
+export async function GET(req: NextRequest) {
+  const timestamp = new Date().toISOString()
+
+  const { orgId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ ok: true, timestamp })
+  }
+
   const checks: Record<string, string> = {}
   checks.js = 'ok'
-  checks.timestamp = new Date().toISOString()
+  checks.timestamp = timestamp
 
   try {
     const { getCloudflareContext } = await import('@opennextjs/cloudflare')

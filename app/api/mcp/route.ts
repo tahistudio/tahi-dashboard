@@ -1,3 +1,4 @@
+import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 
 interface MCPRequest {
@@ -13,6 +14,29 @@ interface MCPRequest {
  * Exposes Tahi Dashboard tools to Claude via custom connector
  */
 export async function POST(req: NextRequest) {
+  // Admin-gate the whole handler: tools/call proxies to /api/admin/* with the
+  // server's own TAHI_API_TOKEN, so an unauthenticated caller must never get
+  // this far. getRequestAuth accepts either a Tahi admin Clerk session or the
+  // Bearer TAHI_API_TOKEN a connector sends.
+  const { orgId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    let id: MCPRequest['id'] | null = null
+    try {
+      const parsed = (await req.clone().json()) as MCPRequest
+      id = parsed.id ?? null
+    } catch {
+      id = null
+    }
+    return NextResponse.json(
+      {
+        jsonrpc: '2.0',
+        id,
+        error: { code: -32001, message: 'Unauthorized' },
+      },
+      { status: 403 },
+    )
+  }
+
   try {
     const body = (await req.json()) as MCPRequest
 

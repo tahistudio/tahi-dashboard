@@ -1,4 +1,5 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { isOrgAdmin } from '@/lib/portal-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -14,7 +15,7 @@ import { stripeSecretKey } from '@/lib/stripe-key'
  * Client view sees the impersonated org, read-only). Reject the Tahi admin org.
  */
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await getPortalAuth(req)
+  const { orgId, userId, impersonating } = await getPortalAuth(req)
   if (!userId || !orgId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -25,6 +26,16 @@ export async function GET(req: NextRequest) {
   }
 
   const database = await db()
+
+  // The Stripe customer portal exposes invoices and payment methods:
+  // workspace admins of the org only, never plain member seats. Impersonation
+  // (admin Client view) has no contact row, so it stays allowed as before.
+  if (
+    !impersonating &&
+    !(await isOrgAdmin(database as ReturnType<typeof import('drizzle-orm/d1').drizzle>, orgId, userId))
+  ) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   // Find the org and its Stripe customer ID
   const org = await database.query.organisations.findFirst({

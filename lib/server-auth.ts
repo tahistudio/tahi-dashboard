@@ -71,6 +71,31 @@ function getClerkClient() {
 }
 
 /**
+ * Hosts allowed as the session JWT's azp (authorized party). The deployed
+ * host comes from NEXT_PUBLIC_APP_URL, which deploy.yml bakes per
+ * environment (prod: https://portal.tahi.studio, staging:
+ * https://staging.tahi.studio), so both deployed environments are covered
+ * without listing dev hosts. localhost and the retired preview hosts are
+ * appended ONLY on non-production builds (Next inlines NODE_ENV at build
+ * time, so they are absent from any deployed bundle).
+ */
+function getAuthorizedParties(): string[] {
+  const parties = [
+    process.env.NEXT_PUBLIC_APP_URL,
+    'https://portal.tahi.studio',
+  ]
+  if (process.env.NODE_ENV !== 'production') {
+    parties.push(
+      'http://localhost:3000',
+      'https://staging.tahi.studio',
+      'https://tahi-dashboard-staging.business-ccd.workers.dev',
+      'https://tahi-test-dashboard.webflow.io',
+    )
+  }
+  return Array.from(new Set(parties.filter(Boolean) as string[]))
+}
+
+/**
  * Get auth state from an API route's NextRequest.
  * Falls back to direct cookie authentication if clerkMiddleware headers
  * were not forwarded from the edge middleware worker.
@@ -121,16 +146,9 @@ export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResul
   // Fallback: validate directly from the Clerk session cookie
   try {
     const clerk = getClerkClient()
-    const authorizedParties = [
-      process.env.NEXT_PUBLIC_APP_URL,
-      'https://tahi-test-dashboard.webflow.io',
-      'https://tahi-dashboard-staging.business-ccd.workers.dev',
-      'https://staging.tahi.studio',
-      'https://portal.tahi.studio',
-      'http://localhost:3000',
-    ].filter(Boolean) as string[]
-
-    const authState = await clerk.authenticateRequest(req, { authorizedParties })
+    const authState = await clerk.authenticateRequest(req, {
+      authorizedParties: getAuthorizedParties(),
+    })
 
     if (!authState.isSignedIn) {
       return { userId: null, orgId: null, sessionId: null }
@@ -266,16 +284,9 @@ export async function getServerAuth(): Promise<RequestAuthResult> {
     })
 
     const clerk = getClerkClient()
-    const authorizedParties = [
-      process.env.NEXT_PUBLIC_APP_URL,
-      'https://tahi-test-dashboard.webflow.io',
-      'https://tahi-dashboard-staging.business-ccd.workers.dev',
-      'https://staging.tahi.studio',
-      'https://portal.tahi.studio',
-      'http://localhost:3000',
-    ].filter(Boolean) as string[]
-
-    const authState = await clerk.authenticateRequest(syntheticReq, { authorizedParties })
+    const authState = await clerk.authenticateRequest(syntheticReq, {
+      authorizedParties: getAuthorizedParties(),
+    })
 
     if (!authState.isSignedIn) {
       return { userId: null, orgId: null, sessionId: null }

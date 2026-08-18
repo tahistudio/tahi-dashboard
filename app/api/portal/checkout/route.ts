@@ -1,4 +1,5 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { isOrgAdmin } from '@/lib/portal-access'
 import { clerkClient } from '@clerk/nextjs/server'
 import { NextRequest, NextResponse } from 'next/server'
 import type Stripe from 'stripe'
@@ -46,6 +47,17 @@ export async function POST(req: NextRequest) {
   }
 
   const database = await db()
+
+  // Starting a paid subscription for the org: workspace admins only. The
+  // provisioning flow links the owner's contact row (clerkUserId + isPrimary)
+  // before payment, so the onboarding pay step passes this gate; a plain
+  // member seat cannot start billing for the org.
+  if (
+    !userId ||
+    !(await isOrgAdmin(database as ReturnType<typeof import('drizzle-orm/d1').drizzle>, orgId, userId))
+  ) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   // The org lookup (D1) and the Stripe price resolution are independent, so run
   // them together to shave a round-trip off the "getting your retainer ready"

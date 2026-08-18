@@ -1,4 +1,5 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { isOrgAdmin } from '@/lib/portal-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -8,7 +9,7 @@ import { eq, and, desc, ne } from 'drizzle-orm'
 // Returns invoices scoped to the authenticated client's org.
 // Query params: status (draft|sent|overdue|paid|all, default all), page (default 1)
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await getPortalAuth(req)
+  const { orgId, userId, impersonating } = await getPortalAuth(req)
 
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -30,6 +31,13 @@ export async function GET(req: NextRequest) {
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Financial data: workspace admins of the org only (member seats are
+  // denied). A Tahi admin previewing Client view has no contact row in the
+  // org, so impersonation is allowed through for this read.
+  if (!impersonating && !(await isOrgAdmin(drizzle, orgId, userId))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   let items
   if (statusParam !== 'all') {

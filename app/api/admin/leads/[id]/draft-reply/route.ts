@@ -315,7 +315,13 @@ export async function POST(
 }
 
 // Just so the path serves something on GET (debugging convenience).
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+// Same gate as POST: drafted sales replies are admin-only data.
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { orgId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
   const { id } = await params
   const database = await db()
   const drafts = await database

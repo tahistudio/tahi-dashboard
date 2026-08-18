@@ -1,4 +1,5 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { isOrgAdmin } from '@/lib/portal-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -20,7 +21,7 @@ import { loadPlanCatalog } from '@/lib/plan-catalog'
 // Settings > Client plans, with lib/billing fallbacks) so the Plan & billing
 // tab renders exactly what the studio sells.
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await getPortalAuth(req)
+  const { orgId, userId, impersonating } = await getPortalAuth(req)
 
   // Deny if not authenticated or if this is the Tahi admin org
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
@@ -29,6 +30,13 @@ export async function GET(req: NextRequest) {
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Financial data (plan rates, cycle totals, GST): workspace admins of the
+  // org only. Impersonation (admin Client view) has no contact row, so it is
+  // allowed through for this read.
+  if (!impersonating && !(await isOrgAdmin(drizzle, orgId, userId))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const catalog = await loadPlanCatalog(drizzle)
   const plans = catalog.map((p) => ({

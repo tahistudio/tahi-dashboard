@@ -31,6 +31,11 @@ const isPublicRoute = createRouteMatcher([
   // Pages live under /p/<resource>/<token>; their data APIs under /api/public.
   '/p/(.*)',
   '/api/public/(.*)',
+  // External-client review form. The email CTA flow lands here via
+  // /api/public/review/respond, which redirects to /review/<token>; the token
+  // is validated by the /api/public/review data routes, so the page itself
+  // must not sit behind the sign-in wall.
+  '/review/(.*)',
 ])
 
 // Admin-only routes : if a client hits these, redirect them to /requests
@@ -87,8 +92,17 @@ export default clerkMiddleware(async (auth, req) => {
   // Allow public routes without auth
   if (isPublicRoute(req)) return NextResponse.next()
 
-  // Allow Bearer token auth for API routes (MCP server, service-to-service)
-  // The actual token validation happens in getRequestAuth() in the route handler
+  // Service-to-service Bearer bypass for /api/*. DO NOT REMOVE without a
+  // migration plan: the worker MCP connector (workers/mcp-server, the owner's
+  // live Claude connector) calls portal.tahi.studio/api/admin/* with
+  // `Authorization: Bearer TAHI_API_TOKEN` and no Clerk session, and
+  // assertCronAuth also accepts `Bearer TAHI_CRON_SECRET`. Clerk treats a
+  // non-Clerk Bearer as unauthenticated, so auth.protect() would 404 those
+  // callers before the route handler could validate the token (verified live
+  // 2026-08-18: junk Bearer reaches the handler and gets its 403; the same
+  // request without a Bearer is 404'd here). This bypass grants nothing by
+  // itself: every /api route must still self-authenticate via
+  // getRequestAuth() / assertCronAuth(), which validate the token server-side.
   const authHeader = req.headers.get('authorization')
   if (authHeader?.startsWith('Bearer ') && req.nextUrl.pathname.startsWith('/api/')) {
     return NextResponse.next()

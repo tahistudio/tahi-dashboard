@@ -7,7 +7,7 @@
  */
 
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -43,11 +43,17 @@ export async function resolveAccessScoping(
   //     and their teamMemberAccess rules govern.
   //   - no new-system rows -> genuinely-legacy member; the legacy column
   //     counts (documented no-lockout default).
+  // Only ACTIVE role assignments count (isNull endedAt, mirroring
+  // lib/permissions.ts): an ended admin role must not keep granting
+  // unrestricted data scope after revocation.
   const newSystemRoles = await database
     .select({ name: schema.roles.name })
     .from(schema.teamMemberRoles)
     .innerJoin(schema.roles, eq(schema.teamMemberRoles.roleId, schema.roles.id))
-    .where(eq(schema.teamMemberRoles.teamMemberId, teamMember.id))
+    .where(and(
+      eq(schema.teamMemberRoles.teamMemberId, teamMember.id),
+      isNull(schema.teamMemberRoles.endedAt),
+    ))
   const roleNames = newSystemRoles.map((r) => r.name)
   if (roleNames.includes('admin') || roleNames.includes('super_admin')) return null
   const hasScopedNewRole = roleNames.length > 0
