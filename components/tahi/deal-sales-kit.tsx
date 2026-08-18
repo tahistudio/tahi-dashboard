@@ -27,13 +27,42 @@ interface Props {
 
 interface OrgContact { id: string; name: string; email: string; isPrimary: number }
 
+interface ProfileMember { name: string; email: string }
+
+// Used only when the signed-in user has no linked team member row (so
+// /api/admin/profile returns null). Keeps the studio owner as the counter-party
+// of last resort rather than emitting an unsigned or blank artifact.
+const FALLBACK_SIGNER: ProfileMember = { name: 'Liam Miller', email: 'business@tahi.studio' }
+
 export function DealSalesKit({ dealId, orgId, dealTitle }: Props) {
   const router = useRouter()
   const [proposals, setProposals] = useState<ProposalRow[]>([])
   const [schedules, setSchedules] = useState<ScheduleRow[]>([])
   const [contracts, setContracts] = useState<ContractRow[]>([])
   const [primaryContact, setPrimaryContact] = useState<OrgContact | null>(null)
+  const [me, setMe] = useState<ProfileMember | null>(null)
   const [creating, setCreating] = useState<null | 'proposal' | 'schedule' | 'contract'>(null)
+
+  // Who is actually creating this artifact. Hardcoding the founder here meant a
+  // new hire's contract silently named someone else as the Tahi signatory,
+  // which has legal effect. Resolved once; deal-independent.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(apiPath('/api/admin/profile'))
+        if (!res.ok) return
+        const data = await res.json() as { member: { name?: string; email?: string } | null }
+        const name = data.member?.name?.trim()
+        const email = data.member?.email?.trim()
+        if (!cancelled && name && email) setMe({ name, email })
+      } catch { /* silent: the fallback signer stands */ }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  const signer = me ?? FALLBACK_SIGNER
+  const preparedBy = `${signer.name}, Tahi Studio`
 
   const reload = useCallback(async () => {
     try {
@@ -83,7 +112,7 @@ export function DealSalesKit({ dealId, orgId, dealTitle }: Props) {
           orgId,
           dealId,
           preparedFor: primaryContactName ?? null,
-          preparedBy: 'Liam Miller, Tahi Studio',
+          preparedBy,
           effectiveDate: new Date().toISOString(),
           seedDefaults: true,
         }),
@@ -108,7 +137,7 @@ export function DealSalesKit({ dealId, orgId, dealTitle }: Props) {
           orgId,
           dealId,
           preparedFor: primaryContactName ?? null,
-          preparedBy: 'Liam Miller, Tahi Studio',
+          preparedBy,
           effectiveDate: new Date().toISOString(),
           numberOfWeeks: 12,
         }),
@@ -125,7 +154,7 @@ export function DealSalesKit({ dealId, orgId, dealTitle }: Props) {
     setCreating('contract')
     try {
       const signers: Array<Record<string, string>> = [
-        { role: 'tahi', name: 'Liam Miller', email: 'business@tahi.studio' },
+        { role: 'tahi', name: signer.name, email: signer.email },
       ]
       if (primaryContactEmail) {
         signers.push({

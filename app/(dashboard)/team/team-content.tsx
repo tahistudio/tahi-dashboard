@@ -6,7 +6,7 @@ import { useUser } from '@clerk/nextjs'
 import {
   Plus, UserCog, Mail, Shield, RefreshCw, Clock, Trash2,
   Pencil, Link2, GitBranch, Eye, User, Briefcase, Save,
-  Users, Activity, Zap, Sparkles,
+  Users, Activity, Zap, Sparkles, Send, KeyRound,
 } from 'lucide-react'
 import { OrgChart } from '@/components/tahi/org-chart'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -27,6 +27,7 @@ import { apiPath } from '@/lib/api'
 import { setTeamMemberImpersonation, type TeamMemberAccessRule } from '@/components/tahi/impersonation-banner'
 import { useRouter } from 'next/navigation'
 import { PageHeader } from '@/components/tahi/page-header'
+import { useToast } from '@/components/tahi/toast'
 
 // -- Types --
 
@@ -40,6 +41,10 @@ interface TeamMember {
   avatarUrl: string | null
   weeklyCapacityHours: number | null
   isContractor: boolean | null
+  // Present only for callers who can see the Team feature. Null means the row
+  // has no Clerk login attached yet, so that person cannot sign in as
+  // themselves and receives no notifications.
+  clerkUserId?: string | null
   createdAt: string
 }
 
@@ -268,8 +273,10 @@ function AddMemberSlideOver({
   const [skillsInput, setSkillsInput] = useState('')
   const [weeklyCapacity, setWeeklyCapacity] = useState('')
   const [isContractor, setIsContractor] = useState(false)
+  const [sendInvite, setSendInvite] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const { showToast } = useToast()
 
   // Reset form state every time the slide-over is opened so the next
   // "Add member" doesn't carry stale text from a previous abort.
@@ -277,6 +284,7 @@ function AddMemberSlideOver({
     if (open) {
       setName(''); setEmail(''); setTitle(''); setRole('member')
       setSkillsInput(''); setWeeklyCapacity(''); setIsContractor(false)
+      setSendInvite(true)
       setError('')
     }
   }, [open])
@@ -313,6 +321,22 @@ function AddMemberSlideOver({
         throw new Error(data.error ?? 'Failed to create team member')
       }
 
+      // The roster row alone gives nobody a login. Sending the Clerk workspace
+      // invite is a separate call, so a failure here must not read as "the
+      // member was not added".
+      if (sendInvite) {
+        const created = await res.json() as { id?: string }
+        if (created.id) {
+          const inviteRes = await fetch(apiPath(`/api/admin/team/${created.id}/invite`), { method: 'POST' })
+          const inviteBody = await inviteRes.json().catch(() => ({})) as { message?: string; error?: string }
+          if (inviteRes.ok) {
+            showToast(inviteBody.message ?? 'Invite sent', 'success')
+          } else {
+            showToast(inviteBody.error ?? 'Member added, but the invite could not be sent', 'warning')
+          }
+        }
+      }
+
       onCreated()
       onClose()
     } catch (err) {
@@ -328,7 +352,7 @@ function AddMemberSlideOver({
       onClose={onClose}
       icon={<UserCog size={15} />}
       title="Add team member"
-      subtitle="Invite someone to the Tahi team."
+      subtitle="Adds them to the roster. Tick the invite box to also send a workspace login."
       maxWidth="48rem"
     >
       <SlideOver.Body>
@@ -342,6 +366,37 @@ function AddMemberSlideOver({
           isContractor={isContractor} onIsContractor={setIsContractor}
           error={error}
         />
+
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '0.625rem',
+            marginTop: '0.875rem',
+            padding: '0.75rem',
+            minHeight: '2.75rem',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--color-bg-secondary)',
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={sendInvite}
+            onChange={(e) => setSendInvite(e.target.checked)}
+            style={{ width: '1rem', height: '1rem', marginTop: '0.125rem', accentColor: 'var(--color-brand)' }}
+          />
+          <span>
+            <span style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)' }}>
+              Send a workspace login invite
+            </span>
+            <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
+              Emails them a Tahi workspace invite. Their access here activates the first time they sign in.
+              Leave this off to add a roster record only.
+            </span>
+          </span>
+        </label>
       </SlideOver.Body>
       <SlideOver.Footer>
         <TahiButton variant="secondary" size="sm" onClick={onClose}>
@@ -354,7 +409,7 @@ function AddMemberSlideOver({
           disabled={saving}
           iconLeft={saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
         >
-          {saving ? 'Adding...' : 'Add member'}
+          {saving ? 'Adding...' : sendInvite ? 'Add and invite' : 'Add member'}
         </TahiButton>
       </SlideOver.Footer>
     </SlideOver>
@@ -724,8 +779,10 @@ export function TeamContent() {
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([
     { id: 'role', values: [] },
   ])
+  const [invitingId, setInvitingId] = useState<string | null>(null)
   const { user } = useUser()
   const router = useRouter()
+  const { showToast } = useToast()
 
   // Check if the current Clerk user has a linked team member record
   const currentUserLinked = useMemo(() => {
@@ -764,6 +821,27 @@ export function TeamContent() {
       setLinkingAccount(false)
     }
   }, [user, mutateTeam])
+
+  // Send (or re-send) the Clerk workspace invite for a roster row. The route
+  // answers already-invited / already-member as a 200 with its own message, so
+  // only a real failure is shown as an error.
+  const handleInvite = useCallback(async (member: TeamMember) => {
+    setInvitingId(member.id)
+    try {
+      const res = await fetch(apiPath(`/api/admin/team/${member.id}/invite`), { method: 'POST' })
+      const body = await res.json().catch(() => ({})) as { message?: string; error?: string }
+      if (res.ok) {
+        showToast(body.message ?? `Invite sent to ${member.email}`, 'success')
+        await mutateTeam()
+      } else {
+        showToast(body.error ?? 'Could not send the invite', 'error')
+      }
+    } catch {
+      showToast('Could not send the invite', 'error')
+    } finally {
+      setInvitingId(null)
+    }
+  }, [showToast, mutateTeam])
 
   const handleDeleteMember = useCallback(async () => {
     if (!deleteMember) return
@@ -835,6 +913,9 @@ export function TeamContent() {
 
     return { headcount, totalCapacity, avgCapacity, contractorCount, segments }
   }, [members])
+
+  // Roster rows still waiting on a Clerk login. Cheap enough to recompute.
+  const unlinkedCount = members.filter(m => !m.clerkUserId).length
 
   // Selected role values from the FilterBar chip.
   const selectedRoles = useMemo(() => {
@@ -922,6 +1003,19 @@ export function TeamContent() {
           </Badge>
         )
       },
+    },
+    {
+      // A member with no clerkUserId cannot sign in as themselves and silently
+      // receives no notifications, so it must never look identical to a
+      // working seat in this table.
+      key: 'login',
+      header: 'Login',
+      sortable: true,
+      sortValue: r => (r.clerkUserId ? 0 : 1),
+      width: '8.5rem',
+      render: r => r.clerkUserId
+        ? <Badge tone="positive" variant="soft" size="sm" dot={false}>Linked</Badge>
+        : <Badge tone="warning" variant="soft" size="sm" dot={false}>Not linked</Badge>,
     },
     {
       key: 'capacity',
@@ -1136,6 +1230,30 @@ export function TeamContent() {
             </div>
           )}
 
+          {/* Roster rows with no login attached. Until someone signs in and
+              claims their row they get no notifications and cannot see the
+              dashboard as themselves, so this is surfaced rather than left to
+              be spotted in the table. */}
+          {!loading && unlinkedCount > 0 && (
+            <div
+              className="flex items-center gap-3 px-4 py-3 rounded-xl border"
+              style={{
+                background: 'var(--color-warning-bg)',
+                borderColor: 'var(--color-warning)',
+              }}
+            >
+              <KeyRound className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--color-warning)' }} />
+              <div>
+                <p className="text-sm font-medium text-[var(--color-text)]">
+                  {unlinkedCount} {unlinkedCount === 1 ? 'member has' : 'members have'} no workspace login
+                </p>
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  They cannot sign in and receive no notifications. Use Send login invite on their row.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Filter row */}
           <FilterBar
             filters={filterDefs}
@@ -1177,6 +1295,11 @@ export function TeamContent() {
               onRowPreview={(r) => setEditMember(r)}
               rowActions={(r) => [
                 { label: 'Edit', icon: <Pencil size={14} />, onClick: () => setEditMember(r) },
+                ...(r.clerkUserId ? [] : [{
+                  label: invitingId === r.id ? 'Sending invite...' : 'Send login invite',
+                  icon: <Send size={14} />,
+                  onClick: () => void handleInvite(r),
+                }]),
                 { label: 'Manage access', icon: <Shield size={14} />, onClick: () => setAccessMember(r) },
                 { label: 'View as', icon: <Eye size={14} />, onClick: () => handleViewAs(r) },
                 { label: 'Remove', icon: <Trash2 size={14} />, tone: 'danger', onClick: () => setDeleteMember(r) },

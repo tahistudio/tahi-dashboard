@@ -19,6 +19,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { inArray } from 'drizzle-orm'
 import { resolvePermissions, featureMap, applyModuleGates, MODULE_SETTING_KEYS } from '@/lib/permissions'
+import { linkTeamMemberOnSignIn } from '@/lib/team-link-server'
 import './app-shell.css'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -68,6 +69,15 @@ export default async function DashboardLayout({
     }
   }
   if (!onboardingComplete) redirect('/onboarding')
+
+  // Team-login backfill. A hire's Clerk account and their team_members row are
+  // only joined by teamMembers.clerkUserId, and nothing used to write it, so a
+  // new hire resolved to no row at all: no role, no scope, no notifications.
+  // Claim their waiting row here, by VERIFIED email, before permissions resolve
+  // so their real role applies on the very first render. It never creates a row
+  // and never overwrites an existing link (see lib/team-link.ts), and an
+  // already-linked user costs one indexed lookup and nothing more.
+  if (isAdmin) await linkTeamMemberOnSignIn(userId, orgId)
 
   // Granular permissions: resolve the caller's capabilities once, server-side,
   // and feed them to the sidebar + <Gate>. Fail-open (full access) if the
