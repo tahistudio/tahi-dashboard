@@ -14,15 +14,25 @@
  *   team_member  - sees features their role can .view, minus feature_visibility deny.
  *   client       - client-audience features only, ON by default, minus per-org deny.
  *
- * Safe defaults (no lockout): a Tahi-org user with NO role assigned resolves to
- * `admin` (preserves the historical "all Tahi users are admin" behaviour). The
- * MCP service token + a missing team_member row also resolve to admin.
+ * DENY BY DEFAULT: a Tahi-org identity with NO active role assigned sees
+ * nothing until a role is granted (it resolves to `team_member` with an EMPTY
+ * viewable set, which `decideFeature` treats as "holds no grant"). Two narrow
+ * exceptions, both explicit and both evaluated before the deny path:
+ *   - the MCP service token (`api-service`), which has no team_member row by
+ *     design and must keep full admin for CLAUDE.md rule 14 parity;
+ *   - a workspace with zero active role assignments anywhere (a fresh or
+ *     unseeded install), where denying would lock the operator out.
  *
  * The decision core (`decideFeature`) is PURE so it is fully unit-tested.
  */
 
 import { schema } from '@/db/d1'
 import { eq, and, isNull, inArray } from 'drizzle-orm'
+import {
+  SERVICE_USER_ID,
+  hasAnyActiveRoleAssignment,
+  resolveTeamMember,
+} from '@/lib/team-identity'
 import {
   FEATURE_TREE,
   getFeatureNode,
@@ -68,7 +78,12 @@ export interface ResolvedAccess {
   isAdmin: boolean // super_admin OR admin
   /** admin+ may open the permissions builder and toggle features for anyone. */
   canManagePermissions: boolean
-  /** team_member: set of resources their role can .view. null = unrestricted (admin+/client). */
+  /**
+   * team_member: the set of resources their roles can .view.
+   *   null  = unrestricted (admin+ / client).
+   *   empty = holds NO grant at all (no active role): deny everything, including
+   *           features that carry no resource mapping. See `decideFeature`.
+   */
   viewableResources: Set<string> | null
   /** Precedence-resolved feature_visibility overrides (most-specific subject wins). */
   overrides: Map<string, Effect>
@@ -88,13 +103,21 @@ export function featureResource(featureKey: string): string | undefined {
 
 /**
  * Decide whether `access` can see `featureKey`. Pure: no DB, fully testable.
- * Order: unknown key -> allow; wrong audience -> deny; super_admin -> allow;
- * explicit override (most-specific feature/ancestor) -> its effect; else default
- * by level (admin/client allow; team_member by role baseline).
+ * Order: unknown key -> allow unless the caller holds no grant; wrong audience
+ * -> deny; super_admin -> allow; explicit override (most-specific
+ * feature/ancestor) -> its effect; no grant -> deny; else default by level
+ * (admin/client allow; team_member by role baseline).
  */
 export function decideFeature(access: ResolvedAccess, featureKey: string): boolean {
+  // An EMPTY viewable set means the caller holds no grant at all (a Tahi-org
+  // identity with no active role). Deny by default: not the ungated features
+  // (overview, messages, content_studio...), not unknown keys either. Only an
+  // explicit feature_visibility allow below can lift a single feature, because
+  // that is a deliberate grant rather than a default.
+  const noGrant = access.viewableResources !== null && access.viewableResources.size === 0
+
   const node = getFeatureNode(featureKey)
-  if (!node) return true // not a gateable feature
+  if (!node) return !noGrant // not a gateable feature
   if (!node.appliesTo.includes(access.audience)) return false
   if (access.isSuperAdmin) return true
 
@@ -105,6 +128,7 @@ export function decideFeature(access: ResolvedAccess, featureKey: string): boole
     if (effect) return effect === 'allow'
   }
 
+  if (noGrant) return false
   if (access.level === 'admin' || access.level === 'client') return true
 
   // team_member: gated by the role's .view baseline for mapped resources.
@@ -219,7 +243,7 @@ export async function resolvePermissions(
       // Resolved by the caller's Clerk user id within their org. An admin
       // previewing a client (impersonation) has no contact row here, so they
       // see the org baseline, never a specific person's refinements.
-      if (auth.userId && auth.userId !== 'api-service') {
+      if (auth.userId && auth.userId !== SERVICE_USER_ID) {
         const [contact] = await drizzle
           .select({ id: schema.contacts.id })
           .from(schema.contacts)
@@ -248,17 +272,14 @@ export async function resolvePermissions(
   }
 
   // ── Team (Tahi org) ──
-  // The MCP service token has no team_member row -> full admin.
+  // The MCP service token has no team_member row and is skipped here; it is
+  // granted admin explicitly at the level decision below.
   let teamMemberId: string | null = null
   let roleNames: string[] = []
   let roleIds: string[] = []
 
-  if (auth.userId && auth.userId !== 'api-service') {
-    const [member] = await drizzle
-      .select({ id: schema.teamMembers.id })
-      .from(schema.teamMembers)
-      .where(eq(schema.teamMembers.clerkUserId, auth.userId))
-      .limit(1)
+  if (auth.userId && auth.userId !== SERVICE_USER_ID) {
+    const member = await resolveTeamMember(drizzle, auth.userId)
     teamMemberId = member?.id ?? null
 
     if (teamMemberId) {
@@ -275,28 +296,41 @@ export async function resolvePermissions(
     }
   }
 
-  // Level from roles. No roles assigned -> admin (no lockout).
+  // Level from roles. DENY BY DEFAULT: no active role assignment -> no access.
+  // The two exceptions are explicit and evaluated here, never as a fallthrough:
+  //   - the MCP service token, which is verified by TAHI_API_TOKEN in
+  //     getRequestAuth and intentionally has no team_member row;
+  //   - a workspace with no active role assignment ANYWHERE, which means the
+  //     roles have not been seeded (fresh install / new environment) rather
+  //     than that this person was left unroled. One guarded query, reached only
+  //     on the roleless path, so a seeded workspace never pays for it.
   let level: AccessLevel
   if (roleNames.includes(SUPER_ADMIN_ROLE)) level = 'super_admin'
   else if (roleNames.includes(ADMIN_ROLE)) level = 'admin'
   else if (roleNames.length > 0) level = 'team_member'
-  else level = 'admin'
+  else if (auth.userId === SERVICE_USER_ID) level = 'admin'
+  else level = (await hasAnyActiveRoleAssignment(drizzle)) ? 'team_member' : 'admin'
 
   const isSuperAdmin = level === 'super_admin'
   const isAdmin = level === 'super_admin' || level === 'admin'
 
-  // team_member: which resources can they .view?
+  // team_member: which resources can they .view? An empty set is the deny-all
+  // marker (no role, or roles that grant no .view at all), so this must stay
+  // an empty Set and never fall back to null (null = unrestricted).
   let viewableResources: Set<string> | null = null
-  if (level === 'team_member' && roleIds.length > 0) {
-    const perms = await drizzle
-      .select({ resource: schema.permissions.resource })
-      .from(schema.rolePermissions)
-      .innerJoin(schema.permissions, eq(schema.rolePermissions.permissionId, schema.permissions.id))
-      .where(and(
-        inArray(schema.rolePermissions.roleId, roleIds),
-        eq(schema.permissions.action, 'view'),
-      ))
-    viewableResources = new Set(perms.map(p => p.resource))
+  if (level === 'team_member') {
+    viewableResources = new Set<string>()
+    if (roleIds.length > 0) {
+      const perms = await drizzle
+        .select({ resource: schema.permissions.resource })
+        .from(schema.rolePermissions)
+        .innerJoin(schema.permissions, eq(schema.rolePermissions.permissionId, schema.permissions.id))
+        .where(and(
+          inArray(schema.rolePermissions.roleId, roleIds),
+          eq(schema.permissions.action, 'view'),
+        ))
+      viewableResources = new Set(perms.map(p => p.resource))
+    }
   }
 
   // Overrides: team_member-specific wins over role-level.

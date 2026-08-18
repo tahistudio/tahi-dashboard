@@ -17,9 +17,10 @@
  *   const denied = await requireAccessToOrg(database, userId, targetOrgId)
  *   if (denied) return denied
  *
- * Admins (main Tahi org, role === 'admin', or no teamMembers row at all — i.e. the
- * NEXT_PUBLIC_TAHI_ORG_ID owner) bypass scoping. Team members without any
- * access rules are denied by default.
+ * DENY BY DEFAULT (see lib/access-scoping.ts for the full decision order).
+ * Bypassing scoping has to be earned: an active admin / super_admin role, an
+ * all_clients rule, or the MCP service token. A team member with no access
+ * rule, and an identity with no team_members row, are both denied.
  */
 
 import { NextResponse } from 'next/server'
@@ -43,7 +44,8 @@ export async function requireAccessToOrg(
 
   const allowedOrgIds = await resolveAccessScoping(database, userId)
 
-  // null = unrestricted (admin or all_clients rule)
+  // null = unrestricted (admin / super_admin role, all_clients rule, service
+  // token, or an unseeded workspace). Anything else, including [], is a filter.
   if (allowedOrgIds === null) return null
 
   if (!allowedOrgIds.includes(targetOrgId)) {
@@ -60,8 +62,9 @@ export async function requireAccessToOrg(
  *   const scope = await getOrgScope(database, userId)
  *   if (scope !== null) conditions.push(inArray(schema.invoices.orgId, scope))
  *
- * Returns [] for "no access at all" — callers should early-return with
- * an empty result set rather than running the query.
+ * Returns [] for "no access at all" (the default for an unroled or unknown
+ * caller); callers should early-return with an empty result set rather than
+ * running the query.
  */
 export async function getOrgScope(
   database: DrizzleDB,

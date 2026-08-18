@@ -70,12 +70,25 @@ function referencesColumn(node: unknown, column: unknown, seen = new Set<unknown
 function seed(opts: {
   teamMember?: Row[]
   roleRows?: Row[]
+  /**
+   * The bootstrap probe: any ACTIVE role assignment in the whole workspace.
+   * Non-empty = a seeded workspace, so the deny defaults stand. Empty = a
+   * fresh/unseeded install, where denying would lock the operator out.
+   * team_member_roles is queried at most twice (the member's own roles, then
+   * the probe), and the own-roles query is skipped when no member row matched,
+   * so queue them in exactly that order.
+   */
+  anyActiveRole?: Row[]
   accessRules?: Row[]
   accessOrgs?: Row[]
 }): { db: StubDb; captures: Capture[] } {
+  const roleQueue: Row[][] = []
+  if ((opts.teamMember ?? []).length > 0) roleQueue.push(opts.roleRows ?? [])
+  roleQueue.push(opts.anyActiveRole ?? [])
+
   const queues = new Map<unknown, Row[][]>([
     [schema.teamMembers, [opts.teamMember ?? []]],
-    [schema.teamMemberRoles, [opts.roleRows ?? []]],
+    [schema.teamMemberRoles, roleQueue],
     [schema.teamMemberAccess, [opts.accessRules ?? []]],
     [schema.teamMemberAccessOrgs, [opts.accessOrgs ?? []]],
   ])
@@ -126,12 +139,28 @@ describe('resolveAccessScoping', () => {
     expect(await resolveAccessScoping(db, 'user_1')).toEqual([])
   })
 
-  it('keeps the legacy-admin no-lockout default when no new-system roles exist', async () => {
+  it('keeps the legacy-admin no-lockout default on an UNSEEDED workspace', async () => {
+    // No role assignment exists anywhere, so the legacy column is the only
+    // signal there is and it still counts.
     const { db } = seed({
       teamMember: [{ id: 'tm_1', role: 'admin' }],
       roleRows: [],
+      anyActiveRole: [],
     })
     expect(await resolveAccessScoping(db, 'user_1')).toBeNull()
+  })
+
+  it('the legacy admin column no longer grants unrestricted scope once roles are seeded', async () => {
+    // team_members.role is still written by the team form and is not a
+    // permission grant: with the roles table in use, this member falls through
+    // to their access rules like anyone else (here: none configured -> deny).
+    const { db } = seed({
+      teamMember: [{ id: 'tm_1', role: 'admin' }],
+      roleRows: [],
+      anyActiveRole: [{ id: 'tmr_someone_else' }],
+      accessRules: [],
+    })
+    expect(await resolveAccessScoping(db, 'user_1')).toEqual([])
   })
 
   it('collects org ids for specific_clients rules', async () => {
@@ -142,5 +171,61 @@ describe('resolveAccessScoping', () => {
       accessOrgs: [{ orgId: 'org_a' }, { orgId: 'org_b' }],
     })
     expect(await resolveAccessScoping(db, 'user_1')).toEqual(['org_a', 'org_b'])
+  })
+})
+
+describe('resolveAccessScoping - deny by default', () => {
+  it('THE OWNER: a super_admin whose ONLY scope row is one specific client stays unrestricted', async () => {
+    // Production shape: business@tahi.studio holds super_admin AND a
+    // specific_clients teamMemberAccess row naming a single org. The role-name
+    // rule is the only thing standing between the studio owner and losing
+    // every other client, so it is pinned here explicitly.
+    const { db } = seed({
+      teamMember: [{ id: 'b3025c04-6cdd-4154-822c-5d4fbfb95b76', role: 'admin' }],
+      roleRows: [{ name: 'super_admin' }],
+      accessRules: [{ id: 'rule_narrow', scopeType: 'specific_clients', planType: null }],
+      accessOrgs: [{ orgId: 'org_giant_group' }],
+    })
+    expect(await resolveAccessScoping(db, 'user_liam')).toBeNull()
+  })
+
+  it('the MCP service identity is unrestricted and reads nothing', async () => {
+    const { db, captures } = seed({ anyActiveRole: [{ id: 'tmr_someone_else' }] })
+    expect(await resolveAccessScoping(db, 'api-service')).toBeNull()
+    expect(captures).toEqual([]) // answered before any lookup
+  })
+
+  it('no user context denies instead of allowing everything', async () => {
+    const { db, captures } = seed({ anyActiveRole: [{ id: 'tmr_someone_else' }] })
+    expect(await resolveAccessScoping(db, null)).toEqual([])
+    expect(captures).toEqual([])
+  })
+
+  it('an identity with no team member row is denied on a seeded workspace', async () => {
+    const { db } = seed({ teamMember: [], anyActiveRole: [{ id: 'tmr_someone_else' }] })
+    expect(await resolveAccessScoping(db, 'user_stranger')).toEqual([])
+  })
+
+  it('BOOTSTRAP: an identity with no team member row keeps full scope on an unseeded workspace', async () => {
+    const { db } = seed({ teamMember: [], anyActiveRole: [] })
+    expect(await resolveAccessScoping(db, 'user_owner')).toBeNull()
+  })
+
+  it('a member with a scoped role and no access rule is denied', async () => {
+    const { db } = seed({
+      teamMember: [{ id: 'tm_hire', role: 'member' }],
+      roleRows: [{ name: 'task_handler' }],
+      accessRules: [],
+    })
+    expect(await resolveAccessScoping(db, 'user_hire')).toEqual([])
+  })
+
+  it('an all_clients rule is still an explicit grant', async () => {
+    const { db } = seed({
+      teamMember: [{ id: 'tm_pm', role: 'member' }],
+      roleRows: [{ name: 'project_manager' }],
+      accessRules: [{ id: 'rule_all', scopeType: 'all_clients', planType: null }],
+    })
+    expect(await resolveAccessScoping(db, 'user_pm')).toBeNull()
   })
 })

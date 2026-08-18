@@ -7,12 +7,12 @@
  * `resolveAccessScoping` returns `string[] | null`, where `null` means
  * "unrestricted" and `[]` means "deny all". That raw shape is easy to invert by
  * accident (a forgotten `.length === 0` check silently leaks every org) AND it
- * overloads `null` across three very different situations: an explicit
- * `all_clients` grant, a legacy `role === 'admin'` member, and a caller with no
- * `teamMembers` row at all. `scopedOrgIds` layers on top so callers get a
- * discriminated `OrgScope` with named sentinels (TypeScript forces every caller
- * to handle deny-all) AND so the privileged bypass is decided by
- * `resolvePermissions` rather than by that ambiguous `null`.
+ * overloads `null` across several situations: an explicit `all_clients` grant,
+ * an admin / super_admin role, and an unseeded workspace. `scopedOrgIds` layers
+ * on top so callers get a discriminated `OrgScope` with named sentinels
+ * (TypeScript forces every caller to handle deny-all) AND so the privileged
+ * bypass is decided by `resolvePermissions` rather than by that ambiguous
+ * `null`.
  *
  * The underlying per-org scoping logic is NOT reimplemented here; this helper
  * only decides who bypasses it and what an empty result means:
@@ -21,12 +21,13 @@
  *   { kind: 'none' } -> deny (return an empty result set; do NOT run the query)
  *   { kind: 'some' } -> filter with inArray(..., orgIds)
  *
- * SECURITY INVARIANT (never violate): the studio owner + super-admins, the Tahi
- * admin org, and the MCP service token ALWAYS keep full access. Those bypasses
- * are evaluated BEFORE the fail-closed deny path, so tightening the default can
- * never lock them out. The fail-closed change applies ONLY to a non-super-admin,
- * non-admin team member with no configured access rule: they now resolve to
- * `{ kind: 'none' }` (no orgs) instead of leaking every client.
+ * SECURITY INVARIANT (never violate): the studio owner + super-admins and the
+ * MCP service token ALWAYS keep full access. Those bypasses are evaluated
+ * BEFORE the fail-closed deny path, so tightening the default can never lock
+ * them out. The fail-closed path applies to everyone else who cannot show a
+ * grant: a team member with no configured access rule, and (since the
+ * deny-by-default flip) an unroled or unknown Tahi-org identity. They resolve
+ * to `{ kind: 'none' }` (no orgs) instead of leaking every client.
  *
  * Single-entity routes keep using `requireAccessToOrg` from lib/require-access.ts.
  *
@@ -56,6 +57,7 @@
 import { db } from '@/lib/db'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { resolvePermissions } from '@/lib/permissions'
+import { SERVICE_USER_ID } from '@/lib/team-identity'
 import type { RequestAuthResult } from '@/lib/server-auth'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -84,8 +86,8 @@ export type OrgScope =
  *   1. MCP service token -> { all }.
  *   2. super_admin / admin level (via resolvePermissions) -> { all }.
  *   3. otherwise apply the team member's configured access rules:
- *        null -> { all }  (explicit all_clients / legacy-admin grant)
- *        []   -> { none } (no rule configured: DENY by default)
+ *        null -> { all }  (explicit all_clients grant / unseeded workspace)
+ *        []   -> { none } (no rule configured, or unroled: DENY by default)
  *        list -> { some }
  */
 export async function scopedOrgIds(
@@ -102,13 +104,13 @@ export async function scopedOrgIds(
   //    keeps MCP parity (CLAUDE.md rule 14) even if the role/permission tables
   //    are mid-migration or empty (in which case resolveAccessScoping could
   //    otherwise return [] and deny the service token).
-  if (auth.userId === 'api-service') return { kind: 'all' }
+  if (auth.userId === SERVICE_USER_ID) return { kind: 'all' }
 
   // 2. super_admin (seeded owner business@ + staci@, un-lockable) and admin
-  //    level (explicit admin role, or the Tahi-org "no role assigned" default)
-  //    bypass scoping. resolvePermissions is the single source of truth for the
-  //    admin decision, so the owner is protected here regardless of the legacy
-  //    `teamMembers.role` column or whether any `teamMemberAccess` rows exist.
+  //    level (an explicit admin role) bypass scoping. resolvePermissions is the
+  //    single source of truth for the admin decision, so the owner is protected
+  //    here regardless of the legacy `teamMembers.role` column or whether any
+  //    `teamMemberAccess` rows exist.
   //    This is STRICTLY SAFER than the old `null -> all` mapping: even if a
   //    misconfiguration made resolveAccessScoping return [] for the owner, they
   //    still resolve to { all } here instead of being denied.
@@ -119,10 +121,11 @@ export async function scopedOrgIds(
   if (access.isAdmin) return { kind: 'all' }
 
   // ── Non-admin team member: FAIL CLOSED ──────────────────────────────────────
-  // Only genuine (non-admin) team members reach here.
-  //   null -> an explicit all_clients rule or a legacy role==='admin' grant:
-  //           an intentional "see everything", so keep { all }.
-  //   []   -> NO configured access rule: deny by default -> { none }.
+  // Only non-admin callers reach here.
+  //   null -> an explicit all_clients rule (an intentional "see everything"),
+  //           or a workspace with no roles seeded yet, so keep { all }.
+  //   []   -> no configured access rule, no role, or an unknown identity:
+  //           deny by default -> { none }.
   //   list -> the specific orgs the member's rules allow -> { some }.
   const ids = await resolveAccessScoping(database as DrizzleDB, auth.userId)
   if (ids === null) return { kind: 'all' }
