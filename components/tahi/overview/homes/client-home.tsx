@@ -297,7 +297,6 @@ const CL_STEPS: FirstRunStep[] = [
   { key: 'brandAssetsUploaded', ic: 'file', t: 'Share brand assets', d: 'Logos, fonts and guidelines so day one is on-brand', time: '2 min', dest: 'files' },
   { key: 'firstRequestSubmitted', ic: 'request', t: 'Make your first request', d: 'Tell us what you need and we take it from there', time: '3 min', dest: 'requests' },
   { key: 'billingSetUp', ic: 'receipt', t: 'Confirm billing', d: 'Check your plan and payment details', time: '1 min', dest: 'plan' },
-  { key: 'meetTheTeam', ic: 'users', t: 'Say hi to the team', d: 'Your team is already in your Messages', time: '1 min', dest: 'messages' },
 ]
 const FIRSTRUN_DISMISS_KEY = 'tahi-ov-firstrun-dismissed'
 
@@ -606,8 +605,10 @@ function ProjectBoard({ project, ro, go }: { project: ProjectResp | undefined; r
             {phases.length > 0 ? ` · ${stage}` : ''}
           </span>
         </div>
-        <button className="ov-cta" disabled={ro} onClick={() => go('messages')}>
-          Message the team
+        {/* Messaging is coming soon for V1: the slot stays as a quiet disabled
+            affordance rather than linking to the hidden Messages surface. */}
+        <button className="ov-cta" disabled title="Client messaging is coming soon">
+          Messaging soon
         </button>
       </div>
       {phases.length > 0 ? (
@@ -773,7 +774,6 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // ── hero ────────────────────────────────────────────────────────────────────
   const retainerNewItems: NewMenuItem[] = [{ ic: 'request', label: 'New request', go: () => go('requests') }]
   const projectNewItems: NewMenuItem[] = [
-    { ic: 'msg', label: 'Message the team', go: () => go('messages') },
     { ic: 'request', label: 'New request', go: () => go('requests') },
   ]
 
@@ -980,11 +980,11 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
                     i === 0 ? (
                       <button
                         className="ov-cta ghost"
-                        disabled={ro}
+                        disabled
                         style={{ height: 30, fontSize: 12, padding: '0 12px' }}
-                        onClick={() => go('messages')}
+                        title="Client messaging is coming soon"
                       >
-                        Message
+                        Soon
                       </button>
                     ) : undefined
                   }
