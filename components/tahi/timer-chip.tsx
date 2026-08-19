@@ -199,8 +199,8 @@ export function TimerChip() {
       fetchedRef.current.task = true
       setTasksLoading(true)
       fetch(apiPath('/api/admin/tasks?status=all'))
-        .then(r => r.json() as Promise<{ items: TaskOption[] }>)
-        .then(d => setTasks(d.items ?? []))
+        .then(r => r.json() as Promise<{ tasks: TaskOption[] }>)
+        .then(d => setTasks(d.tasks ?? []))
         .catch(() => setTasks([]))
         .finally(() => setTasksLoading(false))
     } else if (pickerSource === 'client' && !fetchedRef.current.client && !clientsLoading) {

@@ -30,7 +30,9 @@ export async function GET(
     return NextResponse.json({ error: 'Task not found' }, { status: 404 })
   }
 
-  const items = await drizzle
+  // Key is `subtasks` (not `items`): every client reader expects
+  // `data.subtasks`. Returning `items` silently produced an always-empty list.
+  const subtasks = await drizzle
     .select({
       id: schema.taskSubtasks.id,
       taskId: schema.taskSubtasks.taskId,
@@ -42,7 +44,7 @@ export async function GET(
     .where(eq(schema.taskSubtasks.taskId, taskId))
     .orderBy(asc(schema.taskSubtasks.createdAt))
 
-  return NextResponse.json({ items })
+  return NextResponse.json({ subtasks })
 }
 
 // ── POST /api/admin/tasks/[id]/subtasks ───────────────────────────────────

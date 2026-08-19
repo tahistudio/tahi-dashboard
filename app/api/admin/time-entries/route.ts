@@ -10,23 +10,94 @@
  *      Server computes hours = (endedAt - startedAt) / 3600000.
  *      date derived from startedAt.
  *
- *   3. Mixed   : both { hours, startedAt } set — server trusts the explicit
+ *   3. Mixed   : both { hours, startedAt } set - server trusts the explicit
  *      hours and stores the range for reference.
  *
  * Exactly one of requestId or taskId required. Admin only.
  *
  * PATCH / DELETE on individual entries will live in `[id]/route.ts` later
- * (per the existing /requests/[id]/time-entries pattern — not duplicated here).
+ * (per the existing /requests/[id]/time-entries pattern - not duplicated here).
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { eq, desc } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+/**
+ * GET /api/admin/time-entries?taskId=... (or ?requestId=...)
+ *
+ * Lists the time entries logged against a single task or request, newest
+ * first, with the logging member's name resolved. Returns the running total
+ * so the caller can render "6.5h logged" without a second round trip. Admin
+ * only; org access is enforced against the target's org.
+ */
+export async function GET(req: NextRequest) {
+  const { orgId, userId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const url = new URL(req.url)
+  const taskId = url.searchParams.get('taskId')
+  const requestId = url.searchParams.get('requestId')
+
+  if ((!taskId && !requestId) || (taskId && requestId)) {
+    return NextResponse.json({ error: 'Exactly one of taskId or requestId is required' }, { status: 400 })
+  }
+
+  const database = await db()
+  const drizzle = database as Drizzle
+
+  // Resolve the target org for the access gate.
+  let targetOrgId: string | null = null
+  if (taskId) {
+    const [t] = await drizzle
+      .select({ orgId: schema.tasks.orgId })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.id, taskId))
+      .limit(1)
+    if (!t) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+    targetOrgId = t.orgId
+  } else if (requestId) {
+    const [r] = await drizzle
+      .select({ orgId: schema.requests.orgId })
+      .from(schema.requests)
+      .where(eq(schema.requests.id, requestId))
+      .limit(1)
+    if (!r) return NextResponse.json({ error: 'Request not found' }, { status: 404 })
+    targetOrgId = r.orgId
+  }
+
+  // Tahi-internal tasks may have no org; only unrestricted users may read them.
+  if (targetOrgId) {
+    const denied = await requireAccessToOrg(drizzle, userId, targetOrgId)
+    if (denied) return denied
+  }
+
+  const items = await drizzle
+    .select({
+      id: schema.timeEntries.id,
+      hours: schema.timeEntries.hours,
+      billable: schema.timeEntries.billable,
+      notes: schema.timeEntries.notes,
+      date: schema.timeEntries.date,
+      source: schema.timeEntries.source,
+      teamMemberId: schema.timeEntries.teamMemberId,
+      teamMemberName: schema.teamMembers.name,
+      createdAt: schema.timeEntries.createdAt,
+    })
+    .from(schema.timeEntries)
+    .leftJoin(schema.teamMembers, eq(schema.timeEntries.teamMemberId, schema.teamMembers.id))
+    .where(taskId ? eq(schema.timeEntries.taskId, taskId) : eq(schema.timeEntries.requestId, requestId as string))
+    .orderBy(desc(schema.timeEntries.date))
+
+  const totalHours = items.reduce((sum, e) => sum + (e.hours ?? 0), 0)
+
+  return NextResponse.json({ items, totalHours })
+}
 
 export async function POST(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)

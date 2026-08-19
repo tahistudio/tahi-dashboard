@@ -1,28 +1,21 @@
 import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
-import { TaskDetail } from './task-detail'
-import { ErrorBoundary } from '@/components/tahi/error-boundary'
 
-export const metadata = { title: 'Task Detail - Tahi Dashboard' }
+export const metadata = { title: 'Task - Tahi Dashboard' }
 
 interface Props {
   params: Promise<{ id: string }>
 }
 
+/**
+ * There is exactly one canonical task detail: the slide-over on /tasks. This
+ * former full-page detail dead-ended (its API had no GET), so the route now
+ * redirects to /tasks?task=<id>, which deep-opens the slide-over on load.
+ */
 export default async function TaskDetailPage({ params }: Props) {
-  const { userId, orgId } = await getServerAuth()
+  const { userId } = await getServerAuth()
   if (!userId) redirect('/sign-in')
 
   const { id } = await params
-  const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
-
-  return (
-    <ErrorBoundary fallbackTitle="Task failed to load">
-      <TaskDetail
-        taskId={id}
-        isAdmin={isAdmin}
-        currentUserId={userId}
-      />
-    </ErrorBoundary>
-  )
+  redirect(`/tasks?task=${encodeURIComponent(id)}`)
 }

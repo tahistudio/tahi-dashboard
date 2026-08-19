@@ -106,35 +106,43 @@ export async function GET(req: NextRequest) {
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(orderClause)
 
-  // Gather task IDs to batch-load subtask counts and dependencies
+  // Gather task IDs to batch-load subtask progress and dependencies
   const taskIds = tasks.map(t => t.id)
 
   const subtaskCounts: Record<string, number> = {}
+  const subtaskDoneCounts: Record<string, number> = {}
   const dependenciesByTask: Record<string, Array<{ id: string; dependsOnTaskId: string }>> = {}
+  const blockedByCounts: Record<string, number> = {}
 
   if (taskIds.length > 0) {
-    // Subtask counts
+    // Subtask progress: total count AND completed count in one grouped pass, so
+    // rows can render "2/5" instead of a permanently-0 progress bar.
     const subtaskRows = await drizzle
       .select({
         taskId: schema.taskSubtasks.taskId,
         count: sql<number>`count(*)`.as('count'),
+        done: sql<number>`sum(case when ${schema.taskSubtasks.completed} = 1 then 1 else 0 end)`.as('done'),
       })
       .from(schema.taskSubtasks)
       .where(inArray(schema.taskSubtasks.taskId, taskIds))
       .groupBy(schema.taskSubtasks.taskId)
 
     for (const row of subtaskRows) {
-      subtaskCounts[row.taskId] = row.count
+      subtaskCounts[row.taskId] = Number(row.count) || 0
+      subtaskDoneCounts[row.taskId] = Number(row.done) || 0
     }
 
-    // Dependencies
+    // Dependencies, joined to the blocking task so we know which blockers are
+    // still open. blockedByCount = blockers that are not yet done.
     const depRows = await drizzle
       .select({
         id: schema.taskDependencies.id,
         taskId: schema.taskDependencies.taskId,
         dependsOnTaskId: schema.taskDependencies.dependsOnTaskId,
+        dependsOnStatus: schema.tasks.status,
       })
       .from(schema.taskDependencies)
+      .leftJoin(schema.tasks, eq(schema.taskDependencies.dependsOnTaskId, schema.tasks.id))
       .where(inArray(schema.taskDependencies.taskId, taskIds))
 
     for (const dep of depRows) {
@@ -145,13 +153,18 @@ export async function GET(req: NextRequest) {
         id: dep.id,
         dependsOnTaskId: dep.dependsOnTaskId,
       })
+      if (dep.dependsOnStatus !== 'done') {
+        blockedByCounts[dep.taskId] = (blockedByCounts[dep.taskId] ?? 0) + 1
+      }
     }
   }
 
   const enrichedTasks = tasks.map(t => ({
     ...t,
     subtaskCount: subtaskCounts[t.id] ?? 0,
+    subtaskDone: subtaskDoneCounts[t.id] ?? 0,
     dependencies: dependenciesByTask[t.id] ?? [],
+    blockedByCount: blockedByCounts[t.id] ?? 0,
   }))
 
   return NextResponse.json({ tasks: enrichedTasks })

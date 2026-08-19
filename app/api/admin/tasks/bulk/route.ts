@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { TASK_PRIORITIES } from '@/lib/task-priorities'
 
 // ── PATCH /api/admin/tasks/bulk ───────────────────────────────────────────
 // Bulk update tasks: accepts { taskIds: string[], updates: { status?, priority?, assigneeId? } }
@@ -39,8 +40,7 @@ export async function PATCH(req: NextRequest) {
     }
   }
   if (updates.priority !== undefined) {
-    const validPriorities = ['standard', 'high', 'urgent']
-    if (!validPriorities.includes(updates.priority)) {
+    if (!(TASK_PRIORITIES as readonly string[]).includes(updates.priority)) {
       return NextResponse.json({ error: 'Invalid priority' }, { status: 400 })
     }
   }

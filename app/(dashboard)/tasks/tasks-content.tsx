@@ -1,17 +1,18 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import useSWR from 'swr'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import useSWR, { useSWRConfig } from 'swr'
 import dynamic from 'next/dynamic'
+import { useSearchParams } from 'next/navigation'
 import {
   Plus, Search, Inbox, RefreshCw,
   Calendar, Zap, AlertTriangle, X, Loader2,
   CheckCircle2, Circle, Link2, Clock,
   ChevronRight, ChevronDown, Trash2, GitBranch, Users,
-  Briefcase, Shield, Sparkles,
-  LayoutList, Columns3, CheckSquare, Square,
+  Briefcase, Shield, Sparkles, Play,
+  LayoutList, Columns3, CheckSquare, Square, ListChecks,
 } from 'lucide-react'
-import Link from 'next/link'
+import { notifyTimerChanged } from '@/lib/timer-events'
 import { apiPath } from '@/lib/api'
 import { getInitials } from '@/lib/utils'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
@@ -23,8 +24,29 @@ import { Input, Select } from '@/components/tahi/input'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { Avatar } from '@/components/tahi/avatar'
+import { Callout } from '@/components/tahi/callout'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
+import { KPIStrip, KPICell } from '@/components/tahi/kpi-strip'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
 import { fetchSchedulePhaseOptions } from '@/lib/schedule-phases'
+import { TASK_PRIORITIES, taskPriorityLabel } from '@/lib/task-priorities'
+import {
+  groupTasksByDue,
+  TASK_BUCKET_ORDER,
+  TASK_BUCKET_LABELS,
+  type TaskBucketId,
+} from '@/lib/task-buckets'
+
+// Local YYYY-MM-DD for "today"; drives the My Work time buckets. Kept as a
+// helper (not a top-level const) so it re-evaluates per render across midnight.
+function todayYmd(): string {
+  const d = new Date()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
+type ViewMode = 'my_work' | 'list' | 'board'
 
 // AI wizard modal -- only opened on click, defer to reduce first-paint JS.
 const AiTaskWizard = dynamic(
@@ -69,13 +91,23 @@ interface Subtask {
   createdAt: string
 }
 
-interface TaskDependency {
-  id: string
+// Matches the GET /api/admin/tasks/[id]/dependencies `blockedBy` rows: the
+// tasks that block this one, with the blocking task's title + status.
+interface BlockedByDep {
+  depId: string
   taskId: string
-  dependsOnTaskId: string
-  dependsOnTitle?: string
-  dependsOnStatus?: string
+  taskTitle: string | null
+  taskStatus: string | null
   createdAt: string
+}
+
+interface TaskTimeEntry {
+  id: string
+  hours: number
+  billable: boolean | null
+  notes: string | null
+  date: string
+  teamMemberName: string | null
 }
 
 interface TeamMember {
@@ -180,12 +212,6 @@ function formatType(type: string): string {
   return TASK_TYPE_LABELS[type] ?? type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
-function formatBucket(task: { orgId: string | null; orgName?: string | null; type?: string }): string {
-  return taskBucket(task) === 'for_client'
-    ? (task.orgName ? `For ${task.orgName}` : 'For a client')
-    : 'For us'
-}
-
 // ── Sub-components ───────────────────────────────────────────────────────────
 
 function StatusPill({ status }: { status: string }) {
@@ -205,13 +231,6 @@ function PriorityBadge({ priority }: { priority: string }) {
     return (
       <Badge tone="danger" variant="soft" size="sm" leader="icon" icon={<Zap />}>
         Urgent
-      </Badge>
-    )
-  }
-  if (priority === 'low') {
-    return (
-      <Badge tone="neutral" variant="soft" size="sm">
-        Low
       </Badge>
     )
   }
@@ -263,7 +282,7 @@ function OrgAvatar({ name }: { name: string }) {
 
 function AssigneeAvatar({ name }: { name: string }) {
   // sm = 24px, matching the original 1.5rem assignee chip. Tooltip on
-  // by default — Avatar handles it.
+  // by default - Avatar handles it.
   return <Avatar name={name} size="sm" />
 }
 
@@ -308,6 +327,7 @@ function BlockedIndicator() {
 // ── Main component ───────────────────────────────────────────────────────────
 
 export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
+  const { showToast } = useToast()
   // Persisted UI preferences \u2014 remembered per user, per surface.
   const [typeTab, setTypeTab] = useUserPreference(
     'tasks.typeTab',
@@ -319,18 +339,26 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
     'all',
     { validator: oneOf(['all', 'todo', 'in_progress', 'blocked', 'done']) },
   )
-  const [viewMode, setViewMode] = useUserPreference<'list' | 'board'>(
+  // Default lens is My Work (assigned-to-me, grouped by when it is due). All
+  // tasks + Board remain one segment away.
+  const [viewMode, setViewMode] = useUserPreference<ViewMode>(
     'tasks.viewMode',
-    'list',
-    { validator: oneOf<'list' | 'board'>(['list', 'board']) },
+    'my_work',
+    { validator: oneOf<ViewMode>(['my_work', 'list', 'board']) },
   )
   const [search, setSearch] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [wizardOpen, setWizardOpen] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null })
   const [priorityFilter, setPriorityFilter] = useState('all')
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  // Deep-linkable detail: /tasks?task=<id> opens the slide-over on load.
+  const searchParams = useSearchParams()
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(
+    () => searchParams.get('task'),
+  )
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  const isMyWork = viewMode === 'my_work'
 
   // Decision #046: always load every task, filter client-side. That way the
   // tab count next to "For us" or "For a client" always reflects the true
@@ -338,9 +366,13 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
   // only server-side filter, so it lives in the SWR key (each tab caches
   // separately; keepPreviousData avoids a spinner flash). mutateTasks()
   // replaces every old fetchTasks() refresh.
-  const tasksKey = `/api/admin/tasks${statusTab !== 'all' ? `?status=${statusTab}` : ''}`
+  // My Work fetches assignee=me (the server resolves it to the signed-in team
+  // member). The other lenses keep the status tab as the only server filter.
+  const tasksKey = isMyWork
+    ? '/api/admin/tasks?assignee=me'
+    : `/api/admin/tasks${statusTab !== 'all' ? `?status=${statusTab}` : ''}`
   const { data: tasksData, isLoading: loading, mutate: mutateTasks } = useSWR<{ tasks?: Task[] }>(tasksKey)
-  const tasks = tasksData?.tasks ?? []
+  const tasks = useMemo(() => tasksData?.tasks ?? [], [tasksData])
 
   // Team members (admin only) for assignee display.
   const { data: teamMembersData } = useSWR<{ items: TeamMember[] }>(
@@ -376,6 +408,17 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
     return true
   })
 
+  // My Work: open tasks assigned to me, grouped by when they are due. The
+  // bucketing is shared with the teammate Overview home via lib/task-buckets
+  // so the two surfaces always agree.
+  const myWorkOpen = useMemo(() => tasks.filter(t => t.status !== 'done'), [tasks])
+  const myWorkGroups = useMemo(() => groupTasksByDue(myWorkOpen, todayYmd()), [myWorkOpen])
+  const heroOverdue = myWorkGroups.overdue.length
+  const heroToday = myWorkGroups.today.length
+  const heroBlocked = myWorkOpen.filter(
+    t => t.status === 'blocked' || (t.blockedByCount ?? 0) > 0,
+  ).length
+
   // Tab counts \u2014 always computed from the full task list, NOT the active
   // tab's filtered view. This way "For a client" shows its true count even
   // when you're currently viewing "For us".
@@ -391,7 +434,53 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
     })
   }, [filtered])
 
-  const selectedTask = selectedTaskId ? tasks.find(t => t.id === selectedTaskId) ?? null : null
+  // The selected task usually lives in the loaded list, but a deep link
+  // (/tasks?task=<id>) may point at a task the active lens filtered out, so
+  // fall back to fetching the single task by id.
+  const selectedInList = selectedTaskId ? tasks.find(t => t.id === selectedTaskId) ?? null : null
+  const { data: fetchedSelected } = useSWR<{ task?: Task }>(
+    selectedTaskId && !selectedInList ? `/api/admin/tasks/${selectedTaskId}` : null,
+  )
+  const selectedTask = selectedInList ?? fetchedSelected?.task ?? null
+
+  // Open / close the slide-over and keep the URL shareable without triggering
+  // a Next navigation (history.replaceState leaves SWR caches untouched).
+  const selectTask = useCallback((id: string | null) => {
+    setSelectedTaskId(id)
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    if (id) url.searchParams.set('task', id)
+    else url.searchParams.delete('task')
+    window.history.replaceState(window.history.state, '', url.toString())
+  }, [])
+
+  // Optimistic board move: the card jumps columns immediately, then rolls back
+  // and toasts if the PATCH fails (the previous version swallowed errors).
+  const moveTaskStatus = useCallback(async (taskId: string, newStatus: string) => {
+    try {
+      await mutateTasks(
+        async () => {
+          const res = await fetch(apiPath(`/api/admin/tasks/${taskId}`), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus }),
+          })
+          if (!res.ok) throw new Error('Failed to move task')
+          return undefined
+        },
+        {
+          optimisticData: (cur?: { tasks?: Task[] }) => ({
+            tasks: (cur?.tasks ?? []).map(t => (t.id === taskId ? { ...t, status: newStatus } : t)),
+          }),
+          rollbackOnError: true,
+          populateCache: false,
+          revalidate: true,
+        },
+      )
+    } catch {
+      showToast('Could not move the task. Try again.', 'error')
+    }
+  }, [mutateTasks, showToast])
 
   return (
     <>
@@ -406,11 +495,13 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
 
       {selectedTask && (
         <TaskDetailPanel
+          key={selectedTask.id}
           task={selectedTask}
           isAdmin={isAdmin}
           teamMembers={teamMembers}
-          onClose={() => setSelectedTaskId(null)}
+          onClose={() => selectTask(null)}
           onRefresh={() => { mutateTasks() }}
+          onDeleted={() => { selectTask(null); mutateTasks() }}
         />
       )}
 
@@ -418,9 +509,11 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
         <PageHeader
           title="Tasks"
           subtitle={
-            !loading
-              ? `${filtered.length} ${filtered.length === 1 ? 'task' : 'tasks'}`
-              : isAdmin ? 'All tasks: client-facing, internal, and Tahi Studio.' : 'Tasks assigned to you by the Tahi team.'
+            loading
+              ? (isAdmin ? 'All tasks: client-facing, internal, and Tahi Studio.' : 'Tasks assigned to you by the Tahi team.')
+              : isMyWork
+                ? `${myWorkOpen.length} ${myWorkOpen.length === 1 ? 'task' : 'tasks'} on your plate`
+                : `${filtered.length} ${filtered.length === 1 ? 'task' : 'tasks'}`
           }
         >
           {isAdmin && (
@@ -448,8 +541,34 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
         </PageHeader>
       </div>
 
-      {/* Type tabs (top-level filter) */}
-      {isAdmin && (
+      {/* Hero counts (My Work lens only): the one hero zone. */}
+      {isMyWork && (
+        <div style={{ marginBottom: '0.75rem' }}>
+          <KPIStrip desktopCols={3}>
+            <KPICell
+              icon={AlertTriangle}
+              label="Overdue"
+              value={loading ? '--' : heroOverdue}
+              tone={heroOverdue > 0 ? 'danger' : 'neutral'}
+            />
+            <KPICell
+              icon={Calendar}
+              label="Due today"
+              value={loading ? '--' : heroToday}
+              tone="brand"
+            />
+            <KPICell
+              icon={GitBranch}
+              label="Blocked"
+              value={loading ? '--' : heroBlocked}
+              tone={heroBlocked > 0 ? 'danger' : 'neutral'}
+            />
+          </KPIStrip>
+        </div>
+      )}
+
+      {/* Type tabs (top-level filter). Hidden in My Work, which has no filter bar. */}
+      {isAdmin && !isMyWork && (
         <div className="flex items-center gap-1 flex-wrap" style={{ marginBottom: '0.75rem' }}>
           {TYPE_TABS.map(tab => {
             const active = typeTab === tab.value
@@ -518,49 +637,52 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
           className="flex flex-wrap items-center gap-2"
           style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--color-border-subtle)', background: 'var(--color-bg)' }}
         >
-          {/* Search */}
-          <div style={{ width: '16rem', minWidth: '8rem', flexShrink: 1 }}>
-            <Input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search tasks..."
-              leadingIcon={<Search size={14} aria-hidden="true" />}
-              style={{ width: '100%' }}
-            />
-          </div>
+          {/* Search + filters: the All tasks / Board slicing surface. My Work
+              is deliberately filter-free (it is your day, ordered by urgency). */}
+          {!isMyWork && (
+            <>
+              <div style={{ width: '16rem', minWidth: '8rem', flexShrink: 1 }}>
+                <Input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search tasks..."
+                  leadingIcon={<Search size={14} aria-hidden="true" />}
+                  style={{ width: '100%' }}
+                />
+              </div>
 
-          {/* Filters */}
-          <DateRangePicker value={dateRange} onChange={setDateRange} label="Due date" />
-          <div className="hidden sm:block">
-            <Select
-              value={priorityFilter}
-              onChange={e => setPriorityFilter(e.target.value)}
-              aria-label="Priority filter"
-              highlightActive
-              options={[
-                { value: 'all',      label: 'All Priorities' },
-                { value: 'urgent',   label: 'Urgent'         },
-                { value: 'high',     label: 'High'           },
-                { value: 'standard', label: 'Standard'       },
-                { value: 'low',      label: 'Low'            },
-              ]}
-            />
-          </div>
+              <DateRangePicker value={dateRange} onChange={setDateRange} label="Due date" />
+              <div className="hidden sm:block">
+                <Select
+                  value={priorityFilter}
+                  onChange={e => setPriorityFilter(e.target.value)}
+                  aria-label="Priority filter"
+                  highlightActive
+                  options={[
+                    { value: 'all', label: 'All Priorities' },
+                    ...TASK_PRIORITIES.map(p => ({ value: p, label: taskPriorityLabel(p) })),
+                  ]}
+                />
+              </div>
+            </>
+          )}
 
           <div className="flex-1" />
 
-          {/* View toggle */}
+          {/* View toggle: My Work / All tasks / Board */}
           <ViewToggle
             value={viewMode}
-            onChange={v => setViewMode(v)}
+            onChange={setViewMode}
             options={[
-              { value: 'list',  icon: LayoutList, label: 'List view'  },
-              { value: 'board', icon: Columns3,   label: 'Board view' },
+              { value: 'my_work', icon: ListChecks, label: 'My Work'   },
+              { value: 'list',    icon: LayoutList, label: 'All tasks' },
+              { value: 'board',   icon: Columns3,   label: 'Board view' },
             ]}
           />
         </div>
 
-        {/* Status tabs */}
+        {/* Status tabs (hidden in My Work). */}
+        {!isMyWork && (
         <div
           className="flex items-end overflow-x-auto overflow-y-hidden scrollbar-hide"
           style={{ borderBottom: '1px solid var(--color-border)', paddingLeft: '0.25rem', paddingRight: '1rem', background: 'var(--color-bg)', WebkitOverflowScrolling: 'touch' }}
@@ -591,9 +713,10 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
             />
           )}
         </div>
+        )}
 
         {/* Bulk action bar */}
-        {isAdmin && selectedIds.size > 0 && (
+        {isAdmin && !isMyWork && selectedIds.size > 0 && (
           <TaskBulkActionBar
             selectedCount={selectedIds.size}
             selectedIds={selectedIds}
@@ -607,16 +730,22 @@ export function TasksContent({ isAdmin }: { isAdmin: boolean }) {
         <div style={{ background: viewMode === 'board' ? 'var(--color-bg-secondary)' : 'var(--color-bg)' }}>
           {loading ? (
             <LoadingSkeleton />
+          ) : isMyWork ? (
+            myWorkOpen.length === 0 ? (
+              <MyWorkEmptyState isAdmin={isAdmin} onNew={() => setDialogOpen(true)} />
+            ) : (
+              <MyWorkView groups={myWorkGroups} teamMap={teamMap} onSelect={selectTask} />
+            )
           ) : filtered.length === 0 ? (
             <EmptyState isAdmin={isAdmin} onNew={() => setDialogOpen(true)} />
           ) : viewMode === 'board' ? (
-            <TaskBoardView tasks={filtered} isAdmin={isAdmin} teamMap={teamMap} onStatusChange={() => { mutateTasks() }} />
+            <TaskBoardView tasks={filtered} isAdmin={isAdmin} teamMap={teamMap} onSelect={selectTask} onMove={moveTaskStatus} />
           ) : (
             <TaskListView
               tasks={filtered}
               isAdmin={isAdmin}
               teamMap={teamMap}
-              onSelect={setSelectedTaskId}
+              onSelect={selectTask}
               selectedIds={selectedIds}
               onToggleSelect={isAdmin ? toggleSelect : undefined}
               onToggleAll={isAdmin ? toggleSelectAll : undefined}
@@ -858,15 +987,16 @@ const BOARD_COLUMNS = [
   { status: 'done',        label: 'Done',        topColor: 'var(--status-delivered-dot)' },
 ]
 
-function TaskBoardView({ tasks, isAdmin, teamMap, onStatusChange }: {
+function TaskBoardView({ tasks, isAdmin, teamMap, onSelect, onMove }: {
   tasks: Task[]
   isAdmin: boolean
   teamMap: Map<string, TeamMember>
-  onStatusChange: () => void
+  onSelect: (id: string) => void
+  onMove: (taskId: string, newStatus: string) => void | Promise<void>
 }) {
   const byStatus = (status: string) => tasks.filter(t => t.status === status)
 
-  const handleDrop = async (e: React.DragEvent, newStatus: string) => {
+  const handleDrop = (e: React.DragEvent, newStatus: string) => {
     e.preventDefault()
     const el = e.currentTarget as HTMLElement
     el.style.borderColor = 'var(--color-border)'
@@ -874,16 +1004,8 @@ function TaskBoardView({ tasks, isAdmin, teamMap, onStatusChange }: {
     const fromStatus = e.dataTransfer.getData('fromStatus')
     if (!taskId || fromStatus === newStatus) return
     if (!isAdmin) return
-    try {
-      await fetch(apiPath(`/api/admin/tasks/${taskId}`), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      })
-      onStatusChange()
-    } catch {
-      // silent
-    }
+    // Optimistic move + toast-on-failure lives in the parent (moveTaskStatus).
+    void onMove(taskId, newStatus)
   }
 
   return (
@@ -968,7 +1090,7 @@ function TaskBoardView({ tasks, isAdmin, teamMap, onStatusChange }: {
                   No tasks
                 </div>
               ) : (
-                cards.map(task => <TaskKanbanCard key={task.id} task={task} teamMap={teamMap} />)
+                cards.map(task => <TaskKanbanCard key={task.id} task={task} teamMap={teamMap} onSelect={onSelect} />)
               )}
             </div>
           </div>
@@ -978,15 +1100,18 @@ function TaskBoardView({ tasks, isAdmin, teamMap, onStatusChange }: {
   )
 }
 
-function TaskKanbanCard({ task, teamMap }: { task: Task; teamMap: Map<string, TeamMember> }) {
+function TaskKanbanCard({ task, teamMap, onSelect }: { task: Task; teamMap: Map<string, TeamMember>; onSelect: (id: string) => void }) {
   const assignee = task.assigneeId ? teamMap.get(task.assigneeId) : null
   const hasSubtasks = (task.subtaskCount ?? 0) > 0
   const dueDateState = getDueDateState(task.dueDate, task.status)
 
+  // A button (not a Link): opens the canonical slide-over via onSelect. This
+  // also removes the desktop drag-then-navigate collision the old <Link> had.
   return (
-    <Link
-      href={`/tasks/${task.id}`}
-      className="block rounded-lg transition-all"
+    <button
+      type="button"
+      onClick={() => onSelect(task.id)}
+      className="block w-full text-left rounded-lg transition-all"
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData('taskId', task.id)
@@ -1106,7 +1231,7 @@ function TaskKanbanCard({ task, teamMap }: { task: Task; teamMap: Map<string, Te
           )}
         </div>
       </div>
-    </Link>
+    </button>
   )
 }
 
@@ -1407,23 +1532,178 @@ function EmptyState({ isAdmin, onNew }: { isAdmin: boolean; onNew: () => void })
   )
 }
 
+// ── My Work View ─────────────────────────────────────────────────────────────
+
+function MyWorkView({ groups, teamMap, onSelect }: {
+  groups: Record<TaskBucketId, Task[]>
+  teamMap: Map<string, TeamMember>
+  onSelect: (id: string) => void
+}) {
+  return (
+    <div>
+      {TASK_BUCKET_ORDER.map(bucketId => {
+        const items = groups[bucketId]
+        if (items.length === 0) return null
+        // Only the Overdue header is ever tinted, and only when it has rows.
+        const isOverdue = bucketId === 'overdue'
+        return (
+          <div key={bucketId}>
+            <div
+              className="flex items-center gap-2"
+              style={{
+                padding: '0.875rem 1rem 0.5rem',
+                fontSize: '0.6875rem',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+              }}
+            >
+              <span style={{ color: isOverdue ? 'var(--color-danger)' : 'var(--color-text-subtle)' }}>
+                {TASK_BUCKET_LABELS[bucketId]}
+              </span>
+              <span className="tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
+                {items.length}
+              </span>
+            </div>
+            {items.map((task, i) => (
+              <MyWorkRow
+                key={task.id}
+                task={task}
+                teamMap={teamMap}
+                onSelect={onSelect}
+                isLast={i === items.length - 1}
+              />
+            ))}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function MyWorkRow({ task, teamMap, onSelect, isLast }: {
+  task: Task
+  teamMap: Map<string, TeamMember>
+  onSelect: (id: string) => void
+  isLast: boolean
+}) {
+  const assignee = task.assigneeId ? teamMap.get(task.assigneeId) : null
+  const hasSubtasks = (task.subtaskCount ?? 0) > 0
+  const blockedCount = task.blockedByCount ?? 0
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(task.id)}
+      className="flex items-center gap-3 w-full text-left"
+      style={{
+        padding: '0.75rem 1rem',
+        minHeight: '3.25rem',
+        background: 'transparent',
+        border: 'none',
+        borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
+        cursor: 'pointer',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-row-hover)' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+    >
+      <div className="flex items-center gap-2 min-w-0" style={{ flex: 1 }}>
+        <span data-private className="font-medium truncate" style={{ fontSize: '0.875rem', color: 'var(--color-text)' }}>
+          {task.title}
+        </span>
+        {hasSubtasks && (
+          <SubtaskProgress done={task.subtaskDone ?? 0} total={task.subtaskCount ?? 0} />
+        )}
+      </div>
+
+      <div className="flex items-center gap-3 flex-shrink-0">
+        {task.orgName && (
+          <span
+            className="hidden sm:inline-flex items-center rounded truncate"
+            data-private
+            style={{ padding: '0.125rem 0.5rem', fontSize: '0.6875rem', fontWeight: 600, background: 'var(--color-bg-secondary)', color: 'var(--color-text-muted)', maxWidth: '9rem' }}
+          >
+            For {task.orgName}
+          </span>
+        )}
+        <DueDateChip dueDate={task.dueDate} status={task.status} />
+        {blockedCount > 0 && (
+          <span
+            className="inline-flex items-center gap-1"
+            style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-danger)' }}
+          >
+            <GitBranch style={{ width: '0.75rem', height: '0.75rem' }} />
+            <span className="hidden sm:inline">Blocked by {blockedCount}</span>
+          </span>
+        )}
+        {assignee && <AssigneeAvatar name={assignee.name} />}
+      </div>
+    </button>
+  )
+}
+
+function MyWorkEmptyState({ isAdmin, onNew }: { isAdmin: boolean; onNew: () => void }) {
+  return (
+    <div
+      className="flex flex-col items-center justify-center text-center"
+      style={{ padding: '4rem 1.5rem', background: 'var(--color-bg)' }}
+    >
+      <div
+        className="flex items-center justify-center"
+        style={{
+          width: '3.5rem',
+          height: '3.5rem',
+          borderRadius: 'var(--radius-leaf)',
+          background: 'linear-gradient(135deg, var(--color-brand-light), var(--color-brand-dark))',
+          marginBottom: '1rem',
+        }}
+      >
+        <CheckCircle2 style={{ width: '1.75rem', height: '1.75rem', color: 'white' }} />
+      </div>
+      <h3 className="font-semibold" style={{ fontSize: '1rem', color: 'var(--color-text)', marginBottom: '0.5rem' }}>
+        You are all caught up.
+      </h3>
+      <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', maxWidth: '20rem', marginBottom: '1.25rem' }}>
+        Nothing assigned to you is open right now. Add a task or check the studio board.
+      </p>
+      {isAdmin && (
+        <button
+          onClick={onNew}
+          className="flex items-center gap-2 font-semibold text-white transition-opacity hover:opacity-90"
+          style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', background: 'var(--color-brand)', borderRadius: '0.5rem', border: 'none', cursor: 'pointer' }}
+        >
+          <Plus className="w-4 h-4" />
+          New task
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ── Task Detail Panel (slide-over) ──────────────────────────────────────────
 
-function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
+function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh, onDeleted }: {
   task: Task
   isAdmin: boolean
   teamMembers: TeamMember[]
   onClose: () => void
   onRefresh: () => void
+  onDeleted: () => void
 }) {
   const { showToast } = useToast()
-  const [comment, setComment] = useState('')
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
   const [editingStatus, setEditingStatus] = useState(task.status)
+  // Editable field mirrors, seeded from the task. The panel is keyed by task id
+  // in the parent, so these reset when a different task opens.
+  const [priority, setPriority] = useState(task.priority)
+  const [dueDate, setDueDate] = useState(task.dueDate ?? '')
+  const [assigneeId, setAssigneeId] = useState(task.assigneeId ?? '')
   const [saving, setSaving] = useState(false)
+  const [confirmKind, setConfirmKind] = useState<'subtasks' | 'blocked' | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const teamMap = new Map(teamMembers.map(m => [m.id, m]))
-  const assignee = task.assigneeId ? teamMap.get(task.assigneeId) : null
+  const assignee = assigneeId ? teamMap.get(assigneeId) : null
 
   // Delivery-phase options for the spine selector. Org-scoped: tahi_internal
   // tasks have no org, so the conditional key skips the fetch. Non-fatal.
@@ -1442,23 +1722,36 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
     if (subtasksData) setSubtasks(subtasksData.subtasks ?? [])
   }, [subtasksData])
 
-  // Dependencies via SWR (read-only, no local mutation).
+  // Dependencies via SWR. `blockedBy` = the tasks blocking this one.
   const { data: depsData, isLoading: depsLoading } =
-    useSWR<{ dependencies?: TaskDependency[] }>(`/api/admin/tasks/${task.id}/dependencies`)
-  const dependencies = depsData?.dependencies ?? []
+    useSWR<{ blockedBy?: BlockedByDep[]; blocks?: unknown[] }>(`/api/admin/tasks/${task.id}/dependencies`)
+  const dependencies = depsData?.blockedBy ?? []
+
+  // Real logged time for this task (was a hardcoded placeholder).
+  const { data: timeData } = useSWR<{ items?: TaskTimeEntry[]; totalHours?: number }>(
+    `/api/admin/time-entries?taskId=${task.id}`,
+  )
+  const timeEntries = timeData?.items ?? []
+  const totalHours = timeData?.totalHours ?? 0
+
+  const openBlockers = dependencies.filter(d => d.taskStatus !== 'done').length
+  const openSubtasks = subtasks.filter(s => !s.completed).length
 
   async function toggleSubtask(sub: Subtask) {
+    const previous = subtasks
     const updated = subtasks.map(s => s.id === sub.id ? { ...s, completed: !s.completed } : s)
     setSubtasks(updated)
     try {
-      await fetch(apiPath(`/api/admin/tasks/${task.id}/subtasks/${sub.id}`), {
+      const res = await fetch(apiPath(`/api/admin/tasks/${task.id}/subtasks/${sub.id}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ completed: !sub.completed }),
+        // The API validates `isCompleted`; sending `completed` silently 400s.
+        body: JSON.stringify({ isCompleted: !sub.completed }),
       })
+      if (!res.ok) throw new Error('Failed to update subtask')
     } catch {
-      // Revert on error
-      setSubtasks(subtasks)
+      setSubtasks(previous)
+      showToast('That did not save. Try again.', 'error')
     }
   }
 
@@ -1481,13 +1774,52 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
         }
         setSubtasks(prev => [...prev, newSub])
         setNewSubtaskTitle('')
+      } else {
+        showToast('Failed to add subtask', 'error')
       }
     } catch {
-      showToast('Failed to add subtask')
+      showToast('Failed to add subtask', 'error')
     }
   }
 
-  async function updateStatus(newStatus: string) {
+  // One PATCH path for the inline-editable controls (priority, due, assignee).
+  async function patchField(updates: Record<string, unknown>, successMsg: string) {
+    setSaving(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/tasks/${task.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      })
+      if (!res.ok) throw new Error('Failed to save')
+      showToast(successMsg)
+      onRefresh()
+    } catch {
+      showToast('That did not save. Try again.', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function updatePriority(next: string) {
+    setPriority(next)
+    void patchField({ priority: next }, 'Priority updated')
+  }
+
+  function updateDueDate(next: string) {
+    setDueDate(next)
+    void patchField({ dueDate: next || null }, 'Due date updated')
+  }
+
+  function updateAssignee(next: string) {
+    setAssigneeId(next)
+    void patchField(
+      { assigneeId: next || null, assigneeType: next ? 'team_member' : null },
+      'Assignee updated',
+    )
+  }
+
+  async function applyStatus(newStatus: string) {
     setEditingStatus(newStatus)
     setSaving(true)
     try {
@@ -1496,14 +1828,37 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       })
-      if (res.ok) {
-        showToast('Status updated')
-        onRefresh()
-      }
+      if (!res.ok) throw new Error('Failed to save')
+      showToast('Status updated')
+      onRefresh()
     } catch {
       setEditingStatus(task.status)
+      showToast('That did not save. Try again.', 'error')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Completing is never silent past a live dependency or open subtasks.
+  function requestStatusChange(newStatus: string) {
+    setEditingStatus(newStatus)
+    if (newStatus === 'done') {
+      if (openBlockers > 0) { setConfirmKind('blocked'); return }
+      if (openSubtasks > 0) { setConfirmKind('subtasks'); return }
+    }
+    void applyStatus(newStatus)
+  }
+
+  async function deleteTask() {
+    try {
+      const res = await fetch(apiPath(`/api/admin/tasks/${task.id}`), { method: 'DELETE' })
+      if (!res.ok) throw new Error('Failed to delete')
+      showToast('Task deleted')
+      onDeleted()
+    } catch {
+      showToast('Could not delete the task.', 'error')
+    } finally {
+      setConfirmDelete(false)
     }
   }
 
@@ -1592,40 +1947,63 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
               )}
             </div>
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              padding: '0.375rem',
-              borderRadius: 'var(--radius-button)',
-              border: 'none',
-              background: 'transparent',
-              color: 'var(--color-text-subtle)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              marginLeft: '0.75rem',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)'; e.currentTarget.style.color = 'var(--color-text)' }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
-            aria-label="Close"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center flex-shrink-0" style={{ gap: '0.25rem', marginLeft: '0.75rem' }}>
+            {isAdmin && <TaskTimerButton taskId={task.id} />}
+            {isAdmin && (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                style={{
+                  padding: '0.375rem',
+                  borderRadius: 'var(--radius-button)',
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--color-text-subtle)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-danger-bg)'; e.currentTarget.style.color = 'var(--color-danger)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+                aria-label="Delete task"
+              >
+                <Trash2 size={17} />
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              style={{
+                padding: '0.375rem',
+                borderRadius: 'var(--radius-button)',
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--color-text-subtle)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)'; e.currentTarget.style.color = 'var(--color-text)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Scrollable body */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
 
-            {/* Status + Priority + Due row */}
+            {/* Status + Priority + Due row. Priority / Due / Assignee are the
+                fields people change most, so they PATCH inline on change. */}
             <div className="grid grid-cols-3 gap-3">
               <DetailField label="Status">
                 {isAdmin ? (
                   <select
                     value={editingStatus}
-                    onChange={e => updateStatus(e.target.value)}
+                    onChange={e => requestStatusChange(e.target.value)}
                     disabled={saving}
                     style={{
                       width: '100%',
@@ -1649,17 +2027,71 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
               </DetailField>
 
               <DetailField label="Priority">
-                <PriorityBadge priority={task.priority} />
+                {isAdmin ? (
+                  <select
+                    value={priority}
+                    onChange={e => updatePriority(e.target.value)}
+                    disabled={saving}
+                    style={{
+                      width: '100%',
+                      padding: '0.375rem 0.5rem',
+                      fontSize: '0.8125rem',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: '0.5rem',
+                      background: 'var(--color-bg)',
+                      color: 'var(--color-text)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {TASK_PRIORITIES.map(p => (
+                      <option key={p} value={p}>{taskPriorityLabel(p)}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <PriorityBadge priority={task.priority} />
+                )}
               </DetailField>
 
               <DetailField label="Due Date">
-                <DueDateChip dueDate={task.dueDate} status={task.status} />
+                {isAdmin ? (
+                  <input
+                    type="date"
+                    value={dueDate}
+                    onChange={e => updateDueDate(e.target.value)}
+                    disabled={saving}
+                    style={{
+                      width: '100%',
+                      padding: '0.375rem 0.5rem',
+                      fontSize: '0.8125rem',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: '0.5rem',
+                      background: 'var(--color-bg)',
+                      color: 'var(--color-text)',
+                      cursor: 'pointer',
+                    }}
+                  />
+                ) : (
+                  <DueDateChip dueDate={task.dueDate} status={task.status} />
+                )}
               </DetailField>
             </div>
 
             {/* Assignee */}
             <DetailField label="Assignee">
-              {assignee ? (
+              {isAdmin ? (
+                <div style={{ maxWidth: '20rem' }}>
+                  <SearchableSelect
+                    options={teamMembers.map(m => ({ value: m.id, label: m.name, subtitle: m.title ?? m.email }))}
+                    value={assigneeId || null}
+                    onChange={v => updateAssignee(v ?? '')}
+                    placeholder="Unassigned"
+                    searchPlaceholder="Search team members..."
+                    allowClear
+                    disabled={saving}
+                    size="sm"
+                  />
+                </div>
+              ) : assignee ? (
                 <div className="flex items-center gap-2">
                   <AssigneeAvatar name={assignee.name} />
                   <div>
@@ -1688,7 +2120,7 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
               </DetailField>
             )}
 
-            {/* Delivery phase — links this task to a schedule gantt row so the
+            {/* Delivery phase - links this task to a schedule gantt row so the
                 schedule shows live delivery status (spine #148). Admin-only;
                 hidden when the org has no schedule phases. */}
             {isAdmin && task.orgId && (phaseOptions.length > 0 || task.scheduleRowId) && (
@@ -1818,25 +2250,34 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
                   <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)' }}>Loading...</span>
                 </div>
               ) : dependencies.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-                  {dependencies.map(dep => (
-                    <div
-                      key={dep.id}
-                      className="flex items-center gap-2"
-                      style={{
-                        padding: '0.375rem 0.625rem',
-                        borderRadius: '0.375rem',
-                        border: '1px solid var(--color-border-subtle)',
-                        background: 'var(--color-bg-secondary)',
-                      }}
-                    >
-                      <GitBranch style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }} />
-                      <span data-private style={{ fontSize: '0.8125rem', color: 'var(--color-text)', flex: 1 }}>
-                        {dep.dependsOnTitle ?? dep.dependsOnTaskId}
-                      </span>
-                      {dep.dependsOnStatus && <StatusPill status={dep.dependsOnStatus} />}
-                    </div>
-                  ))}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {openBlockers > 0 && (
+                    <Callout tone="danger">
+                      {openBlockers === 1
+                        ? '1 blocking task is not done yet.'
+                        : `${openBlockers} blocking tasks are not done yet.`}
+                    </Callout>
+                  )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+                    {dependencies.map(dep => (
+                      <div
+                        key={dep.depId}
+                        className="flex items-center gap-2"
+                        style={{
+                          padding: '0.375rem 0.625rem',
+                          borderRadius: '0.375rem',
+                          border: '1px solid var(--color-border-subtle)',
+                          background: 'var(--color-bg-secondary)',
+                        }}
+                      >
+                        <GitBranch style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }} />
+                        <span data-private style={{ fontSize: '0.8125rem', color: 'var(--color-text)', flex: 1 }}>
+                          {dep.taskTitle ?? dep.taskId}
+                        </span>
+                        {dep.taskStatus && <StatusPill status={dep.taskStatus} />}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>
@@ -1845,52 +2286,171 @@ function TaskDetailPanel({ task, isAdmin, teamMembers, onClose, onRefresh }: {
               )}
             </DetailField>
 
-            {/* Time logged placeholder */}
+            {/* Time logged: real entries from timeEntries (idx_time_task). */}
             <DetailField label="Time Logged">
-              <div className="flex items-center gap-1.5">
-                <Clock style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)' }} />
-                <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>
-                  No time entries yet.
-                </span>
-              </div>
-            </DetailField>
-
-            {/* Activity / Comments */}
-            <DetailField label="Activity">
-              <div style={{ marginTop: '0.25rem' }}>
-                <textarea
-                  value={comment}
-                  onChange={e => setComment(e.target.value)}
-                  placeholder="Add a comment or note..."
-                  rows={3}
-                  style={{
-                    width: '100%',
-                    padding: '0.625rem 0.75rem',
-                    fontSize: '0.8125rem',
-                    color: 'var(--color-text)',
-                    background: 'var(--color-bg)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '0.5rem',
-                    outline: 'none',
-                    resize: 'vertical',
-                    minHeight: '4rem',
-                    fontFamily: 'inherit',
-                    lineHeight: '1.5',
-                    boxSizing: 'border-box',
-                  }}
-                  onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
-                  onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
-                />
-                <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', margin: '0.375rem 0 0' }}>
-                  Use @name to mention someone (coming soon).
-                </p>
-              </div>
+              {timeEntries.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+                  <div className="flex items-center gap-1.5">
+                    <Clock style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)' }} />
+                    <span className="tabular-nums" style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>
+                      {Math.round(totalHours * 100) / 100}h logged
+                    </span>
+                  </div>
+                  {timeEntries.slice(0, 5).map(entry => (
+                    <div
+                      key={entry.id}
+                      className="flex items-center justify-between gap-2"
+                      style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}
+                    >
+                      <span data-private className="truncate">
+                        {formatDate(entry.date)}
+                        {entry.teamMemberName ? ` · ${entry.teamMemberName}` : ''}
+                      </span>
+                      <span className="tabular-nums flex-shrink-0">{Math.round(entry.hours * 100) / 100}h</span>
+                    </div>
+                  ))}
+                  <a
+                    href={`/time?task=${task.id}`}
+                    style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-brand)', textDecoration: 'none' }}
+                    onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline' }}
+                    onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none' }}
+                  >
+                    View all in Time
+                  </a>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <Clock style={{ width: '0.75rem', height: '0.75rem', color: 'var(--color-text-subtle)' }} />
+                  <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>
+                    No time logged yet.
+                  </span>
+                </div>
+              )}
             </DetailField>
           </div>
         </div>
       </div>
 
+      {/* Complete-with-open-subtasks confirm. */}
+      <ConfirmDialog
+        open={confirmKind === 'subtasks'}
+        variant="warning"
+        title="Finish this task?"
+        description={`${openSubtasks} subtask${openSubtasks === 1 ? ' is' : 's are'} still open. Mark the task done anyway?`}
+        confirmLabel="Mark done"
+        cancelLabel="Keep working"
+        onConfirm={async () => { await applyStatus('done'); setConfirmKind(null) }}
+        onCancel={() => { setConfirmKind(null); setEditingStatus(task.status) }}
+      />
+
+      {/* Complete-while-blocked confirm. */}
+      <ConfirmDialog
+        open={confirmKind === 'blocked'}
+        variant="warning"
+        title="Finish this task?"
+        description={`This task is blocked by ${openBlockers} task${openBlockers === 1 ? ' that is' : 's that are'} not done. Mark it done anyway?`}
+        confirmLabel="Mark done"
+        cancelLabel="Keep working"
+        onConfirm={async () => { await applyStatus('done'); setConfirmKind(null) }}
+        onCancel={() => { setConfirmKind(null); setEditingStatus(task.status) }}
+      />
+
+      {/* Delete confirm. */}
+      <ConfirmDialog
+        open={confirmDelete}
+        variant="danger"
+        title="Delete this task?"
+        description="This removes the task and its subtasks. This cannot be undone."
+        confirmLabel="Delete task"
+        cancelLabel="Cancel"
+        onConfirm={deleteTask}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </>
+  )
+}
+
+// Start/Stop control for the task's own timer, mirroring the nav TimerChip
+// contract: POST /api/admin/timers { taskId } (409 if one already runs),
+// DELETE ...?action=log to stop. Broadcasts so the nav chip resyncs, and
+// revalidates the Time Logged list after a stop.
+function TaskTimerButton({ taskId }: { taskId: string }) {
+  const { showToast } = useToast()
+  const { mutate: globalMutate } = useSWRConfig()
+  const { data, mutate } = useSWR<{ timer: { id: string; taskId: string | null } | null }>('/api/admin/timers')
+  const active = data?.timer ?? null
+  const runningThis = active?.taskId === taskId
+  const [busy, setBusy] = useState(false)
+
+  async function start() {
+    setBusy(true)
+    try {
+      const res = await fetch(apiPath('/api/admin/timers'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId }),
+      })
+      if (res.status === 409) {
+        showToast('Stop the active timer first', 'warning')
+      } else if (res.ok) {
+        showToast('Timer started', 'success')
+        notifyTimerChanged()
+        await mutate()
+      } else {
+        showToast('Could not start timer', 'error')
+      }
+    } catch {
+      showToast('Network error. Timer not started.', 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function stop() {
+    if (!active) return
+    setBusy(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/timers/${active.id}?action=log`), { method: 'DELETE' })
+      if (res.ok) {
+        showToast('Timer stopped', 'success')
+        notifyTimerChanged()
+        await mutate()
+        void globalMutate(`/api/admin/time-entries?taskId=${taskId}`)
+      } else {
+        showToast('Could not stop timer', 'error')
+      }
+    } catch {
+      showToast('Network error. Try again.', 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => (runningThis ? stop() : start())}
+      disabled={busy}
+      className="inline-flex items-center gap-1.5"
+      style={{
+        padding: '0.375rem 0.625rem',
+        borderRadius: 'var(--radius-button)',
+        border: '1px solid var(--color-border)',
+        background: runningThis ? 'var(--color-danger-bg)' : 'var(--color-bg)',
+        color: runningThis ? 'var(--color-danger)' : 'var(--color-text-muted)',
+        fontSize: '0.75rem',
+        fontWeight: 600,
+        cursor: busy ? 'not-allowed' : 'pointer',
+      }}
+      onMouseEnter={e => { if (!busy && !runningThis) e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+      onMouseLeave={e => { if (!runningThis) e.currentTarget.style.background = 'var(--color-bg)' }}
+      aria-label={runningThis ? 'Stop timer' : 'Start timer'}
+    >
+      {busy
+        ? <Loader2 size={13} className="animate-spin" />
+        : runningThis ? <Square size={12} /> : <Play size={12} />}
+      <span className="hidden sm:inline">{runningThis ? 'Stop timer' : 'Start timer'}</span>
+    </button>
   )
 }
 

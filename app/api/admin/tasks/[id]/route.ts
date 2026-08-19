@@ -5,6 +5,83 @@ import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { createNotification } from '@/lib/notifications'
 import { requireAccessToOrg, getOrgScope } from '@/lib/require-access'
+import { TASK_PRIORITIES } from '@/lib/task-priorities'
+
+type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+/**
+ * Shared scope gate for a single task, mirroring the PATCH rules:
+ * client tasks (orgId set) require access to that org; Tahi-internal tasks
+ * (orgId null) require unrestricted access. Returns a NextResponse to short
+ * circuit on denial, or null when the caller may proceed.
+ */
+async function guardTaskAccess(
+  drizzle: Drizzle,
+  userId: string | null,
+  taskOrgId: string | null,
+): Promise<NextResponse | null> {
+  if (taskOrgId) {
+    return requireAccessToOrg(drizzle, userId, taskOrgId)
+  }
+  const scope = await getOrgScope(drizzle, userId)
+  if (scope !== null) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  return null
+}
+
+// ── GET /api/admin/tasks/[id] ─────────────────────────────────────────────
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { orgId, userId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const { id } = await params
+
+  const database = await db()
+  const drizzle = database as Drizzle
+
+  const [task] = await drizzle
+    .select({
+      id: schema.tasks.id,
+      type: schema.tasks.type,
+      orgId: schema.tasks.orgId,
+      title: schema.tasks.title,
+      description: schema.tasks.description,
+      status: schema.tasks.status,
+      priority: schema.tasks.priority,
+      assigneeId: schema.tasks.assigneeId,
+      assigneeType: schema.tasks.assigneeType,
+      dueDate: schema.tasks.dueDate,
+      completedAt: schema.tasks.completedAt,
+      createdById: schema.tasks.createdById,
+      tags: schema.tasks.tags,
+      trackId: schema.tasks.trackId,
+      position: schema.tasks.position,
+      requestId: schema.tasks.requestId,
+      scheduleRowId: schema.tasks.scheduleRowId,
+      createdAt: schema.tasks.createdAt,
+      updatedAt: schema.tasks.updatedAt,
+      orgName: schema.organisations.name,
+    })
+    .from(schema.tasks)
+    .leftJoin(schema.organisations, eq(schema.tasks.orgId, schema.organisations.id))
+    .where(eq(schema.tasks.id, id))
+    .limit(1)
+
+  if (!task) {
+    return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+  }
+
+  const denied = await guardTaskAccess(drizzle, userId, task.orgId)
+  if (denied) return denied
+
+  return NextResponse.json({ task })
+}
 
 // ── PATCH /api/admin/tasks/[id] ───────────────────────────────────────────
 export async function PATCH(
@@ -35,7 +112,7 @@ export async function PATCH(
   }
 
   const database = await db()
-  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  const drizzle = database as Drizzle
 
   // Verify task exists + scope check
   const [existing] = await drizzle
@@ -48,17 +125,8 @@ export async function PATCH(
     return NextResponse.json({ error: 'Task not found' }, { status: 404 })
   }
 
-  // Tahi-internal tasks (orgId null) are only visible to unrestricted users
-  if (existing.orgId) {
-    const denied = await requireAccessToOrg(drizzle, userId, existing.orgId)
-    if (denied) return denied
-  } else {
-    // No orgId: check user has unrestricted access (null from getOrgScope)
-    const scope = await getOrgScope(drizzle, userId)
-    if (scope !== null) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
-  }
+  const denied = await guardTaskAccess(drizzle, userId, existing.orgId)
+  if (denied) return denied
 
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
 
@@ -82,8 +150,7 @@ export async function PATCH(
     }
   }
   if (body.priority !== undefined) {
-    const validPriorities = ['standard', 'high', 'urgent']
-    if (!validPriorities.includes(body.priority)) {
+    if (!(TASK_PRIORITIES as readonly string[]).includes(body.priority)) {
       return NextResponse.json({ error: 'Invalid priority' }, { status: 400 })
     }
     updates.priority = body.priority
@@ -125,6 +192,40 @@ export async function PATCH(
       entityId: id,
     })
   }
+
+  return NextResponse.json({ success: true })
+}
+
+// ── DELETE /api/admin/tasks/[id] ──────────────────────────────────────────
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { orgId, userId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const { id } = await params
+
+  const database = await db()
+  const drizzle = database as Drizzle
+
+  const [existing] = await drizzle
+    .select({ id: schema.tasks.id, orgId: schema.tasks.orgId })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.id, id))
+    .limit(1)
+
+  if (!existing) {
+    return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+  }
+
+  const denied = await guardTaskAccess(drizzle, userId, existing.orgId)
+  if (denied) return denied
+
+  // Subtasks and dependency rows cascade via their FK onDelete rules.
+  await drizzle.delete(schema.tasks).where(eq(schema.tasks.id, id))
 
   return NextResponse.json({ success: true })
 }
