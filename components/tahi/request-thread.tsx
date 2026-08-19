@@ -14,6 +14,12 @@ interface Message {
   createdAt: string
   teamMemberName?: string | null
   teamMemberAvatar?: string | null
+  // Resolved contact-author label from the portal API ("Sam (Acme)").
+  authorName?: string | null
+  // Server-computed on the portal (own messages carry authorId = contact.id,
+  // which never equals the Clerk currentUserId). Admin omits it and falls back
+  // to the id comparison below, so admin thread behaviour is unchanged.
+  isOwn?: boolean
 }
 
 interface RequestThreadProps {
@@ -36,7 +42,7 @@ export function RequestThread({ messages, currentUserId }: RequestThreadProps) {
         <MessageBubble
           key={msg.id}
           msg={msg}
-          isOwn={msg.authorId === currentUserId}
+          isOwn={msg.isOwn ?? (msg.authorId === currentUserId)}
         />
       ))}
     </div>
@@ -47,7 +53,7 @@ function MessageBubble({ msg, isOwn }: { msg: Message; isOwn: boolean }) {
   const isTeam = msg.authorType === 'team_member'
   const authorName = isTeam
     ? (msg.teamMemberName ?? 'Tahi Team')
-    : 'Client'
+    : (msg.authorName ?? 'Client')
 
   const timeAgo = (() => {
     try {

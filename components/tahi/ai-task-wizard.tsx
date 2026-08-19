@@ -30,6 +30,12 @@ interface AiTaskWizardProps {
   context?: {
     orgId?: string
     trackType?: string
+    /**
+     * Source request id. When set, every task created from this wizard is
+     * linked back to the request (tasks.requestId) so the request detail
+     * "Tasks" panel and the task "Linked Request" field resolve.
+     */
+    requestId?: string
   }
   /**
    * Optional pre-seed for the input box. When provided, the composer opens
@@ -232,6 +238,9 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {}, seed
             type: taskType,
             priority: mappedPriority,
             orgId: context.orgId ?? null,
+            // Link the task back to the originating request when the wizard was
+            // opened from a request detail page.
+            requestId: context.requestId ?? null,
           }),
         })
         results.push(res.ok)
@@ -261,7 +270,7 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {}, seed
     } finally {
       setCreating(false)
     }
-  }, [latestTasks, creating, context.orgId, onTasksCreated])
+  }, [latestTasks, creating, context.orgId, context.requestId, onTasksCreated])
 
   if (!open) return null
 

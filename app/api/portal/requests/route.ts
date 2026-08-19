@@ -70,7 +70,6 @@ export async function GET(req: NextRequest) {
       estimatedHours: schema.requests.estimatedHours,
       startDate: schema.requests.startDate,
       dueDate: schema.requests.dueDate,
-      scopeFlagged: schema.requests.scopeFlagged,
       revisionCount: schema.requests.revisionCount,
       createdAt: schema.requests.createdAt,
       updatedAt: schema.requests.updatedAt,
@@ -121,7 +120,9 @@ export async function POST(req: NextRequest) {
   const now = new Date().toISOString()
 
   // Atomically assign the next request number via a subquery in the INSERT
-  // to avoid race conditions between concurrent request creations.
+  // to avoid race conditions between concurrent request creations. The MAX is
+  // scoped to this org so each client sees a private 1,2,3 sequence and never
+  // learns the studio's total cross-client request volume (T-privacy).
   await drizzle2.run(sql`
     INSERT INTO requests (
       id, org_id, title, type, category, description, due_date, form_responses,
@@ -142,7 +143,7 @@ export async function POST(req: NextRequest) {
       0,
       0,
       3,
-      COALESCE((SELECT MAX(request_number) FROM requests), 0) + 1,
+      COALESCE((SELECT MAX(request_number) FROM requests WHERE org_id = ${orgId}), 0) + 1,
       ${now},
       ${now}
     )

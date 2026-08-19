@@ -79,6 +79,19 @@ export async function POST(req: NextRequest) {
           ))
       }
 
+      // Keep requests.assigneeId in sync with the assignee participant. The
+      // "Unassigned" filter and the workload capacity bar both read
+      // assigneeId, so without this a bulk assign added a participant row but
+      // drained nothing and moved no capacity. Only a team member can own the
+      // assignee slot; runs even when the participant row already exists so a
+      // re-assign always lands.
+      if (p.role === 'assignee' && p.participantType === 'team_member') {
+        await drizzle
+          .update(schema.requests)
+          .set({ assigneeId: p.participantId, updatedAt: now })
+          .where(eq(schema.requests.id, requestId))
+      }
+
       const [existing] = await drizzle
         .select({ id: schema.requestParticipants.id })
         .from(schema.requestParticipants)

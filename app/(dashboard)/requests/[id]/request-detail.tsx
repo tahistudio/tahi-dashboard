@@ -109,6 +109,10 @@ interface Message {
   createdAt: string
   teamMemberName?: string | null
   teamMemberAvatar?: string | null
+  // Portal thread only: resolved contact-author label ("Sam (Acme)") and a
+  // server-computed own-message flag (portal stores authorId = contact.id).
+  authorName?: string | null
+  isOwn?: boolean
 }
 
 interface RequestFile {
@@ -263,6 +267,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const [unlinkingParent, setUnlinkingParent] = useState(false)
   const [participants, setParticipants] = useState<Participant[]>([])
   const threadBottomRef = useRef<HTMLDivElement>(null)
+  // Client Approve / Request-a-change (only meaningful while status is
+  // client_review and the viewer is a client).
+  const [approving, setApproving] = useState(false)
+  const composerWrapRef = useRef<HTMLDivElement>(null)
+  // When the client clicks "Request a change" we tag the very next message they
+  // send as a change request. A ref (not state) so handleSendMessage always
+  // reads the current value without re-subscribing the composer.
+  const changeRequestPendingRef = useRef(false)
   const { showToast } = useToast()
 
   // ---- AI weaves (admin, human-in-the-loop) --------------------------------
@@ -406,6 +418,15 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   ) {
     const messageIsInternal = visibility === 'internal'
 
+    // Client "Request a change" tags the next message with a light prefix so
+    // the studio can spot it in the thread. No new schema: it is just marked-up
+    // body text. Consumed once, then reset.
+    let outgoingHtml = html
+    if (!isAdmin && changeRequestPendingRef.current) {
+      outgoingHtml = `<p><strong>Change request</strong></p>${html}`
+      changeRequestPendingRef.current = false
+    }
+
     // Create a request_thread conversation on first message if none exists
     let convId = conversationId
     if (!convId && isAdmin && request) {
@@ -439,7 +460,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        body: html,
+        body: outgoingHtml,
         isInternal: messageIsInternal,
         conversationId: convId ?? undefined,
       }),
@@ -491,6 +512,48 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     setStatusUpdating(true)
     await patchRequest({ status: newStatus }, `Moved to ${STATUS_LABELS[newStatus] ?? newStatus}`)
     setStatusUpdating(false)
+  }
+
+  // Client approval: the sole client-writable transition (client_review ->
+  // delivered), served by the dedicated portal PATCH. Optimistic, with a
+  // server revalidate to reflect deliveredAt.
+  async function handleClientApprove() {
+    if (!request || approving || request.status !== 'client_review') return
+    setApproving(true)
+    const previous = request
+    setRequest({ ...previous, status: 'delivered' })
+    try {
+      const res = await fetch(apiPath(`/api/portal/requests/${requestId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'delivered' }),
+      })
+      if (!res.ok) {
+        setRequest(previous)
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        showToast(j.error ?? 'Could not approve - please retry')
+        return
+      }
+      showToast('Approved. Thanks for confirming.')
+      await mutateRequest()
+    } catch {
+      setRequest(previous)
+      showToast('Network error - try again')
+    } finally {
+      setApproving(false)
+    }
+  }
+
+  // "Request a change": arm the next-message tag and drop the client into the
+  // composer so they can describe the change straight away.
+  function handleRequestChange() {
+    changeRequestPendingRef.current = true
+    const wrap = composerWrapRef.current
+    if (wrap) {
+      wrap.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      const editable = wrap.querySelector<HTMLElement>('[contenteditable="true"]')
+      editable?.focus()
+    }
   }
 
   async function saveChecklists(updated: Checklist[]) {
@@ -799,7 +862,9 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 High priority
               </span>
             )}
-            {request.scopeFlagged && (
+            {/* Scope flagging is an internal studio signal: never surface it to
+                the client, whose payload no longer carries scopeFlagged anyway. */}
+            {isAdmin && request.scopeFlagged && (
               <span
                 className="inline-flex items-center gap-1 rounded-full"
                 style={{
@@ -924,6 +989,100 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           </div>
         </div>
       </div>
+
+      {/* Client review actions - client only. Sits directly under the pipeline
+          bar so approving a delivery is the obvious next step. Approve routes
+          through the whitelisted portal PATCH (client_review -> delivered);
+          "Request a change" arms the change tag and focuses the composer. */}
+      {!isAdmin && request.status === 'client_review' && (
+        <div
+          role="region"
+          aria-label="Review this delivery"
+          style={{
+            border: '1px solid var(--color-brand)',
+            background: 'var(--color-brand-50)',
+            borderRadius: 'var(--radius-leaf, 0 16px 0 16px)',
+            padding: '1rem 1.125rem',
+          }}
+        >
+          <div className="flex items-start flex-wrap" style={{ gap: '0.75rem' }}>
+            <div
+              className="flex items-center justify-center flex-shrink-0"
+              style={{
+                width: '1.75rem', height: '1.75rem',
+                borderRadius: '0 0.5rem 0 0.5rem',
+                background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
+              }}
+            >
+              <CheckCircle2 size={14} style={{ color: '#ffffff' }} aria-hidden="true" />
+            </div>
+            <div className="flex-1" style={{ minWidth: '12rem' }}>
+              <p className="text-sm font-semibold" style={{ color: 'var(--color-brand-dark)', margin: 0 }}>
+                Ready for your review
+              </p>
+              <p className="text-xs" style={{ color: 'var(--color-text-muted)', margin: '0.1875rem 0 0' }}>
+                Approve to close this request, or request a change and tell us what needs adjusting.
+              </p>
+            </div>
+            <div className="flex items-center flex-wrap" style={{ gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={handleClientApprove}
+                disabled={approving}
+                className="inline-flex items-center transition-colors"
+                style={{
+                  gap: '0.375rem',
+                  padding: '0.4375rem 0.875rem',
+                  fontSize: '0.8125rem',
+                  fontWeight: 600,
+                  borderRadius: 'var(--radius-button)',
+                  border: 'none',
+                  background: approving ? 'var(--color-bg-tertiary)' : 'var(--color-brand)',
+                  color: approving ? 'var(--color-text-subtle)' : '#ffffff',
+                  cursor: approving ? 'not-allowed' : 'pointer',
+                  minHeight: '2.25rem',
+                }}
+                onMouseEnter={e => { if (!approving) e.currentTarget.style.background = 'var(--color-brand-dark)' }}
+                onMouseLeave={e => { if (!approving) e.currentTarget.style.background = 'var(--color-brand)' }}
+              >
+                {approving
+                  ? <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                  : <Check size={14} aria-hidden="true" />}
+                {approving ? 'Approving…' : 'Approve & close'}
+              </button>
+              <button
+                type="button"
+                onClick={handleRequestChange}
+                disabled={approving}
+                className="inline-flex items-center transition-colors"
+                style={{
+                  gap: '0.375rem',
+                  padding: '0.4375rem 0.875rem',
+                  fontSize: '0.8125rem',
+                  fontWeight: 500,
+                  borderRadius: 'var(--radius-button)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  color: 'var(--color-text-muted)',
+                  cursor: approving ? 'not-allowed' : 'pointer',
+                  minHeight: '2.25rem',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.borderColor = 'var(--color-brand)'
+                  e.currentTarget.style.color = 'var(--color-brand-dark)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.borderColor = 'var(--color-border)'
+                  e.currentTarget.style.color = 'var(--color-text-muted)'
+                }}
+              >
+                <RefreshCw size={14} aria-hidden="true" />
+                Request a change
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* AI triage suggestion banner - admin only. Suggestions never apply
           themselves; each field has an explicit Apply button that routes
@@ -1076,6 +1235,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
 
             {/* Composer */}
             <div
+              ref={composerWrapRef}
               style={{
                 padding: '1rem 1.25rem',
                 borderTop: '1px solid var(--color-border-subtle)',
@@ -1281,13 +1441,16 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             />
           )}
 
+          {/* Tasks spawned from this request (admin only). Mirrors the
+              sub-requests panel; the AI task wizard now links tasks back here. */}
+          {isAdmin && <RequestTasksPanel requestId={requestId} />}
+
           {/* Files */}
           <FilesPanel
             files={files}
             onRefresh={() => { mutateFiles() }}
             requestId={requestId}
             orgId={request.orgId}
-            isAdmin={isAdmin}
           />
 
           {/* Activity log - collapsed by default at the bottom */}
@@ -1664,7 +1827,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         <AiTaskWizard
           open={wizardOpen}
           onClose={() => setWizardOpen(false)}
-          context={{ orgId: request.orgId, trackType: request.size ?? undefined }}
+          context={{ orgId: request.orgId, trackType: request.size ?? undefined, requestId }}
           seed={taskWizardSeed}
           onTasksCreated={() => {
             mutateRequest()
@@ -2207,6 +2370,114 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   )
 }
 
+// ---- Tasks Panel -------------------------------------------------------------
+
+interface RequestTaskRow {
+  id: string
+  title: string
+  status: string
+  priority: string | null
+}
+
+// Lists the tasks spawned from this request (admin only). Fetches the existing
+// tasks filter (?requestId=) and mirrors the sub-requests panel layout. Read
+// from the tasks API only - this surface never mutates tasks.
+function RequestTasksPanel({ requestId }: { requestId: string }) {
+  const { data, isLoading } = useSWR<{ tasks: RequestTaskRow[] }>(
+    `/api/admin/tasks?requestId=${requestId}`,
+  )
+  const tasks = data?.tasks ?? []
+
+  return (
+    <Card padding="none">
+      <div
+        style={{
+          padding: 'var(--space-4) var(--space-5)',
+          borderBottom: tasks.length > 0 ? '1px solid var(--color-border-subtle)' : undefined,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 'var(--space-3)',
+        }}
+      >
+        <h3
+          className="flex items-center gap-2"
+          style={{ fontSize: 'var(--text-md)', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}
+        >
+          <ListChecks size={14} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
+          Tasks
+          {tasks.length > 0 && (
+            <span
+              className="text-xs font-normal rounded-full"
+              style={{ padding: '0.0625rem 0.4375rem', background: 'var(--color-bg-tertiary)', color: 'var(--color-text-subtle)' }}
+            >
+              {tasks.length}
+            </span>
+          )}
+        </h3>
+      </div>
+
+      {isLoading ? (
+        <div style={{ padding: 'var(--space-3) var(--space-5)' }}>
+          {[0, 1].map(i => (
+            <div key={i} className="flex items-center gap-3 animate-pulse" style={{ padding: 'var(--space-2) 0' }}>
+              <div className="rounded-full" style={{ width: '4.5rem', height: '1.25rem', background: 'var(--color-bg-tertiary)' }} />
+              <div className="rounded" style={{ flex: 1, height: '0.875rem', background: 'var(--color-bg-tertiary)' }} />
+            </div>
+          ))}
+        </div>
+      ) : tasks.length === 0 ? (
+        <div className="flex flex-col items-center justify-center text-center" style={{ padding: '2rem 1.5rem', gap: '0.375rem' }}>
+          <ListChecks size={18} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
+          <p className="text-sm" style={{ color: 'var(--color-text-subtle)', margin: 0 }}>No tasks yet.</p>
+          <p className="text-xs" style={{ color: 'var(--color-text-subtle)', margin: 0 }}>
+            Use &ldquo;AI: break into tasks&rdquo; to generate some.
+          </p>
+        </div>
+      ) : (
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+          {tasks.map((t, i) => (
+            <li
+              key={t.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-3)',
+                padding: 'var(--space-3) var(--space-5)',
+                borderBottom: i < tasks.length - 1 ? '1px solid var(--color-border-subtle)' : undefined,
+              }}
+            >
+              <Badge tone={statusTone(t.status)} size="sm" variant="soft" dot>
+                {t.status.replace(/_/g, ' ')}
+              </Badge>
+              <span
+                data-private
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontSize: 'var(--text-sm)',
+                  fontWeight: 500,
+                  color: 'var(--color-text)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {t.title}
+              </span>
+              {t.priority && t.priority !== 'standard' && (
+                <Badge tone="neutral" size="sm">
+                  {t.priority}
+                </Badge>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  )
+}
+
 // ---- Checklists Panel --------------------------------------------------------
 
 interface ChecklistsPanelProps {
@@ -2219,6 +2490,10 @@ function ChecklistsPanel({ checklists, onSave, isAdmin }: ChecklistsPanelProps) 
   const [newChecklistTitle, setNewChecklistTitle] = useState('')
   const [addingChecklist, setAddingChecklist] = useState(false)
   const [newItemLabels, setNewItemLabels] = useState<Record<number, string>>({})
+
+  // Clients get checklists as read-only progress. With nothing to show, omit
+  // the card entirely rather than render an empty shell with no affordances.
+  if (!isAdmin && checklists.length === 0) return null
 
   function addChecklist() {
     if (!newChecklistTitle.trim()) return
@@ -2434,21 +2709,36 @@ function ChecklistsPanel({ checklists, onSave, isAdmin }: ChecklistsPanelProps) 
                       className="flex items-center gap-2"
                       style={{ padding: '0.25rem 0' }}
                     >
-                      <button
-                        type="button"
-                        onClick={() => toggleItem(ci, ii)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: 0,
-                          color: item.done ? 'var(--color-brand)' : 'var(--color-text-subtle)',
-                          flexShrink: 0,
-                        }}
-                        aria-label={item.done ? 'Mark incomplete' : 'Mark complete'}
-                      >
-                        <CheckCircle2 size={16} style={{ opacity: item.done ? 1 : 0.4 }} />
-                      </button>
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleItem(ci, ii)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            padding: 0,
+                            color: item.done ? 'var(--color-brand)' : 'var(--color-text-subtle)',
+                            flexShrink: 0,
+                          }}
+                          aria-label={item.done ? 'Mark incomplete' : 'Mark complete'}
+                        >
+                          <CheckCircle2 size={16} style={{ opacity: item.done ? 1 : 0.4 }} />
+                        </button>
+                      ) : (
+                        // Read-only for clients: progress, not a control.
+                        <span
+                          role="img"
+                          aria-label={item.done ? 'Completed' : 'Not completed'}
+                          style={{
+                            display: 'inline-flex',
+                            color: item.done ? 'var(--color-brand)' : 'var(--color-text-subtle)',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <CheckCircle2 size={16} style={{ opacity: item.done ? 1 : 0.4 }} />
+                        </span>
+                      )}
                       <span
                         className="text-sm flex-1"
                         style={{
@@ -2530,10 +2820,11 @@ interface FilesPanelProps {
   onRefresh: () => void
   requestId: string
   orgId: string
-  isAdmin: boolean
 }
 
-function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelProps) {
+// Files are attachable by both studio and client: uploads authorise non-admins
+// server-side, so there is no admin gate on this panel.
+function FilesPanel({ files, onRefresh, requestId, orgId }: FilesPanelProps) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -2639,16 +2930,18 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
           )}
         </h2>
         <div className="flex items-center gap-2">
-          {isAdmin && (
-            <>
-              <input
-                ref={fileInputRef}
-                type="file"
-                onChange={handleFileUpload}
-                className="hidden"
-                aria-label="Upload file"
-              />
-              <button
+          {/* Upload is available to clients too: the presign + confirm routes
+              authorise non-admins and land the file under their own D1 org. The
+              submit form promises clients can attach files, so honour that here. */}
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              onChange={handleFileUpload}
+              className="hidden"
+              aria-label="Upload file"
+            />
+            <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
@@ -2674,8 +2967,7 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
                 {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
                 {uploading ? 'Uploading...' : 'Upload'}
               </button>
-            </>
-          )}
+          </>
           {files.length > 1 && (
             <button
               type="button"
@@ -2732,7 +3024,10 @@ function FilesPanel({ files, onRefresh, requestId, orgId, isAdmin }: FilesPanelP
       {files.length === 0 ? (
         <div className="flex flex-col items-center justify-center text-center" style={{ padding: '2.5rem 1.5rem', gap: '0.375rem' }}>
           <Paperclip size={18} style={{ color: 'var(--color-text-subtle)', marginBottom: '0.25rem' }} />
-          <p className="text-sm" style={{ color: 'var(--color-text-subtle)' }}>No files attached yet.</p>
+          <p className="text-sm" style={{ color: 'var(--color-text-subtle)', margin: 0 }}>No files yet.</p>
+          <p className="text-xs" style={{ color: 'var(--color-text-subtle)', margin: 0 }}>
+            Use Upload to attach files to this request.
+          </p>
         </div>
       ) : (
         <div>

@@ -785,20 +785,25 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
             ? 'Manage all work items and track progress'
             : `${filtered.length} ${filtered.length === 1 ? 'request' : 'requests'}`}
         >
-          <TahiButton
-            variant="secondary"
-            size="sm"
-            onClick={() => {
-              const link = document.createElement('a')
-              link.href = apiPath('/api/admin/export/requests')
-              link.download = 'requests.csv'
-              link.click()
-            }}
-            iconLeft={<Download className="w-3.5 h-3.5" />}
-            aria-label="Export CSV"
-          >
-            <span className="hidden sm:inline">Export CSV</span>
-          </TahiButton>
+          {/* Export hits an admin-only route that 403s non-Tahi orgs, so the
+              button is Tahi-only. Without this gate a client download saves the
+              403 body as requests.csv. */}
+          {isAdmin && (
+            <TahiButton
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                const link = document.createElement('a')
+                link.href = apiPath('/api/admin/export/requests')
+                link.download = 'requests.csv'
+                link.click()
+              }}
+              iconLeft={<Download className="w-3.5 h-3.5" />}
+              aria-label="Export CSV"
+            >
+              <span className="hidden sm:inline">Export CSV</span>
+            </TahiButton>
+          )}
           {isAdmin && (
             <TahiButton
               variant="secondary"

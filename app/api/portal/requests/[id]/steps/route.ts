@@ -28,8 +28,22 @@ export async function GET(
 
   if (!request) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+  // Explicit client-safe projection: the internal routing columns
+  // (assigneeId, createdById, createdByType) are omitted so a client never
+  // learns which studio member owns or authored a step.
   const steps = await database
-    .select()
+    .select({
+      id: schema.requestSteps.id,
+      requestId: schema.requestSteps.requestId,
+      parentStepId: schema.requestSteps.parentStepId,
+      title: schema.requestSteps.title,
+      description: schema.requestSteps.description,
+      completed: schema.requestSteps.completed,
+      completedAt: schema.requestSteps.completedAt,
+      orderIndex: schema.requestSteps.orderIndex,
+      createdAt: schema.requestSteps.createdAt,
+      updatedAt: schema.requestSteps.updatedAt,
+    })
     .from(schema.requestSteps)
     .where(eq(schema.requestSteps.requestId, requestId))
     .orderBy(asc(schema.requestSteps.orderIndex), asc(schema.requestSteps.createdAt))
@@ -89,7 +103,20 @@ export async function POST(
 
 // ── Tree builder ──────────────────────────────────────────────────────────────
 
-type StepRow = typeof schema.requestSteps.$inferSelect
+// Client-safe step shape (mirrors the GET projection above, minus the
+// internal routing columns).
+interface StepRow {
+  id: string
+  requestId: string
+  parentStepId: string | null
+  title: string
+  description: string | null
+  completed: boolean | null
+  completedAt: string | null
+  orderIndex: number | null
+  createdAt: string
+  updatedAt: string
+}
 interface StepNode extends StepRow { children: StepNode[] }
 
 function buildTree(flat: StepRow[]): StepNode[] {
