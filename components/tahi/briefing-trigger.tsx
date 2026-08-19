@@ -1,39 +1,68 @@
 'use client'
 
 /**
- * <BriefingTrigger>. Admin-only top-nav control that surfaces the cached AI
- * daily briefing in a Popover, matching the <NotificationBell> pattern.
+ * <BriefingTrigger>. Admin-only top-nav control that surfaces the SAME daily
+ * brief shown on the overview home, in a compact Popover.
  *
- * Read-only from the client: it renders the briefing already generated and
- * cached to settings.ai_briefing_latest by lib/ai-briefing + its cron. The
- * client never calls the model directly. A "Refresh briefing" button POSTs the
- * admin briefing route (human-triggered, admin-gated) to regenerate on demand.
+ * One source of truth: this reads the deterministic brief cached to
+ * settings.overview_brief_latest (GET /api/admin/overview/brief) that the home
+ * "Daily brief" card renders. The nav popover is the glance (summary + top
+ * rows + open-full-brief link); the home card is the expanded view. They can
+ * never disagree because they read the same cache. "Refresh" POSTs the shared
+ * refresh route and both surfaces pick up the new cache.
  *
- * The trigger shows a subtle unread dot when the cached briefing is newer than
- * the last time this viewer opened it (a localStorage timestamp). Opening the
- * popover marks the current briefing seen and clears the dot.
+ * The trigger shows a subtle unread dot when the cached brief is newer than the
+ * last time this viewer opened it (a localStorage timestamp). Opening the
+ * popover marks the current brief seen and clears the dot.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { Sparkles, RefreshCw } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { Popover } from '@/components/tahi/popover'
-import { BriefingRow, type BriefingData } from '@/components/tahi/ai-briefing-card'
 
 const SEEN_KEY = 'tahi-briefing-seen'
 
+// Logical brief destination id -> real dashboard route (mirrors the overview
+// home's ROUTE_MAP). Anything unlisted falls back to /<id>.
+const ROUTE_MAP: Record<string, string> = {
+  financialreports: '/financial-reports',
+  'financial-reports': '/financial-reports',
+  plan: '/billing',
+  billing: '/billing',
+}
+
+interface BriefRow {
+  tone: 'risk' | 'warn' | 'ok' | ''
+  verb: string | null
+  to: string
+  text: string
+}
+
+interface BriefData {
+  urgent: BriefRow[]
+  week: BriefRow[]
+  slept: BriefRow[]
+  generatedAt?: string
+}
+
+const dotColor = (tone: BriefRow['tone']): string => {
+  if (tone === 'risk') return 'var(--color-danger)'
+  if (tone === 'warn') return 'var(--color-due-soon-text, var(--color-warning))'
+  return 'var(--color-text-subtle)'
+}
+
 export function BriefingTrigger() {
+  const router = useRouter()
   const [open, setOpen] = useState(false)
-  const [data, setData] = useState<BriefingData | null>(null)
+  const [data, setData] = useState<BriefData | null>(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
-  const [tab, setTab] = useState<'today' | 'week'>('today')
   const [hasNew, setHasNew] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
 
-  // Compare the cached briefing's timestamp against the last-seen marker so we
-  // only flag genuinely fresher briefings as unread.
-  const evaluateNew = useCallback((generatedAt: string | null) => {
+  const evaluateNew = useCallback((generatedAt: string | undefined) => {
     if (!generatedAt || typeof window === 'undefined') {
       setHasNew(false)
       return
@@ -42,18 +71,13 @@ export function BriefingTrigger() {
     setHasNew(!seen || new Date(generatedAt).getTime() > new Date(seen).getTime())
   }, [])
 
-  const fetchBriefing = useCallback(async () => {
+  const fetchBrief = useCallback(async () => {
     try {
-      const res = await fetch(apiPath('/api/admin/ai/briefing'))
+      const res = await fetch(apiPath('/api/admin/overview/brief'))
       if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as BriefingData & { stale?: boolean }
-      if (json.stale || !json.generatedAt) {
-        setData(null)
-        setHasNew(false)
-      } else {
-        setData(json)
-        evaluateNew(json.generatedAt)
-      }
+      const json = (await res.json()) as BriefData
+      setData(json)
+      evaluateNew(json.generatedAt)
     } catch {
       setData(null)
       setHasNew(false)
@@ -62,9 +86,9 @@ export function BriefingTrigger() {
     }
   }, [evaluateNew])
 
-  useEffect(() => { void fetchBriefing() }, [fetchBriefing])
+  useEffect(() => { void fetchBrief() }, [fetchBrief])
 
-  const markSeen = useCallback((generatedAt: string | null) => {
+  const markSeen = useCallback((generatedAt: string | undefined) => {
     if (typeof window !== 'undefined' && generatedAt) {
       window.localStorage.setItem(SEEN_KEY, generatedAt)
     }
@@ -73,26 +97,31 @@ export function BriefingTrigger() {
 
   const handleToggle = useCallback(() => {
     if (!open) {
-      void fetchBriefing()
-      markSeen(data?.generatedAt ?? null)
+      void fetchBrief()
+      markSeen(data?.generatedAt)
     }
     setOpen(prev => !prev)
-  }, [open, fetchBriefing, markSeen, data])
+  }, [open, fetchBrief, markSeen, data])
 
-  const generate = useCallback(async () => {
+  const go = useCallback((id: string) => {
+    const path = ROUTE_MAP[id] ?? '/' + id.replace(/^\/+/, '')
+    setOpen(false)
+    router.push(path)
+  }, [router])
+
+  const refresh = useCallback(async () => {
     setGenerating(true)
     try {
-      const res = await fetch(apiPath('/api/admin/ai/briefing'), { method: 'POST' })
+      const res = await fetch(apiPath('/api/admin/overview/brief/refresh?force=1'), { method: 'POST' })
       if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as BriefingData
-      setData(json)
-      markSeen(json.generatedAt)
+      await fetchBrief()
+      markSeen(data?.generatedAt)
     } catch {
-      // silent: transient / offline
+      // silent: transient / offline, leave the existing brief in place
     } finally {
       setGenerating(false)
     }
-  }, [markSeen])
+  }, [fetchBrief, markSeen, data])
 
   const formatTime = (iso: string) => {
     try {
@@ -100,7 +129,19 @@ export function BriefingTrigger() {
     } catch { return '' }
   }
 
-  const items = data ? (tab === 'today' ? data.todayItems : data.weekItems) : []
+  const urgent = data?.urgent ?? []
+  const week = data?.week ?? []
+  const slept = data?.slept ?? []
+  const total = urgent.length + week.length
+  const lede = total === 0
+    ? 'All clear. Nothing is waiting on you right now.'
+    : `${urgent.length} ${urgent.length === 1 ? 'thing needs' : 'things need'} you today, ${week.length} this week.`
+
+  const sections: { key: string; label: string; rows: BriefRow[] }[] = [
+    { key: 'urgent', label: 'Urgent today', rows: urgent },
+    { key: 'week', label: 'This week', rows: week },
+    { key: 'slept', label: 'While you slept', rows: slept },
+  ]
 
   return (
     <div style={{ position: 'relative' }}>
@@ -109,7 +150,7 @@ export function BriefingTrigger() {
         type="button"
         className={'tb-bell' + (hasNew ? ' has-unread' : '')}
         onClick={handleToggle}
-        aria-label={`Daily briefing${hasNew ? ' (new)' : ''}`}
+        aria-label={`Daily brief${hasNew ? ' (new)' : ''}`}
         aria-expanded={open}
         aria-haspopup="true"
       >
@@ -139,10 +180,10 @@ export function BriefingTrigger() {
             <div className="flex items-center" style={{ gap: 'var(--space-2)' }}>
               <Sparkles size={17} style={{ color: 'var(--color-brand)' }} aria-hidden="true" />
               <p style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>
-                Daily Briefing
+                Daily brief
               </p>
             </div>
-            {data && (
+            {data?.generatedAt && (
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
                 {formatTime(data.generatedAt)}
               </span>
@@ -157,86 +198,86 @@ export function BriefingTrigger() {
             </div>
           )}
 
-          {/* Empty / not-yet-generated */}
-          {!loading && !data && (
-            <div style={{ padding: 'var(--space-6) var(--space-5)', textAlign: 'center' }}>
-              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>
-                No briefing yet
-              </p>
-              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-subtle)' }}>
-                Generate an AI summary of what needs your attention.
-              </p>
-            </div>
-          )}
-
           {/* Body */}
           {data && (
             <>
-              {/* Summary */}
               <div style={{ padding: 'var(--space-3) var(--space-5)', background: 'var(--color-brand-50)', flexShrink: 0 }}>
                 <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-brand-dark)', fontWeight: 500 }}>
-                  {data.summary}
+                  {lede}
                 </p>
               </div>
 
-              {/* Tabs */}
-              <div className="flex" style={{ borderBottom: '1px solid var(--color-border-subtle)', flexShrink: 0 }}>
-                {(['today', 'week'] as const).map(t => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setTab(t)}
-                    style={{
-                      flex: 1,
-                      padding: 'var(--space-3)',
-                      fontSize: 'var(--text-sm)',
-                      fontWeight: tab === t ? 600 : 400,
-                      color: tab === t ? 'var(--color-brand)' : 'var(--color-text-muted)',
-                      background: 'transparent',
-                      border: 'none',
-                      borderBottom: tab === t ? '2px solid var(--color-brand)' : '2px solid transparent',
-                      cursor: 'pointer',
-                      transition: 'color 150ms ease, border-color 150ms ease',
-                    }}
-                  >
-                    {t === 'today' ? 'Today' : 'This Week'}
-                    {(t === 'today' ? data.todayItems : data.weekItems).length > 0 && (
-                      <span style={{
-                        marginLeft: 'var(--space-1-5)',
-                        padding: '0 var(--space-1-5)',
-                        fontSize: 'var(--text-xs)',
-                        fontWeight: 600,
-                        background: tab === t ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
-                        color: tab === t ? 'white' : 'var(--color-text-subtle)',
-                        borderRadius: 'var(--radius-full)',
-                      }}>
-                        {(t === 'today' ? data.todayItems : data.weekItems).length}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-
-              {/* Items */}
               <div style={{ overflowY: 'auto', minHeight: 0 }}>
-                {items.length === 0 ? (
+                {total + slept.length === 0 ? (
                   <div style={{ padding: 'var(--space-8) var(--space-5)', textAlign: 'center' }}>
                     <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-subtle)' }}>
-                      {tab === 'today' ? 'Nothing urgent for today. You are all caught up.' : 'No items flagged for this week.'}
+                      You are all caught up.
                     </p>
                   </div>
                 ) : (
-                  items.map((item, i) => (
-                    <BriefingRow key={i} item={item} isLast={i === items.length - 1} />
+                  sections.filter(s => s.rows.length > 0).map(section => (
+                    <div key={section.key}>
+                      <p style={{
+                        padding: 'var(--space-3) var(--space-5) var(--space-1)',
+                        fontSize: 'var(--text-xs)',
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                        color: 'var(--color-text-subtle)',
+                      }}>
+                        {section.label}
+                      </p>
+                      {section.rows.map((r, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center"
+                          style={{
+                            gap: 'var(--space-2-5)',
+                            padding: 'var(--space-2) var(--space-5)',
+                            borderBottom: '1px solid var(--color-border-subtle)',
+                          }}
+                        >
+                          <span style={{
+                            width: '0.4375rem',
+                            height: '0.4375rem',
+                            borderRadius: 'var(--radius-full)',
+                            background: dotColor(r.tone),
+                            flexShrink: 0,
+                          }} aria-hidden="true" />
+                          <span style={{ flex: 1, fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}>
+                            {r.text}
+                          </span>
+                          {r.verb && (
+                            <button
+                              type="button"
+                              onClick={() => go(r.to)}
+                              style={{
+                                flexShrink: 0,
+                                padding: 'var(--space-1) var(--space-2-5)',
+                                fontSize: 'var(--text-xs)',
+                                fontWeight: 600,
+                                color: 'var(--color-brand-dark)',
+                                background: 'var(--color-bg-secondary)',
+                                border: '1px solid var(--color-border)',
+                                borderRadius: 'var(--radius-leaf-sm)',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {r.verb}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   ))
                 )}
               </div>
             </>
           )}
 
-          {/* Footer: human-triggered refresh */}
+          {/* Footer: open full brief + human-triggered refresh */}
           <div
-            className="flex items-center justify-end"
+            className="flex items-center justify-between"
             style={{
               padding: 'var(--space-3) var(--space-5)',
               borderTop: '1px solid var(--color-border-subtle)',
@@ -245,14 +286,29 @@ export function BriefingTrigger() {
           >
             <button
               type="button"
-              onClick={() => void generate()}
+              onClick={() => go('overview')}
+              style={{
+                padding: 'var(--space-2) 0',
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--color-brand-dark)',
+                fontSize: 'var(--text-sm)',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Open full brief
+            </button>
+            <button
+              type="button"
+              onClick={() => void refresh()}
               disabled={generating}
               className="flex items-center justify-center"
               style={{
                 padding: 'var(--space-2) var(--space-3)',
-                background: data ? 'var(--color-bg-secondary)' : 'var(--color-brand)',
-                color: data ? 'var(--color-text)' : 'white',
-                border: data ? '1px solid var(--color-border)' : 'none',
+                background: 'var(--color-bg-secondary)',
+                color: 'var(--color-text)',
+                border: '1px solid var(--color-border)',
                 borderRadius: 'var(--radius-leaf-sm)',
                 fontSize: 'var(--text-sm)',
                 fontWeight: 600,
@@ -263,7 +319,7 @@ export function BriefingTrigger() {
               }}
             >
               <RefreshCw size={14} className={generating ? 'animate-spin' : ''} aria-hidden="true" />
-              {generating ? 'Refreshing...' : data ? 'Refresh briefing' : 'Generate briefing'}
+              {generating ? 'Refreshing...' : 'Refresh'}
             </button>
           </div>
         </div>
