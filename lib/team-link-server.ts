@@ -86,10 +86,27 @@ export async function linkTeamMemberOnSignIn(
           return claimed.length > 0
         },
 
+        // Correct a stale link. Compare-and-set on the OLD id so a concurrent
+        // correction cannot clobber a newer one. Only reached after a verified
+        // email match, so the caller owns this row.
+        relinkMember: async (teamMemberId, clerkUserId, staleClerkUserId) => {
+          const rewritten = await drizzle
+            .update(schema.teamMembers)
+            .set({ clerkUserId, updatedAt: new Date().toISOString() })
+            .where(and(
+              eq(schema.teamMembers.id, teamMemberId),
+              eq(schema.teamMembers.clerkUserId, staleClerkUserId),
+            ))
+            .returning({ id: schema.teamMembers.id })
+          return rewritten.length > 0
+        },
+
         recordOutcome: async (outcome) => {
-          if (outcome.outcome === 'linked') {
+          if (outcome.outcome === 'linked' || outcome.outcome === 'relinked') {
             await logAudit(drizzle as unknown as DB, {
-              action: 'team_member.login_linked',
+              action: outcome.outcome === 'relinked'
+                ? 'team_member.login_relinked'
+                : 'team_member.login_linked',
               userId,
               entityType: 'team_member',
               entityId: outcome.teamMemberId,

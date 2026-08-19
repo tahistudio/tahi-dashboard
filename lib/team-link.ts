@@ -17,8 +17,11 @@
  *     an admin already created. No self-service onboarding into the roster.
  *   - Verified email only, mirroring app/api/portal/accept-invite/route.ts. An
  *     unverified address can be attacker-controlled, so it can never claim a row.
- *   - Never overwrites a non-null clerkUserId. An already-claimed row is left
- *     exactly as it is.
+ *   - Corrects a stale non-null clerkUserId ONLY when the caller's Clerk-verified
+ *     primary email matches the row. Clerk guarantees a verified email is unique
+ *     per instance, so a stored id that differs is stale (e.g. seeded from a
+ *     different Clerk instance during a migration) and the verified-email match
+ *     authoritatively identifies the owner. This is a correction, not a hijack.
  *   - Two rows sharing an email links NEITHER. Guessing could hand the wrong
  *     scope to the wrong person; the caller is expected to leave a trail instead.
  *   - Lazy: the Clerk identity read and the email query only happen on the miss
@@ -42,10 +45,10 @@ export type TeamLinkOutcome =
   | 'no_match'
   /** More than one roster row carries this email. Nothing was linked. */
   | 'ambiguous'
-  /** The single match is already claimed by a different Clerk user. */
-  | 'claimed'
-  /** The row was claimed by this sign-in. */
+  /** The row was claimed by this sign-in (was unlinked). */
   | 'linked'
+  /** The row held a stale id and was corrected to this verified-email owner. */
+  | 'relinked'
   /** A concurrent request claimed the row first. Benign. */
   | 'lost_race'
 
@@ -77,6 +80,12 @@ export interface TeamLinkDeps {
    * concurrent sign-ins cannot both win. Returns true only if this call wrote.
    */
   linkMember: (teamMemberId: string, clerkUserId: string) => Promise<boolean>
+  /**
+   * Correct a stale link. MUST be a compare-and-set on the OLD (stale) id so a
+   * concurrent correction cannot clobber a newer one. Returns true only if this
+   * call wrote. Only reached after a Clerk-verified email match (ownership).
+   */
+  relinkMember: (teamMemberId: string, clerkUserId: string, staleClerkUserId: string) => Promise<boolean>
   /** Optional sink for outcomes worth an operator trail. */
   recordOutcome?: (result: TeamLinkResult) => Promise<void>
 }
@@ -92,7 +101,7 @@ const SERVICE_USER_ID = 'api-service'
 
 /** Outcomes an operator needs to see. The rest are normal steady state. */
 const TRAILED: ReadonlySet<TeamLinkOutcome> = new Set<TeamLinkOutcome>([
-  'linked', 'ambiguous', 'claimed',
+  'linked', 'relinked', 'ambiguous',
 ])
 
 function result(
@@ -114,7 +123,7 @@ export function normaliseEmail(raw: string | null | undefined): string | null {
 /** Verdict over the rows matching the caller's email. 'link' carries its row. */
 export type CandidateDecision =
   | { outcome: 'link'; teamMemberId: string }
-  | { outcome: 'claimed'; teamMemberId: string }
+  | { outcome: 'relink'; teamMemberId: string; staleClerkUserId: string }
   | { outcome: 'already_linked'; teamMemberId: string }
   | { outcome: 'no_match'; teamMemberId: null }
   | { outcome: 'ambiguous'; teamMemberId: null }
@@ -134,7 +143,8 @@ export function decideCandidate(
   const [only] = candidates
   if (only.clerkUserId === clerkUserId) return { outcome: 'already_linked', teamMemberId: only.id }
   if (only.clerkUserId !== null && only.clerkUserId !== '') {
-    return { outcome: 'claimed', teamMemberId: only.id }
+    // Stored id differs but the caller owns the verified email: correct it.
+    return { outcome: 'relink', teamMemberId: only.id, staleClerkUserId: only.clerkUserId }
   }
   return { outcome: 'link', teamMemberId: only.id }
 }
@@ -169,6 +179,9 @@ export async function resolveTeamLink(
   if (decision.outcome === 'link') {
     const wrote = await deps.linkMember(decision.teamMemberId, userId)
     outcome = wrote ? 'linked' : 'lost_race'
+  } else if (decision.outcome === 'relink') {
+    const wrote = await deps.relinkMember(decision.teamMemberId, userId, decision.staleClerkUserId)
+    outcome = wrote ? 'relinked' : 'lost_race'
   } else {
     outcome = decision.outcome
   }

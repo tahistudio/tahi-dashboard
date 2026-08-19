@@ -25,6 +25,7 @@ function deps(overrides: Partial<TeamLinkDeps> = {}) {
     loadVerifiedEmail: vi.fn(async () => ({ email: 'hire@tahi.studio', verified: true })),
     findMembersByEmail: vi.fn(async () => [] as TeamLinkCandidate[]),
     linkMember: vi.fn(async () => true),
+    relinkMember: vi.fn(async () => true),
     recordOutcome: vi.fn(async () => {}),
   }
   return { ...base, ...overrides }
@@ -62,9 +63,9 @@ describe('decideCandidate', () => {
     expect(out).toEqual({ outcome: 'ambiguous', teamMemberId: null })
   })
 
-  it('refuses a row already claimed by someone else', () => {
-    expect(decideCandidate([{ id: 'tm_1', email: 'a@b.c', clerkUserId: 'user_other' }], HIRE))
-      .toEqual({ outcome: 'claimed', teamMemberId: 'tm_1' })
+  it('relinks a row whose stored id is stale (verified-email owner)', () => {
+    expect(decideCandidate([{ id: 'tm_1', email: 'a@b.c', clerkUserId: 'user_stale' }], HIRE))
+      .toEqual({ outcome: 'relink', teamMemberId: 'tm_1', staleClerkUserId: 'user_stale' })
   })
 
   it('reports already_linked when the match is this very user', () => {
@@ -164,16 +165,32 @@ describe('resolveTeamLink', () => {
     expect(d.recordOutcome).not.toHaveBeenCalled()
   })
 
-  it('never steals a row already claimed by another Clerk user', async () => {
+  it('corrects a stale link for the verified-email owner (CAS on the old id)', async () => {
+    const relinkMember = vi.fn(async () => true)
     const d = deps({
       findMembersByEmail: vi.fn(async () => [
-        { id: 'tm_liam', email: 'hire@tahi.studio', clerkUserId: 'user_liam' },
+        { id: 'tm_liam', email: 'hire@tahi.studio', clerkUserId: 'user_stale' },
       ]),
+      relinkMember,
     })
     const res = await resolveTeamLink(d, { userId: HIRE, orgId: TAHI_ORG, tahiOrgId: TAHI_ORG })
-    expect(res.outcome).toBe('claimed')
+    expect(res.outcome).toBe('relinked')
+    expect(res.teamMemberId).toBe('tm_liam')
+    expect(relinkMember).toHaveBeenCalledWith('tm_liam', HIRE, 'user_stale')
     expect(d.linkMember).not.toHaveBeenCalled()
     expect(d.recordOutcome).toHaveBeenCalledTimes(1)
+  })
+
+  it('a lost re-link CAS race is benign, not a correction', async () => {
+    const d = deps({
+      findMembersByEmail: vi.fn(async () => [
+        { id: 'tm_liam', email: 'hire@tahi.studio', clerkUserId: 'user_stale' },
+      ]),
+      relinkMember: vi.fn(async () => false),
+    })
+    const res = await resolveTeamLink(d, { userId: HIRE, orgId: TAHI_ORG, tahiOrgId: TAHI_ORG })
+    expect(res.outcome).toBe('lost_race')
+    expect(d.recordOutcome).not.toHaveBeenCalled()
   })
 
   it('losing the compare-and-set race is benign, not a link', async () => {
