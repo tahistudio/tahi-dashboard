@@ -60,6 +60,20 @@ Prod check before starting: Liam + Staci both hold super_admin role rows, so den
 
 ---
 
+## Shipped 2026-08-18 (session 2) - pushed to main + staging, live-QA'd on staging
+
+- [x] V1 - Hide Messages entirely (nav removed both audiences, /messages redirects, code kept). Live-verified: gone from admin + client nav; /messages -> /overview. - 2026-08-18
+- [x] T1.18 - Team-member nav + page gating made real (adminOnly honoured, 6 leaky features mapped + guarded). - 2026-08-18
+- [x] T1.19 - Teammate-home calls feed org-scoped; docs card relabelled; duplicate super-admin email allowlists deleted (now server isSuperAdmin, live-verified Liam still sees Client view/Private mode). - 2026-08-18
+- [x] T2.5 (tasks) - Tasks correctness + My Work: data-contract bugs fixed (subtasks, blocked-by, progress, timer), dead detail page revived + deep-linkable, editable Status/Priority/Due/Assignee, My Work default. Live-verified on staging (My Work empty state, All tasks list, editable slide-over, Start timer). - 2026-08-18
+- [x] Requests correctness + privacy - scope-flag leak closed (detail + list + steps projections), Export CSV admin-gated, per-org numbering, client message identity, client file upload, Bulk Assign sets assigneeId, request->task requestId + Tasks panel, client Approve/Request-change on client_review (new portal PATCH whitelist). Admin side live-verified; client-portal privacy test-covered. - 2026-08-18
+
+### Follow-ups found during live staging QA (2026-08-18)
+
+- [ ] V1-FIX.1 - [FE] Client home "Message the team" CTA (components/tahi/overview/homes/client-home.tsx) now dead-ends since messaging is hidden - remove it or repoint to the request thread. Also audit remaining /messages links (clients/[id], settings/plan.tsx, notification-links message deep-link) - they redirect gracefully but should be cleaned for V1.
+- [ ] V1-QA.1 - [QA] Live-verify the client request DETAIL as a client: scope-flag pill absent, own messages show the client's name, Approve/Request-change banner on a client_review request. Needs a client-visible (non-internal) request in an impersonated org; set one to client_review first. Row-filtering confirmed unchanged in code; this is the last unverified client-facing piece.
+- [ ] V1-QA.2 - [QA] e2e specs (mobile.spec.ts, portal-flow.spec.ts) assert a Messages tab and will fail - update them for the V1 hide.
+
 ## Sprint T2 - The request platform (Tier 2, ~1.5 weeks)
 
 - [ ] T2.1 (C2.3/B3) - [BE/FE] **Portal invoice detail + real Pay.** GET /api/portal/invoices/[id]; detail page branches SWR on isAdmin (always 403s clients today); hosted_invoice_url column persisted from stripe-create + webhook; real Pay link with billing-portal session fallback.
