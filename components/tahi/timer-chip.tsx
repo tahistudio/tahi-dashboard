@@ -47,7 +47,7 @@ interface ActiveTimerResponse {
     lastPingAt: string
     notes: string | null
     targetTitle: string | null
-    targetType: 'request' | 'task' | 'org'
+    targetType: 'request' | 'task' | 'org' | 'general'
     elapsedSeconds: number
     elapsedHours: number
     isPaused: boolean
@@ -216,11 +216,12 @@ export function TimerChip() {
 
   // --- actions -------------------------------------------------------------
 
-  async function startTimer(source: TimerSource, id: string, confirmed = false) {
+  async function startTimer(source: TimerSource, id: string | null, confirmed = false) {
     setActing(true)
     try {
       const url = confirmed ? apiPath('/api/admin/timers?confirmed=true') : apiPath('/api/admin/timers')
       const body =
+        id === null ? { general: source === 'client' ? 'client' : source } :
         source === 'request' ? { requestId: id } :
         source === 'task' ? { taskId: id } :
         { orgId: id }
@@ -414,11 +415,11 @@ export function TimerChip() {
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: timer?.requestId ? 'space-between' : 'flex-end',
+                  justifyContent: timer?.targetType !== 'general' && timer?.requestId ? 'space-between' : 'flex-end',
                   gap: '0.5rem',
                 }}
               >
-                {timer?.requestId && (
+                {timer?.targetType !== 'general' && timer?.requestId && (
                   <Link
                     href={`/requests/${timer.requestId}`}
                     onClick={() => setOpen(false)}
@@ -518,7 +519,7 @@ function SourcePicker({
   loading: boolean
   query: string
   setQuery: (v: string) => void
-  onPick: (id: string) => void
+  onPick: (id: string | null) => void
   acting: boolean
 }) {
   const q = query.toLowerCase().trim()
@@ -605,6 +606,20 @@ function SourcePicker({
 
       {/* Results */}
       <div className="tt-list" role="list">
+        {!query && (
+          <button
+            type="button"
+            role="listitem"
+            className={'tt-opt tt-opt-none' + (acting && startingId === '__general' ? ' on' : '')}
+            onClick={() => { setStartingId('__general'); onPick(null) }}
+            disabled={acting}
+          >
+            <span className="tt-opt-r" aria-hidden="true" />
+            <span className="tt-opt-t">
+              None, general {source === 'request' ? 'requests' : source === 'task' ? 'tasks' : 'client'} time
+            </span>
+          </button>
+        )}
         {loading || items.length === 0 ? (
           <div className="tt-empty">{emptyText}</div>
         ) : (
