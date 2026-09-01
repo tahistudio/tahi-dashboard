@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import { eq, desc, like, or, and, ne, inArray, sql } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { dispatchDomainEvent } from '@/lib/events'
+import { INTERNAL_ORG_STATUS } from '@/lib/internal-org'
 
 // ── GET /api/admin/clients ──────────────────────────────────────────────────
 // Query params: ?status=active&plan=maintain&search=acme&page=1
@@ -64,6 +65,12 @@ export async function GET(req: NextRequest) {
   const includeProspects = url.searchParams.get('includeProspects') === '1'
   if (!includeProspects && status !== 'prospect') {
     conditions.push(ne(schema.organisations.status, 'prospect'))
+  }
+
+  // The internal studio org exists only so general time has somewhere to
+  // log. Never a client; excluded unless explicitly requested.
+  if (status !== INTERNAL_ORG_STATUS) {
+    conditions.push(ne(schema.organisations.status, INTERNAL_ORG_STATUS))
   }
 
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
