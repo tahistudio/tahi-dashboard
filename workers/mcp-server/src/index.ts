@@ -1358,10 +1358,11 @@ const TOOLS: ToolDef[] = [
 
   // ── Live time tracker ─────────────────────────────────────────────────
   tool('get_active_timer', "Get current user's active timer (null if none). Includes elapsed seconds + target title + paused state."),
-  tool('start_timer', 'Start a timer on a request, task, or client. Exactly one of requestId / taskId / orgId. If another timer is active, pass confirmed=true to auto-stop+log it first.', {
+  tool('start_timer', 'Start a timer on a request, task, or client. Exactly one of requestId / taskId / orgId / general. If another timer is active, pass confirmed=true to auto-stop+log it first.', {
     requestId: prop('string', 'Request to track'),
     taskId: prop('string', 'Task to track'),
     orgId: prop('string', 'Client org to track (use for client-direct work without a specific request)'),
+    general: prop('string', "Start a general timer with no request, task, or client. Time logs against the internal studio org.", { enum: ['request', 'task', 'client'] }),
     notes: prop('string', 'Running notes'),
     confirmed: prop('boolean', 'Auto-stop+log existing active timer'),
   }),
