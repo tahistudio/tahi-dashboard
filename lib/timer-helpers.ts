@@ -7,6 +7,7 @@
 
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { INTERNAL_ORG_ID } from '@/lib/internal-org'
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 /**
@@ -47,6 +48,25 @@ export function formatElapsed(seconds: number): string {
 export function isStaleTimer(lastPingAt: string, thresholdMs = 2 * 60 * 1000, now: Date = new Date()): boolean {
   const last = new Date(lastPingAt).getTime()
   return now.getTime() - last > thresholdMs
+}
+
+export const GENERAL_KINDS = ['request', 'task', 'client'] as const
+export type GeneralKind = (typeof GENERAL_KINDS)[number]
+
+const GENERAL_LABELS: Record<GeneralKind, string> = {
+  request: 'General requests time',
+  task: 'General tasks time',
+  client: 'General client time',
+}
+
+/** Plain-words note for a general (no client) timer, by picker kind. */
+export function generalTimerNotes(kind: GeneralKind): string {
+  return GENERAL_LABELS[kind]
+}
+
+/** True only when a timer points at the internal org and nothing else. */
+export function isGeneralTimer(t: { requestId: string | null; taskId: string | null; orgId: string | null }): boolean {
+  return !t.requestId && !t.taskId && t.orgId === INTERNAL_ORG_ID
 }
 
 /**
