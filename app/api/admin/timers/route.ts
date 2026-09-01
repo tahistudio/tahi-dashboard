@@ -3,8 +3,11 @@
  *
  *   GET  → current user's active timer (null if none). Includes computed
  *          elapsedSeconds + the target's title for convenience.
- *   POST → start a timer. Body : { requestId?, taskId?, orgId?, notes? }.
- *          Exactly one of requestId / taskId / orgId required.
+ *   POST → start a timer. Body : { requestId?, taskId?, orgId?, general?, notes? }.
+ *          Exactly one of requestId / taskId / orgId / general required.
+ *          `general` is 'request' | 'task' | 'client' (the picker tab the
+ *          "None" row was clicked from) and logs against the hidden
+ *          internal studio org (see lib/internal-org.ts).
  *          If the user already has an active timer :
  *            - without `?confirmed=true` : respond 409 with the current
  *              timer so the UI can prompt "stop that and switch?"
@@ -20,7 +23,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
-import { elapsedSeconds, secondsToHours, stopAndLogTimer } from '@/lib/timer-helpers'
+import { elapsedSeconds, secondsToHours, stopAndLogTimer, GENERAL_KINDS, generalTimerNotes, isGeneralTimer, type GeneralKind } from '@/lib/timer-helpers'
+import { ensureInternalOrg } from '@/lib/internal-org'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -41,8 +45,11 @@ export async function GET(req: NextRequest) {
 
   // Join the target title (request, task, or client).
   let targetTitle: string | null = null
-  let targetType: 'request' | 'task' | 'org' = 'request'
-  if (timer.requestId) {
+  let targetType: 'request' | 'task' | 'org' | 'general' = 'request'
+  if (isGeneralTimer(timer)) {
+    targetTitle = timer.notes ?? 'General time'
+    targetType = 'general'
+  } else if (timer.requestId) {
     const [r] = await drizzle
       .select({ title: schema.requests.title, requestNumber: schema.requests.requestNumber })
       .from(schema.requests)
@@ -90,16 +97,19 @@ export async function POST(req: NextRequest) {
     requestId?: string | null
     taskId?: string | null
     orgId?: string | null
+    general?: GeneralKind | null
     notes?: string | null
   } | null
 
-  // Exactly one of requestId / taskId / orgId is required.
   if (!body) {
     return NextResponse.json({ error: 'Body required' }, { status: 400 })
   }
-  const targetCount = [body.requestId, body.taskId, body.orgId].filter(Boolean).length
+  if (body.general && !GENERAL_KINDS.includes(body.general)) {
+    return NextResponse.json({ error: 'general must be request, task, or client' }, { status: 400 })
+  }
+  const targetCount = [body.requestId, body.taskId, body.orgId, body.general].filter(Boolean).length
   if (targetCount !== 1) {
-    return NextResponse.json({ error: 'Exactly one of requestId, taskId, or orgId required' }, { status: 400 })
+    return NextResponse.json({ error: 'Exactly one of requestId, taskId, orgId, or general required' }, { status: 400 })
   }
 
   const { searchParams } = new URL(req.url)
@@ -138,6 +148,8 @@ export async function POST(req: NextRequest) {
       .limit(1)
     if (!o) return NextResponse.json({ error: 'Client not found' }, { status: 404 })
     targetOrgId = body.orgId
+  } else if (body.general) {
+    targetOrgId = await ensureInternalOrg(drizzle)
   }
 
   // Check for existing timer.
@@ -167,12 +179,12 @@ export async function POST(req: NextRequest) {
       userId,
       requestId: body.requestId ?? null,
       taskId: body.taskId ?? null,
-      orgId: body.orgId ?? null,
+      orgId: body.general ? targetOrgId : (body.orgId ?? null),
       startedAt: now,
       pausedAt: null,
       pausedSeconds: 0,
       lastPingAt: now,
-      notes: body.notes ?? null,
+      notes: body.general ? generalTimerNotes(body.general) : (body.notes ?? null),
     })
   } catch (err) {
     // Surface the underlying SQL / Drizzle error so the client toast
