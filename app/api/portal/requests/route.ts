@@ -2,7 +2,8 @@ import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, ne, sql, inArray } from 'drizzle-orm'
+import { eq, desc, asc, and, ne, sql, inArray, notInArray } from 'drizzle-orm'
+import { getPlanLabel } from '@/lib/plan-utils'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 import { dispatchDomainEvent } from '@/lib/events'
 import { loadRequestParticipants, CLIENT_VISIBLE_TEAM_ROLES } from '@/lib/request-participants'
@@ -114,6 +115,35 @@ export async function GET(req: NextRequest) {
   })
 }
 
+// ── Queue placement ──────────────────────────────────────────────────────────
+//
+// Clients never set priority. They say where the new request sits against the
+// work already moving, and this route maps that onto the two columns the queue
+// actually reads:
+//
+//   placement   priority    queue position
+//   ---------   ---------   ----------------------------------------------
+//   queue       standard    appended after everything already open
+//   top         high        moved to the front (0), everything else bumped
+//   replace     high        moved to the front (0), everything else bumped
+//
+// 'replace' does NOT pause the in-flight build or move a track: swapping what
+// the studio is building is a studio decision, not a client one. It records the
+// ask (high priority, front of the queue, `placement` on the domain event) and
+// the confirmation screen tells the client the swap will be confirmed. Statuses
+// that are finished or gone never take part in the ordering.
+const PLACEMENTS = ['queue', 'top', 'replace'] as const
+type Placement = (typeof PLACEMENTS)[number]
+
+/** Statuses that no longer hold a place in the queue. */
+const CLOSED_STATUSES = ['delivered', 'archived', 'cancelled']
+
+function parsePlacement(value: unknown): Placement | null {
+  return typeof value === 'string' && (PLACEMENTS as readonly string[]).includes(value)
+    ? value as Placement
+    : null
+}
+
 // ── POST /api/portal/requests ────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   // getPortalAuth resolves the caller's Clerk org -> the D1 organisations.id, so
@@ -130,9 +160,10 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json() as {
     title?: string; type?: string; category?: string; description?: string
-    dueDate?: string | null; formResponses?: string
+    dueDate?: string | null; formResponses?: string; placement?: string
   }
   const { title, type, category, description, dueDate, formResponses } = body
+  const placement = parsePlacement(body.placement)
 
   if (!title?.trim()) {
     return NextResponse.json({ error: 'Request title is required' }, { status: 400 })
@@ -148,6 +179,41 @@ export async function POST(req: NextRequest) {
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 
+  // Resolve the placement into a priority and a queue position before the
+  // insert. Without a placement nothing changes: standard priority at the
+  // column default, exactly as this route behaved before.
+  let priority = 'standard'
+  let queueOrder = 0
+  if (placement) {
+    priority = placement === 'queue' ? 'standard' : 'high'
+
+    if (placement === 'queue') {
+      const openRows = await drizzle2
+        .select({ queueOrder: schema.requests.queueOrder })
+        .from(schema.requests)
+        .where(and(
+          eq(schema.requests.orgId, orgId),
+          eq(schema.requests.isInternal, false),
+          notInArray(schema.requests.status, CLOSED_STATUSES),
+        ))
+      const highest = openRows.reduce((max, r) => Math.max(max, r.queueOrder ?? 0), -1)
+      queueOrder = highest + 1
+    } else {
+      // Front of the queue. Bumping every other open row (rather than picking
+      // a smaller number) keeps the ordering correct even where an older row
+      // carries a null queue_order, which sorts first in SQLite. updated_at is
+      // deliberately left alone: queue order is not a change to the work.
+      await drizzle2.run(sql`
+        UPDATE requests
+        SET queue_order = COALESCE(queue_order, 0) + 1
+        WHERE org_id = ${orgId}
+          AND is_internal = 0
+          AND status NOT IN ('delivered', 'archived', 'cancelled')
+      `)
+      queueOrder = 0
+    }
+  }
+
   // Atomically assign the next request number via a subquery in the INSERT
   // to avoid race conditions between concurrent request creations. The MAX is
   // scoped to this org so each client sees a private 1,2,3 sequence and never
@@ -155,7 +221,7 @@ export async function POST(req: NextRequest) {
   await drizzle2.run(sql`
     INSERT INTO requests (
       id, org_id, title, type, category, description, due_date, form_responses,
-      status, priority, submitted_by_id, is_internal,
+      status, priority, queue_order, submitted_by_id, is_internal,
       revision_count, max_revisions, request_number, created_at, updated_at
     ) VALUES (
       ${id},
@@ -167,7 +233,8 @@ export async function POST(req: NextRequest) {
       ${dueDate ?? null},
       ${formResponses ?? null},
       'submitted',
-      'standard',
+      ${priority},
+      ${queueOrder},
       ${userId},
       0,
       0,
@@ -191,8 +258,54 @@ export async function POST(req: NextRequest) {
       status: 'submitted',
       isInternal: 0,
       source: 'portal',
+      // The client's own words about urgency, so an automation or a Slack
+      // ping can say "they asked us to replace what is in progress".
+      placement: placement ?? 'queue',
     },
   })
 
-  return NextResponse.json({ id }, { status: 201 })
+  if (!placement) {
+    return NextResponse.json({ id }, { status: 201 })
+  }
+
+  // With a placement the caller is the confirmation screen, which needs the
+  // request number, where the request landed in the queue, and whether this
+  // client is on a retainer at all.
+  const [row] = await drizzle2
+    .select({ requestNumber: schema.requests.requestNumber })
+    .from(schema.requests)
+    .where(eq(schema.requests.id, id))
+    .limit(1)
+
+  // Position among the requests still waiting to be picked up, in the order
+  // the capacity view reads them. A null queue_order sorts as zero so an older
+  // row cannot claim a place it does not hold.
+  const waiting = await drizzle2
+    .select({ id: schema.requests.id })
+    .from(schema.requests)
+    .where(and(
+      eq(schema.requests.orgId, orgId),
+      eq(schema.requests.isInternal, false),
+      eq(schema.requests.status, 'submitted'),
+    ))
+    .orderBy(asc(sql`COALESCE(queue_order, 0)`), asc(schema.requests.createdAt))
+  const index = waiting.findIndex(r => r.id === id)
+
+  const [sub] = await drizzle2
+    .select({ planType: schema.subscriptions.planType })
+    .from(schema.subscriptions)
+    .where(and(
+      eq(schema.subscriptions.orgId, orgId),
+      eq(schema.subscriptions.status, 'active'),
+    ))
+    .limit(1)
+
+  return NextResponse.json({
+    id,
+    requestNumber: row?.requestNumber ?? null,
+    placement,
+    queuePosition: index >= 0 ? index + 1 : null,
+    planLabel: sub ? getPlanLabel(sub.planType) : null,
+    retainer: !!sub,
+  }, { status: 201 })
 }

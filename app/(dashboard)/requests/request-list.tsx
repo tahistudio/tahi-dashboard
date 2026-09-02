@@ -50,6 +50,7 @@ import { RequestsTimeline } from '@/components/tahi/requests/requests-timeline'
 import { RequestsViewSwitcher } from '@/components/tahi/requests/requests-view-switcher'
 import { RequestsHeaderActions } from '@/components/tahi/requests/requests-header-actions'
 import { buildFilterChips, type RailOption } from '@/components/tahi/requests/requests-rail'
+import { CapacityStrip } from '@/components/tahi/requests/capacity-strip'
 import {
   RequestsRailLayout,
   useRequestsRailState,
@@ -1331,6 +1332,16 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
               onDone={() => { setSelectedIds(new Set()); mutateRequests() }}
             />
           </Card>
+        )}
+
+        {/* Capacity lanes. Client audience only, and only on the rail path,
+            so a real client keeps the page they have today until the port is
+            signed off. Renders nothing for a client with no active retainer. */}
+        {railOn && !isAdmin && (
+          <CapacityStrip
+            requests={requests}
+            onOpen={(id) => { router.push(`/requests/${id}`) }}
+          />
         )}
 
         {/* Content area */}

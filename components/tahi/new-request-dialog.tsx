@@ -1,11 +1,21 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { apiPath } from '@/lib/api'
-import { X, Loader2, Zap, CheckCircle2, Lock, Layers, AlignLeft } from 'lucide-react'
+import {
+  X, Loader2, Zap, CheckCircle2, Lock, Layers, AlignLeft,
+  Sparkles, ChevronRight, Check, Inbox, ArrowUp, ArrowLeftRight,
+} from 'lucide-react'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { useToast } from '@/components/tahi/toast'
+import { usePermissions } from '@/components/tahi/permissions-context'
+import { AiRequestWizard } from '@/components/tahi/ai-request-wizard'
+import {
+  suggestRequestSize,
+  sizeToRequestType,
+  type SizeSuggestion,
+} from '@/lib/request-size-suggestion'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -39,6 +49,48 @@ interface NewRequestDialogProps {
    *  skip the default navigation to /requests/[id] — the caller typically
    *  wants to stay on the parent page and refresh. */
   onCreated?: (newRequestId: string) => void
+  /** Pre-fills the form from an AI-authored draft. Marks the size suggestion
+   *  as AI-attributed ("Suggested by AI assist: ..."). */
+  aiDraft?: { title?: string; description?: string; category?: string } | null
+}
+
+/** Where a client wants their new request to sit against work already moving. */
+type Placement = 'queue' | 'top' | 'replace'
+
+const PLACEMENT_OPTIONS: Array<{
+  value: Placement
+  label: string
+  sub: string
+  icon: typeof Inbox
+}> = [
+  {
+    value: 'queue',
+    label: 'Add to my queue',
+    sub: 'Slots in after anything ahead of it',
+    icon: Inbox,
+  },
+  {
+    value: 'top',
+    label: 'Bump to the top',
+    sub: 'Do this one next, before the rest',
+    icon: ArrowUp,
+  },
+  {
+    value: 'replace',
+    label: 'Replace what is in progress',
+    sub: 'Pause the current build and start this now',
+    icon: ArrowLeftRight,
+  },
+]
+
+/** What the portal POST hands back once a placement was sent. */
+interface CreatedSummary {
+  id: string
+  requestNumber: number | null
+  placement: Placement | null
+  queuePosition: number | null
+  planLabel: string | null
+  retainer: boolean
 }
 
 const REQUEST_TYPES = [
@@ -72,11 +124,17 @@ const CATEGORIES = [
 
 export function NewRequestDialog({
   open, onClose, isAdmin, canUseLargeTrack = true, defaultOrgId,
-  parentRequestId, forceOrgId, onCreated,
+  parentRequestId, forceOrgId, onCreated, aiDraft,
 }: NewRequestDialogProps) {
   const isSubRequest = !!parentRequestId
   const router = useRouter()
   const { showToast } = useToast()
+  // The ported dialog (AI entry, size as a suggestion, queue placement,
+  // confirmation screen) is Liam and Staci only while it beds in. Everyone
+  // else, real clients included, keeps the dialog they have today. The one
+  // exception is the team hint line under the size control, which is purely
+  // additive and ships for every team user.
+  const { isSuperAdmin } = usePermissions()
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [createAnother, setCreateAnother] = useState(false)
@@ -109,6 +167,21 @@ export function NewRequestDialog({
   const [startDate, setStartDate] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [estimatedHours, setEstimatedHours] = useState('')
+
+  // ── Ported dialog state (super-admin path) ────────────────────────────────
+  // Client audience: where the request sits against work already moving.
+  const [placement, setPlacement] = useState<Placement>('queue')
+  // Client audience: the size control stays hidden behind the suggestion
+  // until the person opens Change.
+  const [sizeChangeOpen, setSizeChangeOpen] = useState(false)
+  // True once the brief was drafted by the AI assist, which the chip credits.
+  const [aiDrafted, setAiDrafted] = useState(false)
+  // The AI wizard replaces the panel while it is open, matching the
+  // prototype's form / ai / done views.
+  const [aiOpen, setAiOpen] = useState(false)
+  // Set on a successful client submit so the confirmation screen replaces
+  // the form instead of navigating away.
+  const [created, setCreated] = useState<CreatedSummary | null>(null)
 
   // Intake form questions (portal only)
   interface FormQuestion {
@@ -188,6 +261,11 @@ export function NewRequestDialog({
       setError(null)
       setSuccessMessage(null)
       setCreateAnother(false)
+      setPlacement('queue')
+      setSizeChangeOpen(false)
+      setAiDrafted(false)
+      setAiOpen(false)
+      setCreated(null)
     }
   }, [open])
 
@@ -197,6 +275,39 @@ export function NewRequestDialog({
       setType('small_task')
     }
   }, [isAdmin, selectedClient?.planType, type])
+
+  // ── Size suggestion ───────────────────────────────────────────────────────
+  // Whether a multi-day track is on the table at all. Admin reads it off the
+  // selected client's plan, the portal off the prop its page resolved.
+  const largeAllowed = isAdmin ? selectedClient?.planType !== 'maintain' : canUseLargeTrack
+  const suggestion: SizeSuggestion = useMemo(
+    () => suggestRequestSize({
+      brief: description,
+      category,
+      canUseLargeTrack: largeAllowed,
+      fromAi: aiDrafted,
+    }),
+    [description, category, largeAllowed, aiDrafted],
+  )
+  // Clients see the suggestion instead of the control until they open Change.
+  const clientSuggestion = !isAdmin && isSuperAdmin
+  const suggestionShowing = clientSuggestion && !sizeChangeOpen
+  // While the suggestion is showing it drives the submitted type, so what the
+  // chip says and what we post can never drift apart.
+  useEffect(() => {
+    if (!suggestionShowing) return
+    const next = sizeToRequestType(suggestion.size)
+    setType(prev => (prev === next ? prev : next))
+  }, [suggestionShowing, suggestion.size])
+
+  // An AI-authored draft pre-fills the form and marks the suggestion as its own.
+  useEffect(() => {
+    if (!open || !aiDraft) return
+    if (aiDraft.title) setTitle(aiDraft.title)
+    if (aiDraft.description) setDescription(aiDraft.description)
+    if (aiDraft.category) setCategory(aiDraft.category)
+    setAiDrafted(true)
+  }, [open, aiDraft])
 
   async function handleSubmit(e: React.FormEvent, saveAndCreateAnother = false) {
     e.preventDefault()
@@ -240,6 +351,9 @@ export function NewRequestDialog({
         : {
             title: title.trim(), type, category, description, dueDate: dueDate || null,
             formResponses: Object.keys(formResponses).length > 0 ? JSON.stringify(formResponses) : undefined,
+            // Clients set placement, never priority. The route maps it onto
+            // priority plus a queue position and hands back where it landed.
+            ...(clientSuggestion ? { placement } : {}),
           }
 
       const res = await fetch(url, {
@@ -254,9 +368,31 @@ export function NewRequestDialog({
         return
       }
 
-      const data = await res.json() as { id: string }
+      const data = await res.json() as {
+        id: string
+        requestNumber?: number | null
+        placement?: Placement | null
+        queuePosition?: number | null
+        planLabel?: string | null
+        retainer?: boolean
+      }
 
       showToast('Request created successfully')
+
+      // Client audience on the ported path lands on a confirmation screen
+      // showing where the request sits in their queue, rather than being
+      // dropped straight onto the request.
+      if (clientSuggestion && !saveAndCreateAnother) {
+        setCreated({
+          id: data.id,
+          requestNumber: data.requestNumber ?? null,
+          placement: data.placement ?? placement,
+          queuePosition: data.queuePosition ?? null,
+          planLabel: data.planLabel ?? null,
+          retainer: data.retainer ?? false,
+        })
+        return
+      }
 
       if (saveAndCreateAnother) {
         // Reset form but keep client and category pre-selected
@@ -283,6 +419,45 @@ export function NewRequestDialog({
   }
 
   if (!open) return null
+
+  // The AI assist takes over the whole surface, exactly as it does in the
+  // prototype: the form is still mounted underneath and comes back on close.
+  if (aiOpen) {
+    return (
+      <AiRequestWizard
+        open
+        onClose={() => setAiOpen(false)}
+        onRequestsCreated={() => { setAiOpen(false); onClose() }}
+        context={isAdmin
+          ? { orgId: clientOrgId || undefined, speaker: 'admin' }
+          : { speaker: 'client' }}
+        wizardEndpoint={isAdmin ? '/api/admin/ai/request-wizard' : '/api/portal/ai/request-wizard'}
+        submitEndpoint={isAdmin ? '/api/admin/requests' : '/api/portal/requests'}
+        onDraftToForm={(draft) => {
+          setTitle(draft.title)
+          setDescription(draft.description)
+          setCategory(draft.category)
+          // The wizard's vocabulary is wider than the two sizes the dialog
+          // offers, so anything bigger than a small task lands on large.
+          setType(draft.type === 'large_task' || draft.type === 'new_feature' ? 'large_task' : 'small_task')
+          setAiDrafted(true)
+          setSizeChangeOpen(false)
+          setAiOpen(false)
+          showToast('Draft ready. Review it below.')
+        }}
+      />
+    )
+  }
+
+  // Client confirmation: where the request landed, before anything else.
+  if (created) {
+    return (
+      <RequestConfirmation
+        created={created}
+        onDone={() => { onCreated?.(created.id); onClose() }}
+      />
+    )
+  }
 
   return (
     <>
@@ -366,6 +541,15 @@ export function NewRequestDialog({
           style={{ flex: 1, overflowY: 'auto', padding: '1.5rem' }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+
+            {/* AI assist entry. Opens the existing wizard over the form. */}
+            {isSuperAdmin && !isSubRequest && (
+              <AiAssistCard
+                rebuild={aiDrafted}
+                isAdmin={isAdmin}
+                onOpen={() => setAiOpen(true)}
+              />
+            )}
 
             {/* Sub-request indicator — locks client to parent's org */}
             {isSubRequest && (
@@ -474,8 +658,18 @@ export function NewRequestDialog({
             )}
 
             {/* Type tiles: only visible for retainer plans (maintain/scale) */}
-            {showTrackSelector && (
-            <FieldGroup label="Task size">
+            {showTrackSelector && suggestionShowing && (
+              <FieldGroup label="Size">
+                <SizeSuggestionChip
+                  suggestion={suggestion}
+                  canChange={largeAllowed}
+                  onChange={() => setSizeChangeOpen(true)}
+                />
+              </FieldGroup>
+            )}
+
+            {showTrackSelector && !suggestionShowing && (
+            <FieldGroup label={clientSuggestion ? 'Size' : 'Task size'}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.625rem' }}>
                 {REQUEST_TYPES.map(t => {
                   // Block large tasks for maintain plans - for both admin and portal
@@ -563,6 +757,22 @@ export function NewRequestDialog({
                   )
                 })}
               </div>
+              {/* Client audience: a way back to the suggestion. */}
+              {clientSuggestion && (
+                <QuietLink onClick={() => setSizeChangeOpen(false)}>Use suggestion</QuietLink>
+              )}
+              {/* Team audience: the same suggestion as a hint line. Additive,
+                  so it ships for every team user rather than behind the gate. */}
+              {isAdmin && (
+                <p style={{
+                  fontSize: '0.75rem',
+                  color: 'var(--color-text-subtle)',
+                  margin: '0.375rem 0 0',
+                  lineHeight: 1.45,
+                }}>
+                  {suggestion.hint}
+                </p>
+              )}
             </FieldGroup>
             )}
 
@@ -641,6 +851,28 @@ export function NewRequestDialog({
                   />
                 </FieldGroup>
               </div>
+            )}
+
+            {/* Queue placement (client audience). Clients never set priority;
+                they say where the work sits against everything already
+                moving, and the route maps that onto priority + position. */}
+            {clientSuggestion && (
+              <FieldGroup label="When would you like it?">
+                <div
+                  role="radiogroup"
+                  aria-label="When would you like it?"
+                  style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}
+                >
+                  {PLACEMENT_OPTIONS.map(o => (
+                    <PlacementOption
+                      key={o.value}
+                      option={o}
+                      selected={placement === o.value}
+                      onSelect={() => setPlacement(o.value)}
+                    />
+                  ))}
+                </div>
+              </FieldGroup>
             )}
 
             {/* Due date (portal users) */}
@@ -865,6 +1097,393 @@ export function NewRequestDialog({
               {isAdmin ? 'Create request' : 'Submit request'}
             </button>
           </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+// ── AI assist entry ────────────────────────────────────────────────────────────
+
+/** The card at the top of the form that hands over to the AI wizard. */
+function AiAssistCard({
+  rebuild, isAdmin, onOpen,
+}: {
+  rebuild: boolean
+  isAdmin: boolean
+  onOpen: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="tahi-focus-ring"
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'auto 1fr auto',
+        alignItems: 'center',
+        columnGap: '0.75rem',
+        width: '100%',
+        minHeight: '2.75rem',
+        padding: '0.75rem 0.875rem',
+        textAlign: 'left',
+        borderRadius: 'var(--radius-card)',
+        border: '1px solid var(--color-brand-100)',
+        background: 'var(--color-brand-50)',
+        cursor: 'pointer',
+        transition: 'border-color 0.15s, background 0.15s',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.borderColor = 'var(--color-brand)'
+        e.currentTarget.style.background = 'var(--color-brand-100)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.borderColor = 'var(--color-brand-100)'
+        e.currentTarget.style.background = 'var(--color-brand-50)'
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '2rem',
+          height: '2rem',
+          borderRadius: 'var(--radius-leaf-sm)',
+          background: 'var(--color-brand)',
+          color: 'var(--color-bg)',
+        }}
+      >
+        <Sparkles size={17} />
+      </span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-brand-dark)' }}>
+          {rebuild ? 'Rebuild with AI' : 'Build with AI'}
+        </span>
+        <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem', lineHeight: 1.4 }}>
+          {isAdmin
+            ? 'Draft the title and brief from a few answers.'
+            : 'Not sure how to word it? We will ask a few questions.'}
+        </span>
+      </span>
+      <ChevronRight size={17} aria-hidden="true" style={{ color: 'var(--color-brand)' }} />
+    </button>
+  )
+}
+
+// ── Size suggestion ────────────────────────────────────────────────────────────
+
+/** The chip a client sees instead of the size control, with the quiet link
+ *  that reveals the control when the suggestion is wrong. */
+function SizeSuggestionChip({
+  suggestion, canChange, onChange,
+}: {
+  suggestion: SizeSuggestion
+  canChange: boolean
+  onChange: () => void
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      <span style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        alignSelf: 'flex-start',
+        gap: '0.375rem',
+        padding: '0.375rem 0.75rem',
+        borderRadius: 'var(--radius-full)',
+        border: '1px solid var(--color-border-subtle)',
+        background: 'var(--color-brand-50)',
+        color: 'var(--color-brand-dark)',
+        fontSize: '0.75rem',
+        fontWeight: 600,
+      }}>
+        {suggestion.chipLabel}
+      </span>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '0.625rem',
+        flexWrap: 'wrap',
+      }}>
+        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', lineHeight: 1.45 }}>
+          {suggestion.helper}
+        </span>
+        {canChange && <QuietLink onClick={onChange}>Change</QuietLink>}
+      </div>
+    </div>
+  )
+}
+
+/** A quiet text link. 44px of touch reach without 44px of ink. */
+function QuietLink({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="tahi-focus-ring"
+      style={{
+        position: 'relative',
+        alignSelf: 'flex-start',
+        margin: 0,
+        padding: '0.625rem 0',
+        border: 'none',
+        background: 'none',
+        color: 'var(--color-brand-dark)',
+        fontSize: '0.75rem',
+        fontWeight: 600,
+        cursor: 'pointer',
+        flexShrink: 0,
+        borderRadius: 'var(--radius-button)',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline' }}
+      onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none' }}
+    >
+      {children}
+    </button>
+  )
+}
+
+// ── Queue placement ────────────────────────────────────────────────────────────
+
+/** One placement option. Icon tile, text block, and check share one centre
+ *  line; the two text lines share a left edge. */
+function PlacementOption({
+  option, selected, onSelect,
+}: {
+  option: (typeof PLACEMENT_OPTIONS)[number]
+  selected: boolean
+  onSelect: () => void
+}) {
+  const Icon = option.icon
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      className="tahi-focus-ring"
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'auto 1fr auto',
+        alignItems: 'center',
+        columnGap: '0.75rem',
+        width: '100%',
+        minHeight: '2.75rem',
+        padding: '0.75rem 0.875rem',
+        textAlign: 'left',
+        borderRadius: 'var(--radius-card)',
+        border: `1px solid ${selected ? 'var(--color-brand)' : 'var(--color-border)'}`,
+        background: selected ? 'var(--color-brand-50)' : 'var(--color-bg)',
+        cursor: 'pointer',
+        transition: 'border-color 0.15s, background 0.15s',
+      }}
+      onMouseEnter={e => {
+        if (!selected) {
+          e.currentTarget.style.borderColor = 'var(--color-brand-light)'
+          e.currentTarget.style.background = 'var(--color-bg-secondary)'
+        }
+      }}
+      onMouseLeave={e => {
+        if (!selected) {
+          e.currentTarget.style.borderColor = 'var(--color-border)'
+          e.currentTarget.style.background = 'var(--color-bg)'
+        }
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '2rem',
+          height: '2rem',
+          borderRadius: 'var(--radius-leaf-sm)',
+          background: selected ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
+          color: selected ? 'var(--color-bg)' : 'var(--color-text-muted)',
+        }}
+      >
+        <Icon size={17} />
+      </span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{
+          display: 'block',
+          fontSize: '0.8125rem',
+          fontWeight: 600,
+          lineHeight: 1.3,
+          color: selected ? 'var(--color-brand-dark)' : 'var(--color-text)',
+        }}>
+          {option.label}
+        </span>
+        <span style={{
+          display: 'block',
+          fontSize: '0.6875rem',
+          lineHeight: 1.35,
+          marginTop: '0.125rem',
+          color: 'var(--color-text-subtle)',
+        }}>
+          {option.sub}
+        </span>
+      </span>
+      <span
+        aria-hidden="true"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '1.25rem',
+          height: '1.25rem',
+          borderRadius: 'var(--radius-full)',
+          border: `1px solid ${selected ? 'var(--color-brand)' : 'var(--color-border)'}`,
+          background: selected ? 'var(--color-brand)' : 'transparent',
+          color: 'var(--color-bg)',
+        }}
+      >
+        {selected && <Check size={13} strokeWidth={3} />}
+      </span>
+    </button>
+  )
+}
+
+// ── Confirmation ───────────────────────────────────────────────────────────────
+
+/** What a client sees the moment a request lands: the number, what happens
+ *  next, and where it sits in their queue. */
+function RequestConfirmation({ created, onDone }: { created: CreatedSummary; onDone: () => void }) {
+  const nextLine =
+    created.placement === 'replace'
+      ? 'You have asked us to start this ahead of the current build, so we will confirm the swap with you shortly.'
+      : created.placement === 'top'
+        ? 'It has jumped to the top of your queue.'
+        : 'You will see every step right here, and we will message you the moment there is something to look at.'
+  const position = created.queuePosition
+  const showQueue = created.retainer && created.placement !== 'replace' && position != null
+
+  return (
+    <>
+      <div
+        style={{
+          position: 'fixed', inset: 0,
+          background: 'rgba(0,0,0,0.4)',
+          backdropFilter: 'blur(2px)',
+          zIndex: 60,
+        }}
+        onClick={onDone}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-request-confirm-title"
+        style={{
+          position: 'fixed',
+          top: 0, right: 0, bottom: 0,
+          width: '100%',
+          maxWidth: '32.5rem',
+          background: 'var(--color-bg)',
+          boxShadow: 'var(--shadow-lg)',
+          zIndex: 70,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ flex: 1, overflowY: 'auto', padding: '2rem 1.5rem' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '3.25rem',
+            height: '3.25rem',
+            borderRadius: 'var(--radius-leaf)',
+            background: 'var(--color-brand-50)',
+            color: 'var(--color-brand)',
+          }}>
+            <CheckCircle2 size={28} />
+          </div>
+          <h2
+            id="new-request-confirm-title"
+            style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--color-text)', margin: '1rem 0 0' }}
+          >
+            Your request is in
+          </h2>
+          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', margin: '0.5rem 0 0', lineHeight: 1.55 }}>
+            {created.requestNumber != null
+              ? `We have it, request #${created.requestNumber}. ${nextLine}`
+              : `We have it. ${nextLine}`}
+          </p>
+
+          {showQueue && (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'auto 1fr',
+              alignItems: 'center',
+              columnGap: '0.875rem',
+              marginTop: '1.25rem',
+              padding: '0.875rem 1rem',
+              borderRadius: 'var(--radius-card)',
+              border: '1px solid var(--color-border-subtle)',
+              background: 'var(--color-bg-secondary)',
+            }}>
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '2.25rem',
+                height: '2.25rem',
+                borderRadius: 'var(--radius-full)',
+                background: 'var(--color-brand)',
+                color: 'var(--color-bg)',
+                fontSize: '0.875rem',
+                fontWeight: 700,
+              }}>
+                {position}
+              </span>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>
+                  {position === 1 ? 'Next up in your queue' : `Position ${position} in your queue`}
+                </span>
+                {created.planLabel && (
+                  <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
+                    {`Your ${created.planLabel} plan pulls the next one in as a track frees up.`}
+                  </span>
+                )}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          padding: '1rem 1.5rem',
+          paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))',
+          borderTop: '1px solid var(--color-border-subtle)',
+          background: 'var(--color-bg-secondary)',
+          flexShrink: 0,
+        }}>
+          <button
+            type="button"
+            onClick={onDone}
+            className="tahi-focus-ring"
+            style={{
+              minHeight: '2.75rem',
+              padding: '0.5625rem 1.25rem',
+              fontSize: '0.875rem',
+              fontWeight: 600,
+              color: 'var(--color-bg)',
+              background: BRAND_HEX,
+              border: 'none',
+              borderRadius: 'var(--radius-button)',
+              cursor: 'pointer',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-brand-dark)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = BRAND_HEX }}
+          >
+            Done
+          </button>
         </div>
       </div>
     </>

@@ -17,7 +17,7 @@ import { SlideOver } from '@/components/tahi/slide-over'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface RequestDraft {
+export interface RequestDraft {
   id: string
   title: string
   description: string
@@ -48,6 +48,11 @@ interface AiRequestWizardProps {
   /** Where to POST the final request(s). Defaults to the admin endpoint;
    *  clients pass `/api/portal/requests`. */
   submitEndpoint?: string
+  /** When set, the draft step offers "Review in form" beside Create: the
+   *  draft is handed back to the caller and nothing is posted, so the new
+   *  request dialog can pre-fill itself and let the person edit before
+   *  submitting. Omit it and the wizard behaves exactly as it always has. */
+  onDraftToForm?: (draft: RequestDraft) => void
 }
 
 // ── Styling maps (match AiTaskWizard palette) ────────────────────────────────
@@ -85,6 +90,7 @@ export function AiRequestWizard({
   context = {},
   wizardEndpoint = '/api/admin/ai/request-wizard',
   submitEndpoint = '/api/admin/requests',
+  onDraftToForm,
 }: AiRequestWizardProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([INITIAL_MESSAGE])
   const [input, setInput] = useState('')
@@ -277,37 +283,80 @@ export function AiRequestWizard({
           background: 'var(--color-bg)',
         }}>
           {latestDrafts && latestDrafts.length > 0 && (
-            <button
-              onClick={handleCreate}
-              disabled={creating}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.375rem',
-                padding: '0.625rem 0.875rem',
-                background: 'var(--color-brand)',
-                color: 'white',
-                border: 'none',
-                borderRadius: 'var(--radius-leaf-sm)',
-                fontSize: '0.875rem',
-                fontWeight: 600,
-                cursor: creating ? 'not-allowed' : 'pointer',
-                opacity: creating ? 0.7 : 1,
-              }}
-            >
-              {creating ? (
-                <>
-                  <Loader2 size={14} className="animate-spin" />
-                  Creating\u2026
-                </>
-              ) : (
-                <>
-                  <Sparkles size={14} />
-                  {latestDrafts.length === 1 ? 'Create request' : `Create ${latestDrafts.length} requests`}
-                </>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                onClick={handleCreate}
+                disabled={creating}
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.375rem',
+                  minHeight: '2.75rem',
+                  padding: '0.625rem 0.875rem',
+                  background: 'var(--color-brand)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: 'var(--radius-leaf-sm)',
+                  fontSize: '0.875rem',
+                  fontWeight: 600,
+                  cursor: creating ? 'not-allowed' : 'pointer',
+                  opacity: creating ? 0.7 : 1,
+                }}
+              >
+                {creating ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Creating\u2026
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={14} />
+                    {latestDrafts.length === 1 ? 'Create request' : `Create ${latestDrafts.length} requests`}
+                  </>
+                )}
+              </button>
+              {/* Hand the draft back to the form instead of posting it. Only
+                  offered when the caller asked for it. */}
+              {onDraftToForm && (
+                <button
+                  onClick={() => onDraftToForm(latestDrafts[0])}
+                  disabled={creating}
+                  title={latestDrafts.length > 1
+                    ? 'Opens the first draft in the form so you can edit it before submitting'
+                    : 'Opens the draft in the form so you can edit it before submitting'}
+                  className="tahi-focus-ring"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minHeight: '2.75rem',
+                    padding: '0.625rem 0.875rem',
+                    background: 'var(--color-bg)',
+                    color: creating ? 'var(--color-text-subtle)' : 'var(--color-brand-dark)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius-leaf-sm)',
+                    fontSize: '0.875rem',
+                    fontWeight: 500,
+                    cursor: creating ? 'not-allowed' : 'pointer',
+                    whiteSpace: 'nowrap',
+                    transition: 'border-color 0.15s, background 0.15s',
+                  }}
+                  onMouseEnter={e => {
+                    if (creating) return
+                    e.currentTarget.style.borderColor = 'var(--color-brand)'
+                    e.currentTarget.style.background = 'var(--color-brand-50)'
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.borderColor = 'var(--color-border)'
+                    e.currentTarget.style.background = 'var(--color-bg)'
+                  }}
+                >
+                  Review in form
+                </button>
               )}
-            </button>
+            </div>
           )}
           <div style={{
             display: 'flex',
