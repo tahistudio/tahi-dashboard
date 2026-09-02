@@ -19,7 +19,11 @@ export async function GET(req: NextRequest) {
   // also filters by orgId. Accept both so the org filter works everywhere.
   const clientId = url.searchParams.get('clientId') ?? url.searchParams.get('orgId')
   const page    = Math.max(1, parseInt(url.searchParams.get('page') ?? '1'))
-  const limit   = 50
+  // Optional page size. Defaults to 50 as before; callers that resolve their
+  // own views client-side (the requests rail, the MCP list_requests tool) can
+  // ask for up to 500 in one go. `page` still walks whatever size was chosen.
+  const askedLimit = Number.parseInt(url.searchParams.get('limit') ?? '', 10)
+  const limit   = Number.isFinite(askedLimit) ? Math.min(500, Math.max(1, askedLimit)) : 50
   const offset  = (page - 1) * limit
 
   const database = await db()

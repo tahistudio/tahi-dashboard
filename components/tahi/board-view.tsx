@@ -89,6 +89,10 @@ interface BoardViewProps {
   onPriorityClick?: (priority: BoardPriority) => void
   columnActions?: ReadonlyArray<ColumnAction>
   readOnly?: boolean
+  /** Suppress the board's own view tabs and controls row. For callers that
+   *  already render a view switcher and a search field above it (the requests
+   *  rail). Off by default, so every existing consumer is unchanged. */
+  hideHeader?: boolean
   className?: string
 }
 
@@ -121,6 +125,7 @@ export function BoardView({
   onPriorityClick,
   columnActions,
   readOnly,
+  hideHeader = false,
   className,
 }: BoardViewProps) {
   const [internalView, setInternalView] = React.useState<BoardViewKey>(defaultView)
@@ -195,6 +200,7 @@ export function BoardView({
   return (
     <div className={className} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
       {/* Header */}
+      {!hideHeader && (
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.625rem', flexWrap: 'wrap' }}>
         {(title || intro) && (
           <div style={{ flex: 1, minWidth: '12rem' }}>
@@ -286,6 +292,7 @@ export function BoardView({
           })}
         </div>
       </div>
+      )}
 
       {/* Controls row. Search input and the filter pill are direct
           siblings (no nested wrapper) so the filter sits glued to the
@@ -295,6 +302,7 @@ export function BoardView({
           flexes to fill the wrapper — without it, a bare <input>
           sits at its browser-default ~150px and leaves dead space
           between it and the filter pill. */}
+      {!hideHeader && (
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexWrap: 'wrap' }}>
         <Input
           value={query}
@@ -391,6 +399,7 @@ export function BoardView({
           </button>
         )}
       </div>
+      )}
 
       {/* Active filter chips. Render only when filters are present. */}
       {filterCount > 0 && (

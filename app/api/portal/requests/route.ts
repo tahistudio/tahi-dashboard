@@ -19,7 +19,10 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const status = url.searchParams.get('status') ?? 'active'
   const page   = Math.max(1, parseInt(url.searchParams.get('page') ?? '1'))
-  const limit  = 50
+  // Optional page size, matching the admin route: default 50, up to 500 for
+  // callers that filter client-side.
+  const askedLimit = Number.parseInt(url.searchParams.get('limit') ?? '', 10)
+  const limit  = Number.isFinite(askedLimit) ? Math.min(500, Math.max(1, askedLimit)) : 50
   const offset = (page - 1) * limit
 
   const database = await db()

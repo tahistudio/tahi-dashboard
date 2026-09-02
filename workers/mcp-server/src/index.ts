@@ -263,7 +263,8 @@ const TOOLS: ToolDef[] = [
   tool('list_requests', 'List work requests with optional filtering', {
     status: prop('string', 'Filter by status (submitted, in_review, in_progress, client_review, delivered)'),
     clientId: prop('string', 'Filter by client ID'),
-    limit: prop('number', 'Limit results (default 50, max 100)'),
+    limit: prop('number', 'Page size (default 50, max 500)'),
+    page: prop('number', 'Page number, 1-based, against the chosen limit'),
   }),
   tool('get_request', 'Get full detail for a request: metadata, messages, files, steps', {
     requestId: prop('string', 'Request ID'),
@@ -1536,6 +1537,7 @@ async function executeTool(
       if (s('status')) p.status = s('status')!
       if (s('clientId')) p.orgId = s('clientId')!
       if (s('limit')) p.limit = s('limit')!
+      if (s('page')) p.page = s('page')!
       return json(await apiGet('/api/admin/requests', token, p))
     }
     case 'get_request':

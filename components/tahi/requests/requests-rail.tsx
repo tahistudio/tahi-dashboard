@@ -52,7 +52,9 @@ const DIMENSION_LABELS: Record<RequestFilterKey, string> = {
 }
 
 /** Status options carry their pipeline dot so the control and the menu read
- *  the same as every other status surface. */
+ *  the same as every other status surface. `draft` sits off the pipeline and
+ *  is deliberately absent from REQUEST_STATUSES (it is not a status anyone
+ *  moves work into), but requests do carry it, so the filter offers it last. */
 const STATUS_OPTIONS: readonly RailOption[] = [
   { value: 'all', label: 'All statuses' },
   ...REQUEST_STATUSES.map(s => ({
@@ -60,6 +62,11 @@ const STATUS_OPTIONS: readonly RailOption[] = [
     label: s.label,
     dot: REQUEST_STATUS_CONFIG[s.value]?.dot,
   })),
+  {
+    value: 'draft',
+    label: REQUEST_STATUS_CONFIG.draft?.label ?? 'Draft',
+    dot: REQUEST_STATUS_CONFIG.draft?.dot,
+  },
 ]
 
 /** One active filter, ready to render as a clearable chip under the view

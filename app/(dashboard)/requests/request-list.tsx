@@ -372,8 +372,9 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // type / client-tag) after the fetch.
   // On the rail the saved views (Delivered, Overdue, Triage...) are resolved
   // client-side, so the fetch has to bring back every status rather than the
-  // one the old tab strip asked for.
-  const requestsKey = `${isAdmin ? '/api/admin/requests' : '/api/portal/requests'}?status=${railOn ? 'all' : activeTab}`
+  // one the old tab strip asked for, at the route's maximum page size.
+  const requestsQuery = railOn ? 'status=all&limit=500' : `status=${activeTab}`
+  const requestsKey = `${isAdmin ? '/api/admin/requests' : '/api/portal/requests'}?${requestsQuery}`
   const { data: requestsData, isLoading: loading, mutate: mutateRequests } =
     useSWR<{ requests?: Request[] }>(requestsKey)
   const requests = useMemo(() => requestsData?.requests ?? [], [requestsData])
@@ -878,6 +879,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       defaultView="kanban"
       view={boardSubView}
       onViewChange={railOn ? handleBoardSubViewChange : undefined}
+      hideHeader={railOn}
       columns={boardColumns}
       items={boardItems}
       searchPlaceholder="Search requests"
