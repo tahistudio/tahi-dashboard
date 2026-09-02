@@ -58,6 +58,16 @@ interface PeoplePanelProps {
   isAdmin: boolean
   /** Hide the outer Card chrome so this can be embedded directly. */
   embedded?: boolean
+  /** Drop the remove control from the PM row. Every other role keeps it.
+   *  The request detail rail sets this so a request can never be left
+   *  without an owner by a stray click. Off by default, so existing
+   *  callers keep the removable PM they have today. */
+  lockPm?: boolean
+  /** Mark anyone already on the request (in any role) as taken in the
+   *  Followers picker, not just existing followers. Stops the same person
+   *  appearing twice as, say, Assignee and Follower. Off by default so
+   *  existing callers keep today's per-slot behaviour. */
+  dedupeAcrossRoles?: boolean
 }
 
 function Avatar({ name, avatar, size = 24 }: { name: string | null; avatar: string | null; size?: number }) {
@@ -329,6 +339,8 @@ export function PeoplePanel({
   setParticipants,
   isAdmin,
   embedded = false,
+  lockPm = false,
+  dedupeAcrossRoles = false,
 }: PeoplePanelProps) {
   const { showToast } = useToast()
   const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([])
@@ -365,6 +377,11 @@ export function PeoplePanel({
 
   const assigneeIds = useMemo(() => new Set(assignees.map(p => p.participantId)), [assignees])
   const followerIds = useMemo(() => new Set(followers.map(p => p.participantId)), [followers])
+  // Widened set for the Followers picker when the caller asked for it.
+  const anyRoleIds = useMemo(
+    () => new Set(participants.map(p => p.participantId)),
+    [participants],
+  )
 
   // --- server actions, always functional state updates --------------------
 
@@ -472,7 +489,7 @@ export function PeoplePanel({
             p={pm}
             onRemove={() => applyRemove(pm.id)}
             removing={removingId === pm.id}
-            canRemove={isAdmin}
+            canRemove={isAdmin && !lockPm}
           />
         ) : isAdmin ? (
           <AddButton
@@ -590,7 +607,7 @@ export function PeoplePanel({
               ...contacts.map(c => ({ value: `contact:${c.id}`, label: c.name, subtitle: c.email ?? undefined })),
               ...teamMembers.map(tm => ({ value: `team:${tm.id}`, label: tm.name, subtitle: 'Tahi team' })),
             ]}
-            existingIds={followerIds}
+            existingIds={dedupeAcrossRoles ? anyRoleIds : followerIds}
             placeholder="Search people…"
             onPick={v => {
               const [type, id] = v.split(':')

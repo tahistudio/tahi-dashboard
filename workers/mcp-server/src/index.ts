@@ -297,6 +297,16 @@ const TOOLS: ToolDef[] = [
   tool('delete_request', 'Delete a request', {
     requestId: prop('string', 'Request ID'),
   }, ['requestId']),
+  tool('duplicate_request', 'Duplicate a request. Copies title, description, category, type, priority, client org and estimated hours into a brand new top-level request at status "submitted" (no thread, files, participants or due date). Returns the new request id.', {
+    requestId: prop('string', 'Request ID to duplicate'),
+  }, ['requestId']),
+  tool('update_request_fields', 'Update the editable fields on a request detail rail: category, priority, due date and estimated hours. Send only the fields you want to change. Use update_request_status for status and assign_request for the assignee.', {
+    requestId: prop('string', 'Request ID'),
+    category: prop('string', 'Category: design, development, content, strategy, admin, bug'),
+    priority: prop('string', 'Priority: standard or high'),
+    dueDate: prop('string', 'Due date in YYYY-MM-DD format, or empty string to clear'),
+    estimatedHours: prop('number', 'Estimated hours, or 0 to clear'),
+  }, ['requestId']),
   tool('post_request_message', 'Post a message on a request thread', {
     requestId: prop('string', 'Request ID'),
     content: prop('string', 'Message content'),
@@ -1558,6 +1568,19 @@ async function executeTool(
       }))
     case 'delete_request':
       return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'DELETE'))
+    case 'duplicate_request':
+      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/duplicate`, token, 'POST'))
+    case 'update_request_fields': {
+      const patch: Record<string, unknown> = {}
+      if (s('category')) patch.category = s('category')
+      if (s('priority')) patch.priority = s('priority')
+      // '' clears the due date (the tool schema cannot express null).
+      if (typeof args.dueDate === 'string') patch.dueDate = args.dueDate || null
+      // 0 clears the estimate for the same reason.
+      if (typeof args.estimatedHours === 'number') patch.estimatedHours = args.estimatedHours || null
+      if (Object.keys(patch).length === 0) throw new Error('Pass at least one field to update')
+      return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'PATCH', patch))
+    }
     case 'post_request_message':
       return json(await apiWrite(`/api/admin/requests/${s('requestId')}/messages`, token, 'POST', {
         content: s('content'), isInternal: args.isInternal ?? false,

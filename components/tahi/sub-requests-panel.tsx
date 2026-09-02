@@ -48,6 +48,9 @@ interface SubRequestsPanelProps {
    *  parentRequestId pre-filled, so sub-request creation has the same
    *  rich form as top-level creation. */
   onRequestNew?: () => void
+  /** Copy shown in place of the list when there are no children yet. Opt-in
+   *  so panels that already read fine as a bare header keep doing so. */
+  emptyMessage?: string
 }
 
 function Initials({ name }: { name: string | null }) {
@@ -93,6 +96,7 @@ export function SubRequestsPanel({
   alwaysShow = false,
   canCreate = true,
   onRequestNew,
+  emptyMessage,
 }: SubRequestsPanelProps) {
   const doneCount = subRequests.filter(s => s.status === 'delivered').length
   const total = subRequests.length
@@ -134,6 +138,21 @@ export function SubRequestsPanel({
           </TahiButton>
         )}
       </div>
+
+      {/* Empty state — only when the caller asked for one. */}
+      {total === 0 && emptyMessage && (
+        <p
+          style={{
+            margin: 0,
+            padding: 'var(--space-5)',
+            fontSize: 'var(--text-sm)',
+            color: 'var(--color-text-subtle)',
+            textAlign: 'center',
+          }}
+        >
+          {emptyMessage}
+        </p>
+      )}
 
       {/* List of children */}
       {total > 0 && (

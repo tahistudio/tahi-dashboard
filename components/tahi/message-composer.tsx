@@ -42,7 +42,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import Mention from '@tiptap/extension-mention'
 import {
   Bold, Italic, List, ListOrdered, Code, Link as LinkIcon,
-  Paperclip, X, FileText, Image as ImageIcon, Loader2, Send, Lock, Eye,
+  Paperclip, X, FileText, Image as ImageIcon, Loader2, Send, Lock, Eye, AtSign,
 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -78,6 +78,11 @@ interface MessageComposerProps {
   defaultVisibility?: Visibility
   /** Placeholder text in the editor. */
   placeholder?: string
+  /** Drop a starter line into the editor and focus it. Bump `nonce` to
+   *  re-seed; the same nonce never re-fires, so a re-render cannot wipe
+   *  what the user has typed since. Used by the client review bar's
+   *  "Request changes", which seeds the composer instead of posting. */
+  seed?: { text: string; nonce: number } | null
 }
 
 // ── File upload helpers ─────────────────────────────────────────────────────
@@ -146,6 +151,7 @@ export function MessageComposer({
   canBeInternal = false,
   defaultVisibility = 'public',
   placeholder = 'Write a message…',
+  seed = null,
 }: MessageComposerProps) {
   const [visibility, setVisibility] = useState<Visibility>(defaultVisibility)
   const [staged, setStaged] = useState<StagedFile[]>([])
@@ -160,6 +166,13 @@ export function MessageComposer({
    */
   const [isEditorEmpty, setIsEditorEmpty] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  /**
+   * The focus ring belongs to the whole composer, not the editor inside it.
+   * Tiptap already clears its own outline (`focus:outline-none` on the editor
+   * attributes), so we mirror :focus-within into state and paint the ring on
+   * the container. Inline styles cannot express :focus-within, hence state.
+   */
+  const [focusWithin, setFocusWithin] = useState(false)
 
   const isInternal = visibility === 'internal'
   const canAttach = !!requestId
@@ -256,6 +269,25 @@ export function MessageComposer({
       setIsEditorEmpty(editor.isEmpty)
     },
   })
+
+  // ── Seeded starter line ──────────────────────────────────────────────────
+  // Keyed on the caller's nonce so re-renders never overwrite a draft; only
+  // a fresh nonce re-seeds. The text is escaped because it lands as HTML.
+  const seededNonce = useRef<number | null>(null)
+  const seedNonce = seed?.nonce ?? null
+  const seedText = seed?.text ?? ''
+  useEffect(() => {
+    if (!editor || seedNonce == null) return
+    if (seededNonce.current === seedNonce) return
+    seededNonce.current = seedNonce
+    const safe = seedText
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+    editor.commands.setContent(`<p>${safe}</p>`)
+    editor.commands.focus('end')
+    setIsEditorEmpty(editor.isEmpty)
+  }, [editor, seedNonce, seedText])
 
   // ── File pick + drag-drop ────────────────────────────────────────────────
   const addFiles = useCallback((files: FileList | File[]) => {
@@ -358,15 +390,30 @@ export function MessageComposer({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      onFocusCapture={() => setFocusWithin(true)}
+      onBlurCapture={e => {
+        // Only drop the ring when focus leaves the composer entirely, not
+        // when it hops from the editor to a toolbar button.
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false)
+      }}
       style={{
         position: 'relative',
         background: 'var(--color-bg)',
         // When internal, we tint the border subtly rather than painting a
         // thick coloured slab. The visibility toggle + Send button copy
         // communicate the state; the border is just a quiet echo.
-        border: `1px solid ${isInternal ? 'var(--color-warning)' : 'var(--color-border)'}`,
+        border: `1px solid ${
+          focusWithin
+            ? 'var(--color-brand)'
+            : isInternal ? 'var(--color-warning)' : 'var(--color-border)'
+        }`,
         borderRadius: 'var(--radius-lg)',
-        transition: 'border-color 150ms ease',
+        // Two-layer ring sitting outside the box: a bg-coloured spacer, then
+        // the brand line. Matches the site-wide focus treatment.
+        boxShadow: focusWithin
+          ? '0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-brand)'
+          : 'none',
+        transition: 'border-color 150ms ease, box-shadow 150ms ease',
       }}
     >
       {/* Visibility segmented control (admin only) */}
@@ -603,6 +650,17 @@ export function MessageComposer({
               accept="image/*,.pdf,.zip,.docx,.xlsx,.csv,.txt,.mp4,.mov,.webm"
             />
           </>
+        )}
+
+        {/* Mention. Inserts the "@" that opens the team suggestion list, so
+            the affordance is discoverable without knowing the shortcut. The
+            list is fed by the admin team endpoint, so it only shows for
+            studio composers. */}
+        {canBeInternal && (
+          <ToolbarButton
+            onClick={() => editor.chain().focus().insertContent('@').run()}
+            label="Mention someone"
+          ><AtSign size={13} /></ToolbarButton>
         )}
 
         <div style={{ flex: 1 }} />

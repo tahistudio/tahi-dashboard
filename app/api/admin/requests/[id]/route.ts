@@ -203,6 +203,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const body = await req.json() as {
     status?: string
     priority?: string
+    category?: string
     assigneeId?: string | null
     estimatedHours?: number | null
     startDate?: string | null
@@ -221,6 +222,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (body.status === 'delivered') patch.deliveredAt = now
   }
   if (body.priority !== undefined) patch.priority = body.priority
+  // Category is edited in place from the detail rail's Details card.
+  if (body.category !== undefined) patch.category = body.category
   if ('assigneeId' in body) patch.assigneeId = body.assigneeId ?? null
   if ('estimatedHours' in body) patch.estimatedHours = body.estimatedHours ?? null
   if ('startDate' in body) patch.startDate = body.startDate ?? null

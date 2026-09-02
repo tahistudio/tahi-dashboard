@@ -30,6 +30,15 @@ import { PeoplePanel, type Participant } from '@/components/tahi/people-panel'
 import { TimeCard } from '@/components/tahi/time-card'
 import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
 import { fetchSchedulePhaseOptions } from '@/lib/schedule-phases'
+import { usePermissions } from '@/components/tahi/permissions-context'
+import { CATEGORY_CONFIG } from '@/lib/status-config'
+import { DeliverySpine } from '@/components/tahi/requests/delivery-spine'
+import { RequestActionsMenu } from '@/components/tahi/requests/request-actions-menu'
+import { ClientReviewBar } from '@/components/tahi/requests/client-review-bar'
+import {
+  InlineDateField, InlineMenuField, InlineNone, InlineNumberField,
+} from '@/components/tahi/requests/inline-field'
+import type { ReviewDecision } from '@/lib/request-review'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -57,6 +66,36 @@ const PRIORITY_OPTIONS = [
   { value: 'standard', label: 'Standard' },
   { value: 'high', label: 'High' },
 ]
+
+// Category vocabulary for the ported Details rail. Driven off the one
+// CATEGORY_CONFIG map so the chip colours and the picker can never diverge.
+const CATEGORY_OPTIONS = Object.keys(CATEGORY_CONFIG)
+
+function categoryLabel(value: string): string {
+  if (!value) return 'None'
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+/** The category chip used in the Details rail and its picker. */
+function CategoryChip({ value }: { value: string | null }) {
+  if (!value) return <InlineNone>None</InlineNone>
+  const style = CATEGORY_CONFIG[value]
+  return (
+    <span
+      className="inline-flex items-center rounded-full"
+      style={{
+        padding: '0.125rem 0.5rem',
+        fontSize: '0.6875rem',
+        fontWeight: 500,
+        whiteSpace: 'nowrap',
+        background: style?.bg ?? 'var(--color-bg-tertiary)',
+        color: style?.color ?? 'var(--color-text-muted)',
+      }}
+    >
+      {categoryLabel(value)}
+    </span>
+  )
+}
 
 // ---- Types -------------------------------------------------------------------
 
@@ -252,6 +291,11 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const { isImpersonatingClient } = useImpersonation()
   // Only switch to client view when impersonating a client, not a team member
   const isAdmin = isAdminProp && !isImpersonatingClient
+  // Slice 6 of the Requests port ships the rebuilt detail behind the same
+  // super-admin gate the list uses. Everyone else keeps today's detail
+  // untouched, so a regression here can only reach Liam and Staci.
+  const { isSuperAdmin } = usePermissions()
+  const newUi = isSuperAdmin
   const [request, setRequest] = useState<Request | null>(null)
   const [subRequests, setSubRequests] = useState<SubRequestRow[]>([])
   const [parentRequest, setParentRequest] = useState<ParentRequestRef | null>(null)
@@ -271,6 +315,10 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   // client_review and the viewer is a client).
   const [approving, setApproving] = useState(false)
   const composerWrapRef = useRef<HTMLDivElement>(null)
+  // "Request changes" seeds the composer rather than posting straight away,
+  // so the client says what needs adjusting in their own words. Bumping the
+  // nonce re-seeds; the composer ignores a nonce it has already applied.
+  const [composerSeed, setComposerSeed] = useState<{ text: string; nonce: number } | null>(null)
   // When the client clicks "Request a change" we tag the very next message they
   // send as a change request. A ref (not state) so handleSendMessage always
   // reads the current value without re-subscribing the composer.
@@ -421,6 +469,18 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     // Client "Request a change" tags the next message with a light prefix so
     // the studio can spot it in the thread. No new schema: it is just marked-up
     // body text. Consumed once, then reset.
+    // Ported client bar: an armed change request goes to the review endpoint
+    // instead, which moves the request back to in_progress AND posts the note
+    // as one message. The note travels as plain text; the server escapes it.
+    if (newUi && !isAdmin && changeRequestPendingRef.current) {
+      changeRequestPendingRef.current = false
+      await submitClientReview('changes', stripHtmlToText(html))
+      setComposerSeed(null)
+      showToast('Change request sent')
+      await Promise.all([mutateRequest(), mutateFiles()])
+      return
+    }
+
     let outgoingHtml = html
     if (!isAdmin && changeRequestPendingRef.current) {
       outgoingHtml = `<p><strong>Change request</strong></p>${html}`
@@ -548,12 +608,55 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   // composer so they can describe the change straight away.
   function handleRequestChange() {
     changeRequestPendingRef.current = true
+    // The ported bar seeds a starter line so the client is not staring at an
+    // empty box; the legacy bar just focuses what is there.
+    if (newUi) setComposerSeed({ text: 'Changes requested: ', nonce: Date.now() })
     const wrap = composerWrapRef.current
     if (wrap) {
       wrap.scrollIntoView({ behavior: 'smooth', block: 'center' })
       const editable = wrap.querySelector<HTMLElement>('[contenteditable="true"]')
       editable?.focus()
     }
+  }
+
+  // Client review verdict through the dedicated portal endpoint, which moves
+  // the status AND posts the client's note to the thread in one call. Used by
+  // the ported <ClientReviewBar>; the legacy bar keeps its own PATCH.
+  const submitClientReview = useCallback(async (
+    decision: ReviewDecision,
+    note?: string,
+  ) => {
+    const res = await fetch(apiPath(`/api/portal/requests/${requestId}/review`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision, note }),
+    })
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({})) as { error?: string }
+      throw new Error(j.error ?? 'Could not submit your review')
+    }
+    return await res.json() as { status: string }
+  }, [requestId])
+
+  async function handleReviewApprove() {
+    if (!request || approving || request.status !== 'client_review') return
+    setApproving(true)
+    const previous = request
+    setRequest({ ...previous, status: 'delivered' })
+    try {
+      await submitClientReview('approve')
+      showToast('Approved. Thanks for confirming.')
+      await Promise.all([mutateRequest(), mutateFiles()])
+    } catch (err) {
+      setRequest(previous)
+      showToast(err instanceof Error ? err.message : 'Network error - try again')
+    } finally {
+      setApproving(false)
+    }
+  }
+
+  async function handleCategoryChange(category: string) {
+    await patchRequest({ category }, `Category set to ${categoryLabel(category)}`)
   }
 
   async function saveChecklists(updated: Checklist[]) {
@@ -880,18 +983,35 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
               </span>
             )}
             {request.revisionCount > 0 && (
-              <span
-                className="inline-flex items-center gap-1 rounded-full"
-                style={{
-                  padding: '0.125rem 0.5rem',
-                  fontSize: '0.6875rem',
-                  background: 'var(--color-bg-tertiary)',
-                  color: 'var(--color-text-muted)',
-                }}
-              >
-                <RefreshCw size={10} aria-hidden="true" />
-                Rev {request.revisionCount}/{request.maxRevisions}
-              </span>
+              newUi && isAdmin ? (
+                <RevisionChip
+                  revisionCount={request.revisionCount}
+                  maxRevisions={request.maxRevisions}
+                />
+              ) : (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full"
+                  style={{
+                    padding: '0.125rem 0.5rem',
+                    fontSize: '0.6875rem',
+                    background: 'var(--color-bg-tertiary)',
+                    color: 'var(--color-text-muted)',
+                  }}
+                >
+                  <RefreshCw size={10} aria-hidden="true" />
+                  Rev {request.revisionCount}/{request.maxRevisions}
+                </span>
+              )
+            )}
+
+            {/* Header actions. Studio audiences on the ported detail only. */}
+            {newUi && isAdmin && (
+              <RequestActionsMenu
+                requestId={request.id}
+                orgId={request.orgId}
+                hasParent={!!request.parentRequestId}
+                onChanged={() => { mutateRequest() }}
+              />
             )}
           </div>
 
@@ -939,9 +1059,20 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           </div>
         </div>
 
-        {/* Minimal progress bar - replaces the chunky stepper. A single
+        {/* Ported detail: the strip becomes a clickable delivery spine. The
+            studio moves the request by clicking a step; clients read it. */}
+        {newUi ? (
+          <DeliverySpine
+            status={request.status}
+            interactive={isAdmin}
+            busy={statusUpdating}
+            eta={request.dueDate ? `Due ${formatDate(request.dueDate)}` : null}
+            onPick={handleStatusChange}
+          />
+        ) : (
+        /* Minimal progress bar - replaces the chunky stepper. A single
             horizontal line with breakpoints; current step highlighted.
-            Less visual weight than the numbered stepper and reads cleaner. */}
+            Less visual weight than the numbered stepper and reads cleaner. */
         <div
           style={{
             padding: '0.75rem 1.5rem 1rem',
@@ -988,13 +1119,22 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             })}
           </div>
         </div>
+        )}
       </div>
 
       {/* Client review actions - client only. Sits directly under the pipeline
           bar so approving a delivery is the obvious next step. Approve routes
           through the whitelisted portal PATCH (client_review -> delivered);
           "Request a change" arms the change tag and focuses the composer. */}
-      {!isAdmin && request.status === 'client_review' && (
+      {newUi && !isAdmin && request.status === 'client_review' && (
+        <ClientReviewBar
+          busy={approving}
+          onApprove={handleReviewApprove}
+          onRequestChanges={handleRequestChange}
+        />
+      )}
+
+      {!newUi && !isAdmin && request.status === 'client_review' && (
         <div
           role="region"
           aria-label="Review this delivery"
@@ -1410,6 +1550,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 clientName={request?.orgName ?? undefined}
                 requestId={requestId}
                 orgId={request?.orgId}
+                seed={composerSeed}
               />
             </div>
           </Card>
@@ -1438,6 +1579,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
               canCreate={isAdmin}
               onCreated={() => { mutateRequest() }}
               onRequestNew={() => setNewSubOpen(true)}
+              emptyMessage={newUi ? 'No sub-requests yet.' : undefined}
             />
           )}
 
@@ -1451,10 +1593,16 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             onRefresh={() => { mutateFiles() }}
             requestId={requestId}
             orgId={request.orgId}
+            emptyHint={newUi ? 'No files yet. Drop one here or upload.' : undefined}
           />
 
           {/* Activity log - collapsed by default at the bottom */}
-          <ActivityLog request={request} messages={messages} files={files} />
+          <ActivityLog
+            request={request}
+            messages={messages}
+            files={files}
+            openWhenShort={newUi}
+          />
         </div>
 
         {/* Right column: Metadata sidebar - primary-use blocks first.
@@ -1463,8 +1611,10 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           {/* Time (admin only): live timer + manual log + recent entries */}
           {isAdmin && <TimeCard requestId={requestId} />}
 
-          {/* Calls: kickoff, scope review, mid-build check-ins */}
-          {isAdmin && <DiscoveryCallsCard parentType="request" parentId={requestId} />}
+          {/* Calls: kickoff, scope review, mid-build check-ins. The ported
+              rail puts Actions directly under Time, so a phone-width column
+              leads with the two blocks the studio touches most. */}
+          {isAdmin && !newUi && <DiscoveryCallsCard parentType="request" parentId={requestId} />}
 
           {/* Actions: status dropdown, scope flag toggle, make top-level */}
           {isAdmin && (
@@ -1639,6 +1789,8 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             </SidebarCard>
           )}
 
+          {isAdmin && newUi && <DiscoveryCallsCard parentType="request" parentId={requestId} />}
+
           {/* People - PM / Assignees / Followers */}
           <PeoplePanel
             requestId={requestId}
@@ -1646,6 +1798,8 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             participants={participants}
             setParticipants={setParticipants}
             isAdmin={isAdmin}
+            lockPm={newUi}
+            dedupeAcrossRoles={newUi}
           />
 
           {/* Checklists */}
@@ -1655,7 +1809,144 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             isAdmin={isAdmin}
           />
 
-          {/* Details - reference info at the bottom since it changes less */}
+          {/* Details - reference info at the bottom since it changes less.
+              The ported rail edits every row in place; the legacy rail keeps
+              its searchable selects and click-to-edit due date. */}
+          {newUi ? (
+          <SidebarCard title="Details">
+            <div className="flex flex-col" style={{ gap: '0.875rem' }}>
+              <DetailRow label="Type">
+                <span className="capitalize">{request.type.replace(/_/g, ' ')}</span>
+              </DetailRow>
+
+              <DetailRow label="Category">
+                <InlineMenuField
+                  ariaLabel="Change category"
+                  readOnly={!isAdmin}
+                  value={request.category ?? ''}
+                  options={CATEGORY_OPTIONS.map(c => ({
+                    value: c,
+                    label: categoryLabel(c),
+                    node: <CategoryChip value={c} />,
+                  }))}
+                  renderValue={v => <CategoryChip value={v || null} />}
+                  onChange={handleCategoryChange}
+                />
+              </DetailRow>
+
+              <DetailRow label="Priority">
+                <InlineMenuField
+                  ariaLabel="Change priority"
+                  readOnly={!isAdmin}
+                  value={request.priority}
+                  options={PRIORITY_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
+                  renderValue={v => (
+                    v === 'high'
+                      ? (
+                        <span
+                          className="inline-flex items-center rounded-full"
+                          style={{
+                            padding: '0.125rem 0.5rem',
+                            fontSize: '0.6875rem',
+                            fontWeight: 500,
+                            whiteSpace: 'nowrap',
+                            background: 'var(--priority-high-bg)',
+                            color: 'var(--priority-high-text)',
+                            border: '1px solid var(--priority-high-border)',
+                          }}
+                        >
+                          High
+                        </span>
+                      )
+                      : <span className="capitalize">{v || 'Standard'}</span>
+                  )}
+                  onChange={v => { void handlePriorityChange(v) }}
+                />
+              </DetailRow>
+
+              {isAdmin && (
+                <DetailRow label="Assignee">
+                  <InlineMenuField
+                    ariaLabel="Change assignee"
+                    searchable
+                    searchPlaceholder="Search team…"
+                    emptyMessage="No team members"
+                    value={request.assigneeId ?? ''}
+                    options={[
+                      ...teamMembers.map(tm => ({ value: tm.id, label: tm.name, keywords: tm.name })),
+                      { value: '', label: 'Unassigned' },
+                    ]}
+                    renderValue={v => {
+                      const name = teamMembers.find(tm => tm.id === v)?.name ?? request.assigneeName
+                      return v && name
+                        ? <span>{name}</span>
+                        : <InlineNone>Unassigned</InlineNone>
+                    }}
+                    onChange={v => { void handleAssigneeChange(v || null) }}
+                  />
+                </DetailRow>
+              )}
+
+              {isAdmin && (phaseOptions.length > 0 || request.scheduleRowId) && (
+                <DetailRow label="Delivery phase">
+                  <InlineMenuField
+                    ariaLabel="Link to a delivery phase"
+                    searchable
+                    searchPlaceholder="Search phases…"
+                    emptyMessage="No schedule phases"
+                    value={request.scheduleRowId ?? ''}
+                    options={[
+                      ...phaseOptions.map(o => ({ value: o.value, label: o.label, keywords: o.label })),
+                      { value: '', label: 'Not linked' },
+                    ]}
+                    renderValue={v => {
+                      const label = phaseOptions.find(o => o.value === v)?.label
+                      return v && label
+                        ? <span>{label}</span>
+                        : <InlineNone>Not linked</InlineNone>
+                    }}
+                    onChange={v => { void handleScheduleRowChange(v || null) }}
+                  />
+                </DetailRow>
+              )}
+
+              <DetailRow label="Due date">
+                <InlineDateField
+                  ariaLabel="Change due date"
+                  readOnly={!isAdmin}
+                  value={request.dueDate}
+                  render={v => v
+                    ? <span>{formatDate(v)}</span>
+                    : <InlineNone>Not set</InlineNone>}
+                  onChange={v => { void handleDueDateChange(v) }}
+                />
+              </DetailRow>
+
+              {isAdmin && (
+                <DetailRow label="Estimated">
+                  <InlineNumberField
+                    ariaLabel="Change the estimate"
+                    suffix="h"
+                    value={request.estimatedHours}
+                    render={v => v != null
+                      ? <span>{v}h</span>
+                      : <InlineNone>Not set</InlineNone>}
+                    onChange={v => { void patchRequest(
+                      { estimatedHours: v },
+                      v != null ? `Estimate set to ${v}h` : 'Estimate cleared',
+                    ) }}
+                  />
+                </DetailRow>
+              )}
+
+              {request.deliveredAt && (
+                <DetailRow label="Delivered">
+                  {formatDate(request.deliveredAt)}
+                </DetailRow>
+              )}
+            </div>
+          </SidebarCard>
+          ) : (
           <SidebarCard title="Details">
             <div className="flex flex-col" style={{ gap: '0.875rem' }}>
               <DetailRow label="Type">
@@ -1817,6 +2108,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
               )}
             </div>
           </SidebarCard>
+          )}
         </div>
       </div>
 
@@ -1856,10 +2148,14 @@ function ActivityLog({
   request,
   messages,
   files,
+  openWhenShort = false,
 }: {
   request: Request
   messages: Message[]
   files: RequestFile[]
+  /** Ported detail: start expanded when the log is short enough to read at
+   *  a glance (five events or fewer). Long logs stay collapsed. */
+  openWhenShort?: boolean
 }) {
   // `open` toggles the whole card; `expanded` toggles Show more inside it.
   const [open, setOpen] = useState(false)
@@ -1938,6 +2234,18 @@ function ActivityLog({
 
   // Sort chronologically (newest first)
   events.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+
+  // Ported detail: a short log opens itself once per request, so five events
+  // or fewer are readable without a click. The ref means a later click to
+  // collapse it sticks instead of being re-opened on the next render.
+  const eventCount = events.length
+  const autoOpenedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!openWhenShort) return
+    if (autoOpenedFor.current === request.id) return
+    autoOpenedFor.current = request.id
+    setOpen(eventCount > 0 && eventCount <= 5)
+  }, [openWhenShort, request.id, eventCount])
 
   const filteredEvents = filter === 'comments'
     ? events.filter(e => e.type === 'message')
@@ -2321,6 +2629,83 @@ function StatusChipSelect({
               </button>
             )
           })}
+        </div>
+      </Popover>
+    </>
+  )
+}
+
+// ---- Revision chip -----------------------------------------------------------
+
+/**
+ * The Rev n/m chip, made clickable on the ported detail. There is no
+ * per-request revision-history table in the schema (only revisionCount and
+ * maxRevisions on the request row), so the popover reports the allowance
+ * rather than inventing a timeline of rounds.
+ */
+function RevisionChip({
+  revisionCount,
+  maxRevisions,
+}: {
+  revisionCount: number
+  maxRevisions: number
+}) {
+  const ref = useRef<HTMLButtonElement | null>(null)
+  const [open, setOpen] = useState(false)
+  const left = Math.max(0, (maxRevisions ?? 0) - revisionCount)
+
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label="Revision allowance"
+        title="Revision allowance"
+        onClick={() => setOpen(o => !o)}
+        className="tahi-focus-ring inline-flex items-center gap-1 rounded-full"
+        style={{
+          padding: '0.125rem 0.5rem',
+          fontSize: '0.6875rem',
+          border: 'none',
+          background: 'var(--color-bg-tertiary)',
+          color: 'var(--color-text-muted)',
+          cursor: 'pointer',
+          transition: 'background-color 150ms ease',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-border-subtle)' }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)' }}
+      >
+        <RefreshCw size={10} aria-hidden="true" />
+        Rev {revisionCount}/{maxRevisions}
+      </button>
+      <Popover anchorRef={ref} open={open} onClose={() => setOpen(false)} align="start" width="15.5rem">
+        <div style={{ padding: '0.75rem 0.875rem' }}>
+          <p
+            className="uppercase"
+            style={{
+              margin: 0,
+              fontSize: '0.625rem',
+              fontWeight: 600,
+              letterSpacing: '0.08em',
+              color: 'var(--color-text-subtle)',
+            }}
+          >
+            Revisions
+          </p>
+          <p className="text-sm" style={{ margin: '0.375rem 0 0', color: 'var(--color-text)', fontWeight: 600 }}>
+            {revisionCount} of {maxRevisions} used
+          </p>
+          <p className="text-xs" style={{ margin: '0.25rem 0 0', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+            {left === 0
+              ? `All ${maxRevisions} included revisions are used on this request.`
+              : `${left} ${left === 1 ? 'revision' : 'revisions'} left on this plan.`}
+          </p>
+          <p className="text-xs" style={{ margin: '0.5rem 0 0', color: 'var(--color-text-subtle)', lineHeight: 1.5 }}>
+            Round-by-round history is not recorded yet. The thread below is the
+            record of what was asked for.
+          </p>
         </div>
       </Popover>
     </>
@@ -2820,11 +3205,13 @@ interface FilesPanelProps {
   onRefresh: () => void
   requestId: string
   orgId: string
+  /** Ported detail's empty-state line. Falls back to the original copy. */
+  emptyHint?: string
 }
 
 // Files are attachable by both studio and client: uploads authorise non-admins
 // server-side, so there is no admin gate on this panel.
-function FilesPanel({ files, onRefresh, requestId, orgId }: FilesPanelProps) {
+function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint }: FilesPanelProps) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -3024,10 +3411,14 @@ function FilesPanel({ files, onRefresh, requestId, orgId }: FilesPanelProps) {
       {files.length === 0 ? (
         <div className="flex flex-col items-center justify-center text-center" style={{ padding: '2.5rem 1.5rem', gap: '0.375rem' }}>
           <Paperclip size={18} style={{ color: 'var(--color-text-subtle)', marginBottom: '0.25rem' }} />
-          <p className="text-sm" style={{ color: 'var(--color-text-subtle)', margin: 0 }}>No files yet.</p>
-          <p className="text-xs" style={{ color: 'var(--color-text-subtle)', margin: 0 }}>
-            Use Upload to attach files to this request.
+          <p className="text-sm" style={{ color: 'var(--color-text-subtle)', margin: 0 }}>
+            {emptyHint ?? 'No files yet.'}
           </p>
+          {!emptyHint && (
+            <p className="text-xs" style={{ color: 'var(--color-text-subtle)', margin: 0 }}>
+              Use Upload to attach files to this request.
+            </p>
+          )}
         </div>
       ) : (
         <div>
