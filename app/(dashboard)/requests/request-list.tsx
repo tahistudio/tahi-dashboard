@@ -45,6 +45,8 @@ import {
   type BoardViewKey,
 } from '@/components/tahi/board-view'
 import { usePermissions } from '@/components/tahi/permissions-context'
+import { PARTICIPANT_ROLE_LABEL, type RequestParticipant } from '@/lib/request-participants'
+import { RequestsTimeline } from '@/components/tahi/requests/requests-timeline'
 import { RequestsViewSwitcher } from '@/components/tahi/requests/requests-view-switcher'
 import { RequestsHeaderActions } from '@/components/tahi/requests/requests-header-actions'
 import { buildFilterChips, type RailOption } from '@/components/tahi/requests/requests-rail'
@@ -81,6 +83,7 @@ interface Request {
   scopeFlagged: boolean | null
   orgId?: string | null
   orgName?: string | null
+  orgLogoUrl?: string | null
   assigneeId?: string | null
   updatedAt: string | null
   createdAt: string | null
@@ -91,6 +94,10 @@ interface Request {
   subRequestCount?: number | null
   // JSON array string of the owning org's free-form tags
   orgTags?: string | null
+  /** Project manager, assignee and followers, from request_participants.
+   *  Both list APIs return it; the kanban card and the timeline stack it
+   *  as avatars. Empty when the request has no cast beyond its assignee. */
+  participants?: RequestParticipant[] | null
 }
 
 /** Parse an org's tags JSON column into a clean string[]. */
@@ -538,11 +545,10 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   ), [panelAudience, canAddSubRequest])
 
   const effectiveView: ViewMode | 'kanban' | 'timeline' = railOn ? rail.view : view
-  // BoardView owns kanban and timeline as sub-views. Leaving `view` undefined
-  // on the legacy path keeps its own tab strip uncontrolled, exactly as today.
-  const boardSubView: BoardViewKey | undefined = railOn
-    ? (effectiveView === 'timeline' ? 'timeline' : 'kanban')
-    : undefined
+  // On the rail, Timeline renders on its own above, so the only sub-view
+  // BoardView is ever asked for is the kanban. Leaving `view` undefined on
+  // the legacy path keeps its own tab strip uncontrolled, exactly as today.
+  const boardSubView: BoardViewKey | undefined = railOn ? 'kanban' : undefined
 
   // Kanban cards name their assignee, and the list payload carries only the
   // id. The conditional key skips the fetch until a board view is on screen,
@@ -767,13 +773,26 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       }
       const overdue = getDueDateState(r.dueDate, r.status) === 'overdue'
 
-      // People stack. The list payload carries the assignee only, so that is
-      // the one role on the card today; project managers and followers live
-      // in request_participants and need that join added to the list API
-      // before they can appear here. Roles are deduped by person id, so one
-      // person holding two roles reads as a single avatar.
+      // People stack: project manager, assignee, then followers, in the
+      // order the API sorted them. Roles are deduped by person id, so one
+      // person holding two roles reads as a single avatar. The assignee on
+      // the request row is folded in for requests that predate the
+      // participants table, or whose cast was never filled in.
       const people: BoardPerson[] = []
-      if (r.assigneeId) {
+      const seenPeople = new Set<string>()
+      for (const p of r.participants ?? []) {
+        if (seenPeople.has(p.id)) continue
+        seenPeople.add(p.id)
+        people.push({
+          id: p.id,
+          name: p.name,
+          // Team members carry their own avatar; the team list is the
+          // fresher copy when it has been fetched.
+          avatarUrl: teamById.get(p.id)?.avatarUrl ?? p.avatarUrl,
+          role: PARTICIPANT_ROLE_LABEL[p.role],
+        })
+      }
+      if (r.assigneeId && !seenPeople.has(r.assigneeId)) {
         const member = teamById.get(r.assigneeId)
         people.push({
           id: r.assigneeId,
@@ -800,10 +819,10 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         warning: r.scopeFlagged ? 'Flagged for scope creep' : undefined,
         // Admins see which client a card belongs to; a client already knows.
         client: isAdmin && r.orgId && r.orgName
-          ? { id: r.orgId, name: r.orgName }
+          ? { id: r.orgId, name: r.orgName, avatarUrl: r.orgLogoUrl }
           : undefined,
         people: people.length > 0 ? people : undefined,
-        unassigned: !r.assigneeId,
+        unassigned: people.length === 0,
         // A done count is not in the list payload yet, so the bar reads as
         // "0 of N" until the API carries it.
         subtasks: subCount > 0 ? { done: 0, total: subCount } : undefined,
@@ -1080,6 +1099,16 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   const content = effectiveView === 'workload' && isAdmin ? (
     // WorkloadView keeps its own card surface, so it isn't re-wrapped.
     <WorkloadView requests={visible} />
+  ) : (railOn && effectiveView === 'timeline') ? (
+    // On the rail, Timeline is a peer of List and Kanban rather than a tab
+    // inside the board, so it renders on its own. The legacy path keeps
+    // reaching it through BoardView's tab strip below.
+    <RequestsTimeline
+      columns={boardColumns}
+      items={boardItems}
+      showClient={isAdmin}
+      onOpen={(item) => { router.push(`/requests/${item.id}`) }}
+    />
   ) : (effectiveView === 'board' || effectiveView === 'kanban' || effectiveView === 'timeline') ? (
     <BoardView
       views={['kanban', 'timeline']}

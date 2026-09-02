@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import { eq, desc, and, ne, sql, inArray } from 'drizzle-orm'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 import { dispatchDomainEvent } from '@/lib/events'
+import { loadRequestParticipants, CLIENT_VISIBLE_TEAM_ROLES } from '@/lib/request-participants'
 
 // ── GET /api/portal/requests ─────────────────────────────────────────────────
 // Returns requests scoped to the client's own org.
@@ -94,7 +95,23 @@ export async function GET(req: NextRequest) {
     .limit(limit)
     .offset(offset)
 
-  return NextResponse.json({ requests, page, limit })
+  // People row on the card. Team members appear only as project manager or
+  // assignee, so an internal follower never leaks into the portal, and
+  // contacts are held to the caller's own org.
+  const participantsByRequest = await loadRequestParticipants(
+    drizzle,
+    requests.map((r) => r.id),
+    { teamRoles: CLIENT_VISIBLE_TEAM_ROLES, contactOrgId: orgId },
+  )
+
+  return NextResponse.json({
+    requests: requests.map((r) => ({
+      ...r,
+      participants: participantsByRequest.get(r.id) ?? [],
+    })),
+    page,
+    limit,
+  })
 }
 
 // ── POST /api/portal/requests ────────────────────────────────────────────────

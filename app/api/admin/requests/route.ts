@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import { eq, desc, and, ne, inArray, isNull, sql } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { dispatchDomainEvent } from '@/lib/events'
+import { loadRequestParticipants } from '@/lib/request-participants'
 
 // ── GET /api/admin/requests ─────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -89,6 +90,8 @@ export async function GET(req: NextRequest) {
       )`.as('sub_request_count'),
       // Join org name + tags (tags is a JSON array string of free-form labels)
       orgName: schema.organisations.name,
+      // Drives the client avatar on the kanban card and the timeline label.
+      orgLogoUrl: schema.organisations.logoUrl,
       orgTags: schema.organisations.tags,
     })
     .from(schema.requests)
@@ -98,7 +101,20 @@ export async function GET(req: NextRequest) {
     .limit(limit)
     .offset(offset)
 
-  return NextResponse.json({ requests, page, limit })
+  // People row on the card. One extra query over the ids just returned.
+  const participantsByRequest = await loadRequestParticipants(
+    database as ReturnType<typeof import('drizzle-orm/d1').drizzle>,
+    requests.map((r) => r.id),
+  )
+
+  return NextResponse.json({
+    requests: requests.map((r) => ({
+      ...r,
+      participants: participantsByRequest.get(r.id) ?? [],
+    })),
+    page,
+    limit,
+  })
 }
 
 // ── POST /api/admin/requests ────────────────────────────────────────────────
