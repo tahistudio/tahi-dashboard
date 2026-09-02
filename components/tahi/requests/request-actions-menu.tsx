@@ -228,6 +228,7 @@ export function RequestActionsMenu({ requestId, orgId, hasParent, onChanged }: R
         {picking ? (
           <>
             <div
+              className="tahi-focus-within"
               style={{
                 display: 'flex',
                 alignItems: 'center',

@@ -94,6 +94,7 @@ export function DeliverySpine({
       </div>
 
       <ol
+        aria-label="Delivery steps"
         className="flex items-stretch"
         style={{ listStyle: 'none', margin: 0, padding: 0, gap: '0.375rem' }}
       >

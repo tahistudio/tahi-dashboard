@@ -162,6 +162,7 @@ export function InlineMenuField({
       <Popover anchorRef={ref} open={open} onClose={() => setOpen(false)} align="end" width={width}>
         {searchable && (
           <div
+            className="tahi-focus-within"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -209,7 +210,7 @@ export function InlineMenuField({
                 type="button"
                 role="menuitem"
                 onClick={() => { setOpen(false); onChange(o.value) }}
-                className="min-h-11 md:min-h-8"
+                className="tahi-focus-ring min-h-11 md:min-h-8"
                 style={{
                   display: 'flex',
                   alignItems: 'center',

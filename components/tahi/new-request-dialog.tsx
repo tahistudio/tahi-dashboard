@@ -513,6 +513,7 @@ export function NewRequestDialog({
           </div>
           <button
             onClick={onClose}
+            className="tahi-focus-ring"
             style={{
               padding: '0.375rem',
               borderRadius: 'var(--radius-button)',
@@ -687,6 +688,7 @@ export function NewRequestDialog({
                       type="button"
                       disabled={locked}
                       onClick={() => !locked && setType(t.value)}
+                      className="tahi-focus-ring"
                       style={{
                         padding: '0.875rem 0.75rem',
                         borderRadius: 'var(--radius-card)',
@@ -794,6 +796,7 @@ export function NewRequestDialog({
                         key={p}
                         type="button"
                         onClick={() => setPriority(p)}
+                        className="tahi-focus-ring"
                         style={{
                           flex: 1,
                           height: '2.625rem',
@@ -1018,6 +1021,7 @@ export function NewRequestDialog({
           <button
             type="button"
             onClick={onClose}
+            className="tahi-focus-ring"
             style={{
               padding: '0.5rem 1rem',
               fontSize: '0.875rem',
@@ -1038,6 +1042,7 @@ export function NewRequestDialog({
               type="button"
               disabled={submitting || !title.trim()}
               onClick={e => handleSubmit(e, true)}
+              className="tahi-focus-ring"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -1072,6 +1077,7 @@ export function NewRequestDialog({
               form="new-request-form"
               disabled={submitting || !title.trim()}
               onClick={handleSubmit}
+              className="tahi-focus-ring"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -1517,6 +1523,7 @@ function StyledInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
+      className={['tahi-focus-ring', props.className].filter(Boolean).join(' ')}
       style={{
         width: '100%',
         height: '2.625rem',
@@ -1530,14 +1537,6 @@ function StyledInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
         boxSizing: 'border-box',
         ...props.style,
       }}
-      onFocus={e => {
-        e.currentTarget.style.borderColor = BRAND_HEX
-        e.currentTarget.style.boxShadow = `0 0 0 3px rgba(90,130,78,0.12)`
-      }}
-      onBlur={e => {
-        e.currentTarget.style.borderColor = 'var(--color-border)'
-        e.currentTarget.style.boxShadow = 'none'
-      }}
     />
   )
 }
@@ -1548,6 +1547,7 @@ function StyledTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>
   return (
     <textarea
       {...props}
+      className={['tahi-focus-ring', props.className].filter(Boolean).join(' ')}
       style={{
         width: '100%',
         padding: '0.625rem 0.75rem',
@@ -1561,14 +1561,6 @@ function StyledTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>
         boxSizing: 'border-box',
         lineHeight: 1.5,
         ...props.style,
-      }}
-      onFocus={e => {
-        e.currentTarget.style.borderColor = BRAND_HEX
-        e.currentTarget.style.boxShadow = `0 0 0 3px rgba(90,130,78,0.12)`
-      }}
-      onBlur={e => {
-        e.currentTarget.style.borderColor = 'var(--color-border)'
-        e.currentTarget.style.boxShadow = 'none'
       }}
     />
   )
@@ -1592,6 +1584,7 @@ function StyledSelect({
         value={value}
         required={required}
         onChange={e => onChange(e.target.value)}
+        className="tahi-focus-ring"
         style={{
           width: '100%',
           height: '2.625rem',
@@ -1604,14 +1597,6 @@ function StyledSelect({
           outline: 'none',
           appearance: 'none',
           cursor: 'pointer',
-        }}
-        onFocus={e => {
-          e.currentTarget.style.borderColor = BRAND_HEX
-          e.currentTarget.style.boxShadow = `0 0 0 3px rgba(90,130,78,0.12)`
-        }}
-        onBlur={e => {
-          e.currentTarget.style.borderColor = 'var(--color-border)'
-          e.currentTarget.style.boxShadow = 'none'
         }}
       >
         {children}

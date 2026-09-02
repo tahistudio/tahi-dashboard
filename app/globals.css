@@ -420,6 +420,19 @@
   --shadow-leaf: 0 2px 6px rgba(91, 130, 78, 0.18);
   --shadow-ring: 0 0 0 2px var(--color-brand-light);
 
+  /* ── Focus ring ───────────────────────────────────────────
+     One keyboard-focus treatment for the whole app: two layers sitting
+     OUTSIDE the box, a bg-coloured spacer so the ring never touches the
+     control, then the brand line. Painted with box-shadow so it costs no
+     layout (nothing shifts on focus) and follows the element's radius.
+     --focus-ring-color is mode-aware: plain brand is only ~4:1 on the
+     dark canvas, so dark lifts it to the same bright green as links.
+     The inset variant is for cards and rows inside a scroll container,
+     where an outside ring would be clipped by the scroller. */
+  --focus-ring-color: var(--color-brand);
+  --focus-ring: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--focus-ring-color);
+  --focus-ring-inset: inset 0 0 0 2px var(--focus-ring-color);
+
   /* ── Motion ──────────────────────────────────────────────
      Slice 0 re-base: motion serves perceived performance. UI feedback
      is FAST (70-150ms, Carbon-productive territory); only expressive
@@ -1133,15 +1146,65 @@ textarea,
   30%           { transform: translateY(-2px); opacity: 1; }
 }
 
-/* Shared focus ring for clickable divs that act as buttons. Buttons
-   get the browser default; this utility brings the same affordance to
-   role="button" divs (board cards, table rows, timeline rows). */
+/* ============================================================
+   FOCUS RING
+   ============================================================
+   Three classes, one look. All of them key off :focus-visible or
+   :focus-within, so a mouse click never paints a ring; only keyboard
+   and programmatic focus do.
+
+   .tahi-focus-ring     the default. Put it on any control that owns its
+                        own box: buttons, role="button" divs, chips, tabs,
+                        menu items, checkboxes, avatars, table rows.
+   .tahi-focus-within   for a field that sits inside a box that draws its
+                        own border (composer, search, quick-add). The ring
+                        belongs to the wrapper, so the inner field's own
+                        outline and shadow are cleared.
+   .tahi-focus-inset    for cards and rows inside a horizontal or vertical
+                        scroller, where an outside ring would be clipped
+                        by the scroll container.
+
+   Nothing here changes layout: the ring is a box-shadow, so focusing a
+   control never nudges its neighbours. */
 .tahi-focus-ring:focus {
   outline: none;
 }
 .tahi-focus-ring:focus-visible {
-  outline: 2px solid var(--color-brand);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.tahi-focus-within:focus-within {
+  border-color: var(--focus-ring-color);
+  box-shadow: var(--focus-ring);
+}
+/* The wrapper owns the affordance, so the field inside it must not paint a
+   second one. Sits after .tahi-input-group and the catch-all field rules
+   above, so it wins on source order at equal specificity. */
+.tahi-focus-within :is(input, textarea, select, [contenteditable]):focus,
+.tahi-focus-within :is(input, textarea, select, [contenteditable]):focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.tahi-focus-inset:focus {
+  outline: none;
+}
+.tahi-focus-inset:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-inset);
+}
+
+/* Segmented tab (the view switcher on Requests, the board's sub-view strip).
+   The selected tab's lift belongs here, not in an inline style: an inline
+   box-shadow outranks every stylesheet rule, so it would swallow the focus
+   ring on the one tab in the strip that is actually tabbable. */
+.tahi-viewtab[aria-selected="true"] {
+  box-shadow: var(--shadow-xs);
+}
+.tahi-viewtab:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* Hide scrollbar utility */
@@ -1307,6 +1370,12 @@ html.tahi-private [data-private] button {
   --shadow-leaf: none;
   --shadow-brand: none;
   --shadow-ring: 0 0 0 2px #93C98A;
+
+  /* Focus ring: same geometry, brighter ink. --color-brand sits at ~4:1 on
+     the dark canvas, so the ring uses the lifted green (matches --color-link
+     and --shadow-ring above). --focus-ring itself is inherited from :root and
+     re-resolves against the dark --color-bg and this colour. */
+  --focus-ring-color: #93C98A;
 
   /* Status palette. Tinted-on-dark via translucent backgrounds with
      borders for definition, and lighter text colours to keep the same

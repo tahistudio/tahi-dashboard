@@ -77,13 +77,12 @@ export function RequestsViewSwitcher({ value, onChange, audience }: RequestsView
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(key)}
             onKeyDown={onKeyDown}
-            className="tahi-focus-ring inline-flex items-center justify-center h-11 min-w-11 px-3 lg:h-8 lg:min-w-0 lg:px-2.5"
+            className="tahi-viewtab inline-flex items-center justify-center h-11 min-w-11 px-3 lg:h-8 lg:min-w-0 lg:px-2.5"
             style={{
               gap: '0.3125rem',
               border: 'none',
               borderRadius: 'var(--radius-sm)',
               background: active ? 'var(--color-bg)' : 'transparent',
-              boxShadow: active ? 'var(--shadow-xs)' : undefined,
               fontFamily: 'inherit',
               fontSize: '0.75rem',
               fontWeight: 600,

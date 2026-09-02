@@ -219,7 +219,19 @@ const KANBAN_CSS = `
   box-shadow: var(--shadow-md);
   transform: rotate(-1.5deg);
 }
-.tahi-board-person{ position: relative; display: inline-flex; border-radius: 9999px; }
+/* The card sits in a horizontal scroller, so its focus ring goes inside the
+   box: an outside ring would be clipped at the scroller's edges. Layered with
+   the resting and hover shadows so focusing a hovered card keeps both. */
+.tahi-board-card.tahi-focus-inset:focus-visible{ box-shadow: var(--focus-ring-inset), var(--shadow-xs); }
+.tahi-board-card.tahi-focus-inset:hover:focus-visible{ box-shadow: var(--focus-ring-inset), var(--shadow-sm); }
+/* The 2px bg ring is what separates overlapping avatars in the stack. It lives
+   here rather than inline so the focus ring can replace it on :focus-visible. */
+.tahi-board-person{
+  position: relative;
+  display: inline-flex;
+  border-radius: 9999px;
+  box-shadow: 0 0 0 2px var(--color-bg);
+}
 .tahi-board-person:hover, .tahi-board-person:focus-visible{ z-index: 3; }
 .tahi-board-subs-bar:hover .tahi-board-subs-label,
 .tahi-board-subs-bar:hover .tahi-board-subs-chevron{ color: var(--color-brand-dark); }
@@ -514,6 +526,7 @@ function Column({
             type="button"
             onClick={() => onAdd(column.statusValue)}
             aria-label={`Add card to ${column.label}`}
+            className="tahi-focus-ring"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -548,6 +561,7 @@ function Column({
               aria-label={`${column.label} actions`}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
+              className="tahi-focus-ring"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -585,7 +599,7 @@ function Column({
                     type="button"
                     role="menuitem"
                     onClick={() => { a.onClick(column); setMenuOpen(false) }}
-                    className="w-full inline-flex items-center"
+                    className="tahi-focus-ring w-full inline-flex items-center"
                     style={{
                       gap: '0.4375rem',
                       padding: '0.4375rem 0.625rem',
@@ -631,6 +645,7 @@ function Column({
         <button
           type="button"
           onClick={() => onAdd(column.statusValue)}
+          className="tahi-focus-ring"
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -672,6 +687,7 @@ function EmptySlot({ onAdd }: { onAdd?: () => void }) {
       type="button"
       onClick={onAdd}
       disabled={!onAdd}
+      className="tahi-focus-ring"
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -769,7 +785,7 @@ function BoardCard({
 
   return (
     <div
-      className="tahi-focus-ring tahi-board-card"
+      className="tahi-focus-inset tahi-board-card"
       data-dragging={dragging ? 'true' : 'false'}
       data-drop-target={dropOnCard ? 'true' : 'false'}
       draggable={!readOnly && !!onDragStart}
@@ -955,6 +971,7 @@ function BoardCard({
               onClick={(e) => { e.stopPropagation(); setChecklistOpen(o => !o) }}
               aria-expanded={checklistOpen}
               aria-controls={`checklist-${item.id}`}
+              className="tahi-focus-ring"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -1131,7 +1148,6 @@ function PersonDot({
         className="tahi-board-person tahi-focus-ring"
         style={{
           marginLeft: overlap ? '-0.4375rem' : 0,
-          boxShadow: '0 0 0 2px var(--color-bg)',
         }}
       >
         <Avatar name={name} src={avatarUrl} size={size} tooltip={false} noRing />
@@ -1185,7 +1201,6 @@ function CardPeople({
                 border: '1px dashed var(--color-border)',
                 background: 'var(--color-bg-secondary)',
                 color: 'var(--color-text-subtle)',
-                boxShadow: '0 0 0 2px var(--color-bg)',
               }}
             >
               <User size={11} aria-hidden="true" />
@@ -1210,7 +1225,6 @@ function CardPeople({
                 fontSize: '0.5625rem',
                 fontWeight: 700,
                 fontVariantNumeric: 'tabular-nums',
-                boxShadow: '0 0 0 2px var(--color-bg)',
               }}
             >
               +{rest.length}

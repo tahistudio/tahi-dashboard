@@ -284,6 +284,7 @@ export function BoardView({
                 tabIndex={active ? 0 : -1}
                 onClick={() => setView(key)}
                 onKeyDown={onTabKeyDown}
+                className="tahi-viewtab"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -296,7 +297,6 @@ export function BoardView({
                   fontWeight: 600,
                   color: active ? 'var(--color-text)' : 'var(--color-text-muted)',
                   cursor: 'pointer',
-                  boxShadow: active ? 'var(--shadow-xs)' : undefined,
                   transition: 'background-color 120ms ease, color 120ms ease',
                 }}
               >
@@ -479,6 +479,7 @@ export function BoardView({
         id={`view-panel-${activeView}`}
         aria-labelledby={`view-tab-${activeView}`}
         tabIndex={0}
+        className="tahi-focus-inset"
       >
         {activeView === 'kanban' && (
           <KanbanBoard

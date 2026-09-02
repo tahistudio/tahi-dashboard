@@ -276,6 +276,7 @@ function RailSelect({
       >
         {searchable && (
           <div
+            className="tahi-focus-within"
             style={{
               display: 'flex',
               alignItems: 'center',

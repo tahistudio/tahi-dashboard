@@ -481,7 +481,9 @@ function TimelineRow({
       // A div rather than a <button>, so the client Avatar and the plot
       // markers nest validly. role and tabIndex give it the same keyboard
       // contract a button has.
-      className="tahi-tl-row tahi-focus-ring"
+      // The row fills the horizontal scroller, so an outside ring would be
+      // clipped at both edges. Inset keeps the whole ring on screen.
+      className="tahi-tl-row tahi-focus-inset"
       data-zebra={zebra ? 'true' : 'false'}
       role={onOpen ? 'button' : undefined}
       tabIndex={onOpen ? 0 : undefined}

@@ -168,9 +168,11 @@ export function MessageComposer({
   const fileInputRef = useRef<HTMLInputElement>(null)
   /**
    * The focus ring belongs to the whole composer, not the editor inside it.
-   * Tiptap already clears its own outline (`focus:outline-none` on the editor
-   * attributes), so we mirror :focus-within into state and paint the ring on
-   * the container. Inline styles cannot express :focus-within, hence state.
+   * The ring itself is CSS (.tahi-focus-within in globals.css, one definition
+   * shared with every other wrapper field). This state exists only for the
+   * border colour: the internal-visibility tone is set as an inline style, and
+   * an inline border shorthand outranks any stylesheet rule, so the brand
+   * border on focus has to be applied inline too.
    */
   const [focusWithin, setFocusWithin] = useState(false)
 
@@ -387,6 +389,7 @@ export function MessageComposer({
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div
+      className="tahi-focus-within"
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
@@ -404,15 +407,14 @@ export function MessageComposer({
         // communicate the state; the border is just a quiet echo.
         border: `1px solid ${
           focusWithin
-            ? 'var(--color-brand)'
+            ? 'var(--focus-ring-color)'
             : isInternal ? 'var(--color-warning)' : 'var(--color-border)'
         }`,
         borderRadius: 'var(--radius-lg)',
-        // Two-layer ring sitting outside the box: a bg-coloured spacer, then
-        // the brand line. Matches the site-wide focus treatment.
-        boxShadow: focusWithin
-          ? '0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-brand)'
-          : 'none',
+        // The ring itself comes from .tahi-focus-within in globals.css, so the
+        // composer shares one definition with every other wrapper field. The
+        // focusWithin state stays for the border colour only: it has to beat
+        // the internal-visibility warning tone, which is set inline here.
         transition: 'border-color 150ms ease, box-shadow 150ms ease',
       }}
     >
@@ -451,6 +453,7 @@ export function MessageComposer({
                   aria-checked={active}
                   title={tooltip}
                   onClick={() => setVisibility(value)}
+                  className="tahi-focus-ring"
                   style={{
                     padding: '0.3125rem 0.625rem',
                     display: 'inline-flex',
@@ -553,6 +556,7 @@ export function MessageComposer({
                 type="button"
                 onClick={() => removeFile(s.id)}
                 aria-label={`Remove ${s.file.name}`}
+                className="tahi-focus-ring"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -672,6 +676,7 @@ export function MessageComposer({
           disabled={isEmpty || submitting}
           aria-label="Send message"
           title="Send (⌘+Enter)"
+          className="tahi-focus-ring"
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -715,6 +720,7 @@ function ToolbarButton({
       onClick={onClick}
       aria-label={label}
       title={label}
+      className="tahi-focus-ring"
       style={{
         display: 'inline-flex',
         alignItems: 'center',

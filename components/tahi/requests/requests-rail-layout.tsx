@@ -344,7 +344,7 @@ export function RequestsRailLayout({
           <div className="hidden lg:block" style={{ flex: 1, minWidth: 0 }} />
 
           <div
-            className="tahi-input-group flex items-center h-11 lg:h-8"
+            className="tahi-input-group tahi-focus-within flex items-center h-11 lg:h-8"
             style={{
               flex: '1 1 12rem',
               maxWidth: '20rem',
