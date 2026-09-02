@@ -48,6 +48,8 @@ export type {
   BoardAssignee,
   BoardTag,
   BoardPriority,
+  BoardPerson,
+  BoardSubRequest,
 } from '@/components/tahi/kanban-board'
 
 export type BoardViewKey = 'kanban' | 'table' | 'timeline'
@@ -89,6 +91,16 @@ interface BoardViewProps {
   onPriorityClick?: (priority: BoardPriority) => void
   columnActions?: ReadonlyArray<ColumnAction>
   readOnly?: boolean
+  /** Kanban: render priority as an icon with a tooltip instead of a
+   *  labelled chip, so a narrow card's top row stays one line. */
+  iconOnlyPriority?: boolean
+  /** Kanban: endpoint for a card's sub-requests. When it returns a URL
+   *  and the item has `subtasks`, the card's subtask bar expands into a
+   *  lazily fetched, SWR-cached list. */
+  subtaskUrl?: (item: BoardItem) => string | null
+  /** Kanban: id for the horizontal scroller, wired to the proxy
+   *  scrollbar's aria-controls. */
+  boardId?: string
   /** Suppress the board's own view tabs and controls row. For callers that
    *  already render a view switcher and a search field above it (the requests
    *  rail). Off by default, so every existing consumer is unchanged. */
@@ -125,6 +137,9 @@ export function BoardView({
   onPriorityClick,
   columnActions,
   readOnly,
+  iconOnlyPriority,
+  subtaskUrl,
+  boardId,
   hideHeader = false,
   className,
 }: BoardViewProps) {
@@ -479,6 +494,9 @@ export function BoardView({
             onPriorityClick={togglePriority}
             columnActions={columnActions}
             readOnly={readOnly}
+            iconOnlyPriority={iconOnlyPriority}
+            subtaskUrl={subtaskUrl}
+            boardId={boardId}
           />
         )}
         {activeView === 'table' && (

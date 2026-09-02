@@ -33,12 +33,17 @@
  */
 
 import * as React from 'react'
+import useSWR from 'swr'
 import {
   Plus, MoreHorizontal, Calendar, MessageCircle, Paperclip,
-  ChevronDown, ChevronRight, GripVertical,
+  ChevronDown, ChevronRight, ChevronsUp, ChevronUp, Minus,
+  GripVertical, AlertTriangle, User,
 } from 'lucide-react'
 import { Avatar } from '@/components/tahi/avatar'
 import { Popover } from '@/components/tahi/popover'
+import { Tooltip } from '@/components/tahi/tooltip'
+import { BoardScrollbar } from '@/components/tahi/board-scrollbar'
+import { swrFetcher } from '@/lib/swr-fetcher'
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -46,6 +51,21 @@ export interface BoardAssignee {
   id: string
   name: string
   avatarUrl?: string | null
+}
+
+/** One person on a card's people row, with the role the tooltip names. */
+export interface BoardPerson extends BoardAssignee {
+  /** Human role label, e.g. "Project manager", "Assignee", "Follower". */
+  role: string
+}
+
+/** A row in the inline sub-request preview a card expands to. */
+export interface BoardSubRequest {
+  id: string
+  title: string
+  status?: string | null
+  assigneeName?: string | null
+  assigneeAvatarUrl?: string | null
 }
 
 export interface BoardTag {
@@ -96,9 +116,29 @@ export interface BoardItem {
   startDate?: string
   /** Surfaces an overdue tone when set. */
   isOverdue?: boolean
+  /** Suppress the kanban card's due chip while keeping `dueDate` itself.
+   *  Finished work needs no deadline on the card, but the timeline still
+   *  needs the date to place its bar. */
+  hideDueChip?: boolean
   commentCount?: number
   attachmentCount?: number
   assignees?: ReadonlyArray<BoardAssignee>
+
+  /** Short reference pinned to the top right of the card, e.g. "#014". */
+  reference?: string
+  /** Warning marker beside the chips. The string is the tooltip text
+   *  (a scope-creep reason, a blocked note). */
+  warning?: string
+  /** Client-side avatar on the left of the people row. Omit it for
+   *  audiences that should not see which client a card belongs to. */
+  client?: BoardAssignee
+  /** People row on the right: project manager, assignee, followers, in
+   *  that order. Three show; the rest fold into a "+N" chip. */
+  people?: ReadonlyArray<BoardPerson>
+  /** Renders an "Unassigned" placeholder at the end of the people row. */
+  unassigned?: boolean
+  /** Sub-request rollup. Drives the subtask bar under the people row. */
+  subtasks?: { done: number; total: number }
 }
 
 export interface BoardColumn {
@@ -142,8 +182,66 @@ interface KanbanBoardProps {
   columnActions?: ReadonlyArray<ColumnAction>
   /** Disable drag interactions (e.g. read-only viewers). */
   readOnly?: boolean
+  /** Render the priority as an icon with a tooltip instead of a labelled
+   *  chip. Keeps a narrow card's top row to one line. */
+  iconOnlyPriority?: boolean
+  /** Endpoint for an item's sub-requests. When it returns a URL and the
+   *  item has `subtasks`, the subtask bar becomes an expand toggle that
+   *  lazy-loads the rows (SWR-cached, so a re-expand is instant).
+   *  Return null to leave the bar as a static rollup. */
+  subtaskUrl?: (item: BoardItem) => string | null
+  /** id given to the horizontal scroller, wired to the proxy
+   *  scrollbar's aria-controls. */
+  boardId?: string
   className?: string
 }
+
+// ── Styles that inline style objects cannot express ──────────────────
+// Hover, focus, media queries and keyframes. Kept as one block so a
+// card's own inline style stays layout-only and never fights a hover
+// rule on specificity.
+
+const KANBAN_CSS = `
+.tahi-board-card{
+  border: 1px solid var(--color-border-subtle);
+  box-shadow: var(--shadow-xs);
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease, opacity 150ms ease;
+}
+.tahi-board-card:hover{
+  border-color: var(--color-brand);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+.tahi-board-card[data-drop-target="true"]{ border-color: var(--color-brand); }
+.tahi-board-card[data-dragging="true"],
+.tahi-board-card[data-dragging="true"]:hover{
+  border-color: var(--color-brand);
+  box-shadow: var(--shadow-md);
+  transform: rotate(-1.5deg);
+}
+.tahi-board-person{ position: relative; display: inline-flex; border-radius: 9999px; }
+.tahi-board-person:hover, .tahi-board-person:focus-visible{ z-index: 3; }
+.tahi-board-subs-bar:hover .tahi-board-subs-label,
+.tahi-board-subs-bar:hover .tahi-board-subs-chevron{ color: var(--color-brand-dark); }
+.tahi-board-subs-chevron{ transition: transform 180ms ease, color 150ms ease; }
+.tahi-board-subs-bar[aria-expanded="true"] .tahi-board-subs-chevron{ transform: rotate(180deg); }
+.tahi-board-sublist{ animation: tahi-board-subs-in 160ms ease both; }
+@keyframes tahi-board-subs-in{
+  from{ opacity: 0; transform: translateY(-3px); }
+  to{ opacity: 1; transform: none; }
+}
+@media (max-width: 47.9375rem){
+  .tahi-kanban-scroller{ scroll-snap-type: x mandatory; scroll-padding-left: 0.25rem; }
+  .tahi-kanban-scroller > [data-board-column]{ scroll-snap-align: start; }
+  .tahi-board-subs-bar{ min-height: 2.75rem; }
+  .tahi-board-sub-row{ min-height: 1.875rem; }
+}
+@media (prefers-reduced-motion: reduce){
+  .tahi-board-card:hover{ transform: none; }
+  .tahi-board-sublist{ animation: none; }
+  .tahi-board-subs-chevron{ transition: color 150ms ease; }
+}
+`
 
 // ── Component ────────────────────────────────────────────────────────
 
@@ -160,11 +258,29 @@ export function KanbanBoard({
   onPriorityClick,
   columnActions,
   readOnly = false,
+  iconOnlyPriority = false,
+  subtaskUrl,
+  boardId,
   className,
 }: KanbanBoardProps) {
+  // A page can hold more than one board (the design system showcase
+  // does), so the default id is per-instance and stable across SSR.
+  const generatedId = React.useId()
+  const scrollerId = boardId ?? `tahi-kanban-board-${generatedId}`
   const [dragId, setDragId] = React.useState<string | null>(null)
   const [dropColumn, setDropColumn] = React.useState<string | null>(null)
   const [dropOnCard, setDropOnCard] = React.useState<string | null>(null)
+  const scrollerRef = React.useRef<HTMLDivElement | null>(null)
+  // Which cards have their sub-request preview open. Keyed by id so a
+  // re-render, a status move or a filter change does not collapse them.
+  const [openSubtasks, setOpenSubtasks] = React.useState<ReadonlySet<string>>(() => new Set())
+  const toggleSubtasks = React.useCallback((id: string) => {
+    setOpenSubtasks(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }, [])
 
   // Group top-level items by status; index children by parent.
   const { byStatus, childrenByParent } = React.useMemo(() => {
@@ -217,18 +333,29 @@ export function KanbanBoard({
     onCardDragEnd()
   }
 
+  // The scrollbar only needs to re-measure when the shape of the board
+  // changes, which is exactly when a column's card count changes.
+  const signature = columns.map(c => (byStatus.get(c.statusValue)?.length ?? 0)).join(',')
+
   return (
-    <div
-      className={className}
-      style={{
-        display: 'flex',
-        gap: '0.75rem',
-        alignItems: 'flex-start',
-        overflowX: 'auto',
-        paddingBottom: '0.25rem',  // room for the scrollbar
-        scrollSnapType: 'x proximity',
-      }}
-    >
+    <div className={className} style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+      <style>{KANBAN_CSS}</style>
+      <BoardScrollbar scrollerRef={scrollerRef} signature={signature} controlsId={scrollerId} />
+      <div
+        id={scrollerId}
+        ref={scrollerRef}
+        className="tahi-kanban-scroller"
+        style={{
+          display: 'flex',
+          flexDirection: 'row',
+          flexWrap: 'nowrap',
+          gap: '0.875rem',
+          alignItems: 'flex-start',
+          overflowX: 'auto',
+          overscrollBehaviorX: 'contain',
+          paddingBottom: '0.25rem',  // room for the native scrollbar
+        }}
+      >
       {columns.map(col => {
         const cards = byStatus.get(col.statusValue) ?? []
         const isDropTarget = dropColumn === col.statusValue
@@ -280,12 +407,17 @@ export function KanbanBoard({
                   onTagClick={onTagClick}
                   onPriorityClick={onPriorityClick}
                   onClick={onItemClick}
+                  iconOnlyPriority={iconOnlyPriority}
+                  subtaskUrl={subtaskUrl?.(card) ?? null}
+                  subtasksOpen={openSubtasks.has(card.id)}
+                  onToggleSubtasks={toggleSubtasks}
                 />
               ))
             )}
           </Column>
         )
       })}
+      </div>
     </div>
   )
 }
@@ -317,8 +449,11 @@ function Column({
   const menuRef = React.useRef<HTMLButtonElement | null>(null)
   return (
     <div
+      data-board-column
       style={{
-        flex: '0 0 17rem',
+        flex: '0 0 16.5rem',
+        width: '16.5rem',
+        minWidth: '16.5rem',
         display: 'flex',
         flexDirection: 'column',
         gap: '0.4375rem',
@@ -328,7 +463,10 @@ function Column({
         borderRadius: 'var(--radius-md)',
         transition: 'border-color 150ms ease, background 150ms ease',
         minHeight: '12rem',
-        scrollSnapAlign: 'start',
+        // A column never scrolls: it grows with its cards and the page
+        // takes the vertical scroll.
+        maxHeight: 'none',
+        overflow: 'visible',
       }}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -589,6 +727,10 @@ function BoardCard({
   onTagClick,
   onPriorityClick,
   compact = false,
+  iconOnlyPriority = false,
+  subtaskUrl = null,
+  subtasksOpen = false,
+  onToggleSubtasks,
 }: {
   item: BoardItem
   dragging?: boolean
@@ -606,6 +748,10 @@ function BoardCard({
   onTagClick?: (tag: BoardTag) => void
   onPriorityClick?: (priority: BoardPriority) => void
   compact?: boolean
+  iconOnlyPriority?: boolean
+  subtaskUrl?: string | null
+  subtasksOpen?: boolean
+  onToggleSubtasks?: (itemId: string) => void
 }) {
   const [checklistOpen, setChecklistOpen] = React.useState(false)
   const checklist = item.checklist ?? []
@@ -614,10 +760,18 @@ function BoardCard({
   const progressRatio = item.progress
     ? Math.min(1, Math.max(0, item.progress.current / Math.max(1, item.progress.total)))
     : 0
+  const people = item.people ?? []
+  const hasPeopleRow = !!item.client || people.length > 0 || !!item.unassigned
+  const subtasks = item.subtasks && item.subtasks.total > 0 ? item.subtasks : null
+  const showDue = !!item.dueDate && !item.hideDueChip
+  const hasFooterMeta = showDue || !!item.commentCount || !!item.attachmentCount ||
+    (!hasPeopleRow && !!item.assignees && item.assignees.length > 0)
 
   return (
     <div
-      className="tahi-focus-ring"
+      className="tahi-focus-ring tahi-board-card"
+      data-dragging={dragging ? 'true' : 'false'}
+      data-drop-target={dropOnCard ? 'true' : 'false'}
       draggable={!readOnly && !!onDragStart}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
@@ -645,24 +799,10 @@ function BoardCard({
       style={{
         position: 'relative',
         background: 'var(--color-bg)',
-        border: `1px solid ${dropOnCard ? 'var(--color-brand)' : 'var(--color-border-subtle)'}`,
         borderRadius: 'var(--radius-md)',
-        boxShadow: dragging ? 'var(--shadow-md)' : 'var(--shadow-xs)',
         opacity: dragging ? 0.45 : 1,
-        transform: dragging ? 'rotate(-1.5deg)' : 'none',
         cursor: onClick ? 'pointer' : (readOnly ? 'default' : 'grab'),
         overflow: 'hidden',
-        transition: 'border-color 120ms ease, box-shadow 150ms ease, transform 100ms ease',
-      }}
-      onMouseEnter={e => {
-        if (dragging) return
-        e.currentTarget.style.boxShadow = 'var(--shadow-md)'
-        e.currentTarget.style.borderColor = 'var(--color-border)'
-      }}
-      onMouseLeave={e => {
-        if (dragging) return
-        e.currentTarget.style.boxShadow = 'var(--shadow-xs)'
-        e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
       }}
     >
       <div style={{
@@ -671,14 +811,16 @@ function BoardCard({
         flexDirection: 'column',
         gap: compact ? '0.3125rem' : '0.4375rem',
       }}>
-        {/* Tag row: priority + custom tags. Each chip is clickable
-            when a handler is provided — caller routes to a filtered
-            list (e.g. "all high-priority tasks", "all Marketing"). */}
-        {(item.priority || (item.tags && item.tags.length > 0)) && (
+        {/* Top row: category and priority chips on the left, the scope
+            warning beside them, the reference pinned right. Each chip is
+            clickable when a handler is provided — the caller routes to a
+            filtered list (e.g. "all high-priority tasks"). */}
+        {(item.priority || (item.tags && item.tags.length > 0) || item.warning || item.reference) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', alignItems: 'center' }}>
             {item.priority && (
               <PriorityChip
                 priority={item.priority}
+                iconOnly={iconOnlyPriority}
                 onClick={onPriorityClick ? () => onPriorityClick(item.priority!) : undefined}
               />
             )}
@@ -689,18 +831,50 @@ function BoardCard({
                 onClick={onTagClick ? () => onTagClick(tag) : undefined}
               />
             ))}
+            {item.warning && (
+              <Tooltip label={item.warning}>
+                <span
+                  tabIndex={0}
+                  role="img"
+                  aria-label={item.warning}
+                  className="tahi-focus-ring"
+                  style={{ display: 'inline-flex', color: 'var(--color-warning)', borderRadius: 'var(--radius-sm)' }}
+                >
+                  <AlertTriangle size={13} aria-hidden="true" />
+                </span>
+              </Tooltip>
+            )}
+            {item.reference && (
+              <span style={{
+                marginLeft: 'auto',
+                fontSize: '0.6875rem',
+                fontWeight: 600,
+                color: 'var(--color-text-subtle)',
+                fontVariantNumeric: 'tabular-nums',
+              }}>
+                {item.reference}
+              </span>
+            )}
           </div>
         )}
 
         {/* Title + optional description */}
         <div>
-          <div style={{
-            fontSize: compact ? '0.8125rem' : 'var(--text-sm)',
-            fontWeight: 600,
-            color: 'var(--color-text)',
-            lineHeight: 1.35,
-            letterSpacing: '-0.005em',
-          }}>
+          <div
+            title={item.title}
+            style={{
+              fontSize: compact ? '0.8125rem' : 'var(--text-sm)',
+              fontWeight: 600,
+              color: 'var(--color-text)',
+              lineHeight: 1.35,
+              letterSpacing: '-0.005em',
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              overflowWrap: 'break-word',
+            }}
+          >
             {item.title}
           </div>
           {item.description && !compact && (
@@ -719,8 +893,29 @@ function BoardCard({
           )}
         </div>
 
-        {/* Progress bar */}
-        {hasProgress && (
+        {/* People row: client on the left, the delivery people stacked
+            on the right. One row, so a narrow card reads at a glance. */}
+        {hasPeopleRow && (
+          <CardPeople client={item.client} people={people} unassigned={item.unassigned} />
+        )}
+
+        {/* Sub-request rollup. Expands inline when the caller supplies a
+            URL; otherwise it stays a static count. */}
+        {subtasks && (
+          <CardSubtasks
+            itemId={item.id}
+            reference={item.reference}
+            done={subtasks.done}
+            total={subtasks.total}
+            url={subtaskUrl}
+            open={subtasksOpen}
+            onToggle={onToggleSubtasks}
+          />
+        )}
+
+        {/* Progress bar. Subtasks already carry their own bar, so an
+            in-flight card shows one or the other, never both. */}
+        {hasProgress && !subtasks && (
           <div>
             <div style={{
               display: 'flex',
@@ -831,17 +1026,17 @@ function BoardCard({
         )}
 
         {/* Meta footer */}
-        {(item.dueDate || item.commentCount || item.attachmentCount || (item.assignees && item.assignees.length > 0)) && (
+        {hasFooterMeta && (
           <div style={{
             display: 'flex',
             alignItems: 'center',
             gap: '0.625rem',
-            paddingTop: hasProgress || checklist.length > 0 || (nestedChildren && nestedChildren.length > 0) ? '0.1875rem' : 0,
+            paddingTop: hasProgress || !!subtasks || checklist.length > 0 || (nestedChildren && nestedChildren.length > 0) ? '0.1875rem' : 0,
             color: 'var(--color-text-subtle)',
             fontSize: '0.6875rem',
             fontWeight: 500,
           }}>
-            {item.dueDate && (
+            {showDue && (
               <span style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -865,7 +1060,7 @@ function BoardCard({
               </span>
             )}
             <div style={{ flex: 1 }} />
-            {item.assignees && item.assignees.length > 0 && (
+            {!hasPeopleRow && item.assignees && item.assignees.length > 0 && (
               <Avatar.Stack spacing="tight">
                 {item.assignees.slice(0, 3).map(a => (
                   <Avatar
@@ -905,16 +1100,391 @@ function BoardCard({
   )
 }
 
+// ── People row ───────────────────────────────────────────────────────
+
+const STACK_AVATAR_PX = 18
+const CLIENT_AVATAR_PX = 20
+/** How many people show before the rest fold into a "+N" chip. */
+const PEOPLE_VISIBLE = 3
+
+/** One focusable dot in the people row. tabIndex 0 so the tooltip is
+ *  reachable by keyboard, not just by hover. */
+function PersonDot({
+  name,
+  avatarUrl,
+  role,
+  size,
+  overlap,
+}: {
+  name: string
+  avatarUrl?: string | null
+  role: string
+  size: number
+  overlap?: boolean
+}) {
+  return (
+    <Tooltip label={`${name} · ${role}`}>
+      <span
+        tabIndex={0}
+        role="img"
+        aria-label={`${name}, ${role}`}
+        className="tahi-board-person tahi-focus-ring"
+        style={{
+          marginLeft: overlap ? '-0.4375rem' : 0,
+          boxShadow: '0 0 0 2px var(--color-bg)',
+        }}
+      >
+        <Avatar name={name} src={avatarUrl} size={size} tooltip={false} noRing />
+      </span>
+    </Tooltip>
+  )
+}
+
+function CardPeople({
+  client,
+  people,
+  unassigned,
+}: {
+  client?: BoardAssignee
+  people: ReadonlyArray<BoardPerson>
+  unassigned?: boolean
+}) {
+  const visible = people.slice(0, PEOPLE_VISIBLE)
+  const rest = people.slice(PEOPLE_VISIBLE)
+  const restNames = rest.map(p => p.name).join(', ')
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', minHeight: '1.5rem' }}>
+      {client && (
+        <PersonDot name={client.name} avatarUrl={client.avatarUrl} role="Client" size={CLIENT_AVATAR_PX} />
+      )}
+      <div style={{ display: 'inline-flex', alignItems: 'center', marginLeft: 'auto' }}>
+        {visible.map((person, i) => (
+          <PersonDot
+            key={person.id}
+            name={person.name}
+            avatarUrl={person.avatarUrl}
+            role={person.role}
+            size={STACK_AVATAR_PX}
+            overlap={i > 0}
+          />
+        ))}
+        {unassigned && (
+          <Tooltip label="Unassigned · No one is on this yet">
+            <span
+              tabIndex={0}
+              role="img"
+              aria-label="Unassigned"
+              className="tahi-board-person tahi-focus-ring"
+              style={{
+                marginLeft: visible.length > 0 ? '-0.4375rem' : 0,
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: `${STACK_AVATAR_PX}px`,
+                height: `${STACK_AVATAR_PX}px`,
+                border: '1px dashed var(--color-border)',
+                background: 'var(--color-bg-secondary)',
+                color: 'var(--color-text-subtle)',
+                boxShadow: '0 0 0 2px var(--color-bg)',
+              }}
+            >
+              <User size={11} aria-hidden="true" />
+            </span>
+          </Tooltip>
+        )}
+        {rest.length > 0 && (
+          <Tooltip label={`${rest.length} more · ${restNames}`}>
+            <span
+              tabIndex={0}
+              role="img"
+              aria-label={`${rest.length} more: ${restNames}`}
+              className="tahi-board-person tahi-focus-ring"
+              style={{
+                marginLeft: '-0.4375rem',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: `${STACK_AVATAR_PX}px`,
+                height: `${STACK_AVATAR_PX}px`,
+                background: 'var(--color-bg-tertiary)',
+                color: 'var(--color-text-muted)',
+                fontSize: '0.5625rem',
+                fontWeight: 700,
+                fontVariantNumeric: 'tabular-nums',
+                boxShadow: '0 0 0 2px var(--color-bg)',
+              }}
+            >
+              +{rest.length}
+            </span>
+          </Tooltip>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Sub-request preview ──────────────────────────────────────────────
+
+function statusDot(status?: string | null): string {
+  if (!status) return 'var(--color-text-subtle)'
+  return `var(--status-${status.replace(/_/g, '-')}-dot, var(--color-text-subtle))`
+}
+
+function MiniProgress({ value, tone }: { value: number; tone: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: 'block',
+        width: '100%',
+        height: '0.25rem',
+        borderRadius: 999,
+        background: 'var(--color-bg-tertiary)',
+        overflow: 'hidden',
+      }}
+    >
+      <span style={{
+        display: 'block',
+        width: `${Math.round(Math.min(1, Math.max(0, value)) * 100)}%`,
+        height: '100%',
+        borderRadius: 999,
+        background: tone,
+        transition: 'width 200ms ease',
+      }} />
+    </span>
+  )
+}
+
+/** Lazy-loads a card's sub-requests. SWR keys on the URL, so collapsing
+ *  and re-expanding a card is instant and two cards never refetch each
+ *  other's rows. */
+function SubtaskList({ url }: { url: string }) {
+  const { data, error, isLoading } = useSWR<{ subRequests?: BoardSubRequest[]; items?: BoardSubRequest[] }>(
+    url,
+    swrFetcher,
+  )
+  const rows = data?.subRequests ?? data?.items ?? []
+
+  const message = (text: string) => (
+    <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>{text}</span>
+  )
+
+  return (
+    <div
+      className="tahi-board-sublist"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.125rem',
+        marginTop: '0.0625rem',
+        padding: '0.375rem 0.4375rem',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-sm)',
+        background: 'var(--color-bg-secondary)',
+      }}
+    >
+      {isLoading && message('Loading sub-requests…')}
+      {!isLoading && error && message('Could not load sub-requests')}
+      {!isLoading && !error && rows.length === 0 && message('No sub-requests yet')}
+      {rows.map(row => {
+        const done = row.status === 'delivered'
+        return (
+          <div
+            key={row.id}
+            className="tahi-board-sub-row"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4375rem', minHeight: '1.5rem' }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: '0.375rem',
+                height: '0.375rem',
+                borderRadius: 999,
+                background: statusDot(row.status),
+                flexShrink: 0,
+              }}
+            />
+            <span style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: '0.6875rem',
+              fontWeight: 600,
+              color: done ? 'var(--color-text-subtle)' : 'var(--color-text)',
+              textDecoration: done ? 'line-through' : 'none',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}>
+              {row.title}
+            </span>
+            {row.assigneeName ? (
+              <Avatar name={row.assigneeName} src={row.assigneeAvatarUrl} size={STACK_AVATAR_PX} noRing />
+            ) : 'assigneeName' in row ? (
+              // The key present but empty means genuinely unassigned. The
+              // portal payload omits it entirely, so clients see no slot.
+              <span
+                title="Unassigned"
+                style={{
+                  width: `${STACK_AVATAR_PX}px`,
+                  height: `${STACK_AVATAR_PX}px`,
+                  borderRadius: 999,
+                  border: '1px dashed var(--color-border)',
+                  background: 'var(--color-bg)',
+                  flexShrink: 0,
+                }}
+              />
+            ) : null}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function CardSubtasks({
+  itemId,
+  reference,
+  done,
+  total,
+  url,
+  open,
+  onToggle,
+}: {
+  itemId: string
+  reference?: string
+  done: number
+  total: number
+  url: string | null
+  open: boolean
+  onToggle?: (itemId: string) => void
+}) {
+  const ratio = total > 0 ? done / total : 0
+  const tone = done >= total ? 'var(--status-delivered-dot)' : 'var(--color-brand)'
+  const label = `${done} of ${total} subtask${total === 1 ? '' : 's'}`
+  const expandable = !!url && !!onToggle
+
+  const bar = (
+    <>
+      <MiniProgress value={ratio} tone={tone} />
+      <span style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+        <span
+          className="tahi-board-subs-label"
+          style={{
+            fontSize: '0.65625rem',
+            fontWeight: 600,
+            color: 'var(--color-text-subtle)',
+            fontVariantNumeric: 'tabular-nums',
+            transition: 'color 150ms ease',
+          }}
+        >
+          {label}
+        </span>
+        {expandable && (
+          <span className="tahi-board-subs-chevron" style={{ marginLeft: 'auto', display: 'inline-flex', color: 'var(--color-text-subtle)' }}>
+            <ChevronDown size={14} aria-hidden="true" />
+          </span>
+        )}
+      </span>
+    </>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', marginTop: '0.125rem' }}>
+      {expandable ? (
+        <button
+          type="button"
+          className="tahi-board-subs-bar tahi-focus-ring"
+          aria-expanded={open}
+          aria-label={`${open ? 'Hide' : 'Show'} the ${total} subtask${total === 1 ? '' : 's'}${reference ? ` on ${reference}` : ''}`}
+          draggable={false}
+          // The card is the drag source. Without this, pressing the bar
+          // and moving would drag the card instead of toggling.
+          onDragStart={(e) => { e.preventDefault(); e.stopPropagation() }}
+          onClick={(e) => { e.stopPropagation(); onToggle?.(itemId) }}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.3125rem',
+            width: '100%',
+            margin: 0,
+            padding: '0.125rem 0',
+            border: 'none',
+            background: 'none',
+            textAlign: 'left',
+            color: 'inherit',
+            font: 'inherit',
+            borderRadius: 'var(--radius-sm)',
+            cursor: 'pointer',
+          }}
+        >
+          {bar}
+        </button>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3125rem', padding: '0.125rem 0' }}>
+          {bar}
+        </div>
+      )}
+      {expandable && open && url && <SubtaskList url={url} />}
+    </div>
+  )
+}
+
 // ── Chips ────────────────────────────────────────────────────────────
+
+const PRIORITY_ICON: Record<BoardPriority, typeof ChevronsUp> = {
+  urgent: ChevronsUp,
+  high:   ChevronUp,
+  medium: Minus,
+  low:    ChevronDown,
+}
 
 function PriorityChip({
   priority,
   onClick,
+  iconOnly = false,
 }: {
   priority: BoardPriority
   onClick?: () => void
+  iconOnly?: boolean
 }) {
   const tone = PRIORITY_TONE[priority]
+
+  if (iconOnly) {
+    const PriorityIcon = PRIORITY_ICON[priority]
+    const label = `${priority.charAt(0).toUpperCase()}${priority.slice(1)} priority`
+    const iconStyle: React.CSSProperties = {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '1rem',
+      height: '1rem',
+      padding: 0,
+      border: 'none',
+      borderRadius: 'var(--radius-sm)',
+      background: 'transparent',
+      color: tone.dot,
+      cursor: onClick ? 'pointer' : 'default',
+    }
+    return (
+      <Tooltip label={label}>
+        {onClick ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onClick() }}
+            aria-label={`Filter by ${priority} priority`}
+            className="tahi-focus-ring"
+            style={iconStyle}
+          >
+            <PriorityIcon size={14} aria-hidden="true" />
+          </button>
+        ) : (
+          <span tabIndex={0} role="img" aria-label={label} className="tahi-focus-ring" style={iconStyle}>
+            <PriorityIcon size={14} aria-hidden="true" />
+          </span>
+        )}
+      </Tooltip>
+    )
+  }
+
   const baseStyle: React.CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',

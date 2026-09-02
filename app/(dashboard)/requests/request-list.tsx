@@ -38,6 +38,7 @@ import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/
 import {
   BoardView,
   type BoardItem,
+  type BoardPerson,
   type BoardColumn as BoardViewColumn,
   type BoardPriority,
   type BoardTag,
@@ -543,6 +544,19 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     ? (effectiveView === 'timeline' ? 'timeline' : 'kanban')
     : undefined
 
+  // Kanban cards name their assignee, and the list payload carries only the
+  // id. The conditional key skips the fetch until a board view is on screen,
+  // and shares SWR's cache with the bulk bar's copy of the same list.
+  const boardVisible = effectiveView === 'board' || effectiveView === 'kanban'
+  const { data: boardTeamData } = useSWR<{ items: Array<{ id: string; name: string; avatarUrl: string | null }> }>(
+    isAdmin && boardVisible ? '/api/admin/team-members' : null,
+  )
+  const teamById = useMemo(() => {
+    const m = new Map<string, { name: string; avatarUrl: string | null }>()
+    for (const t of boardTeamData?.items ?? []) m.set(t.id, { name: t.name, avatarUrl: t.avatarUrl })
+    return m
+  }, [boardTeamData])
+
   // ── FilterBar wiring ──────────────────────────────────────────────────────
   // FilterBar drives the same individual filter state vars used by `filtered`.
   // Status + Category + Type chips are permanent (nonRemovable). The client-tag
@@ -752,15 +766,51 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         tags.push({ id: `tag-${t}`, label: t })
       }
       const overdue = getDueDateState(r.dueDate, r.status) === 'overdue'
+
+      // People stack. The list payload carries the assignee only, so that is
+      // the one role on the card today; project managers and followers live
+      // in request_participants and need that join added to the list API
+      // before they can appear here. Roles are deduped by person id, so one
+      // person holding two roles reads as a single avatar.
+      const people: BoardPerson[] = []
+      if (r.assigneeId) {
+        const member = teamById.get(r.assigneeId)
+        people.push({
+          id: r.assigneeId,
+          name: member?.name ?? 'Assignee',
+          avatarUrl: member?.avatarUrl,
+          role: 'Assignee',
+        })
+      }
+
+      const subCount = r.subRequestCount ?? 0
+      const delivered = r.status === 'delivered'
+
       return {
         id: r.id,
         status: r.status,
-        title: r.requestNumber != null
-          ? `#${String(r.requestNumber).padStart(3, '0')} ${r.title}`
-          : r.title,
+        title: r.title,
+        // The number sits in its own slot at the top right of the card, so
+        // it no longer rides along in front of the title.
+        reference: r.requestNumber != null
+          ? `#${String(r.requestNumber).padStart(3, '0')}`
+          : undefined,
         priority: toBoardPriority(r.priority),
         tags: tags.length > 0 ? tags : undefined,
+        warning: r.scopeFlagged ? 'Flagged for scope creep' : undefined,
+        // Admins see which client a card belongs to; a client already knows.
+        client: isAdmin && r.orgId && r.orgName
+          ? { id: r.orgId, name: r.orgName }
+          : undefined,
+        people: people.length > 0 ? people : undefined,
+        unassigned: !r.assigneeId,
+        // A done count is not in the list payload yet, so the bar reads as
+        // "0 of N" until the API carries it.
+        subtasks: subCount > 0 ? { done: 0, total: subCount } : undefined,
+        // A delivered request is finished, so its card shows no due chip.
+        // The date itself stays, because the timeline still plots by it.
         dueDate: r.dueDate ?? undefined,
+        hideDueChip: delivered,
         startDate: r.startDate ?? undefined,
         isOverdue: overdue,
       }
@@ -773,7 +823,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         if (kids && kids.length > 0) item.children = kids.map(toItem)
         return item
       })
-  }, [visible])
+  }, [visible, isAdmin, teamById])
 
   // Drag source context for the cross-client guard. dataTransfer is empty during
   // dragover, so we mirror the dragged request's org into a ref via boardItems
@@ -1044,6 +1094,10 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       onNest={isAdmin ? handleBoardNest : undefined}
       onItemClick={(item) => { router.push(`/requests/${item.id}`) }}
       readOnly={!isAdmin}
+      iconOnlyPriority
+      subtaskUrl={(item) => isAdmin
+        ? `/api/admin/requests/${item.id}/sub-requests`
+        : `/api/portal/requests/${item.id}/sub-requests`}
     />
   ) : (
     <Card padding="none">
