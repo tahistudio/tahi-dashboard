@@ -33,7 +33,22 @@ import {
   type BoardColumn as BoardViewColumn,
   type BoardPriority,
   type BoardTag,
+  type BoardViewKey,
 } from '@/components/tahi/board-view'
+import { usePermissions } from '@/components/tahi/permissions-context'
+import { RequestsViewSwitcher } from '@/components/tahi/requests/requests-view-switcher'
+import { RequestsHeaderActions } from '@/components/tahi/requests/requests-header-actions'
+import { buildFilterChips, type RailOption } from '@/components/tahi/requests/requests-rail'
+import {
+  RequestsRailLayout,
+  useRequestsRailState,
+} from '@/components/tahi/requests/requests-rail-layout'
+import {
+  DEFAULT_REQUEST_FILTERS,
+  applyRequestViews,
+  countSavedViews,
+  type RequestsAudience,
+} from '@/lib/requests-views'
 
 // AI wizard modal -- only opened on click, defer to reduce first-paint JS.
 const AiRequestWizard = dynamic(
@@ -258,7 +273,11 @@ function DueDateChip({ dueDate, status }: { dueDate: string | null; status: stri
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
-  const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
+  const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules, impersonatedTeamMemberId } = useImpersonation()
+  // The rail layout is Liam and Staci only while it beds in. Everyone else,
+  // real clients included, keeps the toolbar they have today.
+  const { isSuperAdmin } = usePermissions()
+  const railOn = isSuperAdmin
   // Only switch to client view when impersonating a client, not a team member
   const isAdmin = isAdminProp && !isImpersonatingClient
   // Check if impersonated team member is a viewer
@@ -308,6 +327,18 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
 
   const statusOptions = isAdmin ? ADMIN_STATUS_OPTIONS : CLIENT_STATUS_OPTIONS
 
+  // ── Rail state (super-admin path) ─────────────────────────────────────────
+  // A teammate lens is the only audience with an "Assigned to me" view, and
+  // impersonation is the only place the browser knows which teammate that is.
+  const audience: RequestsAudience = isImpersonatingTeamMember
+    ? 'team_member'
+    : isAdmin ? 'admin' : 'client'
+  const rail = useRequestsRailState({
+    audience,
+    initialQuery: searchParams.get('q') ?? '',
+    enabled: railOn,
+  })
+
   const { showToast } = useToast()
 
   // Custom kanban columns (admin only) via SWR. The conditional key skips the
@@ -339,10 +370,61 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // param is unused here). Pagination is a follow-up and can't be done purely
   // server-side, because this list is filtered client-side (search / category /
   // type / client-tag) after the fetch.
-  const requestsKey = `${isAdmin ? '/api/admin/requests' : '/api/portal/requests'}?status=${activeTab}`
+  // On the rail the saved views (Delivered, Overdue, Triage...) are resolved
+  // client-side, so the fetch has to bring back every status rather than the
+  // one the old tab strip asked for.
+  const requestsKey = `${isAdmin ? '/api/admin/requests' : '/api/portal/requests'}?status=${railOn ? 'all' : activeTab}`
   const { data: requestsData, isLoading: loading, mutate: mutateRequests } =
     useSWR<{ requests?: Request[] }>(requestsKey)
   const requests = useMemo(() => requestsData?.requests ?? [], [requestsData])
+
+  // ── Rail derivations ──────────────────────────────────────────────────────
+  // Category and client options come from the loaded rows, so a filter can
+  // only ever offer a value that exists in the data in front of the user.
+  const railCategoryOptions = useMemo<RailOption[]>(() => {
+    const seen = new Set<string>()
+    for (const r of requests) if (r.category) seen.add(r.category)
+    return [
+      { value: 'all', label: 'All categories' },
+      ...Array.from(seen).sort((a, b) => a.localeCompare(b)).map(c => ({ value: c, label: formatType(c) })),
+    ]
+  }, [requests])
+
+  const railClientOptions = useMemo<RailOption[]>(() => {
+    const byId = new Map<string, string>()
+    for (const r of requests) if (r.orgId) byId.set(r.orgId, r.orgName ?? r.orgId)
+    return [
+      { value: 'all', label: 'All clients' },
+      ...Array.from(byId, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label)),
+    ]
+  }, [requests])
+
+  // Counts run over everything loaded, not the filtered set, so the rail keeps
+  // telling you how much work sits behind each view while you are inside one.
+  const railCounts = useMemo(
+    () => countSavedViews(requests, audience, { assigneeId: impersonatedTeamMemberId }),
+    [requests, audience, impersonatedTeamMemberId],
+  )
+
+  const railRows = useMemo(
+    () => applyRequestViews(requests, {
+      audience,
+      savedView: rail.savedView,
+      filters: rail.filters,
+      query: rail.query,
+      sort: rail.sort,
+      assigneeId: impersonatedTeamMemberId,
+    }),
+    [requests, audience, rail.savedView, rail.filters, rail.query, rail.sort, impersonatedTeamMemberId],
+  )
+
+  const railChips = useMemo(
+    () => buildFilterChips(rail.filters, audience, {
+      categoryOptions: railCategoryOptions,
+      clientOptions: railClientOptions,
+    }),
+    [rail.filters, audience, railCategoryOptions, railClientOptions],
+  )
 
   // Inline status change from list view. Optimistically patches the SWR cache,
   // fires the PUT, and reverts by revalidating from the server on failure.
@@ -364,8 +446,9 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     }
   }, [requestsData, mutateRequests])
 
-  // Clear selection when tab changes
-  useEffect(() => { setSelectedIds(new Set()) }, [activeTab])
+  // Clear selection when the visible set changes under it, so a bulk action
+  // can never reach a row the user has since filtered away.
+  useEffect(() => { setSelectedIds(new Set()) }, [activeTab, rail.savedView, rail.filters])
 
   const filtered = requests.filter(r => {
     // Text search
@@ -397,6 +480,16 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   ).sort((a, b) => a.localeCompare(b))
 
   const sorted = sortRequests(filtered, sortKey)
+
+  // The one row set every view renders. On the rail it comes from the saved
+  // view + filters + search + sort pipeline; otherwise it is the legacy list.
+  const visible = railOn ? railRows : sorted
+  const effectiveView: ViewMode | 'kanban' | 'timeline' = railOn ? rail.view : view
+  // BoardView owns kanban and timeline as sub-views. Leaving `view` undefined
+  // on the legacy path keeps its own tab strip uncontrolled, exactly as today.
+  const boardSubView: BoardViewKey | undefined = railOn
+    ? (effectiveView === 'timeline' ? 'timeline' : 'kanban')
+    : undefined
 
   // ── FilterBar wiring ──────────────────────────────────────────────────────
   // FilterBar drives the same individual filter state vars used by `filtered`.
@@ -484,7 +577,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // ── Board: map requests → BoardItem (top-level + nested children) ─────────
   const boardItems: BoardItem[] = useMemo(() => {
     const childrenByParent = new Map<string, Request[]>()
-    for (const r of sorted) {
+    for (const r of visible) {
       if (r.parentRequestId) {
         const list = childrenByParent.get(r.parentRequestId) ?? []
         list.push(r)
@@ -514,7 +607,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         isOverdue: overdue,
       }
     }
-    return sorted
+    return visible
       .filter(r => !r.parentRequestId)
       .map(r => {
         const item = toItem(r)
@@ -522,7 +615,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         if (kids && kids.length > 0) item.children = kids.map(toItem)
         return item
       })
-  }, [sorted])
+  }, [visible])
 
   // Drag source context for the cross-client guard. dataTransfer is empty during
   // dragover, so we mirror the dragged request's org into a ref via boardItems
@@ -757,6 +850,59 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     return cols
   }, [isAdmin, handleRowStatusChange])
 
+  // -- Shared handlers -------------------------------------------------------
+  const exportRequestsCsv = useCallback(() => {
+    const link = document.createElement('a')
+    link.href = apiPath('/api/admin/export/requests')
+    link.download = 'requests.csv'
+    link.click()
+  }, [])
+
+  const handleSaveDefault = useCallback(() => {
+    rail.saveDefault()
+    showToast('Saved as your default view', 'success')
+  }, [rail, showToast])
+
+  const handleBoardSubViewChange = useCallback((next: BoardViewKey) => {
+    if (next === 'kanban' || next === 'timeline') rail.setView(next)
+  }, [rail])
+
+  // The body under the toolbar. Identical in both paths; only the toolbar
+  // around it changes.
+  const content = effectiveView === 'workload' && isAdmin ? (
+    // WorkloadView keeps its own card surface, so it isn't re-wrapped.
+    <WorkloadView requests={visible} />
+  ) : (effectiveView === 'board' || effectiveView === 'kanban' || effectiveView === 'timeline') ? (
+    <BoardView
+      views={['kanban', 'timeline']}
+      defaultView="kanban"
+      view={boardSubView}
+      onViewChange={railOn ? handleBoardSubViewChange : undefined}
+      columns={boardColumns}
+      items={boardItems}
+      searchPlaceholder="Search requests"
+      onMove={isAdmin ? handleBoardMove : undefined}
+      onNest={isAdmin ? handleBoardNest : undefined}
+      onItemClick={(item) => { router.push(`/requests/${item.id}`) }}
+      readOnly={!isAdmin}
+    />
+  ) : (
+    <Card padding="none">
+      <DataTable<Request>
+        ariaLabel="Requests"
+        columns={columns}
+        rows={visible}
+        getRowId={r => r.id}
+        loading={loading}
+        selectable={isAdmin}
+        selectedIds={isAdmin ? selectedIds : undefined}
+        onSelectionChange={isAdmin ? handleSelectionChange : undefined}
+        onRowClick={(r) => { router.push(`/requests/${r.id}`) }}
+        empty={<EmptyState isAdmin={isAdmin} onNew={() => setDialogOpen(true)} />}
+      />
+    </Card>
+  )
+
   return (
     <>
       <NewRequestDialog
@@ -783,8 +929,19 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
           title="Requests"
           subtitle={loading
             ? 'Manage all work items and track progress'
-            : `${filtered.length} ${filtered.length === 1 ? 'request' : 'requests'}`}
+            : `${visible.length} ${visible.length === 1 ? 'request' : 'requests'}`}
         >
+          {railOn ? (
+            <RequestsHeaderActions
+              isAdmin={isAdmin}
+              readOnly={isViewerImpersonation}
+              onNew={() => setDialogOpen(true)}
+              onAiDraft={() => setAiWizardOpen(true)}
+              onExportCsv={exportRequestsCsv}
+              onBulkCreate={() => setBulkCreateOpen(true)}
+            />
+          ) : (
+            <>
           {/* Export hits an admin-only route that 403s non-Tahi orgs, so the
               button is Tahi-only. Without this gate a client download saves the
               403 body as requests.csv. */}
@@ -838,9 +995,12 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
               <span className="sm:hidden">New</span>
             </TahiButton>
           )}
+            </>
+          )}
         </PageHeader>
 
         {/* Filter row + view toggle */}
+        {!railOn && (
         <div className="flex flex-wrap items-center" style={{ gap: '0.5rem' }}>
           <div style={{ flex: 1, minWidth: '14rem' }}>
             <FilterBar
@@ -882,6 +1042,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
             />
           </div>
         </div>
+        )}
 
         {/* Bulk action bar */}
         {isAdmin && selectedIds.size > 0 && (
@@ -896,37 +1057,37 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         )}
 
         {/* Content area */}
-        {view === 'workload' && isAdmin ? (
-          // WorkloadView keeps its own card surface, so it isn't re-wrapped.
-          <WorkloadView requests={sorted} />
-        ) : view === 'board' ? (
-          <BoardView
-            views={['kanban', 'timeline']}
-            defaultView="kanban"
-            columns={boardColumns}
-            items={boardItems}
-            searchPlaceholder="Search requests"
-            onMove={isAdmin ? handleBoardMove : undefined}
-            onNest={isAdmin ? handleBoardNest : undefined}
-            onItemClick={(item) => { router.push(`/requests/${item.id}`) }}
-            readOnly={!isAdmin}
-          />
-        ) : (
-          <Card padding="none">
-            <DataTable<Request>
-              ariaLabel="Requests"
-              columns={columns}
-              rows={sorted}
-              getRowId={r => r.id}
-              loading={loading}
-              selectable={isAdmin}
-              selectedIds={isAdmin ? selectedIds : undefined}
-              onSelectionChange={isAdmin ? handleSelectionChange : undefined}
-              onRowClick={(r) => { router.push(`/requests/${r.id}`) }}
-              empty={<EmptyState isAdmin={isAdmin} onNew={() => setDialogOpen(true)} />}
-            />
-          </Card>
-        )}
+        {railOn ? (
+          <RequestsRailLayout
+            railProps={{
+              audience,
+              savedView: rail.savedView,
+              onSavedViewChange: rail.setSavedView,
+              counts: railCounts,
+              filters: rail.filters,
+              onFiltersChange: rail.setFilters,
+              sort: rail.sort,
+              onSortChange: rail.setSort,
+              categoryOptions: railCategoryOptions,
+              clientOptions: railClientOptions,
+              isDefault: rail.isDefault,
+              onSaveDefault: handleSaveDefault,
+            }}
+            switcher={
+              <RequestsViewSwitcher value={rail.view} onChange={rail.setView} audience={audience} />
+            }
+            chips={railChips}
+            onClearChip={chip => rail.setFilters({ ...rail.filters, [chip.key]: DEFAULT_REQUEST_FILTERS[chip.key] })}
+            onClearAll={() => { rail.setFilters({ ...DEFAULT_REQUEST_FILTERS }); rail.setSavedView(null) }}
+            query={rail.query}
+            onQueryChange={rail.setQuery}
+            searchPlaceholder={isAdmin ? 'Search requests or clients' : 'Search requests'}
+            total={visible.length}
+            loading={loading}
+          >
+            {content}
+          </RequestsRailLayout>
+        ) : content}
       </div>
 
       {/* Drag-to-nest confirm dialog (board view) */}
