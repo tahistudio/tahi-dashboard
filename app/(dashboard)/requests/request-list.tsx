@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import useSWR from 'swr'
+import useSWR, { useSWRConfig } from 'swr'
 import { useSearchParams, useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
@@ -26,6 +26,14 @@ import { EmptyState as SharedEmptyState } from '@/components/tahi/empty-state'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
 import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
+import { pruneExpandedIds } from '@/components/tahi/data-table-expand'
+import {
+  BulkActionBar as SharedBulkActionBar,
+  type BulkAction,
+  type BulkActionResult,
+} from '@/components/tahi/bulk-action-bar'
+import { SubRequestRows } from '@/components/tahi/requests/sub-request-rows'
+import { REQUEST_STATUSES } from '@/lib/status-config'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
 import {
   BoardView,
@@ -77,6 +85,9 @@ interface Request {
   createdAt: string | null
   requestNumber?: number | null
   parentRequestId?: string | null
+  /** How many children hang off this request. Both list APIs return it;
+   *  a positive value is what gives the row its expand chevron. */
+  subRequestCount?: number | null
   // JSON array string of the owning org's free-form tags
   orgTags?: string | null
 }
@@ -324,6 +335,13 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     return () => window.removeEventListener('tahi:shortcut', handleShortcut)
   }, [])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  // Which list rows have their sub-request panel open. Many can be open at
+  // once; the set is pruned whenever the visible rows change (below), so a
+  // panel never survives the filter that hid its parent.
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set())
+  // The parent a new sub-request is being created under, plus its client, so
+  // NewRequestDialog can lock both.
+  const [subRequestParent, setSubRequestParent] = useState<{ id: string; orgId: string | null } | null>(null)
 
   const statusOptions = isAdmin ? ADMIN_STATUS_OPTIONS : CLIENT_STATUS_OPTIONS
 
@@ -340,6 +358,9 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   })
 
   const { showToast } = useToast()
+  // Used to revalidate one expanded row's sub-request panel after a child is
+  // created, without blowing away every other cached panel.
+  const { mutate: mutateKey } = useSWRConfig()
 
   // Custom kanban columns (admin only) via SWR. The conditional key skips the
   // fetch entirely for clients. Mapped to the shared BoardView column shape;
@@ -485,6 +506,36 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // The one row set every view renders. On the rail it comes from the saved
   // view + filters + search + sort pipeline; otherwise it is the legacy list.
   const visible = railOn ? railRows : sorted
+
+  // ── Expandable sub-request rows (rail path) ───────────────────────────────
+  // Prune open panels down to the rows still on screen whenever a filter,
+  // saved view, search or sort changes the set under the table.
+  useEffect(() => {
+    if (!railOn) return
+    const ids = visible.map(r => r.id)
+    setExpandedIds(prev => pruneExpandedIds(prev, ids))
+  }, [railOn, visible])
+
+  // Clients read sub-requests through the org-scoped portal route and never
+  // get the add affordance; the team reads the admin route and does.
+  const panelAudience: 'team' | 'client' = audience === 'client' ? 'client' : 'team'
+  const canAddSubRequest = panelAudience === 'team' && !isViewerImpersonation
+
+  const isRowExpandable = useCallback(
+    (r: Request) => (r.subRequestCount ?? 0) > 0,
+    [],
+  )
+
+  const renderSubRequestPanel = useCallback((r: Request) => (
+    <SubRequestRows
+      parentId={r.id}
+      audience={panelAudience}
+      onAddSubRequest={canAddSubRequest
+        ? () => setSubRequestParent({ id: r.id, orgId: r.orgId ?? null })
+        : undefined}
+    />
+  ), [panelAudience, canAddSubRequest])
+
   const effectiveView: ViewMode | 'kanban' | 'timeline' = railOn ? rail.view : view
   // BoardView owns kanban and timeline as sub-views. Leaving `view` undefined
   // on the legacy path keeps its own tab strip uncontrolled, exactly as today.
@@ -569,6 +620,112 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   const handleSelectionChange = useCallback((nextSel: Set<string>) => {
     setSelectedIds(nextSel)
   }, [])
+
+  // ── Shared bulk bar (rail path) ───────────────────────────────────────────
+  // One primary action plus an Edit menu of Status / Assign / Danger
+  // sections, all routed through the shared BulkActionBar so every result
+  // raises a toast and Archive goes through the shared confirm dialog.
+  const bulkBarOpen = railOn && isAdmin && selectedIds.size > 0
+  // The team list only loads once a selection exists; the conditional key
+  // skips the fetch entirely until the bar is on screen.
+  const { data: bulkTeamData } = useSWR<{ items: Array<{ id: string; name: string }> }>(
+    bulkBarOpen ? '/api/admin/team-members' : null,
+  )
+
+  const runBulkStatus = useCallback(async (status: string): Promise<BulkActionResult> => {
+    const ids = Array.from(selectedIds)
+    const res = await fetch(apiPath('/api/admin/requests/bulk'), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(status === 'archived' ? { ids, archived: true } : { ids, status }),
+    })
+    if (!res.ok) throw new Error('Bulk status failed')
+    const json = await res.json() as { updated?: number }
+    const ok = json.updated ?? ids.length
+    return { ok, failed: Math.max(0, ids.length - ok) }
+  }, [selectedIds])
+
+  const runBulkAssign = useCallback(async (
+    memberId: string,
+    role: 'pm' | 'assignee' | 'follower',
+  ): Promise<BulkActionResult> => {
+    const ids = Array.from(selectedIds)
+    const res = await fetch(apiPath('/api/admin/requests/bulk-assign'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestIds: ids,
+        participants: [{ participantId: memberId, participantType: 'team_member', role }],
+      }),
+    })
+    if (!res.ok) throw new Error('Bulk assign failed')
+    return { ok: ids.length }
+  }, [selectedIds])
+
+  const bulkActions = useMemo<BulkAction[]>(() => {
+    const count = selectedIds.size
+    const noun = count === 1 ? 'request' : 'requests'
+    const list: BulkAction[] = []
+
+    // Status. Archived is deliberately left out here: it is destructive, so
+    // it lives once in the Danger section behind a confirm rather than
+    // twice, once unguarded.
+    for (const s of REQUEST_STATUSES) {
+      if (s.value === 'archived' || s.value === 'delivered') continue
+      list.push({
+        id: `status-${s.value}`,
+        section: 'Status',
+        label: s.label,
+        verb: `moved to ${s.label}`,
+        run: () => runBulkStatus(s.value),
+      })
+    }
+
+    // Assign. One section per role so a single click both picks the person
+    // and says what they are being made.
+    const roles: Array<{ key: 'pm' | 'assignee' | 'follower'; section: string; word: string }> = [
+      { key: 'assignee', section: 'Assign as assignee', word: 'assignee' },
+      { key: 'pm',       section: 'Assign as PM',       word: 'PM'       },
+      { key: 'follower', section: 'Assign as follower', word: 'follower' },
+    ]
+    for (const role of roles) {
+      for (const tm of bulkTeamData?.items ?? []) {
+        list.push({
+          id: `assign-${role.key}-${tm.id}`,
+          section: role.section,
+          label: tm.name,
+          successMessage: `${tm.name} added as ${role.word} on ${count} ${noun}`,
+          errorMessage: `Couldn't assign ${tm.name}`,
+          run: () => runBulkAssign(tm.id, role.key),
+        })
+      }
+    }
+
+    list.push({
+      id: 'archive',
+      section: 'Danger',
+      label: 'Archive',
+      tone: 'danger',
+      verb: 'archived',
+      icon: <AlertTriangle size={14} />,
+      confirm: {
+        title: `Archive ${count} ${noun}?`,
+        description: 'They move out of the pipeline. You can bring them back from the Archived view.',
+        confirmLabel: 'Archive',
+        variant: 'danger',
+      },
+      run: () => runBulkStatus('archived'),
+    })
+
+    return list
+  }, [selectedIds, bulkTeamData, runBulkStatus, runBulkAssign])
+
+  const bulkPrimaryAction = useMemo<BulkAction>(() => ({
+    id: 'deliver',
+    label: 'Mark delivered',
+    verb: 'marked delivered',
+    run: () => runBulkStatus('delivered'),
+  }), [runBulkStatus])
 
   // ── Inline status change as a DataTable edit chip ─────────────────────────
   const handleRowStatusChange = useCallback((row: Request, next: string) => {
@@ -901,6 +1058,13 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         onSelectionChange={isAdmin ? handleSelectionChange : undefined}
         onRowClick={(r) => { router.push(`/requests/${r.id}`) }}
         empty={<EmptyState isAdmin={isAdmin} onNew={() => setDialogOpen(true)} />}
+        {...(railOn ? {
+          expandable: isRowExpandable,
+          renderExpanded: renderSubRequestPanel,
+          expandedIds,
+          onExpandedChange: setExpandedIds,
+          expandAllLabel: 'sub-requests',
+        } : {})}
       />
     </Card>
   )
@@ -913,6 +1077,23 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         isAdmin={isAdmin}
         defaultOrgId={defaultClientId}
       />
+
+      {/* Add sub-request, opened from an expanded row. The same full dialog
+          as a top-level request, with the parent and its client locked. */}
+      {subRequestParent && (
+        <NewRequestDialog
+          open
+          onClose={() => setSubRequestParent(null)}
+          isAdmin={isAdmin}
+          parentRequestId={subRequestParent.id}
+          forceOrgId={subRequestParent.orgId ?? undefined}
+          onCreated={() => {
+            mutateKey(`/api/admin/requests/${subRequestParent.id}/sub-requests`)
+            setSubRequestParent(null)
+            mutateRequests()
+          }}
+        />
+      )}
 
       <AiRequestWizard
         open={aiWizardOpen}
@@ -1046,8 +1227,19 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         </div>
         )}
 
-        {/* Bulk action bar */}
-        {isAdmin && selectedIds.size > 0 && (
+        {/* Bulk action bar. The rail path uses the shared component (one
+            primary action, an Edit menu, confirm + toast on every result);
+            the legacy toolbar keeps the bar it has today, unchanged. */}
+        {bulkBarOpen ? (
+          <SharedBulkActionBar
+            selectedCount={selectedIds.size}
+            itemNoun="request"
+            primaryAction={bulkPrimaryAction}
+            actions={bulkActions}
+            onClear={() => setSelectedIds(new Set())}
+            onResult={() => { setSelectedIds(new Set()); mutateRequests() }}
+          />
+        ) : (!railOn && isAdmin && selectedIds.size > 0) && (
           <Card padding="none" style={{ overflow: 'visible' }}>
             <BulkActionBar
               selectedCount={selectedIds.size}

@@ -79,6 +79,14 @@ export async function GET(req: NextRequest) {
       deliveredAt: schema.requests.deliveredAt,
       requestNumber: schema.requests.requestNumber,
       parentRequestId: schema.requests.parentRequestId,
+      // How many children hang off this request. Drives the list view's
+      // expand chevron, so the table knows which rows open without having
+      // to fetch every child up front. Correlated subquery rather than a
+      // GROUP BY join so the row set and its ordering stay untouched.
+      subRequestCount: sql<number>`(
+        SELECT COUNT(*) FROM requests AS sub
+        WHERE sub.parent_request_id = ${schema.requests.id}
+      )`.as('sub_request_count'),
       // Join org name + tags (tags is a JSON array string of free-form labels)
       orgName: schema.organisations.name,
       orgTags: schema.organisations.tags,

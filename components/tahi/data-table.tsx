@@ -9,7 +9,11 @@
  *   - Row selection with checkbox column and select-all in head.
  *   - Per-row action menu via 3-dots button OR right-click anywhere
  *     on the row.
- *   - Expandable rows (renderExpand) with a slide-down detail panel.
+ *   - Expandable rows, two flavours:
+ *       renderExpand    one row open at a time, row click toggles it.
+ *       expandable +    many rows open at once, a chevron in the first
+ *       renderExpanded  column toggles them, row click still navigates,
+ *                       plus an Expand all / Collapse all header control.
  *   - Sticky thead, h-scroll on mobile, density toggle.
  *   - Loading / empty states baked in.
  *   - Outer wrapper clips to its parent's rounded corners so the
@@ -38,10 +42,22 @@
 
 import * as React from 'react'
 import {
-  ChevronDown, ChevronUp, Loader2, MoreHorizontal, Check,
+  ChevronDown, ChevronUp, ChevronRight, Loader2, MoreHorizontal, Check,
 } from 'lucide-react'
 import { Popover } from '@/components/tahi/popover'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
+import {
+  toggleExpandedId,
+  areAllExpanded,
+  toggleExpandAll,
+} from '@/components/tahi/data-table-expand'
+
+export {
+  toggleExpandedId,
+  pruneExpandedIds,
+  areAllExpanded,
+  toggleExpandAll,
+} from '@/components/tahi/data-table-expand'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -165,11 +181,34 @@ interface DataTableProps<Row> {
    *  same menu. */
   rowActions?: (row: Row) => DataTableAction[]
 
-  // ── Expandable rows ──
+  // ── Expandable rows: legacy single-open mode ──
   /** Returns the inline detail panel for a row. When non-null for a
    *  row, the row click toggles its expansion instead of firing
-   *  onRowClick. */
+   *  onRowClick. Only one row is open at a time.
+   *
+   *  Superseded by `expandable` + `renderExpanded` for lists that need
+   *  many rows open at once and a row click that still navigates. The two
+   *  modes are mutually exclusive; `expandable` wins if both are passed. */
   renderExpand?: (row: Row) => React.ReactNode
+
+  // ── Expandable rows: multi-open, chevron-driven mode ──
+  /** Marks a row as expandable. Providing this switches the table into
+   *  multi-open mode: a 1.5rem chevron button renders at the head of the
+   *  first column, the row click keeps firing onRowClick / onRowPreview,
+   *  and any number of rows can be open at once. Rows that return false
+   *  get an equal-width spacer so the first column stays aligned. */
+  expandable?: (row: Row) => boolean
+  /** The panel rendered beneath an open row, spanning every column. Only
+   *  called for rows that are both expandable and currently open, so the
+   *  panel can fetch its own data lazily on mount. */
+  renderExpanded?: (row: Row) => React.ReactNode
+  /** Controlled set of open row ids. Omit for internal state. */
+  expandedIds?: ReadonlySet<string>
+  /** Fires with the next open set. Required for controlled mode. */
+  onExpandedChange?: (next: Set<string>) => void
+  /** Accessible label for the Expand all / Collapse all header control.
+   *  Defaults to "sub-rows", giving "Expand all sub-rows". */
+  expandAllLabel?: string
 
   // ── Pagination ──
   /** Enable client-side pagination. Defaults to true when rows.length > 20.
@@ -201,6 +240,11 @@ export function DataTable<Row>({
   onSelectionChange,
   rowActions,
   renderExpand,
+  expandable,
+  renderExpanded,
+  expandedIds,
+  onExpandedChange,
+  expandAllLabel = 'sub-rows',
   onRowPreview,
   paginate,
   defaultPageSize = 20,
@@ -276,8 +320,26 @@ export function DataTable<Row>({
 
   const rowPaddingY = density === 'compact' ? '0.5rem' : '0.75rem'
 
-  // Expansion
+  // Expansion, legacy single-open mode.
   const [expandedId, setExpandedId] = React.useState<string | null>(null)
+
+  // Expansion, multi-open mode. Controlled when expandedIds is supplied.
+  const multiExpand = !!expandable
+  const [internalExpanded, setInternalExpanded] = React.useState<ReadonlySet<string>>(() => new Set())
+  const openIds = expandedIds ?? internalExpanded
+  const setOpenIds = React.useCallback((next: Set<string>) => {
+    if (expandedIds === undefined) setInternalExpanded(next)
+    onExpandedChange?.(next)
+  }, [expandedIds, onExpandedChange])
+
+  // Which of the rows actually on screen can open. Expand all only ever
+  // reaches the current page, so it can't quietly fetch a hundred panels.
+  const expandableIds = React.useMemo(
+    () => (expandable ? pagedRows.filter(expandable).map(getRowId) : []),
+    [expandable, pagedRows, getRowId],
+  )
+  const allExpanded = areAllExpanded(expandableIds, openIds)
+
   // Right-click action menu state
   const [actionMenu, setActionMenu] = React.useState<{ row: Row; x: number; y: number } | null>(null)
 
@@ -301,7 +363,6 @@ export function DataTable<Row>({
     setSelection(next)
   }
 
-  const anyClickable = !!onRowClick || !!onRowPreview || !!renderExpand
   const colCount = columns.length + (selectable ? 1 : 0) + (rowActions ? 1 : 0)
 
   return (
@@ -335,21 +396,33 @@ export function DataTable<Row>({
                   scope="col"
                   style={{
                     ...thStyle(stickyOffset),
-                    width: '2.75rem',
+                    width: expandableIds.length > 0 ? '4.25rem' : '2.75rem',
                     paddingRight: 0,
                   }}
                 >
-                  <SelectCheckbox
-                    checked={!!allSelected}
-                    indeterminate={someSelected}
-                    onChange={toggleAll}
-                    ariaLabel={allSelected ? 'Deselect all rows' : 'Select all rows'}
-                  />
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.125rem' }}>
+                    <SelectCheckbox
+                      checked={!!allSelected}
+                      indeterminate={someSelected}
+                      onChange={toggleAll}
+                      ariaLabel={allSelected ? 'Deselect all rows' : 'Select all rows'}
+                    />
+                    {expandableIds.length > 0 && (
+                      <ExpandToggle
+                        expanded={allExpanded}
+                        label={`${allExpanded ? 'Collapse' : 'Expand'} all ${expandAllLabel}`}
+                        onToggle={() => setOpenIds(toggleExpandAll(expandableIds, openIds))}
+                      />
+                    )}
+                  </span>
                 </th>
               )}
-              {columns.map(col => {
+              {columns.map((col, colIndex) => {
                 const isSorted = activeSort?.key === col.key
                 const align = col.align ?? 'left'
+                // With no checkbox column the Expand all control has no home
+                // of its own, so it leads the first header cell instead.
+                const leadsExpandAll = !selectable && colIndex === 0 && expandableIds.length > 0
                 return (
                   <th
                     key={col.key}
@@ -364,6 +437,14 @@ export function DataTable<Row>({
                       minWidth: col.minWidth,
                     }}
                   >
+                    {leadsExpandAll && (
+                      <ExpandToggle
+                        expanded={allExpanded}
+                        label={`${allExpanded ? 'Collapse' : 'Expand'} all ${expandAllLabel}`}
+                        onToggle={() => setOpenIds(toggleExpandAll(expandableIds, openIds))}
+                        style={{ marginRight: '0.25rem', verticalAlign: 'middle' }}
+                      />
+                    )}
                     {col.sortable ? (
                       <button
                         type="button"
@@ -438,9 +519,16 @@ export function DataTable<Row>({
                 const id = getRowId(row)
                 const isLast = rowIndex === pagedRows.length - 1
                 const isSelected = activeSelection?.has(id) ?? false
-                const expandContent = renderExpand?.(row) ?? null
-                const isExpandable = expandContent != null
-                const isExpanded = isExpandable && expandedId === id
+                // Multi-open mode wins when both APIs are supplied.
+                const canExpand = multiExpand ? expandable(row) : (renderExpand?.(row) ?? null) != null
+                const isExpanded = multiExpand
+                  ? (canExpand && openIds.has(id))
+                  : (canExpand && expandedId === id)
+                const expandContent = !isExpanded
+                  ? null
+                  : multiExpand
+                    ? (renderExpanded?.(row) ?? null)
+                    : (renderExpand?.(row) ?? null)
                 return (
                   <DataRow<Row>
                     key={id}
@@ -456,12 +544,17 @@ export function DataTable<Row>({
                     selectable={selectable}
                     toggleRow={toggleRow}
                     rowActions={rowActions}
-                    isExpandable={isExpandable}
+                    isExpandable={canExpand}
                     isExpanded={isExpanded}
-                    toggleExpand={() => setExpandedId(prev => (prev === id ? null : id))}
+                    toggleExpand={() => {
+                      if (multiExpand) setOpenIds(toggleExpandedId(openIds, id))
+                      else setExpandedId(prev => (prev === id ? null : id))
+                    }}
                     expandContent={expandContent}
                     openContextMenu={(x, y) => setActionMenu({ row, x, y })}
                     extraColumnCount={(selectable ? 1 : 0) + (rowActions ? 1 : 0)}
+                    chevronMode={multiExpand}
+                    showChevronGutter={multiExpand && expandableIds.length > 0}
                   />
                 )
               })
@@ -535,6 +628,12 @@ interface DataRowProps<Row> {
   expandContent: React.ReactNode
   openContextMenu: (x: number, y: number) => void
   extraColumnCount: number
+  /** Multi-open mode: a chevron button drives expansion and the row click
+   *  is left alone, so clicking the row still navigates. */
+  chevronMode: boolean
+  /** Reserve the chevron's width on rows that cannot expand, so the first
+   *  column's content stays aligned down the table. */
+  showChevronGutter: boolean
 }
 
 function DataRow<Row>({
@@ -556,17 +655,21 @@ function DataRow<Row>({
   expandContent,
   openContextMenu,
   extraColumnCount,
+  chevronMode,
+  showChevronGutter,
 }: DataRowProps<Row>) {
   const actionsRef = React.useRef<HTMLButtonElement | null>(null)
   const [menuOpen, setMenuOpen] = React.useState(false)
-  const clickable = isExpandable || !!onRowClick || !!onRowPreview
+  const clickable = (isExpandable && !chevronMode) || !!onRowClick || !!onRowPreview
 
   const handleRowClick = (e: React.MouseEvent) => {
     // Don't fire row-click when the user is interacting with the
     // checkbox column, actions column, link cell, or chip cell.
     const target = e.target as HTMLElement
     if (target.closest('[data-row-control]')) return
-    if (isExpandable) toggleExpand()
+    // In chevron mode the chevron owns expansion, so a row click keeps its
+    // normal meaning: navigate, or open the preview.
+    if (isExpandable && !chevronMode) toggleExpand()
     else if (onRowPreview) onRowPreview(row)
     else if (onRowClick) onRowClick(row)
   }
@@ -606,7 +709,7 @@ function DataRow<Row>({
             data-row-control
             style={{
               padding: `${paddingY} 0 ${paddingY} 1rem`,
-              borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
+              borderBottom: isLast && !isExpanded ? 'none' : '1px solid var(--color-border-subtle)',
               verticalAlign: 'middle',
               width: '2.75rem',
             }}
@@ -618,9 +721,21 @@ function DataRow<Row>({
             />
           </td>
         )}
-        {columns.map((col) => {
+        {columns.map((col, colIndex) => {
           const align = col.align ?? 'left'
           const isInteractive = col.link || col.edit
+          const body = col.link
+            ? <LinkCell row={row} col={col} link={col.link} />
+            : col.edit
+              ? <ChipCell row={row} edit={col.edit} />
+              : col.render
+                ? col.render(row, rowIndex)
+                : col.accessor
+                  ? col.accessor(row)
+                  : null
+          // The chevron leads the first column so it sits before the row's
+          // identifier, exactly where the eye scans for a disclosure.
+          const leadsChevron = chevronMode && colIndex === 0 && showChevronGutter
           return (
             <td
               key={col.key}
@@ -628,21 +743,31 @@ function DataRow<Row>({
               style={{
                 padding: `${paddingY} 1rem`,
                 textAlign: align,
-                borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
+                borderBottom: isLast && !isExpanded ? 'none' : '1px solid var(--color-border-subtle)',
                 color: col.muted ? 'var(--color-text-muted)' : 'var(--color-text)',
                 verticalAlign: 'middle',
                 whiteSpace: col.wrap ? 'normal' : 'nowrap',
               }}
             >
-              {col.link
-                ? <LinkCell row={row} col={col} link={col.link} />
-                : col.edit
-                  ? <ChipCell row={row} edit={col.edit} />
-                  : col.render
-                    ? col.render(row, rowIndex)
-                    : col.accessor
-                      ? col.accessor(row)
-                      : null}
+              {leadsChevron ? (
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', minWidth: 0 }}>
+                  {isExpandable ? (
+                    <span data-row-control style={{ display: 'inline-flex' }}>
+                      <ExpandToggle
+                        expanded={isExpanded}
+                        label={`${isExpanded ? 'Collapse' : 'Expand'} row`}
+                        onToggle={toggleExpand}
+                      />
+                    </span>
+                  ) : (
+                    <span
+                      aria-hidden="true"
+                      style={{ display: 'inline-block', width: '1.5rem', height: '1.5rem', flex: 'none' }}
+                    />
+                  )}
+                  <span style={{ minWidth: 0, display: 'flex', alignItems: 'center' }}>{body}</span>
+                </span>
+              ) : body}
             </td>
           )
         })}
@@ -651,7 +776,7 @@ function DataRow<Row>({
             data-row-control
             style={{
               padding: `${paddingY} 0.5rem`,
-              borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
+              borderBottom: isLast && !isExpanded ? 'none' : '1px solid var(--color-border-subtle)',
               verticalAlign: 'middle',
               width: '3rem',
               textAlign: 'right',
@@ -710,17 +835,92 @@ function DataRow<Row>({
             colSpan={columns.length + extraColumnCount}
             style={{
               padding: 0,
-              borderBottom: isLast ? 'none' : '1px solid var(--color-border-subtle)',
-              background: 'var(--color-bg-secondary)',
+              // In chevron mode the panel draws its own hairline on all four
+              // sides and pulls up 1px so it sits ON the parent row's rule
+              // rather than beside a doubled one.
+              borderBottom: chevronMode
+                ? 'none'
+                : (isLast ? 'none' : '1px solid var(--color-border-subtle)'),
+              background: chevronMode ? 'transparent' : 'var(--color-bg-secondary)',
             }}
           >
-            <div style={{ padding: '1rem 1.25rem', animation: 'tahi-row-expand 200ms ease-out' }}>
+            <div
+              style={chevronMode
+                ? {
+                    background: 'var(--color-bg-secondary)',
+                    border: '1px solid var(--color-border-subtle)',
+                    marginTop: '-1px',
+                    animation: 'tahi-row-expand 180ms ease-out',
+                  }
+                : { padding: '1rem 1.25rem', animation: 'tahi-row-expand 200ms ease-out' }}
+            >
               {expandContent}
             </div>
           </td>
         </tr>
       )}
     </>
+  )
+}
+
+// ── Expand chevron ──────────────────────────────────────────────────────────
+//
+// One 1.5rem disclosure button, used for both the per-row chevron and the
+// Expand all / Collapse all header control. A real <button>, so it is
+// keyboard operable and reachable by the site-wide focus ring; the click is
+// stopped from bubbling so opening a panel never also opens the record.
+
+function ExpandToggle({
+  expanded,
+  label,
+  onToggle,
+  style,
+}: {
+  expanded: boolean
+  label: string
+  onToggle: () => void
+  style?: React.CSSProperties
+}) {
+  return (
+    <button
+      type="button"
+      className="tahi-focus-ring inline-flex items-center justify-center"
+      aria-expanded={expanded}
+      aria-label={label}
+      title={label}
+      onClick={(e) => { e.stopPropagation(); onToggle() }}
+      style={{
+        width: '1.5rem',
+        height: '1.5rem',
+        flex: 'none',
+        padding: 0,
+        border: 'none',
+        background: 'transparent',
+        borderRadius: 'var(--radius-sm)',
+        color: 'var(--color-text-subtle)',
+        cursor: 'pointer',
+        transition: 'background-color 150ms ease, color 150ms ease',
+        ...style,
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.background = 'var(--color-bg-tertiary)'
+        e.currentTarget.style.color = 'var(--color-text)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.background = 'transparent'
+        e.currentTarget.style.color = 'var(--color-text-subtle)'
+      }}
+    >
+      <ChevronRight
+        size={14}
+        strokeWidth={2.4}
+        aria-hidden="true"
+        style={{
+          transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+          transition: 'transform 150ms ease',
+        }}
+      />
+    </button>
   )
 }
 

@@ -78,6 +78,15 @@ export async function GET(req: NextRequest) {
       updatedAt: schema.requests.updatedAt,
       deliveredAt: schema.requests.deliveredAt,
       requestNumber: schema.requests.requestNumber,
+      // Client-visible child count, driving the list view's expand chevron.
+      // Internal-only children are excluded so the count can never hint at
+      // work the client is not allowed to see, matching the is_internal
+      // filter this route already applies to the rows themselves.
+      subRequestCount: sql<number>`(
+        SELECT COUNT(*) FROM requests AS sub
+        WHERE sub.parent_request_id = ${schema.requests.id}
+          AND sub.is_internal = 0
+      )`.as('sub_request_count'),
     })
     .from(schema.requests)
     .where(and(...conditions))
