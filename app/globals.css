@@ -184,6 +184,67 @@
   --status-archived-text:      #7c6c5f;
   --status-archived-border:    #e3d9cc;
 
+  /* ── Badge tone palette ─────────────────────────────────
+     Backs <Badge> TONE_MAP so status / priority / filter chips carry a
+     .dark override instead of a fixed light tint. These light values are
+     byte-identical to the previously hardcoded hex, so light mode is
+     unchanged; only the .dark block diverges. `solid` is the loud-fill
+     background (white text sits on it) and intentionally stays deep in
+     both themes, so it needs no dark override. */
+  --badge-brand-bg:     #EEF5EB;
+  --badge-brand-text:   #3F6235;
+  --badge-brand-border: #D5E4CF;
+  --badge-brand-dot:    #5A824E;
+  --badge-brand-solid:  #3F6235;
+
+  --badge-positive-bg:     #E9F7EE;
+  --badge-positive-text:   #176B3D;
+  --badge-positive-border: #C8E8D2;
+  --badge-positive-dot:    #22C55E;
+  --badge-positive-solid:  #176B3D;
+
+  --badge-info-bg:     #EBF1FE;
+  --badge-info-text:   #1F4FBA;
+  --badge-info-border: #D5E2FB;
+  --badge-info-dot:    #3B82F6;
+  --badge-info-solid:  #1F4FBA;
+
+  --badge-warning-bg:     #FEF6E6;
+  --badge-warning-text:   #8A5A12;
+  --badge-warning-border: #F7E2B8;
+  --badge-warning-dot:    #F59E0B;
+  --badge-warning-solid:  #8A5A12;
+
+  --badge-danger-bg:     #FDEDEC;
+  --badge-danger-text:   #B42318;
+  --badge-danger-border: #F6CDC7;
+  --badge-danger-dot:    #EF4444;
+  --badge-danger-solid:  #B42318;
+
+  --badge-teal-bg:     #E6F6F9;
+  --badge-teal-text:   #0E6E81;
+  --badge-teal-border: #C2E7EE;
+  --badge-teal-dot:    #06B6D4;
+  --badge-teal-solid:  #0E6E81;
+
+  --badge-purple-bg:     #F0EBFC;
+  --badge-purple-text:   #5A30C3;
+  --badge-purple-border: #DCD2F4;
+  --badge-purple-dot:    #8B5CF6;
+  --badge-purple-solid:  #5A30C3;
+
+  --badge-rose-bg:     #FBE9F2;
+  --badge-rose-text:   #9D1F62;
+  --badge-rose-border: #F4CADF;
+  --badge-rose-dot:    #EC4899;
+  --badge-rose-solid:  #9D1F62;
+
+  --badge-neutral-bg:     #F2F4F2;
+  --badge-neutral-text:   #525A52;
+  --badge-neutral-border: #E1E5E1;
+  --badge-neutral-dot:    #9CA3AF;
+  --badge-neutral-solid:  #525A52;
+
   /* ── Category palette ───────────────────────────────────── */
   --cat-design-bg:        #fce7f3;
   --cat-design-text:      #be185d;
@@ -1277,6 +1338,49 @@ html.tahi-private [data-private] button {
   --status-archived-bg:        rgba(124, 108, 95, 0.18);
   --status-archived-text:      #BBA89A;
   --status-archived-border:    rgba(124, 108, 95, 0.32);
+
+  /* Badge tone palette (dark). Translucent tinted backgrounds + lighter
+     text, aligned to the verified --status-* dark family above. `solid`
+     and most `dot` accents are intentionally left un-overridden: the deep
+     solid fill and the saturated dots already read against the dark
+     surface, so only bg / text / border shift per theme. Brand dot is the
+     one exception, lightened so the leaf-green dot stays visible. */
+  --badge-brand-bg:     rgba(90, 130, 78, 0.16);
+  --badge-brand-text:   #A7D39B;
+  --badge-brand-border: rgba(90, 130, 78, 0.32);
+  --badge-brand-dot:    #7AAB6B;
+
+  --badge-positive-bg:     rgba(34, 197, 94, 0.15);
+  --badge-positive-text:   #8FD9A8;
+  --badge-positive-border: rgba(34, 197, 94, 0.30);
+
+  --badge-info-bg:     rgba(59, 130, 246, 0.15);
+  --badge-info-text:   #98B7F7;
+  --badge-info-border: rgba(59, 130, 246, 0.30);
+
+  --badge-warning-bg:     rgba(245, 158, 11, 0.15);
+  --badge-warning-text:   #F4C77A;
+  --badge-warning-border: rgba(245, 158, 11, 0.30);
+
+  --badge-danger-bg:     rgba(239, 68, 68, 0.15);
+  --badge-danger-text:   #F4A0A0;
+  --badge-danger-border: rgba(239, 68, 68, 0.30);
+
+  --badge-teal-bg:     rgba(6, 182, 212, 0.15);
+  --badge-teal-text:   #7DD7E5;
+  --badge-teal-border: rgba(6, 182, 212, 0.30);
+
+  --badge-purple-bg:     rgba(139, 92, 246, 0.16);
+  --badge-purple-text:   #C4B0F5;
+  --badge-purple-border: rgba(139, 92, 246, 0.32);
+
+  --badge-rose-bg:     rgba(236, 72, 153, 0.15);
+  --badge-rose-text:   #F3A9CE;
+  --badge-rose-border: rgba(236, 72, 153, 0.30);
+
+  --badge-neutral-bg:     rgba(156, 163, 175, 0.10);
+  --badge-neutral-text:   #BFC4BC;
+  --badge-neutral-border: rgba(156, 163, 175, 0.25);
 }
 
 /* ============================================================

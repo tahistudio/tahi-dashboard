@@ -103,22 +103,25 @@ interface BadgeProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'childr
 // ── Tone → token map ────────────────────────────────────────────────────────
 
 /**
- * Tone palette. Values come straight from the Tahi Studio design pack
- * (Stripe-soft Twenty-leaning). Each tone has a deeper text colour for
- * legibility against the soft tinted background. Borders are reserved
- * for the outline variant only. Soft variant has no border, which keeps
- * the visual weight down across dense lists.
+ * Tone palette. Values are CSS custom properties defined in globals.css
+ * (:root + .dark). Light values are byte-identical to the previous
+ * hardcoded design-pack hex, so light mode is unchanged; the .dark block
+ * carries the tinted-on-dark overrides so chips stop keeping a light tint
+ * in dark mode. `solid` is the loud-fill background for variant="solid"
+ * (white text sits on it) and stays deep in both themes on purpose. Each
+ * tone still has a deeper text colour for legibility against the soft
+ * tinted background. Borders are reserved for the outline variant only.
  */
-const TONE_MAP: Record<BadgeTone, { bg: string; text: string; border: string; dot: string }> = {
-  brand:    { bg: '#EEF5EB', text: '#3F6235', border: '#D5E4CF', dot: '#5A824E' },
-  positive: { bg: '#E9F7EE', text: '#176B3D', border: '#C8E8D2', dot: '#22C55E' },
-  info:     { bg: '#EBF1FE', text: '#1F4FBA', border: '#D5E2FB', dot: '#3B82F6' },
-  warning:  { bg: '#FEF6E6', text: '#8A5A12', border: '#F7E2B8', dot: '#F59E0B' },
-  danger:   { bg: '#FDEDEC', text: '#B42318', border: '#F6CDC7', dot: '#EF4444' },
-  teal:     { bg: '#E6F6F9', text: '#0E6E81', border: '#C2E7EE', dot: '#06B6D4' },
-  purple:   { bg: '#F0EBFC', text: '#5A30C3', border: '#DCD2F4', dot: '#8B5CF6' },
-  rose:     { bg: '#FBE9F2', text: '#9D1F62', border: '#F4CADF', dot: '#EC4899' },
-  neutral:  { bg: '#F2F4F2', text: '#525A52', border: '#E1E5E1', dot: '#9CA3AF' },
+const TONE_MAP: Record<BadgeTone, { bg: string; text: string; border: string; dot: string; solid: string }> = {
+  brand:    { bg: 'var(--badge-brand-bg)',    text: 'var(--badge-brand-text)',    border: 'var(--badge-brand-border)',    dot: 'var(--badge-brand-dot)',    solid: 'var(--badge-brand-solid)'    },
+  positive: { bg: 'var(--badge-positive-bg)', text: 'var(--badge-positive-text)', border: 'var(--badge-positive-border)', dot: 'var(--badge-positive-dot)', solid: 'var(--badge-positive-solid)' },
+  info:     { bg: 'var(--badge-info-bg)',     text: 'var(--badge-info-text)',     border: 'var(--badge-info-border)',     dot: 'var(--badge-info-dot)',     solid: 'var(--badge-info-solid)'     },
+  warning:  { bg: 'var(--badge-warning-bg)',  text: 'var(--badge-warning-text)',  border: 'var(--badge-warning-border)',  dot: 'var(--badge-warning-dot)',  solid: 'var(--badge-warning-solid)'  },
+  danger:   { bg: 'var(--badge-danger-bg)',   text: 'var(--badge-danger-text)',   border: 'var(--badge-danger-border)',   dot: 'var(--badge-danger-dot)',   solid: 'var(--badge-danger-solid)'   },
+  teal:     { bg: 'var(--badge-teal-bg)',     text: 'var(--badge-teal-text)',     border: 'var(--badge-teal-border)',     dot: 'var(--badge-teal-dot)',     solid: 'var(--badge-teal-solid)'     },
+  purple:   { bg: 'var(--badge-purple-bg)',   text: 'var(--badge-purple-text)',   border: 'var(--badge-purple-border)',   dot: 'var(--badge-purple-dot)',   solid: 'var(--badge-purple-solid)'   },
+  rose:     { bg: 'var(--badge-rose-bg)',     text: 'var(--badge-rose-text)',     border: 'var(--badge-rose-border)',     dot: 'var(--badge-rose-dot)',     solid: 'var(--badge-rose-solid)'     },
+  neutral:  { bg: 'var(--badge-neutral-bg)',  text: 'var(--badge-neutral-text)',  border: 'var(--badge-neutral-border)',  dot: 'var(--badge-neutral-dot)',  solid: 'var(--badge-neutral-solid)'  },
 }
 
 // ── Size → padding/font map ────────────────────────────────────────────────
@@ -160,6 +163,9 @@ export function Badge({
   let text: string
   let border: string
   let dotColour: string
+  // Loud-fill background for the solid variant. For categorical colours it
+  // is the categorical hue itself; for tones it is the dedicated deep token.
+  let solidBg: string
 
   if (stage) {
     const c = stageColour(stage)
@@ -167,18 +173,21 @@ export function Badge({
     text = c
     border = c
     dotColour = c
+    solidBg = c
   } else if (source) {
     const c = sourceColour(source)
     bg = `${c}18`
     text = c
     border = c
     dotColour = c
+    solidBg = c
   } else {
     const t = TONE_MAP[tone ?? 'neutral']
     bg = t.bg
     text = t.text
     border = t.border
     dotColour = t.dot
+    solidBg = t.solid
   }
 
   const s = SIZE_MAP[size]
@@ -196,7 +205,7 @@ export function Badge({
       finalBorder = undefined
       break
     case 'solid':
-      finalBg = text
+      finalBg = solidBg
       finalText = '#ffffff'
       finalBorder = undefined
       break
