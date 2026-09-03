@@ -74,7 +74,12 @@ function InlineTrigger({
       onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
       onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
     >
-      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{children}</span>
+      {/* nowrap is what makes the ellipsis real: text-overflow only applies to
+          non-wrapping content, so without it a two-word assignee or phase name
+          wrapped to a second line and grew the row instead of truncating. */}
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {children}
+      </span>
       <ChevronDown
         size={13}
         aria-hidden="true"

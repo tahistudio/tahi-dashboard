@@ -14,7 +14,9 @@
  * The connector is an absolutely positioned bar inside each step except the
  * first, running from that step's node back to the previous one. Every step
  * is `flex: 1`, so `left: -50%; width: 100%` lands exactly centre to centre
- * without measuring anything.
+ * without measuring anything. Vertically it has to clear the step's own
+ * padding as well as reach the node waist, because `top` resolves from the
+ * padding box: see STEP_PAD_TOP and CONNECTOR_TOP below.
  *
  * Off-pipeline statuses (draft, on_hold, cancelled, archived) are not steps.
  * The parent decides whether to render the spine at all; when the current
@@ -52,8 +54,17 @@ interface DeliverySpineProps {
 }
 
 const NODE_SIZE = '1.5rem'
-/** Half the node minus half the connector, so the bar hits the node's waist. */
-const CONNECTOR_TOP = '0.6875rem'
+/**
+ * Vertical padding on the step box. Identical for both audiences, so the
+ * studio spine and the client spine draw the same geometry, and folded into
+ * CONNECTOR_TOP below because `top` on an absolutely positioned child
+ * resolves from the containing block's PADDING box, not its border box.
+ */
+const STEP_PAD_TOP = '0.25rem'
+/** Half the node minus half the connector, measured from the node's top edge. */
+const NODE_WAIST = '0.6875rem'
+/** Where the connector sits, so the bar hits the node's waist exactly. */
+const CONNECTOR_TOP = `calc(${STEP_PAD_TOP} + ${NODE_WAIST})`
 
 export function DeliverySpine({
   status,
@@ -191,6 +202,10 @@ export function DeliverySpine({
             textAlign: 'center',
             minWidth: 0,
             width: '100%',
+            // Shared by both audiences so the connector's `top` lands on the
+            // node waist either way. Changing this means changing
+            // STEP_PAD_TOP, not this line.
+            padding: `${STEP_PAD_TOP} 0.125rem`,
           }
 
           if (!interactive) {
@@ -199,7 +214,7 @@ export function DeliverySpine({
                 key={s}
                 aria-current={current ? 'step' : undefined}
                 className="flex-1"
-                style={{ ...stepLayout, padding: '0.125rem 0.125rem 0' }}
+                style={stepLayout}
               >
                 {inner}
               </li>
@@ -217,7 +232,6 @@ export function DeliverySpine({
                 className="tahi-focus-ring min-h-11 md:min-h-0"
                 style={{
                   ...stepLayout,
-                  padding: '0.25rem 0.125rem',
                   border: 'none',
                   borderRadius: 'var(--radius-md)',
                   background: 'transparent',

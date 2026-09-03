@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import useSWR from 'swr'
 import { apiPath } from '@/lib/api'
 import {
@@ -8,7 +8,7 @@ import {
   User, CheckCircle2, Loader2, Activity,
   FileText, Image as ImageIcon, Download, Paperclip,
   Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud, ChevronDown, Eye,
-  Sparkles, Wand2, X, Check, Lock, Archive, MessageSquare,
+  Sparkles, Wand2, X, Check, Lock, Archive, MessageSquare, PauseCircle, Ban,
 } from 'lucide-react'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import Link from 'next/link'
@@ -71,6 +71,25 @@ const PRIORITY_OPTIONS = [
   { value: 'standard', label: 'Standard' },
   { value: 'high', label: 'High' },
 ]
+
+// The line the ported detail shows in place of the delivery spine when the
+// request is not on one of the five pipeline steps. One sentence per status,
+// worded for both audiences: a client sees the same note the studio does.
+const OFF_PIPELINE_NOTES: Record<string, string> = {
+  draft: 'This request is a draft, not yet submitted.',
+  archived: 'This request is archived.',
+  on_hold: 'This request is on hold, off the delivery pipeline for now.',
+  cancelled: 'This request was cancelled.',
+}
+
+/** The glyph beside an off-pipeline note. Decorative: the note carries it. */
+function OffPipelineIcon({ status }: { status: string }) {
+  const style = { flexShrink: 0, color: 'var(--color-text-subtle)' }
+  if (status === 'draft') return <FileText size={16} aria-hidden="true" style={style} />
+  if (status === 'archived') return <Archive size={16} aria-hidden="true" style={style} />
+  if (status === 'cancelled') return <Ban size={16} aria-hidden="true" style={style} />
+  return <PauseCircle size={16} aria-hidden="true" style={style} />
+}
 
 // Category vocabulary for the ported Details rail. Driven off the one
 // CATEGORY_CONFIG map so the chip colours and the picker can never diverge.
@@ -293,6 +312,9 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const [messages, setMessages] = useState<Message[]>([])
   // Visibility is now owned by <MessageComposer> and passed back through handleSendMessage.
   const [statusUpdating, setStatusUpdating] = useState(false)
+  // Mirrors statusUpdating for the Internal switch, so a double tap cannot
+  // fire two PATCHes whose order decides who can see the request.
+  const [internalUpdating, setInternalUpdating] = useState(false)
   const [editingDueDate, setEditingDueDate] = useState(false)
   const [dueDateInput, setDueDateInput] = useState('')
   const [conversationId, setConversationId] = useState<string | null>(null)
@@ -673,15 +695,20 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   // (both filter on requests.isInternal), so this switch is the studio's
   // single control over whether the client can see this page at all.
   async function handleInternalToggle() {
-    if (!request) return
+    if (!request || internalUpdating) return
     const next = !request.isInternal
     const who = request.orgName ?? 'The client'
-    await patchRequest(
-      { isInternal: next },
-      next
-        ? `${who} can no longer see this request`
-        : `${who} can see this request again`,
-    )
+    setInternalUpdating(true)
+    try {
+      await patchRequest(
+        { isInternal: next },
+        next
+          ? `${who} can no longer see this request`
+          : `${who} can see this request again`,
+      )
+    } finally {
+      setInternalUpdating(false)
+    }
   }
 
   async function handleScopeFlagToggle() {
@@ -1229,12 +1256,12 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     </Card>
   ) : null
 
-  // Draft and archived requests never sit on the delivery pipeline, so the
-  // ported detail swaps the spine for a single honest line. On hold and
-  // cancelled keep the spine: they are pauses inside a live pipeline, and the
-  // spine still shows how far the work got.
+  // Every status that is not one of the five pipeline steps gets the note
+  // instead of the spine. The spine has no way to show how far an off-pipeline
+  // request got (there is no stored high-water mark, so it would draw five
+  // grey nodes and no current step, which reads as broken), and the studio can
+  // still move any of them from the status control in the Actions card.
   const isOffPipelineNote = !isPipelineStatus(request.status)
-    && (request.status === 'draft' || request.status === 'archived')
 
   return (
     <div className="flex flex-col" style={{ gap: '1.5rem', maxWidth: '68.75rem' }}>
@@ -1513,8 +1540,8 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         </div>
       )}
 
-      {/* Delivery spine: its own card between the header and the grid. Draft
-          and archived requests are not on the pipeline at all, so they get a
+      {/* Delivery spine: its own card between the header and the grid.
+          Off-pipeline statuses (draft, on hold, cancelled, archived) get a
           one-line note instead of five steps with no current one, which reads
           as broken rather than deliberate. */}
       {newUi && (
@@ -1533,12 +1560,8 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
               color: 'var(--color-text-muted)',
             }}
           >
-            {request.status === 'draft'
-              ? <FileText size={16} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--color-text-subtle)' }} />
-              : <Archive size={16} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--color-text-subtle)' }} />}
-            {request.status === 'draft'
-              ? 'This request is a draft, not yet submitted.'
-              : 'This request is archived.'}
+            <OffPipelineIcon status={request.status} />
+            {OFF_PIPELINE_NOTES[request.status] ?? 'This request is off the delivery pipeline.'}
           </div>
         ) : (
           <DeliverySpine
@@ -2021,7 +2044,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             request={request}
             messages={messages}
             files={files}
-            openWhenShort={newUi}
+            newUi={newUi}
           />
         </div>
 
@@ -2034,8 +2057,21 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             status control stay reachable on a long thread. `self-start` is
             what makes that work: a stretched grid item is as tall as the row
             and has nowhere to travel. Below md the grid is one column and the
-            rail scrolls with the page. */}
-        <div className="flex flex-col gap-4 md:self-start md:sticky md:top-0">
+            rail scrolls with the page.
+
+            A pinned box stops translating, so a rail taller than the viewport
+            would put Details, People and Checklists permanently out of reach:
+            the max-height plus its own overflow is what keeps the bottom of a
+            studio rail scrollable once it pins. The shell is `h-screen`, so
+            the budget is 100vh less the 3.5rem top bar, less the top offset,
+            less a little breathing room at the bottom: 6rem at md, 7rem at lg.
+            Deliberately conservative, because an optional banner above the top
+            bar can only ever make the scrollport shorter, and a rail that ends
+            early reads as spacing while one that ends late is unreachable. The
+            top offset itself is what keeps the first card off the top bar.
+            Menus in here render through the shared portalled <Popover>, so
+            they still escape this scroll container. */}
+        <div className="flex flex-col gap-4 md:self-start md:sticky md:top-4 lg:top-6 md:max-h-[calc(100vh_-_6rem)] lg:max-h-[calc(100vh_-_7rem)] md:overflow-y-auto md:overscroll-contain">
           {/* Time (admin only): live timer + manual log + recent entries */}
           {isAdmin && <TimeCard requestId={requestId} />}
 
@@ -2122,9 +2158,12 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                   <>
                     <InternalSwitch
                       checked={request.isInternal}
+                      busy={internalUpdating}
+                      describedById={INTERNAL_NOTE_ID}
                       onToggle={handleInternalToggle}
                     />
                     <p
+                      id={INTERNAL_NOTE_ID}
                       className="text-xs"
                       style={{ color: 'var(--color-text-subtle)', margin: 0, lineHeight: 1.45 }}
                     >
@@ -2301,14 +2340,20 @@ function ActivityLog({
   request,
   messages,
   files,
-  openWhenShort = false,
+  newUi = false,
 }: {
   request: Request
   messages: Message[]
   files: RequestFile[]
-  /** Ported detail: start expanded when the log is short enough to read at
-   *  a glance (five events or fewer). Long logs stay collapsed. */
-  openWhenShort?: boolean
+  /**
+   * The ported detail. Moves the filter into the header so which half of the
+   * feed you are reading shows without expanding, starts the card expanded
+   * when the log is short enough to read at a glance (five events or fewer),
+   * and swaps "Posted a comment" for the comment's own first line. Everyone
+   * still on the legacy detail keeps today's card exactly as it was, which is
+   * the same gate the rest of this page honours.
+   */
+  newUi?: boolean
 }) {
   // `open` toggles the whole card; `expanded` toggles Show more inside it.
   const [open, setOpen] = useState(false)
@@ -2326,36 +2371,57 @@ function ActivityLog({
 
   const applyFilter = useCallback((next: ActivityFilter) => {
     setFilter(next)
+    // The ported card's filter is clickable while the body is collapsed, so
+    // choosing a half of the feed has to reveal it. Otherwise the control
+    // reads as dead: the selection moves and nothing appears.
+    setOpen(true)
     try { localStorage.setItem('tahi-activity-filter', next) } catch { /* ignore */ }
   }, [])
 
   // Thread messages are merged in as comment events carrying a one-line
   // excerpt, so Comments filters to something worth reading rather than a
   // stack of rows that all say "Posted a comment".
-  const events = buildActivityEvents(
-    {
-      createdAt: request.createdAt,
-      updatedAt: request.updatedAt,
-      deliveredAt: request.deliveredAt,
-      statusLabel: STATUS_LABELS[request.status] ?? request.status,
-      assigneeName: request.assigneeName,
-    },
-    messages.map(m => ({
-      id: m.id,
-      body: m.body,
-      isInternal: m.isInternal,
-      createdAt: m.createdAt,
-      authorName: m.teamMemberName
-        ?? m.authorName
-        ?? (m.authorType === 'contact' ? 'Client' : null),
-    })),
-    files.map(f => ({
-      id: f.id,
-      filename: f.filename,
-      createdAt: f.createdAt,
-      uploaderName: f.uploaderName ?? null,
-    })),
-  )
+  //
+  // Memoised because messageExcerpt walks the full Tiptap HTML of every
+  // message: without this every parent re-render (status patch, participant
+  // edit, SWR revalidation) re-parses the whole thread to build a list the
+  // collapsed card then throws away.
+  const events = useMemo(() => {
+    const merged = buildActivityEvents(
+      {
+        createdAt: request.createdAt,
+        updatedAt: request.updatedAt,
+        deliveredAt: request.deliveredAt,
+        statusLabel: STATUS_LABELS[request.status] ?? request.status,
+        assigneeName: request.assigneeName,
+      },
+      messages.map(m => ({
+        id: m.id,
+        body: m.body,
+        isInternal: m.isInternal,
+        createdAt: m.createdAt,
+        authorName: m.teamMemberName
+          ?? m.authorName
+          ?? (m.authorType === 'contact' ? 'Client' : null),
+      })),
+      files.map(f => ({
+        id: f.id,
+        filename: f.filename,
+        createdAt: f.createdAt,
+        uploaderName: f.uploaderName ?? null,
+      })),
+    )
+    if (newUi) return merged
+    // Legacy detail keeps the wording it has today. Same chronology, same
+    // filter, no excerpts, so the surface every non-super-admin uses is
+    // untouched by this slice.
+    return merged.map(e => e.type === 'comment'
+      ? { ...e, description: e.internal ? 'Posted an internal note' : 'Posted a comment' }
+      : e)
+  }, [
+    request.createdAt, request.updatedAt, request.deliveredAt,
+    request.status, request.assigneeName, messages, files, newUi,
+  ])
 
   // Ported detail: a short log opens itself once per request, so five events
   // or fewer are readable without a click. The ref means a later click to
@@ -2363,11 +2429,11 @@ function ActivityLog({
   const eventCount = events.length
   const autoOpenedFor = useRef<string | null>(null)
   useEffect(() => {
-    if (!openWhenShort) return
+    if (!newUi) return
     if (autoOpenedFor.current === request.id) return
     autoOpenedFor.current = request.id
     setOpen(eventCount > 0 && eventCount <= 5)
-  }, [openWhenShort, request.id, eventCount])
+  }, [newUi, request.id, eventCount])
 
   const filteredEvents = filterActivityEvents(events, filter)
   const displayed = expanded ? filteredEvents : filteredEvents.slice(0, 5)
@@ -2375,86 +2441,128 @@ function ActivityLog({
   const iconMap: Record<ActivityEventType, React.ReactNode> = {
     created: <Plus size={10} />,
     status_change: <RefreshCw size={10} />,
-    comment: <MessageSquare size={10} />,
+    comment: newUi ? <MessageSquare size={10} /> : <FileText size={10} />,
     file_upload: <Upload size={10} />,
   }
 
+  // The disclosure's own contents, shared by both headers. `min-w-0` on the
+  // label and `truncate` on the word are what make the row degrade by
+  // ellipsis: the Card clips its overflow, so a header that cannot shrink
+  // loses the chevron silently at 375px instead of wrapping.
+  const disclosureInner = (
+    <>
+      <span
+        className="text-sm font-semibold flex items-center gap-2 min-w-0"
+        style={{ color: 'var(--color-text)' }}
+      >
+        <Activity size={14} style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} aria-hidden="true" />
+        <span className="truncate">Activity</span>
+        {events.length > 0 && (
+          <span
+            className="text-xs font-normal rounded-full flex-shrink-0"
+            style={{
+              padding: '0.0625rem 0.4375rem',
+              background: 'var(--color-bg-tertiary)',
+              color: 'var(--color-text-subtle)',
+            }}
+          >
+            {events.length}
+          </span>
+        )}
+      </span>
+      <ChevronDown
+        size={14}
+        aria-hidden="true"
+        style={{
+          flexShrink: 0,
+          color: 'var(--color-text-subtle)',
+          transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+          transition: 'transform 0.15s',
+        }}
+      />
+    </>
+  )
+
+  const filterControl = (className: string) => events.length > 0 ? (
+    <SegmentedControl
+      role="tablist"
+      size="sm"
+      ariaLabel="Activity filter"
+      value={filter}
+      onChange={applyFilter}
+      options={ACTIVITY_FILTER_OPTIONS}
+      className={className}
+    />
+  ) : null
+
   return (
     <Card padding="none" style={{ overflow: 'hidden' }}>
-      {/* Header row. The filter sits out here beside the disclosure rather
-          than inside the body, so which half of the feed you are looking at
-          reads without expanding the card first. It cannot live inside the
-          disclosure button either: a control inside a button is not a
-          control. */}
-      <div
-        className="flex items-center"
-        style={{
-          gap: '0.5rem',
-          padding: '0.5rem 0.75rem 0.5rem 1.25rem',
-          borderBottom: open ? '1px solid var(--color-row-border)' : 'none',
-        }}
-      >
+      {/* Ported header row. The filter sits out here beside the disclosure
+          rather than inside the body, so which half of the feed you are
+          looking at reads without expanding the card first. It cannot live
+          inside the disclosure button either: a control inside a button is
+          not a control. The legacy header below keeps the filter in the body,
+          where every non-super-admin has it today. */}
+      {newUi ? (
+        <div
+          className="flex items-center"
+          style={{
+            gap: '0.5rem',
+            padding: '0.5rem 0.75rem 0.5rem 1.25rem',
+            borderBottom: open ? '1px solid var(--color-row-border)' : 'none',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setOpen(v => !v)}
+            aria-expanded={open}
+            aria-controls="activity-log-body"
+            className="tahi-focus-ring flex items-center flex-1 transition-colors min-h-11 md:min-h-8"
+            style={{
+              gap: '0.5rem',
+              minWidth: 0,
+              padding: '0.375rem 0.5rem',
+              marginLeft: '-0.5rem',
+              borderRadius: 'var(--radius-sm)',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+          >
+            {disclosureInner}
+          </button>
+          {filterControl('shrink-0')}
+        </div>
+      ) : (
         <button
           type="button"
           onClick={() => setOpen(v => !v)}
           aria-expanded={open}
           aria-controls="activity-log-body"
-          className="tahi-focus-ring flex items-center flex-1 transition-colors min-h-11 md:min-h-8"
+          className="tahi-focus-ring flex items-center justify-between w-full transition-colors"
           style={{
-            gap: '0.5rem',
-            minWidth: 0,
-            padding: '0.375rem 0.5rem',
-            marginLeft: '-0.5rem',
-            borderRadius: 'var(--radius-sm)',
+            padding: '0.875rem 1.25rem',
             background: 'transparent',
+            // `border` first, then `borderBottom`: inline styles apply in key
+            // order, so the shorthand would wipe the divider if it came last.
             border: 'none',
+            borderBottom: open ? '1px solid var(--color-row-border)' : 'none',
             cursor: 'pointer',
             textAlign: 'left',
           }}
           onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
           onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
         >
-          <span className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-            <Activity size={14} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
-            Activity
-            {events.length > 0 && (
-              <span
-                className="text-xs font-normal rounded-full"
-                style={{
-                  padding: '0.0625rem 0.4375rem',
-                  background: 'var(--color-bg-tertiary)',
-                  color: 'var(--color-text-subtle)',
-                }}
-              >
-                {events.length}
-              </span>
-            )}
-          </span>
-          <ChevronDown
-            size={14}
-            aria-hidden="true"
-            style={{
-              color: 'var(--color-text-subtle)',
-              transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 0.15s',
-            }}
-          />
+          {disclosureInner}
         </button>
-        {events.length > 0 && (
-          <SegmentedControl
-            role="tablist"
-            size="sm"
-            ariaLabel="Activity filter"
-            value={filter}
-            onChange={applyFilter}
-            options={ACTIVITY_FILTER_OPTIONS}
-            className="shrink-0"
-          />
-        )}
-      </div>
+      )}
 
       {open && (
       <div id="activity-log-body" style={{ padding: '0.75rem 1.25rem' }}>
+        {!newUi && filterControl('mb-3')}
         {filteredEvents.length === 0 ? (
           <p className="text-xs" style={{ color: 'var(--color-text-subtle)', padding: '0.5rem 0' }}>
             {filter === 'comments' ? 'No comments yet.' : 'No activity yet.'}
@@ -2469,10 +2577,10 @@ function ActivityLog({
                     width: '1.25rem',
                     height: '1.25rem',
                     marginTop: '0.0625rem',
-                    background: event.internal
+                    background: newUi && event.internal
                       ? 'var(--status-in-review-bg)'
                       : 'var(--color-bg-tertiary)',
-                    color: event.internal
+                    color: newUi && event.internal
                       ? 'var(--status-in-review-text)'
                       : 'var(--color-text-subtle)',
                   }}
@@ -2480,7 +2588,7 @@ function ActivityLog({
                   {iconMap[event.type]}
                 </div>
                 <div className="flex-1 min-w-0">
-                  {event.type === 'comment' ? (
+                  {newUi && event.type === 'comment' ? (
                     <>
                       <p className="text-xs" style={{ color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
                         <span className="font-medium" style={{ color: 'var(--color-text)' }}>
@@ -2875,17 +2983,33 @@ function SidebarCard({ title, children }: { title: string; children: React.React
 // ---- Internal switch ---------------------------------------------------------
 
 /**
+ * The id of the consequence line under the Internal switch. The switch points
+ * at it with aria-describedby, so a screen reader hears which way round the
+ * request currently is, not just "Internal request, switch". One detail page
+ * is mounted at a time, so a fixed id is safe (as with activity-log-body).
+ */
+const INTERNAL_NOTE_ID = 'request-internal-note'
+
+/**
  * The Actions card's Internal request switch. A real `role="switch"` rather
  * than a second pill button, because this is a state the studio reads at a
  * glance and the track shows it without the label having to change. The
  * consequence line lives beside it in the Actions card, not in here, so the
- * client's name can be named.
+ * client's name can be named; `describedById` is what ties the two together.
+ *
+ * `busy` disables it while the PATCH is in flight: two taps in a row would
+ * otherwise send two writes computed from the optimistic state, and the one
+ * that lands last decides whether the client can see the request.
  */
 function InternalSwitch({
   checked,
+  busy = false,
+  describedById,
   onToggle,
 }: {
   checked: boolean
+  busy?: boolean
+  describedById?: string
   onToggle: () => void | Promise<void>
 }) {
   return (
@@ -2893,7 +3017,9 @@ function InternalSwitch({
       type="button"
       role="switch"
       aria-checked={checked}
-      onClick={() => { void onToggle() }}
+      aria-describedby={describedById}
+      disabled={busy}
+      onClick={() => { if (!busy) void onToggle() }}
       className="tahi-focus-ring flex items-center min-h-11 md:min-h-8"
       style={{
         gap: '0.625rem',
@@ -2906,7 +3032,9 @@ function InternalSwitch({
         fontWeight: 500,
         color: 'var(--color-text)',
         textAlign: 'left',
-        cursor: 'pointer',
+        cursor: busy ? 'not-allowed' : 'pointer',
+        opacity: busy ? 0.6 : 1,
+        transition: 'opacity 130ms ease',
       }}
     >
       <span

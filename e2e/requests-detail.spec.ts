@@ -100,6 +100,9 @@ test.describe('Request detail', () => {
 
   test('the activity filter reads without expanding the card', async ({ page }) => {
     test.skip(!(await openFirstRequest(page)), 'No requests in this dataset.')
+    // Header placement is part of the ported card. The legacy card keeps the
+    // filter inside the body, where it is only reachable once expanded.
+    test.skip(!(await portedDetailIsOn(page)), 'The rebuilt detail is super-admin gated.')
 
     const filter = activityFilter(page)
     test.skip((await filter.count()) === 0, 'This request has no activity yet.')
@@ -114,6 +117,11 @@ test.describe('Request detail', () => {
     await expect(comments).toHaveAttribute('aria-selected', 'true')
     await expect(all).toHaveAttribute('aria-selected', 'false')
 
+    // Choosing a half of the feed also reveals it: the control is clickable
+    // while the card is collapsed, so a selection that showed nothing would
+    // read as dead.
+    await expect(page.locator('#activity-log-body')).toBeVisible()
+
     // The choice persists: it is written to localStorage under the key the
     // legacy toggle already used.
     expect(await page.evaluate(() => localStorage.getItem('tahi-activity-filter'))).toBe('comments')
@@ -126,6 +134,7 @@ test.describe('Request detail', () => {
 
   test('the activity filter moves under the arrow keys', async ({ page }) => {
     test.skip(!(await openFirstRequest(page)), 'No requests in this dataset.')
+    test.skip(!(await portedDetailIsOn(page)), 'The rebuilt detail is super-admin gated.')
 
     const filter = activityFilter(page)
     test.skip((await filter.count()) === 0, 'This request has no activity yet.')
@@ -133,7 +142,12 @@ test.describe('Request detail', () => {
     const all = filter.getByRole('tab', { name: 'All', exact: true })
     const comments = filter.getByRole('tab', { name: 'Comments', exact: true })
 
+    // click() to set the starting half, then an explicit focus(): the roving
+    // tabindex handler lives on the option button, and WebKit (the
+    // mobile-safari project) does not focus a button on click, so without this
+    // the arrows would go to <body> and never reach the control.
     await all.click()
+    await all.focus()
     await page.keyboard.press('ArrowRight')
     await expect(comments).toHaveAttribute('aria-selected', 'true')
     await page.keyboard.press('ArrowLeft')
@@ -144,20 +158,30 @@ test.describe('Request detail', () => {
     test.skip(!(await openFirstRequest(page)), 'No requests in this dataset.')
     test.skip(!(await portedDetailIsOn(page)), 'The rebuilt detail is super-admin gated.')
 
-    const trigger = page.getByRole('button', { name: 'Change priority' })
+    // Category, not Priority: "Change category" always renders a nowrap
+    // CategoryChip, so a clipped row shows up as real overflow. A plain-text
+    // value would only prove the point once the span stops wrapping, which
+    // makes the assertion vacuous on the rows that carry no chip.
+    const trigger = page.getByRole('button', { name: 'Change category' })
     test.skip((await trigger.count()) === 0, 'The Details rail is not editable for this audience.')
 
     // The regression this guards: the trigger's negative margins used to make
-    // its max-width resolve 10px short, so the value span ellipsised a chip
-    // that had room to spare. Priority is always "High" or "Standard", short
-    // enough that the span must never need to truncate at any rail width.
-    const fits = await trigger.first().evaluate(el => {
+    // its max-width resolve 10px short, so the clipping span ate the right
+    // edge of a chip that had room to spare. Measured two ways: the span must
+    // not be scrolling, and the chip's own box must sit inside the trigger's
+    // content box. 1px of tolerance for sub-pixel rounding.
+    const fit = await trigger.first().evaluate(el => {
       const span = el.querySelector('span')
-      if (!span) return true
-      // 1px of tolerance for sub-pixel rounding at fractional zoom levels.
-      return span.scrollWidth <= span.clientWidth + 1
+      if (!span) return { scrolls: 0, spill: 0 }
+      const chip = span.firstElementChild
+      const spill = chip
+        ? chip.getBoundingClientRect().right - el.getBoundingClientRect().right
+          + parseFloat(getComputedStyle(el).paddingRight)
+        : 0
+      return { scrolls: span.scrollWidth - span.clientWidth, spill }
     })
-    expect(fits).toBe(true)
+    expect(fit.scrolls).toBeLessThanOrEqual(1)
+    expect(fit.spill).toBeLessThanOrEqual(1)
   })
 
   test('the Internal switch states the consequence in words', async ({ page }) => {
