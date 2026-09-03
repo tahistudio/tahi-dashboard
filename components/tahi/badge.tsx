@@ -38,6 +38,9 @@
  */
 
 import React from 'react'
+// The request-status tone map. lib/status-config.ts imports BadgeTone from
+// here as a type only, so this stays a one-way runtime dependency.
+import { REQUEST_STATUS_TONE } from '@/lib/status-config'
 import { X } from 'lucide-react'
 import { stageColour, sourceColour } from '@/lib/chart-colors'
 import { LeafIcon } from '@/components/tahi/tahi-glyphs'
@@ -379,8 +382,16 @@ export function Badge({
 
 // ── Convenience helpers ─────────────────────────────────────────────────────
 
-/** Map a request/deal status slug to a Badge tone. */
+/** Map a request/deal status slug to a Badge tone.
+ *
+ *  Request statuses are answered from REQUEST_STATUS_TONE, the map derived
+ *  from the one ordered vocabulary, so this switch cannot drift from it
+ *  again: on_hold used to fall through to neutral here while the expanded
+ *  sub-request rows painted the same status amber one row below. Everything
+ *  else (deals, invoices, contracts, calls) keeps the switch. */
 export function statusTone(status: string): BadgeTone {
+  const requestTone = REQUEST_STATUS_TONE[status]
+  if (requestTone) return requestTone
   switch (status) {
     case 'draft':
     case 'archived':

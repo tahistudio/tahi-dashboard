@@ -1,10 +1,10 @@
 'use client'
 
 /**
- * <PeoplePanel> — sidebar block on a request detail page. Three role
+ * <PeoplePanel>. Sidebar block on a request detail page. Three role
  * slots (PM / Assignees / Followers) with optimistic multi-select adds.
  *
- * Concurrency story — why we don't call back to the parent for refetch
+ * Concurrency story: why we don't call back to the parent for refetch
  * between mutations:
  *
  *   Early versions called `onChange()` after every POST/DELETE, which
@@ -20,7 +20,7 @@
  *   so each handler always composes on the latest state, regardless of
  *   how fast the user is clicking. When the server confirms, we swap the
  *   temp row with the real row via a single map() on prev. No refetch
- *   needed — the parent's full refetch happens on page load only, and
+ *   needed, because the parent's full refetch happens on page load only, and
  *   we're authoritative from that point forward.
  *
  * The MultiPicker is rendered through a <Popover> so it overlays the
@@ -52,7 +52,7 @@ interface PeoplePanelProps {
   requestId: string
   orgId: string
   participants: Participant[]
-  /** React state dispatcher from the parent — we call it with functional
+  /** React state dispatcher from the parent. We call it with functional
    *  updaters so optimistic writes always compose on latest state. */
   setParticipants: React.Dispatch<React.SetStateAction<Participant[]>>
   isAdmin: boolean
@@ -68,6 +68,18 @@ interface PeoplePanelProps {
    *  appearing twice as, say, Assignee and Follower. Off by default so
    *  existing callers keep today's per-slot behaviour. */
   dedupeAcrossRoles?: boolean
+  /**
+   * Called when the team member carrying the Assignee role changes, with the
+   * id (null when the last one was removed) and their name.
+   *
+   * A participant row and `requests.assigneeId` are two records of the same
+   * fact, and this panel only ever wrote the first. Workload buckets by
+   * `assigneeId`, the "Assigned to me" saved view tests it and the unassigned
+   * filter counts on it, so adding someone here left every one of those
+   * saying the request had nobody on it. The caller owns the request row, so
+   * it does that half of the write.
+   */
+  onAssigneeMirror?: (assigneeId: string | null, name: string | null) => void
 }
 
 function Avatar({ name, avatar, size = 24 }: { name: string | null; avatar: string | null; size?: number }) {
@@ -341,6 +353,7 @@ export function PeoplePanel({
   embedded = false,
   lockPm = false,
   dedupeAcrossRoles = false,
+  onAssigneeMirror,
 }: PeoplePanelProps) {
   const { showToast } = useToast()
   const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([])
@@ -404,7 +417,7 @@ export function PeoplePanel({
       addedAt: new Date().toISOString(),
     }
 
-    // Optimistic insert — functional update so we compose on latest state
+    // Optimistic insert, a functional update so we compose on latest state
     // even when the user is clicking faster than the server can respond.
     setParticipants(prev => {
       // Short-circuit if that person is already in this role (fast double-clicks).
@@ -445,14 +458,22 @@ export function PeoplePanel({
           ? { ...p, id: data.participant.id, addedAt: data.participant.addedAt }
           : p,
       ))
+      // Carry the assignee onto the request row so Workload, the saved views
+      // and the unassigned filter see the same person these avatars do.
+      if (role === 'assignee' && participantType === 'team_member') {
+        onAssigneeMirror?.(participantId, displayName)
+      }
     } catch {
       setParticipants(prev => prev.filter(p => p.id !== tempId))
-      showToast('Network error — try again')
+      showToast('Network error, try again')
     }
-  }, [requestId, setParticipants, showToast])
+  }, [requestId, setParticipants, showToast, onAssigneeMirror])
 
   const applyRemove = useCallback(async (rowId: string) => {
     if (rowId.startsWith('temp-')) return // still saving, ignore
+    // Read off the props before the optimistic removal, so the mirror below
+    // still knows which role the row was carrying.
+    const removedRow = participants.find(p => p.id === rowId) ?? null
     // Optimistic: take it out of the list immediately.
     let snapshotRow: Participant | null = null
     setRemovingId(rowId)
@@ -465,17 +486,26 @@ export function PeoplePanel({
         method: 'DELETE',
       })
       if (!res.ok) {
-        // Roll back — put the row back where it was.
+        // Roll back, putting the row back where it was.
         if (snapshotRow) setParticipants(prev => [...prev, snapshotRow!])
         showToast('Failed to remove')
+        return
+      }
+      // Taking the assignee off clears the request's own assignee field, the
+      // inverse of the mirror in applyAdd. Only when nobody else holds the
+      // role: two assignee rows and one column means the survivor keeps it.
+      if (removedRow && removedRow.role === 'assignee' && removedRow.participantType === 'team_member') {
+        const next = participants.find(p =>
+          p.id !== rowId && p.role === 'assignee' && p.participantType === 'team_member')
+        onAssigneeMirror?.(next?.participantId ?? null, next?.name ?? null)
       }
     } catch {
       if (snapshotRow) setParticipants(prev => [...prev, snapshotRow!])
-      showToast('Network error — try again')
+      showToast('Network error, try again')
     } finally {
       setRemovingId(null)
     }
-  }, [requestId, setParticipants, showToast])
+  }, [requestId, setParticipants, showToast, participants, onAssigneeMirror])
 
   // --- render -------------------------------------------------------------
 

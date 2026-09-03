@@ -597,6 +597,12 @@ function AlignedRequestDialog({
         setEstimatedHours('')
         setAiDrafted(false)
         setSuccessMessage('Request created. Create another one below.')
+        // onCreated is a refresh signal, not a close signal: the callers that
+        // close do that themselves, and the sub-request panels do their
+        // revalidation inside it. Skipping it here left an admin who saved two
+        // sub-requests in a row looking at an empty panel and a stale count
+        // until a hard reload.
+        onCreated?.(data.id)
         return
       }
 
@@ -1919,6 +1925,10 @@ function LegacyRequestDialog({
         setEstimatedHours('')
         setSuccessMessage('Request created successfully. Create another one below.')
         setCreateAnother(true)
+        // Same refresh signal as the aligned branch above: the callers that
+        // close do that themselves, and the sub-request panels revalidate in
+        // here. Until the gate flips this is the branch a normal admin sees.
+        onCreated?.(data.id)
       } else if (onCreated) {
         onCreated(data.id)
         onClose()

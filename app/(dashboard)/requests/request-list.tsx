@@ -8,7 +8,7 @@ import Link from 'next/link'
 import {
   Plus, LayoutList, Columns3, BarChart3,
   AlertTriangle, ChevronDown, Inbox, RefreshCw,
-  Calendar, Zap, Download,
+  Zap, Download,
   CheckSquare, Square, Users, Loader2, X, Sparkles,
   Palette, Code2, FileText, Compass, Briefcase, Bug, Megaphone, Tag,
 } from 'lucide-react'
@@ -42,7 +42,7 @@ import { SubRequestRows } from '@/components/tahi/requests/sub-request-rows'
 import { REQUEST_STATUSES } from '@/lib/status-config'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
 import { subtaskRollup } from '@/components/tahi/kanban-board'
-import { dueDateState } from '@/components/tahi/due-date-chip'
+import { DueDateChip, dueDateState } from '@/components/tahi/due-date-chip'
 import {
   BoardView,
   type BoardItem,
@@ -149,18 +149,26 @@ const TRIAGE_BADGE = {
   },
 } as const
 
-// Default board columns mapped to the shared BoardView column shape. Used as a
-// fallback when no per-client custom kanban columns are configured. On Hold
-// earns a column of its own: without one, a held request is grouped under a
-// status no column claims and silently vanishes from the board.
-const BOARD_COLS: BoardViewColumn[] = [
-  { id: 'submitted',     label: 'Submitted',     statusValue: 'submitted',     color: 'var(--status-submitted-dot)', ...TRIAGE_BADGE },
-  { id: 'in_review',     label: 'In Review',     statusValue: 'in_review',     color: 'var(--status-in-review-dot)'     },
-  { id: 'in_progress',   label: 'In Progress',   statusValue: 'in_progress',   color: 'var(--status-in-progress-dot)'   },
-  { id: 'client_review', label: 'Client Review', statusValue: 'client_review', color: 'var(--status-client-review-dot)' },
-  { id: 'on_hold',       label: 'On Hold',       statusValue: 'on_hold',       color: 'var(--badge-warning-dot)'        },
-  { id: 'delivered',     label: 'Delivered',     statusValue: 'delivered',     color: 'var(--status-delivered-dot)'     },
+// Default board columns, used as a fallback when no per-client custom kanban
+// columns are configured. The statuses are named here because the board is a
+// pipeline rather than the whole vocabulary: cancelled and archived work is
+// finished and off it (the note under the board counts what that leaves out),
+// and draft has not been submitted yet. Labels and dots are read from
+// REQUEST_STATUS_CONFIG rather than restated, so a rename lands everywhere at
+// once. On Hold earns a column of its own: without one, a held request is
+// grouped under a status no column claims and silently vanishes.
+const BOARD_STATUSES: readonly string[] = [
+  'submitted', 'in_review', 'in_progress', 'client_review', 'on_hold', 'delivered',
 ]
+
+const BOARD_COLS: BoardViewColumn[] = BOARD_STATUSES.map(value => ({
+  id: value,
+  label: STATUS_CFG[value]?.label ?? value,
+  statusValue: value,
+  color: STATUS_CFG[value]?.dot ?? 'var(--color-border)',
+  // Everything landing in intake is waiting to be triaged.
+  ...(value === 'submitted' ? TRIAGE_BADGE : {}),
+}))
 
 // Statuses a brand new request may be created at. Mirrors CREATABLE_STATUSES
 // in app/api/admin/requests/route.ts, which cannot export it (a route module
@@ -282,9 +290,11 @@ function sortRequests(requests: Request[], sortKey: SortKey): Request[] {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-// Status values offered in the inline status-chip column + bulk actions. Maps
-// each to a Badge tone for the DataTable ChipCell options.
-const ALL_STATUSES = ['submitted', 'in_review', 'in_progress', 'client_review', 'on_hold', 'delivered', 'cancelled']
+// Status values offered in the inline status-chip column, derived from the one
+// ordered vocabulary so a status added there cannot miss this chip. Archived
+// is the exception: it is destructive, so it lives once in the bulk bar's
+// Danger section behind a confirm rather than one click away in a table cell.
+const EDITABLE_STATUSES = REQUEST_STATUSES.filter(s => s.value !== 'archived')
 
 // Read-only status badge for the client (non-admin) status column.
 function StatusBadgeCell({ status }: { status: string }) {
@@ -314,36 +324,25 @@ function PriorityBadge({ priority }: { priority: string | null }) {
   )
 }
 
-function DueDateChip({ dueDate, status }: { dueDate: string | null; status: string }) {
-  const state = getDueDateState(dueDate, status)
+/**
+ * The Due cell. The chip itself is the shared one, so the list, the kanban
+ * card and the timeline cannot disagree about the same date: the local copy
+ * parsed a stored value carrying a time component as an invalid date and
+ * printed "Invalid Date" where the card printed "15 Sep". The placeholder is
+ * the one thing the table needs that the chip does not draw, since an empty
+ * cell in a bordered row reads as a rendering fault rather than as no date.
+ */
+function DueDateCell({
+  dueDate,
+  status,
+  size = 'md',
+}: {
+  dueDate: string | null
+  status: string
+  size?: 'sm' | 'md'
+}) {
   if (!dueDate) return <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.75rem' }}>--</span>
-
-  const bgMap = {
-    overdue: 'var(--color-overdue-bg)',
-    'due-soon': 'var(--color-due-soon-bg)',
-    'on-track': 'transparent',
-  }
-  const colorMap = {
-    overdue: 'var(--color-overdue-text)',
-    'due-soon': 'var(--color-due-soon-text)',
-    'on-track': 'var(--color-text-muted)',
-  }
-
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded font-medium"
-      style={{
-        padding: state !== 'on-track' ? '0.125rem 0.375rem' : '0',
-        fontSize: '0.75rem',
-        background: state ? bgMap[state] : 'transparent',
-        color: state ? colorMap[state] : 'var(--color-text-muted)',
-      }}
-    >
-      {state === 'overdue' && <AlertTriangle style={{ width: '0.625rem', height: '0.625rem' }} />}
-      <Calendar style={{ width: '0.625rem', height: '0.625rem' }} />
-      {formatDate(dueDate)}
-    </span>
-  )
+  return <DueDateChip dueDate={dueDate} status={status} size={size} />
 }
 
 
@@ -472,7 +471,7 @@ function RequestMobileCard({
               {formatType(request.category)}
             </span>
           )}
-          <DueDateChip dueDate={request.dueDate} status={request.status} />
+          <DueDateCell dueDate={request.dueDate} status={request.status} size="sm" />
         </div>
 
         {expandable && (
@@ -536,6 +535,12 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   const isViewerImpersonation = isImpersonatingTeamMember &&
     impersonatedAccessRules.length > 0 &&
     impersonatedAccessRules.every(r => r.role === 'viewer')
+  // The studio audience with a real write. Every control that mutates a
+  // request hangs off this, not off `isAdmin`: the PATCH and POST calls behind
+  // them land as the real super admin, so a viewer's lens has to hold here
+  // too. Declared with the other audience flags because the bulk bar, the
+  // inline status chip and the board's drag handlers all need it.
+  const canWriteRequests = isAdmin && !isViewerImpersonation
   const searchParams = useSearchParams()
   const router = useRouter()
   // Persisted per-user preferences (Decision #047).
@@ -611,8 +616,18 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // Custom kanban columns (admin only) via SWR. The conditional key skips the
   // fetch entirely for clients. Mapped to the shared BoardView column shape;
   // falls back to BOARD_COLS when none are configured or the fetch fails.
+  //
+  // The route only returns a client's own columns when it is told which client
+  // (`?orgId=`), so narrowing the rail to one client has to be part of the
+  // key. Without it a per-client board configured in settings was unreachable
+  // from the one surface it was built for.
+  const kanbanColumnsKey = isAdmin
+    ? (railOn && rail.filters.client !== 'all'
+        ? `/api/admin/kanban-columns?orgId=${encodeURIComponent(rail.filters.client)}`
+        : '/api/admin/kanban-columns')
+    : null
   const { data: kanbanData } = useSWR<{ columns: Array<{ statusValue: string; colour: string | null; label: string; position: number }> }>(
-    isAdmin ? '/api/admin/kanban-columns' : null,
+    kanbanColumnsKey,
   )
   const boardColumns = useMemo<BoardViewColumn[]>(() => {
     const cols = kanbanData?.columns
@@ -674,9 +689,17 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // telling you how much work sits behind each view while you are inside one.
   // They are exact only below the fetch's 500-row ceiling: past that the tail
   // of the backlog is not in `requests` and every count quietly under-reports.
+  //
+  // Sub-requests are left out on purpose: they reach the screen inside their
+  // parent's expanded group rather than as rows of their own, so counting them
+  // here would promise rows the table does not draw.
+  const countableRequests = useMemo(
+    () => (railOn ? requests.filter(r => !r.parentRequestId) : requests),
+    [railOn, requests],
+  )
   const railCounts = useMemo(
-    () => countSavedViews(requests, audience, { assigneeId: impersonatedTeamMemberId }),
-    [requests, audience, impersonatedTeamMemberId],
+    () => countSavedViews(countableRequests, audience, { assigneeId: impersonatedTeamMemberId }),
+    [countableRequests, audience, impersonatedTeamMemberId],
   )
 
   const railRows = useMemo(
@@ -703,6 +726,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // fires the PATCH (the route has no PUT; the old PUT came back 405 and the
   // optimistic row quietly reverted), and revalidates on failure.
   const handleStatusChange = useCallback(async (requestId: string, newStatus: string) => {
+    if (!canWriteRequests) return
     const prev = requestsData
     const optimistic = prev
       ? { ...prev, requests: (prev.requests ?? []).map(r => r.id === requestId ? { ...r, status: newStatus } : r) }
@@ -718,11 +742,16 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     } catch {
       mutateRequests() // Revert on failure by revalidating from the server
     }
-  }, [requestsData, mutateRequests])
+  }, [requestsData, mutateRequests, canWriteRequests])
 
   // Clear selection when the visible set changes under it, so a bulk action
-  // can never reach a row the user has since filtered away.
-  useEffect(() => { setSelectedIds(new Set()) }, [activeTab, rail.savedView, rail.filters])
+  // can never reach a row the user has since filtered away. Both search boxes
+  // are in here: typing a client name narrows the table exactly the way a
+  // filter chip does, and leaving the search out left ten rows selected over
+  // a one-row table, with Archive reaching the nine nobody could see.
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [activeTab, rail.savedView, rail.filters, rail.query, search])
 
   const filtered = requests.filter(r => {
     // Text search
@@ -759,13 +788,25 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // view + filters + search + sort pipeline; otherwise it is the legacy list.
   const visible = railOn ? railRows : sorted
 
+  // What the table actually lists. A sub-request already appears as a <tr>
+  // inside its parent's expanded group, so leaving it in the top-level set
+  // printed it twice, counted it twice and let it be ticked twice. The board
+  // has always drawn only parents for the same reason; the workload and the
+  // timeline keep the whole set, because a child is still work someone is
+  // carrying.
+  const tableRows = useMemo(
+    () => (railOn ? visible.filter(r => !r.parentRequestId) : visible),
+    [railOn, visible],
+  )
+  const visibleIds = useMemo(() => new Set(tableRows.map(r => r.id)), [tableRows])
+
   // ── Expandable sub-request rows (rail path) ───────────────────────────────
   // Prune open panels down to the rows still on screen whenever a filter,
   // saved view, search or sort changes the set under the table.
   useEffect(() => {
-    const ids = visible.map(r => r.id)
+    const ids = tableRows.map(r => r.id)
     setExpandedIds(prev => pruneExpandedIds(prev, ids))
-  }, [visible])
+  }, [tableRows])
 
   // Clients read sub-requests through the org-scoped portal route and never
   // get the add affordance; the team reads the admin route and does.
@@ -913,7 +954,15 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // One primary action plus an Edit menu of Status / Assign / Danger
   // sections, all routed through the shared BulkActionBar so every result
   // raises a toast and Archive goes through the shared confirm dialog.
-  const bulkBarOpen = railOn && isAdmin && selectedIds.size > 0
+  // Selection clamped to what the table is drawing right now. The reset
+  // effect above already empties it when the filters move, but this is the
+  // guarantee: whatever the bar says it is about to do, it does to rows the
+  // user can see and nothing else.
+  const selectedVisibleIds = useMemo(
+    () => Array.from(selectedIds).filter(id => visibleIds.has(id)),
+    [selectedIds, visibleIds],
+  )
+  const bulkBarOpen = railOn && canWriteRequests && selectedVisibleIds.length > 0
   // The team list only loads once a selection exists; the conditional key
   // skips the fetch entirely until the bar is on screen.
   const { data: bulkTeamData } = useSWR<{ items: Array<{ id: string; name: string }> }>(
@@ -921,7 +970,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   )
 
   const runBulkStatus = useCallback(async (status: string): Promise<BulkActionResult> => {
-    const ids = Array.from(selectedIds)
+    const ids = selectedVisibleIds
     const res = await fetch(apiPath('/api/admin/requests/bulk'), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -931,13 +980,13 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     const json = await res.json() as { updated?: number }
     const ok = json.updated ?? ids.length
     return { ok, failed: Math.max(0, ids.length - ok) }
-  }, [selectedIds])
+  }, [selectedVisibleIds])
 
   const runBulkAssign = useCallback(async (
     memberId: string,
     role: 'pm' | 'assignee' | 'follower',
   ): Promise<BulkActionResult> => {
-    const ids = Array.from(selectedIds)
+    const ids = selectedVisibleIds
     const res = await fetch(apiPath('/api/admin/requests/bulk-assign'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -948,10 +997,10 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     })
     if (!res.ok) throw new Error('Bulk assign failed')
     return { ok: ids.length }
-  }, [selectedIds])
+  }, [selectedVisibleIds])
 
   const bulkActions = useMemo<BulkAction[]>(() => {
-    const count = selectedIds.size
+    const count = selectedVisibleIds.length
     const noun = count === 1 ? 'request' : 'requests'
     const list: BulkAction[] = []
 
@@ -1006,7 +1055,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     })
 
     return list
-  }, [selectedIds, bulkTeamData, runBulkStatus, runBulkAssign])
+  }, [selectedVisibleIds, bulkTeamData, runBulkStatus, runBulkAssign])
 
   const bulkPrimaryAction = useMemo<BulkAction>(() => ({
     id: 'deliver',
@@ -1152,7 +1201,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // Board move: status change, and un-nest-on-column-drop (moving a nested child
   // onto a column clears its parent, matching the legacy board).
   const handleBoardMove = useCallback(async (itemId: string, toStatus: string) => {
-    if (!isAdmin) return
+    if (!canWriteRequests) return
     const src = requestById.get(itemId)
     if (!src) return
     const fromStatus = src.status
@@ -1197,12 +1246,12 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       mutateRequests(prev, { revalidate: false }) // Revert the optimistic paint
       showToast('Could not move request', 'error')
     }
-  }, [isAdmin, requestById, requestsData, mutateRequests, showToast])
+  }, [canWriteRequests, requestById, requestsData, mutateRequests, showToast])
 
   // Board nest: dropping card A onto card B nests A under B. Cross-client drops
   // are refused before the confirm dialog opens (same guard the backend enforces).
   const handleBoardNest = useCallback((childId: string, parentId: string) => {
-    if (!isAdmin || childId === parentId) return
+    if (!canWriteRequests || childId === parentId) return
     const source = requestById.get(childId)
     const target = requestById.get(parentId)
     if (!source || !target) return
@@ -1214,7 +1263,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       targetId: parentId,
       targetTitle: target.title,
     })
-  }, [isAdmin, requestById])
+  }, [canWriteRequests, requestById])
 
   const confirmNest = useCallback(async () => {
     if (!nestPrompt) return
@@ -1321,16 +1370,16 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       sortable: true,
       sortValue: r => r.status,
       width: '11rem',
-      // Admin gets an editable chip wired to the optimistic status PUT; clients
-      // see a read-only status badge.
-      ...(isAdmin
+      // A studio audience with a write gets the editable chip wired to the
+      // optimistic status PATCH; clients and a viewer's lens see the badge.
+      ...(canWriteRequests
         ? {
             edit: {
               value: (r: Request) => r.status,
-              options: ALL_STATUSES.map(s => ({
-                value: s,
-                label: STATUS_CFG[s]?.label ?? s,
-                tone: statusTone(s),
+              options: EDITABLE_STATUSES.map(s => ({
+                value: s.value,
+                label: s.label,
+                tone: s.tone,
               })),
               onChange: handleRowStatusChange,
             },
@@ -1355,7 +1404,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       sortable: true,
       sortValue: r => r.dueDate ?? '',
       width: '7rem',
-      render: r => <DueDateChip dueDate={r.dueDate} status={r.status} />,
+      render: r => <DueDateCell dueDate={r.dueDate} status={r.status} />,
     })
 
     cols.push({
@@ -1375,7 +1424,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     })
 
     return cols
-  }, [isAdmin, handleRowStatusChange])
+  }, [isAdmin, canWriteRequests, handleRowStatusChange])
 
   // -- Shared handlers -------------------------------------------------------
   const exportRequestsCsv = useCallback(() => {
@@ -1388,6 +1437,14 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   const handleSaveDefault = useCallback(() => {
     rail.saveDefault()
     showToast('Saved as your default view', 'success')
+  }, [rail, showToast])
+
+  // The way back to it. The snapshot is applied on a fresh browser too (see
+  // applyStoredRequestDefault), so saving one is now a real default rather
+  // than a label the control read back to itself.
+  const handleResetDefault = useCallback(() => {
+    rail.resetToDefault()
+    showToast('Back to your default view', 'success')
   }, [rail, showToast])
 
   // Clear all: every filter, the saved view and both sorts, so the sheet's
@@ -1429,7 +1486,6 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // `?client=` param is deliberately not one of them: it retargets the write
   // without narrowing the board, so the composer would silently file a card
   // under a client whose name is nowhere on screen.
-  const canWriteRequests = isAdmin && !isViewerImpersonation
   const soleVisibleOrgId = useMemo(() => {
     let only: string | null = null
     for (const r of visible) {
@@ -1556,8 +1612,8 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         columns={boardColumns}
         items={boardItems}
         searchPlaceholder="Search requests"
-        onMove={isAdmin ? handleBoardMove : undefined}
-        onNest={isAdmin ? handleBoardNest : undefined}
+        onMove={canWriteRequests ? handleBoardMove : undefined}
+        onNest={canWriteRequests ? handleBoardNest : undefined}
         // Quick-add only when the board knows the client to write against.
         // There is no dialog fallback on the column plus: the dialog always
         // creates at intake, so a plus in In Progress would name a column it
@@ -1569,7 +1625,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         quickAddHint={quickAddOrgName ? `Adds to ${quickAddOrgName}` : undefined}
         onTagClick={railOn ? handleBoardTagClick : undefined}
         onItemClick={(item) => { router.push(`/requests/${item.id}`) }}
-        readOnly={!isAdmin}
+        readOnly={!canWriteRequests}
         iconOnlyPriority
         subtaskUrl={(item) => isAdmin
           ? `/api/admin/requests/${item.id}/sub-requests`
@@ -1594,12 +1650,12 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       <DataTable<Request>
         ariaLabel="Requests"
         columns={columns}
-        rows={visible}
+        rows={tableRows}
         getRowId={r => r.id}
         loading={loading}
-        selectable={isAdmin}
-        selectedIds={isAdmin ? selectedIds : undefined}
-        onSelectionChange={isAdmin ? handleSelectionChange : undefined}
+        selectable={canWriteRequests}
+        selectedIds={canWriteRequests ? selectedIds : undefined}
+        onSelectionChange={canWriteRequests ? handleSelectionChange : undefined}
         onRowClick={(r) => { router.push(`/requests/${r.id}`) }}
         // Controlled so Clear all can reach the order the user can see.
         sort={tableSort}
@@ -1654,9 +1710,12 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
           isAdmin={isAdmin}
           parentRequestId={subRequestParent.id}
           forceOrgId={subRequestParent.orgId ?? undefined}
+          // A refresh signal only. The dialog closes itself on the normal
+          // path and stays open on "Save + another", where this now fires
+          // per sub-request so the expanded panel and the parent's count
+          // keep up with what has been created.
           onCreated={() => {
             mutateKey(`/api/admin/requests/${subRequestParent.id}/sub-requests`)
-            setSubRequestParent(null)
             mutateRequests()
           }}
         />
@@ -1804,14 +1863,14 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
             the legacy toolbar keeps the bar it has today, unchanged. */}
         {bulkBarOpen ? (
           <SharedBulkActionBar
-            selectedCount={selectedIds.size}
+            selectedCount={selectedVisibleIds.length}
             itemNoun="request"
             primaryAction={bulkPrimaryAction}
             actions={bulkActions}
             onClear={() => setSelectedIds(new Set())}
             onResult={() => { setSelectedIds(new Set()); mutateRequests() }}
           />
-        ) : (!railOn && isAdmin && selectedIds.size > 0) && (
+        ) : (!railOn && canWriteRequests && selectedIds.size > 0) && (
           <Card padding="none" style={{ overflow: 'visible' }}>
             <BulkActionBar
               selectedCount={selectedIds.size}
@@ -1845,10 +1904,16 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
             chips={railChips}
             onClearChip={chip => rail.setFilters({ ...rail.filters, [chip.key]: DEFAULT_REQUEST_FILTERS[chip.key] })}
             onClearAll={clearAllFilters}
+            // Only offered once there is a saved default to go back to and the
+            // view has actually wandered off it.
+            onResetDefault={rail.hasDefault && !rail.isDefault ? handleResetDefault : undefined}
             query={rail.query}
             onQueryChange={rail.setQuery}
             searchPlaceholder={isAdmin ? 'Search requests or clients' : 'Search requests'}
-            total={visible.length}
+            // The count says how many rows the body is drawing, which on the
+            // list is parents only; children arrive inside their parent's
+            // group. The board and the timeline draw the same set.
+            total={effectiveView === 'workload' ? visible.length : tableRows.length}
             loading={loading}
           >
             {showCapacityStrip && (
@@ -1883,7 +1948,11 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       {bulkCreateOpen && (
         <BulkCreateDialog
           onClose={() => setBulkCreateOpen(false)}
-          onCreated={() => { setBulkCreateOpen(false); mutateRequests() }}
+          onCreated={(created) => {
+            setBulkCreateOpen(false)
+            mutateRequests()
+            showToast(`Created ${created} ${created === 1 ? 'request' : 'requests'}`, 'success')
+          }}
         />
       )}
     </>
@@ -2518,7 +2587,8 @@ function BulkCreateDialog({
   onCreated,
 }: {
   onClose: () => void
-  onCreated: () => void
+  /** How many rows the route actually wrote, so the page can say so. */
+  onCreated: (created: number) => void
 }) {
   const { data: clientsData, isLoading: orgsLoading } = useSWR<{ clients: OrgOption[] }>('/api/admin/clients')
   const orgs = clientsData?.clients ?? []
@@ -2578,8 +2648,10 @@ function BulkCreateDialog({
         throw new Error(err.error ?? 'Failed to create')
       }
       const result = await res.json() as { created: number }
-      onCreated()
-      setErrorMsg(`Created ${result.created} requests`)
+      // The count travels up: onCreated unmounts this dialog, so anything set
+      // on this component after it lands on nothing and the user was left with
+      // no confirmation at all beyond the list refreshing under them.
+      onCreated(result.created)
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to create')
     } finally {
