@@ -1445,6 +1445,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                         </span>
                       </div>
                       <textarea
+                        className="tahi-focus-ring"
                         value={replyDraft}
                         onChange={e => setReplyDraft(e.target.value)}
                         rows={7}
@@ -1460,7 +1461,6 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                           fontFamily: 'inherit',
                           lineHeight: 1.6,
                           resize: 'vertical',
-                          outline: 'none',
                           boxSizing: 'border-box',
                         }}
                       />
