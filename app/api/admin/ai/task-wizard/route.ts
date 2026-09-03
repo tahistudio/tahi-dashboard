@@ -1,5 +1,6 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
+import { HAIKU_MODEL } from '@/lib/ai-models'
 
 export const dynamic = 'force-dynamic'
 
@@ -142,7 +143,7 @@ async function callClaudeHaiku(
     : systemPrompt
 
   const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+    model: HAIKU_MODEL,
     max_tokens: 1024,
     system: fullSystem,
     messages,

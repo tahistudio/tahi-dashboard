@@ -13,6 +13,7 @@
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
+import { HAIKU_MODEL } from '@/lib/ai-models'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,7 +53,28 @@ interface WizardResponse {
   reply: string
   requests?: RequestDraft[]
   done: boolean
+  /** True when the answer came from the keyword fallback, not the model. */
+  degraded?: true
+  reason?: 'ai_unavailable'
 }
+
+// ── Failure payloads ──────────────────────────────────────────────────────────
+// A model that was never reached used to come back as a 200 carrying a draft
+// built by regex from the user's own words, indistinguishable from a real one.
+// These three shapes keep the difference visible: the panel renders `error` and
+// paints a degraded answer as a notice rather than an assistant bubble.
+
+const DEGRADED = { degraded: true, reason: 'ai_unavailable' } as const
+
+const AI_UNAVAILABLE = {
+  error: 'The AI assistant could not be reached. Try again shortly, or write the request yourself.',
+  reason: 'ai_unavailable',
+} as const
+
+const AI_RATE_LIMITED = {
+  error: 'The AI assistant is busy right now. Wait a moment and send that again.',
+  reason: 'ai_rate_limited',
+} as const
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -154,7 +176,7 @@ async function callClaudeHaiku(
     : systemPrompt
 
   const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+    model: HAIKU_MODEL,
     max_tokens: 1024,
     system: fullSystem,
     messages,
@@ -362,9 +384,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Deterministic fallback when API key is absent.
+  // No key configured. In production that is a broken deploy, and a 200 that
+  // answers forever from a regex hides it from the logs and from monitoring, so
+  // it fails loudly there. Local dev keeps the keyword draft, flagged degraded
+  // and labelled on screen, so the wizard is still workable without a key.
   if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json(handleDeterministic(messages))
+    if (process.env.NODE_ENV === 'production') {
+      return NextResponse.json(AI_UNAVAILABLE, { status: 503 })
+    }
+    return NextResponse.json({ ...handleDeterministic(messages), ...DEGRADED })
   }
 
   const contextParts: string[] = []
@@ -376,7 +404,9 @@ export async function POST(req: NextRequest) {
   try {
     const anthropicMessages: AnthropicMessage[] = messages.map(m => ({ role: m.role, content: m.content }))
     const responseText = await callClaudeHaiku(anthropicMessages, SYSTEM_PROMPT, contextNote)
-    if (!responseText) return NextResponse.json(handleDeterministic(messages))
+    // Empty text is a failed call, not an answer. Say so rather than filing a
+    // keyword draft under the model's name.
+    if (!responseText) return NextResponse.json(AI_UNAVAILABLE, { status: 502 })
     const { reply, requests } = parseRequestsFromResponse(responseText)
     const response: WizardResponse = {
       reply: reply || 'Could you tell me a bit more about what you need?',
@@ -388,9 +418,9 @@ export async function POST(req: NextRequest) {
     console.error('Claude Haiku API error:', err)
     if (err instanceof Error && 'status' in err) {
       const statusErr = err as Error & { status: number }
-      if (statusErr.status === 429) return NextResponse.json(handleDeterministic(messages))
+      if (statusErr.status === 429) return NextResponse.json(AI_RATE_LIMITED, { status: 429 })
     }
-    return NextResponse.json(handleDeterministic(messages))
+    return NextResponse.json(AI_UNAVAILABLE, { status: 502 })
   }
 }
 

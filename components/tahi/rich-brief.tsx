@@ -70,36 +70,13 @@ export function normaliseBriefHtml(html: string): string {
 }
 
 /**
- * Plain prose turned into the HTML the brief stores. The AI wizard route
- * documents its `description` as plain text and leaves the conversion to the
- * caller, and Tiptap's setContent parses whatever it is handed as HTML: without
- * this, a two-paragraph draft collapses into one run-on line and a stray "<"
- * is swallowed as markup. Blank lines split paragraphs, single newlines become
- * <br>, and the four HTML-significant characters are escaped.
+ * The brief's two plain-text rules now live in lib/brief-html.ts, a leaf module
+ * with no Tiptap import, so a caller that needs only the string conversion (the
+ * AI request wizard, which is deliberately code-split) does not pull the editor
+ * bundle along with it. Re-exported here because this stayed the obvious place
+ * to look for them.
  */
-export function plainTextToBriefHtml(text?: string | null): string {
-  if (!text) return ''
-  const escaped = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-  const blocks = escaped
-    .replace(/\r\n?/g, '\n')
-    .split(/\n{2,}/)
-    .map(block => block.trim())
-    .filter(Boolean)
-  if (blocks.length === 0) return ''
-  return blocks.map(block => `<p>${block.split('\n').join('<br>')}</p>`).join('')
-}
-
-/**
- * True when a value already looks like the HTML the editor emits, so an AI
- * draft is only converted when it really is plain text.
- */
-export function looksLikeBriefHtml(value?: string | null): boolean {
-  return !!value && /<(p|ul|ol|li|br|strong|em|a)\b[^>]*>/i.test(value)
-}
+export { plainTextToBriefHtml, looksLikeBriefHtml } from '@/lib/brief-html'
 
 // ── Styles ─────────────────────────────────────────────────────────────────────
 

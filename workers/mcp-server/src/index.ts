@@ -7,6 +7,8 @@
  * Full feature parity with the stdio MCP server (mcp-server/index.ts).
  */
 
+import { requestToolCall } from './request-tools'
+
 interface Env {
   TAHI_API_TOKEN: string
   OAUTH_CLIENT_ID: string
@@ -284,12 +286,15 @@ const TOOLS: ToolDef[] = [
     priority: prop('string', 'Priority: standard or high'),
     type: prop('string', 'Type: small_task, large_task, bug_fix, content_update, new_feature, consultation, custom'),
     description: prop('string', 'Description of the request'),
+    startDate: prop('string', 'Start date in YYYY-MM-DD format'),
     dueDate: prop('string', 'Due date in YYYY-MM-DD format'),
+    estimatedHours: prop('number', 'Estimated hours for the work'),
+    isInternal: prop('boolean', 'True files the request Tahi-internal, hidden from the client portal. Defaults to false (client-visible).'),
     status: prop('string', 'Optional starting status. One of: submitted (default), in_review, in_progress, client_review, on_hold, archived. Delivered and cancelled are not creatable; move the request there with update_request_status.'),
   }, ['title', 'clientOrgId']),
   tool('update_request_status', 'Update the status of a request', {
     requestId: prop('string', 'Request ID'),
-    status: prop('string', 'New status: draft, submitted, in_review, in_progress, client_review, delivered, archived'),
+    status: prop('string', 'New status: draft, submitted, in_review, in_progress, client_review, on_hold, delivered, cancelled, archived'),
   }, ['requestId', 'status']),
   tool('assign_request', 'Assign a team member to a request', {
     requestId: prop('string', 'Request ID'),
@@ -301,12 +306,15 @@ const TOOLS: ToolDef[] = [
   tool('duplicate_request', 'Duplicate a request. Copies title, description, category, type, priority, client org and estimated hours into a brand new top-level request at status "submitted" (no thread, files, participants or due date). Returns the new request id.', {
     requestId: prop('string', 'Request ID to duplicate'),
   }, ['requestId']),
-  tool('update_request_fields', 'Update the editable fields on a request detail rail: category, priority, due date, estimated hours and internal visibility. Send only the fields you want to change. Use update_request_status for status and assign_request for the assignee.', {
+  tool('update_request_fields', 'Update the editable fields on a request detail rail: category, priority, start and due dates, estimated hours, capacity track, checklists and internal visibility. Send only the fields you want to change. Use update_request_status for status and assign_request for the assignee.', {
     requestId: prop('string', 'Request ID'),
     category: prop('string', 'Category: design, development, content, strategy, admin, bug'),
     priority: prop('string', 'Priority: standard or high'),
+    startDate: prop('string', 'Start date in YYYY-MM-DD format, or empty string to clear'),
     dueDate: prop('string', 'Due date in YYYY-MM-DD format, or empty string to clear'),
     estimatedHours: prop('number', 'Estimated hours, or 0 to clear'),
+    trackId: prop('string', 'Capacity track ID this request occupies, or empty string to unlink'),
+    checklists: prop('string', 'Checklists as a JSON string, the same shape the detail rail PATCHes'),
     isInternal: prop('boolean', 'True hides the request from the client portal entirely, false makes it visible to the client again'),
   }, ['requestId']),
   tool('post_request_message', 'Post a message on a request thread', {
@@ -314,6 +322,84 @@ const TOOLS: ToolDef[] = [
     content: prop('string', 'Message content'),
     isInternal: prop('boolean', 'Whether the message is internal (team only)'),
   }, ['requestId', 'content']),
+  // Bulk request tools (bulk_update_request_status, bulk_create_requests) are
+  // deliberately absent. Their only backend is PATCH|POST
+  // /api/admin/requests/bulk, which gates on isTahiAdmin alone: it loops over
+  // whatever ids it is handed with no per-row requireAccessToOrg, and writes
+  // `status` verbatim against no vocabulary. Exposing that over a service token
+  // that already bypasses access scoping would let one call scatter an
+  // unrecognised status across arbitrary rows and return {updated: N} as if it
+  // worked. They land in the same change as the route's scoping and status
+  // validation, not before it.
+
+  // ── Request workflow steps ────────────────────────────────────────────
+  tool('create_request_step', 'Add a workflow step to a request. Steps are visible to the client on their request detail.', {
+    requestId: prop('string', 'Request ID'),
+    title: prop('string', 'Step title'),
+    description: prop('string', 'Optional step description'),
+    parentStepId: prop('string', 'Parent step ID when nesting under an existing step'),
+    orderIndex: prop('number', 'Position within its level (default 0)'),
+  }, ['requestId', 'title']),
+  tool('update_request_step', 'Update one workflow step: title, description, completion, order, parent or assignee. Send only what changes.', {
+    requestId: prop('string', 'Request ID the step belongs to'),
+    stepId: prop('string', 'Step ID'),
+    title: prop('string', 'New step title'),
+    description: prop('string', 'New step description'),
+    completed: prop('boolean', 'True marks the step done and stamps completedAt, false reopens it'),
+    orderIndex: prop('number', 'New position within its level'),
+    parentStepId: prop('string', 'New parent step ID, or empty string to lift it to the top level'),
+    assigneeId: prop('string', 'Team member ID to own the step, or empty string to clear'),
+  }, ['requestId', 'stepId']),
+  tool('delete_request_step', 'Delete a workflow step and every step nested under it. DESTRUCTIVE: confirm with the user before calling.', {
+    requestId: prop('string', 'Request ID the step belongs to'),
+    stepId: prop('string', 'Step ID'),
+  }, ['requestId', 'stepId']),
+
+  // ── Request time and files ────────────────────────────────────────────
+  tool('list_request_time_entries', 'List the time logged against one request, with who logged it', {
+    requestId: prop('string', 'Request ID'),
+  }, ['requestId']),
+  tool('log_request_time', 'Log time against a request. Defaults the team member to the calling identity when none is given.', {
+    requestId: prop('string', 'Request ID'),
+    hours: prop('number', 'Hours worked, must be greater than 0'),
+    description: prop('string', 'What the time was spent on'),
+    billable: prop('boolean', 'Whether the entry is billable (default true)'),
+    teamMemberId: prop('string', 'Team member ID the entry belongs to'),
+  }, ['requestId', 'hours']),
+  tool('list_request_files', 'List the files attached to one request, with uploader and size', {
+    requestId: prop('string', 'Request ID'),
+  }, ['requestId']),
+
+  // ── Kanban columns ────────────────────────────────────────────────────
+  tool('list_kanban_columns', 'List the request board columns. Pass orgId for one client\'s board; it falls back to the global set with inherited:true when that client has none of its own.', {
+    orgId: prop('string', 'Client organisation ID for a per-client board'),
+  }),
+  tool('create_kanban_column', 'Create a board column, clone the global board for one client, or seed the default global board. Exactly one mode per call.', {
+    label: prop('string', 'Column label, e.g. "In Review". Required unless cloning or seeding.'),
+    statusValue: prop('string', 'The requests.status value this column holds. Defaults to a slug of the label.'),
+    colour: prop('string', 'Hex colour for the column marker'),
+    position: prop('number', 'Display order, lowest first'),
+    orgId: prop('string', 'Client organisation ID for a per-client column, omit for the global board'),
+    cloneFromGlobal: prop('boolean', 'True with orgId copies the global board to that client (no-op when they already have columns)'),
+    seedDefaults: prop('boolean', 'True installs the default global board when no global columns exist'),
+  }),
+  tool('update_kanban_column', 'Update one board column: label, colour, position or status value', {
+    columnId: prop('string', 'Kanban column ID'),
+    label: prop('string', 'New label'),
+    colour: prop('string', 'New hex colour'),
+    position: prop('number', 'New display order'),
+    statusValue: prop('string', 'New requests.status value this column holds'),
+  }, ['columnId']),
+  tool('delete_kanban_column', 'Delete a board column. Refuses with 409 while requests still sit in it. DESTRUCTIVE: confirm with the user before calling.', {
+    columnId: prop('string', 'Kanban column ID'),
+  }, ['columnId']),
+  // End of the request surface. It covers /api/admin/requests in full; the
+  // three client-side capabilities (portal create with placement, portal review
+  // approve / request changes, portal capacity read) have no tool and cannot
+  // get one from here. This server authenticates with the service token, which
+  // lib/server-auth.ts resolves to the Tahi admin org, and every /api/portal
+  // route 403s that org. They are unreachable, not merely unwritten, until a
+  // portal impersonation token exists.
 
   // ── Read: Tasks ───────────────────────────────────────────────────────
   tool('list_tasks', 'List tasks with optional filters. Decision #046: tasks are always Tahi-internal. Filter by orgId for client-specific tasks; omit both orgId and type for everything.', {
@@ -1239,6 +1325,12 @@ const TOOLS: ToolDef[] = [
     messages: { type: 'array', items: { type: 'object', properties: { role: { type: 'string' }, content: { type: 'string' } } }, description: 'Conversation history (pass full array each call)' },
     context: { type: 'object', properties: { orgId: { type: 'string' }, speaker: { type: 'string' }, planType: { type: 'string' } }, description: 'Optional context: orgId the request is for, speaker ("client" or "admin"), planType' },
   }, ['messages']),
+  tool('ai_triage_request', 'Suggest how to route one request: assignee, priority, track and a one-line reason. Returns suggestions only and never mutates the request; apply them with assign_request and update_request_fields.', {
+    requestId: prop('string', 'Request ID to triage'),
+  }, ['requestId']),
+  tool('ai_draft_request_reply', 'Draft a reply for a request thread, grounded in the request, the client and the recent thread. Returns draft text only and posts nothing; post it with post_request_message once a human has read it.', {
+    requestId: prop('string', 'Request ID to draft a reply for'),
+  }, ['requestId']),
 
   // ── Finance reporting (Phase 10) ──────────────────────────────────
   tool('get_invoice_aging', 'Outstanding invoices grouped by aging bucket (current/30/60/90+ days), in NZD'),
@@ -1502,6 +1594,17 @@ async function executeTool(
   const json = (data: unknown) => JSON.stringify(data, null, 2)
   const s = (key: string) => args[key] ? String(args[key]) : undefined
 
+  // The request surface is a pure lookup, so it answers first and the switch
+  // below never sees those names.
+  const requestCall = requestToolCall(name, args)
+  if (requestCall) {
+    return json(
+      requestCall.method === 'GET'
+        ? await apiGet(requestCall.path, token, requestCall.query)
+        : await apiWrite(requestCall.path, token, requestCall.method, requestCall.body),
+    )
+  }
+
   switch (name) {
     // ── Overview & Reports ────────────────────────────────────────────
     case 'get_overview':
@@ -1544,51 +1647,9 @@ async function executeTool(
       return json(await apiWrite(`/api/admin/clients/${s('clientId')}/welcome-email`, token, 'POST'))
 
     // ── Requests ──────────────────────────────────────────────────────
-    case 'list_requests': {
-      const p: Record<string, string> = {}
-      if (s('status')) p.status = s('status')!
-      if (s('clientId')) p.orgId = s('clientId')!
-      if (s('limit')) p.limit = s('limit')!
-      if (s('page')) p.page = s('page')!
-      return json(await apiGet('/api/admin/requests', token, p))
-    }
-    case 'get_request':
-      return json(await apiGet(`/api/admin/requests/${s('requestId')}`, token))
-    case 'get_request_messages':
-      return json(await apiGet(`/api/admin/requests/${s('requestId')}/messages`, token))
-    case 'get_request_steps':
-      return json(await apiGet(`/api/admin/requests/${s('requestId')}/steps`, token))
-    case 'create_request':
-      return json(await apiWrite('/api/admin/requests', token, 'POST', args as Record<string, unknown>))
-    case 'update_request_status':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'PATCH', { status: s('status') }))
-    case 'assign_request':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'PATCH', { assigneeId: s('assigneeId') }))
-    case 'link_request_to_schedule_row':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'PATCH', {
-        scheduleRowId: typeof args.scheduleRowId === 'string' && args.scheduleRowId ? args.scheduleRowId : null,
-      }))
-    case 'delete_request':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'DELETE'))
-    case 'duplicate_request':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/duplicate`, token, 'POST'))
-    case 'update_request_fields': {
-      const patch: Record<string, unknown> = {}
-      if (s('category')) patch.category = s('category')
-      if (s('priority')) patch.priority = s('priority')
-      // '' clears the due date (the tool schema cannot express null).
-      if (typeof args.dueDate === 'string') patch.dueDate = args.dueDate || null
-      // 0 clears the estimate for the same reason.
-      if (typeof args.estimatedHours === 'number') patch.estimatedHours = args.estimatedHours || null
-      // Client visibility: true removes the request from the client portal.
-      if (typeof args.isInternal === 'boolean') patch.isInternal = args.isInternal
-      if (Object.keys(patch).length === 0) throw new Error('Pass at least one field to update')
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'PATCH', patch))
-    }
-    case 'post_request_message':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/messages`, token, 'POST', {
-        content: s('content'), isInternal: args.isInternal ?? false,
-      }))
+    // The whole request surface lives in ./request-tools as a pure map from
+    // tool call to API call, so the field names on the wire are covered by a
+    // spec the root vitest run picks up (vitest excludes workers/**).
 
     // ── Tasks ─────────────────────────────────────────────────────────
     case 'list_tasks': {
