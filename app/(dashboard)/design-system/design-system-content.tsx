@@ -26,8 +26,9 @@ import { useToast } from '@/components/tahi/toast'
 import { BarChart, LineChart, Sparkline, Gauge, DonutChart, GanttChart, FunnelChart, MultiBarChart, Heatmap, CalendarHeatmap } from '@/components/tahi/chart'
 import { DataTable } from '@/components/tahi/data-table'
 import { statusTone } from '@/components/tahi/badge'
-import { Trash2, ExternalLink, Copy, Pencil, Reply } from 'lucide-react'
+import { Trash2, ExternalLink, Copy, Pencil, Reply, Rows, LayoutGrid, BarChart3, CalendarRange } from 'lucide-react'
 import { FilterBar, type ActiveFilter, type FilterDef } from '@/components/tahi/filter-bar'
+import { SegmentedControl, type SegmentedControlOption } from '@/components/tahi/segmented-control'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { Stepper } from '@/components/tahi/stepper'
 import { ProgressBar } from '@/components/tahi/progress-bar'
@@ -966,6 +967,7 @@ function BrandSection() {
 
 const COMPONENTS_NAV = [
   { id: 'comp-button',       label: 'Button',       ready: true },
+  { id: 'comp-segmented',    label: 'Segmented',    ready: true },
   { id: 'comp-avatar',       label: 'Avatar',       ready: true },
   { id: 'comp-badge',        label: 'Badge',        ready: true },
   { id: 'comp-card',         label: 'Card',         ready: true },
@@ -1163,6 +1165,69 @@ function ButtonShowcase() {
             <TahiButton variant="secondary" loading>Importing</TahiButton>
             <TahiButton variant="primary" disabled>Disabled</TahiButton>
             <TahiButton variant="secondary" disabled>Disabled</TahiButton>
+          </StateRow>
+        </div>
+      </Card>
+    </PrimitiveShell>
+  )
+}
+
+type SegDemoView = 'list' | 'kanban' | 'workload' | 'timeline'
+type SegDemoSize = 'small' | 'large'
+type SegDemoScope = 'all' | 'comments'
+
+const SEG_VIEW_OPTIONS: SegmentedControlOption<SegDemoView>[] = [
+  { value: 'list',     label: 'List',     icon: <Rows size={14} aria-hidden="true" /> },
+  { value: 'kanban',   label: 'Kanban',   icon: <LayoutGrid size={14} aria-hidden="true" /> },
+  { value: 'workload', label: 'Workload', icon: <BarChart3 size={14} aria-hidden="true" /> },
+  { value: 'timeline', label: 'Timeline', icon: <CalendarRange size={14} aria-hidden="true" /> },
+]
+const SEG_SIZE_OPTIONS: SegmentedControlOption<SegDemoSize>[] = [
+  { value: 'small', label: 'Small' },
+  { value: 'large', label: 'Large' },
+]
+const SEG_PLAN_OPTIONS: SegmentedControlOption<SegDemoSize>[] = [
+  { value: 'small', label: 'Small' },
+  { value: 'large', label: 'Large', disabled: true, title: 'This plan has no large track' },
+]
+const SEG_SCOPE_OPTIONS: SegmentedControlOption<SegDemoScope>[] = [
+  { value: 'all',      label: 'All' },
+  { value: 'comments', label: 'Comments' },
+]
+
+function SegmentedControlShowcase() {
+  const [view, setView] = useState<SegDemoView>('list')
+  const [size, setSize] = useState<SegDemoSize>('small')
+  const [plan, setPlan] = useState<SegDemoSize>('small')
+  const [scope, setScope] = useState<SegDemoScope>('all')
+  return (
+    <PrimitiveShell
+      id="comp-segmented"
+      title="Segmented control"
+      source="components/tahi/segmented-control.tsx"
+      intro="One sliding pill for every single-choice strip: tablist for view switchers, radiogroup for form choices, group for filters. The pill measures the active option, so icon-only breakpoints and fill columns need no extra wiring. Buttons grow to 2.75rem below md; arrows, Home and End move the selection in tablist and radiogroup."
+    >
+      <Card padded={false}>
+        <div style={{ padding: '0 1.5rem' }}>
+          <StateRow label="Tablist · icons">
+            <SegmentedControl role="tablist" ariaLabel="Requests view" value={view} onChange={setView} options={SEG_VIEW_OPTIONS} />
+          </StateRow>
+          <StateRow label="Icon only below lg">
+            <SegmentedControl role="tablist" ariaLabel="Requests view, compact" value={view} onChange={setView} options={SEG_VIEW_OPTIONS} size="sm" iconOnlyBelow="lg" />
+          </StateRow>
+          <StateRow label="Radiogroup · fill">
+            <div style={{ width: '100%', maxWidth: '20rem' }}>
+              <SegmentedControl role="radiogroup" ariaLabel="Request size" value={size} onChange={setSize} options={SEG_SIZE_OPTIONS} fill />
+            </div>
+          </StateRow>
+          <StateRow label="Disabled option">
+            <div style={{ width: '100%', maxWidth: '20rem' }}>
+              <SegmentedControl role="radiogroup" ariaLabel="Request size, no large track" value={plan} onChange={setPlan} options={SEG_PLAN_OPTIONS} fill />
+            </div>
+          </StateRow>
+          <StateRow label="Group · sm and md">
+            <SegmentedControl ariaLabel="Activity filter" value={scope} onChange={setScope} options={SEG_SCOPE_OPTIONS} size="sm" />
+            <SegmentedControl ariaLabel="Activity filter, medium" value={scope} onChange={setScope} options={SEG_SCOPE_OPTIONS} />
           </StateRow>
         </div>
       </Card>
@@ -1721,6 +1786,7 @@ function ComponentsSection() {
       <ComponentsSubNav />
       <div className="space-y-12">
         <ButtonShowcase />
+        <SegmentedControlShowcase />
         <AvatarShowcase />
         <BadgeShowcase />
         <CardShowcase />

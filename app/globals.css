@@ -2393,3 +2393,176 @@ html.reduce-motion *::after {
   animation-iteration-count: 1 !important;
   transition-duration: 0.01ms !important;
 }
+
+
+/* ============================================================
+   SEGMENTED CONTROL
+   ============================================================
+   The sliding-pill segmented control, components/tahi/segmented-control.tsx.
+   One primitive for the Requests view switcher, the detail Activity filter,
+   the dialog size control and the settings SlideSeg wrapper. The timer
+   chip's .tt-seg in app-shell.css is a separate, older control.
+
+   Anatomy
+     .tahi-seg       the track: relative, hairline on all sides. Like the
+                     rest of this file the block is unlayered, so it beats
+                     Tailwind utilities: a consumer's className is for
+                     width and margin utilities only; display and padding
+                     are owned here.
+     .tahi-seg-pill  the moving highlight. The component positions it with
+                     an inline transform and width read from the active
+                     button, keeps it hidden until that first measurement
+                     (nothing jumps on hydration) and flips data-state to
+                     "ready" only after a layout effect has forced the
+                     browser to compute that first position with the
+                     transition still off, which is when the transition
+                     switches on (a plain post-paint flip is not enough on
+                     the hydration path; see the component). The hairline
+                     is a border, not part of the shadow list, because
+                     --shadow-xs is none in dark mode and a shadow list
+                     containing none is invalid and would drop the hairline
+                     with it.
+     .tahi-seg-b     an option. Transparent; the pill sits underneath. The
+                     focus ring is .tahi-focus-ring, so nothing here paints
+                     a box-shadow on the button.
+     .tahi-seg-ic    the icon slot, brand-tinted on the active option
+     .tahi-seg-label the label text
+
+   Variants on the track
+     .tahi-seg-sm / .tahi-seg-md   2rem / 2.25rem buttons from md up; both
+                                   are 2.75rem below md for touch
+     .tahi-seg-fill                equal-width columns, full width. Columns
+                                   can shrink below their label, which then
+                                   ellipsises instead of widening the track
+                                   past its container.
+     .tahi-seg-icon-md / -lg       icon only below that breakpoint. The
+                                   component hides the label with Tailwind
+                                   (hidden md:inline / hidden lg:inline);
+                                   these keep a 2.75rem square target for
+                                   as long as the label is hidden. */
+.tahi-seg {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0.125rem;
+  max-width: 100%;
+  padding: 0.1875rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  vertical-align: middle;
+}
+.tahi-seg-fill {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  width: 100%;
+}
+.tahi-seg-pill {
+  position: absolute;
+  top: 0.1875rem;
+  bottom: 0.1875rem;
+  left: 0;
+  z-index: 0;
+  box-sizing: border-box;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-xs);
+  pointer-events: none;
+}
+.tahi-seg-pill[data-state="ready"] {
+  transition:
+    transform 360ms var(--ease-out),
+    width 360ms var(--ease-out);
+}
+.tahi-seg-b {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+  padding: 0 0.8125rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color var(--dur-2) var(--ease-out);
+}
+.tahi-seg-sm .tahi-seg-b {
+  font-size: 0.75rem;
+}
+.tahi-seg-b:hover,
+.tahi-seg-b[data-active="true"] {
+  color: var(--color-text);
+}
+.tahi-seg-b[aria-disabled="true"] {
+  color: var(--color-text-subtle);
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.tahi-seg-b[aria-disabled="true"]:hover {
+  color: var(--color-text-subtle);
+}
+.tahi-seg-ic {
+  display: inline-flex;
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: opacity var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
+}
+.tahi-seg-b[data-active="true"] .tahi-seg-ic {
+  opacity: 1;
+  color: var(--color-brand);
+}
+@media (min-width: 48rem) {
+  .tahi-seg-b {
+    min-height: 2.25rem;
+    min-width: 0;
+  }
+  .tahi-seg-sm .tahi-seg-b {
+    min-height: 2rem;
+    padding: 0 0.625rem;
+  }
+  .tahi-seg-icon-lg .tahi-seg-b {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
+}
+@media (min-width: 64rem) {
+  .tahi-seg-icon-lg .tahi-seg-b {
+    min-height: 2.25rem;
+    min-width: 0;
+  }
+  .tahi-seg-icon-lg.tahi-seg-sm .tahi-seg-b {
+    min-height: 2rem;
+  }
+}
+/* Fill columns: the button may shrink below its label (after the icon-only
+   rules above, so it wins on source order at equal specificity) and the
+   label ellipsises inside it. The label's line-height is loosened from the
+   button's 1 so overflow: hidden never clips a descender. */
+.tahi-seg-fill .tahi-seg-b {
+  min-width: 0;
+}
+.tahi-seg-fill .tahi-seg-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tahi-seg-pill[data-state="ready"] {
+    transition: none;
+  }
+}

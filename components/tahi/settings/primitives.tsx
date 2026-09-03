@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Camera, Check, Pencil, Trash2, X } from 'lucide-react'
+import { SegmentedControl } from '@/components/tahi/segmented-control'
 
 /* ---------- theme-aware portal ---------- */
 function currentTheme(): 'light' | 'dark' {
@@ -340,10 +341,14 @@ export function EditDialog({ heading, fields, row, onSave, onClose }: EditDialog
 }
 
 /* ---------- SlideSeg (animated segmented control with icons / tablist) ----
-   The design's icon-capable variant of Seg: options are objects, an optional
-   icon renders in a .sg-ic slot, and role='tablist' + optRole='tab' turn it
-   into an accessible tab strip (Team & access uses this). Seg stays as the
-   tuple-based control for existing sections. */
+   The design's icon-capable variant of Seg: options are objects with an
+   optional icon, and role='tablist' + optRole='tab' turn it into an
+   accessible tab strip (Team & access uses this). Since the Requests
+   alignment pass it is a thin wrapper over the shared <SegmentedControl>
+   (components/tahi/segmented-control.tsx), so settings inherits the sliding
+   pill motion, roving tabindex and focus ring from one place. The props and
+   the click behaviour are unchanged. Seg stays as the tuple-based control
+   for existing sections. */
 export interface SlideSegOpt {
   v: string
   label: string
@@ -360,38 +365,15 @@ export interface SlideSegProps {
 }
 
 export function SlideSeg({ opts, value, onChange, ariaLabel, role = 'group', optRole }: SlideSegProps) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [ind, setInd] = useState<{ x: number; w: number }>({ x: 0, w: 0 })
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const measure = () => {
-      const bs = el.querySelectorAll<HTMLButtonElement>('.segx-b')
-      const i = Math.max(0, opts.findIndex((o) => o.v === value))
-      const b = bs[i]
-      if (b) setInd({ x: b.offsetLeft, w: b.offsetWidth })
-    }
-    measure()
-    window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
-  }, [value, opts])
+  const isTabs = role === 'tablist' || optRole === 'tab'
   return (
-    <div className="segx" ref={ref} role={role} aria-label={ariaLabel}>
-      <span className="segx-ind" style={{ transform: 'translateX(' + ind.x + 'px)', width: ind.w }} />
-      {opts.map((o) => (
-        <button
-          key={o.v}
-          type="button"
-          role={optRole}
-          aria-selected={optRole === 'tab' ? value === o.v : undefined}
-          className={'segx-b' + (value === o.v ? ' on' : '')}
-          onClick={() => onChange(o.v)}
-        >
-          {o.icon && <span className="sg-ic">{o.icon}</span>}
-          {o.label}
-        </button>
-      ))}
-    </div>
+    <SegmentedControl
+      value={value}
+      onChange={onChange}
+      options={opts.map((o) => ({ value: o.v, label: o.label, icon: o.icon }))}
+      ariaLabel={ariaLabel}
+      role={isTabs ? 'tablist' : 'group'}
+    />
   )
 }
 
