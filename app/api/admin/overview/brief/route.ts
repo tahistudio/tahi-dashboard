@@ -373,23 +373,18 @@ export async function readBriefCache(drizzle: D1): Promise<CachedBrief | null> {
   }
 }
 
-// Upsert the computed brief into settings (select-then-update/insert, matching
-// the AI briefing cache write, since settings.key is the primary key).
+// Upsert the computed brief into settings in one statement. Two page loads
+// on a stale morning both recompute and both write; a select-then-insert
+// raced itself here and the loser died on the settings.key primary key.
 export async function writeBriefCache(drizzle: D1, result: BriefResult, generatedAt: string): Promise<void> {
   const value = JSON.stringify({ ...result, generatedAt })
-  const existing = await drizzle
-    .select({ key: schema.settings.key })
-    .from(schema.settings)
-    .where(eq(schema.settings.key, BRIEF_CACHE_KEY))
-    .limit(1)
-  if (existing.length > 0) {
-    await drizzle
-      .update(schema.settings)
-      .set({ value, updatedAt: generatedAt })
-      .where(eq(schema.settings.key, BRIEF_CACHE_KEY))
-  } else {
-    await drizzle.insert(schema.settings).values({ key: BRIEF_CACHE_KEY, value, updatedAt: generatedAt })
-  }
+  await drizzle
+    .insert(schema.settings)
+    .values({ key: BRIEF_CACHE_KEY, value, updatedAt: generatedAt })
+    .onConflictDoUpdate({
+      target: schema.settings.key,
+      set: { value, updatedAt: generatedAt },
+    })
 }
 
 // Fresh when generated within ~20h OR on the same UTC calendar day. A future

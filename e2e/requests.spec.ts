@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { primePage } from './helpers'
 
 /**
  * Requests happy path (Slice 8 of the Requests TSX port).
@@ -61,11 +62,21 @@ function requestLinks(page: Page) {
 }
 
 async function gotoRequests(page: Page): Promise<void> {
-  await page.goto('/requests')
+  // A dev server compiling a sibling route can reset the first connection,
+  // which Chromium reports as an aborted navigation. One retry keeps the
+  // spec honest about the page rather than the harness.
+  try {
+    await page.goto('/requests')
+  } catch (err) {
+    if (!String(err).includes('ERR_ABORTED')) throw err
+    await page.goto('/requests')
+  }
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Requests', { timeout: 20_000 })
 }
 
 test.describe('Requests', () => {
+  test.beforeEach(async ({ page }) => { await primePage(page) })
+
   test('the list page loads with no horizontal scroll', async ({ page }) => {
     await gotoRequests(page)
     await expectNoHorizontalScroll(page)
@@ -143,8 +154,11 @@ test.describe('Requests', () => {
     // Walk in from the top of the document until focus lands on a control that
     // opts into the shared ring. Asserting on the class rather than a named
     // button keeps this honest whichever toolbar is mounted.
+    // Start the sequential focus walk at the page heading so the sidebar's
+    // twenty-odd links do not eat the budget on desktop.
+    await page.getByRole('heading', { level: 1 }).click()
     let found = false
-    for (let i = 0; i < 40 && !found; i++) {
+    for (let i = 0; i < 60 && !found; i++) {
       await page.keyboard.press('Tab')
       found = await page.evaluate(() => {
         const el = document.activeElement as HTMLElement | null

@@ -1,4 +1,5 @@
 import { test, expect, type Locator } from '@playwright/test'
+import { primePage } from './helpers'
 
 /**
  * Segmented control (components/tahi/segmented-control.tsx), the live half.
@@ -63,6 +64,8 @@ function buttonGeometry(button: Locator): Promise<Geometry> {
 }
 
 test.describe('Segmented control', () => {
+  test.beforeEach(async ({ page }) => { await primePage(page) })
+
   test('the pill sits on the active tab and follows a click without a mount slide-in', async ({ page }) => {
     // Catch the moment the transition switches on. A MutationObserver
     // callback runs before the browser's next style recalc, so the
@@ -110,7 +113,12 @@ test.describe('Segmented control', () => {
     expect(Math.abs(before.width - listBox.width)).toBeLessThanOrEqual(1)
 
     // Click: selection moves and the pill glides (a real transition) to it.
-    await kanban.click()
+    // The showcase sits between the sticky Components nav and the fixed
+    // mobile tab bar, and Playwright's edge-aligned scroll can leave the tab
+    // under one of them on a phone viewport. This test is about the pill's
+    // motion after a selection, not pointer hit-testing (the Requests spec
+    // covers that), so the click is dispatched on the element directly.
+    await kanban.dispatchEvent('click')
     await expect(kanban).toHaveAttribute('aria-selected', 'true')
     await expect(list).toHaveAttribute('aria-selected', 'false')
     const gliding = await pill.evaluate(el => {
