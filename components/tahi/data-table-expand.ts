@@ -1,10 +1,11 @@
 /**
- * Expand-state helpers for <DataTable>'s multi-row expand API.
+ * Pure state helpers for <DataTable>: which rows are open, which column the
+ * table is sorted by, and which rows a shift-click selects.
  *
  * Kept in their own module (no React, no 'use client') so the reducer-ish
- * rules that govern which rows are open can be unit-tested without a DOM,
- * and so <DataTable> and its consumers share one implementation instead of
- * each page hand-rolling a Set toggle.
+ * rules can be unit-tested without a DOM, and so <DataTable> and its
+ * consumers share one implementation instead of each page hand-rolling a Set
+ * toggle.
  *
  * Every function is pure and returns a NEW Set, except `pruneExpandedIds`,
  * which returns the SAME Set instance when nothing needed removing. That
@@ -72,4 +73,85 @@ export function toggleExpandAll(
 ): Set<string> {
   if (areAllExpanded(expandableIds, current)) return new Set()
   return new Set(expandableIds)
+}
+
+// ── Sort ────────────────────────────────────────────────────────────────────
+
+/**
+ * The sort a table is currently under. Structurally identical to
+ * `DataTableSort` in data-table.tsx; declared here so this module stays free
+ * of the client component that consumes it.
+ */
+export interface DataTableSortState {
+  key: string
+  dir: 'asc' | 'desc'
+}
+
+/**
+ * The three-step header cycle: ascending, descending, then off.
+ *
+ * Clearing on the third click is what keeps a page-level sort control alive.
+ * Without it one header click silently overrides the order the page handed
+ * in, with no way back short of a reload, so the page's own Sort select
+ * reads as a dead input.
+ */
+export function nextSortState(
+  current: DataTableSortState | null | undefined,
+  key: string,
+): DataTableSortState | null {
+  if (!current || current.key !== key) return { key, dir: 'asc' }
+  if (current.dir === 'asc') return { key, dir: 'desc' }
+  return null
+}
+
+/**
+ * The same cycle for a table that owns its own sort, where "off" has to mean
+ * something concrete.
+ *
+ * A controlled table can hand `null` up and let the page decide what unsorted
+ * looks like. An uncontrolled one cannot: `defaultSort` is only the initial
+ * state, so clearing to `null` would drop the list into whatever order the API
+ * happened to return and there would be no way back short of a reload. The
+ * third click therefore returns to the declared default. Tables that declare
+ * no default still clear to nothing, which is what hands ordering back to a
+ * page-level Sort control.
+ */
+export function nextInternalSortState(
+  current: DataTableSortState | null | undefined,
+  key: string,
+  defaultSort: DataTableSortState | null | undefined,
+): DataTableSortState | null {
+  return nextSortState(current, key) ?? defaultSort ?? null
+}
+
+// ── Range selection ─────────────────────────────────────────────────────────
+
+/**
+ * Shift-click range selection. Adds (or removes) every id from `anchor` to
+ * `index` inclusive, in either direction, and leaves every id outside the
+ * span untouched.
+ *
+ * `select` comes from the row that was clicked: shift-clicking an unselected
+ * row selects the span, shift-clicking a selected one clears it, which is the
+ * behaviour every file manager has trained people to expect. Indices outside
+ * the id list are clamped rather than throwing, so a stale anchor left behind
+ * by a filter can never break a click.
+ */
+export function applyRangeSelection(
+  current: ReadonlySet<string>,
+  ids: readonly string[],
+  anchor: number,
+  index: number,
+  select: boolean,
+): Set<string> {
+  const next = new Set(current)
+  const from = Math.max(0, Math.min(anchor, index))
+  const to = Math.min(ids.length - 1, Math.max(anchor, index))
+  for (let i = from; i <= to; i++) {
+    const id = ids[i]
+    if (id === undefined) continue
+    if (select) next.add(id)
+    else next.delete(id)
+  }
+  return next
 }

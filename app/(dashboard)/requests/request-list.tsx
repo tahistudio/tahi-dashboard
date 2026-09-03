@@ -25,8 +25,13 @@ import { Avatar } from '@/components/tahi/avatar'
 import { EmptyState as SharedEmptyState } from '@/components/tahi/empty-state'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
-import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
-import { pruneExpandedIds } from '@/components/tahi/data-table-expand'
+import {
+  DataTable,
+  type DataTableColumn,
+  type DataTableExpandedContext,
+  type DataTableSort,
+} from '@/components/tahi/data-table'
+import { pruneExpandedIds, toggleExpandedId } from '@/components/tahi/data-table-expand'
 import {
   BulkActionBar as SharedBulkActionBar,
   type BulkAction,
@@ -57,6 +62,7 @@ import {
 } from '@/components/tahi/requests/requests-rail-layout'
 import {
   DEFAULT_REQUEST_FILTERS,
+  DEFAULT_REQUEST_SORT,
   applyRequestViews,
   countSavedViews,
   type RequestsAudience,
@@ -290,6 +296,181 @@ function DueDateChip({ dueDate, status }: { dueDate: string | null; status: stri
 }
 
 
+/**
+ * What this page is, in one line, for the person reading it. Three audiences,
+ * three sentences; the row count lives in the toolbar below, with its own
+ * aria-live, so it is not repeated here.
+ */
+const AUDIENCE_SUBTITLE: Record<RequestsAudience, string> = {
+  admin: 'Every request across your clients: submit, triage, and deliver.',
+  team_member: "Your clients' requests: what's yours and what's queued.",
+  client: "Everything you've asked us for, and where each piece stands.",
+}
+
+/**
+ * One request as a card, used instead of the table below md. The top line
+ * carries the number and the status, then the title, then the client, the
+ * category and the due date. Expandable rows get a 2.75rem chevron and the
+ * same children the desktop panel shows, as a dot list.
+ */
+function RequestMobileCard({
+  request,
+  showClient,
+  audience,
+  expandable,
+  expanded,
+  onToggle,
+  onOpen,
+}: {
+  request: Request
+  showClient: boolean
+  audience: 'team' | 'client'
+  expandable: boolean
+  expanded: boolean
+  onToggle: () => void
+  onOpen: () => void
+}) {
+  const cat = request.category ? CAT_CFG[request.category] : undefined
+  return (
+    <div
+      onClick={onOpen}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.5625rem',
+        padding: '0.8125rem 0.875rem',
+        borderBottom: '1px solid var(--color-border-subtle)',
+        cursor: 'pointer',
+        transition: 'background-color 120ms ease',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-hover-tint)' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        {request.priority === 'urgent' && (
+          <Zap
+            size={13}
+            strokeWidth={2.4}
+            fill="currentColor"
+            aria-label="Urgent"
+            style={{ color: 'var(--color-danger)', flexShrink: 0 }}
+          />
+        )}
+        {request.scopeFlagged && (
+          <AlertTriangle size={13} aria-label="Scope flagged" style={{ color: 'var(--color-danger)', flexShrink: 0 }} />
+        )}
+        {request.requestNumber != null && (
+          <span data-private className="font-mono" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
+            #{String(request.requestNumber).padStart(3, '0')}
+          </span>
+        )}
+        <span style={{ marginLeft: 'auto' }}>
+          <StatusBadgeCell status={request.status} />
+        </span>
+      </div>
+
+      <Link
+        data-private
+        href={`/requests/${request.id}`}
+        className="tahi-focus-ring"
+        onClick={e => e.stopPropagation()}
+        style={{
+          fontSize: '0.90625rem',
+          fontWeight: 600,
+          lineHeight: 1.35,
+          color: 'var(--color-text)',
+          textDecoration: 'none',
+          borderRadius: 'var(--radius-sm)',
+        }}
+      >
+        {request.title}
+      </Link>
+
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '0.5rem' }}>
+        <div className="flex items-center flex-wrap" style={{ flex: 1, minWidth: 0, gap: '0.5rem' }}>
+          {showClient && request.orgName && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', minWidth: 0 }}>
+              <Avatar name={request.orgName} size="xs" />
+              <span
+                data-private
+                style={{
+                  fontSize: '0.78125rem',
+                  fontWeight: 500,
+                  color: 'var(--color-text-muted)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {request.orgName}
+              </span>
+            </span>
+          )}
+          {request.category && (
+            <span
+              style={{
+                padding: '0.125rem 0.4375rem',
+                borderRadius: 'var(--radius-sm)',
+                background: cat?.bg ?? 'var(--color-bg-tertiary)',
+                color: cat?.color ?? 'var(--color-text-muted)',
+                fontSize: '0.6875rem',
+                fontWeight: 600,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {formatType(request.category)}
+            </span>
+          )}
+          <DueDateChip dueDate={request.dueDate} status={request.status} />
+        </div>
+
+        {expandable && (
+          <button
+            type="button"
+            className="tahi-focus-ring inline-flex items-center justify-center h-11 w-11 m-[-0.625rem]"
+            aria-expanded={expanded}
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${request.title} sub-requests`}
+            onClick={e => { e.stopPropagation(); onToggle() }}
+            style={{
+              flex: 'none',
+              border: 'none',
+              borderRadius: 'var(--radius-md)',
+              background: 'transparent',
+              color: 'var(--color-text-subtle)',
+              cursor: 'pointer',
+              transition: 'background-color 150ms ease, color 150ms ease',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'var(--color-bg-tertiary)'
+              e.currentTarget.style.color = 'var(--color-text)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = 'var(--color-text-subtle)'
+            }}
+          >
+            <ChevronDown
+              size={16}
+              strokeWidth={2.4}
+              aria-hidden="true"
+              style={{
+                transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                transition: 'transform 150ms ease',
+              }}
+            />
+          </button>
+        )}
+      </div>
+
+      {expandable && expanded && (
+        <div onClick={e => e.stopPropagation()}>
+          <SubRequestRows parentId={request.id} audience={audience} variant="cards" />
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
@@ -348,6 +529,11 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // once; the set is pruned whenever the visible rows change (below), so a
   // panel never survives the filter that hid its parent.
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set())
+  // The table's column sort, held here rather than inside <DataTable>. It is
+  // the ordering the user can actually see once a header has been clicked, so
+  // Clear all has to be able to reach it; a purely internal sort would leave
+  // "Clear all" resetting the rail's Sort control while the list did not move.
+  const [tableSort, setTableSort] = useState<DataTableSort | null>(null)
   // The parent a new sub-request is being created under, plus its client, so
   // NewRequestDialog can lock both.
   const [subRequestParent, setSubRequestParent] = useState<{ id: string; orgId: string | null } | null>(null)
@@ -396,16 +582,17 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // tab caches independently; keepPreviousData shows the prior rows while a new
   // tab revalidates (no spinner flash). The global fetcher adds apiPath +
   // parses JSON. isLoading is true only on the first uncached load.
-  // NOTE: the admin GET silently caps at 50 rows (server-side limit; the page
-  // param is unused here). Pagination is a follow-up and can't be done purely
-  // server-side, because this list is filtered client-side (search / category /
-  // type / client-tag) after the fetch.
+  // NOTE on limits: both routes honour `limit` up to a hard ceiling of 500
+  // (app/api/admin/requests/route.ts and app/api/portal/requests/route.ts),
+  // with no pagination past it, so the rail asks for the maximum. Everything
+  // below is filtered client-side (search / category / type / client-tag),
+  // which is why the fetch cannot narrow further server-side.
   // On the rail the saved views (Delivered, Overdue, Triage...) are resolved
   // client-side, so the fetch has to bring back every status rather than the
-  // one the old tab strip asked for, at the route's maximum page size.
+  // one the old tab strip asked for.
   const requestsQuery = railOn ? 'status=all&limit=500' : `status=${activeTab}`
   const requestsKey = `${isAdmin ? '/api/admin/requests' : '/api/portal/requests'}?${requestsQuery}`
-  const { data: requestsData, isLoading: loading, mutate: mutateRequests } =
+  const { data: requestsData, isLoading: loading, mutate: mutateRequests, error: requestsError } =
     useSWR<{ requests?: Request[] }>(requestsKey)
   const requests = useMemo(() => requestsData?.requests ?? [], [requestsData])
 
@@ -432,6 +619,8 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
 
   // Counts run over everything loaded, not the filtered set, so the rail keeps
   // telling you how much work sits behind each view while you are inside one.
+  // They are exact only below the fetch's 500-row ceiling: past that the tail
+  // of the backlog is not in `requests` and every count quietly under-reports.
   const railCounts = useMemo(
     () => countSavedViews(requests, audience, { assigneeId: impersonatedTeamMemberId }),
     [requests, audience, impersonatedTeamMemberId],
@@ -520,10 +709,9 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // Prune open panels down to the rows still on screen whenever a filter,
   // saved view, search or sort changes the set under the table.
   useEffect(() => {
-    if (!railOn) return
     const ids = visible.map(r => r.id)
     setExpandedIds(prev => pruneExpandedIds(prev, ids))
-  }, [railOn, visible])
+  }, [visible])
 
   // Clients read sub-requests through the org-scoped portal route and never
   // get the add affordance; the team reads the admin route and does.
@@ -535,15 +723,37 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     [],
   )
 
-  const renderSubRequestPanel = useCallback((r: Request) => (
+  // Real <tr> children in the parent's own tbody, so a child's status,
+  // assignee and Done word land under Status, Priority and Due with no width
+  // constants restated here.
+  const renderSubRequestPanel = useCallback((r: Request, table: DataTableExpandedContext) => (
     <SubRequestRows
       parentId={r.id}
       audience={panelAudience}
+      table={table}
       onAddSubRequest={canAddSubRequest
         ? () => setSubRequestParent({ id: r.id, orgId: r.orgId ?? null })
         : undefined}
     />
   ), [panelAudience, canAddSubRequest])
+
+  const toggleRowExpanded = useCallback((id: string) => {
+    setExpandedIds(prev => toggleExpandedId(prev, id))
+  }, [])
+
+  // Below md the table becomes a card list: a six-column table on a 375px
+  // phone can only scroll sideways, which CLAUDE.md rules out.
+  const renderMobileCard = useCallback((r: Request) => (
+    <RequestMobileCard
+      request={r}
+      showClient={isAdmin}
+      audience={panelAudience}
+      expandable={isRowExpandable(r)}
+      expanded={expandedIds.has(r.id)}
+      onToggle={() => toggleRowExpanded(r.id)}
+      onOpen={() => { router.push(`/requests/${r.id}`) }}
+    />
+  ), [isAdmin, panelAudience, isRowExpandable, expandedIds, toggleRowExpanded, router])
 
   const effectiveView: ViewMode | 'kanban' | 'timeline' = railOn ? rail.view : view
   // On the rail, Timeline renders on its own above, so the only sub-view
@@ -955,12 +1165,21 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     const cols: DataTableColumn<Request>[] = [
       {
         key: 'title',
-        header: 'Title',
+        header: 'Request',
         sortable: true,
         sortValue: r => r.title.toLowerCase(),
         minWidth: '18rem',
         render: r => (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+            {r.priority === 'urgent' && (
+              <Zap
+                size={13}
+                strokeWidth={2.4}
+                fill="currentColor"
+                aria-label="Urgent"
+                style={{ color: 'var(--color-danger)', flexShrink: 0 }}
+              />
+            )}
             {r.scopeFlagged && (
               <AlertTriangle
                 size={13}
@@ -1068,6 +1287,9 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       sortable: true,
       sortValue: r => r.updatedAt ?? '',
       width: '7rem',
+      // Last column, and a relative date, so it reads best flushed to the
+      // table's right edge rather than floating mid-gutter.
+      align: 'right',
       render: r => (
         <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
           {formatDate(r.updatedAt ? r.updatedAt.slice(0, 10) : null)}
@@ -1090,6 +1312,33 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     rail.saveDefault()
     showToast('Saved as your default view', 'success')
   }, [rail, showToast])
+
+  // Clear all: every filter, the saved view and both sorts, so the sheet's
+  // button really does undo everything it can see. The column sort goes too:
+  // it is the order actually on screen once a header has been clicked, and
+  // resetting only the rail's Sort control would leave the list unmoved. The
+  // search box lives outside the sheet, so it is left alone here.
+  const clearAllFilters = useCallback(() => {
+    setTableSort(null)
+    if (railOn) {
+      rail.setFilters({ ...DEFAULT_REQUEST_FILTERS })
+      rail.setSavedView(null)
+      rail.setSort({ ...DEFAULT_REQUEST_SORT })
+      return
+    }
+    setDateRange({ from: null, to: null })
+    setCategoryFilter('all')
+    setTypeFilter('all')
+    setTagFilter('all')
+  }, [railOn, rail])
+
+  // The filtered empty state's way out. It also drops the search, because a
+  // recovery button that leaves the page empty is worse than no button.
+  const clearFiltersAndSearch = useCallback(() => {
+    clearAllFilters()
+    if (railOn) rail.setQuery('')
+    else setSearch('')
+  }, [clearAllFilters, railOn, rail])
 
   const handleBoardSubViewChange = useCallback((next: BoardViewKey) => {
     if (next === 'kanban' || next === 'timeline') rail.setView(next)
@@ -1141,17 +1390,40 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         selectedIds={isAdmin ? selectedIds : undefined}
         onSelectionChange={isAdmin ? handleSelectionChange : undefined}
         onRowClick={(r) => { router.push(`/requests/${r.id}`) }}
-        empty={<EmptyState isAdmin={isAdmin} onNew={() => setDialogOpen(true)} />}
+        // Controlled so Clear all can reach the order the user can see.
+        sort={tableSort}
+        onSortChange={setTableSort}
+        // Two different nothings: no data at all, versus a filter hiding
+        // every row there is. The second one needs a way back.
+        empty={requests.length > 0
+          ? <FilteredEmptyState onClear={clearFiltersAndSearch} />
+          : <EmptyState isAdmin={isAdmin} onNew={() => setDialogOpen(true)} />}
         {...(railOn ? {
           expandable: isRowExpandable,
           renderExpanded: renderSubRequestPanel,
+          expandedRowMode: 'rows' as const,
           expandedIds,
           onExpandedChange: setExpandedIds,
           expandAllLabel: 'sub-requests',
+          // The card list is part of the new UI, not a separate 375px fix:
+          // the legacy path has no chevron and no sub-request panel, so a card
+          // with both would be an affordance its own desktop table lacks. It
+          // flips with the rest of the rail.
+          mobileCard: renderMobileCard,
         } : {})}
       />
     </Card>
   )
+
+  // A failed fetch used to fall through to the empty state, so "this did not
+  // load" read as "you have no requests". The panel says which it is and
+  // offers the one thing that helps.
+  const listBody = requestsError ? (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <ListLoadError onRetry={() => { void mutateRequests() }} />
+      {content}
+    </div>
+  ) : content
 
   return (
     <>
@@ -1194,9 +1466,14 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         {/* Page header */}
         <PageHeader
           title="Requests"
-          subtitle={loading
-            ? 'Manage all work items and track progress'
-            : `${visible.length} ${visible.length === 1 ? 'request' : 'requests'}`}
+          // On the rail the count lives in the toolbar row a few rem below,
+          // with its own aria-live, so the subtitle is free to say what this
+          // page is for the person reading it.
+          subtitle={railOn
+            ? AUDIENCE_SUBTITLE[audience]
+            : loading
+              ? 'Manage all work items and track progress'
+              : `${visible.length} ${visible.length === 1 ? 'request' : 'requests'}`}
         >
           {railOn ? (
             <RequestsHeaderActions
@@ -1366,16 +1643,16 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
             }
             chips={railChips}
             onClearChip={chip => rail.setFilters({ ...rail.filters, [chip.key]: DEFAULT_REQUEST_FILTERS[chip.key] })}
-            onClearAll={() => { rail.setFilters({ ...DEFAULT_REQUEST_FILTERS }); rail.setSavedView(null) }}
+            onClearAll={clearAllFilters}
             query={rail.query}
             onQueryChange={rail.setQuery}
             searchPlaceholder={isAdmin ? 'Search requests or clients' : 'Search requests'}
             total={visible.length}
             loading={loading}
           >
-            {content}
+            {listBody}
           </RequestsRailLayout>
-        ) : content}
+        ) : listBody}
       </div>
 
       {/* Drag-to-nest confirm dialog (board view) */}
@@ -2233,7 +2510,59 @@ function BulkCreateDialog({
   )
 }
 
-// ─── Empty state ──────────────────────────────────────────────────────────────
+// ─── Empty and error states ───────────────────────────────────────────────────
+
+/** Rows exist, the current filters just hide all of them. Distinct copy plus
+ *  a way back, so the page never reads as "you have no requests" when it
+ *  really means "nothing matches what you asked for". */
+function FilteredEmptyState({ onClear }: { onClear: () => void }) {
+  return (
+    <SharedEmptyState
+      icon={<Inbox className="w-7 h-7" />}
+      title="No requests match"
+      description="Try clearing a filter or the search."
+      action={
+        <TahiButton variant="secondary" size="md" onClick={onClear} iconLeft={<X className="w-4 h-4" />}>
+          Clear filters
+        </TahiButton>
+      }
+    />
+  )
+}
+
+/** The list fetch failed. Kept small and above the table rather than replacing
+ *  it, so any rows still in the SWR cache stay readable underneath.
+ *
+ *  One token family, and the badge one rather than --color-danger-bg, because
+ *  the badge tokens are the only red surface with a .dark override. Mixing
+ *  --color-danger-bg with --color-text put near-white text on a near-white
+ *  pink card in dark mode. role="alert" rather than "status": this is a
+ *  failure with a recovery action, and a polite region queues behind the
+ *  rail's own live count.
+ */
+function ListLoadError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      role="alert"
+      className="flex flex-wrap items-center"
+      style={{
+        gap: '0.625rem',
+        padding: '0.75rem 0.875rem',
+        border: '1px solid var(--badge-danger-border)',
+        borderRadius: 'var(--radius-md)',
+        background: 'var(--badge-danger-bg)',
+        fontSize: '0.8125rem',
+        color: 'var(--badge-danger-text)',
+      }}
+    >
+      <AlertTriangle size={15} aria-hidden="true" style={{ flexShrink: 0 }} />
+      <span style={{ flex: '1 1 12rem', minWidth: 0 }}>Could not load requests.</span>
+      <TahiButton variant="secondary" size="sm" onClick={onRetry} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
+        Try again
+      </TahiButton>
+    </div>
+  )
+}
 
 function EmptyState({ isAdmin, onNew }: { isAdmin: boolean; onNew: () => void }) {
   return (

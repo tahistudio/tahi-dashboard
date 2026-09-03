@@ -4,9 +4,12 @@
  * <DataTable>. The shared list-page table.
  *
  * Features:
- *   - Sortable columns (controlled or internal).
+ *   - Sortable columns (controlled or internal). A header cycles ascending,
+ *     descending, then off, so a page-level sort control gets its ordering
+ *     back on the third click.
  *   - Row click navigates or toggles expansion.
- *   - Row selection with checkbox column and select-all in head.
+ *   - Row selection with checkbox column and select-all in head, plus
+ *     shift-click to extend the selection across a range of rows.
  *   - Per-row action menu via 3-dots button OR right-click anywhere
  *     on the row.
  *   - Expandable rows, two flavours:
@@ -14,7 +17,11 @@
  *       expandable +    many rows open at once, a chevron in the first
  *       renderExpanded  column toggles them, row click still navigates,
  *                       plus an Expand all / Collapse all header control.
- *   - Sticky thead, h-scroll on mobile, density toggle.
+ *                       With expandedRowMode="rows" the children are real
+ *                       <tr>s in the same tbody, so their cells line up with
+ *                       the parent's columns for free.
+ *   - Sticky thead, h-scroll on mobile, an opt-in mobileCard layout below md,
+ *     density toggle.
  *   - Loading / empty states baked in.
  *   - Outer wrapper clips to its parent's rounded corners so the
  *     table doesn't poke past a Card's curve.
@@ -50,6 +57,9 @@ import {
   toggleExpandedId,
   areAllExpanded,
   toggleExpandAll,
+  nextSortState,
+  nextInternalSortState,
+  applyRangeSelection,
 } from '@/components/tahi/data-table-expand'
 
 export {
@@ -57,6 +67,9 @@ export {
   pruneExpandedIds,
   areAllExpanded,
   toggleExpandAll,
+  nextSortState,
+  nextInternalSortState,
+  applyRangeSelection,
 } from '@/components/tahi/data-table-expand'
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -126,6 +139,22 @@ export interface DataTableColumn<Row> {
    *  horizontally instead of wrapping mid-content. Set true on long-
    *  text columns where wrapping is genuinely wanted. */
   wrap?: boolean
+}
+
+/**
+ * What `renderExpanded` is told about the table it is rendering into. Only
+ * meaningful in `expandedRowMode="rows"`, where the caller emits real cells
+ * and has to match the parent's shape.
+ */
+export interface DataTableExpandedContext {
+  /** The data columns, in order, by key. */
+  columnKeys: readonly string[]
+  /** Cells before the data columns: the selection column, when there is one. */
+  leadingCells: number
+  /** Cells after them: the row-actions column, when there is one. */
+  trailingCells: number
+  /** Every cell in one full-width row, for a `colSpan`. */
+  colSpan: number
 }
 
 export interface DataTableAction {
@@ -198,10 +227,25 @@ interface DataTableProps<Row> {
    *  and any number of rows can be open at once. Rows that return false
    *  get an equal-width spacer so the first column stays aligned. */
   expandable?: (row: Row) => boolean
-  /** The panel rendered beneath an open row, spanning every column. Only
-   *  called for rows that are both expandable and currently open, so the
-   *  panel can fetch its own data lazily on mount. */
-  renderExpanded?: (row: Row) => React.ReactNode
+  /** The panel rendered beneath an open row. Only called for rows that are
+   *  both expandable and currently open, so the panel can fetch its own data
+   *  lazily on mount.
+   *
+   *  In the default `panel` mode it is wrapped in a full-width cell, so it can
+   *  return anything. In `rows` mode it must return `<tr>` elements; `ctx`
+   *  carries the parent's column keys and the leading / trailing cell counts
+   *  so the children can line their cells up. */
+  renderExpanded?: (row: Row, ctx: DataTableExpandedContext) => React.ReactNode
+  /** How an open row's children are put into the table.
+   *
+   *  `panel` (default) drops one full-width cell under the row and lets the
+   *  caller draw whatever it likes inside it.
+   *
+   *  `rows` renders the caller's `<tr>` elements straight into the same
+   *  `<tbody>`, so the browser's own column algorithm aligns a child's cells
+   *  with its parent's at every width, with no duplicated width constants.
+   *  Use it whenever the children are the same shape as the parent row. */
+  expandedRowMode?: 'panel' | 'rows'
   /** Controlled set of open row ids. Omit for internal state. */
   expandedIds?: ReadonlySet<string>
   /** Fires with the next open set. Required for controlled mode. */
@@ -217,6 +261,14 @@ interface DataTableProps<Row> {
   /** Initial page size. Defaults to 20. User can change via the size
    *  selector in the pagination footer (20 / 50 / 100 / all). */
   defaultPageSize?: 20 | 50 | 100 | 'all'
+
+  // ── Mobile ──
+  /** Opt-in card layout used instead of the table below `md`. Without it the
+   *  table simply scrolls sideways on a phone, which is fine for a two-column
+   *  list and miserable for a six-column one. The caller owns the whole card,
+   *  including its own hairline; the loading, empty and pagination chrome
+   *  around it stays shared. */
+  mobileCard?: (row: Row) => React.ReactNode
 }
 
 // ── Implementation ──────────────────────────────────────────────────────────
@@ -242,12 +294,14 @@ export function DataTable<Row>({
   renderExpand,
   expandable,
   renderExpanded,
+  expandedRowMode = 'panel',
   expandedIds,
   onExpandedChange,
   expandAllLabel = 'sub-rows',
   onRowPreview,
   paginate,
   defaultPageSize = 20,
+  mobileCard,
 }: DataTableProps<Row>) {
   const isControlledSort = sort !== undefined
   const [internalSort, setInternalSort] = React.useState<DataTableSort | null>(defaultSort)
@@ -267,15 +321,20 @@ export function DataTable<Row>({
     }
   }, [isControlledSelection, onSelectionChange])
 
+  // Ascending, descending, then off. The third click hands ordering back to
+  // whatever handed the rows in, so a page-level sort control never ends up
+  // permanently overridden by one header click.
+  //
+  // A controlled table gets the raw null and decides for itself. An
+  // uncontrolled one falls back to `defaultSort`, because there "off" would
+  // otherwise mean the order the API happened to return, with no way back
+  // short of a reload. Tables that declare no default still clear to nothing.
   const handleSortClick = (col: DataTableColumn<Row>) => {
     if (!col.sortable) return
-    const nextDir: SortDir =
-      activeSort?.key === col.key && activeSort.dir === 'asc' ? 'desc' : 'asc'
-    const next: DataTableSort = { key: col.key, dir: nextDir }
     if (isControlledSort) {
-      onSortChange?.(next)
+      onSortChange?.(nextSortState(activeSort, col.key))
     } else {
-      setInternalSort(next)
+      setInternalSort(nextInternalSortState(activeSort, col.key, defaultSort))
     }
   }
 
@@ -348,22 +407,85 @@ export function DataTable<Row>({
   const allSelected = selectable && allRowIds.length > 0 && allRowIds.every(id => activeSelection?.has(id))
   const someSelected = selectable && !allSelected && allRowIds.some(id => activeSelection?.has(id))
 
+  // Where the last checkbox click landed, so the next one can shift-extend
+  // from it. An index into the rows currently on screen, which is also the
+  // only span a shift-click is allowed to reach.
+  const lastToggledIndex = React.useRef<number | null>(null)
+
   const toggleAll = () => {
     if (allSelected) {
       setSelection(new Set())
     } else {
       setSelection(new Set(allRowIds))
     }
+    // Select-all rewrites the whole selection, so no single row is the anchor
+    // any more.
+    lastToggledIndex.current = null
   }
 
-  const toggleRow = (id: string) => {
-    const next = new Set(activeSelection ?? [])
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    setSelection(next)
+  // An index only means something against the exact row list it was taken
+  // from. A page change, a filter, a saved view or a new sort all rewrite that
+  // list, and an anchor left over from the old one would silently select a
+  // span nobody anchored on. The joined id list is the cheapest honest
+  // identity for "the rows on screen right now".
+  const pagedRowsKey = React.useMemo(
+    () => pagedRows.map(getRowId).join('|'),
+    [pagedRows, getRowId],
+  )
+  React.useEffect(() => { lastToggledIndex.current = null }, [pagedRowsKey])
+
+  const toggleRow = (id: string, rowIndex: number, e?: React.MouseEvent) => {
+    const current = activeSelection ?? new Set<string>()
+    const anchor = lastToggledIndex.current
+    if (e?.shiftKey && anchor !== null) {
+      // Extend from the anchor. Direction comes from the clicked row: an
+      // unselected row selects the span, a selected one clears it.
+      setSelection(applyRangeSelection(current, pagedRows.map(getRowId), anchor, rowIndex, !current.has(id)))
+      // Shift-clicking a row also drags a text selection across it.
+      if (typeof window !== 'undefined') window.getSelection()?.removeAllRanges()
+    } else {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      setSelection(next)
+    }
+    lastToggledIndex.current = rowIndex
   }
 
   const colCount = columns.length + (selectable ? 1 : 0) + (rowActions ? 1 : 0)
+
+  // Which of the two layouts is actually mounted, once we know the width.
+  //
+  // `md:hidden` / `hidden md:block` alone leaves both in the DOM, so a desktop
+  // render still calls `mobileCard` for every paged row (mounting whatever it
+  // renders a second time) and ships two copies of the empty state. `null`
+  // means "not measured yet": both layouts render, exactly as the CSS pair
+  // does today, so the server render and the first client render agree and
+  // nothing flashes. The effect runs on mount and drops the unused one.
+  const wantsCards = !!mobileCard
+  const [narrow, setNarrow] = React.useState<boolean | null>(null)
+  React.useEffect(() => {
+    // Tables with no card layout have only one thing to render, so they never
+    // need to know the width and never take a listener.
+    if (!wantsCards) return
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const mql = window.matchMedia('(max-width: 767px)')
+    const update = () => setNarrow(mql.matches)
+    update()
+    mql.addEventListener?.('change', update)
+    return () => mql.removeEventListener?.('change', update)
+  }, [wantsCards])
+  const showCards = narrow !== false
+  const showTable = !mobileCard || narrow !== true
+
+  // Handed to `renderExpanded` in rows mode so a child row can match the
+  // parent's cell count without the caller restating the column list.
+  const expandedContext = React.useMemo<DataTableExpandedContext>(() => ({
+    columnKeys: columns.map(c => c.key),
+    leadingCells: selectable ? 1 : 0,
+    trailingCells: rowActions ? 1 : 0,
+    colSpan: colCount,
+  }), [columns, selectable, rowActions, colCount])
 
   return (
     <div
@@ -377,191 +499,206 @@ export function DataTable<Row>({
         overflow: 'hidden',
       }}
     >
-      <div className="h-scroll" style={{ width: '100%' }}>
-        <table
-          role="table"
-          aria-label={ariaLabel}
-          style={{
-            width: '100%',
-            borderCollapse: 'separate',
-            borderSpacing: 0,
-            fontSize: 'var(--text-sm)',
-            minWidth: 'max-content',
-          }}
-        >
-          <thead>
-            <tr>
-              {selectable && (
-                <th
-                  scope="col"
-                  style={{
-                    ...thStyle(stickyOffset),
-                    width: expandableIds.length > 0 ? '4.25rem' : '2.75rem',
-                    paddingRight: 0,
-                  }}
-                >
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.125rem' }}>
-                    <SelectCheckbox
-                      checked={!!allSelected}
-                      indeterminate={someSelected}
-                      onChange={toggleAll}
-                      ariaLabel={allSelected ? 'Deselect all rows' : 'Select all rows'}
-                    />
-                    {expandableIds.length > 0 && (
-                      <ExpandToggle
-                        expanded={allExpanded}
-                        label={`${allExpanded ? 'Collapse' : 'Expand'} all ${expandAllLabel}`}
-                        onToggle={() => setOpenIds(toggleExpandAll(expandableIds, openIds))}
-                      />
-                    )}
-                  </span>
-                </th>
-              )}
-              {columns.map((col, colIndex) => {
-                const isSorted = activeSort?.key === col.key
-                const align = col.align ?? 'left'
-                // With no checkbox column the Expand all control has no home
-                // of its own, so it leads the first header cell instead.
-                const leadsExpandAll = !selectable && colIndex === 0 && expandableIds.length > 0
-                return (
+      {/* Card layout below md, when the caller opted in. Same rows, same
+          pagination; only the shape of one record changes. */}
+      {mobileCard && showCards && (
+        <div className="md:hidden" style={{ width: '100%' }}>
+          {loading ? (
+            <div style={{ padding: '2.5rem 1rem' }}>
+              <TableStatusBlock>
+                <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-brand)' }} aria-hidden="true" />
+                Loading
+              </TableStatusBlock>
+            </div>
+          ) : sortedRows.length === 0 ? (
+            <div style={{ padding: 'var(--space-4)' }}>
+              {empty ?? <TableStatusBlock pad>No items to display.</TableStatusBlock>}
+            </div>
+          ) : (
+            pagedRows.map(row => (
+              <React.Fragment key={getRowId(row)}>{mobileCard(row)}</React.Fragment>
+            ))
+          )}
+        </div>
+      )}
+
+      {showTable && (
+        <div className={mobileCard ? 'h-scroll hidden md:block' : 'h-scroll'} style={{ width: '100%' }}>
+          <table
+            role="table"
+            aria-label={ariaLabel}
+            style={{
+              width: '100%',
+              borderCollapse: 'separate',
+              borderSpacing: 0,
+              fontSize: 'var(--text-sm)',
+              minWidth: 'max-content',
+            }}
+          >
+            <thead>
+              <tr>
+                {selectable && (
                   <th
-                    key={col.key}
                     scope="col"
-                    aria-sort={col.sortable
-                      ? (isSorted ? (activeSort.dir === 'asc' ? 'ascending' : 'descending') : 'none')
-                      : undefined}
                     style={{
                       ...thStyle(stickyOffset),
-                      textAlign: align,
-                      width: col.width,
-                      minWidth: col.minWidth,
+                      width: expandableIds.length > 0 ? '4.25rem' : '2.75rem',
+                      paddingRight: 0,
+                      userSelect: 'none',
+                      WebkitUserSelect: 'none',
                     }}
                   >
-                    {leadsExpandAll && (
-                      <ExpandToggle
-                        expanded={allExpanded}
-                        label={`${allExpanded ? 'Collapse' : 'Expand'} all ${expandAllLabel}`}
-                        onToggle={() => setOpenIds(toggleExpandAll(expandableIds, openIds))}
-                        style={{ marginRight: '0.25rem', verticalAlign: 'middle' }}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.125rem' }}>
+                      <SelectCheckbox
+                        checked={!!allSelected}
+                        indeterminate={someSelected}
+                        onChange={toggleAll}
+                        ariaLabel={allSelected ? 'Deselect all rows' : 'Select all rows'}
                       />
-                    )}
-                    {col.sortable ? (
-                      <button
-                        type="button"
-                        onClick={() => handleSortClick(col)}
-                        className="inline-flex items-center"
-                        style={{
-                          gap: '0.25rem',
-                          padding: 0,
-                          margin: 0,
-                          background: 'transparent',
-                          border: 'none',
-                          cursor: 'pointer',
-                          font: 'inherit',
-                          color: isSorted ? 'var(--color-text)' : 'inherit',
-                          textTransform: 'inherit',
-                          letterSpacing: 'inherit',
-                          fontWeight: 'inherit',
-                        }}
-                      >
-                        {col.header}
-                        <SortIndicator active={isSorted} dir={isSorted ? activeSort.dir : undefined} />
-                      </button>
-                    ) : (
-                      col.header
-                    )}
+                      {expandableIds.length > 0 && (
+                        <ExpandToggle
+                          expanded={allExpanded}
+                          label={`${allExpanded ? 'Collapse' : 'Expand'} all ${expandAllLabel}`}
+                          onToggle={() => setOpenIds(toggleExpandAll(expandableIds, openIds))}
+                        />
+                      )}
+                    </span>
                   </th>
-                )
-              })}
-              {rowActions && (
-                <th
-                  scope="col"
-                  aria-label="Row actions"
-                  style={{
-                    ...thStyle(stickyOffset),
-                    width: '3rem',
-                  }}
-                />
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={colCount} style={{ padding: '2.5rem 1rem' }}>
-                  <div
+                )}
+                {columns.map((col, colIndex) => {
+                  const isSorted = activeSort?.key === col.key
+                  const align = col.align ?? 'left'
+                  // With no checkbox column the Expand all control has no home
+                  // of its own, so it leads the first header cell instead.
+                  const leadsExpandAll = !selectable && colIndex === 0 && expandableIds.length > 0
+                  return (
+                    <th
+                      key={col.key}
+                      scope="col"
+                      aria-sort={col.sortable
+                        ? (isSorted ? (activeSort.dir === 'asc' ? 'ascending' : 'descending') : 'none')
+                        : undefined}
+                      style={{
+                        ...thStyle(stickyOffset),
+                        textAlign: align,
+                        width: col.width,
+                        minWidth: col.minWidth,
+                      }}
+                    >
+                      {leadsExpandAll && (
+                        <ExpandToggle
+                          expanded={allExpanded}
+                          label={`${allExpanded ? 'Collapse' : 'Expand'} all ${expandAllLabel}`}
+                          onToggle={() => setOpenIds(toggleExpandAll(expandableIds, openIds))}
+                          style={{ marginRight: '0.25rem', verticalAlign: 'middle' }}
+                        />
+                      )}
+                      {col.sortable ? (
+                        <button
+                          type="button"
+                          onClick={() => handleSortClick(col)}
+                          className="inline-flex items-center"
+                          style={{
+                            gap: '0.25rem',
+                            padding: 0,
+                            margin: 0,
+                            background: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            font: 'inherit',
+                            color: isSorted ? 'var(--color-text)' : 'inherit',
+                            textTransform: 'inherit',
+                            letterSpacing: 'inherit',
+                            fontWeight: 'inherit',
+                          }}
+                        >
+                          {col.header}
+                          <SortIndicator active={isSorted} dir={isSorted ? activeSort.dir : undefined} />
+                        </button>
+                      ) : (
+                        col.header
+                      )}
+                    </th>
+                  )
+                })}
+                {rowActions && (
+                  <th
+                    scope="col"
+                    aria-label="Row actions"
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '0.5rem',
-                      color: 'var(--color-text-subtle)',
-                      fontSize: 'var(--text-sm)',
+                      ...thStyle(stickyOffset),
+                      width: '3rem',
                     }}
-                  >
-                    <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-brand)' }} aria-hidden="true" />
-                    Loading
-                  </div>
-                </td>
-              </tr>
-            ) : sortedRows.length === 0 ? (
-              <tr>
-                <td colSpan={colCount} style={{ padding: 'var(--space-4)' }}>
-                  {empty ?? (
-                    <div style={{ textAlign: 'center', color: 'var(--color-text-subtle)', fontSize: 'var(--text-sm)', padding: '1.5rem 0' }}>
-                      No items to display.
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ) : (
-              pagedRows.map((row, rowIndex) => {
-                const id = getRowId(row)
-                const isLast = rowIndex === pagedRows.length - 1
-                const isSelected = activeSelection?.has(id) ?? false
-                // Multi-open mode wins when both APIs are supplied.
-                const canExpand = multiExpand ? expandable(row) : (renderExpand?.(row) ?? null) != null
-                const isExpanded = multiExpand
-                  ? (canExpand && openIds.has(id))
-                  : (canExpand && expandedId === id)
-                const expandContent = !isExpanded
-                  ? null
-                  : multiExpand
-                    ? (renderExpanded?.(row) ?? null)
-                    : (renderExpand?.(row) ?? null)
-                return (
-                  <DataRow<Row>
-                    key={id}
-                    row={row}
-                    rowId={id}
-                    rowIndex={rowIndex}
-                    columns={columns}
-                    onRowClick={onRowClick}
-                    onRowPreview={onRowPreview}
-                    paddingY={rowPaddingY}
-                    isLast={isLast}
-                    isSelected={isSelected}
-                    selectable={selectable}
-                    toggleRow={toggleRow}
-                    rowActions={rowActions}
-                    isExpandable={canExpand}
-                    isExpanded={isExpanded}
-                    toggleExpand={() => {
-                      if (multiExpand) setOpenIds(toggleExpandedId(openIds, id))
-                      else setExpandedId(prev => (prev === id ? null : id))
-                    }}
-                    expandContent={expandContent}
-                    openContextMenu={(x, y) => setActionMenu({ row, x, y })}
-                    extraColumnCount={(selectable ? 1 : 0) + (rowActions ? 1 : 0)}
-                    chevronMode={multiExpand}
-                    showChevronGutter={multiExpand && expandableIds.length > 0}
                   />
-                )
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={colCount} style={{ padding: '2.5rem 1rem' }}>
+                    <TableStatusBlock>
+                      <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-brand)' }} aria-hidden="true" />
+                      Loading
+                    </TableStatusBlock>
+                  </td>
+                </tr>
+              ) : sortedRows.length === 0 ? (
+                <tr>
+                  <td colSpan={colCount} style={{ padding: 'var(--space-4)' }}>
+                    {empty ?? <TableStatusBlock pad>No items to display.</TableStatusBlock>}
+                  </td>
+                </tr>
+              ) : (
+                pagedRows.map((row, rowIndex) => {
+                  const id = getRowId(row)
+                  const isLast = rowIndex === pagedRows.length - 1
+                  const isSelected = activeSelection?.has(id) ?? false
+                  // Multi-open mode wins when both APIs are supplied.
+                  const canExpand = multiExpand ? expandable(row) : (renderExpand?.(row) ?? null) != null
+                  const isExpanded = multiExpand
+                    ? (canExpand && openIds.has(id))
+                    : (canExpand && expandedId === id)
+                  const expandContent = !isExpanded
+                    ? null
+                    : multiExpand
+                      ? (renderExpanded?.(row, expandedContext) ?? null)
+                      : (renderExpand?.(row) ?? null)
+                  return (
+                    <DataRow<Row>
+                      key={id}
+                      row={row}
+                      rowId={id}
+                      rowIndex={rowIndex}
+                      columns={columns}
+                      onRowClick={onRowClick}
+                      onRowPreview={onRowPreview}
+                      paddingY={rowPaddingY}
+                      isLast={isLast}
+                      isSelected={isSelected}
+                      selectable={selectable}
+                      toggleRow={toggleRow}
+                      rowActions={rowActions}
+                      isExpandable={canExpand}
+                      isExpanded={isExpanded}
+                      toggleExpand={() => {
+                        if (multiExpand) setOpenIds(toggleExpandedId(openIds, id))
+                        else setExpandedId(prev => (prev === id ? null : id))
+                      }}
+                      expandContent={expandContent}
+                      expandedRowMode={multiExpand ? expandedRowMode : 'panel'}
+                      openContextMenu={(x, y) => setActionMenu({ row, x, y })}
+                      extraColumnCount={(selectable ? 1 : 0) + (rowActions ? 1 : 0)}
+                      chevronMode={multiExpand}
+                      showChevronGutter={multiExpand && expandableIds.length > 0}
+                    />
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Pagination footer — only rendered when enabled AND there's
           actually more than one page worth of data. */}
@@ -584,6 +721,30 @@ export function DataTable<Row>({
           onClose={() => setActionMenu(null)}
         />
       )}
+    </div>
+  )
+}
+
+// ── Loading / empty block ───────────────────────────────────────────────────
+//
+// One centred line, shared by the table body and the mobile card list so both
+// say the same thing in the same voice.
+
+function TableStatusBlock({ children, pad = false }: { children: React.ReactNode; pad?: boolean }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '0.5rem',
+        padding: pad ? '1.5rem 0' : undefined,
+        textAlign: 'center',
+        color: 'var(--color-text-subtle)',
+        fontSize: 'var(--text-sm)',
+      }}
+    >
+      {children}
     </div>
   )
 }
@@ -620,12 +781,15 @@ interface DataRowProps<Row> {
   isLast: boolean
   isSelected: boolean
   selectable: boolean
-  toggleRow: (id: string) => void
+  toggleRow: (id: string, rowIndex: number, e?: React.MouseEvent) => void
   rowActions?: (row: Row) => DataTableAction[]
   isExpandable: boolean
   isExpanded: boolean
   toggleExpand: () => void
   expandContent: React.ReactNode
+  /** `rows` drops `expandContent` straight into the tbody; see the prop of
+   *  the same name on <DataTable>. */
+  expandedRowMode: 'panel' | 'rows'
   openContextMenu: (x: number, y: number) => void
   extraColumnCount: number
   /** Multi-open mode: a chevron button drives expansion and the row click
@@ -653,6 +817,7 @@ function DataRow<Row>({
   isExpanded,
   toggleExpand,
   expandContent,
+  expandedRowMode,
   openContextMenu,
   extraColumnCount,
   chevronMode,
@@ -712,11 +877,16 @@ function DataRow<Row>({
               borderBottom: isLast && !isExpanded ? 'none' : '1px solid var(--color-border-subtle)',
               verticalAlign: 'middle',
               width: '2.75rem',
+              // Only the cell the shift-click lands in, not the whole row: a
+              // shift-drag can no longer paint a text selection down the
+              // table, and a title or a client name is still copyable.
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
             }}
           >
             <SelectCheckbox
               checked={isSelected}
-              onChange={() => toggleRow(rowId)}
+              onChange={e => toggleRow(rowId, rowIndex, e)}
               ariaLabel={isSelected ? 'Deselect row' : 'Select row'}
             />
           </td>
@@ -829,7 +999,10 @@ function DataRow<Row>({
           </td>
         )}
       </tr>
-      {isExpanded && expandContent && (
+      {/* Rows mode: the caller's <tr> children go straight into this tbody,
+          so the browser lines their cells up with the parent's columns. */}
+      {isExpanded && expandContent && expandedRowMode === 'rows' && expandContent}
+      {isExpanded && expandContent && expandedRowMode === 'panel' && (
         <tr>
           <td
             colSpan={columns.length + extraColumnCount}
@@ -1048,6 +1221,15 @@ function paginationBtnStyle(enabled: boolean): React.CSSProperties {
 
 // ── Selection checkbox ──────────────────────────────────────────────────────
 
+// The 1.125rem box is the visual; the button around it is the target. Below
+// md it grows to 2.75rem square. The extra width is pulled back with a
+// negative horizontal margin so the column keeps its width, but the extra
+// height is left to push the row taller: a negative vertical margin would
+// overflow the row, and in a compact table the overflow from one row's target
+// lands on top of its neighbour's, so the bottom band of row N's checkbox
+// would select row N+1. A phone getting taller rows in exchange is the point
+// of a 44px target. The event reaches the caller so a shift-click can extend
+// a range.
 function SelectCheckbox({
   checked,
   indeterminate = false,
@@ -1056,38 +1238,54 @@ function SelectCheckbox({
 }: {
   checked: boolean
   indeterminate?: boolean
-  onChange: () => void
+  onChange: (e: React.MouseEvent) => void
   ariaLabel: string
 }) {
   const showCheck = checked || indeterminate
+  const [hover, setHover] = React.useState(false)
   return (
     <button
       type="button"
       role="checkbox"
       aria-checked={indeterminate ? 'mixed' : checked}
       aria-label={ariaLabel}
-      onClick={(e) => { e.stopPropagation(); onChange() }}
+      onClick={(e) => { e.stopPropagation(); onChange(e) }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className="tahi-focus-ring inline-flex items-center justify-center h-11 w-11 mx-[-0.8125rem] md:h-[1.125rem] md:w-[1.125rem] md:mx-0"
       style={{
-        width: '1.125rem',
-        height: '1.125rem',
-        borderRadius: 'var(--radius-sm)',
-        border: showCheck
-          ? '1px solid var(--color-brand)'
-          : '1px solid var(--color-border)',
-        background: showCheck ? 'var(--color-brand)' : 'var(--color-bg)',
-        cursor: 'pointer',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        transition: 'background-color 120ms ease, border-color 120ms ease',
+        flex: 'none',
         padding: 0,
+        border: 'none',
+        borderRadius: 'var(--radius-sm)',
+        background: 'transparent',
+        cursor: 'pointer',
       }}
     >
-      {indeterminate ? (
-        <span style={{ width: '0.5rem', height: '2px', background: '#ffffff', borderRadius: 1 }} />
-      ) : checked ? (
-        <Check size={12} aria-hidden="true" style={{ color: '#ffffff' }} strokeWidth={3} />
-      ) : null}
+      <span
+        aria-hidden="true"
+        style={{
+          width: '1.125rem',
+          height: '1.125rem',
+          flex: 'none',
+          boxSizing: 'border-box',
+          borderRadius: 'var(--radius-sm)',
+          border: showCheck
+            ? '1px solid var(--color-brand)'
+            : `1px solid ${hover ? 'var(--color-brand)' : 'var(--color-border)'}`,
+          background: showCheck ? 'var(--color-brand)' : 'var(--color-bg)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'background-color 120ms ease, border-color 120ms ease',
+        }}
+      >
+        {indeterminate ? (
+          <span style={{ width: '0.5rem', height: '2px', background: 'var(--color-text-on-dark)', borderRadius: '1px' }} />
+        ) : checked ? (
+          <Check size={12} aria-hidden="true" style={{ color: 'var(--color-text-on-dark)' }} strokeWidth={3} />
+        ) : null}
+      </span>
     </button>
   )
 }

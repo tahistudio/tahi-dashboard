@@ -4,15 +4,22 @@
  * <RequestsViewSwitcher>. The four peer views of the Requests surface:
  * List, Kanban, Workload (Tahi only) and Timeline.
  *
- * Icon plus label from 1024px up, icon only below it with the name carried by
- * `title` and `aria-label`. Full WAI-ARIA tab pattern: roving tabindex, arrow
- * keys to cycle, Home and End to jump, matching the board's own tab strip so
- * the two feel like one control language.
+ * A thin arrangement of the shared <SegmentedControl>: the sliding pill, the
+ * brand-tinted active icon, the full WAI-ARIA tab pattern (roving tabindex,
+ * arrows to cycle, Home and End to jump) and the 2.75rem touch targets all
+ * come from the primitive. This file only decides which views this audience
+ * gets and what each one is called.
+ *
+ * The label drops below 1024px, where the rail has already collapsed into the
+ * Filters sheet and the row is at its most crowded; the name is still carried
+ * by `title` and `aria-label`, so the accessible name never changes with the
+ * viewport.
  */
 
-import * as React from 'react'
+import { useMemo } from 'react'
 import { BarChart3, CalendarRange, LayoutGrid, Rows } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { SegmentedControl, type SegmentedControlOption } from '@/components/tahi/segmented-control'
 import { REQUESTS_VIEW_KEYS, type RequestsAudience, type RequestsViewKey } from '@/lib/requests-views'
 
 const VIEW_META: Record<RequestsViewKey, { label: string; Icon: LucideIcon; adminOnly?: boolean }> = {
@@ -35,69 +42,26 @@ export interface RequestsViewSwitcherProps {
 }
 
 export function RequestsViewSwitcher({ value, onChange, audience }: RequestsViewSwitcherProps) {
-  const keys = viewKeysFor(audience)
+  const options = useMemo<SegmentedControlOption<RequestsViewKey>[]>(
+    () => viewKeysFor(audience).map(key => {
+      const { label, Icon } = VIEW_META[key]
+      return { value: key, label, icon: <Icon size={14} aria-hidden="true" /> }
+    }),
+    [audience],
+  )
 
   return (
-    <div
+    <SegmentedControl<RequestsViewKey>
       role="tablist"
-      aria-label="Requests view"
-      className="inline-flex flex-shrink-0"
-      style={{
-        padding: '0.1875rem',
-        gap: '0.0625rem',
-        background: 'var(--color-bg-secondary)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-md)',
-      }}
-    >
-      {keys.map((key, i) => {
-        const { label, Icon } = VIEW_META[key]
-        const active = key === value
-        const onKeyDown = (e: React.KeyboardEvent) => {
-          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-            e.preventDefault()
-            const step = e.key === 'ArrowRight' ? 1 : -1
-            onChange(keys[(i + step + keys.length) % keys.length])
-          } else if (e.key === 'Home') {
-            e.preventDefault()
-            onChange(keys[0])
-          } else if (e.key === 'End') {
-            e.preventDefault()
-            onChange(keys[keys.length - 1])
-          }
-        }
-        return (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            aria-label={label}
-            title={label}
-            tabIndex={active ? 0 : -1}
-            onClick={() => onChange(key)}
-            onKeyDown={onKeyDown}
-            className="tahi-viewtab inline-flex items-center justify-center h-11 min-w-11 px-3 lg:h-8 lg:min-w-0 lg:px-2.5"
-            style={{
-              gap: '0.3125rem',
-              border: 'none',
-              borderRadius: 'var(--radius-sm)',
-              background: active ? 'var(--color-bg)' : 'transparent',
-              fontFamily: 'inherit',
-              fontSize: '0.75rem',
-              fontWeight: 600,
-              color: active ? 'var(--color-text)' : 'var(--color-text-muted)',
-              cursor: 'pointer',
-              transition: 'background-color var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
-            }}
-            onMouseEnter={e => { if (!active) e.currentTarget.style.color = 'var(--color-text)' }}
-            onMouseLeave={e => { if (!active) e.currentTarget.style.color = 'var(--color-text-muted)' }}
-          >
-            <Icon size={14} aria-hidden="true" />
-            <span className="hidden lg:inline">{label}</span>
-          </button>
-        )
-      })}
-    </div>
+      // The e2e suite and the lead's smoke probes both find this strip by
+      // name, so the label is part of the contract, not decoration.
+      ariaLabel="Requests view"
+      size="sm"
+      iconOnlyBelow="lg"
+      value={value}
+      onChange={onChange}
+      options={options}
+      className="flex-shrink-0"
+    />
   )
 }
