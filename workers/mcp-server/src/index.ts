@@ -285,6 +285,7 @@ const TOOLS: ToolDef[] = [
     type: prop('string', 'Type: small_task, large_task, bug_fix, content_update, new_feature, consultation, custom'),
     description: prop('string', 'Description of the request'),
     dueDate: prop('string', 'Due date in YYYY-MM-DD format'),
+    status: prop('string', 'Optional starting status. One of: submitted (default), in_review, in_progress, client_review, on_hold, archived. Delivered and cancelled are not creatable; move the request there with update_request_status.'),
   }, ['title', 'clientOrgId']),
   tool('update_request_status', 'Update the status of a request', {
     requestId: prop('string', 'Request ID'),

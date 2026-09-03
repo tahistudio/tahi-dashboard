@@ -97,6 +97,53 @@ export function parseTimelineDate(value?: string | null, now: number = Date.now(
   return Number.isNaN(iso) ? null : iso
 }
 
+/** One row's place on the chart, plus whether that place is a real
+ *  deadline or the fallback below. */
+export interface TimelinePlot extends TimelineRange {
+  /** True when `endTs` is the item's own due date. False when the item
+   *  has none and is plotted on the day it was raised instead, which is
+   *  what stops an undated row from ever reading as overdue. */
+  dated: boolean
+}
+
+/**
+ * Where one item sits. An item with a due date draws from its start (a
+ * bar) or on the date alone (a milestone). An item with no due date is
+ * still worth seeing, so it drops a milestone on the day it was raised:
+ * on a board where most work is undated, dropping those rows leaves a
+ * view that reads as empty when it is not.
+ *
+ * Returns null only when there is no usable date at all.
+ */
+export function timelinePlot(args: {
+  dueDate?: string | null
+  startDate?: string | null
+  createdDate?: string | null
+  now: number
+}): TimelinePlot | null {
+  const { now } = args
+  const due = parseTimelineDate(args.dueDate, now)
+  if (due != null) {
+    return { startTs: parseTimelineDate(args.startDate, now), endTs: due, dated: true }
+  }
+  const created = parseTimelineDate(args.createdDate, now)
+  if (created != null) return { startTs: null, endTs: created, dated: false }
+  return null
+}
+
+/**
+ * Row order: soonest deadline at the top, undated rows after every dated
+ * one. Undated rows then run oldest first, so the longest-waiting work
+ * heads that tail.
+ */
+export function compareTimelineRows(
+  a: { endTs: number; dated: boolean },
+  b: { endTs: number; dated: boolean },
+): number {
+  if (a.dated !== b.dated) return a.dated ? -1 : 1
+  return a.endTs - b.endTs
+}
+
 /**
  * The plotted window. Today is folded into the extent before padding, so
  * a board whose work all sits in the past or all in the future still

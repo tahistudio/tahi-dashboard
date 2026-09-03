@@ -10,6 +10,7 @@ import {
   AlertTriangle, ChevronDown, Inbox, RefreshCw,
   Calendar, Zap, Download,
   CheckSquare, Square, Users, Loader2, X, Sparkles,
+  Palette, Code2, FileText, Compass, Briefcase, Bug, Megaphone, Tag,
 } from 'lucide-react'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
@@ -35,6 +36,7 @@ import {
 import { SubRequestRows } from '@/components/tahi/requests/sub-request-rows'
 import { REQUEST_STATUSES } from '@/lib/status-config'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
+import { subtaskRollup } from '@/components/tahi/kanban-board'
 import {
   BoardView,
   type BoardItem,
@@ -93,6 +95,9 @@ interface Request {
   /** How many children hang off this request. Both list APIs return it;
    *  a positive value is what gives the row its expand chevron. */
   subRequestCount?: number | null
+  /** How many of those children are delivered. Both list APIs return it;
+   *  it is the "done" half of the kanban card's subtask bar. */
+  subRequestDoneCount?: number | null
   // JSON array string of the owning org's free-form tags
   orgTags?: string | null
   /** Project manager, assignee and followers, from request_participants.
@@ -126,15 +131,42 @@ interface DateRange {
 
 import { REQUEST_STATUS_CONFIG as STATUS_CFG, CATEGORY_CONFIG as CAT_CFG } from '@/lib/status-config'
 
+// The marker over the intake column: everything landing here is waiting to
+// be triaged, which is the one column that is a job rather than a state.
+const TRIAGE_BADGE = {
+  badge: 'Triage',
+  badgeTone: {
+    bg: 'var(--status-submitted-bg)',
+    text: 'var(--status-submitted-text)',
+    border: 'var(--status-submitted-border)',
+  },
+} as const
+
 // Default board columns mapped to the shared BoardView column shape. Used as a
-// fallback when no per-client custom kanban columns are configured.
+// fallback when no per-client custom kanban columns are configured. On Hold
+// earns a column of its own: without one, a held request is grouped under a
+// status no column claims and silently vanishes from the board.
 const BOARD_COLS: BoardViewColumn[] = [
-  { id: 'submitted',     label: 'Submitted',     statusValue: 'submitted',     color: 'var(--status-submitted-dot)'     },
+  { id: 'submitted',     label: 'Submitted',     statusValue: 'submitted',     color: 'var(--status-submitted-dot)', ...TRIAGE_BADGE },
   { id: 'in_review',     label: 'In Review',     statusValue: 'in_review',     color: 'var(--status-in-review-dot)'     },
   { id: 'in_progress',   label: 'In Progress',   statusValue: 'in_progress',   color: 'var(--status-in-progress-dot)'   },
   { id: 'client_review', label: 'Client Review', statusValue: 'client_review', color: 'var(--status-client-review-dot)' },
+  { id: 'on_hold',       label: 'On Hold',       statusValue: 'on_hold',       color: 'var(--badge-warning-dot)'        },
   { id: 'delivered',     label: 'Delivered',     statusValue: 'delivered',     color: 'var(--status-delivered-dot)'     },
 ]
+
+// Category chips on a card are icon-only and tinted, so the row reads at a
+// glance on a 16.5rem column. The label still reaches the user through the
+// chip's tooltip and accessible name.
+const CATEGORY_ICON: Record<string, typeof Palette> = {
+  design:      Palette,
+  development: Code2,
+  content:     FileText,
+  strategy:    Compass,
+  admin:       Briefcase,
+  bug:         Bug,
+  marketing:   Megaphone,
+}
 
 const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, standard: 2 }
 
@@ -387,6 +419,8 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
           label: c.label,
           statusValue: c.statusValue,
           color: c.colour ?? `var(--status-${c.statusValue.replace(/_/g, '-')}-dot)`,
+          // A client can rename their intake column; it is still triage.
+          ...(c.statusValue === 'submitted' ? TRIAGE_BADGE : {}),
         }))
     }
     return BOARD_COLS
@@ -764,13 +798,28 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       }
     }
     const toItem = (r: Request): BoardItem => {
+      // Admins see which client a card belongs to; a client already knows.
+      const showClientAvatar = isAdmin && !!r.orgId && !!r.orgName
       const tags: BoardTag[] = []
       if (r.category) {
         const cat = CAT_CFG[r.category]
-        tags.push({ id: `cat-${r.category}`, label: formatType(r.category), color: cat?.color })
+        const CategoryIcon = CATEGORY_ICON[r.category] ?? Tag
+        tags.push({
+          id: `cat-${r.category}`,
+          label: formatType(r.category),
+          color: cat?.color,
+          background: cat?.bg,
+          icon: <CategoryIcon size={12} strokeWidth={2.2} aria-hidden="true" />,
+          iconOnly: true,
+        })
       }
-      for (const t of parseOrgTags(r.orgTags)) {
-        tags.push({ id: `tag-${t}`, label: t })
+      // The org's own tags are the client's identity in another form. Once
+      // the client avatar is on the card they say nothing new, and they cost
+      // the chip row the space the category and priority need.
+      if (!showClientAvatar) {
+        for (const t of parseOrgTags(r.orgTags)) {
+          tags.push({ id: `tag-${t}`, label: t })
+        }
       }
       const overdue = getDueDateState(r.dueDate, r.status) === 'overdue'
 
@@ -803,7 +852,6 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         })
       }
 
-      const subCount = r.subRequestCount ?? 0
       const delivered = r.status === 'delivered'
 
       return {
@@ -818,20 +866,22 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         priority: toBoardPriority(r.priority),
         tags: tags.length > 0 ? tags : undefined,
         warning: r.scopeFlagged ? 'Flagged for scope creep' : undefined,
-        // Admins see which client a card belongs to; a client already knows.
-        client: isAdmin && r.orgId && r.orgName
+        client: showClientAvatar && r.orgId && r.orgName
           ? { id: r.orgId, name: r.orgName, avatarUrl: r.orgLogoUrl }
           : undefined,
         people: people.length > 0 ? people : undefined,
         unassigned: people.length === 0,
-        // A done count is not in the list payload yet, so the bar reads as
-        // "0 of N" until the API carries it.
-        subtasks: subCount > 0 ? { done: 0, total: subCount } : undefined,
+        // Both list routes count the delivered children beside the total,
+        // so the bar reads "2 of 4" rather than always "0 of 4".
+        subtasks: subtaskRollup(r.subRequestCount, r.subRequestDoneCount),
         // A delivered request is finished, so its card shows no due chip.
         // The date itself stays, because the timeline still plots by it.
         dueDate: r.dueDate ?? undefined,
         hideDueChip: delivered,
         startDate: r.startDate ?? undefined,
+        // Undated work plots on the day it was raised rather than dropping
+        // off the timeline entirely.
+        createdDate: r.createdAt ?? undefined,
         isOverdue: overdue,
       }
     }
@@ -1095,11 +1145,75 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     if (next === 'kanban' || next === 'timeline') rail.setView(next)
   }, [rail])
 
+  // ── Board: quick-add, chip clicks, off-board tail ─────────────────────────
+  // Quick-add writes straight through the admin POST, so it needs a client to
+  // write against. The rail's client filter is the only place the board knows
+  // one; without it the column plus opens the full dialog instead.
+  const canWriteRequests = isAdmin && !isViewerImpersonation
+  const quickAddOrgId = railOn && rail.filters.client !== 'all'
+    ? rail.filters.client
+    : defaultClientId ?? null
+
+  const handleQuickAdd = useCallback(async (status: string, title: string) => {
+    if (!canWriteRequests || !quickAddOrgId) return
+    try {
+      const res = await fetch(apiPath('/api/admin/requests'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientOrgId: quickAddOrgId, title, status }),
+      })
+      if (!res.ok) throw new Error('Failed')
+      showToast('Request added', 'success')
+      mutateRequests()
+    } catch {
+      showToast('Could not add the request', 'error')
+    }
+  }, [canWriteRequests, quickAddOrgId, showToast, mutateRequests])
+
+  // One filter model. A category chip on a card narrows the rail's category
+  // filter rather than opening a second, invisible one inside the board.
+  const handleBoardTagClick = useCallback((tag: BoardTag) => {
+    if (!railOn) return
+    const category = tag.id.startsWith('cat-') ? tag.id.slice(4) : null
+    if (!category) return
+    rail.setFilters({
+      ...rail.filters,
+      category: rail.filters.category === category ? 'all' : category,
+    })
+  }, [railOn, rail])
+
+  // Capacity lanes. Client audience only, and only on the rail path, so a
+  // real client keeps the page they have today until the port is signed off.
+  // It answers "what is my plan doing right now", which is only true of the
+  // whole list: a search, a filter or a saved view all narrow the set under
+  // it, so the strip stands down until the list is showing everything again.
+  // Renders nothing for a client with no active retainer.
+  const showCapacityStrip = railOn
+    && !isAdmin
+    && effectiveView === 'list'
+    && rail.query.trim() === ''
+    && railChips.length === 0
+    && !rail.savedView
+
+  // Statuses with no column are grouped nowhere and simply do not render, so
+  // the board says how much work it is not showing rather than losing it.
+  const offBoard = useMemo(() => {
+    const known = new Set(boardColumns.map(c => c.statusValue))
+    const missing = visible.filter(r => !r.parentRequestId && !known.has(r.status))
+    const labels = Array.from(new Set(
+      missing.map(r => STATUS_CFG[r.status]?.label ?? formatType(r.status)),
+    ))
+    return { count: missing.length, labels }
+  }, [visible, boardColumns])
+
   // The body under the toolbar. Identical in both paths; only the toolbar
   // around it changes.
   const content = effectiveView === 'workload' && isAdmin ? (
     // WorkloadView keeps its own card surface, so it isn't re-wrapped.
-    <WorkloadView requests={visible} />
+    <WorkloadView
+      requests={visible}
+      onOpen={(id) => { router.push(`/requests/${id}`) }}
+    />
   ) : (railOn && effectiveView === 'timeline') ? (
     // On the rail, Timeline is a peer of List and Kanban rather than a tab
     // inside the board, so it renders on its own. The legacy path keeps
@@ -1111,24 +1225,41 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       onOpen={(item) => { router.push(`/requests/${item.id}`) }}
     />
   ) : (effectiveView === 'board' || effectiveView === 'kanban' || effectiveView === 'timeline') ? (
-    <BoardView
-      views={['kanban', 'timeline']}
-      defaultView="kanban"
-      view={boardSubView}
-      onViewChange={railOn ? handleBoardSubViewChange : undefined}
-      hideHeader={railOn}
-      columns={boardColumns}
-      items={boardItems}
-      searchPlaceholder="Search requests"
-      onMove={isAdmin ? handleBoardMove : undefined}
-      onNest={isAdmin ? handleBoardNest : undefined}
-      onItemClick={(item) => { router.push(`/requests/${item.id}`) }}
-      readOnly={!isAdmin}
-      iconOnlyPriority
-      subtaskUrl={(item) => isAdmin
-        ? `/api/admin/requests/${item.id}/sub-requests`
-        : `/api/portal/requests/${item.id}/sub-requests`}
-    />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      <BoardView
+        views={['kanban', 'timeline']}
+        defaultView="kanban"
+        view={boardSubView}
+        onViewChange={railOn ? handleBoardSubViewChange : undefined}
+        hideHeader={railOn}
+        columns={boardColumns}
+        items={boardItems}
+        searchPlaceholder="Search requests"
+        onMove={isAdmin ? handleBoardMove : undefined}
+        onNest={isAdmin ? handleBoardNest : undefined}
+        // Quick-add when the board knows the client to write against;
+        // otherwise the column plus opens the full dialog, which asks.
+        onQuickAdd={canWriteRequests && quickAddOrgId ? handleQuickAdd : undefined}
+        onAdd={canWriteRequests && !quickAddOrgId ? () => setDialogOpen(true) : undefined}
+        onTagClick={railOn ? handleBoardTagClick : undefined}
+        onItemClick={(item) => { router.push(`/requests/${item.id}`) }}
+        readOnly={!isAdmin}
+        iconOnlyPriority
+        subtaskUrl={(item) => isAdmin
+          ? `/api/admin/requests/${item.id}/sub-requests`
+          : `/api/portal/requests/${item.id}/sub-requests`}
+      />
+      {offBoard.count > 0 && (
+        <p style={{
+          margin: 0,
+          fontSize: '0.75rem',
+          color: 'var(--color-text-subtle)',
+          lineHeight: 1.5,
+        }}>
+          {`${offBoard.count} ${offBoard.count === 1 ? 'request sits' : 'requests sit'} off the board (${offBoard.labels.join(', ')}). The list view shows ${offBoard.count === 1 ? 'it' : 'them'}.`}
+        </p>
+      )}
+    </div>
   ) : (
     <Card padding="none">
       <DataTable<Request>
@@ -1334,16 +1465,6 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
           </Card>
         )}
 
-        {/* Capacity lanes. Client audience only, and only on the rail path,
-            so a real client keeps the page they have today until the port is
-            signed off. Renders nothing for a client with no active retainer. */}
-        {railOn && !isAdmin && (
-          <CapacityStrip
-            requests={requests}
-            onOpen={(id) => { router.push(`/requests/${id}`) }}
-          />
-        )}
-
         {/* Content area */}
         {railOn ? (
           <RequestsRailLayout
@@ -1373,6 +1494,12 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
             total={visible.length}
             loading={loading}
           >
+            {showCapacityStrip && (
+              <CapacityStrip
+                requests={requests}
+                onOpen={(id) => { router.push(`/requests/${id}`) }}
+              />
+            )}
             {content}
           </RequestsRailLayout>
         ) : content}
@@ -1415,30 +1542,66 @@ interface WorkloadTeamMember {
   avatarUrl: string | null
 }
 
-function WorkloadView({ requests }: { requests: Request[] }) {
+/** Open requests one person can hold before the bar says they are full.
+ *  A studio-wide number, not a per-person one, so the cards compare. */
+const WORKLOAD_CAPACITY = 5
+/** Statuses that stop counting against a person's load. */
+const WORKLOAD_CLOSED_STATUSES: readonly string[] = ['delivered', 'cancelled', 'archived']
+/** How many of a person's requests are named before the "+N more" line. */
+const WORKLOAD_PREVIEW = 4
+
+function WorkloadView({
+  requests,
+  onOpen,
+}: {
+  requests: Request[]
+  onOpen: (id: string) => void
+}) {
   const { data: membersData, isLoading: loadingMembers } =
     useSWR<{ items: WorkloadTeamMember[] }>('/api/admin/team-members')
   const members = membersData?.items ?? []
 
   if (loadingMembers) {
     return (
-      <div style={{ padding: '1.5rem' }}>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(18rem, 1fr))',
+        gap: '0.75rem',
+      }}>
         {[...Array(4)].map((_, i) => (
-          <div key={i} className="flex items-center gap-3 animate-pulse" style={{ marginBottom: '1rem' }}>
-            <div className="rounded-full" style={{ width: '2rem', height: '2rem', background: 'var(--color-border-subtle)' }} />
-            <div className="h-4 rounded" style={{ width: '8rem', background: 'var(--color-border-subtle)' }} />
-            <div className="h-4 rounded" style={{ width: '3rem', background: 'var(--color-border-subtle)', marginLeft: 'auto' }} />
+          <div
+            key={i}
+            className="animate-pulse"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.625rem',
+              padding: '0.875rem 0.9375rem',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-card)',
+              background: 'var(--color-bg)',
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <div className="rounded-full" style={{ width: '2rem', height: '2rem', background: 'var(--color-border-subtle)' }} />
+              <div className="h-4 rounded" style={{ width: '8rem', background: 'var(--color-border-subtle)' }} />
+              <div className="h-4 rounded" style={{ width: '2.5rem', background: 'var(--color-border-subtle)', marginLeft: 'auto' }} />
+            </div>
+            <div className="rounded" style={{ height: '0.5rem', background: 'var(--color-border-subtle)' }} />
           </div>
         ))}
       </div>
     )
   }
 
-  // Count assigned requests per team member
+  // Only open work counts. Delivered, cancelled and archived requests stay
+  // on someone's name forever, and counting them would say a teammate is
+  // busy because of what they finished last quarter.
   const assignmentMap = new Map<string, Request[]>()
   const unassigned: Request[] = []
 
   for (const req of requests) {
+    if (WORKLOAD_CLOSED_STATUSES.includes(req.status)) continue
     if (req.assigneeId) {
       const existing = assignmentMap.get(req.assigneeId) ?? []
       existing.push(req)
@@ -1448,170 +1611,245 @@ function WorkloadView({ requests }: { requests: Request[] }) {
     }
   }
 
-  const maxCount = Math.max(
-    1,
-    ...members.map(m => (assignmentMap.get(m.id) ?? []).length),
-    unassigned.length
-  )
-
   return (
-    <div style={{ padding: '1rem' }}>
-      <div
-        className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
-        style={{ border: '1px solid var(--color-border)' }}
-      >
-        {/* Table header */}
-        <div
-          className="grid text-xs font-semibold uppercase tracking-wide"
-          style={{
-            gridTemplateColumns: '1fr 5rem 1fr',
-            padding: '0.625rem 1rem',
-            borderBottom: '1px solid var(--color-border-subtle)',
-            color: 'var(--color-th-text)',
-            background: 'var(--color-th-bg)',
-          }}
-        >
-          <span>Team Member</span>
-          <span style={{ textAlign: 'center' }}>Assigned</span>
-          <span>Capacity</span>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <h3 style={{
+        margin: 0,
+        fontSize: '0.6875rem',
+        fontWeight: 700,
+        letterSpacing: '0.05em',
+        textTransform: 'uppercase',
+        color: 'var(--color-text-subtle)',
+      }}>
+        Team load, open work only
+      </h3>
 
-        {members.map((member, i) => {
-          const assigned = assignmentMap.get(member.id) ?? []
-          const pct = maxCount > 0 ? Math.round((assigned.length / maxCount) * 100) : 0
-          const isLast = i === members.length - 1 && unassigned.length === 0
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(18rem, 1fr))',
+        gap: '0.75rem',
+      }}>
+        {members.map(member => (
+          <WorkloadCard
+            key={member.id}
+            name={member.name}
+            role={member.role}
+            initials={getInitials(member.name)}
+            items={assignmentMap.get(member.id) ?? []}
+            onOpen={onOpen}
+          />
+        ))}
 
-          return (
-            <div
-              key={member.id}
-              className="grid items-center"
-              style={{
-                gridTemplateColumns: '1fr 5rem 1fr',
-                padding: '0.75rem 1rem',
-                borderBottom: isLast ? 'none' : '1px solid var(--color-row-border)',
-              }}
-            >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div
-                  className="flex items-center justify-center rounded-full flex-shrink-0 font-semibold"
-                  style={{
-                    width: '2rem',
-                    height: '2rem',
-                    fontSize: '0.6875rem',
-                    background: 'var(--color-brand)',
-                    color: 'white',
-                  }}
-                >
-                  {getInitials(member.name)}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text)' }}>
-                    {member.name}
-                  </p>
-                  {member.role && (
-                    <p className="text-xs truncate" style={{ color: 'var(--color-text-subtle)' }}>
-                      {member.role}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <span
-                className="text-sm font-semibold"
-                style={{ textAlign: 'center', color: assigned.length > 0 ? 'var(--color-text)' : 'var(--color-text-subtle)' }}
-              >
-                {assigned.length}
-              </span>
-              <div className="flex items-center gap-2">
-                <div
-                  style={{
-                    flex: 1,
-                    height: '0.5rem',
-                    background: 'var(--color-bg-tertiary)',
-                    borderRadius: '0.25rem',
-                    overflow: 'hidden',
-                  }}
-                >
-                  <div
-                    style={{
-                      width: `${pct}%`,
-                      height: '100%',
-                      background: pct > 100 ? 'var(--color-danger)' : pct > 75 ? 'var(--color-warning)' : 'var(--color-brand)',
-                      borderRadius: '0.25rem',
-                      transition: 'width 0.3s',
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-          )
-        })}
-
-        {/* Unassigned row */}
+        {/* The unassigned lane is a repo addition, not a prototype one, and
+            worth keeping: it is the only place a request with nobody on it
+            is counted rather than filed under someone. */}
         {unassigned.length > 0 && (
-          <div
-            className="grid items-center"
-            style={{
-              gridTemplateColumns: '1fr 5rem 1fr',
-              padding: '0.75rem 1rem',
-              background: 'var(--color-bg-secondary)',
-            }}
-          >
-            <div className="flex items-center gap-2.5">
-              <div
-                className="flex items-center justify-center rounded-full flex-shrink-0"
-                style={{
-                  width: '2rem',
-                  height: '2rem',
-                  background: 'var(--color-bg-tertiary)',
-                  color: 'var(--color-text-subtle)',
-                }}
-              >
-                <Inbox style={{ width: '0.875rem', height: '0.875rem' }} />
-              </div>
-              <p className="text-sm font-medium" style={{ color: 'var(--color-text-muted)' }}>
-                Unassigned
-              </p>
-            </div>
-            <span
-              className="text-sm font-semibold"
-              style={{ textAlign: 'center', color: 'var(--color-warning)' }}
-            >
-              {unassigned.length}
-            </span>
-            <div className="flex items-center gap-2">
-              <div
-                style={{
-                  flex: 1,
-                  height: '0.5rem',
-                  background: 'var(--color-bg-tertiary)',
-                  borderRadius: '0.25rem',
-                  overflow: 'hidden',
-                }}
-              >
-                <div
-                  style={{
-                    width: `${Math.round((unassigned.length / maxCount) * 100)}%`,
-                    height: '100%',
-                    background: 'var(--color-danger)',
-                    borderRadius: '0.25rem',
-                    transition: 'width 0.3s',
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {members.length === 0 && (
-          <div className="flex flex-col items-center justify-center text-center" style={{ padding: '3rem 1.5rem' }}>
-            <Users style={{ width: '2rem', height: '2rem', color: 'var(--color-text-subtle)', marginBottom: '0.75rem' }} />
-            <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>No team members</p>
-            <p className="text-xs" style={{ color: 'var(--color-text-subtle)', marginTop: '0.25rem' }}>
-              Add team members to see workload distribution.
-            </p>
-          </div>
+          <WorkloadCard
+            name="Unassigned"
+            role="Nobody is on these yet"
+            icon={<Inbox style={{ width: '0.875rem', height: '0.875rem' }} aria-hidden="true" />}
+            items={unassigned}
+            onOpen={onOpen}
+          />
         )}
       </div>
+
+      {members.length === 0 && (
+        <div
+          className="flex flex-col items-center justify-center text-center"
+          style={{
+            padding: '3rem 1.5rem',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-card)',
+            background: 'var(--color-bg)',
+          }}
+        >
+          <Users style={{ width: '2rem', height: '2rem', color: 'var(--color-text-subtle)', marginBottom: '0.75rem' }} />
+          <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>No team members</p>
+          <p className="text-xs" style={{ color: 'var(--color-text-subtle)', marginTop: '0.25rem' }}>
+            Add team members to see workload distribution.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** One teammate (or the unassigned lane): load against capacity, then the
+ *  first few requests behind that number so it is a starting point rather
+ *  than a score. */
+function WorkloadCard({
+  name,
+  role,
+  initials,
+  icon,
+  items,
+  onOpen,
+}: {
+  name: string
+  role?: string | null
+  initials?: string
+  icon?: React.ReactNode
+  items: Request[]
+  onOpen: (id: string) => void
+}) {
+  const load = items.length
+  // Against a fixed capacity, not against the busiest person: scaling to the
+  // busiest painted whoever held the most work at exactly 100 percent, even
+  // when that was one request, and never reached the danger tone at all.
+  const rawPct = (load / WORKLOAD_CAPACITY) * 100
+  const tone = rawPct > 100
+    ? 'var(--color-danger)'
+    : rawPct > 75 ? 'var(--color-warning)' : 'var(--color-brand)'
+  const preview = items.slice(0, WORKLOAD_PREVIEW)
+  const rest = load - preview.length
+
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '0.625rem',
+      padding: '0.875rem 0.9375rem',
+      border: '1px solid var(--color-border)',
+      borderRadius: 'var(--radius-card)',
+      background: 'var(--color-bg)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
+        <span
+          aria-hidden="true"
+          className="flex items-center justify-center rounded-full flex-shrink-0 font-semibold"
+          style={{
+            width: '2rem',
+            height: '2rem',
+            fontSize: '0.6875rem',
+            background: icon ? 'var(--color-bg-tertiary)' : 'var(--color-brand)',
+            color: icon ? 'var(--color-text-subtle)' : '#ffffff',
+          }}
+        >
+          {icon ?? initials}
+        </span>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text)', margin: 0 }}>
+            {name}
+          </p>
+          {role && (
+            <p className="text-xs truncate" style={{ color: 'var(--color-text-subtle)', margin: 0 }}>
+              {role}
+            </p>
+          )}
+        </div>
+        <span
+          className="text-sm font-semibold"
+          style={{
+            flexShrink: 0,
+            fontVariantNumeric: 'tabular-nums',
+            color: load > 0 ? 'var(--color-text)' : 'var(--color-text-subtle)',
+          }}
+        >
+          {`${load} / ${WORKLOAD_CAPACITY}`}
+        </span>
+      </div>
+
+      <div
+        role="progressbar"
+        aria-valuenow={load}
+        aria-valuemin={0}
+        aria-valuemax={WORKLOAD_CAPACITY}
+        aria-label={`${name}, ${load} of ${WORKLOAD_CAPACITY} open requests`}
+        style={{
+          height: '0.5rem',
+          background: 'var(--color-bg-tertiary)',
+          borderRadius: 'var(--radius-full)',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{
+          // The bar stops at full; the colour is what carries "over".
+          width: `${Math.min(100, rawPct)}%`,
+          height: '100%',
+          background: tone,
+          borderRadius: 'var(--radius-full)',
+          transition: 'width 0.3s',
+        }} />
+      </div>
+
+      {load === 0 ? (
+        <p style={{ margin: 0, fontSize: '0.75rem', fontStyle: 'italic', color: 'var(--color-text-subtle)' }}>
+          Nothing open.
+        </p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
+          {preview.map(r => {
+            const overdue = getDueDateState(r.dueDate, r.status) === 'overdue'
+            return (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => onOpen(r.id)}
+                className="tahi-focus-ring"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  width: '100%',
+                  minHeight: '1.75rem',
+                  padding: '0.1875rem 0.25rem',
+                  border: 'none',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'transparent',
+                  textAlign: 'left',
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                  transition: 'background-color 120ms ease',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: '0.4375rem',
+                    height: '0.4375rem',
+                    flexShrink: 0,
+                    borderRadius: 'var(--radius-full)',
+                    background: STATUS_CFG[r.status]?.dot ?? 'var(--color-text-subtle)',
+                  }}
+                />
+                <span style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontSize: '0.78125rem',
+                  color: 'var(--color-text-muted)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {r.title}
+                </span>
+                {r.dueDate && (
+                  <span style={{
+                    flexShrink: 0,
+                    fontSize: '0.6875rem',
+                    fontVariantNumeric: 'tabular-nums',
+                    color: overdue ? 'var(--color-danger)' : 'var(--color-text-subtle)',
+                  }}>
+                    {formatDate(r.dueDate)}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+          {rest > 0 && (
+            <p style={{
+              margin: '0.125rem 0 0 0.9375rem',
+              fontSize: '0.71875rem',
+              color: 'var(--color-text-subtle)',
+            }}>
+              {`+${rest} more`}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

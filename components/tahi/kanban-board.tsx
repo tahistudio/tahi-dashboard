@@ -35,11 +35,12 @@
 import * as React from 'react'
 import useSWR from 'swr'
 import {
-  Plus, MoreHorizontal, Calendar, MessageCircle, Paperclip,
+  Plus, MoreHorizontal, MessageCircle, Paperclip,
   ChevronDown, ChevronRight, ChevronsUp, ChevronUp, Minus,
   GripVertical, AlertTriangle, User,
 } from 'lucide-react'
 import { Avatar } from '@/components/tahi/avatar'
+import { DueDateChip } from '@/components/tahi/due-date-chip'
 import { Popover } from '@/components/tahi/popover'
 import { Tooltip } from '@/components/tahi/tooltip'
 import { BoardScrollbar } from '@/components/tahi/board-scrollbar'
@@ -74,6 +75,15 @@ export interface BoardTag {
   /** Hex or var() string. Used for the chip tint + text. If omitted,
    *  the chip falls back to neutral grey. */
   color?: string
+  /** Chip fill. Pairs with `color` to make a tinted chip (a category on
+   *  its `--cat-*` tokens) rather than the default neutral surface. */
+  background?: string
+  /** Glyph shown before the label, or on its own when `iconOnly`. */
+  icon?: React.ReactNode
+  /** Drop the label and keep the glyph. The label still names the chip
+   *  through its tooltip and accessible name, so nothing is lost to a
+   *  screen reader or a keyboard user. */
+  iconOnly?: boolean
 }
 
 export interface BoardChecklistItem {
@@ -114,6 +124,9 @@ export interface BoardItem {
    *  view renders a bar spanning the range; otherwise the timeline
    *  drops a milestone marker at dueDate. */
   startDate?: string
+  /** When the item was raised. The timeline plots an item with no due
+   *  date here, as a hollow milestone, rather than dropping the row. */
+  createdDate?: string
   /** Surfaces an overdue tone when set. */
   isOverdue?: boolean
   /** Suppress the kanban card's due chip while keeping `dueDate` itself.
@@ -148,6 +161,11 @@ export interface BoardColumn {
   statusValue: string
   /** Header dot colour. */
   color?: string
+  /** Small marker beside the column name, e.g. "Triage" over the intake
+   *  column. Tinted with the column's own status tokens when given. */
+  badge?: string
+  /** Token trio behind `badge`. Defaults to the neutral surface. */
+  badgeTone?: { bg: string; text: string; border: string }
 }
 
 export interface ColumnAction {
@@ -166,8 +184,14 @@ interface KanbanBoardProps {
   /** Fires when a card is dragged onto another card — caller decides
    *  whether to nest (prompt + persist parentId). */
   onNest?: (childId: string, parentId: string) => void
-  /** "+ Add card" button at the bottom of each column. */
+  /** "+ Add card" button at the bottom of each column. Opens whatever the
+   *  caller wants (usually the full new-item dialog). */
   onAdd?: (status: string) => void
+  /** Inline quick-add. When supplied, the column footer becomes the
+   *  composer: a title, Enter to add, Escape to cancel. Takes precedence
+   *  over `onAdd`, which stays available for callers that only want a
+   *  dialog. Returning a promise is fine; the composer closes optimistically. */
+  onQuickAdd?: (status: string, title: string) => void
   /** Click a checklist checkbox. */
   onToggleChecklist?: (itemId: string, checklistItemId: string) => void
   /** Click a card body (not the chips / checkboxes). */
@@ -219,6 +243,26 @@ const KANBAN_CSS = `
   box-shadow: var(--shadow-md);
   transform: rotate(-1.5deg);
 }
+/* A draggable card says so under the cursor. The rule lives here rather
+   than inline so :active can answer it; an inline cursor would win. */
+.tahi-board-card[draggable="true"]{ cursor: grab; }
+.tahi-board-card[draggable="true"]:active{ cursor: grabbing; }
+/* Column header buttons. Sized here rather than inline so the mobile
+   media query below can grow them to a 2.75rem touch target. */
+.tahi-board-colbtn{ width: 1.375rem; height: 1.375rem; }
+/* The grip is the visual half of that promise: invisible at rest, half
+   there on hover, never in the way (pointer-events: none inline). */
+.tahi-kanban-grip{ opacity: 0; transition: opacity 120ms ease; }
+.tahi-board-card:hover .tahi-kanban-grip{ opacity: 0.5; }
+/* Settle: the card lands back flat after a drop instead of snapping. */
+.tahi-board-card[data-settling="true"]{
+  animation: tahi-board-settle 420ms cubic-bezier(.22, 1, .36, 1) both;
+}
+@keyframes tahi-board-settle{
+  0%{ transform: rotate(-2.5deg) scale(0.96); opacity: 0.5; }
+  55%{ transform: rotate(0.6deg) scale(1.015); opacity: 1; }
+  100%{ transform: rotate(0) scale(1); opacity: 1; }
+}
 /* The card sits in a horizontal scroller, so its focus ring goes inside the
    box: an outside ring would be clipped at the scroller's edges. Layered with
    the resting and hover shadows so focusing a hovered card keeps both. */
@@ -247,13 +291,35 @@ const KANBAN_CSS = `
   .tahi-kanban-scroller > [data-board-column]{ scroll-snap-align: start; }
   .tahi-board-subs-bar{ min-height: 2.75rem; }
   .tahi-board-sub-row{ min-height: 1.875rem; }
+  .tahi-board-quickadd-btn,
+  .tahi-board-quickadd-form button{ min-height: 2.75rem; }
+  .tahi-board-colbtn{ width: 2.75rem; height: 2.75rem; }
 }
 @media (prefers-reduced-motion: reduce){
   .tahi-board-card:hover{ transform: none; }
+  .tahi-board-card[data-settling="true"]{ animation: none; }
   .tahi-board-sublist{ animation: none; }
   .tahi-board-subs-chevron{ transition: color 150ms ease; }
 }
 `
+
+// ── Pure helpers ─────────────────────────────────────────────────────
+
+/**
+ * The subtask rollup a card's progress bar reads. Returns undefined when
+ * there is nothing to roll up, which is the card's cue to render no bar.
+ * Done is clamped into the range, so a stale or over-counted done value
+ * can never draw past full or below empty.
+ */
+export function subtaskRollup(
+  total: number | null | undefined,
+  done: number | null | undefined,
+): { done: number; total: number } | undefined {
+  const t = Math.max(0, Math.trunc(total ?? 0))
+  if (t === 0) return undefined
+  const d = Math.min(t, Math.max(0, Math.trunc(done ?? 0)))
+  return { done: d, total: t }
+}
 
 // ── Component ────────────────────────────────────────────────────────
 
@@ -263,6 +329,7 @@ export function KanbanBoard({
   onMove,
   onNest,
   onAdd,
+  onQuickAdd,
   onToggleChecklist,
   onItemClick,
   onAssigneeClick,
@@ -282,6 +349,17 @@ export function KanbanBoard({
   const [dragId, setDragId] = React.useState<string | null>(null)
   const [dropColumn, setDropColumn] = React.useState<string | null>(null)
   const [dropOnCard, setDropOnCard] = React.useState<string | null>(null)
+  // The card that just landed, so it can play the settle animation once.
+  const [settledId, setSettledId] = React.useState<string | null>(null)
+  const settleTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  React.useEffect(() => () => {
+    if (settleTimer.current) clearTimeout(settleTimer.current)
+  }, [])
+  const markSettled = React.useCallback((id: string) => {
+    if (settleTimer.current) clearTimeout(settleTimer.current)
+    setSettledId(id)
+    settleTimer.current = setTimeout(() => setSettledId(cur => (cur === id ? null : cur)), 460)
+  }, [])
   const scrollerRef = React.useRef<HTMLDivElement | null>(null)
   // Which cards have their sub-request preview open. Keyed by id so a
   // re-render, a status move or a filter change does not collapse them.
@@ -341,7 +419,11 @@ export function KanbanBoard({
     if (readOnly) return
     e.preventDefault()
     const id = dragId ?? e.dataTransfer.getData('text/plain')
-    if (id) onMove?.(id, col.statusValue, byStatus.get(col.statusValue)?.length ?? 0)
+    const alreadyHere = !!id && (byStatus.get(col.statusValue) ?? []).some(c => c.id === id)
+    if (id && !alreadyHere) {
+      onMove?.(id, col.statusValue, byStatus.get(col.statusValue)?.length ?? 0)
+      markSettled(id)
+    }
     onCardDragEnd()
   }
 
@@ -378,19 +460,21 @@ export function KanbanBoard({
             count={cards.length}
             isDropTarget={isDropTarget}
             actions={columnActions}
-            onAdd={onAdd}
+            onAdd={readOnly ? undefined : onAdd}
+            onQuickAdd={readOnly ? undefined : onQuickAdd}
             onDragOver={(e) => onColumnDragOver(e, col)}
             onDragLeave={() => setDropColumn(null)}
             onDrop={(e) => onColumnDrop(e, col)}
           >
             {cards.length === 0 ? (
-              <EmptySlot onAdd={onAdd ? () => onAdd(col.statusValue) : undefined} />
+              <EmptySlot readOnly={readOnly} />
             ) : (
               cards.map(card => (
                 <BoardCard
                   key={card.id}
                   item={card}
                   dragging={dragId === card.id}
+                  settling={settledId === card.id}
                   dropOnCard={dropOnCard === card.id}
                   readOnly={readOnly}
                   nestedChildren={childrenByParent.get(card.id) ?? []}
@@ -442,6 +526,7 @@ function Column({
   isDropTarget,
   actions,
   onAdd,
+  onQuickAdd,
   onDragOver,
   onDragLeave,
   onDrop,
@@ -452,6 +537,7 @@ function Column({
   isDropTarget: boolean
   actions?: ReadonlyArray<ColumnAction>
   onAdd?: (status: string) => void
+  onQuickAdd?: (status: string, title: string) => void
   onDragOver: (e: React.DragEvent) => void
   onDragLeave: (e: React.DragEvent) => void
   onDrop: (e: React.DragEvent) => void
@@ -459,6 +545,13 @@ function Column({
 }) {
   const [menuOpen, setMenuOpen] = React.useState(false)
   const menuRef = React.useRef<HTMLButtonElement | null>(null)
+  // The inline composer. Opened from the footer or from the header plus.
+  const [composerOpen, setComposerOpen] = React.useState(false)
+  const canAdd = !!onAdd || !!onQuickAdd
+  const openAdd = () => {
+    if (onQuickAdd) setComposerOpen(true)
+    else onAdd?.(column.statusValue)
+  }
   return (
     <div
       data-board-column
@@ -520,19 +613,34 @@ function Column({
         }}>
           {count}
         </span>
+        {column.badge && (
+          <span style={{
+            padding: '0.0625rem 0.3125rem',
+            borderRadius: 'var(--radius-sm)',
+            border: `1px solid ${column.badgeTone?.border ?? 'var(--color-border-subtle)'}`,
+            background: column.badgeTone?.bg ?? 'var(--color-bg)',
+            color: column.badgeTone?.text ?? 'var(--color-text-muted)',
+            fontSize: '0.5625rem',
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            whiteSpace: 'nowrap',
+          }}>
+            {column.badge}
+          </span>
+        )}
         <div style={{ flex: 1 }} />
-        {onAdd && (
+        {canAdd && (
           <button
             type="button"
-            onClick={() => onAdd(column.statusValue)}
+            onClick={openAdd}
             aria-label={`Add card to ${column.label}`}
-            className="tahi-focus-ring"
+            className="tahi-focus-ring tahi-board-colbtn"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              width: '1.375rem',
-              height: '1.375rem',
+              flexShrink: 0,
               borderRadius: 'var(--radius-sm)',
               background: 'transparent',
               border: 'none',
@@ -561,13 +669,12 @@ function Column({
               aria-label={`${column.label} actions`}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
-              className="tahi-focus-ring"
+              className="tahi-focus-ring tahi-board-colbtn"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: '1.375rem',
-                height: '1.375rem',
+                flexShrink: 0,
                 borderRadius: 'var(--radius-sm)',
                 background: 'transparent',
                 border: 'none',
@@ -640,12 +747,20 @@ function Column({
         {children}
       </div>
 
-      {/* "+ Add card" footer */}
-      {onAdd && (
+      {/* Add footer. The inline composer when the caller wants quick-add,
+          otherwise the plain button that hands off to a dialog. */}
+      {onQuickAdd ? (
+        <QuickAdd
+          label={column.label}
+          open={composerOpen}
+          onOpenChange={setComposerOpen}
+          onSubmit={(title) => onQuickAdd(column.statusValue, title)}
+        />
+      ) : onAdd ? (
         <button
           type="button"
           onClick={() => onAdd(column.statusValue)}
-          className="tahi-focus-ring"
+          className="tahi-focus-ring tahi-board-quickadd-btn"
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -674,46 +789,201 @@ function Column({
           <Plus size={11} aria-hidden="true" />
           Add card
         </button>
-      )}
+      ) : null}
+    </div>
+  )
+}
+
+// ── Inline quick-add ─────────────────────────────────────────────────
+
+/** Title-only composer in the column footer. Enter adds, Shift plus Enter
+ *  starts a new line, Escape closes without writing. Nothing here is a
+ *  control until it is opened, so a read-only column stays quiet. */
+function QuickAdd({
+  label,
+  open,
+  onOpenChange,
+  onSubmit,
+}: {
+  label: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onSubmit: (title: string) => void
+}) {
+  const [value, setValue] = React.useState('')
+  const inputRef = React.useRef<HTMLTextAreaElement | null>(null)
+
+  React.useEffect(() => {
+    if (open) inputRef.current?.focus()
+  }, [open])
+
+  const close = () => { setValue(''); onOpenChange(false) }
+  const submit = () => {
+    const title = value.trim()
+    if (!title) return
+    onSubmit(title)
+    close()
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenChange(true)}
+        className="tahi-focus-ring tahi-board-quickadd-btn"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.4375rem',
+          width: '100%',
+          padding: '0.5rem 0.625rem',
+          border: '1px dashed var(--color-border)',
+          borderRadius: 'var(--radius-sm)',
+          background: 'transparent',
+          fontSize: '0.75rem',
+          fontWeight: 600,
+          fontFamily: 'inherit',
+          color: 'var(--color-text-muted)',
+          cursor: 'pointer',
+          textAlign: 'left',
+          transition: 'border-color 120ms ease, color 120ms ease, background-color 120ms ease',
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.borderColor = 'var(--color-brand)'
+          e.currentTarget.style.color = 'var(--color-brand-dark)'
+          e.currentTarget.style.background = 'var(--color-bg)'
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.borderColor = 'var(--color-border)'
+          e.currentTarget.style.color = 'var(--color-text-muted)'
+          e.currentTarget.style.background = 'transparent'
+        }}
+      >
+        <Plus size={13} aria-hidden="true" />
+        Add request
+      </button>
+    )
+  }
+
+  return (
+    <div
+      className="tahi-board-quickadd-form tahi-focus-within"
+      style={{
+        padding: '0.5625rem',
+        border: '1px solid var(--color-brand)',
+        borderRadius: 'var(--radius-sm)',
+        background: 'var(--color-bg)',
+      }}
+    >
+      <textarea
+        ref={inputRef}
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        placeholder="Request title"
+        aria-label={`New request in ${label}`}
+        rows={2}
+        onKeyDown={e => {
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
+          if (e.key === 'Escape') { e.preventDefault(); close() }
+        }}
+        style={{
+          width: '100%',
+          border: 'none',
+          outline: 'none',
+          resize: 'none',
+          background: 'transparent',
+          fontFamily: 'inherit',
+          fontSize: '0.8125rem',
+          lineHeight: 1.4,
+          color: 'var(--color-text)',
+          minHeight: '2.375rem',
+        }}
+      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4375rem', marginTop: '0.4375rem' }}>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!value.trim()}
+          className="tahi-focus-ring"
+          style={{
+            height: '1.875rem',
+            padding: '0 0.75rem',
+            border: 'none',
+            borderRadius: 'var(--radius-sm)',
+            background: value.trim() ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
+            // White on brand green, the same pairing <TahiButton> uses for
+            // its primary. It is the one colour that must not follow the
+            // theme, so it is not a token.
+            color: value.trim() ? '#ffffff' : 'var(--color-text-subtle)',
+            fontFamily: 'inherit',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            cursor: value.trim() ? 'pointer' : 'not-allowed',
+          }}
+        >
+          Add
+        </button>
+        <button
+          type="button"
+          onClick={close}
+          className="tahi-focus-ring"
+          style={{
+            height: '1.875rem',
+            padding: '0 0.625rem',
+            border: 'none',
+            borderRadius: 'var(--radius-sm)',
+            background: 'transparent',
+            color: 'var(--color-text-muted)',
+            fontFamily: 'inherit',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'var(--color-bg-secondary)'
+            e.currentTarget.style.color = 'var(--color-text)'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'var(--color-text-muted)'
+          }}
+        >
+          Cancel
+        </button>
+        <span style={{
+          marginLeft: 'auto',
+          fontSize: '0.6875rem',
+          color: 'var(--color-text-subtle)',
+        }}>
+          Enter to add
+        </span>
+      </div>
     </div>
   )
 }
 
 // ── Empty column slot ────────────────────────────────────────────────
 
-function EmptySlot({ onAdd }: { onAdd?: () => void }) {
+/** A slot, not a control: there is nothing to press here, and a disabled
+ *  button would say otherwise. Dropping onto it is handled by the column. */
+function EmptySlot({ readOnly }: { readOnly?: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={onAdd}
-      disabled={!onAdd}
-      className="tahi-focus-ring"
+    <div
       style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: '0.3125rem',
-        padding: '1.5rem 0.75rem',
-        background: 'transparent',
+        padding: '1.25rem 0.75rem',
         border: '1px dashed var(--color-border)',
         borderRadius: 'var(--radius-md)',
         fontSize: '0.75rem',
+        fontStyle: 'italic',
+        fontWeight: 500,
         color: 'var(--color-text-subtle)',
-        cursor: onAdd ? 'pointer' : 'default',
-        transition: 'border-color 120ms ease, background-color 120ms ease',
-      }}
-      onMouseEnter={e => {
-        if (!onAdd) return
-        e.currentTarget.style.borderColor = 'var(--color-brand)'
-        e.currentTarget.style.background = 'var(--color-brand-50)'
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.borderColor = 'var(--color-border)'
-        e.currentTarget.style.background = 'transparent'
       }}
     >
-      {onAdd ? <><Plus size={11} aria-hidden="true" />Drop a card or add one</> : 'No cards'}
-    </button>
+      {readOnly ? 'Nothing here' : 'Drop here'}
+    </div>
   )
 }
 
@@ -729,6 +999,7 @@ const PRIORITY_TONE: Record<BoardPriority, { bg: string; text: string; dot: stri
 function BoardCard({
   item,
   dragging,
+  settling,
   dropOnCard,
   readOnly,
   nestedChildren,
@@ -750,6 +1021,7 @@ function BoardCard({
 }: {
   item: BoardItem
   dragging?: boolean
+  settling?: boolean
   dropOnCard?: boolean
   readOnly?: boolean
   nestedChildren?: ReadonlyArray<BoardItem>
@@ -787,6 +1059,7 @@ function BoardCard({
     <div
       className="tahi-focus-inset tahi-board-card"
       data-dragging={dragging ? 'true' : 'false'}
+      data-settling={settling ? 'true' : 'false'}
       data-drop-target={dropOnCard ? 'true' : 'false'}
       draggable={!readOnly && !!onDragStart}
       role={onClick ? 'button' : undefined}
@@ -817,7 +1090,9 @@ function BoardCard({
         background: 'var(--color-bg)',
         borderRadius: 'var(--radius-md)',
         opacity: dragging ? 0.45 : 1,
-        cursor: onClick ? 'pointer' : (readOnly ? 'default' : 'grab'),
+        // A draggable card takes its cursor from CSS (grab, then grabbing
+        // on :active), which an inline value would override.
+        cursor: !readOnly && onDragStart ? undefined : (onClick ? 'pointer' : 'default'),
         overflow: 'hidden',
       }}
     >
@@ -827,19 +1102,12 @@ function BoardCard({
         flexDirection: 'column',
         gap: compact ? '0.3125rem' : '0.4375rem',
       }}>
-        {/* Top row: category and priority chips on the left, the scope
-            warning beside them, the reference pinned right. Each chip is
-            clickable when a handler is provided — the caller routes to a
-            filtered list (e.g. "all high-priority tasks"). */}
+        {/* Top row, left to right: tags (the category chip first), then
+            priority, then the scope warning, with the reference pinned
+            right. Each chip is clickable when a handler is provided, and
+            the caller routes to a filtered list ("all Design work"). */}
         {(item.priority || (item.tags && item.tags.length > 0) || item.warning || item.reference) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', alignItems: 'center' }}>
-            {item.priority && (
-              <PriorityChip
-                priority={item.priority}
-                iconOnly={iconOnlyPriority}
-                onClick={onPriorityClick ? () => onPriorityClick(item.priority!) : undefined}
-              />
-            )}
             {item.tags?.map(tag => (
               <TagChip
                 key={tag.id}
@@ -847,6 +1115,13 @@ function BoardCard({
                 onClick={onTagClick ? () => onTagClick(tag) : undefined}
               />
             ))}
+            {item.priority && (
+              <PriorityChip
+                priority={item.priority}
+                iconOnly={iconOnlyPriority}
+                onClick={onPriorityClick ? () => onPriorityClick(item.priority!) : undefined}
+              />
+            )}
             {item.warning && (
               <Tooltip label={item.warning}>
                 <span
@@ -1054,15 +1329,12 @@ function BoardCard({
             fontWeight: 500,
           }}>
             {showDue && (
-              <span style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.1875rem',
-                color: item.isOverdue ? 'var(--color-danger)' : 'var(--color-text-subtle)',
-              }}>
-                <Calendar size={10} aria-hidden="true" />
-                {item.dueDate}
-              </span>
+              <DueDateChip
+                dueDate={item.dueDate}
+                status={item.status}
+                size="sm"
+                overdue={item.isOverdue}
+              />
             )}
             {!!item.commentCount && item.commentCount > 0 && (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1875rem' }}>
@@ -1105,8 +1377,6 @@ function BoardCard({
             top: '0.3125rem',
             right: '0.3125rem',
             color: 'var(--color-text-subtle)',
-            opacity: 0,
-            transition: 'opacity 120ms ease',
             pointerEvents: 'none',
           }}
         >
@@ -1554,22 +1824,42 @@ function TagChip({
   onClick?: () => void
 }) {
   const color = tag.color ?? 'var(--color-text-muted)'
+  // A tinted chip (a category on its --cat-* tokens) carries its own fill
+  // and needs no outline; the neutral chip keeps the hairline it had.
+  const tinted = !!tag.background
   const baseStyle: React.CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
-    padding: '0.0625rem 0.4375rem',
-    background: 'var(--color-bg-secondary)',
-    border: '1px solid var(--color-border-subtle)',
+    gap: tag.iconOnly ? 0 : '0.1875rem',
+    padding: tag.iconOnly ? '0.1875rem' : '0.0625rem 0.4375rem',
+    background: tag.background ?? 'var(--color-bg-secondary)',
+    border: tinted ? '1px solid transparent' : '1px solid var(--color-border-subtle)',
     borderRadius: 'var(--radius-sm)',
     color,
     fontSize: '0.625rem',
     fontWeight: 600,
     letterSpacing: '0.01em',
     cursor: onClick ? 'pointer' : 'default',
-    transition: 'background-color 120ms ease, border-color 120ms ease',
+    transition: 'background-color 120ms ease, border-color 120ms ease, filter 120ms ease',
   }
-  if (!onClick) return <span style={baseStyle}>{tag.label}</span>
-  return (
+  const inner = (
+    <>
+      {tag.icon}
+      {!tag.iconOnly && tag.label}
+    </>
+  )
+
+  if (!onClick) {
+    const chip = (
+      <span style={baseStyle} aria-label={tag.iconOnly ? tag.label : undefined}>
+        {inner}
+      </span>
+    )
+    // Icon-only means the label has to reach the user some other way.
+    return tag.iconOnly ? <Tooltip label={tag.label}>{chip}</Tooltip> : chip
+  }
+
+  const button = (
     <button
       type="button"
       onClick={(e) => { e.stopPropagation(); onClick() }}
@@ -1577,17 +1867,20 @@ function TagChip({
       className="tahi-focus-ring"
       style={baseStyle}
       onMouseEnter={e => {
+        if (tinted) { e.currentTarget.style.filter = 'brightness(0.96)'; return }
         e.currentTarget.style.background = 'var(--color-bg)'
         e.currentTarget.style.borderColor = 'var(--color-border)'
       }}
       onMouseLeave={e => {
+        if (tinted) { e.currentTarget.style.filter = 'none'; return }
         e.currentTarget.style.background = 'var(--color-bg-secondary)'
         e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
       }}
     >
-      {tag.label}
+      {inner}
     </button>
   )
+  return tag.iconOnly ? <Tooltip label={tag.label}>{button}</Tooltip> : button
 }
 
 // ── Checklist row ─────────────────────────────────────────────────────

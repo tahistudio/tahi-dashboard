@@ -15,6 +15,8 @@ import {
   formatTimelineTick,
   doneStatusValues,
   isTimelineOverdue,
+  timelinePlot,
+  compareTimelineRows,
   type TimelineRange,
 } from '@/lib/timeline-domain'
 
@@ -256,5 +258,68 @@ describe('isTimelineOverdue', () => {
     expect(isTimelineOverdue({
       status: 'submitted', endTs: NOW + days(1), now: NOW, doneStatuses,
     })).toBe(false)
+  })
+})
+
+describe('timelinePlot', () => {
+  it('draws a bar from the start date to the due date', () => {
+    const plot = timelinePlot({
+      dueDate: '2026-09-20', startDate: '2026-09-10', createdDate: '2026-09-01', now: NOW,
+    })
+    expect(plot).toEqual({
+      startTs: Date.parse('2026-09-10'),
+      endTs: Date.parse('2026-09-20'),
+      dated: true,
+    })
+  })
+
+  it('drops a milestone on the due date when there is no start', () => {
+    const plot = timelinePlot({ dueDate: '2026-09-20', createdDate: '2026-09-01', now: NOW })
+    expect(plot?.startTs).toBeNull()
+    expect(plot?.endTs).toBe(Date.parse('2026-09-20'))
+    expect(plot?.dated).toBe(true)
+  })
+
+  it('falls back to the created date, as an undated milestone', () => {
+    // A start date must not stretch a bar backwards to the created date.
+    const plot = timelinePlot({
+      dueDate: null, startDate: '2026-09-10', createdDate: '2026-09-01', now: NOW,
+    })
+    expect(plot).toEqual({ startTs: null, endTs: Date.parse('2026-09-01'), dated: false })
+  })
+
+  it('is null when the item carries no date at all', () => {
+    expect(timelinePlot({ dueDate: null, startDate: null, createdDate: null, now: NOW })).toBeNull()
+  })
+})
+
+describe('compareTimelineRows', () => {
+  const row = (endTs: number, dated: boolean) => ({ endTs, dated })
+
+  it('puts the soonest deadline first', () => {
+    expect(compareTimelineRows(row(NOW, true), row(NOW + days(3), true))).toBeLessThan(0)
+    expect(compareTimelineRows(row(NOW + days(3), true), row(NOW, true))).toBeGreaterThan(0)
+  })
+
+  it('sinks undated rows below every dated one, however old', () => {
+    expect(compareTimelineRows(row(NOW - days(400), false), row(NOW + days(400), true)))
+      .toBeGreaterThan(0)
+  })
+
+  it('runs the undated tail oldest first', () => {
+    expect(compareTimelineRows(row(NOW - days(9), false), row(NOW - days(2), false)))
+      .toBeLessThan(0)
+  })
+
+  it('sorts a mixed set into deadlines, then the undated tail', () => {
+    const rows = [
+      { id: 'undated-new', ...row(NOW - days(1), false) },
+      { id: 'due-later',   ...row(NOW + days(9), true) },
+      { id: 'undated-old', ...row(NOW - days(30), false) },
+      { id: 'due-soon',    ...row(NOW + days(1), true) },
+    ]
+    expect([...rows].sort(compareTimelineRows).map(r => r.id)).toEqual([
+      'due-soon', 'due-later', 'undated-old', 'undated-new',
+    ])
   })
 })

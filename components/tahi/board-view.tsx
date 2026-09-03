@@ -78,6 +78,8 @@ interface BoardViewProps {
   onMove?: (itemId: string, toStatus: string, position: number) => void
   onNest?: (childId: string, parentId: string) => void
   onAdd?: (status: string) => void
+  /** Inline quick-add in the kanban column footer. See <KanbanBoard>. */
+  onQuickAdd?: (status: string, title: string) => void
   onToggleChecklist?: (itemId: string, checklistItemId: string) => void
   onItemClick?: (item: BoardItem) => void
   /** Click an assignee avatar → caller routes to their profile. */
@@ -103,7 +105,12 @@ interface BoardViewProps {
   boardId?: string
   /** Suppress the board's own view tabs and controls row. For callers that
    *  already render a view switcher and a search field above it (the requests
-   *  rail). Off by default, so every existing consumer is unchanged. */
+   *  rail). Off by default, so every existing consumer is unchanged.
+   *
+   *  It also switches off the shell's own chip filter model: with no tabs
+   *  and no search of its own, a second set of active-filter chips over
+   *  the board would contradict the ones the caller is already showing.
+   *  Chip clicks then reach `onTagClick` / `onPriorityClick` or nothing. */
   hideHeader?: boolean
   className?: string
 }
@@ -130,6 +137,7 @@ export function BoardView({
   onMove,
   onNest,
   onAdd,
+  onQuickAdd,
   onToggleChecklist,
   onItemClick,
   onAssigneeClick,
@@ -168,6 +176,12 @@ export function BoardView({
     return m
   }, [items])
 
+  // With the header hidden the shell owns no filter UI, so it must not own
+  // filter state either: chip clicks either reach the caller's model or do
+  // nothing at all. Passing undefined down renders the chip as plain text
+  // rather than a button that filters a set nobody can see.
+  const localChipFilters = !hideHeader
+
   const toggleTag = (tag: BoardTag) => {
     if (onTagClick) { onTagClick(tag); return }
     setActiveTagIds(prev => {
@@ -184,6 +198,8 @@ export function BoardView({
       return next
     })
   }
+  const handleTagClick = localChipFilters ? toggleTag : onTagClick
+  const handlePriorityClick = localChipFilters ? togglePriority : onPriorityClick
   const clearFilters = () => {
     setActiveTagIds(new Set())
     setActivePriorities(new Set())
@@ -210,7 +226,7 @@ export function BoardView({
     })
   }, [items, query, activeTagIds, activePriorities])
 
-  const filterCount = activeTagIds.size + activePriorities.size
+  const filterCount = localChipFilters ? activeTagIds.size + activePriorities.size : 0
 
   return (
     <div className={className} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -472,14 +488,19 @@ export function BoardView({
         </div>
       )}
 
-      {/* Active view. Wrapped in role="tabpanel" so the active panel
-          is announced as the disclosed region for the selected tab. */}
+      {/* Active view. Wrapped in role="tabpanel" so the active panel is
+          announced as the disclosed region for the selected tab. With the
+          header hidden there is no tablist here to be labelled by, so the
+          panel role, the tab stop and the dangling aria-labelledby all go
+          with it and the wrapper is a plain box. */}
       <div
-        role="tabpanel"
-        id={`view-panel-${activeView}`}
-        aria-labelledby={`view-tab-${activeView}`}
-        tabIndex={0}
-        className="tahi-focus-inset"
+        {...(hideHeader ? {} : {
+          role: 'tabpanel',
+          id: `view-panel-${activeView}`,
+          'aria-labelledby': `view-tab-${activeView}`,
+          tabIndex: 0,
+          className: 'tahi-focus-inset',
+        })}
       >
         {activeView === 'kanban' && (
           <KanbanBoard
@@ -488,11 +509,12 @@ export function BoardView({
             onMove={onMove}
             onNest={onNest}
             onAdd={onAdd}
+            onQuickAdd={onQuickAdd}
             onToggleChecklist={onToggleChecklist}
             onItemClick={onItemClick}
             onAssigneeClick={onAssigneeClick}
-            onTagClick={toggleTag}
-            onPriorityClick={togglePriority}
+            onTagClick={handleTagClick}
+            onPriorityClick={handlePriorityClick}
             columnActions={columnActions}
             readOnly={readOnly}
             iconOnlyPriority={iconOnlyPriority}
@@ -506,7 +528,7 @@ export function BoardView({
             items={filteredItems}
             onItemClick={onItemClick}
             onAssigneeClick={onAssigneeClick}
-            onTagClick={toggleTag}
+            onTagClick={handleTagClick}
           />
         )}
         {activeView === 'timeline' && (
