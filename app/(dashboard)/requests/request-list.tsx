@@ -29,6 +29,7 @@ import {
   DataTable,
   type DataTableColumn,
   type DataTableExpandedContext,
+  type DataTableSort,
 } from '@/components/tahi/data-table'
 import { pruneExpandedIds, toggleExpandedId } from '@/components/tahi/data-table-expand'
 import {
@@ -528,6 +529,11 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // once; the set is pruned whenever the visible rows change (below), so a
   // panel never survives the filter that hid its parent.
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set())
+  // The table's column sort, held here rather than inside <DataTable>. It is
+  // the ordering the user can actually see once a header has been clicked, so
+  // Clear all has to be able to reach it; a purely internal sort would leave
+  // "Clear all" resetting the rail's Sort control while the list did not move.
+  const [tableSort, setTableSort] = useState<DataTableSort | null>(null)
   // The parent a new sub-request is being created under, plus its client, so
   // NewRequestDialog can lock both.
   const [subRequestParent, setSubRequestParent] = useState<{ id: string; orgId: string | null } | null>(null)
@@ -1307,10 +1313,13 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     showToast('Saved as your default view', 'success')
   }, [rail, showToast])
 
-  // Clear all: every filter, the saved view and the sort, so the sheet's
-  // button really does undo everything it can see. The search box lives
-  // outside the sheet, so it is left alone here.
+  // Clear all: every filter, the saved view and both sorts, so the sheet's
+  // button really does undo everything it can see. The column sort goes too:
+  // it is the order actually on screen once a header has been clicked, and
+  // resetting only the rail's Sort control would leave the list unmoved. The
+  // search box lives outside the sheet, so it is left alone here.
   const clearAllFilters = useCallback(() => {
+    setTableSort(null)
     if (railOn) {
       rail.setFilters({ ...DEFAULT_REQUEST_FILTERS })
       rail.setSavedView(null)
@@ -1381,7 +1390,9 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         selectedIds={isAdmin ? selectedIds : undefined}
         onSelectionChange={isAdmin ? handleSelectionChange : undefined}
         onRowClick={(r) => { router.push(`/requests/${r.id}`) }}
-        mobileCard={renderMobileCard}
+        // Controlled so Clear all can reach the order the user can see.
+        sort={tableSort}
+        onSortChange={setTableSort}
         // Two different nothings: no data at all, versus a filter hiding
         // every row there is. The second one needs a way back.
         empty={requests.length > 0
@@ -1394,6 +1405,11 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
           expandedIds,
           onExpandedChange: setExpandedIds,
           expandAllLabel: 'sub-requests',
+          // The card list is part of the new UI, not a separate 375px fix:
+          // the legacy path has no chevron and no sub-request panel, so a card
+          // with both would be an affordance its own desktop table lacks. It
+          // flips with the rest of the rail.
+          mobileCard: renderMobileCard,
         } : {})}
       />
     </Card>
@@ -2515,23 +2531,31 @@ function FilteredEmptyState({ onClear }: { onClear: () => void }) {
 }
 
 /** The list fetch failed. Kept small and above the table rather than replacing
- *  it, so any rows still in the SWR cache stay readable underneath. */
+ *  it, so any rows still in the SWR cache stay readable underneath.
+ *
+ *  One token family, and the badge one rather than --color-danger-bg, because
+ *  the badge tokens are the only red surface with a .dark override. Mixing
+ *  --color-danger-bg with --color-text put near-white text on a near-white
+ *  pink card in dark mode. role="alert" rather than "status": this is a
+ *  failure with a recovery action, and a polite region queues behind the
+ *  rail's own live count.
+ */
 function ListLoadError({ onRetry }: { onRetry: () => void }) {
   return (
     <div
-      role="status"
+      role="alert"
       className="flex flex-wrap items-center"
       style={{
         gap: '0.625rem',
         padding: '0.75rem 0.875rem',
         border: '1px solid var(--badge-danger-border)',
         borderRadius: 'var(--radius-md)',
-        background: 'var(--color-danger-bg)',
+        background: 'var(--badge-danger-bg)',
         fontSize: '0.8125rem',
-        color: 'var(--color-text)',
+        color: 'var(--badge-danger-text)',
       }}
     >
-      <AlertTriangle size={15} aria-hidden="true" style={{ color: 'var(--color-danger)', flexShrink: 0 }} />
+      <AlertTriangle size={15} aria-hidden="true" style={{ flexShrink: 0 }} />
       <span style={{ flex: '1 1 12rem', minWidth: 0 }}>Could not load requests.</span>
       <TahiButton variant="secondary" size="sm" onClick={onRetry} iconLeft={<RefreshCw className="w-3.5 h-3.5" />}>
         Try again

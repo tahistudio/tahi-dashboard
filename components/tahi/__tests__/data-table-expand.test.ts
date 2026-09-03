@@ -5,6 +5,7 @@ import {
   areAllExpanded,
   toggleExpandAll,
   nextSortState,
+  nextInternalSortState,
   applyRangeSelection,
 } from '@/components/tahi/data-table-expand'
 
@@ -116,6 +117,36 @@ describe('nextSortState', () => {
 
   it('treats undefined the same as no sort', () => {
     expect(nextSortState(undefined, 'status')).toEqual({ key: 'status', dir: 'asc' })
+  })
+})
+
+describe('nextInternalSortState', () => {
+  const byName = { key: 'name', dir: 'asc' } as const
+
+  it('clears to nothing when the table declared no default', () => {
+    expect(nextInternalSortState({ key: 'title', dir: 'desc' }, 'title', null)).toBeNull()
+    expect(nextInternalSortState({ key: 'title', dir: 'desc' }, 'title', undefined)).toBeNull()
+  })
+
+  it('returns to the declared default instead of the raw row order', () => {
+    expect(nextInternalSortState({ key: 'title', dir: 'desc' }, 'title', byName)).toEqual(byName)
+  })
+
+  it('sends a default column back to its declared direction rather than off', () => {
+    // Third click on the column the table already sorts by: it lands back on
+    // ascending, so aria-sort never reads "none" for a table that has an order
+    // it is contractually meant to keep.
+    expect(nextInternalSortState({ key: 'name', dir: 'desc' }, 'name', byName)).toEqual(byName)
+  })
+
+  it('matches nextSortState for the first two clicks', () => {
+    expect(nextInternalSortState(null, 'title', byName)).toEqual({ key: 'title', dir: 'asc' })
+    expect(nextInternalSortState({ key: 'title', dir: 'asc' }, 'title', byName))
+      .toEqual({ key: 'title', dir: 'desc' })
+  })
+
+  it('starts a different column ascending even with a default in play', () => {
+    expect(nextInternalSortState(byName, 'dueDate', byName)).toEqual({ key: 'dueDate', dir: 'asc' })
   })
 })
 

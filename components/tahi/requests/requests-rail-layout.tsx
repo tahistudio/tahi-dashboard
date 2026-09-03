@@ -440,11 +440,13 @@ export function RequestsRailLayout({
         <SlideOver.Body>
           <RequestsRail {...railProps} touch />
         </SlideOver.Body>
+        {/* No Save as default here: the chips row above carries it below lg,
+            and two controls with the same accessible name on screen at once
+            is worse than one in a slightly less obvious place. */}
         <SlideOver.Footer>
           <TahiButton variant="secondary" size="md" style={{ minHeight: '2.75rem' }} onClick={onClearAll}>
             Clear all
           </TahiButton>
-          <SaveDefaultControl isDefault={railProps.isDefault} onSave={railProps.onSaveDefault} touch />
           <div style={{ flex: 1 }} />
           <TahiButton variant="primary" size="md" style={{ minHeight: '2.75rem' }} onClick={() => setSheetOpen(false)}>
             Show {total}

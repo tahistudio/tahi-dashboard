@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { primePage } from './helpers'
 
 /**
  * Requests LIST surface (the alignment pass, audit findings A1 to A13).
@@ -54,7 +55,15 @@ async function isNarrow(page: Page): Promise<boolean> {
 }
 
 async function gotoRequests(page: Page): Promise<void> {
-  await page.goto('/requests')
+  // A dev server compiling a sibling route can reset the first connection,
+  // which Chromium reports as an aborted navigation. One retry keeps the
+  // spec honest about the page rather than the harness.
+  try {
+    await page.goto('/requests')
+  } catch (err) {
+    if (!String(err).includes('ERR_ABORTED')) throw err
+    await page.goto('/requests')
+  }
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Requests', { timeout: 20_000 })
 }
 
@@ -64,6 +73,10 @@ async function listSettled(page: Page): Promise<void> {
 }
 
 test.describe('Requests list', () => {
+  // A fresh context looks like a first visit, so the product tour spotlight
+  // would sit over the page and swallow every click and Tab press below.
+  test.beforeEach(async ({ page }) => { await primePage(page) })
+
   test('the view switcher is one sliding pill', async ({ page }) => {
     await gotoRequests(page)
     test.skip(!(await railIsOn(page)), 'Rail UI is super-admin gated; the bypass user is not one.')
@@ -160,27 +173,49 @@ test.describe('Requests list', () => {
     const expand = page.getByRole('button', { name: 'Expand row' }).first()
     test.skip((await expand.count()) === 0, 'No request in this dataset has sub-requests.')
 
+    // The shape of the tbody: one number per row, its cell count. Full-width
+    // rows (the loading, empty and Add sub-request lines) read as 1.
+    const rowShape = () => page.evaluate(() => {
+      const body = document.querySelector('table tbody')
+      if (!body) return { cells: [] as number[], spans: [] as number[] }
+      const rows = Array.from(body.querySelectorAll('tr')).map(tr => Array.from(tr.querySelectorAll('td')))
+      return {
+        cells: rows.map(tds => tds.length),
+        spans: rows.filter(tds => tds.length === 1).map(tds => tds[0].colSpan),
+      }
+    })
+
+    const before = await rowShape()
     await expand.click()
     await expect(page.getByRole('button', { name: 'Collapse row' }).first()).toBeVisible()
+    // The panel fetches on mount, so wait for its loading line to clear before
+    // measuring anything.
+    await expect(page.getByText('Loading sub-requests')).toHaveCount(0, { timeout: 15_000 })
+    test.skip(
+      (await page.getByText('No sub-requests yet.').count()) > 0,
+      'The expanded request turned out to have no sub-requests.',
+    )
 
-    // Every row in the body, parent and child alike, has the same cell count,
-    // which is the whole point of rendering children as real <tr>s.
-    const cellCounts = await page.evaluate(() => {
-      const body = document.querySelector('table tbody')
-      if (!body) return []
-      return Array.from(body.querySelectorAll('tr')).map(tr => tr.querySelectorAll('td').length)
-    })
-    const spanning = cellCounts.filter(n => n === 1)
-    const gridRows = cellCounts.filter(n => n > 1)
-    expect(gridRows.length).toBeGreaterThan(1)
-    // The full-width rows are the loading / empty / Add sub-request lines.
-    expect(new Set(gridRows).size).toBe(1)
-    expect(spanning.length).toBeLessThanOrEqual(cellCounts.length)
+    const after = await rowShape()
+    const gridBefore = before.cells.filter(n => n > 1)
+    const gridAfter = after.cells.filter(n => n > 1)
+
+    // Children arrived as real grid rows, not as one full-width panel.
+    expect(gridBefore.length).toBeGreaterThan(0)
+    expect(gridAfter.length).toBeGreaterThan(gridBefore.length)
+    // And every one of them carries the parent's cell count, which is the
+    // whole point of rendering them into the same tbody.
+    expect(new Set(gridAfter).size).toBe(1)
+    // The team audience closes the group with an Add sub-request line, and a
+    // full-width row has to span exactly the parent's columns to line up.
+    expect(after.spans.length).toBeGreaterThan(0)
+    expect(after.spans.every(n => n === gridAfter[0])).toBe(true)
   })
 
   test('the mobile card list replaces the table below md', async ({ page }) => {
     await gotoRequests(page)
     test.skip(!(await isNarrow(page)), 'Chromium runs at desktop width; this is the phone case.')
+    test.skip(!(await railIsOn(page)), 'The card list ships with the rail UI, behind the same gate.')
     await listSettled(page)
 
     // No table on screen, and nothing scrolling sideways.
@@ -217,8 +252,9 @@ test.describe('Requests list', () => {
     const search = page.getByRole('textbox', { name: /Search requests/ })
     test.skip((await search.count()) === 0, 'Search box not mounted for this audience.')
 
-    // The card list and the table each carry an empty state; only the one for
-    // the current width is on screen, so filter to it rather than guessing.
+    // Only the layout for the current width is mounted, but the loading frame
+    // before the width is measured has both, so filter to what is on screen
+    // rather than guessing which one it is.
     const noMatch = page.getByText('No requests match').filter({ visible: true })
     const clear = page.getByRole('button', { name: 'Clear filters' }).filter({ visible: true })
 

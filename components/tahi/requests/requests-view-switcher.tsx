@@ -16,7 +16,6 @@
  * viewport.
  */
 
-import * as React from 'react'
 import { useMemo } from 'react'
 import { BarChart3, CalendarRange, LayoutGrid, Rows } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'

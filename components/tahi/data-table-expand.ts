@@ -104,6 +104,26 @@ export function nextSortState(
   return null
 }
 
+/**
+ * The same cycle for a table that owns its own sort, where "off" has to mean
+ * something concrete.
+ *
+ * A controlled table can hand `null` up and let the page decide what unsorted
+ * looks like. An uncontrolled one cannot: `defaultSort` is only the initial
+ * state, so clearing to `null` would drop the list into whatever order the API
+ * happened to return and there would be no way back short of a reload. The
+ * third click therefore returns to the declared default. Tables that declare
+ * no default still clear to nothing, which is what hands ordering back to a
+ * page-level Sort control.
+ */
+export function nextInternalSortState(
+  current: DataTableSortState | null | undefined,
+  key: string,
+  defaultSort: DataTableSortState | null | undefined,
+): DataTableSortState | null {
+  return nextSortState(current, key) ?? defaultSort ?? null
+}
+
 // ── Range selection ─────────────────────────────────────────────────────────
 
 /**
