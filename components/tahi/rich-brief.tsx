@@ -16,6 +16,11 @@
  * Empty is normalised to an empty string rather than Tiptap's "<p></p>", so a
  * brief that was typed then cleared is falsy for every caller that checks it.
  *
+ * <RichBriefProse> is the reading twin: the same list, link and emphasis rules
+ * for a brief that has already been saved. Use it anywhere a stored
+ * description is rendered, because the repo has no typography plugin and
+ * Tailwind's preflight has already flattened lists and links by then.
+ *
  * Styles live in RICH_BRIEF_CSS below rather than app/globals.css: the block
  * is component-local the same way kanban-board.tsx keeps KANBAN_CSS, so it
  * ships and dies with the component.
@@ -63,6 +68,38 @@ export function normaliseBriefHtml(html: string): string {
   return richBriefIsEmpty(html) ? '' : html
 }
 
+/**
+ * Plain prose turned into the HTML the brief stores. The AI wizard route
+ * documents its `description` as plain text and leaves the conversion to the
+ * caller, and Tiptap's setContent parses whatever it is handed as HTML: without
+ * this, a two-paragraph draft collapses into one run-on line and a stray "<"
+ * is swallowed as markup. Blank lines split paragraphs, single newlines become
+ * <br>, and the four HTML-significant characters are escaped.
+ */
+export function plainTextToBriefHtml(text?: string | null): string {
+  if (!text) return ''
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+  const blocks = escaped
+    .replace(/\r\n?/g, '\n')
+    .split(/\n{2,}/)
+    .map(block => block.trim())
+    .filter(Boolean)
+  if (blocks.length === 0) return ''
+  return blocks.map(block => `<p>${block.split('\n').join('<br>')}</p>`).join('')
+}
+
+/**
+ * True when a value already looks like the HTML the editor emits, so an AI
+ * draft is only converted when it really is plain text.
+ */
+export function looksLikeBriefHtml(value?: string | null): boolean {
+  return !!value && /<(p|ul|ol|li|br|strong|em|a)\b[^>]*>/i.test(value)
+}
+
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
 const RICH_BRIEF_CSS = `
@@ -98,7 +135,9 @@ const RICH_BRIEF_CSS = `
 .tahi-rich-brief-tool:hover{ background: var(--color-bg); color: var(--color-text); }
 .tahi-rich-brief-tool[data-active="true"]{
   background: var(--color-brand-100);
-  color: var(--color-brand-dark);
+  /* --color-link, not --color-brand-dark: brand-dark has no .dark override,
+     so it reads at roughly 1.6:1 once the panel goes dark. */
+  color: var(--color-link);
 }
 .tahi-rich-brief-div{
   width: 1px;
@@ -118,12 +157,22 @@ const RICH_BRIEF_CSS = `
 }
 .tahi-rich-brief-editor.ProseMirror p{ margin: 0 0 0.375rem; }
 .tahi-rich-brief-editor.ProseMirror p:last-child{ margin-bottom: 0; }
-.tahi-rich-brief-editor.ProseMirror ul{ margin: 0.375rem 0; padding-left: 1.25rem; }
+/* Tailwind's preflight sets "ul { list-style: none }", so a bulleted brief
+   would be plain indented text without this. Same reason .tahi-doc-prose
+   redraws its own markers in app/globals.css. */
+.tahi-rich-brief-editor.ProseMirror ul{
+  margin: 0.375rem 0;
+  padding-left: 1.25rem;
+  list-style: disc;
+}
 .tahi-rich-brief-editor.ProseMirror li{ margin: 0.125rem 0; }
+.tahi-rich-brief-editor.ProseMirror li::marker{ color: var(--color-brand); }
 .tahi-rich-brief-editor.ProseMirror li > p{ margin: 0; }
 .tahi-rich-brief-editor.ProseMirror strong{ font-weight: 700; }
+/* Preflight also resets "a { color: inherit; text-decoration: inherit }", so
+   a link inside the brief needs its colour and underline spelled out. */
 .tahi-rich-brief-editor.ProseMirror a{
-  color: var(--color-brand-dark);
+  color: var(--color-link);
   text-decoration: underline;
   text-underline-offset: 0.1875rem;
 }
@@ -138,6 +187,32 @@ const RICH_BRIEF_CSS = `
   .tahi-rich-brief-tool{ width: 2.75rem; height: 2.75rem; }
   .tahi-rich-brief-tools{ gap: 0; }
 }
+`
+
+/**
+ * The read side of the same brief. The repo has no @tailwindcss/typography
+ * plugin, so a "prose" class on a saved brief is a no-op and preflight has
+ * already flattened its lists and links. These rules are the reading twin of
+ * the editor rules above, so a brief looks the same either side of Create.
+ */
+const RICH_BRIEF_PROSE_CSS = `
+.tahi-brief-prose{ font-size: 0.875rem; line-height: 1.6; color: var(--color-text); }
+.tahi-brief-prose > :first-child{ margin-top: 0; }
+.tahi-brief-prose > :last-child{ margin-bottom: 0; }
+.tahi-brief-prose p{ margin: 0 0 0.5rem; }
+.tahi-brief-prose ul{ margin: 0.5rem 0; padding-left: 1.25rem; list-style: disc; }
+.tahi-brief-prose ol{ margin: 0.5rem 0; padding-left: 1.25rem; list-style: decimal; }
+.tahi-brief-prose li{ margin: 0.125rem 0; }
+.tahi-brief-prose li::marker{ color: var(--color-brand); }
+.tahi-brief-prose li > p{ margin: 0; }
+.tahi-brief-prose strong{ font-weight: 700; }
+.tahi-brief-prose em{ font-style: italic; }
+.tahi-brief-prose a{
+  color: var(--color-link);
+  text-decoration: underline;
+  text-underline-offset: 0.1875rem;
+}
+.tahi-brief-prose a:hover{ text-decoration-thickness: 0.125rem; }
 `
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -248,6 +323,31 @@ export function RichBrief({ value, onChange, placeholder, ariaLabel }: RichBrief
       </div>
       {editor ? <EditorContent editor={editor} /> : null}
     </div>
+  )
+}
+
+/**
+ * A saved brief, read. Drop this in wherever a stored `requests.description`
+ * is rendered so bullets, links and emphasis survive the trip out of the
+ * editor. The HTML is trusted the same way the surrounding page already
+ * trusts it: sanitise on the way into the database, not here.
+ */
+export function RichBriefProse({
+  html, className, style,
+}: {
+  html: string
+  className?: string
+  style?: React.CSSProperties
+}) {
+  return (
+    <>
+      <style>{RICH_BRIEF_PROSE_CSS}</style>
+      <div
+        className={['tahi-brief-prose', className].filter(Boolean).join(' ')}
+        style={style}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    </>
   )
 }
 

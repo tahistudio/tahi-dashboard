@@ -13,7 +13,11 @@
  * today, kept verbatim so nothing changes for them until the lead flips
  * NEW_DIALOG_FOR_EVERYONE below. That flag plus `isSuperAdmin` is the whole
  * rollout gate; the audience split inside the new dialog has nothing to do
- * with it.
+ * with it. "Verbatim" is meant literally, down to the intake block
+ * (<LegacyIntakeQuestions>) and its copy: the AI card, the size suggestion,
+ * the queue placement and the confirmation the shipped dialog carried were
+ * already `isSuperAdmin`-only, and a super admin now gets the rebuild, so no
+ * pixel a client sees moves before the flip.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -28,7 +32,12 @@ import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { SegmentedControl, nextSegmentIndex } from '@/components/tahi/segmented-control'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { Tooltip } from '@/components/tahi/tooltip'
-import { RichBrief, richBriefIsEmpty } from '@/components/tahi/rich-brief'
+import {
+  RichBrief,
+  richBriefIsEmpty,
+  plainTextToBriefHtml,
+  looksLikeBriefHtml,
+} from '@/components/tahi/rich-brief'
 import { useToast } from '@/components/tahi/toast'
 import { usePermissions } from '@/components/tahi/permissions-context'
 import { AiRequestWizardPanel } from '@/components/tahi/ai-request-wizard'
@@ -191,6 +200,17 @@ export function isoDatePlusDays(days: number, from: Date = new Date()): string {
 /** Days the ideal due date defaults to, and the floor under the picker. */
 export const DUE_DATE_DEFAULT_DAYS = 7
 export const DUE_DATE_MIN_DAYS = 1
+
+/**
+ * A brief handed in from outside the editor, in the shape RichBrief stores.
+ * The AI wizard routes document their `description` as plain text, so it is
+ * escaped and split into paragraphs; anything that already carries markup is
+ * passed straight through.
+ */
+export function toBriefHtml(value?: string | null): string {
+  if (!value) return ''
+  return looksLikeBriefHtml(value) ? value : plainTextToBriefHtml(value)
+}
 
 export interface SubmitGateInput {
   title: string
@@ -391,15 +411,19 @@ function AlignedRequestDialog({
     return () => { cancelled = true }
   }, [category, open, isAdmin])
 
+  // Sub-requests load the list too even though the picker stays hidden: the
+  // parent's org is the only way `selectedClient` resolves, and without it the
+  // plan is unknown, so the Size control would vanish and every sub-request
+  // would be filed as a small task whatever the parent's track.
   useEffect(() => {
-    if (!open || !isAdmin || isSubRequest) return
+    if (!open || !isAdmin) return
     setClientsLoading(true)
     fetch(apiPath('/api/admin/clients?status=active'))
       .then(r => r.json() as Promise<{ organisations: Array<{ id: string; name: string; planType?: string | null }> }>)
       .then(data => setClients((data.organisations ?? []).map(o => ({ id: o.id, name: o.name, planType: o.planType }))))
       .catch(() => setClients([]))
       .finally(() => setClientsLoading(false))
-  }, [open, isAdmin, isSubRequest])
+  }, [open, isAdmin])
 
   useEffect(() => {
     if (!isAdmin || !clientOrgId) {
@@ -470,7 +494,7 @@ function AlignedRequestDialog({
   useEffect(() => {
     if (!open || !aiDraft) return
     if (aiDraft.title) setTitle(aiDraft.title)
-    if (aiDraft.description) setDescription(aiDraft.description)
+    if (aiDraft.description) setDescription(toBriefHtml(aiDraft.description))
     if (aiDraft.category) setCategory(aiDraft.category)
     setAiDrafted(true)
   }, [open, aiDraft])
@@ -486,7 +510,10 @@ function AlignedRequestDialog({
 
   const handleDraftToForm = useCallback((draft: { title: string; description: string; category: string; type: string }) => {
     setTitle(draft.title)
-    setDescription(draft.description)
+    // The wizard route hands back plain prose and leaves the conversion to the
+    // caller. RichBrief parses whatever it is given as HTML, so without this a
+    // multi-paragraph draft arrives as one run-on line.
+    setDescription(toBriefHtml(draft.description))
     setCategory(draft.category)
     // The wizard's vocabulary is wider than the two sizes the dialog offers,
     // so anything bigger than a small task lands on large.
@@ -704,7 +731,9 @@ function AlignedRequestDialog({
                 </FieldGroup>
               )}
 
-              {isAdmin && clientOrgId && brandOptions.length > 0 && (
+              {/* Brand is not part of the sub-request body, so it is not
+                  offered there rather than offered and ignored. */}
+              {isAdmin && !isSubRequest && clientOrgId && brandOptions.length > 0 && (
                 <FieldGroup label="Brand" htmlFor="req-brand">
                   <StyledSelect id="req-brand" value={brandId} onChange={setBrandId}>
                     <option value="">No specific brand</option>
@@ -783,7 +812,10 @@ function AlignedRequestDialog({
                       {isClient && (
                         <QuietLink onClick={() => setSizeChangeOpen(false)}>Use suggestion</QuietLink>
                       )}
-                      {isAdmin && (
+                      {/* Only while there are two sizes to choose between:
+                          on a single-track plan the hint and the Info note
+                          below would say the same sentence twice. */}
+                      {isAdmin && largeAllowed && (
                         <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: '0.375rem 0 0', lineHeight: 1.45 }}>
                           {suggestion.hint}
                         </p>
@@ -948,7 +980,31 @@ function AlignedRequestDialog({
               {isClient ? <Sparkles size={14} aria-hidden="true" /> : <Inbox size={14} aria-hidden="true" />}
               {isClient ? 'We will confirm where it sits in your queue' : 'Lands in Triage'}
             </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginLeft: 'auto' }}>
+            {/* Why the button is off, in the open rather than in a title a
+                disabled control never fires and a thumb can never reach. */}
+            {blockedReason && (
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.375rem',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                color: 'var(--color-text-muted)',
+              }}>
+                <Info size={13} aria-hidden="true" style={{ flexShrink: 0 }} />
+                {blockedReason}
+              </span>
+            )}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: '0.5rem',
+              // The three actions break among themselves rather than squashing
+              // the primary label into two lines under the panel's overflow.
+              flexWrap: 'wrap',
+              marginLeft: 'auto',
+            }}>
               <SecondaryButton onClick={onClose}>Cancel</SecondaryButton>
               {isAdmin && (
                 <SecondaryButton
@@ -974,7 +1030,10 @@ function AlignedRequestDialog({
                   padding: '0.5625rem 1.25rem',
                   fontSize: '0.875rem',
                   fontWeight: 600,
-                  color: 'var(--color-bg)',
+                  // White, not --color-bg: --color-brand has no .dark override
+                  // but --color-bg does, so the token would go near-black on
+                  // green under .dark. Matches every other brand fill in the repo.
+                  color: 'white',
                   background: !canSubmit || submitting ? 'var(--color-brand-200)' : BRAND,
                   border: 'none',
                   borderRadius: 'var(--radius-button)',
@@ -1018,6 +1077,9 @@ function SlideOverShell({
       open={open}
       onClose={onClose}
       variant="center"
+      // The whole body swaps between these three, which unmounts whatever held
+      // focus. Naming the view here is what pulls focus back into the panel.
+      contentKey={view}
       maxWidth="38.75rem"
       icon={view === 'ai' ? <Sparkles size={15} /> : undefined}
       title={done ? undefined : title}
@@ -1078,7 +1140,7 @@ function AiAssistCard({
           height: '2rem',
           borderRadius: 'var(--radius-leaf-sm)',
           background: 'var(--color-brand)',
-          color: 'var(--color-bg)',
+          color: 'white',
         }}
       >
         <Sparkles size={17} />
@@ -1164,7 +1226,9 @@ function CategoryGrid({ value, onChange }: { value: string; onChange: (v: string
 
 function DueDateInfo() {
   return (
-    <Tooltip label={DUE_DATE_TIP}>
+    // showOnTap: without it a tap is swallowed and a phone never sees the one
+    // sentence that says the date is a target rather than a promise.
+    <Tooltip label={DUE_DATE_TIP} showOnTap>
       {/* A real button, so the copy is reachable by keyboard rather than
           hover only, and so a screen reader reads it from the label. */}
       <button type="button" aria-label={DUE_DATE_TIP} className="tahi-reqd-info tahi-focus-ring">
@@ -1304,7 +1368,7 @@ function PlacementOption({
           height: '2rem',
           borderRadius: 'var(--radius-leaf-sm)',
           background: selected ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
-          color: selected ? 'var(--color-bg)' : 'var(--color-text-muted)',
+          color: selected ? 'white' : 'var(--color-text-muted)',
         }}
       >
         <Icon size={17} />
@@ -1340,7 +1404,7 @@ function PlacementOption({
           borderRadius: 'var(--radius-full)',
           border: `1px solid ${selected ? 'var(--color-brand)' : 'var(--color-border)'}`,
           background: selected ? 'var(--color-brand)' : 'transparent',
-          color: 'var(--color-bg)',
+          color: 'white',
         }}
       >
         {selected && <Check size={13} strokeWidth={3} />}
@@ -1423,7 +1487,7 @@ function RequestConfirmation({
               height: '2.5rem',
               borderRadius: 'var(--radius-leaf-sm)',
               background: 'var(--color-brand)',
-              color: 'var(--color-bg)',
+              color: 'white',
               fontSize: '1.0625rem',
               fontWeight: 700,
             }}>
@@ -1453,7 +1517,14 @@ function RequestConfirmation({
         background: 'var(--color-bg-secondary)',
         flexShrink: 0,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginLeft: 'auto' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          gap: '0.5rem',
+          flexWrap: 'wrap',
+          marginLeft: 'auto',
+        }}>
           <SecondaryButton onClick={onDone}>Done</SecondaryButton>
           {!isClient && (
             <button
@@ -1465,7 +1536,7 @@ function RequestConfirmation({
                 padding: '0.5625rem 1.25rem',
                 fontSize: '0.875rem',
                 fontWeight: 600,
-                color: 'var(--color-bg)',
+                color: 'white',
                 background: BRAND,
                 border: 'none',
                 borderRadius: 'var(--radius-button)',
@@ -1592,6 +1663,83 @@ function IntakeQuestions({
 }
 
 // ── The legacy dialog, unchanged for everyone outside the gate ─────────────────
+
+/**
+ * The intake block exactly as the shipped dialog draws it: a top-divider
+ * section, "Additional questions", the required marker inside the label text
+ * and the question repeated as the checkbox's own words. Kept legacy-local
+ * rather than pointed at the shared <IntakeQuestions> above so that the
+ * rollout gate really does mean nothing changes for a client until it flips.
+ * Delete it with LegacyRequestDialog.
+ */
+function LegacyIntakeQuestions({
+  questions, responses, onChange,
+}: {
+  questions: FormQuestion[]
+  responses: Record<string, string>
+  onChange: (id: string, value: string) => void
+}) {
+  return (
+    <div style={{
+      borderTop: '1px solid var(--color-border-subtle)',
+      paddingTop: '1rem',
+      marginTop: '0.5rem',
+    }}>
+      <p style={{
+        fontSize: '0.75rem',
+        fontWeight: 600,
+        color: 'var(--color-text-muted)',
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        marginBottom: '0.75rem',
+      }}>
+        Additional questions
+      </p>
+      {questions.map(q => (
+        <FieldGroup key={q.id} label={`${q.label}${q.required ? ' *' : ''}`} htmlFor={`intake-${q.id}`}>
+          {q.type === 'textarea' ? (
+            <StyledTextarea
+              id={`intake-${q.id}`}
+              value={responses[q.id] ?? ''}
+              onChange={e => onChange(q.id, e.target.value)}
+              rows={3}
+              required={q.required}
+            />
+          ) : q.type === 'select' ? (
+            <StyledSelect
+              id={`intake-${q.id}`}
+              value={responses[q.id] ?? ''}
+              onChange={v => onChange(q.id, v)}
+              required={q.required}
+            >
+              <option value="">Select...</option>
+              {(q.options ?? []).map(opt => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </StyledSelect>
+          ) : q.type === 'checkbox' ? (
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: 'var(--color-text)' }}>
+              <input
+                type="checkbox"
+                checked={responses[q.id] === 'true'}
+                onChange={e => onChange(q.id, e.target.checked ? 'true' : 'false')}
+              />
+              {q.label}
+            </label>
+          ) : (
+            <StyledInput
+              id={`intake-${q.id}`}
+              type={q.type === 'url' ? 'url' : 'text'}
+              value={responses[q.id] ?? ''}
+              onChange={e => onChange(q.id, e.target.value)}
+              required={q.required}
+            />
+          )}
+        </FieldGroup>
+      ))}
+    </div>
+  )
+}
 
 function LegacyRequestDialog({
   open, onClose, isAdmin, canUseLargeTrack = true, defaultOrgId,
@@ -1835,7 +1983,7 @@ function LegacyRequestDialog({
             <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
               {isAdmin
                 ? 'Create a request on behalf of a client.'
-                : 'Tell us what you need and we will get started.'}
+                : "Tell us what you need and we'll get started."}
             </p>
           </div>
           <button
@@ -1948,8 +2096,8 @@ function LegacyRequestDialog({
               }}>
                 <Zap size={12} aria-hidden="true" />
                 {clientUsesTracks
-                  ? `Retainer client (${selectedClient?.planType}), select task size below`
-                  : 'Project or hourly client, no track selection needed'}
+                  ? `Retainer client (${selectedClient?.planType}) - select task size below`
+                  : 'Project / hourly client - no track selection needed'}
               </div>
             )}
 
@@ -2147,7 +2295,7 @@ function LegacyRequestDialog({
             </FieldGroup>
 
             {!isAdmin && intakeQuestions.length > 0 && (
-              <IntakeQuestions
+              <LegacyIntakeQuestions
                 questions={intakeQuestions}
                 responses={formResponses}
                 onChange={(id, value) => setFormResponses(prev => ({ ...prev, [id]: value }))}
@@ -2273,7 +2421,7 @@ function LegacyRequestDialog({
                 padding: '0.5625rem 1.25rem',
                 fontSize: '0.875rem',
                 fontWeight: 600,
-                color: 'var(--color-bg)',
+                color: 'white',
                 background: submitting || !title.trim() ? 'var(--color-brand-200)' : BRAND,
                 border: 'none',
                 borderRadius: 'var(--radius-button)',

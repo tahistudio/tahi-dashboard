@@ -37,10 +37,12 @@
  * backdrop, a 38.75rem panel that rises and scales in over 200ms, a body
  * capped by the panel's own 90vh height so long forms scroll inside it, and
  * the three focus behaviours a modal owes a keyboard user (focus moves into
- * the panel on open, Tab cycles inside it, focus returns to the trigger on
- * close). Those focus rules are deliberately scoped to the centred variant so
- * the right-hand drawer keeps behaving exactly as its consumers expect. Under
- * prefers-reduced-motion both variants cross-fade instead of moving.
+ * the panel on open and on every `contentKey` change, Tab cycles inside it,
+ * focus returns to the trigger on close). The Tab handler is bound on document
+ * rather than the panel so it still fires when a body swap has dropped focus
+ * on <body>. Those focus rules are deliberately scoped to the centred variant
+ * so the right-hand drawer keeps behaving exactly as its consumers expect.
+ * Under prefers-reduced-motion both variants cross-fade instead of moving.
  *
  * For short-form confirmations, <ConfirmDialog> is still the smaller tool.
  * For full-screen takeovers, use <FullScreenDialog> (not yet built).
@@ -51,16 +53,28 @@ import { X } from 'lucide-react'
 
 const EXIT_MS = 220
 
-/** Everything that can take focus inside a modal panel, in DOM order. */
+/**
+ * Everything Tab can land on inside a modal panel, in DOM order. tabindex="-1"
+ * is excluded everywhere, not just on the catch-all: a roving-tabindex group
+ * (the dialog's category tiles) is a pile of real buttons the browser skips,
+ * and counting them would put the trap's "last stop" on something Tab never
+ * reaches.
+ */
 const FOCUSABLE_SELECTOR = [
-  'a[href]',
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[contenteditable="true"]',
+  'a[href]:not([tabindex="-1"])',
+  'button:not([disabled]):not([tabindex="-1"])',
+  'input:not([disabled]):not([tabindex="-1"])',
+  'select:not([disabled]):not([tabindex="-1"])',
+  'textarea:not([disabled]):not([tabindex="-1"])',
+  '[contenteditable="true"]:not([tabindex="-1"])',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
+
+/** The visible focus stops inside a panel, in DOM order. */
+function focusablesIn(el: HTMLElement): HTMLElement[] {
+  return Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+    .filter(node => node.offsetParent !== null || node === document.activeElement)
+}
 
 export type SlideOverVariant = 'right' | 'center'
 
@@ -85,6 +99,13 @@ interface SlideOverProps {
    * still comes from `maxWidth`, which defaults to 38.75rem when centred.
    */
   variant?: SlideOverVariant
+  /**
+   * Centred variant only. Changes to this value re-run the focus-into-panel
+   * step, so a dialog that swaps its whole body (form to AI to confirmation)
+   * never leaves focus on the <body> the unmounted control fell off. Feed it
+   * whatever names the current body, e.g. the view.
+   */
+  contentKey?: string | number
   children: React.ReactNode
 }
 
@@ -98,6 +119,7 @@ function SlideOverRoot({
   ariaLabel,
   hideCloseButton = false,
   variant = 'right',
+  contentKey,
   children,
 }: SlideOverProps) {
   const centred = variant === 'center'
@@ -140,47 +162,78 @@ function SlideOverRoot({
     }
   }, [open, onClose])
 
-  // Centred modals move focus into the panel on open and hand it back to
-  // whatever opened them on close. The right-hand drawer is left alone: it has
+  // Centred modals hand focus back to whatever opened them on close. Kept
+  // apart from the focus-in effect below so a content swap cannot bounce focus
+  // out to the opener and back. The right-hand drawer is left alone: it has
   // shipped without this and several consumers focus their own field.
   useEffect(() => {
     if (!centred || !open) return
     const opener = document.activeElement as HTMLElement | null
-    const frame = window.requestAnimationFrame(() => {
-      const el = panelRef.current
-      if (!el) return
-      const first = el.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
-      ;(first ?? el).focus()
-    })
     return () => {
-      window.cancelAnimationFrame(frame)
       if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus()
     }
   }, [centred, open])
 
-  // Tab cycles inside a centred panel rather than escaping to the page under it.
-  const trapTab = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'Tab') return
-    const el = panelRef.current
-    if (!el) return
-    const items = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-      .filter(node => node.offsetParent !== null || node === document.activeElement)
-    if (items.length === 0) {
-      e.preventDefault()
-      el.focus()
-      return
+  // Focus moves into the panel on open, and again whenever `contentKey`
+  // changes: swapping the body unmounts whatever held focus, which drops it on
+  // <body>, outside the panel and outside the trap.
+  useEffect(() => {
+    if (!centred || !open) return
+    const frame = window.requestAnimationFrame(() => {
+      const el = panelRef.current
+      if (!el) return
+      // Already inside (a consumer focused its own field) : leave it there.
+      const active = document.activeElement
+      if (active && active !== el && el.contains(active)) return
+      const first = focusablesIn(el)[0]
+      ;(first ?? el).focus()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [centred, open, contentKey])
+
+  // Tab cycles inside a centred panel rather than escaping to the page under
+  // it. Bound on document rather than the panel: after a body swap the focused
+  // control is unmounted and the keydown fires on <body>, which a handler on
+  // the panel node would never see.
+  useEffect(() => {
+    if (!centred || !open) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return
+      const el = panelRef.current
+      if (!el) return
+      const items = focusablesIn(el)
+      if (items.length === 0) {
+        e.preventDefault()
+        el.focus()
+        return
+      }
+      const first = items[0]
+      const last = items[items.length - 1]
+      const active = document.activeElement as HTMLElement | null
+      const orphaned = !active || active === document.body || active === document.documentElement
+      if (orphaned) {
+        // Focus fell off an unmounted control onto <body>. Pull it back to
+        // whichever end the Tab was heading for rather than letting it walk
+        // the page behind the modal.
+        e.preventDefault()
+        ;(e.shiftKey ? last : first).focus()
+        return
+      }
+      // Anything else outside the panel is a portalled child of it (the
+      // searchable select renders its dropdown on document.body), so its own
+      // keyboard handling is left alone.
+      if (active !== el && !el.contains(active)) return
+      if (e.shiftKey && (active === first || active === el)) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault()
+        first.focus()
+      }
     }
-    const first = items[0]
-    const last = items[items.length - 1]
-    const active = document.activeElement
-    if (e.shiftKey && (active === first || active === el)) {
-      e.preventDefault()
-      last.focus()
-    } else if (!e.shiftKey && active === last) {
-      e.preventDefault()
-      first.focus()
-    }
-  }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [centred, open])
 
   if (!rendered) return null
 
@@ -228,7 +281,6 @@ function SlideOverRoot({
               ? `slideOverSlideOut ${EXIT_MS}ms cubic-bezier(0.4, 0, 1, 1) forwards`
               : 'slideOverSlideIn 250ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
-      onKeyDown={centred ? trapTab : undefined}
     >
         {/* Header (rendered if title is set) */}
         {title && (

@@ -5,11 +5,18 @@ import {
   submitBlockedReason,
   nextCategoryIndex,
   parseIntakeQuestions,
+  toBriefHtml,
   DUE_DATE_DEFAULT_DAYS,
   DUE_DATE_MIN_DAYS,
   type SubmitGateInput,
 } from '@/components/tahi/new-request-dialog'
-import { richBriefPlainText, richBriefIsEmpty, normaliseBriefHtml } from '@/components/tahi/rich-brief'
+import {
+  richBriefPlainText,
+  richBriefIsEmpty,
+  normaliseBriefHtml,
+  plainTextToBriefHtml,
+  looksLikeBriefHtml,
+} from '@/components/tahi/rich-brief'
 import { aiWizardProgress, openerForCategory, AI_MIN_STEPS } from '@/components/tahi/ai-request-wizard'
 
 // The repo's Vitest runs in the `node` environment with no DOM, so these cover
@@ -189,6 +196,78 @@ describe('normaliseBriefHtml', () => {
 
   it('leaves a real brief alone', () => {
     expect(normaliseBriefHtml('<p>Real</p>')).toBe('<p>Real</p>')
+  })
+})
+
+describe('plainTextToBriefHtml', () => {
+  it('wraps a single line in a paragraph', () => {
+    expect(plainTextToBriefHtml('Refresh the hero')).toBe('<p>Refresh the hero</p>')
+  })
+
+  it('splits blank-line-separated prose into paragraphs', () => {
+    expect(plainTextToBriefHtml('First para.\n\nSecond para.'))
+      .toBe('<p>First para.</p><p>Second para.</p>')
+  })
+
+  it('treats a run of blank lines as one break', () => {
+    expect(plainTextToBriefHtml('One\n\n\n\nTwo')).toBe('<p>One</p><p>Two</p>')
+  })
+
+  it('keeps a single newline as a line break inside the paragraph', () => {
+    expect(plainTextToBriefHtml('Line one\nLine two')).toBe('<p>Line one<br>Line two</p>')
+  })
+
+  it('normalises Windows line endings', () => {
+    expect(plainTextToBriefHtml('One\r\n\r\nTwo')).toBe('<p>One</p><p>Two</p>')
+  })
+
+  it('escapes markup so a stray angle bracket is shown, not parsed', () => {
+    expect(plainTextToBriefHtml('Use <div> here')).toBe('<p>Use &lt;div&gt; here</p>')
+    expect(plainTextToBriefHtml('Tea & toast')).toBe('<p>Tea &amp; toast</p>')
+    expect(plainTextToBriefHtml('He said "go"')).toBe('<p>He said &quot;go&quot;</p>')
+  })
+
+  it('escapes the ampersand before the brackets, so entities are not doubled', () => {
+    expect(plainTextToBriefHtml('<script>')).toBe('<p>&lt;script&gt;</p>')
+  })
+
+  it('reads nothing and whitespace-only as empty', () => {
+    expect(plainTextToBriefHtml('')).toBe('')
+    expect(plainTextToBriefHtml(null)).toBe('')
+    expect(plainTextToBriefHtml(undefined)).toBe('')
+    expect(plainTextToBriefHtml('   \n\n  ')).toBe('')
+  })
+
+  it('round-trips back through the plain-text reader', () => {
+    expect(richBriefPlainText(plainTextToBriefHtml('One\n\nTwo & three'))).toBe('One Two & three')
+  })
+})
+
+describe('looksLikeBriefHtml', () => {
+  it('spots the tags the editor emits', () => {
+    expect(looksLikeBriefHtml('<p>Hi</p>')).toBe(true)
+    expect(looksLikeBriefHtml('<ul><li>Hi</li></ul>')).toBe(true)
+  })
+
+  it('does not mistake prose that mentions a tag for markup', () => {
+    expect(looksLikeBriefHtml('Wrap it in a <container> please')).toBe(false)
+    expect(looksLikeBriefHtml('Plain words')).toBe(false)
+    expect(looksLikeBriefHtml('')).toBe(false)
+  })
+})
+
+describe('toBriefHtml', () => {
+  it('converts the plain text the AI wizard hands back', () => {
+    expect(toBriefHtml('Draft one.\n\nDraft two.')).toBe('<p>Draft one.</p><p>Draft two.</p>')
+  })
+
+  it('leaves a brief that already carries markup alone', () => {
+    expect(toBriefHtml('<p>Already rich</p>')).toBe('<p>Already rich</p>')
+  })
+
+  it('reads nothing as empty', () => {
+    expect(toBriefHtml(undefined)).toBe('')
+    expect(toBriefHtml('')).toBe('')
   })
 })
 

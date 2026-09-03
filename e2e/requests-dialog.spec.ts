@@ -54,13 +54,41 @@ async function rebuiltDialogIsOn(page: Page): Promise<boolean> {
   return (await page.getByRole('radiogroup', { name: 'What kind of work?' }).count()) > 0
 }
 
+/** True while focus sits inside one of the mounted dialog panels. */
+async function focusIsInsideDialog(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const active = document.activeElement
+    if (!active) return false
+    return Array.from(document.querySelectorAll('[role="dialog"]'))
+      .some(panel => panel === active || panel.contains(active))
+  })
+}
+
 test.describe('New request dialog', () => {
-  test('opens, traps Escape and closes', async ({ page }) => {
+  test('opens and closes on Escape', async ({ page }) => {
     await gotoRequests(page)
     const dialog = await openDialog(page)
 
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden({ timeout: 10_000 })
+  })
+
+  test('Tab cycles inside the panel, including after the body swaps', async ({ page }) => {
+    await gotoRequests(page)
+    await openDialog(page)
+    test.skip(!(await rebuiltDialogIsOn(page)), 'The rebuilt dialog is super-admin gated.')
+
+    // More presses than the form has stops, so a leaky trap walks out into the
+    // sidebar and the top nav rather than wrapping.
+    for (let i = 0; i < 30; i += 1) await page.keyboard.press('Tab')
+    expect(await focusIsInsideDialog(page)).toBe(true)
+
+    // Swapping the whole body unmounts whatever held focus. The trap has to
+    // survive that, which is the case a panel-bound keydown handler misses.
+    await page.getByRole('button', { name: /Build with AI/ }).click()
+    await expect(page.getByRole('progressbar', { name: 'Interview progress' })).toBeVisible()
+    for (let i = 0; i < 12; i += 1) await page.keyboard.press('Tab')
+    expect(await focusIsInsideDialog(page)).toBe(true)
   })
 
   test('the body reads in the prototype order', async ({ page }) => {
@@ -137,14 +165,37 @@ test.describe('New request dialog', () => {
     await expect(page.getByRole('radiogroup', { name: 'What kind of work?' })).toBeVisible()
   })
 
-  test('the dialog fits a 375px viewport with no horizontal scroll', async ({ page }) => {
+  test('the footer keeps its primary action inside the panel at 375px', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 })
     await gotoRequests(page)
-    await openDialog(page)
+    const dialog = await openDialog(page)
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     )
     expect(overflow).toBeLessThanOrEqual(0)
+
+    // The page-level measurement above can never fail while the panel clips
+    // with overflow: hidden, so the real question is whether the primary
+    // action still fits the panel it is drawn in.
+    const submit = dialog.getByRole('button', { name: /^(Create request|Submit request)$/ })
+    await expect(submit).toBeVisible()
+    const panelBox = await dialog.boundingBox()
+    const submitBox = await submit.boundingBox()
+    expect(panelBox).not.toBeNull()
+    expect(submitBox).not.toBeNull()
+    if (!panelBox || !submitBox) return
+
+    // Half a pixel of slack for sub-pixel layout, nothing more.
+    expect(submitBox.x).toBeGreaterThanOrEqual(panelBox.x - 0.5)
+    expect(submitBox.x + submitBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 0.5)
+
+    if (await rebuiltDialogIsOn(page)) {
+      // A label that wrapped to two lines shows up as a taller button than the
+      // one beside it, which is exactly what a footer that cannot wrap does.
+      const cancelBox = await dialog.getByRole('button', { name: 'Cancel' }).boundingBox()
+      expect(cancelBox).not.toBeNull()
+      if (cancelBox) expect(Math.abs(submitBox.height - cancelBox.height)).toBeLessThanOrEqual(1)
+    }
   })
 })

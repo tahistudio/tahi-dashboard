@@ -410,7 +410,7 @@ export function AiRequestWizardPanel({
                 padding: '0.625rem 0.875rem',
                 borderRadius: 'var(--radius-lg)',
                 background: msg.role === 'user' ? 'var(--color-brand)' : 'var(--color-bg-secondary)',
-                color: msg.role === 'user' ? 'var(--color-bg)' : 'var(--color-text)',
+                color: msg.role === 'user' ? 'white' : 'var(--color-text)',
                 fontSize: '0.875rem',
                 lineHeight: 1.5,
                 whiteSpace: 'pre-wrap',
@@ -429,8 +429,6 @@ export function AiRequestWizardPanel({
         ))}
         {sending && (
           <div
-            aria-live="polite"
-            aria-label="Drafting a reply"
             style={{
               alignSelf: 'flex-start',
               padding: '0.625rem 0.875rem',
@@ -441,6 +439,12 @@ export function AiRequestWizardPanel({
             <span className="tahi-ai-typing" aria-hidden="true"><i /><i /><i /></span>
           </div>
         )}
+        {/* Mounted in every state on purpose: a live region only announces a
+            change to text inside a region that already existed, so creating
+            one alongside its own content says nothing at all. */}
+        <div aria-live="polite" className="sr-only">
+          {sending ? 'Drafting a reply' : ''}
+        </div>
         <div ref={messagesEndRef} />
       </div>
 
@@ -475,7 +479,7 @@ export function AiRequestWizardPanel({
                   minHeight: '2.75rem',
                   padding: '0.625rem 0.875rem',
                   background: creating ? 'var(--color-brand-200)' : 'var(--color-brand)',
-                  color: 'var(--color-bg)',
+                  color: 'white',
                   border: 'none',
                   borderRadius: 'var(--radius-button)',
                   fontSize: '0.875rem',
