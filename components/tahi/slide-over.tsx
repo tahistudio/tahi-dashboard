@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * <SlideOver> — the shared right-side drawer primitive.
+ * <SlideOver>. The shared right-side drawer primitive.
  *
  * Use for :
  *   - AI wizards (task, request)
@@ -33,14 +33,36 @@
  *   - Mobile : full-width (max-width cap is desktop-only)
  *   - Optional header with icon + title + close button
  *
- * For MODAL dialogs (centered, short-form confirmation), use <ConfirmDialog>.
+ * variant="center" turns the same shell into a centred modal: a blurred
+ * backdrop, a 38.75rem panel that rises and scales in over 200ms, a body
+ * capped by the panel's own 90vh height so long forms scroll inside it, and
+ * the three focus behaviours a modal owes a keyboard user (focus moves into
+ * the panel on open, Tab cycles inside it, focus returns to the trigger on
+ * close). Those focus rules are deliberately scoped to the centred variant so
+ * the right-hand drawer keeps behaving exactly as its consumers expect. Under
+ * prefers-reduced-motion both variants cross-fade instead of moving.
+ *
+ * For short-form confirmations, <ConfirmDialog> is still the smaller tool.
  * For full-screen takeovers, use <FullScreenDialog> (not yet built).
  */
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 
 const EXIT_MS = 220
+
+/** Everything that can take focus inside a modal panel, in DOM order. */
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[contenteditable="true"]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+
+export type SlideOverVariant = 'right' | 'center'
 
 interface SlideOverProps {
   open: boolean
@@ -55,8 +77,14 @@ interface SlideOverProps {
   maxWidth?: string
   /** Accessible label when no title is rendered. */
   ariaLabel?: string
-  /** When true, hides the default close (X) button — use in combination with a custom footer close action. */
+  /** When true, hides the default close (X) button. Pair it with a custom footer close action. */
   hideCloseButton?: boolean
+  /**
+   * 'right' (default) is the drawer. 'center' is a centred modal: blurred
+   * backdrop, rise-and-scale entry, focus trapped inside the panel. Width
+   * still comes from `maxWidth`, which defaults to 38.75rem when centred.
+   */
+  variant?: SlideOverVariant
   children: React.ReactNode
 }
 
@@ -66,11 +94,15 @@ function SlideOverRoot({
   icon,
   title,
   subtitle,
-  maxWidth = '28rem',
+  maxWidth,
   ariaLabel,
   hideCloseButton = false,
+  variant = 'right',
   children,
 }: SlideOverProps) {
+  const centred = variant === 'center'
+  const panelWidth = maxWidth ?? (centred ? '38.75rem' : '28rem')
+  const panelRef = useRef<HTMLDivElement>(null)
   // Track "rendered" separately from "open" so the close transition
   // can play before unmount. When open flips true → render immediately.
   // When open flips false → leave mounted, mark `closing`, unmount
@@ -93,7 +125,7 @@ function SlideOverRoot({
     return () => window.clearTimeout(t)
   }, [open, rendered])
 
-  // Escape closes + body scroll lock — only while truly open
+  // Escape closes plus body scroll lock, only while truly open
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -108,51 +140,96 @@ function SlideOverRoot({
     }
   }, [open, onClose])
 
+  // Centred modals move focus into the panel on open and hand it back to
+  // whatever opened them on close. The right-hand drawer is left alone: it has
+  // shipped without this and several consumers focus their own field.
+  useEffect(() => {
+    if (!centred || !open) return
+    const opener = document.activeElement as HTMLElement | null
+    const frame = window.requestAnimationFrame(() => {
+      const el = panelRef.current
+      if (!el) return
+      const first = el.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
+      ;(first ?? el).focus()
+    })
+    return () => {
+      window.cancelAnimationFrame(frame)
+      if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus()
+    }
+  }, [centred, open])
+
+  // Tab cycles inside a centred panel rather than escaping to the page under it.
+  const trapTab = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Tab') return
+    const el = panelRef.current
+    if (!el) return
+    const items = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+      .filter(node => node.offsetParent !== null || node === document.activeElement)
+    if (items.length === 0) {
+      e.preventDefault()
+      el.focus()
+      return
+    }
+    const first = items[0]
+    const last = items[items.length - 1]
+    const active = document.activeElement
+    if (e.shiftKey && (active === first || active === el)) {
+      e.preventDefault()
+      last.focus()
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault()
+      first.focus()
+    }
+  }
+
   if (!rendered) return null
 
   const titleId = title ? 'slide-over-title' : undefined
 
-  return (
-    <>
-      {/* Backdrop */}
-      <div
-        style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 60,
-          background: 'rgba(0, 0, 0, 0.3)',
-          animation: closing
-            ? `slideOverFadeOut ${EXIT_MS}ms ease-in forwards`
-            : 'slideOverFadeIn 200ms ease-out',
-        }}
-        onClick={onClose}
-        aria-hidden="true"
-      />
-
-      {/* Panel */}
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-label={titleId ? undefined : ariaLabel}
-        className="slide-over-panel"
-        style={{
-          position: 'fixed',
-          top: 0,
-          right: 0,
-          bottom: 0,
-          zIndex: 70,
-          width: '100%',
-          maxWidth,
-          background: 'var(--color-bg)',
-          boxShadow: '-8px 0 30px rgba(0, 0, 0, 0.12)',
-          display: 'flex',
-          flexDirection: 'column',
-          animation: closing
-            ? `slideOverSlideOut ${EXIT_MS}ms cubic-bezier(0.4, 0, 1, 1) forwards`
-            : 'slideOverSlideIn 250ms cubic-bezier(0.22, 1, 0.36, 1)',
-        }}
-      >
+  const panel = (
+    <div
+      ref={panelRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      aria-label={titleId ? undefined : ariaLabel}
+      tabIndex={centred ? -1 : undefined}
+      className={centred ? 'slide-over-center-panel' : 'slide-over-panel'}
+      style={centred
+        ? {
+            width: `min(${panelWidth}, 100%)`,
+            maxHeight: '90vh',
+            pointerEvents: 'auto',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-xl)',
+            boxShadow: 'var(--shadow-lg)',
+            overflow: 'hidden',
+            outline: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+            animation: closing
+              ? `slideOverModalOut ${EXIT_MS}ms ease-in forwards`
+              : `slideOverModalIn var(--motion-base, 200ms) var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1)) both`,
+          }
+        : {
+            position: 'fixed',
+            top: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 70,
+            width: '100%',
+            maxWidth: panelWidth,
+            background: 'var(--color-bg)',
+            boxShadow: '-8px 0 30px rgba(0, 0, 0, 0.12)',
+            display: 'flex',
+            flexDirection: 'column',
+            animation: closing
+              ? `slideOverSlideOut ${EXIT_MS}ms cubic-bezier(0.4, 0, 1, 1) forwards`
+              : 'slideOverSlideIn 250ms cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+      onKeyDown={centred ? trapTab : undefined}
+    >
         {/* Header (rendered if title is set) */}
         {title && (
           <div
@@ -234,8 +311,38 @@ function SlideOverRoot({
           </div>
         )}
 
-        {children}
-      </div>
+      {children}
+    </div>
+  )
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 60,
+          // A scrim is always dark, in both themes, so it stays a literal
+          // rgba the way <ConfirmDialog> already has it rather than a text
+          // token that would invert to a white wash under .dark.
+          background: centred ? 'rgba(18, 26, 15, 0.45)' : 'rgba(0, 0, 0, 0.3)',
+          backdropFilter: centred ? 'blur(3px)' : undefined,
+          animation: closing
+            ? `slideOverFadeOut ${EXIT_MS}ms ease-in forwards`
+            : 'slideOverFadeIn 200ms ease-out',
+        }}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+
+      {/* Panel. Centred variant sits in a click-through flex frame so the
+          backdrop underneath still closes on an outside click. */}
+      {centred ? (
+        <div className="slide-over-center-frame">{panel}</div>
+      ) : (
+        panel
+      )}
 
       {/* Animation keyframes + mobile full-width rule */}
       <style>{`
@@ -255,8 +362,35 @@ function SlideOverRoot({
           from { transform: translateX(0); }
           to   { transform: translateX(100%); }
         }
+        @keyframes slideOverModalIn {
+          from { opacity: 0; transform: translateY(0.875rem) scale(0.985); }
+          to   { opacity: 1; transform: none; }
+        }
+        @keyframes slideOverModalOut {
+          from { opacity: 1; transform: none; }
+          to   { opacity: 0; transform: translateY(0.5rem) scale(0.99); }
+        }
+        .slide-over-center-frame {
+          position: fixed;
+          inset: 0;
+          z-index: 70;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 1.5rem;
+          pointer-events: none;
+        }
         @media (max-width: 40rem) {
           .slide-over-panel { max-width: 100% !important; }
+          .slide-over-center-frame { padding: 0.75rem; }
+          .slide-over-center-panel { max-height: 92vh !important; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          /* Scoped to the centred variant. The drawer's slide is what its
+             consumers already ship; only the new modal opts out here. */
+          .slide-over-center-panel {
+            animation-name: ${closing ? 'slideOverFadeOut' : 'slideOverFadeIn'} !important;
+          }
         }
       `}</style>
     </>
