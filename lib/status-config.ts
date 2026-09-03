@@ -97,6 +97,39 @@ export const REQUEST_STATUSES: readonly StatusOption[] = [
 ]
 
 /**
+ * Statuses a one-click chip may pick, wherever a request's status is edited
+ * inline (the list column, the detail Actions card). Archived is the one
+ * exception: it is destructive, so it lives once in the bulk bar's Danger
+ * section behind a confirm rather than one unguarded click away in a cell.
+ * Both surfaces read this so they cannot state opposite rules for the same
+ * action.
+ */
+export const EDITABLE_STATUSES: readonly StatusOption[] =
+  REQUEST_STATUSES.filter((s) => s.value !== 'archived')
+
+/**
+ * Statuses a brand new request may be created at. Delivered and cancelled
+ * carry side effects that belong to the status PATCH, so the POST rejects
+ * them and the board must not offer a quick-add it knows will 400.
+ *
+ * This lives here, not in the route, because a route module may only export
+ * HTTP methods and route config: the server whitelist and the board's
+ * quick-add gate could otherwise only be kept in step by hand. The client
+ * side reads it from here now; app/api/admin/requests/route.ts still keeps
+ * its own copy and should import this one instead.
+ */
+export const CREATABLE_STATUSES: readonly string[] = REQUEST_STATUSES
+  .map((s) => s.value)
+  .filter((v) => v !== 'delivered' && v !== 'cancelled')
+
+/** Whether a new request may be created straight into this status. Custom
+ *  kanban columns are checked through here too, so a client-renamed
+ *  Delivered column is gated the same way. */
+export function canCreateAtStatus(status: string): boolean {
+  return CREATABLE_STATUSES.includes(status)
+}
+
+/**
  * The one ordered task-status vocabulary. Replaces the three divergent
  * maps that disagreed on Blocked (two TASK_STATUS_CONFIG copies plus a
  * TASK_STATUS_TONE). Settled tones: todo neutral, in_progress info,

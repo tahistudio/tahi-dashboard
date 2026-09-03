@@ -102,3 +102,59 @@ describe('sanitizeRichText - legitimate Tiptap formatting survives', () => {
     expect(sanitizeRichText('We need a new landing page by Friday.')).toBe('We need a new landing page by Friday.')
   })
 })
+
+describe('sanitizeRichText - running it twice changes nothing', () => {
+  // The allowlist runs on the way IN (the portal writers) and again on the way
+  // OUT (request-thread, RichBriefProse), so a stored body is sanitised at
+  // least twice before a reader sees it. Escaping an already-escaped entity a
+  // second time is what printed the literal "Q&amp;A" where the author typed
+  // "Q&A", so every case below asserts the fixed point.
+  const CORPUS = [
+    '<p>Tom &amp; Jerry</p>',
+    '<p>Q&amp;A on the &lt;head&gt; tag</p>',
+    'plain & text < with > brackets',
+    '1 < 2 && 3 > 2',
+    '<p>Costs &lt; &pound;100 &amp;&amp; &gt; 50</p>',
+    '<a href="https://example.com/?a=1&amp;b=2">link</a>',
+    '<a href="/requests?tab=all&amp;sort=due">relative</a>',
+    '<ul><li>one &amp; two</li><li>three</li></ul>',
+    'hello <img src=x onerror=alert(1)',
+    '<a href="javascript:alert(1)">x</a>',
+    '<span data-mention-id="u1">@Liam</span> &amp; co',
+    '&amp;amp;',
+    '&#38; &#x26; &notanentity; &123;',
+  ]
+
+  it.each(CORPUS)('is a fixed point for %j', (input) => {
+    const once = sanitizeRichText(input)
+    expect(sanitizeRichText(once)).toBe(once)
+  })
+
+  it('leaves a stored &amp; alone instead of printing the entity', () => {
+    expect(sanitizeRichText('<p>Tom &amp; Jerry</p>')).toBe('<p>Tom &amp; Jerry</p>')
+    expect(sanitizeRichText('<p>Q&amp;A</p>')).toBe('<p>Q&amp;A</p>')
+  })
+
+  it('still escapes a bare ampersand that opens no entity', () => {
+    expect(sanitizeRichText('a & b')).toBe('a &amp; b')
+    expect(sanitizeRichText('AT&T &amp; co')).toBe('AT&amp;T &amp; co')
+    expect(sanitizeRichText('&notanentity')).toBe('&amp;notanentity')
+  })
+
+  it('keeps a query-string ampersand as one entity in an href', () => {
+    const out = sanitizeRichText('<a href="https://example.com/?a=1&amp;b=2">link</a>')
+    expect(out).toContain('href="https://example.com/?a=1&amp;b=2"')
+    expect(out).not.toContain('&amp;amp;')
+  })
+
+  it('rejects a scheme hidden behind a NAMED entity, not just a numeric one', () => {
+    const out = sanitizeRichText('<a href="java&Tab;script:alert(1)">x</a>')
+    expect(out).not.toContain('href=')
+    expect(out.toLowerCase()).not.toContain('javascript:')
+  })
+
+  it('still rejects a numeric reference written without its semicolon', () => {
+    const out = sanitizeRichText('<a href="&#106avascript:alert(1)">x</a>')
+    expect(out).not.toContain('href=')
+  })
+})

@@ -35,13 +35,35 @@ const DROP_WITH_CONTENT = new Set([
   'svg', 'math', 'title', 'textarea', 'xmp',
 ])
 
+/**
+ * A '&' that does NOT already open a valid named or numeric entity.
+ *
+ * This sanitizer runs at render time too, over bodies a writer has usually
+ * escaped once already: Tiptap's getHTML() emits `&amp;` for a typed '&', and
+ * the portal writers run this same function before the row is stored.
+ * Escaping every '&' unconditionally re-escaped those stored entities, so a
+ * second pass printed the literal text "Q&amp;A" where the author typed
+ * "Q&A". Leaving an existing entity alone makes the pass idempotent:
+ * sanitizeRichText(sanitizeRichText(x)) === sanitizeRichText(x).
+ *
+ * Safety is unaffected. An entity in a TEXT node always decodes to a
+ * character and never to markup, which is the whole point of escaping.
+ */
+const BARE_AMP = /&(?!(?:#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);)/g
+
 function escapeText(s: string): string {
   return s
-    .replace(/&/g, '&amp;')
+    .replace(BARE_AMP, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
 }
 
+/**
+ * Attribute values are escaped WITHOUT the entity exemption above: every '&'
+ * becomes '&amp;', so nothing a browser would decode inside an attribute can
+ * survive. safeHref hands this the fully decoded url, so the escape puts back
+ * the one canonical entity and the pair is stable across repeat passes.
+ */
 function escapeAttr(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -50,25 +72,68 @@ function escapeAttr(s: string): string {
     .replace(/>/g, '&gt;')
 }
 
-/** Validate an <a href>: only http(s), mailto, and relative links survive. */
+// The named entities a browser decodes inside an attribute that matter to the
+// scheme check in safeHref: the whitespace and punctuation an attacker can
+// hide a "javascript:" behind, plus the ones that round-trip escapeAttr's own
+// output. Anything else is left literal, which is harmless because escapeAttr
+// re-escapes its '&' on the way out.
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  tab: '\t', newline: '\n', colon: ':', sol: '/',
+  semi: ';', num: '#', period: '.', lpar: '(', rpar: ')', excl: '!', comma: ',',
+}
+
+/**
+ * Decode HTML entities the way a browser does when it reads an attribute
+ * value, in ONE pass, so "&amp;amp;" decodes to "&amp;" and not to "&".
+ */
+function decodeEntities(raw: string): string {
+  return raw.replace(/&(#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (whole: string, body: string) => {
+    if (body[0] === '#') {
+      const code = body[1] === 'x' || body[1] === 'X'
+        ? parseInt(body.slice(2), 16)
+        : parseInt(body.slice(1), 10)
+      if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return whole
+      try {
+        return String.fromCodePoint(code)
+      } catch {
+        return whole
+      }
+    }
+    return NAMED_ENTITIES[body.toLowerCase()] ?? whole
+  })
+}
+
+/**
+ * Validate an <a href>: only http(s), mailto, and relative links survive.
+ *
+ * Returns the DECODED url, which escapeAttr then escapes exactly once. That
+ * is both what the author meant (a stored `?a=1&amp;b=2` is the url
+ * `?a=1&b=2`) and what makes a second sanitize pass reproduce the first.
+ */
 function safeHref(raw: string): string | null {
-  // Decode numeric HTML entities that could hide a scheme (e.g.
-  // &#106;avascript:), then drop ALL whitespace + control chars (<= 0x20) a
+  // Decode the HTML entities that could hide a scheme (e.g. &#106;avascript:
+  // or java&Tab;script:), then drop ALL whitespace + control chars (<= 0x20) a
   // browser would ignore inside a scheme (e.g. "java\tscript:").
-  const decoded = raw
-    .replace(/&#x([0-9a-f]+);?/gi, (_m, h) => String.fromCharCode(parseInt(h, 16)))
-    .replace(/&#(\d+);?/g, (_m, d) => String.fromCharCode(parseInt(d, 10)))
+  const decoded = decodeEntities(raw)
+  // For the CHECK only, collapse numeric references that were written without
+  // their closing semicolon as well, because a browser still decodes those.
+  // The url this function RETURNS keeps the strict decode above; this pass
+  // only decides whether the link is allowed through at all.
+  const probe = decoded
+    .replace(/&#x([0-9a-f]+);?/gi, (_m, h: string) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#(\d+);?/g, (_m, d: string) => String.fromCharCode(parseInt(d, 10)))
   let cleaned = ''
-  for (let k = 0; k < decoded.length; k++) {
-    if (decoded.charCodeAt(k) > 0x20) cleaned += decoded[k]
+  for (let k = 0; k < probe.length; k++) {
+    if (probe.charCodeAt(k) > 0x20) cleaned += probe[k]
   }
   cleaned = cleaned.toLowerCase()
   if (cleaned.startsWith('http://') || cleaned.startsWith('https://') || cleaned.startsWith('mailto:')) {
-    return raw.trim()
+    return decoded.trim()
   }
   // Allow relative / anchor links (no scheme and not protocol-relative "//").
   if (!/^[a-z][a-z0-9+.-]*:/.test(cleaned) && !cleaned.startsWith('//')) {
-    return raw.trim()
+    return decoded.trim()
   }
   return null
 }

@@ -39,7 +39,8 @@ import {
   type BulkActionResult,
 } from '@/components/tahi/bulk-action-bar'
 import { SubRequestRows } from '@/components/tahi/requests/sub-request-rows'
-import { REQUEST_STATUSES } from '@/lib/status-config'
+import { dropNestedDuplicates } from '@/components/tahi/requests/nesting'
+import { canCreateAtStatus, EDITABLE_STATUSES, REQUEST_STATUSES } from '@/lib/status-config'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
 import { subtaskRollup } from '@/components/tahi/kanban-board'
 import { DueDateChip, dueDateState } from '@/components/tahi/due-date-chip'
@@ -170,22 +171,6 @@ const BOARD_COLS: BoardViewColumn[] = BOARD_STATUSES.map(value => ({
   ...(value === 'submitted' ? TRIAGE_BADGE : {}),
 }))
 
-// Statuses a brand new request may be created at. Mirrors CREATABLE_STATUSES
-// in app/api/admin/requests/route.ts, which cannot export it (a route module
-// may only export HTTP methods and route config). Delivered and cancelled
-// carry side effects that belong to the status PATCH, so the POST rejects
-// them; the board must not offer a quick-add it knows will 400. Custom
-// kanban columns are checked through the same set, so a client-renamed
-// Delivered column is gated too.
-const CREATABLE_STATUSES: readonly string[] = REQUEST_STATUSES
-  .map(s => s.value)
-  .filter(v => v !== 'delivered' && v !== 'cancelled')
-
-/** Whether the board may create a card straight into this column. */
-function canCreateAtStatus(status: string): boolean {
-  return CREATABLE_STATUSES.includes(status)
-}
-
 // Category chips on a card are icon-only and tinted, so the row reads at a
 // glance on a 16.5rem column. The label still reaches the user through the
 // chip's tooltip and accessible name.
@@ -289,12 +274,6 @@ function sortRequests(requests: Request[], sortKey: SortKey): Request[] {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-
-// Status values offered in the inline status-chip column, derived from the one
-// ordered vocabulary so a status added there cannot miss this chip. Archived
-// is the exception: it is destructive, so it lives once in the bulk bar's
-// Danger section behind a confirm rather than one click away in a table cell.
-const EDITABLE_STATUSES = REQUEST_STATUSES.filter(s => s.value !== 'archived')
 
 // Read-only status badge for the client (non-admin) status column.
 function StatusBadgeCell({ status }: { status: string }) {
@@ -790,12 +769,13 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
 
   // What the table actually lists. A sub-request already appears as a <tr>
   // inside its parent's expanded group, so leaving it in the top-level set
-  // printed it twice, counted it twice and let it be ticked twice. The board
-  // has always drawn only parents for the same reason; the workload and the
-  // timeline keep the whole set, because a child is still work someone is
-  // carrying.
+  // printed it twice, counted it twice and let it be ticked twice. Only the
+  // duplicates go: a child whose parent did not survive the search or the
+  // saved view has no group to appear in, so it keeps its own row and stays
+  // findable. The board draws only parents; the workload and the timeline keep
+  // the whole set, because a child is still work someone is carrying.
   const tableRows = useMemo(
-    () => (railOn ? visible.filter(r => !r.parentRequestId) : visible),
+    () => (railOn ? dropNestedDuplicates(visible) : visible),
     [railOn, visible],
   )
   const visibleIds = useMemo(() => new Set(tableRows.map(r => r.id)), [tableRows])
@@ -1439,8 +1419,10 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     showToast('Saved as your default view', 'success')
   }, [rail, showToast])
 
-  // The way back to it. The snapshot is applied on a fresh browser too (see
-  // applyStoredRequestDefault), so saving one is now a real default rather
+  // The way back to it, and the only thing that applies the snapshot on
+  // demand. applyStoredRequestDefault fills keys this browser is missing, but
+  // the snapshot lives in localStorage, so it cannot reach a browser that has
+  // never held one; this button is what makes Save as default useful rather
   // than a label the control read back to itself.
   const handleResetDefault = useCallback(() => {
     rail.resetToDefault()

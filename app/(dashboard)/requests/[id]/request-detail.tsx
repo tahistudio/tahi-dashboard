@@ -36,7 +36,7 @@ import { TimeCard } from '@/components/tahi/time-card'
 import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
 import { fetchSchedulePhaseOptions } from '@/lib/schedule-phases'
 import { usePermissions } from '@/components/tahi/permissions-context'
-import { CATEGORY_CONFIG, REQUEST_STATUS_CONFIG, REQUEST_STATUSES } from '@/lib/status-config'
+import { CATEGORY_CONFIG, EDITABLE_STATUSES, REQUEST_STATUS_CONFIG } from '@/lib/status-config'
 import { StatusChipSelect } from '@/components/tahi/status-chip-select'
 import { DeliverySpine, isPipelineStatus } from '@/components/tahi/requests/delivery-spine'
 import { SegmentedControl } from '@/components/tahi/segmented-control'
@@ -451,11 +451,38 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     )
   }, [mutateGlobal])
 
+  /**
+   * How many writes this page has open.
+   *
+   * Every edit here paints local state first and confirms with the server
+   * after, and the request fetcher fans out to four endpoints, so a revalidate
+   * that was already in flight when a write landed answers with the PRE-write
+   * row. The mirror effect below would then paint that stale answer over the
+   * fresh one: the People card reverted to the old assignee, and an unrelated
+   * field patch could wipe an optimistic checklist. Holding the mirror while
+   * the page is still writing closes that window, and the write that takes the
+   * count back to zero asks for one fresh read, so nothing is lost.
+   */
+  const pendingWrites = useRef(0)
+  const beginWrite = useCallback(() => {
+    pendingWrites.current += 1
+  }, [])
+  const endWrite = useCallback((revalidate: boolean) => {
+    pendingWrites.current = Math.max(0, pendingWrites.current - 1)
+    if (pendingWrites.current === 0 && revalidate) {
+      void mutateRequest()
+      void mutateRequestLists()
+    }
+  }, [mutateRequest, mutateRequestLists])
+
   // Mirror fetched data into local state. Local state is the source of truth for
   // optimistic edits (patchRequest, checklists, participants, unlink), so each
   // refresh (mutateRequest) re-syncs everything exactly as loadRequest used to.
   useEffect(() => {
     if (!requestData) return
+    // A read that raced a write is stale by the time it arrives. endWrite()
+    // fires a fresh one the moment the last write settles.
+    if (pendingWrites.current > 0) return
     setRequest(requestData.request)
     setSubRequests(requestData.subRequests)
     setParentRequest(requestData.parent)
@@ -594,23 +621,37 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     await Promise.all([mutateRequest(), mutateFiles()])
   }
 
-  // Optimistic patch helper - updates local state immediately, PATCHes the
-  // server in the background, rolls back + toasts on failure. Every field-
-  // level mutation below goes through this so the UI never blinks.
+  /**
+   * Optimistic patch helper: updates local state immediately, PATCHes the
+   * server in the background, rolls back and toasts on failure. Every
+   * field-level mutation below goes through this so the UI never blinks.
+   *
+   * Resolves TRUE only when the server took the write, so a caller that
+   * mirrors the change somewhere else (the assignee / participants pair) can
+   * tell a 403 or a dropped connection from a save and stay out of the
+   * divergence it exists to prevent.
+   *
+   * Pass `revalidate: false` when the caller has more writes to make; it owns
+   * the beginWrite/endWrite pair around the whole sequence and the refresh
+   * fires once at the end.
+   */
   const patchRequest = useCallback(async (
     patch: Partial<Request>,
     successMsg?: string,
-  ) => {
-    if (!request) return
+    options?: { revalidate?: boolean },
+  ): Promise<boolean> => {
+    if (!request) return false
     // One gate for every field write on this page. A viewer's lens is not a
     // suggestion: the request is theirs to read, not to move.
     if (!canWrite) {
       showToast('Read-only while you are viewing as this team member')
-      return
+      return false
     }
     const previous = request
     // Apply optimistically
     setRequest({ ...previous, ...patch })
+    let ok = false
+    beginWrite()
     try {
       const res = await fetch(apiPath(`/api/admin/requests/${requestId}`), {
         method: 'PATCH',
@@ -621,22 +662,24 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         setRequest(previous)
         const j = await res.json().catch(() => ({})) as { error?: string }
         showToast(j.error ?? 'Update failed - please retry')
-        return
+      } else {
+        ok = true
+        if (successMsg) showToast(successMsg)
       }
-      if (successMsg) showToast(successMsg)
+    } catch {
+      setRequest(previous)
+      showToast('Network error - try again')
+    } finally {
       // The optimistic paint above covers what the user typed; the revalidate
       // fills in what only the server knows. A status move to delivered stamps
       // deliveredAt and bumps updatedAt, and without this the Details card's
       // Delivered row and the activity feed's "Request was delivered" event
       // never appear until a hard reload. The list cache is refreshed too, so
       // the board and the rail agree with the page that just wrote.
-      void mutateRequest()
-      void mutateRequestLists()
-    } catch {
-      setRequest(previous)
-      showToast('Network error - try again')
+      endWrite(ok && options?.revalidate !== false)
     }
-  }, [request, requestId, showToast, canWrite, mutateRequest, mutateRequestLists])
+    return ok
+  }, [request, requestId, showToast, canWrite, beginWrite, endWrite])
 
   async function handleStatusChange(newStatus: string) {
     if (!request || request.status === newStatus) return
@@ -733,6 +776,11 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   async function saveChecklists(updated: Checklist[]) {
     const previous = checklists
     setChecklists(updated)
+    // Counted like every other write: the mirror effect reads checklists back
+    // out of requests.checklists, so a revalidate landing mid-save used to be
+    // able to paint the pre-tick list over the box the user just ticked.
+    beginWrite()
+    let saved = false
     try {
       const res = await fetch(apiPath(`/api/admin/requests/${requestId}`), {
         method: 'PATCH',
@@ -742,10 +790,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       if (!res.ok) {
         setChecklists(previous)
         showToast('Checklist update failed')
+      } else {
+        saved = true
       }
     } catch {
       setChecklists(previous)
       showToast('Network error - try again')
+    } finally {
+      endWrite(saved)
     }
   }
 
@@ -825,12 +877,28 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   async function handleAssigneeChange(assigneeId: string | null) {
     const name = assigneeId ? teamMembers.find(tm => tm.id === assigneeId)?.name ?? null : null
     const previousAssigneeId = request?.assigneeId ?? null
-    await patchRequest(
-      { assigneeId, assigneeName: name },
-      assigneeId ? `Assigned to ${name ?? 'team member'}` : 'Unassigned',
-    )
-    if (!canWrite || assigneeId === previousAssigneeId) return
-    await syncAssigneeParticipant(previousAssigneeId, assigneeId, name)
+    // Both writes sit inside one begin/end pair, so the participant DELETE and
+    // POST land before the page asks the server for a fresh read. Without it
+    // the read could answer with the pre-write participants and the People
+    // card would snap back to the person who no longer holds this.
+    beginWrite()
+    let saved = false
+    try {
+      // A rejected PATCH (a 403 from access scoping, a 500, an offline tab)
+      // leaves requests.assigneeId exactly as it was. Mirroring it into
+      // request_participants anyway would create the divergence this pair
+      // exists to remove, so the mirror only follows a save the server took.
+      saved = await patchRequest(
+        { assigneeId, assigneeName: name },
+        assigneeId ? `Assigned to ${name ?? 'team member'}` : 'Unassigned',
+        { revalidate: false },
+      )
+      if (saved && canWrite && assigneeId !== previousAssigneeId) {
+        await syncAssigneeParticipant(previousAssigneeId, assigneeId, name)
+      }
+    } finally {
+      endWrite(saved)
+    }
   }
 
   /**
@@ -2185,6 +2253,11 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             requestId={requestId}
             orgId={request.orgId}
             emptyHint={newUi ? 'No files yet. Drop one here or upload.' : undefined}
+            /* Not canWrite: a client legitimately attaches files to their own
+               request, and canWrite is studio-only. What has to hold is the
+               viewer's lens, because the upload and the delete behind it land
+               as the real super admin and genuinely mutate the row. */
+            canMutate={!isViewerImpersonation}
           />
 
           {/* Activity log - collapsed by default at the bottom */}
@@ -2244,14 +2317,17 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     Status
                   </span>
                   <div style={{ flex: 1 }}>
-                    {/* The shared chip, driven off REQUEST_STATUSES. The old
-                        local copy carried its own six-status list, so a
-                        request the board had put on hold printed the raw
-                        slug here and could not be moved back or cancelled
-                        from the page that manages it. */}
+                    {/* The shared chip, driven off the same EDITABLE_STATUSES
+                        the list column uses. The old local copy carried its
+                        own six-status list, so a request the board had put on
+                        hold printed the raw slug here and could not be moved
+                        back or cancelled from the page that manages it.
+                        Archived is the one status left out: it is destructive,
+                        so it belongs behind the bulk bar's Danger confirm
+                        rather than one unguarded click away here. */}
                     <StatusChipSelect
                       value={request.status}
-                      options={REQUEST_STATUSES}
+                      options={EDITABLE_STATUSES}
                       busy={statusUpdating}
                       disabled={!canWrite}
                       onChange={handleStatusChange}
@@ -3608,11 +3684,16 @@ interface FilesPanelProps {
   orgId: string
   /** Ported detail's empty-state line. Falls back to the original copy. */
   emptyHint?: string
+  /** False under a viewer's lens: view and download stay open, attaching and
+   *  deleting do not. Defaults to true so any other caller is unaffected. */
+  canMutate?: boolean
 }
 
 // Files are attachable by both studio and client: uploads authorise non-admins
-// server-side, so there is no admin gate on this panel.
-function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint }: FilesPanelProps) {
+// server-side, so there is no ADMIN gate on this panel. There is a write gate,
+// because a super admin standing in a viewer's shoes must not be able to
+// attach or destroy a file from a page they are only reading.
+function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint, canMutate = true }: FilesPanelProps) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -3721,6 +3802,7 @@ function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint }: FilesPane
           {/* Upload is available to clients too: the presign + confirm routes
               authorise non-admins and land the file under their own D1 org. The
               submit form promises clients can attach files, so honour that here. */}
+          {canMutate && (
           <>
             <input
               ref={fileInputRef}
@@ -3756,6 +3838,7 @@ function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint }: FilesPane
                 {uploading ? 'Uploading...' : 'Upload'}
               </button>
           </>
+          )}
           {files.length > 1 && (
             <button
               type="button"
@@ -3846,6 +3929,7 @@ function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint }: FilesPane
               <FileActions
                 file={f}
                 onDeleted={onRefresh}
+                canDelete={canMutate}
               />
             </div>
           ))}
@@ -3862,10 +3946,14 @@ function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint }: FilesPane
  * video, audio). Download forces attachment Content-Disposition. Delete
  * confirms via a Tahi dialog and hits DELETE /api/uploads/[fileId] which
  * removes from R2 + the files row.
+ *
+ * Delete is the only one of the three that writes, so it is the only one the
+ * viewer's lens takes away. Reading a file is what a viewer is for.
  */
-function FileActions({ file, onDeleted }: {
+function FileActions({ file, onDeleted, canDelete = true }: {
   file: { id: string; filename: string; storageKey: string; mimeType: string | null }
   onDeleted: () => void
+  canDelete?: boolean
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -3922,20 +4010,22 @@ function FileActions({ file, onDeleted }: {
       >
         <Download size={14} />
       </a>
-      <button
-        type="button"
-        onClick={() => setConfirmOpen(true)}
-        disabled={busy}
-        style={iconBtn}
-        aria-label={`Delete ${file.filename}`}
-        title="Delete"
-        onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = '#dc2626' }}
-        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
-      >
-        <Trash2 size={14} />
-      </button>
+      {canDelete && (
+        <button
+          type="button"
+          onClick={() => setConfirmOpen(true)}
+          disabled={busy}
+          style={iconBtn}
+          aria-label={`Delete ${file.filename}`}
+          title="Delete"
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-danger-bg)'; e.currentTarget.style.color = 'var(--color-danger)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+        >
+          <Trash2 size={14} />
+        </button>
+      )}
       <ConfirmDialog
-        open={confirmOpen}
+        open={canDelete && confirmOpen}
         title="Delete file?"
         description={`Permanently removes "${file.filename}" from this request. The file is gone from R2 storage and any messages referencing it will lose the link. Cannot be undone.`}
         confirmLabel="Delete file"

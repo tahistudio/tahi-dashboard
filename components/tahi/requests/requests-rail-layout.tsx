@@ -70,15 +70,19 @@ function writePref(key: string, value: unknown): void {
 }
 
 /**
- * Apply the saved default snapshot to any rail key the browser does not
+ * Apply the saved default snapshot to any rail key this browser does not
  * already hold. Runs once during the first client render, after the legacy
  * migration and before `useUserPreference` hydrates, so a key the user has
  * set since always wins.
  *
- * Until this existed the `requests.default` snapshot had no reader at all:
- * Save as default wrote it, the control read it back only to relabel itself,
- * and a new browser opened on the built-in List / All requests view with the
- * saved default sitting unused in storage.
+ * Scope, stated plainly so nobody reads more into it. Both the snapshot and
+ * the rail keys live in localStorage, so this fills a GAP IN ONE BROWSER: a
+ * key the user never touched, or one that has been cleared while the snapshot
+ * survived. It cannot carry a default to a second machine, and clearing
+ * storage takes the snapshot with it, so a fresh browser still opens on the
+ * built-in List / All requests view. Reaching further needs the snapshot
+ * persisted server-side (a settings key), which is open work on the API side.
+ * The Reset to default control is what applies the snapshot on demand.
  */
 export function applyStoredRequestDefault(): void {
   if (typeof window === 'undefined') return
