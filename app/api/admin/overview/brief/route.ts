@@ -2,10 +2,11 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, inArray, notInArray, gte, isNotNull, desc, asc } from 'drizzle-orm'
+import { eq, and, inArray, notInArray, gte, isNotNull, desc, asc, like, lt } from 'drizzle-orm'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
-import { resolvePermissions, can } from '@/lib/permissions'
+import { resolvePermissions, can, type ResolvedAccess } from '@/lib/permissions'
 import { resolveAccessScoping } from '@/lib/access-scoping'
+import { BRIEF_FEATURES, briefCacheKeyForFingerprint, briefScopeFingerprint } from '@/lib/brief-cache-key'
 import { overnightCutoff, daysPastDue } from '@/lib/overview-aggregates'
 
 export const dynamic = 'force-dynamic'
@@ -62,8 +63,13 @@ function plural(n: number, one: string, many: string): string {
 export async function computeBrief(
   drizzle: D1,
   auth: { userId: string | null; orgId: string | null },
+  // The GET resolves both of these to build the cache key, so it hands them
+  // back rather than paying for a second resolvePermissions +
+  // resolveAccessScoping round on every cache miss. Omitted by the cron and
+  // the refresh endpoint, which resolve nothing up front.
+  prepared?: { access: ResolvedAccess; allowedOrgs: string[] | null },
 ): Promise<BriefResult> {
-  const access = await resolvePermissions(drizzle, auth)
+  const access = prepared?.access ?? await resolvePermissions(drizzle, auth)
   const canSeeInvoices = can(access, 'invoices')
   const canSeeContracts = can(access, 'contracts')
   const canSeeCalls = can(access, 'calls')
@@ -72,7 +78,7 @@ export async function computeBrief(
 
   // Org scoping: null = unrestricted (admin / all_clients); [] = deny all;
   // otherwise the allowed org ids. Client/request/invoice rows are filtered.
-  const allowedOrgs = await resolveAccessScoping(drizzle, auth.userId)
+  const allowedOrgs = prepared ? prepared.allowedOrgs : await resolveAccessScoping(drizzle, auth.userId)
   const denyAll = Array.isArray(allowedOrgs) && allowedOrgs.length === 0
 
   const rateMap: RateMap = await (async () => {
@@ -350,12 +356,12 @@ export async function computeBrief(
 
 // Read the cached brief from settings. Returns null on a missing / corrupt /
 // shape-mismatched row so the caller safely falls through to a recompute.
-export async function readBriefCache(drizzle: D1): Promise<CachedBrief | null> {
+export async function readBriefCache(drizzle: D1, cacheKey: string = BRIEF_CACHE_KEY): Promise<CachedBrief | null> {
   try {
     const [row] = await drizzle
       .select({ value: schema.settings.value })
       .from(schema.settings)
-      .where(eq(schema.settings.key, BRIEF_CACHE_KEY))
+      .where(eq(schema.settings.key, cacheKey))
       .limit(1)
     if (!row?.value) return null
     const parsed = JSON.parse(row.value) as Partial<CachedBrief>
@@ -376,11 +382,16 @@ export async function readBriefCache(drizzle: D1): Promise<CachedBrief | null> {
 // Upsert the computed brief into settings in one statement. Two page loads
 // on a stale morning both recompute and both write; a select-then-insert
 // raced itself here and the loser died on the settings.key primary key.
-export async function writeBriefCache(drizzle: D1, result: BriefResult, generatedAt: string): Promise<void> {
+export async function writeBriefCache(
+  drizzle: D1,
+  result: BriefResult,
+  generatedAt: string,
+  cacheKey: string = BRIEF_CACHE_KEY,
+): Promise<void> {
   const value = JSON.stringify({ ...result, generatedAt })
   await drizzle
     .insert(schema.settings)
-    .values({ key: BRIEF_CACHE_KEY, value, updatedAt: generatedAt })
+    .values({ key: cacheKey, value, updatedAt: generatedAt })
     .onConflictDoUpdate({
       target: schema.settings.key,
       set: { value, updatedAt: generatedAt },
@@ -404,6 +415,11 @@ export function isBriefFresh(generatedAt: string, now: Date): boolean {
 // Otherwise recomputes with the caller's own permissions, caches it, and
 // returns it. Response shape is unchanged ({ urgent, week, slept }) plus a
 // generatedAt stamp the card uses for its "Updated ..." line.
+//
+// The cache is keyed on the caller's resolved scope (allowed orgs + granted
+// brief features), so a scoped team member can never be served the owner's
+// brief and can never overwrite it with their narrower one. The unrestricted
+// owner scope keeps the plain key the morning cron writes.
 export async function GET(req: NextRequest) {
   const auth = await getRequestAuth(req)
   if (!isTahiAdmin(auth.orgId)) {
@@ -414,7 +430,18 @@ export async function GET(req: NextRequest) {
   const drizzle = database as D1
   const now = new Date()
 
-  const cached = await readBriefCache(drizzle)
+  // One resolve of the caller's permissions and org scope, used for both the
+  // cache key and (on a miss) computeBrief itself. Resolving twice put a
+  // handful of D1 queries on the previously pure cache-read path.
+  const access = await resolvePermissions(drizzle, auth)
+  const allowedOrgs = await resolveAccessScoping(drizzle, auth.userId)
+  const features = BRIEF_FEATURES.filter((feature) => can(access, feature))
+  const cacheKey = briefCacheKeyForFingerprint(
+    BRIEF_CACHE_KEY,
+    briefScopeFingerprint(allowedOrgs, features),
+  )
+
+  const cached = await readBriefCache(drizzle, cacheKey)
   if (cached && isBriefFresh(cached.generatedAt, now)) {
     return NextResponse.json({
       urgent: cached.urgent,
@@ -424,10 +451,33 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  const result = await computeBrief(drizzle, auth)
+  const result = await computeBrief(drizzle, auth, { access, allowedOrgs })
   const generatedAt = now.toISOString()
-  await writeBriefCache(drizzle, result, generatedAt)
+  await writeBriefCache(drizzle, result, generatedAt, cacheKey)
+  // A scope that stops being used (a rule edited, a member offboarded) would
+  // otherwise leave its brief row in `settings` forever. Swept on the miss
+  // path only, so a cache hit stays a single read.
+  await sweepStaleBriefCache(drizzle, now)
   return NextResponse.json({ ...result, generatedAt })
+}
+
+/**
+ * Delete scope-suffixed brief rows that have not been rewritten for a day.
+ * Never touches the base key: that is the row the morning cron warms and the
+ * owner reads, and it is meant to persist between generations.
+ */
+async function sweepStaleBriefCache(drizzle: D1, now: Date): Promise<void> {
+  const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
+  try {
+    await drizzle
+      .delete(schema.settings)
+      .where(and(
+        like(schema.settings.key, `${BRIEF_CACHE_KEY}:%`),
+        lt(schema.settings.updatedAt, cutoff),
+      ))
+  } catch {
+    // Best effort. A sweep that fails must never fail the brief.
+  }
 }
 
 // Small helper so the contract row assembly stays out of the main flow.

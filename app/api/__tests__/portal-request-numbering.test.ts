@@ -16,7 +16,16 @@ interface CapturedSql {
   values: unknown[]
 }
 
-const captured: { runArgs: CapturedSql[] } = { runArgs: [] }
+/**
+ * `selectResults` answers the SELECTs the POST issues, in order. Only the
+ * large_task entitlement path reads anything (the active subscription, then
+ * the org's tracks override), so every other case leaves this empty and the
+ * chain answers with no rows.
+ */
+const captured: { runArgs: CapturedSql[]; selectResults: unknown[] } = {
+  runArgs: [],
+  selectResults: [],
+}
 
 // ---------------------------------------------------------------------------
 // Mocks - hoisted; factories cannot reference outer variables except via the
@@ -35,26 +44,52 @@ vi.mock('@/lib/events', () => ({
   dispatchDomainEvent: vi.fn().mockResolvedValue(undefined),
 }))
 
-vi.mock('@/db/d1', () => ({ schema: {} }))
-
-// Capture the `sql` template. The other named exports (eq/desc/and/ne/inArray)
-// are only used by GET, which these tests never call, so leaving them undefined
-// is safe.
-vi.mock('drizzle-orm', () => ({
-  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
-    strings: Array.from(strings),
-    values,
-  }),
+vi.mock('@/db/d1', () => ({
+  schema: {
+    subscriptions: { orgId: 'org_id', status: 'status', planType: 'plan_type', hasPrioritySupport: 'has_priority_support' },
+    organisations: { id: 'id', tracksMode: 'tracks_mode', customSmallTracks: 'custom_small_tracks', customLargeTracks: 'custom_large_tracks' },
+  },
 }))
 
-vi.mock('@/lib/db', () => ({
-  db: vi.fn().mockResolvedValue({
-    run: vi.fn((arg: CapturedSql) => {
-      captured.runArgs.push(arg)
-      return Promise.resolve({ meta: {} })
+// Capture the `sql` template. eq/and are called by the entitlement lookup; the
+// rest (desc/ne/inArray/notInArray/asc) are only used by GET, which these tests
+// never call, so a stub that records nothing is enough.
+vi.mock('drizzle-orm', () => {
+  const stub = (...args: unknown[]) => ({ args })
+  return {
+    sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+      strings: Array.from(strings),
+      values,
     }),
-  }),
-}))
+    eq: stub,
+    and: stub,
+    ne: stub,
+    asc: stub,
+    desc: stub,
+    inArray: stub,
+    notInArray: stub,
+  }
+})
+
+vi.mock('@/lib/db', () => {
+  // A chainable select whose terminal `limit` answers from selectResults.
+  const chain: Record<string, unknown> = {}
+  for (const method of ['from', 'leftJoin', 'where', 'orderBy', 'offset']) {
+    chain[method] = vi.fn(() => chain)
+  }
+  chain.limit = vi.fn(() => Promise.resolve(
+    captured.selectResults.length ? captured.selectResults.shift() : [],
+  ))
+  return {
+    db: vi.fn().mockResolvedValue({
+      select: vi.fn(() => chain),
+      run: vi.fn((arg: CapturedSql) => {
+        captured.runArgs.push(arg)
+        return Promise.resolve({ meta: {} })
+      }),
+    }),
+  }
+})
 
 import { POST } from '@/app/api/portal/requests/route'
 import { NextRequest } from 'next/server'
@@ -85,6 +120,7 @@ describe('POST /api/portal/requests', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     captured.runArgs = []
+    captured.selectResults = []
     process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
     vi.mocked(getPortalAuth).mockResolvedValue(portalAuth())
   })
@@ -122,5 +158,134 @@ describe('POST /api/portal/requests', () => {
     const res = await POST(makeRequest({ title: '   ' }))
     expect(res.status).toBe(400)
     expect(captured.runArgs).toHaveLength(0)
+  })
+})
+
+/**
+ * The category tiles are a fixed set, so a value outside the list arriving
+ * here is a probe or a stale client. Size gets both halves: the vocabulary
+ * check below, and the plan entitlement check in the suite after this one.
+ */
+describe('POST /api/portal/requests, submitted vocabulary', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    captured.runArgs = []
+    captured.selectResults = []
+    process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
+    vi.mocked(getPortalAuth).mockResolvedValue(portalAuth())
+  })
+
+  it('accepts the two sizes and the six categories', async () => {
+    for (const type of ['small_task', 'large_task']) {
+      const res = await POST(makeRequest({ title: 'x', type }))
+      expect(res.status).toBe(201)
+    }
+    for (const category of ['design', 'development', 'content', 'strategy', 'admin', 'bug']) {
+      const res = await POST(makeRequest({ title: 'x', category }))
+      expect(res.status).toBe(201)
+    }
+  })
+
+  it('rejects a size outside the vocabulary before writing', async () => {
+    const res = await POST(makeRequest({ title: 'x', type: 'enormous_task' }))
+    expect(res.status).toBe(400)
+    const json = await res.json() as { error?: string }
+    expect(json.error).toContain('type must be one of')
+    expect(captured.runArgs).toHaveLength(0)
+  })
+
+  it('rejects a category outside the vocabulary before writing', async () => {
+    const res = await POST(makeRequest({ title: 'x', category: 'finance' }))
+    expect(res.status).toBe(400)
+    expect(captured.runArgs).toHaveLength(0)
+  })
+
+  it('rejects form responses that are not JSON', async () => {
+    const res = await POST(makeRequest({ title: 'x', formResponses: 'not json at all' }))
+    expect(res.status).toBe(400)
+    expect(captured.runArgs).toHaveLength(0)
+  })
+
+  it('accepts form responses that parse', async () => {
+    const res = await POST(makeRequest({ title: 'x', formResponses: '{"q1":"yes"}' }))
+    expect(res.status).toBe(201)
+    expect(captured.runArgs).toHaveLength(1)
+  })
+})
+
+/**
+ * The size is not cosmetic. /api/portal/capacity reads `type` straight off the
+ * row to decide which lane a request occupies, so a client on a plan with no
+ * multi-day track could post {"type":"large_task"} and take a large capacity
+ * slot their plan does not carry. The dialog gates the option, but only in the
+ * browser, which is exactly the half an HTTP client skips.
+ */
+describe('POST /api/portal/requests, large_task entitlement', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    captured.runArgs = []
+    captured.selectResults = []
+    process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
+    vi.mocked(getPortalAuth).mockResolvedValue(portalAuth())
+  })
+
+  /** subscription row, then the org's tracks override row. */
+  function plan(
+    sub: { planType: string; hasPrioritySupport: boolean } | null,
+    override: { tracksMode: string | null; customSmallTracks: number | null; customLargeTracks: number | null } | null = null,
+  ) {
+    captured.selectResults = [sub ? [sub] : [], override ? [override] : []]
+  }
+
+  it('refuses a large_task from a maintain plan, which has no multi-day track', async () => {
+    plan({ planType: 'maintain', hasPrioritySupport: false })
+    const res = await POST(makeRequest({ title: 'Full rebuild', type: 'large_task' }))
+    expect(res.status).toBe(400)
+    const json = await res.json() as { error?: string }
+    expect(json.error).toContain('multi-day track')
+    expect(captured.runArgs).toHaveLength(0)
+  })
+
+  it('allows a large_task from a scale plan, which carries one', async () => {
+    plan({ planType: 'scale', hasPrioritySupport: false })
+    const res = await POST(makeRequest({ title: 'Full rebuild', type: 'large_task' }))
+    expect(res.status).toBe(201)
+    expect(captured.runArgs).toHaveLength(1)
+  })
+
+  it('refuses a large_task when a custom override grants zero large tracks', async () => {
+    plan(
+      { planType: 'scale', hasPrioritySupport: false },
+      { tracksMode: 'custom', customSmallTracks: 2, customLargeTracks: 0 },
+    )
+    const res = await POST(makeRequest({ title: 'Full rebuild', type: 'large_task' }))
+    expect(res.status).toBe(400)
+    expect(captured.runArgs).toHaveLength(0)
+  })
+
+  it('allows a large_task when tracks are off, since there is no lane to overdraw', async () => {
+    plan(
+      { planType: 'maintain', hasPrioritySupport: false },
+      { tracksMode: 'off', customSmallTracks: null, customLargeTracks: null },
+    )
+    const res = await POST(makeRequest({ title: 'Full rebuild', type: 'large_task' }))
+    expect(res.status).toBe(201)
+  })
+
+  it('allows a large_task from a client with no active subscription', async () => {
+    // A project client has no track model at all, so the size is a hint on the
+    // card and refusing it would remove their only large option.
+    plan(null)
+    const res = await POST(makeRequest({ title: 'Full rebuild', type: 'large_task' }))
+    expect(res.status).toBe(201)
+  })
+
+  it('never looks a plan up for a small_task', async () => {
+    plan({ planType: 'maintain', hasPrioritySupport: false })
+    const res = await POST(makeRequest({ title: 'Tweak the footer', type: 'small_task' }))
+    expect(res.status).toBe(201)
+    // The entitlement lookup is the only SELECT the POST issues, so an
+    // untouched queue proves a small request pays nothing for this check.
+    expect(captured.selectResults).toHaveLength(2)
   })
 })

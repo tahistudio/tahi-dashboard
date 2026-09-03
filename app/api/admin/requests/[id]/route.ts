@@ -3,17 +3,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, asc, count, gt, isNull, inArray } from 'drizzle-orm'
-import { notifyOrgContacts, notifyTeamMember } from '@/lib/notifications'
 import { requireAccessToOrg } from '@/lib/require-access'
-import { dispatchDomainEvent } from '@/lib/events'
-import { REQUEST_STATUSES } from '@/lib/status-config'
-
-// The two vocabularies a PATCH may write. Anything else is a client bug or a
+// The two vocabularies a PATCH may write live in lib/request-vocabulary so the
+// bulk PATCH is held to the same list. Anything else is a client bug or a
 // probe, and used to land in the row verbatim.
-// 'draft' is a real request state (the rail filters on it and the detail
-// shows an off-pipeline note) even though it is not a pipeline column.
-const PATCHABLE_STATUSES = new Set<string>([...REQUEST_STATUSES.map(s => s.value), 'draft'])
-const PATCHABLE_PRIORITIES = new Set<string>(['standard', 'high'])
+import { isPatchableStatus, isRequestPriority } from '@/lib/request-vocabulary'
+import { emitRequestStatusChanged } from '@/lib/request-status-effects'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -227,14 +222,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const patch: Record<string, unknown> = { updatedAt: now }
 
   if (body.status !== undefined) {
-    if (!PATCHABLE_STATUSES.has(body.status)) {
+    if (!isPatchableStatus(body.status)) {
       return NextResponse.json({ error: `Unknown status: ${body.status}` }, { status: 400 })
     }
     patch.status = body.status
     if (body.status === 'delivered') patch.deliveredAt = now
   }
   if (body.priority !== undefined) {
-    if (!PATCHABLE_PRIORITIES.has(body.priority)) {
+    if (!isRequestPriority(body.priority)) {
       return NextResponse.json({ error: `Unknown priority: ${body.priority}` }, { status: 400 })
     }
     patch.priority = body.priority
@@ -272,7 +267,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     .set(patch)
     .where(eq(schema.requests.id, id))
 
-  // Send notifications on status change
+  // Notifications + domain event on status change. Shared with the bulk PATCH
+  // through lib/request-status-effects so the two paths cannot drift.
   if (body.status !== undefined) {
     // Fetch the request to get orgId and assigneeId
     const [updatedReq] = await drizzle
@@ -286,37 +282,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       .limit(1)
 
     if (updatedReq) {
-      const statusLabel = body.status.replace(/_/g, ' ')
-      const notifTitle = `Request "${updatedReq.title}" status changed to ${statusLabel}`
-      const notifPayload = {
-        type: 'request_status_changed' as const,
-        title: notifTitle,
-        body: `Status is now "${statusLabel}"`,
-        entityType: 'request' as const,
-        entityId: id,
-      }
-
-      // Notify the assignee (if one exists). assigneeId is a teamMembers.id;
-      // notifyTeamMember resolves it to the Clerk user id the bell queries.
-      if (updatedReq.assigneeId) {
-        await notifyTeamMember(drizzle, updatedReq.assigneeId, notifPayload)
-      }
-
-      // Notify contacts at the client org (skips those without a linked login)
-      await notifyOrgContacts(drizzle, updatedReq.orgId, notifPayload)
-
-      // Fire the domain event (automations + outgoing webhooks). Non-blocking.
-      await dispatchDomainEvent(drizzle, {
-        type: 'request_status_changed',
-        entityId: id,
-        entityType: 'request',
+      await emitRequestStatusChanged(drizzle, {
+        id,
+        title: updatedReq.title,
         orgId: updatedReq.orgId,
-        data: {
-          status: body.status,
-          title: updatedReq.title,
-          assigneeId: updatedReq.assigneeId ?? null,
-        },
-      })
+        assigneeId: updatedReq.assigneeId ?? null,
+      }, body.status)
     }
   }
 

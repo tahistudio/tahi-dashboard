@@ -3,23 +3,43 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, desc } from 'drizzle-orm'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 export const dynamic = 'force-dynamic'
 
 type Params = { params: Promise<{ id: string }> }
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
+/** Files on a request are that client's files, so both handlers resolve the
+ *  owning request's org and check the caller's scope before they run. */
+async function guardRequestAccess(
+  database: DrizzleDB,
+  userId: string | null,
+  requestId: string,
+): Promise<NextResponse | null> {
+  const [owner] = await database
+    .select({ orgId: schema.requests.orgId })
+    .from(schema.requests)
+    .where(eq(schema.requests.id, requestId))
+    .limit(1)
+  if (!owner) return NextResponse.json({ error: 'Request not found' }, { status: 404 })
+  return requireAccessToOrg(database, userId, owner.orgId)
+}
+
 // ── GET /api/admin/requests/[id]/files ───────────────────────────────────────
 // Returns all files attached to a request.
 export async function GET(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const { id } = await params
   const database = await db()
-  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  const drizzle = database as DrizzleDB
+
+  const denied = await guardRequestAccess(drizzle, userId, id)
+  if (denied) return denied
 
   const files = await drizzle
     .select({
@@ -86,6 +106,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!request) {
     return NextResponse.json({ error: 'Request not found' }, { status: 404 })
   }
+
+  const denied = await requireAccessToOrg(drizzle, userId, request.orgId)
+  if (denied) return denied
 
   // Resolve team member ID from Clerk userId
   let uploaderId = userId ?? 'unknown'

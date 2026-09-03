@@ -35,6 +35,23 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { id: childId } = await params
   const body = await req.json().catch(() => null) as { parentRequestId?: string | null } | null
 
+  // Un-nesting is destructive and not recoverable: subPosition goes null and a
+  // re-nest appends to the end. So it has to be asked for explicitly. A null
+  // body, malformed JSON, a truncated retry, or a caller that forgot the field
+  // used to read as "un-nest" and silently detached a sub-request.
+  if (!body || typeof body !== 'object' || !('parentRequestId' in body)) {
+    return NextResponse.json(
+      { error: 'parentRequestId is required (send null to un-nest)' },
+      { status: 400 },
+    )
+  }
+  if (body.parentRequestId !== null && typeof body.parentRequestId !== 'string') {
+    return NextResponse.json(
+      { error: 'parentRequestId must be a request id or null' },
+      { status: 400 },
+    )
+  }
+
   const database = await db()
   const drizzle = database as Drizzle
 
@@ -47,8 +64,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   const denied = await requireAccessToOrg(drizzle, userId, child.orgId)
   if (denied) return denied
 
-  // Clear parent (un-nest)
-  if (body?.parentRequestId === null || body?.parentRequestId === undefined) {
+  // Clear parent (un-nest). Only an explicit null gets here.
+  if (body.parentRequestId === null) {
     await drizzle
       .update(schema.requests)
       .set({ parentRequestId: null, subPosition: null })
@@ -70,7 +87,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     .limit(1)
   if (existingChildOfChild) {
     return NextResponse.json({
-      error: 'This request has sub-requests of its own. V1 only supports one level of nesting — move its sub-requests out before nesting this one.',
+      error: 'This request has sub-requests of its own. V1 only supports one level of nesting. Move its sub-requests out before nesting this one.',
     }, { status: 400 })
   }
 

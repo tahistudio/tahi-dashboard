@@ -19,24 +19,27 @@ vi.mock('@/lib/server-auth', () => ({
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org_tahi'),
 }))
 
-vi.mock('@/lib/db', () => ({
-  db: vi.fn().mockResolvedValue({
-    insert: vi.fn().mockReturnValue({ values: vi.fn().mockResolvedValue(undefined) }),
-    run: vi.fn().mockResolvedValue({ meta: { last_row_id: 1 } }),  // atomic request numbering uses drizzle.run(sql`...`)
-    select: vi.fn().mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        leftJoin: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            orderBy: vi.fn().mockReturnValue({
-              limit: vi.fn().mockReturnValue({
-                offset: vi.fn().mockResolvedValue([]),
-              }),
-            }),
-          }),
-        }),
-      }),
+// The create route looks the client org up before it writes (an unknown org
+// is a 404), so the fake select chain answers with a matching row.
+vi.mock('@/lib/db', () => {
+  const rows = [{ id: 'org_client_1' }]
+  const chain: Record<string, unknown> = {}
+  for (const method of ['from', 'leftJoin', 'where', 'orderBy', 'offset']) {
+    chain[method] = vi.fn(() => chain)
+  }
+  chain.limit = vi.fn(() => Promise.resolve(rows))
+  return {
+    db: vi.fn().mockResolvedValue({
+      insert: vi.fn().mockReturnValue({ values: vi.fn().mockResolvedValue(undefined) }),
+      run: vi.fn().mockResolvedValue({ meta: { last_row_id: 1 } }),  // atomic request numbering uses drizzle.run(sql`...`)
+      select: vi.fn(() => chain),
     }),
-  }),
+  }
+})
+
+// Unrestricted caller: requireAccessToOrg itself stays real.
+vi.mock('@/lib/access-scoping', () => ({
+  resolveAccessScoping: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock('@/db/d1', () => ({

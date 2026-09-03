@@ -3,19 +3,40 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc } from 'drizzle-orm'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 type Params = { params: Promise<{ id: string }> }
+type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+/** Hours logged against a request are that client's hours, so both handlers
+ *  resolve the owning request's org and check the caller's scope first. */
+async function guardRequestAccess(
+  database: Drizzle,
+  userId: string | null,
+  requestId: string,
+): Promise<NextResponse | null> {
+  const [owner] = await database
+    .select({ orgId: schema.requests.orgId })
+    .from(schema.requests)
+    .where(eq(schema.requests.id, requestId))
+    .limit(1)
+  if (!owner) return NextResponse.json({ error: 'Request not found' }, { status: 404 })
+  return requireAccessToOrg(database, userId, owner.orgId)
+}
 
 // GET /api/admin/requests/[id]/time-entries
 export async function GET(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const { id: requestId } = await params
   const database = await db()
-  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  const drizzle = database as Drizzle
+
+  const denied = await guardRequestAccess(drizzle, userId, requestId)
+  if (denied) return denied
 
   const items = await drizzle
     .select({
@@ -57,7 +78,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   const database = await db()
-  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  const drizzle = database as Drizzle
 
   // Get the request to find the orgId
   const [request] = await drizzle
@@ -69,6 +90,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!request) {
     return NextResponse.json({ error: 'Request not found' }, { status: 404 })
   }
+
+  const denied = await requireAccessToOrg(drizzle, userId, request.orgId)
+  if (denied) return denied
 
   // Find team member for the current user if not provided
   let teamMemberId = body.teamMemberId

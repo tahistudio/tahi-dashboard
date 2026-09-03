@@ -3,10 +3,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, asc, and, ne, sql, inArray, notInArray } from 'drizzle-orm'
-import { getPlanLabel } from '@/lib/plan-utils'
+import { getPlanLabel, resolveTracksConfig } from '@/lib/plan-utils'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 import { dispatchDomainEvent } from '@/lib/events'
 import { loadRequestParticipants, CLIENT_VISIBLE_TEAM_ROLES } from '@/lib/request-participants'
+import {
+  isRequestCategory,
+  isRequestType,
+  REQUEST_CATEGORIES,
+  REQUEST_TYPES,
+} from '@/lib/request-vocabulary'
 
 // ── GET /api/portal/requests ─────────────────────────────────────────────────
 // Returns requests scoped to the client's own org.
@@ -152,6 +158,45 @@ function parsePlacement(value: unknown): Placement | null {
     : null
 }
 
+/** The per-client tracks override columns, which land with migration 0079. */
+type TracksOverrideRow = {
+  tracksMode: string | null
+  customSmallTracks: number | null
+  customLargeTracks: number | null
+}
+
+/**
+ * May this client file a multi-day (large_task) request?
+ *
+ * The size is not cosmetic: /api/portal/capacity reads `type` straight off the
+ * row to decide which lane the request occupies, so a client on a plan with no
+ * large track could post {"type":"large_task"} and take a capacity slot their
+ * plan does not carry. The dialog's size control gates the large option, but
+ * only in the browser.
+ *
+ * The explicit answers to the two cases the plan model leaves open:
+ *
+ *   no active subscription  -> allowed. A project client has no track model at
+ *     all (resolveTracksConfig would report zero of both), so the size is only
+ *     a hint on the card and refusing it would block their only large option.
+ *   tracks_mode = 'off'     -> allowed. One unified board, no per-track split,
+ *     nothing to overdraw.
+ *
+ * Everything else is the resolved config: auto follows the plan entitlements
+ * (maintain has no large track, scale does), custom follows the explicit
+ * per-client counts. This is the same rule the admin dialog applies when it
+ * disables Multi-day for a maintain client.
+ */
+function largeTaskAllowed(
+  sub: { planType: string | null; hasPrioritySupport: boolean | null } | undefined,
+  org: TracksOverrideRow | undefined,
+): boolean {
+  if (!sub) return true
+  const config = resolveTracksConfig(org, sub.planType, !!sub.hasPrioritySupport)
+  if (config.mode === 'off') return true
+  return config.largeTracks > 0
+}
+
 // ── POST /api/portal/requests ────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   // getPortalAuth resolves the caller's Clerk org -> the D1 organisations.id, so
@@ -177,6 +222,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Request title is required' }, { status: 400 })
   }
 
+  // Size and category are whitelisted here, not just in the dialog. The
+  // category tiles are a fixed set, so anything else arriving on this route is
+  // a probe or a stale client. Size gets a second, harder check further down
+  // (largeTaskAllowed): the vocabulary says 'large_task' is a real size, and
+  // the plan says whether this client may occupy a large capacity lane with
+  // one. Both halves are needed; the whitelist alone accepts exactly the
+  // payload that overdraws the client's own capacity view.
+  if (type !== undefined && !isRequestType(type)) {
+    return NextResponse.json(
+      { error: `type must be one of: ${REQUEST_TYPES.join(', ')}` },
+      { status: 400 },
+    )
+  }
+  if (category !== undefined && category !== null && !isRequestCategory(category)) {
+    return NextResponse.json(
+      { error: `category must be one of: ${REQUEST_CATEGORIES.join(', ')}` },
+      { status: 400 },
+    )
+  }
+
+  // form_responses is read back as JSON by the detail page, so a value that
+  // cannot be parsed would land in a column nothing can render.
+  if (formResponses !== undefined && formResponses !== null) {
+    try {
+      JSON.parse(formResponses)
+    } catch {
+      return NextResponse.json({ error: 'formResponses must be valid JSON' }, { status: 400 })
+    }
+  }
+
   // Client-submitted rich text is rendered to Tahi admins via
   // dangerouslySetInnerHTML, so sanitise it server-side at this untrusted
   // boundary (allowlist; strips scripts / event handlers / unsafe hrefs).
@@ -184,6 +259,50 @@ export async function POST(req: NextRequest) {
 
   const database2 = await db()
   const drizzle2 = database2 as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // Entitlement, not just vocabulary: 'large_task' is a legal size, but only
+  // for a client whose plan carries a multi-day track. Resolved server-side
+  // because the size gate was browser-only, and the row it writes decides how
+  // much of the client's own capacity the request occupies.
+  if (type === 'large_task') {
+    const [sub] = await drizzle2
+      .select({
+        planType: schema.subscriptions.planType,
+        hasPrioritySupport: schema.subscriptions.hasPrioritySupport,
+      })
+      .from(schema.subscriptions)
+      .where(and(
+        eq(schema.subscriptions.orgId, orgId),
+        eq(schema.subscriptions.status, 'active'),
+      ))
+      .limit(1)
+
+    // The per-client override columns land with migration 0079; wrapped so
+    // this endpoint keeps working between deploy and migration, exactly as
+    // /api/portal/capacity does.
+    let override: TracksOverrideRow | undefined
+    try {
+      ;[override] = await drizzle2
+        .select({
+          tracksMode: schema.organisations.tracksMode,
+          customSmallTracks: schema.organisations.customSmallTracks,
+          customLargeTracks: schema.organisations.customLargeTracks,
+        })
+        .from(schema.organisations)
+        .where(eq(schema.organisations.id, orgId))
+        .limit(1)
+    } catch {
+      override = undefined
+    }
+
+    if (!largeTaskAllowed(sub, override)) {
+      return NextResponse.json(
+        { error: 'Your plan does not include a multi-day track. Please submit this as a smaller request or talk to us about your plan.' },
+        { status: 400 },
+      )
+    }
+  }
+
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 

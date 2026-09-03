@@ -3,19 +3,44 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, asc } from 'drizzle-orm'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+/**
+ * Steps belong to a request, and a request belongs to a client, so every
+ * handler here has to answer the owning request's org before it reads or
+ * writes. Steps are client-visible through the portal steps route, so an
+ * unscoped insert put a step title straight into someone else's portal.
+ * Returns a response to return, or null when the caller is allowed.
+ */
+async function guardRequestAccess(
+  database: D1,
+  userId: string | null,
+  requestId: string,
+): Promise<NextResponse | null> {
+  const [owner] = await database
+    .select({ orgId: schema.requests.orgId })
+    .from(schema.requests)
+    .where(eq(schema.requests.id, requestId))
+    .limit(1)
+  if (!owner) return NextResponse.json({ error: 'Request not found' }, { status: 404 })
+  return requireAccessToOrg(database, userId, owner.orgId)
+}
 
 // GET /api/admin/requests/[id]/steps : list all steps as a nested tree
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id: requestId } = await params
   const database = await db() as unknown as D1
+
+  const denied = await guardRequestAccess(database, userId, requestId)
+  if (denied) return denied
 
   const steps = await database
     .select()
@@ -47,6 +72,9 @@ export async function POST(
   }
 
   const database = await db() as unknown as D1
+
+  const denied = await guardRequestAccess(database, userId, requestId)
+  if (denied) return denied
 
   const step = await database
     .insert(schema.requestSteps)
