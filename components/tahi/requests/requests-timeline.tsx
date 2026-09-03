@@ -468,6 +468,10 @@ function TimelineRow({
 
   const marker = startTs != null ? (
     <span
+      // Which shape a row plotted as. The e2e spec asserts an undated
+      // request really reaches the chart, rather than that the legend key
+      // naming the shape is on screen (it always is).
+      data-timeline-marker="bar"
       style={{
         position: 'absolute',
         top: '50%',
@@ -483,6 +487,7 @@ function TimelineRow({
     />
   ) : (
     <span
+      data-timeline-marker={datum.dated ? 'due' : 'undated'}
       style={{
         position: 'absolute',
         top: '50%',

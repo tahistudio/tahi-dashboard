@@ -9,11 +9,12 @@ import { test, expect, type Page } from '@playwright/test'
  * everything here runs as an admin on both the chromium and mobile-safari
  * (iPhone 13) projects.
  *
- * The four peer views are still gated to super admins
- * (`usePermissions().isSuperAdmin`), and the bypass user's resolved level is
+ * COVERAGE WARNING. The four peer views are gated to super admins
+ * (`usePermissions().isSuperAdmin`) and the bypass user's resolved level is
  * not guaranteed, so every test checks the switcher exists first and skips
- * with a reason rather than failing. Once the lead flips the gate the skips
- * turn into real coverage with no edit here.
+ * with a reason rather than failing. A green run of this file therefore does
+ * not mean the board was exercised: read the skip reasons. Once the lead
+ * flips that gate the skips turn into real coverage with no edit here.
  *
  * Nothing in this file writes. The quick-add composer is opened and
  * cancelled, never submitted, so a run leaves no requests behind.
@@ -37,6 +38,21 @@ test.use({
   },
 })
 
+/**
+ * The product tour paints a fixed, full-viewport overlay at z-index 10000
+ * 1500ms after the first authed page load of a fresh context, and every
+ * click after that lands on the overlay instead of the page. Marking it
+ * complete in localStorage before any navigation is what keeps this file
+ * from being a coin toss. addInitScript has to run before goto, so it lives
+ * in a beforeEach rather than inside the navigation helper.
+ */
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('tahi-tour-complete', '1')
+    window.localStorage.setItem('tahi-tour-seen', '1')
+  })
+})
+
 function viewTabs(page: Page) {
   return page.getByRole('tablist', { name: 'Requests view' })
 }
@@ -50,6 +66,12 @@ async function expectNoHorizontalScroll(page: Page): Promise<void> {
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   )
   expect(overflow).toBeLessThanOrEqual(0)
+}
+
+/** One kanban column, named by the status it groups rather than by a
+ *  control inside it (a column that takes no new work has no control). */
+function column(page: Page, status: string) {
+  return page.locator(`[data-board-column][data-column-status="${status}"]`)
 }
 
 async function gotoRequests(page: Page): Promise<void> {
@@ -71,15 +93,8 @@ test.describe('Requests board', () => {
     await gotoRequests(page)
     await openView(page, 'Kanban')
 
-    // The column's own add button is the one control named after it, so it
-    // is how a column is identified without depending on its cards. A
-    // read-only audience has none, and has no columns to add to either.
-    const first = page.getByRole('button', { name: 'Add card to Submitted' })
-    test.skip((await first.count()) === 0, 'This audience cannot write to the board.')
-
-    for (const label of ['Submitted', 'In Review', 'In Progress', 'Client Review', 'On Hold', 'Delivered']) {
-      await expect(page.getByRole('button', { name: `Add card to ${label}` }).first())
-        .toBeVisible({ timeout: 10_000 })
+    for (const status of ['submitted', 'in_review', 'in_progress', 'client_review', 'on_hold', 'delivered']) {
+      await expect(column(page, status)).toBeVisible({ timeout: 10_000 })
     }
     await expectNoHorizontalScroll(page)
   })
@@ -90,28 +105,40 @@ test.describe('Requests board', () => {
 
     // Scoped to the board: "Triage" is also a saved view in the rail, and
     // the point of this test is the marker over the intake column.
-    const board = page.locator('.tahi-kanban-scroller')
-    await expect(board.getByText('Triage', { exact: true })).toBeVisible({ timeout: 10_000 })
+    await expect(column(page, 'submitted').getByText('Triage', { exact: true }))
+      .toBeVisible({ timeout: 10_000 })
+  })
+
+  test('a column the POST would reject offers no add at all', async ({ page }) => {
+    await gotoRequests(page)
+    await openView(page, 'Kanban')
+
+    // A client can rename or drop columns through custom kanban columns, so
+    // the closed column is only asserted on when this board has one.
+    const closed = column(page, 'delivered')
+    await expect(column(page, 'submitted')).toBeVisible({ timeout: 10_000 })
+    test.skip((await closed.count()) === 0, 'This board has no Delivered column.')
+
+    // Delivered and cancelled carry side effects the create route does not
+    // run, so nothing may be born there. The column says so by offering no
+    // control rather than by failing on submit.
+    await expect(closed.getByRole('button', { name: /^Add / })).toHaveCount(0)
   })
 
   test('quick-add opens a composer and Escape closes it without writing', async ({ page }) => {
     await gotoRequests(page)
     await openView(page, 'Kanban')
 
-    const add = page.getByRole('button', { name: 'Add card to Submitted' })
-    test.skip((await add.count()) === 0, 'This audience cannot write to the board.')
+    // Named loosely: a client can rename the intake column, and the label
+    // follows the column's own name.
+    const add = column(page, 'submitted').getByRole('button', { name: /^Add card to / })
+    // Quick-add only offers itself when the board knows which client to
+    // write against: the rail's client filter, or a board whose cards all
+    // belong to one org. Neither is guaranteed in this dataset.
+    test.skip((await add.count()) === 0, 'This board cannot resolve a single client to write against.')
     await add.first().click()
 
     const composer = page.getByRole('textbox', { name: /New request in/ }).first()
-    // Quick-add only offers itself when the board knows which client to
-    // write against; otherwise the plus opens the full dialog instead.
-    if ((await composer.count()) === 0) {
-      const dialog = page.getByRole('dialog').first()
-      await expect(dialog).toBeVisible({ timeout: 10_000 })
-      await page.keyboard.press('Escape')
-      return
-    }
-
     await expect(composer).toBeFocused()
     await composer.fill('Never submitted, e2e only')
     await page.keyboard.press('Escape')
@@ -148,8 +175,20 @@ test.describe('Requests board', () => {
     await openView(page, 'Timeline')
 
     // The legend names the tones, including the hollow marker undated work
-    // plots as, so the chart is readable without a tooltip.
+    // plots as. It renders unconditionally, so it is chrome, not evidence.
     await expect(page.getByText('No due date', { exact: true })).toBeVisible({ timeout: 10_000 })
+
+    // The evidence is that nothing falls off the chart: T1's claim is that a
+    // request with no due date still plots (hollow, on the day it was
+    // raised) rather than being dropped. One marker per row proves it
+    // whatever the dataset holds.
+    const rows = page.locator('.tahi-tl-row')
+    const rowCount = await rows.count()
+    test.skip(rowCount === 0, 'No requests to plot in this dataset.')
+    await expect(page.locator('[data-timeline-marker]')).toHaveCount(rowCount)
+    const undated = page.locator('[data-timeline-marker="undated"]')
+    if (await undated.count()) await expect(undated.first()).toBeVisible()
+
     const today = page.getByRole('button', { name: 'Today', exact: true })
     if (await today.count()) await today.click()
     await expectNoHorizontalScroll(page)

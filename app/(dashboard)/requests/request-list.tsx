@@ -37,6 +37,7 @@ import { SubRequestRows } from '@/components/tahi/requests/sub-request-rows'
 import { REQUEST_STATUSES } from '@/lib/status-config'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
 import { subtaskRollup } from '@/components/tahi/kanban-board'
+import { dueDateState } from '@/components/tahi/due-date-chip'
 import {
   BoardView,
   type BoardItem,
@@ -155,6 +156,22 @@ const BOARD_COLS: BoardViewColumn[] = [
   { id: 'delivered',     label: 'Delivered',     statusValue: 'delivered',     color: 'var(--status-delivered-dot)'     },
 ]
 
+// Statuses a brand new request may be created at. Mirrors CREATABLE_STATUSES
+// in app/api/admin/requests/route.ts, which cannot export it (a route module
+// may only export HTTP methods and route config). Delivered and cancelled
+// carry side effects that belong to the status PATCH, so the POST rejects
+// them; the board must not offer a quick-add it knows will 400. Custom
+// kanban columns are checked through the same set, so a client-renamed
+// Delivered column is gated too.
+const CREATABLE_STATUSES: readonly string[] = REQUEST_STATUSES
+  .map(s => s.value)
+  .filter(v => v !== 'delivered' && v !== 'cancelled')
+
+/** Whether the board may create a card straight into this column. */
+function canCreateAtStatus(status: string): boolean {
+  return CREATABLE_STATUSES.includes(status)
+}
+
 // Category chips on a card are icon-only and tinted, so the row reads at a
 // glance on a 16.5rem column. The label still reaches the user through the
 // chip's tooltip and accessible name.
@@ -222,14 +239,16 @@ function formatDate(dateStr: string | null): string {
   } catch { return '--' }
 }
 
+/**
+ * The tone a due date earns. One rule for the whole page: it delegates to
+ * the shared `dueDateState` so the list, the kanban card and the workload
+ * preview cannot disagree about the same request. The shared version also
+ * counts cancelled work as closed, and tolerates a stored value that
+ * carries a time component (the local copy parsed those as Invalid Date
+ * and quietly answered "on-track").
+ */
 function getDueDateState(dueDate: string | null, status: string): 'overdue' | 'due-soon' | 'on-track' | null {
-  if (!dueDate || status === 'delivered' || status === 'archived') return null
-  const due = new Date(dueDate + 'T23:59:59')
-  const now = new Date()
-  const diffDays = (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-  if (diffDays < 0) return 'overdue'
-  if (diffDays <= 3) return 'due-soon'
-  return 'on-track'
+  return dueDateState(dueDate, status)
 }
 
 function formatType(type: string) {
@@ -581,9 +600,12 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
 
   const effectiveView: ViewMode | 'kanban' | 'timeline' = railOn ? rail.view : view
   // On the rail, Timeline renders on its own above, so the only sub-view
-  // BoardView is ever asked for is the kanban. Leaving `view` undefined on
-  // the legacy path keeps its own tab strip uncontrolled, exactly as today.
-  const boardSubView: BoardViewKey | undefined = railOn ? 'kanban' : undefined
+  // BoardView is ever asked for is the kanban. On the legacy path BoardView
+  // still owns a kanban / timeline tab strip, and the board needs to know
+  // which of the two is showing (the off-board note belongs to the kanban
+  // only), so that strip is driven from here rather than left uncontrolled.
+  const [legacyBoardView, setLegacyBoardView] = useState<BoardViewKey>('kanban')
+  const boardSubView: BoardViewKey = railOn ? 'kanban' : legacyBoardView
 
   // Kanban cards name their assignee, and the list payload carries only the
   // id. The conditional key skips the fetch until a board view is on screen,
@@ -818,7 +840,11 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       // the chip row the space the category and priority need.
       if (!showClientAvatar) {
         for (const t of parseOrgTags(r.orgTags)) {
-          tags.push({ id: `tag-${t}`, label: t })
+          // The rail's filter model has a category filter and no org-tag
+          // filter, so a click on one of these has nowhere to go. Marking
+          // it unclickable renders it as text rather than as a button
+          // promising "Filter by <tag>" and doing nothing.
+          tags.push({ id: `tag-${t}`, label: t, clickable: false })
         }
       }
       const overdue = getDueDateState(r.dueDate, r.status) === 'overdue'
@@ -1147,31 +1173,61 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
 
   // ── Board: quick-add, chip clicks, off-board tail ─────────────────────────
   // Quick-add writes straight through the admin POST, so it needs a client to
-  // write against. The rail's client filter is the only place the board knows
-  // one; without it the column plus opens the full dialog instead.
+  // write against, and the board a user is looking at has to be the client
+  // they are writing to. Two ways that holds: the rail's client filter names
+  // one, or every card on the board already belongs to the same org. The
+  // `?client=` param is deliberately not one of them: it retargets the write
+  // without narrowing the board, so the composer would silently file a card
+  // under a client whose name is nowhere on screen.
   const canWriteRequests = isAdmin && !isViewerImpersonation
+  const soleVisibleOrgId = useMemo(() => {
+    let only: string | null = null
+    for (const r of visible) {
+      if (!r.orgId) continue
+      if (only && r.orgId !== only) return null
+      only = r.orgId
+    }
+    return only
+  }, [visible])
   const quickAddOrgId = railOn && rail.filters.client !== 'all'
     ? rail.filters.client
-    : defaultClientId ?? null
+    : soleVisibleOrgId
+  // The composer names the client it writes to, so "add a card here" never
+  // means a client the board has not said out loud.
+  const quickAddOrgName = useMemo(() => {
+    if (!quickAddOrgId) return null
+    return requests.find(r => r.orgId === quickAddOrgId)?.orgName ?? null
+  }, [quickAddOrgId, requests])
 
   const handleQuickAdd = useCallback(async (status: string, title: string) => {
     if (!canWriteRequests || !quickAddOrgId) return
+    let res: Response
     try {
-      const res = await fetch(apiPath('/api/admin/requests'), {
+      res = await fetch(apiPath('/api/admin/requests'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientOrgId: quickAddOrgId, title, status }),
       })
-      if (!res.ok) throw new Error('Failed')
-      showToast('Request added', 'success')
-      mutateRequests()
     } catch {
       showToast('Could not add the request', 'error')
+      // Rethrown so the composer keeps the title the user typed.
+      throw new Error('Request quick-add failed')
     }
+    if (!res.ok) {
+      const reason = await res.json()
+        .then((j: unknown) => (j as { error?: string })?.error ?? null)
+        .catch(() => null)
+      showToast(reason ?? 'Could not add the request', 'error')
+      throw new Error(reason ?? 'Request quick-add failed')
+    }
+    showToast('Request added', 'success')
+    mutateRequests()
   }, [canWriteRequests, quickAddOrgId, showToast, mutateRequests])
 
   // One filter model. A category chip on a card narrows the rail's category
   // filter rather than opening a second, invisible one inside the board.
+  // Only the category chip is marked clickable on a card, so this is the
+  // only tag that ever reaches here.
   const handleBoardTagClick = useCallback((tag: BoardTag) => {
     if (!railOn) return
     const category = tag.id.startsWith('cat-') ? tag.id.slice(4) : null
@@ -1195,6 +1251,20 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     && railChips.length === 0
     && !rail.savedView
 
+  // The workload cards read as an absolute claim ("3 of 5", tinted against a
+  // studio-wide capacity), but they are fed the same narrowed set every other
+  // view gets. A search, a saved view or a filter chip therefore understates
+  // everyone. The card keeps the narrowing (filtering the board by client is
+  // worth having) and says so out loud instead.
+  const workloadNarrowed = railOn
+    ? rail.query.trim() !== '' || railChips.length > 0 || !!rail.savedView
+    : search.trim() !== ''
+      || categoryFilter !== 'all'
+      || typeFilter !== 'all'
+      || tagFilter !== 'all'
+      || !!dateRange.from
+      || !!dateRange.to
+
   // Statuses with no column are grouped nowhere and simply do not render, so
   // the board says how much work it is not showing rather than losing it.
   const offBoard = useMemo(() => {
@@ -1212,6 +1282,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     // WorkloadView keeps its own card surface, so it isn't re-wrapped.
     <WorkloadView
       requests={visible}
+      narrowed={workloadNarrowed}
       onOpen={(id) => { router.push(`/requests/${id}`) }}
     />
   ) : (railOn && effectiveView === 'timeline') ? (
@@ -1230,17 +1301,22 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
         views={['kanban', 'timeline']}
         defaultView="kanban"
         view={boardSubView}
-        onViewChange={railOn ? handleBoardSubViewChange : undefined}
+        onViewChange={railOn ? handleBoardSubViewChange : setLegacyBoardView}
         hideHeader={railOn}
         columns={boardColumns}
         items={boardItems}
         searchPlaceholder="Search requests"
         onMove={isAdmin ? handleBoardMove : undefined}
         onNest={isAdmin ? handleBoardNest : undefined}
-        // Quick-add when the board knows the client to write against;
-        // otherwise the column plus opens the full dialog, which asks.
+        // Quick-add only when the board knows the client to write against.
+        // There is no dialog fallback on the column plus: the dialog always
+        // creates at intake, so a plus in In Progress would name a column it
+        // does not honour. The page header keeps its own New request.
         onQuickAdd={canWriteRequests && quickAddOrgId ? handleQuickAdd : undefined}
-        onAdd={canWriteRequests && !quickAddOrgId ? () => setDialogOpen(true) : undefined}
+        // Delivered and cancelled columns take no new work, so they offer
+        // no plus and no composer rather than a write the POST rejects.
+        canAddTo={canCreateAtStatus}
+        quickAddHint={quickAddOrgName ? `Adds to ${quickAddOrgName}` : undefined}
         onTagClick={railOn ? handleBoardTagClick : undefined}
         onItemClick={(item) => { router.push(`/requests/${item.id}`) }}
         readOnly={!isAdmin}
@@ -1249,7 +1325,10 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
           ? `/api/admin/requests/${item.id}/sub-requests`
           : `/api/portal/requests/${item.id}/sub-requests`}
       />
-      {offBoard.count > 0 && (
+      {/* The note counts what has no column, so it belongs to the kanban.
+          Under the legacy path's Timeline tab there are no columns for it
+          to be talking about. */}
+      {offBoard.count > 0 && boardSubView === 'kanban' && (
         <p style={{
           margin: 0,
           fontSize: '0.75rem',
@@ -1550,11 +1629,25 @@ const WORKLOAD_CLOSED_STATUSES: readonly string[] = ['delivered', 'cancelled', '
 /** How many of a person's requests are named before the "+N more" line. */
 const WORKLOAD_PREVIEW = 4
 
+// Hover, focus and the mobile touch target for the request rows inside a
+// workload card. Kept beside the component the way kanban-board.tsx keeps
+// KANBAN_CSS, because a media query cannot be expressed inline.
+const WORKLOAD_CSS = `
+.tahi-workload-row{ min-height: 1.75rem; }
+@media (max-width: 47.9375rem){
+  .tahi-workload-row{ min-height: 2.75rem; }
+}
+`
+
 function WorkloadView({
   requests,
+  narrowed = false,
   onOpen,
 }: {
   requests: Request[]
+  /** True when a search, filter or saved view is narrowing `requests`, so
+   *  the counts are a slice of each person's load rather than all of it. */
+  narrowed?: boolean
   onOpen: (id: string) => void
 }) {
   const { data: membersData, isLoading: loadingMembers } =
@@ -1613,16 +1706,25 @@ function WorkloadView({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-      <h3 style={{
-        margin: 0,
-        fontSize: '0.6875rem',
-        fontWeight: 700,
-        letterSpacing: '0.05em',
-        textTransform: 'uppercase',
-        color: 'var(--color-text-subtle)',
-      }}>
-        Team load, open work only
-      </h3>
+      <style>{WORKLOAD_CSS}</style>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1875rem' }}>
+        <h3 style={{
+          margin: 0,
+          fontSize: '0.6875rem',
+          fontWeight: 700,
+          letterSpacing: '0.05em',
+          textTransform: 'uppercase',
+          color: 'var(--color-text-subtle)',
+        }}>
+          Team load, open work only
+        </h3>
+        {narrowed && (
+          <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-subtle)', lineHeight: 1.5 }}>
+            These counts follow the filters above, so they are a slice of each
+            person&rsquo;s load rather than all of it.
+          </p>
+        )}
+      </div>
 
       <div style={{
         display: 'grid',
@@ -1654,7 +1756,10 @@ function WorkloadView({
         )}
       </div>
 
-      {members.length === 0 && (
+      {/* Only when there is genuinely nothing above it. With no team members
+          but open unassigned work, the grid is already showing a card, and
+          saying "no workload" underneath it would contradict that card. */}
+      {members.length === 0 && unassigned.length === 0 && (
         <div
           className="flex flex-col items-center justify-center text-center"
           style={{
@@ -1786,13 +1891,12 @@ function WorkloadCard({
                 key={r.id}
                 type="button"
                 onClick={() => onOpen(r.id)}
-                className="tahi-focus-ring"
+                className="tahi-focus-ring tahi-workload-row"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: '0.5rem',
                   width: '100%',
-                  minHeight: '1.75rem',
                   padding: '0.1875rem 0.25rem',
                   border: 'none',
                   borderRadius: 'var(--radius-sm)',

@@ -80,10 +80,17 @@ export interface BoardTag {
   background?: string
   /** Glyph shown before the label, or on its own when `iconOnly`. */
   icon?: React.ReactNode
-  /** Drop the label and keep the glyph. The label still names the chip
-   *  through its tooltip and accessible name, so nothing is lost to a
-   *  screen reader or a keyboard user. */
+  /** Drop the label and keep the glyph. The chip is then named through
+   *  its tooltip and, because a bare <span> is generic and cannot carry
+   *  one, an explicit role="img" plus aria-label. */
   iconOnly?: boolean
+  /**
+   * Whether this particular chip is a control when the board has an
+   * `onTagClick`. Defaults to true. Set it false for a chip the handler
+   * does not act on, so it renders as a plain span rather than a button
+   * that promises a filter and does nothing.
+   */
+  clickable?: boolean
 }
 
 export interface BoardChecklistItem {
@@ -190,8 +197,22 @@ interface KanbanBoardProps {
   /** Inline quick-add. When supplied, the column footer becomes the
    *  composer: a title, Enter to add, Escape to cancel. Takes precedence
    *  over `onAdd`, which stays available for callers that only want a
-   *  dialog. Returning a promise is fine; the composer closes optimistically. */
-  onQuickAdd?: (status: string, title: string) => void
+   *  dialog. Return a promise to have the composer wait on the write: it
+   *  clears and closes on resolve, and on reject it stays open with the
+   *  title still in the box so the user can retry. */
+  onQuickAdd?: (status: string, title: string) => void | Promise<void>
+  /**
+   * Which columns may be written into. Returning false suppresses that
+   * column's header plus and its footer composer entirely, so the board
+   * never offers an add its backend would reject (a Requests board cannot
+   * create a request straight into Delivered or Cancelled).
+   * Defaults to every column being writable.
+   */
+  canAddTo?: (status: string) => boolean
+  /** One line under the quick-add composer naming what the write lands
+   *  against, e.g. "Adds to Acme Ltd". Without it the composer says which
+   *  column a card joins but not which client it belongs to. */
+  quickAddHint?: string
   /** Click a checklist checkbox. */
   onToggleChecklist?: (itemId: string, checklistItemId: string) => void
   /** Click a card body (not the chips / checkboxes). */
@@ -294,6 +315,10 @@ const KANBAN_CSS = `
   .tahi-board-quickadd-btn,
   .tahi-board-quickadd-form button{ min-height: 2.75rem; }
   .tahi-board-colbtn{ width: 2.75rem; height: 2.75rem; }
+  /* A clickable chip is a control like any other, and the icon-only one is
+     an 18px square at rest. The chip keeps its own padding; the min-height
+     is what carries it to a thumb-sized target. */
+  .tahi-board-chip{ min-height: 2.75rem; }
 }
 @media (prefers-reduced-motion: reduce){
   .tahi-board-card:hover{ transform: none; }
@@ -330,6 +355,8 @@ export function KanbanBoard({
   onNest,
   onAdd,
   onQuickAdd,
+  canAddTo,
+  quickAddHint,
   onToggleChecklist,
   onItemClick,
   onAssigneeClick,
@@ -453,6 +480,9 @@ export function KanbanBoard({
       {columns.map(col => {
         const cards = byStatus.get(col.statusValue) ?? []
         const isDropTarget = dropColumn === col.statusValue
+        // A column the caller cannot write into offers no add at all,
+        // rather than a control whose write is rejected on submit.
+        const addable = canAddTo ? canAddTo(col.statusValue) : true
         return (
           <Column
             key={col.id}
@@ -460,8 +490,9 @@ export function KanbanBoard({
             count={cards.length}
             isDropTarget={isDropTarget}
             actions={columnActions}
-            onAdd={readOnly ? undefined : onAdd}
-            onQuickAdd={readOnly ? undefined : onQuickAdd}
+            onAdd={readOnly || !addable ? undefined : onAdd}
+            onQuickAdd={readOnly || !addable ? undefined : onQuickAdd}
+            quickAddHint={quickAddHint}
             onDragOver={(e) => onColumnDragOver(e, col)}
             onDragLeave={() => setDropColumn(null)}
             onDrop={(e) => onColumnDrop(e, col)}
@@ -527,6 +558,7 @@ function Column({
   actions,
   onAdd,
   onQuickAdd,
+  quickAddHint,
   onDragOver,
   onDragLeave,
   onDrop,
@@ -537,7 +569,8 @@ function Column({
   isDropTarget: boolean
   actions?: ReadonlyArray<ColumnAction>
   onAdd?: (status: string) => void
-  onQuickAdd?: (status: string, title: string) => void
+  onQuickAdd?: (status: string, title: string) => void | Promise<void>
+  quickAddHint?: string
   onDragOver: (e: React.DragEvent) => void
   onDragLeave: (e: React.DragEvent) => void
   onDrop: (e: React.DragEvent) => void
@@ -555,6 +588,9 @@ function Column({
   return (
     <div
       data-board-column
+      // The status is on the element so a smoke test (and the e2e board
+      // spec) can name a column without depending on a control inside it.
+      data-column-status={column.statusValue}
       style={{
         flex: '0 0 16.5rem',
         width: '16.5rem',
@@ -752,6 +788,7 @@ function Column({
       {onQuickAdd ? (
         <QuickAdd
           label={column.label}
+          hint={quickAddHint}
           open={composerOpen}
           onOpenChange={setComposerOpen}
           onSubmit={(title) => onQuickAdd(column.statusValue, title)}
@@ -796,21 +833,30 @@ function Column({
 
 // ── Inline quick-add ─────────────────────────────────────────────────
 
-/** Title-only composer in the column footer. Enter adds, Shift plus Enter
- *  starts a new line, Escape closes without writing. Nothing here is a
- *  control until it is opened, so a read-only column stays quiet. */
+/**
+ * Title-only composer in the column footer. Enter adds, Shift plus Enter
+ * starts a new line, Escape closes without writing. Nothing here is a
+ * control until it is opened, so a read-only column stays quiet.
+ *
+ * The composer waits on the write rather than closing optimistically: a
+ * rejected write leaves the box open with the title still in it, so the
+ * typing is never lost to a 400 the user cannot see.
+ */
 function QuickAdd({
   label,
+  hint,
   open,
   onOpenChange,
   onSubmit,
 }: {
   label: string
+  hint?: string
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSubmit: (title: string) => void
+  onSubmit: (title: string) => void | Promise<void>
 }) {
   const [value, setValue] = React.useState('')
+  const [saving, setSaving] = React.useState(false)
   const inputRef = React.useRef<HTMLTextAreaElement | null>(null)
 
   React.useEffect(() => {
@@ -818,12 +864,25 @@ function QuickAdd({
   }, [open])
 
   const close = () => { setValue(''); onOpenChange(false) }
-  const submit = () => {
-    const title = value.trim()
-    if (!title) return
-    onSubmit(title)
-    close()
+  const submit = async () => {
+    // Shift plus Enter is a typing affordance, not a title format: the
+    // interior newlines are collapsed so they never reach the stored
+    // title, and from there the list, exports and email.
+    const title = value.replace(/\s+/g, ' ').trim()
+    if (!title || saving) return
+    setSaving(true)
+    try {
+      await onSubmit(title)
+      close()
+    } catch {
+      // The caller has already said what went wrong. Keep the box open
+      // with the title intact so the write can be tried again.
+    } finally {
+      setSaving(false)
+    }
   }
+
+  const canSubmit = !!value.trim() && !saving
 
   if (!open) {
     return (
@@ -882,8 +941,9 @@ function QuickAdd({
         placeholder="Request title"
         aria-label={`New request in ${label}`}
         rows={2}
+        readOnly={saving}
         onKeyDown={e => {
-          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit() }
           if (e.key === 'Escape') { e.preventDefault(); close() }
         }}
         style={{
@@ -899,29 +959,46 @@ function QuickAdd({
           minHeight: '2.375rem',
         }}
       />
+      {hint && (
+        <p style={{
+          margin: '0.375rem 0 0',
+          fontSize: '0.6875rem',
+          lineHeight: 1.4,
+          color: 'var(--color-text-subtle)',
+        }}>
+          {hint}
+        </p>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.4375rem', marginTop: '0.4375rem' }}>
         <button
           type="button"
-          onClick={submit}
-          disabled={!value.trim()}
+          onClick={() => { void submit() }}
+          disabled={!value.trim() || saving}
           className="tahi-focus-ring"
           style={{
             height: '1.875rem',
             padding: '0 0.75rem',
             border: 'none',
             borderRadius: 'var(--radius-sm)',
-            background: value.trim() ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
+            background: canSubmit ? 'var(--color-brand)' : 'var(--color-bg-tertiary)',
             // White on brand green, the same pairing <TahiButton> uses for
             // its primary. It is the one colour that must not follow the
             // theme, so it is not a token.
-            color: value.trim() ? '#ffffff' : 'var(--color-text-subtle)',
+            color: canSubmit ? '#ffffff' : 'var(--color-text-subtle)',
             fontFamily: 'inherit',
             fontSize: '0.75rem',
             fontWeight: 600,
-            cursor: value.trim() ? 'pointer' : 'not-allowed',
+            cursor: canSubmit ? 'pointer' : 'not-allowed',
+            transition: 'background-color 120ms ease',
+          }}
+          onMouseEnter={e => {
+            if (canSubmit) e.currentTarget.style.background = 'var(--color-brand-dark)'
+          }}
+          onMouseLeave={e => {
+            if (canSubmit) e.currentTarget.style.background = 'var(--color-brand)'
           }}
         >
-          Add
+          {saving ? 'Adding' : 'Add'}
         </button>
         <button
           type="button"
@@ -1054,6 +1131,9 @@ function BoardCard({
   const showDue = !!item.dueDate && !item.hideDueChip
   const hasFooterMeta = showDue || !!item.commentCount || !!item.attachmentCount ||
     (!hasPeopleRow && !!item.assignees && item.assignees.length > 0)
+  // The drag grip only exists on a draggable card, and the chip row has to
+  // leave it room (see the paddingRight below).
+  const showGrip = !readOnly && !!onDragStart
 
   return (
     <div
@@ -1107,7 +1187,17 @@ function BoardCard({
             right. Each chip is clickable when a handler is provided, and
             the caller routes to a filtered list ("all Design work"). */}
         {(item.priority || (item.tags && item.tags.length > 0) || item.warning || item.reference) && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', alignItems: 'center' }}>
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '0.25rem',
+            alignItems: 'center',
+            // The grip is pinned to the card's top right corner, exactly
+            // where a right-aligned reference sits. Reserve the gutter for
+            // it at rest rather than opening one on hover, so nothing in
+            // the row shifts under the cursor.
+            paddingRight: showGrip ? '0.5rem' : undefined,
+          }}>
             {item.tags?.map(tag => (
               <TagChip
                 key={tag.id}
@@ -1368,7 +1458,7 @@ function BoardCard({
       </div>
 
       {/* Drag handle hint (subtle, top-right) */}
-      {!readOnly && onDragStart && (
+      {showGrip && (
         <span
           aria-hidden="true"
           className="tahi-kanban-grip"
@@ -1806,7 +1896,7 @@ function PriorityChip({
       type="button"
       onClick={(e) => { e.stopPropagation(); onClick() }}
       aria-label={`Filter by ${priority} priority`}
-      className="tahi-focus-ring"
+      className="tahi-focus-ring tahi-board-chip"
       style={baseStyle}
       onMouseEnter={e => { e.currentTarget.style.filter = 'brightness(0.95)' }}
       onMouseLeave={e => { e.currentTarget.style.filter = 'none' }}
@@ -1827,6 +1917,11 @@ function TagChip({
   // A tinted chip (a category on its --cat-* tokens) carries its own fill
   // and needs no outline; the neutral chip keeps the hairline it had.
   const tinted = !!tag.background
+  // A chip is only a control when the board has a handler AND this chip is
+  // one the handler acts on. Anything else renders as a plain span: a
+  // button that promises "Filter by X" and does nothing is worse than text,
+  // and so is a pointer cursor over text that cannot be pressed.
+  const interactive = !!onClick && tag.clickable !== false
   const baseStyle: React.CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
@@ -1839,7 +1934,7 @@ function TagChip({
     fontSize: '0.625rem',
     fontWeight: 600,
     letterSpacing: '0.01em',
-    cursor: onClick ? 'pointer' : 'default',
+    cursor: interactive ? 'pointer' : 'default',
     transition: 'background-color 120ms ease, border-color 120ms ease, filter 120ms ease',
   }
   const inner = (
@@ -1849,9 +1944,18 @@ function TagChip({
     </>
   )
 
-  if (!onClick) {
+  // Written out rather than as `!interactive` so the button branch below
+  // sees `onClick` narrowed to defined.
+  if (!onClick || tag.clickable === false) {
     const chip = (
-      <span style={baseStyle} aria-label={tag.iconOnly ? tag.label : undefined}>
+      // aria-label is ignored on a generic <span>, so the icon-only chip
+      // takes an explicit role that supports a name. The glyph inside is
+      // aria-hidden, and the tooltip is only a description while it is open.
+      <span
+        style={baseStyle}
+        role={tag.iconOnly ? 'img' : undefined}
+        aria-label={tag.iconOnly ? tag.label : undefined}
+      >
         {inner}
       </span>
     )
@@ -1864,7 +1968,7 @@ function TagChip({
       type="button"
       onClick={(e) => { e.stopPropagation(); onClick() }}
       aria-label={`Filter by ${tag.label}`}
-      className="tahi-focus-ring"
+      className="tahi-focus-ring tahi-board-chip"
       style={baseStyle}
       onMouseEnter={e => {
         if (tinted) { e.currentTarget.style.filter = 'brightness(0.96)'; return }

@@ -78,8 +78,16 @@ interface BoardViewProps {
   onMove?: (itemId: string, toStatus: string, position: number) => void
   onNest?: (childId: string, parentId: string) => void
   onAdd?: (status: string) => void
-  /** Inline quick-add in the kanban column footer. See <KanbanBoard>. */
-  onQuickAdd?: (status: string, title: string) => void
+  /** Inline quick-add in the kanban column footer. See <KanbanBoard>.
+   *  Reject the returned promise to keep the composer open on a failed
+   *  write. */
+  onQuickAdd?: (status: string, title: string) => void | Promise<void>
+  /** Which columns accept an add. See <KanbanBoard>. Returning false
+   *  suppresses that column's plus and its footer composer. */
+  canAddTo?: (status: string) => boolean
+  /** One line under the quick-add composer naming what the write lands
+   *  against, e.g. "Adds to Acme Ltd". */
+  quickAddHint?: string
   onToggleChecklist?: (itemId: string, checklistItemId: string) => void
   onItemClick?: (item: BoardItem) => void
   /** Click an assignee avatar → caller routes to their profile. */
@@ -138,6 +146,8 @@ export function BoardView({
   onNest,
   onAdd,
   onQuickAdd,
+  canAddTo,
+  quickAddHint,
   onToggleChecklist,
   onItemClick,
   onAssigneeClick,
@@ -510,6 +520,8 @@ export function BoardView({
             onNest={onNest}
             onAdd={onAdd}
             onQuickAdd={onQuickAdd}
+            canAddTo={canAddTo}
+            quickAddHint={quickAddHint}
             onToggleChecklist={onToggleChecklist}
             onItemClick={onItemClick}
             onAssigneeClick={onAssigneeClick}
