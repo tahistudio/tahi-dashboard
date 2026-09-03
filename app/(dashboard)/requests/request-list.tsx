@@ -53,7 +53,6 @@ import {
   type BoardTag,
   type BoardViewKey,
 } from '@/components/tahi/board-view'
-import { usePermissions } from '@/components/tahi/permissions-context'
 import { PARTICIPANT_ROLE_LABEL, type RequestParticipant } from '@/lib/request-participants'
 import { RequestsTimeline } from '@/components/tahi/requests/requests-timeline'
 import { RequestsViewSwitcher } from '@/components/tahi/requests/requests-view-switcher'
@@ -506,8 +505,9 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules, impersonatedTeamMemberId } = useImpersonation()
   // The rail layout is Liam and Staci only while it beds in. Everyone else,
   // real clients included, keeps the toolbar they have today.
-  const { isSuperAdmin } = usePermissions()
-  const railOn = isSuperAdmin
+  // The rail UI is on for every audience since 2026-09-03; the legacy
+  // branches below are dead and queued for deletion.
+  const railOn = true
   // Only switch to client view when impersonating a client, not a team member
   const isAdmin = isAdminProp && !isImpersonatingClient
   // Check if impersonated team member is a viewer

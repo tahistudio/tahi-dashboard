@@ -38,7 +38,13 @@ test.use({
 })
 
 async function gotoRequests(page: Page): Promise<void> {
-  await page.goto('/requests')
+  // A compiling dev server can abort the first navigation; retry once.
+  try {
+    await page.goto('/requests')
+  } catch (err) {
+    if (!String(err).includes('ERR_ABORTED')) throw err
+    await page.goto('/requests')
+  }
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Requests', { timeout: 20_000 })
 }
 

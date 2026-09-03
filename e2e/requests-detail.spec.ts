@@ -51,7 +51,13 @@ async function expectNoHorizontalScroll(page: Page): Promise<void> {
  * empty, so callers can skip instead of failing on someone else's data.
  */
 async function openFirstRequest(page: Page): Promise<boolean> {
-  await page.goto('/requests')
+  // A compiling dev server can abort the first navigation; retry once.
+  try {
+    await page.goto('/requests')
+  } catch (err) {
+    if (!String(err).includes('ERR_ABORTED')) throw err
+    await page.goto('/requests')
+  }
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Requests', { timeout: 20_000 })
 
   const first = page.locator('a[href^="/requests/"]').first()

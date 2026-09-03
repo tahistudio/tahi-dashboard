@@ -35,7 +35,6 @@ import { PeoplePanel, type Participant } from '@/components/tahi/people-panel'
 import { TimeCard } from '@/components/tahi/time-card'
 import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
 import { fetchSchedulePhaseOptions } from '@/lib/schedule-phases'
-import { usePermissions } from '@/components/tahi/permissions-context'
 import { CATEGORY_CONFIG, EDITABLE_STATUSES, REQUEST_STATUS_CONFIG } from '@/lib/status-config'
 import { StatusChipSelect } from '@/components/tahi/status-chip-select'
 import { DeliverySpine, isPipelineStatus } from '@/components/tahi/requests/delivery-spine'
@@ -329,8 +328,9 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   // Slice 6 of the Requests port ships the rebuilt detail behind the same
   // super-admin gate the list uses. Everyone else keeps today's detail
   // untouched, so a regression here can only reach Liam and Staci.
-  const { isSuperAdmin } = usePermissions()
-  const newUi = isSuperAdmin
+  // The rebuilt detail is on for every audience since 2026-09-03; the
+  // legacy branches below are dead and queued for deletion.
+  const newUi = true
   const [request, setRequest] = useState<Request | null>(null)
   const [subRequests, setSubRequests] = useState<SubRequestRow[]>([])
   const [parentRequest, setParentRequest] = useState<ParentRequestRef | null>(null)

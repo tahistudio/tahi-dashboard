@@ -54,7 +54,7 @@ import {
  * true in one commit and every admin and every client gets it; the legacy
  * component below can then be deleted in the commit after.
  */
-const NEW_DIALOG_FOR_EVERYONE = false
+const NEW_DIALOG_FOR_EVERYONE = true
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
