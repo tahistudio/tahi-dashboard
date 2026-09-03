@@ -89,6 +89,14 @@ export async function GET(req: NextRequest) {
         WHERE sub.parent_request_id = ${schema.requests.id}
           AND sub.is_internal = 0
       )`.as('sub_request_count'),
+      // The done half of the card's subtask bar, held to the same
+      // client-visible children the count above is.
+      subRequestDoneCount: sql<number>`(
+        SELECT COUNT(*) FROM requests AS sub
+        WHERE sub.parent_request_id = ${schema.requests.id}
+          AND sub.is_internal = 0
+          AND sub.status = 'delivered'
+      )`.as('sub_request_done_count'),
     })
     .from(schema.requests)
     .where(and(...conditions))

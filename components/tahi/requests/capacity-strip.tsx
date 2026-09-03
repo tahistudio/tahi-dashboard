@@ -21,9 +21,36 @@ import * as React from 'react'
 import useSWR from 'swr'
 import { Calendar } from 'lucide-react'
 import { Avatar } from '@/components/tahi/avatar'
+import { Badge } from '@/components/tahi/badge'
 import { getPlanLabel } from '@/lib/plan-utils'
 import { formatDate, parseLooseDate } from '@/lib/utils'
 import type { RequestParticipant } from '@/lib/request-participants'
+
+// ── Styles ────────────────────────────────────────────────────────────────────
+//
+// One keyframe and its reduced-motion fallback, which an inline style cannot
+// express. Scoped to this component the way <KanbanBoard> keeps KANBAN_CSS,
+// so nothing lands in globals.css for a single strip.
+
+const CAPACITY_CSS = `
+.tahi-cap-live{ position: relative; }
+.tahi-cap-live::after{
+  content: '';
+  position: absolute;
+  inset: -0.25rem;
+  border-radius: var(--radius-full);
+  background: var(--status-in-progress-dot, var(--color-brand));
+  opacity: 0.4;
+  animation: tahi-cap-pulse 1.8s ease-out infinite;
+}
+@keyframes tahi-cap-pulse{
+  0%{ transform: scale(0.55); opacity: 0.55; }
+  100%{ transform: scale(2); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce){
+  .tahi-cap-live::after{ animation: none; opacity: 0.25; transform: scale(1); }
+}
+`
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -142,13 +169,30 @@ export function CapacityStrip({
         overflow: 'hidden',
       }}
     >
-      <header style={{ padding: '0.875rem 1rem 0.75rem' }}>
-        <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
-          {`Your ${planLabel} plan`}
-        </h2>
-        <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: '0.1875rem 0 0', lineHeight: 1.45 }}>
-          {`${tracks.length} active ${tracks.length === 1 ? 'track' : 'tracks'}. One request builds per track, the next pulls in automatically.`}
-        </p>
+      <style>{CAPACITY_CSS}</style>
+      {/* The header carries a soft brand wash that fades into the card, so
+          the strip reads as the plan speaking rather than another list. The
+          tint is a background, not a hairline, so no single-side border. */}
+      <header
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '0.75rem',
+          padding: '0.875rem 1rem 0.75rem',
+          background: 'linear-gradient(180deg, color-mix(in srgb, var(--color-brand-100) 45%, var(--color-bg)), var(--color-bg))',
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
+            {`Your ${planLabel} plan`}
+          </h2>
+          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: '0.1875rem 0 0', lineHeight: 1.45 }}>
+            {`${tracks.length} active ${tracks.length === 1 ? 'track' : 'tracks'}. One request builds per track, the next pulls in automatically.`}
+          </p>
+        </div>
+        <Badge tone="brand" variant="soft" size="sm" leader="dot">
+          {planLabel}
+        </Badge>
       </header>
 
       <div style={{ padding: '0 1rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -431,10 +475,13 @@ function LaneTile({
 
 // ── Small parts ───────────────────────────────────────────────────────────────
 
+/** The "happening now" signal on a lane tile: a dot with one expanding ring.
+ *  Under prefers-reduced-motion the ring holds still instead of pulsing. */
 function LiveDot() {
   return (
     <span
       aria-hidden="true"
+      className="tahi-cap-live"
       style={{
         display: 'inline-block',
         width: '0.5rem',
@@ -443,7 +490,6 @@ function LiveDot() {
         flexShrink: 0,
         borderRadius: 'var(--radius-full)',
         background: 'var(--status-in-progress-dot, var(--color-brand))',
-        boxShadow: '0 0 0 3px var(--color-brand-50)',
       }}
     />
   )

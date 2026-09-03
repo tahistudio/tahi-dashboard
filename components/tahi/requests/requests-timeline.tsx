@@ -29,11 +29,12 @@ import {
   DAY_MS,
   TIMELINE_EDGE_EXTENSION_DAYS,
   TIMELINE_LABEL_WIDTH_PX,
+  compareTimelineRows,
   computeTimelineDomain,
   doneStatusValues,
   formatTimelineDate,
   isTimelineOverdue,
-  parseTimelineDate,
+  timelinePlot,
   ratioOf,
   timelineChartWidth,
   todayRatio,
@@ -85,6 +86,9 @@ interface TimelineDatum {
   item: BoardItem
   startTs: number | null
   endTs: number
+  /** False when the row has no due date and is plotted on its created
+   *  date instead. Those rows are never overdue and sort last. */
+  dated: boolean
   column: BoardColumn | undefined
   isOverdue: boolean
 }
@@ -125,18 +129,30 @@ export function RequestsTimeline({
   const data = React.useMemo<TimelineDatum[]>(() => (
     items
       .map((item): TimelineDatum | null => {
-        const endTs = parseTimelineDate(item.dueDate, now)
-        if (endTs == null) return null
+        // Undated work still plots, as a milestone on the day it was
+        // raised, so a board where most requests carry no due date does
+        // not read as an empty chart.
+        const plot = timelinePlot({
+          dueDate: item.dueDate,
+          startDate: item.startDate,
+          createdDate: item.createdDate,
+          now,
+        })
+        if (!plot) return null
         return {
           item,
-          startTs: parseTimelineDate(item.startDate, now),
-          endTs,
+          startTs: plot.startTs,
+          endTs: plot.endTs,
+          dated: plot.dated,
           column: columnByStatus.get(item.status),
-          isOverdue: isTimelineOverdue({ status: item.status, endTs, now, doneStatuses }),
+          // Only a real deadline can be missed. A created date in the
+          // past is not a late one.
+          isOverdue: plot.dated
+            && isTimelineOverdue({ status: item.status, endTs: plot.endTs, now, doneStatuses }),
         }
       })
       .filter((d): d is TimelineDatum => d !== null)
-      .sort((a, b) => (a.startTs ?? a.endTs) - (b.startTs ?? b.endTs))
+      .sort(compareTimelineRows)
   ), [items, columnByStatus, doneStatuses, now])
 
   // Scroll extension. Reaching either edge widens the domain by another
@@ -232,6 +248,7 @@ export function RequestsTimeline({
         />
       ))}
       <LegendKey color="var(--color-danger)" label="Overdue" />
+      <LegendKey color="var(--color-text-subtle)" label="No due date" hollow />
       <button
         type="button"
         className="tahi-focus-ring tahi-tl-today"
@@ -284,7 +301,7 @@ export function RequestsTimeline({
             color: 'var(--color-text-muted)',
             fontSize: '0.8125rem',
           }}>
-            No requests with a due date to plot.
+            No requests to plot.
           </div>
         </div>
       </div>
@@ -440,13 +457,21 @@ function TimelineRow({
   const widthRatio = Math.max(0, endRatio - leftRatio)
 
   const statusLabel = datum.column?.label ?? item.status
-  const dates = startTs != null
-    ? `${formatTimelineDate(startTs)} to ${formatTimelineDate(datum.endTs)}`
-    : `Due ${formatTimelineDate(datum.endTs)}`
+  const dates = !datum.dated
+    // Plotted on its created date, so say so rather than inventing a
+    // deadline the request does not have.
+    ? `No due date, raised ${formatTimelineDate(datum.endTs)}`
+    : startTs != null
+      ? `${formatTimelineDate(startTs)} to ${formatTimelineDate(datum.endTs)}`
+      : `Due ${formatTimelineDate(datum.endTs)}`
   const tip = `${statusLabel}${datum.isOverdue ? ', overdue' : ''}, ${dates}`
 
   const marker = startTs != null ? (
     <span
+      // Which shape a row plotted as. The e2e spec asserts an undated
+      // request really reaches the chart, rather than that the legend key
+      // naming the shape is on screen (it always is).
+      data-timeline-marker="bar"
       style={{
         position: 'absolute',
         top: '50%',
@@ -462,6 +487,7 @@ function TimelineRow({
     />
   ) : (
     <span
+      data-timeline-marker={datum.dated ? 'due' : 'undated'}
       style={{
         position: 'absolute',
         top: '50%',
@@ -470,7 +496,10 @@ function TimelineRow({
         height: '0.8125rem',
         transform: 'translate(-50%, -50%) rotate(45deg)',
         borderRadius: '0.125rem',
-        background: tone,
+        // A request with no due date plots hollow, so its position reads
+        // as "raised here", not as a deadline it never agreed to.
+        background: datum.dated ? tone : 'var(--color-bg)',
+        border: datum.dated ? undefined : `2px solid ${tone}`,
         boxShadow: datum.isOverdue ? overdueRing : undefined,
       }}
     />
@@ -583,7 +612,7 @@ function TodayLine({ ratio }: { ratio: number }) {
   )
 }
 
-function LegendKey({ color, label }: { color: string; label: string }) {
+function LegendKey({ color, label, hollow }: { color: string; label: string; hollow?: boolean }) {
   return (
     <span style={{
       display: 'inline-flex',
@@ -600,7 +629,8 @@ function LegendKey({ color, label }: { color: string; label: string }) {
           height: '0.5rem',
           flexShrink: 0,
           borderRadius: 999,
-          background: color,
+          background: hollow ? 'var(--color-bg)' : color,
+          border: hollow ? `2px solid ${color}` : undefined,
         }}
       />
       {label}

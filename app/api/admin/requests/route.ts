@@ -6,6 +6,15 @@ import { eq, desc, and, ne, inArray, isNull, sql } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { dispatchDomainEvent } from '@/lib/events'
 import { loadRequestParticipants } from '@/lib/request-participants'
+import { REQUEST_STATUSES } from '@/lib/status-config'
+
+/** Statuses a brand new request may be created at. The request vocabulary
+ *  minus the two ends of its life: delivered and cancelled both carry side
+ *  effects (delivery timestamps, notifications) that belong to the status
+ *  PATCH, so a request has to be moved there rather than born there. */
+const CREATABLE_STATUSES: readonly string[] = REQUEST_STATUSES
+  .map(s => s.value)
+  .filter(v => v !== 'delivered' && v !== 'cancelled')
 
 // ── GET /api/admin/requests ─────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -88,6 +97,13 @@ export async function GET(req: NextRequest) {
         SELECT COUNT(*) FROM requests AS sub
         WHERE sub.parent_request_id = ${schema.requests.id}
       )`.as('sub_request_count'),
+      // How many of those children are done. The kanban card's subtask bar
+      // is "done of total", and without this half it read 0 of N forever.
+      subRequestDoneCount: sql<number>`(
+        SELECT COUNT(*) FROM requests AS sub
+        WHERE sub.parent_request_id = ${schema.requests.id}
+          AND sub.status = 'delivered'
+      )`.as('sub_request_done_count'),
       // Join org name + tags (tags is a JSON array string of free-form labels)
       orgName: schema.organisations.name,
       // Drives the client avatar on the kanban card and the timeline label.
@@ -127,6 +143,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json() as {
     clientOrgId?: string; title?: string; type?: string
     category?: string; description?: string; priority?: string
+    status?: string
     isInternal?: boolean | number
     startDate?: string | null; dueDate?: string | null; estimatedHours?: number | null
   }
@@ -134,6 +151,18 @@ export async function POST(req: NextRequest) {
 
   if (!clientOrgId || !title?.trim()) {
     return NextResponse.json({ error: 'clientOrgId and title are required' }, { status: 400 })
+  }
+
+  // A request may be created straight into a column other than intake (the
+  // kanban's quick-add drops one into whichever column it was typed in).
+  // Only the open half of the vocabulary: nothing should be born delivered
+  // or cancelled, and those two carry side effects this route does not run.
+  const status = body.status ?? 'submitted'
+  if (!CREATABLE_STATUSES.includes(status)) {
+    return NextResponse.json(
+      { error: `status must be one of: ${CREATABLE_STATUSES.join(', ')}` },
+      { status: 400 },
+    )
   }
 
   const database = await db()
@@ -155,7 +184,7 @@ export async function POST(req: NextRequest) {
       ${type ?? 'small_task'},
       ${category ?? 'development'},
       ${description ?? null},
-      'submitted',
+      ${status},
       ${priority ?? 'standard'},
       ${startDate ?? null},
       ${dueDate ?? null},
@@ -181,7 +210,7 @@ export async function POST(req: NextRequest) {
       type: type ?? 'small_task',
       category: category ?? 'development',
       priority: priority ?? 'standard',
-      status: 'submitted',
+      status,
       isInternal: body.isInternal ? 1 : 0,
       source: 'admin',
     },
