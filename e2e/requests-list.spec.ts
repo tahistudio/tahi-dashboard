@@ -46,6 +46,7 @@ function viewTabs(page: Page) {
 }
 
 async function railIsOn(page: Page): Promise<boolean> {
+  await viewTabs(page).first().waitFor({ state: 'attached', timeout: 8_000 }).catch(() => {})
   return (await viewTabs(page).count()) > 0
 }
 
@@ -69,7 +70,8 @@ async function gotoRequests(page: Page): Promise<void> {
 
 /** Wait for the list to settle into rows or an empty state. */
 async function listSettled(page: Page): Promise<void> {
-  await page.waitForLoadState('networkidle')
+  // The shell keeps a notification stream open, so networkidle never fires.
+  await page.locator('table, [data-mobile-cards], a[href^="/requests/"]').first().waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {})
 }
 
 test.describe('Requests list', () => {

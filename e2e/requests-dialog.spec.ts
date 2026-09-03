@@ -52,7 +52,9 @@ async function openDialog(page: Page) {
 
 /** The rebuilt dialog leads with the category tiles; the legacy one has none. */
 async function rebuiltDialogIsOn(page: Page): Promise<boolean> {
-  return (await page.getByRole('radiogroup', { name: 'What kind of work?' }).count()) > 0
+  const grid = page.getByRole('radiogroup', { name: 'What kind of work?' })
+  await grid.first().waitFor({ state: 'attached', timeout: 8_000 }).catch(() => {})
+  return (await grid.count()) > 0
 }
 
 /** True while focus sits inside one of the mounted dialog panels. */

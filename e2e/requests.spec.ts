@@ -139,7 +139,7 @@ test.describe('Requests', () => {
     // The detail rebuild is behind the same super-admin flag as the rail, so
     // the spine is absent rather than broken when the gate is closed.
     const spine = page.getByRole('list', { name: 'Delivery steps' })
-    await page.waitForLoadState('networkidle')
+    await spine.first().waitFor({ state: 'attached', timeout: 8_000 }).catch(() => {})
     test.skip((await spine.count()) === 0, 'Delivery spine is super-admin gated.')
 
     await expect(spine).toBeVisible({ timeout: 20_000 })

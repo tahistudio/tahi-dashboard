@@ -129,23 +129,15 @@ export async function generateBriefing(): Promise<BriefingResponse> {
   const briefing = parseBriefingResponse(briefingText)
 
   // Cache the result in settings so the GET endpoint serves it to the UI.
-  const existing = await database.select()
-    .from(schema.settings)
-    .where(eq(schema.settings.key, 'ai_briefing_latest'))
-    .limit(1)
-
+  // One upsert: two concurrent generations used to race a select-then-insert
+  // into a settings.key primary key collision.
   const cacheValue = JSON.stringify(briefing)
-  if (existing.length > 0) {
-    await database.update(schema.settings)
-      .set({ value: cacheValue, updatedAt: now.toISOString() })
-      .where(eq(schema.settings.key, 'ai_briefing_latest'))
-  } else {
-    await database.insert(schema.settings).values({
-      key: 'ai_briefing_latest',
-      value: cacheValue,
-      updatedAt: now.toISOString(),
+  await database.insert(schema.settings)
+    .values({ key: 'ai_briefing_latest', value: cacheValue, updatedAt: now.toISOString() })
+    .onConflictDoUpdate({
+      target: schema.settings.key,
+      set: { value: cacheValue, updatedAt: now.toISOString() },
     })
-  }
 
   return briefing
 }

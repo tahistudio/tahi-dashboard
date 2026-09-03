@@ -59,7 +59,9 @@ async function openFirstRequest(page: Page): Promise<boolean> {
 
   await first.click()
   await expect(page).toHaveURL(/\/requests\/[^/]+$/, { timeout: 20_000 })
-  await page.waitForLoadState('networkidle')
+  // The shell keeps a notification stream open, so networkidle never fires;
+  // wait for the detail rail instead.
+  await page.locator('dt').first().waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {})
   return true
 }
 
@@ -69,6 +71,7 @@ async function openFirstRequest(page: Page): Promise<boolean> {
  */
 async function portedDetailIsOn(page: Page): Promise<boolean> {
   const spine = page.getByRole('list', { name: 'Delivery steps' })
+  await spine.first().waitFor({ state: 'attached', timeout: 8_000 }).catch(() => {})
   if (await spine.count()) return true
   return (await page.getByText(/This request is (a draft, not yet submitted|archived)\./).count()) > 0
 }

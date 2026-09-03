@@ -59,6 +59,7 @@ function viewTabs(page: Page) {
 }
 
 async function railIsOn(page: Page): Promise<boolean> {
+  await viewTabs(page).first().waitFor({ state: 'attached', timeout: 8_000 }).catch(() => {})
   return (await viewTabs(page).count()) > 0
 }
 
