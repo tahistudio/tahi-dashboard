@@ -99,3 +99,84 @@ export function focusablesIn(el: HTMLElement): HTMLElement[] {
 export function isOrphanedFocus(active: Element | null): boolean {
   return !active || active === document.body || active === document.documentElement
 }
+
+/**
+ * The document surface a scroll lock writes to. Abstracted so the refcount
+ * rule below can be unit tested in the repo's DOM-free `node` environment.
+ */
+export interface ScrollLockTarget {
+  read(): string
+  write(value: string): void
+}
+
+export interface BodyScrollLock {
+  /** Takes a hold. The first holder is the one that captures what to restore. */
+  acquire(): void
+  /** Drops a hold. The last one out restores what the first one captured. */
+  release(): void
+  /** How many holds are outstanding. Exported for tests. */
+  holders(): number
+}
+
+/**
+ * A refcounted body scroll lock.
+ *
+ * Every overlay used to save `document.body.style.overflow` on open and write
+ * its own copy back on close. With two overlays up at once (a ConfirmDialog
+ * raised from inside a SlideOver, which is the shape on docs, contracts,
+ * proposals, leads, team, time and tasks) the inner one captured 'hidden' from
+ * the outer one, and whichever restore ran last won: closing both could leave
+ * the page permanently unscrollable with no overlay on screen.
+ *
+ * Counting holders fixes every ordering. Only the 0 to 1 transition reads and
+ * overwrites the value, and only the 1 to 0 transition puts it back, so nested
+ * overlays, sibling overlays closing in one commit, and effects that re-run
+ * mid-flight (React runs every destroy before any create, which drops the
+ * count to 0 and re-captures a clean value) all land on the same result.
+ */
+export function createBodyScrollLock(target: ScrollLockTarget): BodyScrollLock {
+  let count = 0
+  let restore = ''
+  return {
+    acquire() {
+      if (count === 0) {
+        restore = target.read()
+        target.write('hidden')
+      }
+      count += 1
+    },
+    release() {
+      if (count === 0) return
+      count -= 1
+      if (count === 0) target.write(restore)
+    },
+    holders() {
+      return count
+    },
+  }
+}
+
+const documentBodyOverflow: ScrollLockTarget = {
+  read: () => (typeof document === 'undefined' ? '' : document.body.style.overflow),
+  write: value => {
+    if (typeof document !== 'undefined') document.body.style.overflow = value
+  },
+}
+
+/** The one lock every overlay primitive shares. */
+export const bodyScrollLock = createBodyScrollLock(documentBodyOverflow)
+
+/**
+ * Takes a hold on the shared lock and hands back its release. Shaped for a
+ * `useEffect` cleanup, and idempotent so a double cleanup cannot drive the
+ * count negative.
+ */
+export function lockBodyScroll(lock: BodyScrollLock = bodyScrollLock): () => void {
+  lock.acquire()
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    lock.release()
+  }
+}

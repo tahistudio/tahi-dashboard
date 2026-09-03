@@ -27,6 +27,10 @@
  *   - Escape closes THIS panel only. The popover registers on the shared
  *     overlay stack while open, so a SlideOver or ConfirmDialog underneath
  *     stands down instead of unmounting along with it.
+ *   - The panel is a `role="dialog"`, so it needs a name. `label` sets one;
+ *     without it the panel borrows the anchor's own accessible name, which
+ *     is what a menu trigger already carries. A nameless dialog announced on
+ *     every consumer was the alternative.
  *
  * Usage:
  *
@@ -72,6 +76,21 @@ interface PopoverProps {
    *  the look. Used by the forest user-card menu, which paints its own dark
    *  surface. Positioning / flip / escape / outside-click all still apply. */
   bare?: boolean
+  /** Accessible name for the panel. `role="dialog"` without one announces as
+   *  a nameless dialog, and the panel is a portal so it has no ancestor to
+   *  borrow a name from. Omit it and the panel takes the anchor's own name,
+   *  which is what every menu-style consumer wants ("Category", "Assignee",
+   *  "Row actions") without having to say it twice. */
+  label?: string
+}
+
+/** The anchor's accessible name, as far as a DOM read can tell. */
+function anchorName(el: HTMLElement | null): string | undefined {
+  if (!el) return undefined
+  const name = el.getAttribute('aria-label')
+    ?? el.getAttribute('title')
+    ?? el.textContent?.trim()
+  return name || undefined
 }
 
 const MOBILE_BREAKPOINT = 480
@@ -88,8 +107,10 @@ export function Popover({
   align = 'start',
   mobileFullWidth = false,
   bare = false,
+  label,
 }: PopoverProps) {
   const [mounted, setMounted] = useState(false)
+  const [derivedLabel, setDerivedLabel] = useState<string | undefined>(undefined)
   const [position, setPosition] = useState<{
     left: number
     top: number
@@ -216,6 +237,14 @@ export function Popover({
     return () => document.removeEventListener('keydown', handle)
   }, [open, onClose, layerId])
 
+  // Name the panel off its anchor when the consumer did not name it. Read on
+  // open rather than during render because a ref has no value on the first
+  // pass, and the anchor is guaranteed to exist by the time a panel is open.
+  useEffect(() => {
+    if (!open || label) return
+    setDerivedLabel(anchorName(anchorRef.current))
+  }, [open, label, anchorRef])
+
   // Move focus into the panel on open. The portal is appended to <body>, so
   // the panel is last in tab order: leaving focus on the trigger meant
   // tabbing through the rest of the page to reach the first option. Panels
@@ -265,6 +294,7 @@ export function Popover({
     <div
       ref={panelRef}
       role="dialog"
+      aria-label={label ?? derivedLabel}
       style={{
         position: 'fixed',
         left: position?.left ?? -9999,

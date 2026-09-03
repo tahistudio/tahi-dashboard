@@ -59,7 +59,7 @@
 
 import React, { useEffect, useId, useRef, useState } from 'react'
 import { X } from 'lucide-react'
-import { focusablesIn, overlayLayers, shouldHandleEscape } from '@/components/tahi/overlay-stack'
+import { focusablesIn, lockBodyScroll, overlayLayers, shouldHandleEscape } from '@/components/tahi/overlay-stack'
 
 const EXIT_MS = 220
 
@@ -142,7 +142,7 @@ function SlideOverRoot({
     return () => overlayLayers.remove(layerId)
   }, [open, layerId])
 
-  // Escape closes plus body scroll lock, only while truly open
+  // Escape closes, only while truly open.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -153,13 +153,19 @@ function SlideOverRoot({
       onClose()
     }
     document.addEventListener('keydown', onKey)
-    const prevOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = prevOverflow
-    }
+    return () => document.removeEventListener('keydown', onKey)
   }, [open, onClose, layerId])
+
+  // Body scroll lock, deliberately its own effect keyed on `open` alone.
+  // Sharing the Escape effect meant every consumer's inline `onClose` arrow
+  // re-ran the lock on each parent render, and a refcount that churns is a
+  // refcount that can be observed mid-flight. The lock itself is shared and
+  // counted, so a ConfirmDialog raised from inside this drawer no longer
+  // captures 'hidden' as the value to restore.
+  useEffect(() => {
+    if (!open) return
+    return lockBodyScroll()
+  }, [open])
 
   // Both variants hand focus back to whatever opened them on close. Kept
   // apart from the focus-in effect below so a content swap cannot bounce focus

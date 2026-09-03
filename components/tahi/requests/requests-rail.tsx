@@ -502,9 +502,14 @@ export function SaveDefaultControl({ isDefault, onSave, touch = false }: {
         e.currentTarget.style.color = 'var(--color-brand-dark)'
         e.currentTarget.style.background = 'var(--color-bg-secondary)'
       }}
+      // No early return on leave, even once this IS the default. Clicking the
+      // control with the mouse flips isDefault while the pointer is still
+      // over it, and the hover background was written imperatively above;
+      // React will not undo it, because the style prop's background reads
+      // 'transparent' on both sides of the change and the diff is a no-op.
+      // Skipping the reset left a permanently shaded pill.
       onMouseLeave={e => {
-        if (isDefault) return
-        e.currentTarget.style.color = 'var(--color-text-muted)'
+        e.currentTarget.style.color = isDefault ? 'var(--color-text-subtle)' : 'var(--color-text-muted)'
         e.currentTarget.style.background = 'transparent'
       }}
     >

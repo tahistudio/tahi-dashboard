@@ -16,7 +16,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 import { AlertTriangle, Loader2, X } from 'lucide-react'
-import { focusablesIn, isOrphanedFocus, overlayLayers, shouldHandleEscape } from '@/components/tahi/overlay-stack'
+import { focusablesIn, isOrphanedFocus, lockBodyScroll, overlayLayers, shouldHandleEscape } from '@/components/tahi/overlay-stack'
 
 interface ConfirmDialogProps {
   open: boolean
@@ -59,9 +59,8 @@ export function ConfirmDialog({
     return () => overlayLayers.remove(layerId)
   }, [open, layerId])
 
-  // Escape cancels, plus the body scroll lock <SlideOver> already does. The
-  // lock is skipped while an action is in flight for the same reason Cancel
-  // is disabled then: the write is already on its way.
+  // Escape cancels, but not while an action is in flight, for the same reason
+  // Cancel is disabled then: the write is already on its way.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -71,13 +70,21 @@ export function ConfirmDialog({
       onCancel()
     }
     document.addEventListener('keydown', onKey)
-    const prevOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = prevOverflow
-    }
+    return () => document.removeEventListener('keydown', onKey)
   }, [open, onCancel, loading, layerId])
+
+  // The same shared, refcounted body scroll lock <SlideOver> holds, in its own
+  // effect keyed on `open` alone. Two things were wrong with saving and
+  // restoring `document.body.style.overflow` here directly: this dialog is
+  // usually raised from inside a drawer that already holds the lock, so it
+  // captured 'hidden' as the value to put back, and the capture sat in an
+  // effect whose deps included an inline `onCancel` arrow, so it re-ran on
+  // every parent render. Counting holders makes both orderings, and the
+  // sibling-close-in-one-commit case, land on the original value.
+  useEffect(() => {
+    if (!open) return
+    return lockBodyScroll()
+  }, [open])
 
   // Focus lands on Cancel, never on the destructive button.
   useEffect(() => {
