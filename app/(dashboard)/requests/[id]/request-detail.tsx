@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import useSWR from 'swr'
 import { apiPath } from '@/lib/api'
 import {
@@ -8,7 +8,7 @@ import {
   User, CheckCircle2, Loader2, Activity,
   FileText, Image as ImageIcon, Download, Paperclip,
   Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud, ChevronDown, Eye,
-  Sparkles, Wand2, X, Check,
+  Sparkles, Wand2, X, Check, Lock, Archive, MessageSquare, PauseCircle, Ban,
 } from 'lucide-react'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import Link from 'next/link'
@@ -32,7 +32,12 @@ import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
 import { fetchSchedulePhaseOptions } from '@/lib/schedule-phases'
 import { usePermissions } from '@/components/tahi/permissions-context'
 import { CATEGORY_CONFIG } from '@/lib/status-config'
-import { DeliverySpine } from '@/components/tahi/requests/delivery-spine'
+import { DeliverySpine, isPipelineStatus } from '@/components/tahi/requests/delivery-spine'
+import { SegmentedControl } from '@/components/tahi/segmented-control'
+import {
+  buildActivityEvents, filterActivityEvents, stripHtmlToText,
+  type ActivityEventType, type ActivityFilter,
+} from '@/components/tahi/requests/activity-feed'
 import { RequestActionsMenu } from '@/components/tahi/requests/request-actions-menu'
 import { ClientReviewBar } from '@/components/tahi/requests/client-review-bar'
 import {
@@ -66,6 +71,25 @@ const PRIORITY_OPTIONS = [
   { value: 'standard', label: 'Standard' },
   { value: 'high', label: 'High' },
 ]
+
+// The line the ported detail shows in place of the delivery spine when the
+// request is not on one of the five pipeline steps. One sentence per status,
+// worded for both audiences: a client sees the same note the studio does.
+const OFF_PIPELINE_NOTES: Record<string, string> = {
+  draft: 'This request is a draft, not yet submitted.',
+  archived: 'This request is archived.',
+  on_hold: 'This request is on hold, off the delivery pipeline for now.',
+  cancelled: 'This request was cancelled.',
+}
+
+/** The glyph beside an off-pipeline note. Decorative: the note carries it. */
+function OffPipelineIcon({ status }: { status: string }) {
+  const style = { flexShrink: 0, color: 'var(--color-text-subtle)' }
+  if (status === 'draft') return <FileText size={16} aria-hidden="true" style={style} />
+  if (status === 'archived') return <Archive size={16} aria-hidden="true" style={style} />
+  if (status === 'cancelled') return <Ban size={16} aria-hidden="true" style={style} />
+  return <PauseCircle size={16} aria-hidden="true" style={style} />
+}
 
 // Category vocabulary for the ported Details rail. Driven off the one
 // CATEGORY_CONFIG map so the chip colours and the picker can never diverge.
@@ -196,20 +220,6 @@ interface TriageSuggestion {
   oneLineReason: string
 }
 
-// Strip HTML down to readable text for seeding the AI wizard from a
-// request's rich-text description.
-function stripHtmlToText(html: string): string {
-  return html
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-}
-
 // Convert a plain-text AI draft into the minimal HTML the thread renders.
 // Escapes first, then maps blank lines to paragraphs and single newlines
 // to <br>. Keeps the posted message consistent with composer output.
@@ -302,6 +312,9 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const [messages, setMessages] = useState<Message[]>([])
   // Visibility is now owned by <MessageComposer> and passed back through handleSendMessage.
   const [statusUpdating, setStatusUpdating] = useState(false)
+  // Mirrors statusUpdating for the Internal switch, so a double tap cannot
+  // fire two PATCHes whose order decides who can see the request.
+  const [internalUpdating, setInternalUpdating] = useState(false)
   const [editingDueDate, setEditingDueDate] = useState(false)
   const [dueDateInput, setDueDateInput] = useState('')
   const [conversationId, setConversationId] = useState<string | null>(null)
@@ -678,6 +691,26 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     }
   }
 
+  // Internal requests never appear in the portal list or the portal detail
+  // (both filter on requests.isInternal), so this switch is the studio's
+  // single control over whether the client can see this page at all.
+  async function handleInternalToggle() {
+    if (!request || internalUpdating) return
+    const next = !request.isInternal
+    const who = request.orgName ?? 'The client'
+    setInternalUpdating(true)
+    try {
+      await patchRequest(
+        { isInternal: next },
+        next
+          ? `${who} can no longer see this request`
+          : `${who} can see this request again`,
+      )
+    } finally {
+      setInternalUpdating(false)
+    }
+  }
+
   async function handleScopeFlagToggle() {
     if (!request) return
     await patchRequest(
@@ -904,6 +937,332 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     ...teamMembers.map(tm => ({ value: tm.id, label: tm.name })),
   ]
 
+  // The Details card. The ported rail lifts it above People and Checklists
+  // (reference first, then the people, then the steps); the legacy rail
+  // keeps it last. The ported rows edit in place, the legacy rows keep
+  // their searchable selects and click-to-edit due date.
+  const detailsCard = newUi ? (
+    <SidebarCard title="Details">
+      <div className="flex flex-col" style={{ gap: '0.875rem' }}>
+        <DetailRow label="Type">
+          <span className="capitalize">{request.type.replace(/_/g, ' ')}</span>
+        </DetailRow>
+
+        <DetailRow label="Category">
+          <InlineMenuField
+            ariaLabel="Change category"
+            readOnly={!isAdmin}
+            value={request.category ?? ''}
+            options={CATEGORY_OPTIONS.map(c => ({
+              value: c,
+              label: categoryLabel(c),
+              node: <CategoryChip value={c} />,
+            }))}
+            renderValue={v => <CategoryChip value={v || null} />}
+            onChange={handleCategoryChange}
+          />
+        </DetailRow>
+
+        <DetailRow label="Priority">
+          <InlineMenuField
+            ariaLabel="Change priority"
+            readOnly={!isAdmin}
+            value={request.priority}
+            options={PRIORITY_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
+            renderValue={v => (
+              v === 'high'
+                ? (
+                  <span
+                    className="inline-flex items-center rounded-full"
+                    style={{
+                      padding: '0.125rem 0.5rem',
+                      fontSize: '0.6875rem',
+                      fontWeight: 500,
+                      whiteSpace: 'nowrap',
+                      background: 'var(--priority-high-bg)',
+                      color: 'var(--priority-high-text)',
+                      border: '1px solid var(--priority-high-border)',
+                    }}
+                  >
+                    High
+                  </span>
+                )
+                : <span className="capitalize">{v || 'Standard'}</span>
+            )}
+            onChange={v => { void handlePriorityChange(v) }}
+          />
+        </DetailRow>
+
+        {isAdmin && (
+          <DetailRow label="Assignee">
+            <InlineMenuField
+              ariaLabel="Change assignee"
+              searchable
+              searchPlaceholder="Search team…"
+              emptyMessage="No team members"
+              value={request.assigneeId ?? ''}
+              options={[
+                ...teamMembers.map(tm => ({ value: tm.id, label: tm.name, keywords: tm.name })),
+                { value: '', label: 'Unassigned' },
+              ]}
+              renderValue={v => {
+                const name = teamMembers.find(tm => tm.id === v)?.name ?? request.assigneeName
+                return v && name
+                  ? <span>{name}</span>
+                  : <InlineNone>Unassigned</InlineNone>
+              }}
+              onChange={v => { void handleAssigneeChange(v || null) }}
+            />
+          </DetailRow>
+        )}
+
+        {isAdmin && (phaseOptions.length > 0 || request.scheduleRowId) && (
+          <DetailRow label="Delivery phase">
+            <InlineMenuField
+              ariaLabel="Link to a delivery phase"
+              searchable
+              searchPlaceholder="Search phases…"
+              emptyMessage="No schedule phases"
+              value={request.scheduleRowId ?? ''}
+              options={[
+                ...phaseOptions.map(o => ({ value: o.value, label: o.label, keywords: o.label })),
+                { value: '', label: 'Not linked' },
+              ]}
+              renderValue={v => {
+                const label = phaseOptions.find(o => o.value === v)?.label
+                return v && label
+                  ? <span>{label}</span>
+                  : <InlineNone>Not linked</InlineNone>
+              }}
+              onChange={v => { void handleScheduleRowChange(v || null) }}
+            />
+          </DetailRow>
+        )}
+
+        <DetailRow label="Due date">
+          <InlineDateField
+            ariaLabel="Change due date"
+            readOnly={!isAdmin}
+            value={request.dueDate}
+            render={v => v
+              ? <span>{formatDate(v)}</span>
+              : <InlineNone>Not set</InlineNone>}
+            onChange={v => { void handleDueDateChange(v) }}
+          />
+        </DetailRow>
+
+        {isAdmin && (
+          <DetailRow label="Estimated">
+            <InlineNumberField
+              ariaLabel="Change the estimate"
+              suffix="h"
+              value={request.estimatedHours}
+              render={v => v != null
+                ? <span>{v}h</span>
+                : <InlineNone>Not set</InlineNone>}
+              onChange={v => { void patchRequest(
+                { estimatedHours: v },
+                v != null ? `Estimate set to ${v}h` : 'Estimate cleared',
+              ) }}
+            />
+          </DetailRow>
+        )}
+
+        {request.deliveredAt && (
+          <DetailRow label="Delivered">
+            {formatDate(request.deliveredAt)}
+          </DetailRow>
+        )}
+      </div>
+    </SidebarCard>
+    ) : (
+    <SidebarCard title="Details">
+      <div className="flex flex-col" style={{ gap: '0.875rem' }}>
+        <DetailRow label="Type">
+          <span className="capitalize">{request.type.replace(/_/g, ' ')}</span>
+        </DetailRow>
+
+        {request.category && (
+          <DetailRow label="Category">
+            <span className="capitalize">{request.category}</span>
+          </DetailRow>
+        )}
+
+        {/* Priority (editable for admin via searchable-select) */}
+        <DetailRow label="Priority">
+          {isAdmin ? (
+            <div style={{ width: '100%', maxWidth: '10rem' }}>
+              <SearchableSelect
+                options={PRIORITY_OPTIONS}
+                value={request.priority}
+                onChange={handlePriorityChange}
+                placeholder="Select priority"
+                size="sm"
+              />
+            </div>
+          ) : (
+            <span className="capitalize">{request.priority}</span>
+          )}
+        </DetailRow>
+
+        {/* Assignee (editable for admin via searchable-select) */}
+        <DetailRow label="Assignee">
+          {isAdmin ? (
+            <div style={{ width: '100%', maxWidth: '10rem' }}>
+              <SearchableSelect
+                options={teamMemberOptions}
+                value={request.assigneeId ?? ''}
+                onChange={v => handleAssigneeChange(v || null)}
+                placeholder="Unassigned"
+                searchPlaceholder="Search team..."
+                allowClear
+                size="sm"
+              />
+            </div>
+          ) : (
+            <span className="flex items-center gap-1.5">
+              <User size={12} style={{ color: 'var(--color-text-subtle)' }} />
+              {request.assigneeName ?? 'Unassigned'}
+            </span>
+          )}
+        </DetailRow>
+
+        {/* Delivery phase - links this request to a schedule gantt row
+            so the schedule shows live delivery status (spine #148).
+            Admin-only; hidden when the org has no schedule phases. */}
+        {isAdmin && (phaseOptions.length > 0 || request.scheduleRowId) && (
+          <DetailRow label="Delivery phase">
+            <div style={{ width: '100%', maxWidth: '10rem' }}>
+              <SearchableSelect
+                options={phaseOptions}
+                value={request.scheduleRowId ?? ''}
+                onChange={v => handleScheduleRowChange(v || null)}
+                placeholder="Not linked"
+                searchPlaceholder="Search phases..."
+                emptyMessage="No schedule phases"
+                allowClear
+                size="sm"
+              />
+            </div>
+          </DetailRow>
+        )}
+
+        {/* Due date */}
+        <DetailRow label="Due date">
+          {isAdmin && editingDueDate ? (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="date"
+                value={dueDateInput}
+                onChange={e => setDueDateInput(e.target.value)}
+                autoFocus
+                style={{
+                  fontSize: '0.8125rem',
+                  padding: '0.25rem 0.5rem',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-button)',
+                  color: 'var(--color-text)',
+                  background: 'var(--color-bg)',
+                  outline: 'none',
+                }}
+                onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
+                onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+              />
+              <button
+                type="button"
+                onClick={() => handleDueDateChange(dueDateInput || null)}
+                style={{
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  padding: '0.25rem 0.5rem',
+                  background: 'var(--color-brand)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: 'var(--radius-button)',
+                  cursor: 'pointer',
+                }}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingDueDate(false)}
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '0.25rem 0.5rem',
+                  color: 'var(--color-text-muted)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <span
+              className="flex items-center gap-1.5"
+              style={{
+                cursor: isAdmin ? 'pointer' : 'default',
+                color: 'var(--color-text)',
+              }}
+              onClick={() => {
+                if (isAdmin) {
+                  setDueDateInput(request.dueDate ?? '')
+                  setEditingDueDate(true)
+                }
+              }}
+              onMouseEnter={e => { if (isAdmin) e.currentTarget.style.color = 'var(--color-brand)' }}
+              onMouseLeave={e => { if (isAdmin) e.currentTarget.style.color = 'var(--color-text)' }}
+            >
+              <Calendar size={12} style={{ color: 'var(--color-text-subtle)' }} />
+              {request.dueDate ? formatDate(request.dueDate) : 'Not set'}
+            </span>
+          )}
+        </DetailRow>
+
+        {request.estimatedHours != null && (
+          <DetailRow label="Estimated">
+            <span className="flex items-center gap-1.5">
+              <Clock size={12} style={{ color: 'var(--color-text-subtle)' }} />
+              {request.estimatedHours}h
+            </span>
+          </DetailRow>
+        )}
+
+        {request.deliveredAt && (
+          <DetailRow label="Delivered">
+            {formatDate(request.deliveredAt)}
+          </DetailRow>
+        )}
+      </div>
+    </SidebarCard>
+  )
+
+  // The brief. The ported detail leads with it, so a reader knows what was
+  // asked before they read the replies to it; the legacy order keeps it under
+  // the thread. Built once here and mounted in whichever slot applies.
+  const briefCard = request.description ? (
+    <Card padding="none" style={{ overflow: 'hidden' }}>
+      <Card.Header bordered style={{ margin: 0, padding: '0.875rem 1.25rem' }}>
+        <Card.Title as="h2">{newUi ? 'Brief' : 'Description'}</Card.Title>
+      </Card.Header>
+      <div
+        data-private
+        className="prose prose-sm max-w-none"
+        style={{ padding: '1.25rem', color: 'var(--color-text)', fontSize: '0.875rem', lineHeight: 1.6 }}
+        dangerouslySetInnerHTML={{ __html: request.description }}
+      />
+    </Card>
+  ) : null
+
+  // Every status that is not one of the five pipeline steps gets the note
+  // instead of the spine. The spine has no way to show how far an off-pipeline
+  // request got (there is no stored high-water mark, so it would draw five
+  // grey nodes and no current step, which reads as broken), and the studio can
+  // still move any of them from the status control in the Actions card.
+  const isOffPipelineNote = !isPipelineStatus(request.status)
+
   return (
     <div className="flex flex-col" style={{ gap: '1.5rem', maxWidth: '68.75rem' }}>
       {/* Breadcrumb - includes parent when this request is a sub-request */}
@@ -963,6 +1322,25 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 }}
               >
                 High priority
+              </span>
+            )}
+            {/* Internal request: the one chip that says a client cannot see
+                this page at all. Studio audiences only, because the portal
+                payload never carries an internal request in the first place. */}
+            {isAdmin && request.isInternal && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full"
+                style={{
+                  padding: '0.125rem 0.5rem',
+                  fontSize: '0.6875rem',
+                  fontWeight: 600,
+                  background: 'var(--status-in-review-bg)',
+                  color: 'var(--status-in-review-text)',
+                  border: '1px solid var(--status-in-review-border)',
+                }}
+              >
+                <Lock size={10} aria-hidden="true" />
+                Internal
               </span>
             )}
             {/* Scope flagging is an internal studio signal: never surface it to
@@ -1056,20 +1434,24 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 Due {formatDate(request.dueDate)}
               </span>
             )}
+            {/* Who is carrying this. The rail and the header stack both know,
+                but neither says it in words, so the sub-meta does. */}
+            {newUi && isAdmin && request.assigneeName && (
+              <span data-private className="flex items-center" style={{ gap: '0.375rem' }}>
+                <User size={12} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
+                Led by{' '}
+                <strong style={{ color: 'var(--color-text)', fontWeight: 600 }}>
+                  {request.assigneeName}
+                </strong>
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Ported detail: the strip becomes a clickable delivery spine. The
-            studio moves the request by clicking a step; clients read it. */}
-        {newUi ? (
-          <DeliverySpine
-            status={request.status}
-            interactive={isAdmin}
-            busy={statusUpdating}
-            eta={request.dueDate ? `Due ${formatDate(request.dueDate)}` : null}
-            onPick={handleStatusChange}
-          />
-        ) : (
+        {/* Ported detail: the strip leaves the header card entirely and
+            becomes the delivery spine below it. The legacy header keeps its
+            inline progress bar. */}
+        {!newUi && (
         /* Minimal progress bar - replaces the chunky stepper. A single
             horizontal line with breakpoints; current step highlighted.
             Less visual weight than the numbered stepper and reads cleaner. */
@@ -1121,6 +1503,76 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         </div>
         )}
       </div>
+
+      {/* Scope warning. The header chip is the at-a-glance signal; this card
+          carries the reason, so whoever picks the request up next reads why
+          before they start burning more hours on it. Studio only. */}
+      {newUi && isAdmin && request.scopeFlagged && (
+        <div
+          role="region"
+          aria-label="Scope warning"
+          style={{
+            border: '1px solid var(--color-danger)',
+            borderRadius: 'var(--radius-lg)',
+            background: 'var(--color-bg)',
+            boxShadow: 'var(--shadow-xs)',
+            padding: '0.875rem 1.125rem',
+          }}
+        >
+          <div className="flex items-start" style={{ gap: '0.6875rem' }}>
+            <AlertTriangle
+              size={18}
+              aria-hidden="true"
+              style={{ flexShrink: 0, marginTop: '0.0625rem', color: 'var(--color-danger)' }}
+            />
+            <div style={{ minWidth: 0 }}>
+              <p className="text-sm font-bold" style={{ color: 'var(--color-text)', margin: 0 }}>
+                Scope flagged, check before continuing
+              </p>
+              <p
+                className="text-xs"
+                style={{ color: 'var(--color-text-muted)', margin: '0.1875rem 0 0', lineHeight: 1.5 }}
+              >
+                {request.scopeFlagReason || 'Someone on the team flagged this for a scope check.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delivery spine: its own card between the header and the grid.
+          Off-pipeline statuses (draft, on hold, cancelled, archived) get a
+          one-line note instead of five steps with no current one, which reads
+          as broken rather than deliberate. */}
+      {newUi && (
+        isOffPipelineNote ? (
+          <div
+            className="flex items-center"
+            style={{
+              gap: '0.5625rem',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-lg)',
+              background: 'var(--color-bg)',
+              boxShadow: 'var(--shadow-xs)',
+              padding: '0.875rem 1.125rem',
+              fontSize: '0.8125rem',
+              fontWeight: 500,
+              color: 'var(--color-text-muted)',
+            }}
+          >
+            <OffPipelineIcon status={request.status} />
+            {OFF_PIPELINE_NOTES[request.status] ?? 'This request is off the delivery pipeline.'}
+          </div>
+        ) : (
+          <DeliverySpine
+            status={request.status}
+            interactive={isAdmin}
+            busy={statusUpdating}
+            eta={request.dueDate ? `Due ${formatDate(request.dueDate)}` : null}
+            onPick={handleStatusChange}
+          />
+        )
+      )}
 
       {/* Client review actions - client only. Sits directly under the pipeline
           bar so approving a delivery is the obvious next step. Approve routes
@@ -1332,7 +1784,10 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         {/* Left column - thread-first, description / sub-requests / files below,
             activity collapsed at the bottom */}
         <div className="flex flex-col gap-6">
-          {/* Thread (first for immediate comms context) */}
+          {/* Ported order: brief, then the conversation about it. */}
+          {newUi && briefCard}
+
+          {/* Thread */}
           <Card padding="none" style={{ overflow: 'hidden' }}>
             <Card.Header
               bordered
@@ -1555,20 +2010,8 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             </div>
           </Card>
 
-          {/* Description */}
-          {request.description && (
-            <Card padding="none" style={{ overflow: 'hidden' }}>
-              <Card.Header bordered style={{ margin: 0, padding: '0.875rem 1.25rem' }}>
-                <Card.Title as="h2">Description</Card.Title>
-              </Card.Header>
-              <div
-                data-private
-                className="prose prose-sm max-w-none"
-                style={{ padding: '1.25rem', color: 'var(--color-text)', fontSize: '0.875rem', lineHeight: 1.6 }}
-                dangerouslySetInnerHTML={{ __html: request.description }}
-              />
-            </Card>
-          )}
+          {/* Legacy order keeps the brief under the thread. */}
+          {!newUi && briefCard}
 
           {/* Sub-requests - only for top-level requests (V1 disallows grandchildren) */}
           {!request.parentRequestId && (
@@ -1601,13 +2044,34 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             request={request}
             messages={messages}
             files={files}
-            openWhenShort={newUi}
+            newUi={newUi}
           />
         </div>
 
         {/* Right column: Metadata sidebar - primary-use blocks first.
-            Time → Actions → People → Checklists → Details. */}
-        <div className="flex flex-col gap-4">
+            Ported order: Time, Actions, Discovery calls, Details, People,
+            Checklists. Legacy order keeps Details last.
+
+            From md up the rail sticks to the top of the scrollport (the
+            <main> element in the dashboard layout), so Time, Actions and the
+            status control stay reachable on a long thread. `self-start` is
+            what makes that work: a stretched grid item is as tall as the row
+            and has nowhere to travel. Below md the grid is one column and the
+            rail scrolls with the page.
+
+            A pinned box stops translating, so a rail taller than the viewport
+            would put Details, People and Checklists permanently out of reach:
+            the max-height plus its own overflow is what keeps the bottom of a
+            studio rail scrollable once it pins. The shell is `h-screen`, so
+            the budget is 100vh less the 3.5rem top bar, less the top offset,
+            less a little breathing room at the bottom: 6rem at md, 7rem at lg.
+            Deliberately conservative, because an optional banner above the top
+            bar can only ever make the scrollport shorter, and a rail that ends
+            early reads as spacing while one that ends late is unreachable. The
+            top offset itself is what keeps the first card off the top bar.
+            Menus in here render through the shared portalled <Popover>, so
+            they still escape this scroll container. */}
+        <div className="flex flex-col gap-4 md:self-start md:sticky md:top-4 lg:top-6 md:max-h-[calc(100vh_-_6rem)] lg:max-h-[calc(100vh_-_7rem)] md:overflow-y-auto md:overscroll-contain">
           {/* Time (admin only): live timer + manual log + recent entries */}
           {isAdmin && <TimeCard requestId={requestId} />}
 
@@ -1683,6 +2147,32 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                   <AlertTriangle size={12} aria-hidden="true" />
                   {request.scopeFlagged ? 'Scope flagged' : 'Flag scope creep'}
                 </button>
+
+                {/* Internal request. The only control on this page that
+                    changes who can see it, so the note underneath spells the
+                    consequence out in the client's own name rather than
+                    leaving it to the switch label. Both the portal list and
+                    the portal detail already refuse internal rows, so the
+                    switch closes the boundary rather than opening one. */}
+                {newUi && (
+                  <>
+                    <InternalSwitch
+                      checked={request.isInternal}
+                      busy={internalUpdating}
+                      describedById={INTERNAL_NOTE_ID}
+                      onToggle={handleInternalToggle}
+                    />
+                    <p
+                      id={INTERNAL_NOTE_ID}
+                      className="text-xs"
+                      style={{ color: 'var(--color-text-subtle)', margin: 0, lineHeight: 1.45 }}
+                    >
+                      {request.isInternal
+                        ? 'Hidden from the client portal.'
+                        : `Visible to ${request.orgName ?? 'the client'} in their portal.`}
+                    </p>
+                  </>
+                )}
 
                 {/* Make top-level - only for sub-requests */}
                 {request.parentRequestId && (
@@ -1791,6 +2281,10 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
 
           {isAdmin && newUi && <DiscoveryCallsCard parentType="request" parentId={requestId} />}
 
+          {/* Details, then People, then Checklists on the ported rail;
+              the legacy rail keeps Details last. */}
+          {newUi && detailsCard}
+
           {/* People - PM / Assignees / Followers */}
           <PeoplePanel
             requestId={requestId}
@@ -1809,306 +2303,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             isAdmin={isAdmin}
           />
 
-          {/* Details - reference info at the bottom since it changes less.
-              The ported rail edits every row in place; the legacy rail keeps
-              its searchable selects and click-to-edit due date. */}
-          {newUi ? (
-          <SidebarCard title="Details">
-            <div className="flex flex-col" style={{ gap: '0.875rem' }}>
-              <DetailRow label="Type">
-                <span className="capitalize">{request.type.replace(/_/g, ' ')}</span>
-              </DetailRow>
-
-              <DetailRow label="Category">
-                <InlineMenuField
-                  ariaLabel="Change category"
-                  readOnly={!isAdmin}
-                  value={request.category ?? ''}
-                  options={CATEGORY_OPTIONS.map(c => ({
-                    value: c,
-                    label: categoryLabel(c),
-                    node: <CategoryChip value={c} />,
-                  }))}
-                  renderValue={v => <CategoryChip value={v || null} />}
-                  onChange={handleCategoryChange}
-                />
-              </DetailRow>
-
-              <DetailRow label="Priority">
-                <InlineMenuField
-                  ariaLabel="Change priority"
-                  readOnly={!isAdmin}
-                  value={request.priority}
-                  options={PRIORITY_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
-                  renderValue={v => (
-                    v === 'high'
-                      ? (
-                        <span
-                          className="inline-flex items-center rounded-full"
-                          style={{
-                            padding: '0.125rem 0.5rem',
-                            fontSize: '0.6875rem',
-                            fontWeight: 500,
-                            whiteSpace: 'nowrap',
-                            background: 'var(--priority-high-bg)',
-                            color: 'var(--priority-high-text)',
-                            border: '1px solid var(--priority-high-border)',
-                          }}
-                        >
-                          High
-                        </span>
-                      )
-                      : <span className="capitalize">{v || 'Standard'}</span>
-                  )}
-                  onChange={v => { void handlePriorityChange(v) }}
-                />
-              </DetailRow>
-
-              {isAdmin && (
-                <DetailRow label="Assignee">
-                  <InlineMenuField
-                    ariaLabel="Change assignee"
-                    searchable
-                    searchPlaceholder="Search team…"
-                    emptyMessage="No team members"
-                    value={request.assigneeId ?? ''}
-                    options={[
-                      ...teamMembers.map(tm => ({ value: tm.id, label: tm.name, keywords: tm.name })),
-                      { value: '', label: 'Unassigned' },
-                    ]}
-                    renderValue={v => {
-                      const name = teamMembers.find(tm => tm.id === v)?.name ?? request.assigneeName
-                      return v && name
-                        ? <span>{name}</span>
-                        : <InlineNone>Unassigned</InlineNone>
-                    }}
-                    onChange={v => { void handleAssigneeChange(v || null) }}
-                  />
-                </DetailRow>
-              )}
-
-              {isAdmin && (phaseOptions.length > 0 || request.scheduleRowId) && (
-                <DetailRow label="Delivery phase">
-                  <InlineMenuField
-                    ariaLabel="Link to a delivery phase"
-                    searchable
-                    searchPlaceholder="Search phases…"
-                    emptyMessage="No schedule phases"
-                    value={request.scheduleRowId ?? ''}
-                    options={[
-                      ...phaseOptions.map(o => ({ value: o.value, label: o.label, keywords: o.label })),
-                      { value: '', label: 'Not linked' },
-                    ]}
-                    renderValue={v => {
-                      const label = phaseOptions.find(o => o.value === v)?.label
-                      return v && label
-                        ? <span>{label}</span>
-                        : <InlineNone>Not linked</InlineNone>
-                    }}
-                    onChange={v => { void handleScheduleRowChange(v || null) }}
-                  />
-                </DetailRow>
-              )}
-
-              <DetailRow label="Due date">
-                <InlineDateField
-                  ariaLabel="Change due date"
-                  readOnly={!isAdmin}
-                  value={request.dueDate}
-                  render={v => v
-                    ? <span>{formatDate(v)}</span>
-                    : <InlineNone>Not set</InlineNone>}
-                  onChange={v => { void handleDueDateChange(v) }}
-                />
-              </DetailRow>
-
-              {isAdmin && (
-                <DetailRow label="Estimated">
-                  <InlineNumberField
-                    ariaLabel="Change the estimate"
-                    suffix="h"
-                    value={request.estimatedHours}
-                    render={v => v != null
-                      ? <span>{v}h</span>
-                      : <InlineNone>Not set</InlineNone>}
-                    onChange={v => { void patchRequest(
-                      { estimatedHours: v },
-                      v != null ? `Estimate set to ${v}h` : 'Estimate cleared',
-                    ) }}
-                  />
-                </DetailRow>
-              )}
-
-              {request.deliveredAt && (
-                <DetailRow label="Delivered">
-                  {formatDate(request.deliveredAt)}
-                </DetailRow>
-              )}
-            </div>
-          </SidebarCard>
-          ) : (
-          <SidebarCard title="Details">
-            <div className="flex flex-col" style={{ gap: '0.875rem' }}>
-              <DetailRow label="Type">
-                <span className="capitalize">{request.type.replace(/_/g, ' ')}</span>
-              </DetailRow>
-
-              {request.category && (
-                <DetailRow label="Category">
-                  <span className="capitalize">{request.category}</span>
-                </DetailRow>
-              )}
-
-              {/* Priority (editable for admin via searchable-select) */}
-              <DetailRow label="Priority">
-                {isAdmin ? (
-                  <div style={{ width: '100%', maxWidth: '10rem' }}>
-                    <SearchableSelect
-                      options={PRIORITY_OPTIONS}
-                      value={request.priority}
-                      onChange={handlePriorityChange}
-                      placeholder="Select priority"
-                      size="sm"
-                    />
-                  </div>
-                ) : (
-                  <span className="capitalize">{request.priority}</span>
-                )}
-              </DetailRow>
-
-              {/* Assignee (editable for admin via searchable-select) */}
-              <DetailRow label="Assignee">
-                {isAdmin ? (
-                  <div style={{ width: '100%', maxWidth: '10rem' }}>
-                    <SearchableSelect
-                      options={teamMemberOptions}
-                      value={request.assigneeId ?? ''}
-                      onChange={v => handleAssigneeChange(v || null)}
-                      placeholder="Unassigned"
-                      searchPlaceholder="Search team..."
-                      allowClear
-                      size="sm"
-                    />
-                  </div>
-                ) : (
-                  <span className="flex items-center gap-1.5">
-                    <User size={12} style={{ color: 'var(--color-text-subtle)' }} />
-                    {request.assigneeName ?? 'Unassigned'}
-                  </span>
-                )}
-              </DetailRow>
-
-              {/* Delivery phase - links this request to a schedule gantt row
-                  so the schedule shows live delivery status (spine #148).
-                  Admin-only; hidden when the org has no schedule phases. */}
-              {isAdmin && (phaseOptions.length > 0 || request.scheduleRowId) && (
-                <DetailRow label="Delivery phase">
-                  <div style={{ width: '100%', maxWidth: '10rem' }}>
-                    <SearchableSelect
-                      options={phaseOptions}
-                      value={request.scheduleRowId ?? ''}
-                      onChange={v => handleScheduleRowChange(v || null)}
-                      placeholder="Not linked"
-                      searchPlaceholder="Search phases..."
-                      emptyMessage="No schedule phases"
-                      allowClear
-                      size="sm"
-                    />
-                  </div>
-                </DetailRow>
-              )}
-
-              {/* Due date */}
-              <DetailRow label="Due date">
-                {isAdmin && editingDueDate ? (
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="date"
-                      value={dueDateInput}
-                      onChange={e => setDueDateInput(e.target.value)}
-                      autoFocus
-                      style={{
-                        fontSize: '0.8125rem',
-                        padding: '0.25rem 0.5rem',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius-button)',
-                        color: 'var(--color-text)',
-                        background: 'var(--color-bg)',
-                        outline: 'none',
-                      }}
-                      onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
-                      onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleDueDateChange(dueDateInput || null)}
-                      style={{
-                        fontSize: '0.75rem',
-                        fontWeight: 600,
-                        padding: '0.25rem 0.5rem',
-                        background: 'var(--color-brand)',
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: 'var(--radius-button)',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Save
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditingDueDate(false)}
-                      style={{
-                        fontSize: '0.75rem',
-                        padding: '0.25rem 0.5rem',
-                        color: 'var(--color-text-muted)',
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <span
-                    className="flex items-center gap-1.5"
-                    style={{
-                      cursor: isAdmin ? 'pointer' : 'default',
-                      color: 'var(--color-text)',
-                    }}
-                    onClick={() => {
-                      if (isAdmin) {
-                        setDueDateInput(request.dueDate ?? '')
-                        setEditingDueDate(true)
-                      }
-                    }}
-                    onMouseEnter={e => { if (isAdmin) e.currentTarget.style.color = 'var(--color-brand)' }}
-                    onMouseLeave={e => { if (isAdmin) e.currentTarget.style.color = 'var(--color-text)' }}
-                  >
-                    <Calendar size={12} style={{ color: 'var(--color-text-subtle)' }} />
-                    {request.dueDate ? formatDate(request.dueDate) : 'Not set'}
-                  </span>
-                )}
-              </DetailRow>
-
-              {request.estimatedHours != null && (
-                <DetailRow label="Estimated">
-                  <span className="flex items-center gap-1.5">
-                    <Clock size={12} style={{ color: 'var(--color-text-subtle)' }} />
-                    {request.estimatedHours}h
-                  </span>
-                </DetailRow>
-              )}
-
-              {request.deliveredAt && (
-                <DetailRow label="Delivered">
-                  {formatDate(request.deliveredAt)}
-                </DetailRow>
-              )}
-            </div>
-          </SidebarCard>
-          )}
+          {!newUi && detailsCard}
         </div>
       </div>
 
@@ -2136,33 +2331,36 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
 
 // ---- Activity Log ------------------------------------------------------------
 
-interface ActivityEvent {
-  id: string
-  type: 'created' | 'status_change' | 'message' | 'file_upload'
-  description: string
-  author: string | null
-  timestamp: string
-}
+const ACTIVITY_FILTER_OPTIONS = [
+  { value: 'all' as const, label: 'All' },
+  { value: 'comments' as const, label: 'Comments' },
+]
 
 function ActivityLog({
   request,
   messages,
   files,
-  openWhenShort = false,
+  newUi = false,
 }: {
   request: Request
   messages: Message[]
   files: RequestFile[]
-  /** Ported detail: start expanded when the log is short enough to read at
-   *  a glance (five events or fewer). Long logs stay collapsed. */
-  openWhenShort?: boolean
+  /**
+   * The ported detail. Moves the filter into the header so which half of the
+   * feed you are reading shows without expanding, starts the card expanded
+   * when the log is short enough to read at a glance (five events or fewer),
+   * and swaps "Posted a comment" for the comment's own first line. Everyone
+   * still on the legacy detail keeps today's card exactly as it was, which is
+   * the same gate the rest of this page honours.
+   */
+  newUi?: boolean
 }) {
   // `open` toggles the whole card; `expanded` toggles Show more inside it.
   const [open, setOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   // `filter` switches between all events and comments-only, persisted so the
   // preference sticks across requests and sessions.
-  const [filter, setFilter] = useState<'all' | 'comments'>('all')
+  const [filter, setFilter] = useState<ActivityFilter>('all')
 
   useEffect(() => {
     try {
@@ -2171,69 +2369,59 @@ function ActivityLog({
     } catch { /* localStorage unavailable */ }
   }, [])
 
-  const applyFilter = useCallback((next: 'all' | 'comments') => {
+  const applyFilter = useCallback((next: ActivityFilter) => {
     setFilter(next)
+    // The ported card's filter is clickable while the body is collapsed, so
+    // choosing a half of the feed has to reveal it. Otherwise the control
+    // reads as dead: the selection moves and nothing appears.
+    setOpen(true)
     try { localStorage.setItem('tahi-activity-filter', next) } catch { /* ignore */ }
   }, [])
 
-  // Build activity events from available data
-  const events: ActivityEvent[] = []
-
-  // Request created
-  events.push({
-    id: 'created',
-    type: 'created',
-    description: 'Request was created',
-    author: null,
-    timestamp: request.createdAt,
-  })
-
-  // Status changes inferred: if updatedAt differs from createdAt, the request was updated
-  if (request.updatedAt !== request.createdAt) {
-    events.push({
-      id: 'status-update',
-      type: 'status_change',
-      description: `Status changed to ${STATUS_LABELS[request.status] ?? request.status}`,
-      author: request.assigneeName,
-      timestamp: request.updatedAt,
-    })
-  }
-
-  // Delivered event
-  if (request.deliveredAt) {
-    events.push({
-      id: 'delivered',
-      type: 'status_change',
-      description: 'Request was delivered',
-      author: request.assigneeName,
-      timestamp: request.deliveredAt,
-    })
-  }
-
-  // Messages posted
-  for (const msg of messages) {
-    events.push({
-      id: `msg-${msg.id}`,
-      type: 'message',
-      description: msg.isInternal ? 'Posted an internal note' : 'Posted a comment',
-      author: msg.teamMemberName ?? (msg.authorType === 'contact' ? 'Client' : null),
-      timestamp: msg.createdAt,
-    })
-  }
-
-  // Files uploaded
-  for (const file of files) {
-    events.push({
-      id: `file-${file.id}`,
-      type: 'file_upload',
-      description: `Uploaded ${file.filename}`,
-      author: file.uploaderName ?? null,
-      timestamp: file.createdAt,
-    })
-  }
-
-  // Sort chronologically (newest first)
-  events.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+  // Thread messages are merged in as comment events carrying a one-line
+  // excerpt, so Comments filters to something worth reading rather than a
+  // stack of rows that all say "Posted a comment".
+  //
+  // Memoised because messageExcerpt walks the full Tiptap HTML of every
+  // message: without this every parent re-render (status patch, participant
+  // edit, SWR revalidation) re-parses the whole thread to build a list the
+  // collapsed card then throws away.
+  const events = useMemo(() => {
+    const merged = buildActivityEvents(
+      {
+        createdAt: request.createdAt,
+        updatedAt: request.updatedAt,
+        deliveredAt: request.deliveredAt,
+        statusLabel: STATUS_LABELS[request.status] ?? request.status,
+        assigneeName: request.assigneeName,
+      },
+      messages.map(m => ({
+        id: m.id,
+        body: m.body,
+        isInternal: m.isInternal,
+        createdAt: m.createdAt,
+        authorName: m.teamMemberName
+          ?? m.authorName
+          ?? (m.authorType === 'contact' ? 'Client' : null),
+      })),
+      files.map(f => ({
+        id: f.id,
+        filename: f.filename,
+        createdAt: f.createdAt,
+        uploaderName: f.uploaderName ?? null,
+      })),
+    )
+    if (newUi) return merged
+    // Legacy detail keeps the wording it has today. Same chronology, same
+    // filter, no excerpts, so the surface every non-super-admin uses is
+    // untouched by this slice.
+    return merged.map(e => e.type === 'comment'
+      ? { ...e, description: e.internal ? 'Posted an internal note' : 'Posted a comment' }
+      : e)
+  }, [
+    request.createdAt, request.updatedAt, request.deliveredAt,
+    request.status, request.assigneeName, messages, files, newUi,
+  ])
 
   // Ported detail: a short log opens itself once per request, so five events
   // or fewer are readable without a click. The ref means a later click to
@@ -2241,114 +2429,140 @@ function ActivityLog({
   const eventCount = events.length
   const autoOpenedFor = useRef<string | null>(null)
   useEffect(() => {
-    if (!openWhenShort) return
+    if (!newUi) return
     if (autoOpenedFor.current === request.id) return
     autoOpenedFor.current = request.id
     setOpen(eventCount > 0 && eventCount <= 5)
-  }, [openWhenShort, request.id, eventCount])
+  }, [newUi, request.id, eventCount])
 
-  const filteredEvents = filter === 'comments'
-    ? events.filter(e => e.type === 'message')
-    : events
+  const filteredEvents = filterActivityEvents(events, filter)
   const displayed = expanded ? filteredEvents : filteredEvents.slice(0, 5)
 
-  const iconMap: Record<ActivityEvent['type'], React.ReactNode> = {
+  const iconMap: Record<ActivityEventType, React.ReactNode> = {
     created: <Plus size={10} />,
     status_change: <RefreshCw size={10} />,
-    message: <FileText size={10} />,
+    comment: newUi ? <MessageSquare size={10} /> : <FileText size={10} />,
     file_upload: <Upload size={10} />,
   }
 
+  // The disclosure's own contents, shared by both headers. `min-w-0` on the
+  // label and `truncate` on the word are what make the row degrade by
+  // ellipsis: the Card clips its overflow, so a header that cannot shrink
+  // loses the chevron silently at 375px instead of wrapping.
+  const disclosureInner = (
+    <>
+      <span
+        className="text-sm font-semibold flex items-center gap-2 min-w-0"
+        style={{ color: 'var(--color-text)' }}
+      >
+        <Activity size={14} style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} aria-hidden="true" />
+        <span className="truncate">Activity</span>
+        {events.length > 0 && (
+          <span
+            className="text-xs font-normal rounded-full flex-shrink-0"
+            style={{
+              padding: '0.0625rem 0.4375rem',
+              background: 'var(--color-bg-tertiary)',
+              color: 'var(--color-text-subtle)',
+            }}
+          >
+            {events.length}
+          </span>
+        )}
+      </span>
+      <ChevronDown
+        size={14}
+        aria-hidden="true"
+        style={{
+          flexShrink: 0,
+          color: 'var(--color-text-subtle)',
+          transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+          transition: 'transform 0.15s',
+        }}
+      />
+    </>
+  )
+
+  const filterControl = (className: string) => events.length > 0 ? (
+    <SegmentedControl
+      role="tablist"
+      size="sm"
+      ariaLabel="Activity filter"
+      value={filter}
+      onChange={applyFilter}
+      options={ACTIVITY_FILTER_OPTIONS}
+      className={className}
+    />
+  ) : null
+
   return (
     <Card padding="none" style={{ overflow: 'hidden' }}>
-      <button
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        aria-expanded={open}
-        aria-controls="activity-log-body"
-        className="flex items-center justify-between w-full transition-colors"
-        style={{
-          padding: '0.875rem 1.25rem',
-          borderBottom: open ? '1px solid var(--color-row-border)' : 'none',
-          background: 'transparent',
-          border: 'none',
-          borderBottomWidth: open ? 1 : 0,
-          borderBottomStyle: 'solid',
-          borderBottomColor: 'var(--color-row-border)',
-          cursor: 'pointer',
-          textAlign: 'left',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-        onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-      >
-        <span className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-          <Activity size={14} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
-          Activity
-          {events.length > 0 && (
-            <span
-              className="text-xs font-normal rounded-full"
-              style={{
-                padding: '0.0625rem 0.4375rem',
-                background: 'var(--color-bg-tertiary)',
-                color: 'var(--color-text-subtle)',
-              }}
-            >
-              {events.length}
-            </span>
-          )}
-        </span>
-        <ChevronDown
-          size={14}
-          aria-hidden="true"
+      {/* Ported header row. The filter sits out here beside the disclosure
+          rather than inside the body, so which half of the feed you are
+          looking at reads without expanding the card first. It cannot live
+          inside the disclosure button either: a control inside a button is
+          not a control. The legacy header below keeps the filter in the body,
+          where every non-super-admin has it today. */}
+      {newUi ? (
+        <div
+          className="flex items-center"
           style={{
-            color: 'var(--color-text-subtle)',
-            transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition: 'transform 0.15s',
+            gap: '0.5rem',
+            padding: '0.5rem 0.75rem 0.5rem 1.25rem',
+            borderBottom: open ? '1px solid var(--color-row-border)' : 'none',
           }}
-        />
-      </button>
+        >
+          <button
+            type="button"
+            onClick={() => setOpen(v => !v)}
+            aria-expanded={open}
+            aria-controls="activity-log-body"
+            className="tahi-focus-ring flex items-center flex-1 transition-colors min-h-11 md:min-h-8"
+            style={{
+              gap: '0.5rem',
+              minWidth: 0,
+              padding: '0.375rem 0.5rem',
+              marginLeft: '-0.5rem',
+              borderRadius: 'var(--radius-sm)',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+          >
+            {disclosureInner}
+          </button>
+          {filterControl('shrink-0')}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen(v => !v)}
+          aria-expanded={open}
+          aria-controls="activity-log-body"
+          className="tahi-focus-ring flex items-center justify-between w-full transition-colors"
+          style={{
+            padding: '0.875rem 1.25rem',
+            background: 'transparent',
+            // `border` first, then `borderBottom`: inline styles apply in key
+            // order, so the shorthand would wipe the divider if it came last.
+            border: 'none',
+            borderBottom: open ? '1px solid var(--color-row-border)' : 'none',
+            cursor: 'pointer',
+            textAlign: 'left',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+        >
+          {disclosureInner}
+        </button>
+      )}
 
       {open && (
       <div id="activity-log-body" style={{ padding: '0.75rem 1.25rem' }}>
-        {events.length > 0 && (
-          <div
-            role="tablist"
-            aria-label="Activity filter"
-            style={{
-              display: 'inline-flex',
-              gap: '0.125rem',
-              padding: '0.1875rem',
-              background: 'var(--color-bg-tertiary)',
-              borderRadius: '0.5rem',
-              marginBottom: '0.75rem',
-            }}
-          >
-            {(['all', 'comments'] as const).map(key => {
-              const active = filter === key
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => applyFilter(key)}
-                  className="text-xs font-medium transition-colors"
-                  style={{
-                    padding: '0.25rem 0.625rem',
-                    borderRadius: '0.375rem',
-                    border: 'none',
-                    cursor: 'pointer',
-                    background: active ? 'var(--color-bg)' : 'transparent',
-                    color: active ? 'var(--color-text)' : 'var(--color-text-subtle)',
-                    boxShadow: active ? 'var(--shadow-xs)' : 'none',
-                  }}
-                >
-                  {key === 'all' ? 'All' : 'Comments'}
-                </button>
-              )
-            })}
-          </div>
-        )}
+        {!newUi && filterControl('mb-3')}
         {filteredEvents.length === 0 ? (
           <p className="text-xs" style={{ color: 'var(--color-text-subtle)', padding: '0.5rem 0' }}>
             {filter === 'comments' ? 'No comments yet.' : 'No activity yet.'}
@@ -2363,22 +2577,47 @@ function ActivityLog({
                     width: '1.25rem',
                     height: '1.25rem',
                     marginTop: '0.0625rem',
-                    background: 'var(--color-bg-tertiary)',
-                    color: 'var(--color-text-subtle)',
+                    background: newUi && event.internal
+                      ? 'var(--status-in-review-bg)'
+                      : 'var(--color-bg-tertiary)',
+                    color: newUi && event.internal
+                      ? 'var(--status-in-review-text)'
+                      : 'var(--color-text-subtle)',
                   }}
                 >
                   {iconMap[event.type]}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs" style={{ color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-                    {event.author ? (
-                      <span className="font-medium" style={{ color: 'var(--color-text)' }}>
-                        {event.author}
-                      </span>
-                    ) : null}
-                    {event.author ? ' ' : ''}
-                    {event.description}
-                  </p>
+                  {newUi && event.type === 'comment' ? (
+                    <>
+                      <p className="text-xs" style={{ color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                        <span className="font-medium" style={{ color: 'var(--color-text)' }}>
+                          {event.author ?? 'Someone'}
+                        </span>
+                        {event.internal ? ' added an internal note' : ' commented'}
+                      </p>
+                      {event.description && (
+                        <p
+                          data-private
+                          className="text-xs truncate"
+                          style={{ color: 'var(--color-text-muted)', marginTop: '0.0625rem' }}
+                          title={event.description}
+                        >
+                          {event.description}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs" style={{ color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                      {event.author ? (
+                        <span className="font-medium" style={{ color: 'var(--color-text)' }}>
+                          {event.author}
+                        </span>
+                      ) : null}
+                      {event.author ? ' ' : ''}
+                      {event.description}
+                    </p>
+                  )}
                   <p className="text-xs" style={{ color: 'var(--color-text-subtle)', marginTop: '0.0625rem' }}>
                     {formatActivityDate(event.timestamp)}
                   </p>
@@ -2392,11 +2631,12 @@ function ActivityLog({
           <button
             type="button"
             onClick={() => setExpanded(!expanded)}
-            className="text-xs font-medium transition-colors"
+            className="tahi-focus-ring text-xs font-medium transition-colors"
             style={{
               color: 'var(--color-brand)',
               background: 'none',
               border: 'none',
+              borderRadius: 'var(--radius-sm)',
               cursor: 'pointer',
               padding: '0.375rem 0 0',
               display: 'block',
@@ -2740,6 +2980,95 @@ function SidebarCard({ title, children }: { title: string; children: React.React
   )
 }
 
+// ---- Internal switch ---------------------------------------------------------
+
+/**
+ * The id of the consequence line under the Internal switch. The switch points
+ * at it with aria-describedby, so a screen reader hears which way round the
+ * request currently is, not just "Internal request, switch". One detail page
+ * is mounted at a time, so a fixed id is safe (as with activity-log-body).
+ */
+const INTERNAL_NOTE_ID = 'request-internal-note'
+
+/**
+ * The Actions card's Internal request switch. A real `role="switch"` rather
+ * than a second pill button, because this is a state the studio reads at a
+ * glance and the track shows it without the label having to change. The
+ * consequence line lives beside it in the Actions card, not in here, so the
+ * client's name can be named; `describedById` is what ties the two together.
+ *
+ * `busy` disables it while the PATCH is in flight: two taps in a row would
+ * otherwise send two writes computed from the optimistic state, and the one
+ * that lands last decides whether the client can see the request.
+ */
+function InternalSwitch({
+  checked,
+  busy = false,
+  describedById,
+  onToggle,
+}: {
+  checked: boolean
+  busy?: boolean
+  describedById?: string
+  onToggle: () => void | Promise<void>
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-describedby={describedById}
+      disabled={busy}
+      onClick={() => { if (!busy) void onToggle() }}
+      className="tahi-focus-ring flex items-center min-h-11 md:min-h-8"
+      style={{
+        gap: '0.625rem',
+        width: '100%',
+        padding: '0.1875rem 0',
+        border: 'none',
+        background: 'transparent',
+        borderRadius: 'var(--radius-sm)',
+        fontSize: '0.75rem',
+        fontWeight: 500,
+        color: 'var(--color-text)',
+        textAlign: 'left',
+        cursor: busy ? 'not-allowed' : 'pointer',
+        opacity: busy ? 0.6 : 1,
+        transition: 'opacity 130ms ease',
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          position: 'relative',
+          flexShrink: 0,
+          width: '2.125rem',
+          height: '1.25rem',
+          borderRadius: '0.6875rem',
+          border: `1px solid ${checked ? 'transparent' : 'var(--color-border)'}`,
+          background: checked ? 'var(--color-brand)' : 'var(--color-bg-secondary)',
+          transition: 'background-color 160ms ease, border-color 160ms ease',
+        }}
+      >
+        <span
+          style={{
+            position: 'absolute',
+            top: '0.125rem',
+            left: checked ? '1rem' : '0.125rem',
+            width: '0.875rem',
+            height: '0.875rem',
+            borderRadius: '50%',
+            background: 'var(--color-bg)',
+            boxShadow: 'var(--shadow-xs)',
+            transition: 'left 160ms ease',
+          }}
+        />
+      </span>
+      <span style={{ minWidth: 0 }}>Internal request</span>
+    </button>
+  )
+}
+
 // ---- Detail Row --------------------------------------------------------------
 
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
@@ -2748,7 +3077,20 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
       <dt className="text-xs font-medium flex-shrink-0" style={{ color: 'var(--color-text-subtle)', paddingTop: '0.1875rem' }}>
         {label}
       </dt>
-      <dd className="text-sm text-right" style={{ color: 'var(--color-text)' }}>
+      {/* The value cell grows into the row instead of shrink-wrapping the
+          trigger's margin box, so an inline editor gets the whole width the
+          rail can spare before its label starts to ellipsis. */}
+      <dd
+        className="text-sm text-right"
+        style={{
+          color: 'var(--color-text)',
+          flex: '1 1 auto',
+          minWidth: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+        }}
+      >
         {children}
       </dd>
     </div>

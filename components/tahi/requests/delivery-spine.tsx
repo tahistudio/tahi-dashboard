@@ -1,13 +1,22 @@
 'use client'
 
 /**
- * <DeliverySpine> — the request detail's status strip, made clickable.
+ * <DeliverySpine>: the request's delivery pipeline, drawn as its own card.
  *
- * Five pipeline steps drawn as a connected track. For a studio audience
- * every step is a button that moves the request there (the parent runs the
- * optimistic PATCH and the toast), with a hint line under the track. For a
- * client, and for anyone in read-only client view, the same track renders
- * as plain markup with no affordance.
+ * Five steps on a connector track: 1.5rem circular nodes with a 0.125rem
+ * ring, a check inside the completed ones, a brand halo on the current one,
+ * and the step label underneath. For a studio audience every step is a
+ * button that moves the request there (the parent runs the optimistic PATCH
+ * and the toast), with a hint line under the track. For a client, and for
+ * anyone in read-only client view, the same track renders as plain markup
+ * with no affordance.
+ *
+ * The connector is an absolutely positioned bar inside each step except the
+ * first, running from that step's node back to the previous one. Every step
+ * is `flex: 1`, so `left: -50%; width: 100%` lands exactly centre to centre
+ * without measuring anything. Vertically it has to clear the step's own
+ * padding as well as reach the node waist, because `top` resolves from the
+ * padding box: see STEP_PAD_TOP and CONNECTOR_TOP below.
  *
  * Off-pipeline statuses (draft, on_hold, cancelled, archived) are not steps.
  * The parent decides whether to render the spine at all; when the current
@@ -44,6 +53,19 @@ interface DeliverySpineProps {
   eta?: string | null
 }
 
+const NODE_SIZE = '1.5rem'
+/**
+ * Vertical padding on the step box. Identical for both audiences, so the
+ * studio spine and the client spine draw the same geometry, and folded into
+ * CONNECTOR_TOP below because `top` on an absolutely positioned child
+ * resolves from the containing block's PADDING box, not its border box.
+ */
+const STEP_PAD_TOP = '0.25rem'
+/** Half the node minus half the connector, measured from the node's top edge. */
+const NODE_WAIST = '0.6875rem'
+/** Where the connector sits, so the bar hits the node's waist exactly. */
+const CONNECTOR_TOP = `calc(${STEP_PAD_TOP} + ${NODE_WAIST})`
+
 export function DeliverySpine({
   status,
   interactive = false,
@@ -54,27 +76,28 @@ export function DeliverySpine({
   const currentIndex = PIPELINE_STATUSES.indexOf(status as PipelineStatus)
 
   return (
-    <div
+    <section
+      aria-label="Delivery"
       style={{
-        padding: '0.875rem 1.5rem 1rem',
-        borderTop: '1px solid var(--color-border-subtle)',
-        background: 'var(--color-bg-secondary)',
-        borderBottomLeftRadius: '0.75rem',
-        borderBottomRightRadius: '0.75rem',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-lg)',
+        background: 'var(--color-bg)',
+        boxShadow: 'var(--shadow-xs)',
+        padding: '1rem 1.125rem',
       }}
     >
       <div
         className="flex items-center"
-        style={{ gap: '0.5rem', marginBottom: '0.625rem' }}
+        style={{ gap: '0.5rem', marginBottom: '0.875rem' }}
       >
         <h2
           className="uppercase"
           style={{
             margin: 0,
             fontSize: '0.6875rem',
-            fontWeight: 600,
+            fontWeight: 700,
             letterSpacing: '0.06em',
-            color: 'var(--color-text-muted)',
+            color: 'var(--color-text-subtle)',
           }}
         >
           Delivery
@@ -83,9 +106,9 @@ export function DeliverySpine({
           <span
             style={{
               marginLeft: 'auto',
-              fontSize: '0.6875rem',
-              fontWeight: 500,
-              color: 'var(--color-text-subtle)',
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              color: 'var(--color-text-muted)',
             }}
           >
             {eta}
@@ -95,54 +118,103 @@ export function DeliverySpine({
 
       <ol
         aria-label="Delivery steps"
-        className="flex items-stretch"
-        style={{ listStyle: 'none', margin: 0, padding: 0, gap: '0.375rem' }}
+        className="flex items-start"
+        style={{ listStyle: 'none', margin: 0, padding: 0 }}
       >
         {PIPELINE_STATUSES.map((s, i) => {
           const done = currentIndex > i && currentIndex !== -1
           const current = currentIndex === i
           const label = REQUEST_STATUS_LABELS[s] ?? s
-          const barColor = done || current ? 'var(--color-brand)' : 'var(--color-border)'
+          const reached = done || current
 
           const inner = (
             <>
+              {/* Connector back to the previous node. Skipped on the first
+                  step, so nothing hangs off the left edge of the card. */}
+              {i > 0 && (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    top: CONNECTOR_TOP,
+                    left: '-50%',
+                    width: '100%',
+                    height: '0.125rem',
+                    zIndex: 0,
+                    background: reached ? 'var(--color-brand)' : 'var(--color-border)',
+                    transition: 'background-color 200ms ease',
+                  }}
+                />
+              )}
               <span
                 aria-hidden="true"
+                className="flex items-center justify-center"
                 style={{
-                  height: '0.1875rem',
-                  borderRadius: '0.125rem',
-                  background: barColor,
-                  transition: 'background-color 200ms ease',
+                  position: 'relative',
+                  zIndex: 1,
+                  width: NODE_SIZE,
+                  height: NODE_SIZE,
+                  borderRadius: '50%',
+                  boxSizing: 'border-box',
+                  border: `0.125rem solid ${reached ? 'var(--color-brand)' : 'var(--color-border)'}`,
+                  background: done ? 'var(--color-brand)' : 'var(--color-bg)',
+                  color: done ? 'var(--color-bg)' : 'var(--color-brand)',
+                  boxShadow: current
+                    ? '0 0 0 0.25rem color-mix(in srgb, var(--color-brand) 16%, transparent)'
+                    : 'none',
+                  transition: 'background-color 200ms ease, border-color 200ms ease',
                 }}
-              />
-              <span
-                className="flex items-center"
-                style={{ gap: '0.25rem', minWidth: 0 }}
               >
-                {done && (
-                  <Check size={11} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--color-brand)' }} />
-                )}
-                <span
-                  className="truncate"
-                  style={{
-                    fontSize: '0.6875rem',
-                    fontWeight: current ? 600 : 400,
-                    color: current ? 'var(--color-brand-dark)' : 'var(--color-text-subtle)',
-                  }}
-                >
-                  {label}
-                </span>
+                {done
+                  ? <Check size={13} strokeWidth={3} />
+                  : (
+                    <span
+                      style={{
+                        width: '0.4375rem',
+                        height: '0.4375rem',
+                        borderRadius: '50%',
+                        background: current ? 'currentColor' : 'var(--color-border)',
+                      }}
+                    />
+                  )}
+              </span>
+              <span
+                className="truncate"
+                style={{
+                  maxWidth: '100%',
+                  fontSize: '0.6875rem',
+                  fontWeight: current ? 700 : 600,
+                  lineHeight: 1.25,
+                  color: reached ? 'var(--color-link)' : 'var(--color-text-subtle)',
+                }}
+              >
+                {label}
               </span>
             </>
           )
+
+          const stepLayout: React.CSSProperties = {
+            position: 'relative',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '0.5rem',
+            textAlign: 'center',
+            minWidth: 0,
+            width: '100%',
+            // Shared by both audiences so the connector's `top` lands on the
+            // node waist either way. Changing this means changing
+            // STEP_PAD_TOP, not this line.
+            padding: `${STEP_PAD_TOP} 0.125rem`,
+          }
 
           if (!interactive) {
             return (
               <li
                 key={s}
                 aria-current={current ? 'step' : undefined}
-                className="flex-1 flex flex-col"
-                style={{ gap: '0.25rem', minWidth: 0 }}
+                className="flex-1"
+                style={stepLayout}
               >
                 {inner}
               </li>
@@ -157,21 +229,18 @@ export function DeliverySpine({
                 aria-current={current ? 'step' : undefined}
                 title={current ? `This request is at ${label}` : `Move to ${label}`}
                 onClick={() => { if (!busy && !current) onPick?.(s) }}
-                className="tahi-focus-ring flex-1 flex flex-col min-h-11 md:min-h-[2.25rem]"
+                className="tahi-focus-ring min-h-11 md:min-h-0"
                 style={{
-                  gap: '0.25rem',
-                  minWidth: 0,
-                  padding: '0.25rem 0.125rem',
+                  ...stepLayout,
                   border: 'none',
-                  borderRadius: 'var(--radius-sm)',
+                  borderRadius: 'var(--radius-md)',
                   background: 'transparent',
-                  textAlign: 'left',
+                  font: 'inherit',
                   cursor: busy ? 'not-allowed' : current ? 'default' : 'pointer',
                   opacity: busy ? 0.6 : 1,
-                  justifyContent: 'center',
                   transition: 'background-color 150ms ease',
                 }}
-                onMouseEnter={e => { if (!busy) e.currentTarget.style.background = 'var(--color-bg-tertiary)' }}
+                onMouseEnter={e => { if (!busy) e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
                 onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
               >
                 {inner}
@@ -185,7 +254,7 @@ export function DeliverySpine({
         <p
           className="text-center"
           style={{
-            margin: '0.75rem 0 0',
+            margin: '0.875rem 0 0',
             fontSize: '0.6875rem',
             fontWeight: 500,
             color: 'var(--color-text-subtle)',
@@ -194,6 +263,6 @@ export function DeliverySpine({
           Click a step to move this request.
         </p>
       )}
-    </div>
+    </section>
   )
 }

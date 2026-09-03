@@ -39,7 +39,12 @@ const TRIGGER_STYLE: React.CSSProperties = {
   color: 'var(--color-text)',
   textAlign: 'right',
   cursor: 'pointer',
-  maxWidth: '100%',
+  // The negative margins above make the button's MARGIN box 0.625rem
+  // narrower than its border box, and a plain 100% resolves against that
+  // margin box. Cancelling the two margins here is what stops the chevron
+  // from stealing 10px off the chip's right edge in every rail row. The
+  // inner span keeps its ellipsis, so long names still truncate.
+  maxWidth: 'calc(100% + 0.625rem)',
   transition: 'background-color 130ms ease',
 }
 
@@ -69,7 +74,12 @@ function InlineTrigger({
       onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
       onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
     >
-      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{children}</span>
+      {/* nowrap is what makes the ellipsis real: text-overflow only applies to
+          non-wrapping content, so without it a two-word assignee or phase name
+          wrapped to a second line and grew the row instead of truncating. */}
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {children}
+      </span>
       <ChevronDown
         size={13}
         aria-hidden="true"
