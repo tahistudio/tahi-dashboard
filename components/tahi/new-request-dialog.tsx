@@ -431,6 +431,10 @@ function AlignedRequestDialog({
       setBrandId('')
       return
     }
+    // A brand belongs to one client: switching client A to client B must
+    // drop A's brand id before the new options load, or B's request would be
+    // posted with a brand the API now rejects as foreign.
+    setBrandId('')
     let cancelled = false
     fetch(apiPath(`/api/admin/brands?orgId=${clientOrgId}`))
       .then(r => r.json() as Promise<{ items: Array<{ id: string; name: string }> }>)
