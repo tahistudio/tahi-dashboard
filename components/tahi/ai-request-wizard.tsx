@@ -28,7 +28,7 @@ import { Sparkles, Send, AlertTriangle } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
-import { looksLikeBriefHtml, plainTextToBriefHtml } from '@/components/tahi/rich-brief'
+import { looksLikeBriefHtml, plainTextToBriefHtml } from '@/lib/brief-html'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -210,6 +210,39 @@ export function buildCreateRequestBody(input: CreateRequestBodyInput): Record<st
   return body
 }
 
+// ── Which of the panel's own submit controls apply ───────────────────────────
+
+export interface WizardSubmitControlsInput {
+  /** False on the portal, where the route derives the org from the session. */
+  isAdminFlow: boolean
+  /** The caller already named the client, so the panel does not have to ask. */
+  hasContextOrg: boolean
+  /** `onDraftToForm` is wired: the caller's form is what actually gets filed. */
+  handsBackToForm: boolean
+}
+
+/**
+ * The client picker and the internal-only tick belong to whoever posts the
+ * request, and that is not this panel whenever a form is waiting for the draft.
+ *
+ * Hand-back carries title, description, category and type and nothing else, and
+ * the new request dialog submits its own body with its own client field and its
+ * own visibility rule. A tick set here would be dropped on the way, and a
+ * client picked here would be the second picker on screen while the dialog's
+ * own field stayed empty and its Create stayed disabled. So the panel offers
+ * both only on the standalone drawer, where its Create button is the only way
+ * out.
+ */
+export function wizardSubmitControls(
+  input: WizardSubmitControlsInput,
+): { clientPicker: boolean; internalOnly: boolean } {
+  const ownsSubmit = !input.handsBackToForm
+  return {
+    clientPicker: input.isAdminFlow && ownsSubmit && !input.hasContextOrg,
+    internalOnly: input.isAdminFlow && ownsSubmit,
+  }
+}
+
 // ── Local styles ──────────────────────────────────────────────────────────────
 
 const AI_WIZARD_CSS = `
@@ -264,7 +297,12 @@ export function AiRequestWizardPanel({
   const [clients, setClients] = useState<ClientOption[]>([])
   const [clientsLoading, setClientsLoading] = useState(false)
   const [internalOnly, setInternalOnly] = useState(false)
-  const needsClientPicker = isAdminFlow && !context.orgId
+  const controls = wizardSubmitControls({
+    isAdminFlow,
+    hasContextOrg: !!context.orgId,
+    handsBackToForm: !!onDraftToForm,
+  })
+  const needsClientPicker = controls.clientPicker
   // `||`, not `??`: the dialog passes '' while its own picker is empty, and an
   // empty string must fall through to the one this panel offers.
   const targetOrgId = context.orgId || pickedClientId || ''
@@ -594,9 +632,12 @@ export function AiRequestWizardPanel({
         flexShrink: 0,
         background: 'var(--color-bg)',
       }}>
-        {/* The client this gets filed against. The dialog supplies one through
-            context; the standalone drawer opens with none, and creating without
-            it used to 400 on every draft with nothing on screen to fix. */}
+        {/* The client this gets filed against, asked for only where this panel
+            is the thing that files it. The dialog owns its own client field, so
+            a picker here would be the second one on screen and would not reach
+            the dialog's submit body. The standalone drawer opens with none, and
+            creating without it used to 400 on every draft with nothing on
+            screen to fix. */}
         {latestDrafts && latestDrafts.length > 0 && needsClientPicker && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
             {/* A span, not a label: SearchableSelect's trigger is a portal'd
@@ -631,8 +672,10 @@ export function AiRequestWizardPanel({
         )}
 
         {/* Internal is a choice, never a default: an AI draft is normal client
-            work unless the person says otherwise. */}
-        {latestDrafts && latestDrafts.length > 0 && isAdminFlow && (
+            work unless the person says otherwise. Hidden when a form is waiting
+            for the draft, because hand-back carries no visibility flag and the
+            tick would quietly do nothing. */}
+        {latestDrafts && latestDrafts.length > 0 && controls.internalOnly && (
           <label
             className="min-h-11 md:min-h-8"
             style={{

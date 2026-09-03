@@ -59,6 +59,14 @@ describe('isSafeBriefingHref', () => {
     expect(isSafeBriefingHref('/clients?status=active')).toBe(true)
   })
 
+  it('accepts a deal link under either root', () => {
+    // The prompt hands the model /deals now. /pipeline stays on the allowlist
+    // because next.config still redirects it and cached briefings carry it, and
+    // a whole category losing its link is worse than one redirect hop.
+    expect(isSafeBriefingHref('/deals/deal_1')).toBe(true)
+    expect(isSafeBriefingHref('/pipeline/deal_1')).toBe(true)
+  })
+
   it('rejects anything that leaves the dashboard', () => {
     expect(isSafeBriefingHref('https://evil.example/steal')).toBe(false)
     expect(isSafeBriefingHref('//evil.example/steal')).toBe(false)
@@ -96,6 +104,12 @@ describe('parseBriefingResponse', () => {
     const parsed = parseBriefingResponse(briefing(item('request', 'low', 'https://evil.example')))
     expect(parsed.todayItems).toHaveLength(1)
     expect(parsed.todayItems[0].href).toBeUndefined()
+  })
+
+  it('keeps a pipeline row with its link, the category that used to lose it', () => {
+    const parsed = parseBriefingResponse(briefing(item('pipeline', 'medium', '/deals/deal_1')))
+    expect(parsed.todayItems).toHaveLength(1)
+    expect(parsed.todayItems[0].href).toBe('/deals/deal_1')
   })
 
   it('keeps the good items in a mixed batch', () => {

@@ -13,6 +13,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildCreateRequestBody,
   draftBriefHtml,
+  wizardSubmitControls,
   DEGRADED_PREFIX,
   type RequestDraft,
 } from '@/components/tahi/ai-request-wizard'
@@ -106,6 +107,35 @@ describe('buildCreateRequestBody, portal flow', () => {
   it('never marks a client request internal, even if asked to', () => {
     const body = buildCreateRequestBody({ draft: DRAFT, speaker: 'client', internalOnly: true })
     expect(body).not.toHaveProperty('isInternal')
+  })
+})
+
+describe('wizardSubmitControls', () => {
+  const drawer = { isAdminFlow: true, hasContextOrg: false, handsBackToForm: false }
+
+  it('offers both controls on the standalone drawer, which files the request itself', () => {
+    expect(wizardSubmitControls(drawer)).toEqual({ clientPicker: true, internalOnly: true })
+  })
+
+  it('drops the picker once the caller has already named the client', () => {
+    expect(wizardSubmitControls({ ...drawer, hasContextOrg: true }))
+      .toEqual({ clientPicker: false, internalOnly: true })
+  })
+
+  it('offers neither when a form is waiting for the draft', () => {
+    // Hand-back carries title, description, category and type. An internal tick
+    // set here would never reach the dialog's submit body, and a client picked
+    // here would sit next to the dialog's own empty client field with Create
+    // still disabled. The caller owns both.
+    expect(wizardSubmitControls({ ...drawer, handsBackToForm: true }))
+      .toEqual({ clientPicker: false, internalOnly: false })
+    expect(wizardSubmitControls({ ...drawer, hasContextOrg: true, handsBackToForm: true }))
+      .toEqual({ clientPicker: false, internalOnly: false })
+  })
+
+  it('offers neither on the portal, where the route derives the org and nothing is internal', () => {
+    expect(wizardSubmitControls({ ...drawer, isAdminFlow: false }))
+      .toEqual({ clientPicker: false, internalOnly: false })
   })
 })
 

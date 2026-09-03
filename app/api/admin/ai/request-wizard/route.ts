@@ -384,10 +384,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // No key configured: the model was never reached, so the keyword draft goes
-  // back labelled rather than dressed up as model output. The panel renders
-  // the notice instead of a normal assistant bubble.
+  // No key configured. In production that is a broken deploy, and a 200 that
+  // answers forever from a regex hides it from the logs and from monitoring, so
+  // it fails loudly there. Local dev keeps the keyword draft, flagged degraded
+  // and labelled on screen, so the wizard is still workable without a key.
   if (!process.env.ANTHROPIC_API_KEY) {
+    if (process.env.NODE_ENV === 'production') {
+      return NextResponse.json(AI_UNAVAILABLE, { status: 503 })
+    }
     return NextResponse.json({ ...handleDeterministic(messages), ...DEGRADED })
   }
 

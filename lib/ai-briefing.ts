@@ -196,7 +196,9 @@ function buildBriefingContext(data: {
 
   lines.push(`## Open Pipeline Deals (${data.deals.length})`)
   for (const d of data.deals.slice(0, 10)) {
-    lines.push(`- [id:${d.id} href:/pipeline/${d.id}] "${d.title}" $${d.value ?? 0} - stage: ${d.stageName ?? 'unknown'} - close date: ${d.expectedCloseDate ?? 'none set'}`)
+    // Deals live at /deals. /pipeline is only a 308 in next.config, so pointing
+    // the model straight at the real route saves every briefing row a redirect.
+    lines.push(`- [id:${d.id} href:/deals/${d.id}] "${d.title}" $${d.value ?? 0} - stage: ${d.stageName ?? 'unknown'} - close date: ${d.expectedCloseDate ?? 'none set'}`)
   }
   lines.push('')
 
@@ -282,10 +284,18 @@ const BRIEFING_CATEGORIES: readonly BriefingItem['category'][] = [
 /** The priorities a briefing item may carry. Anything else drops the item. */
 const BRIEFING_PRIORITIES: readonly BriefingItem['priority'][] = ['high', 'medium', 'low']
 
-/** The dashboard sections a briefing row is allowed to link into. */
+/**
+ * The dashboard sections a briefing row is allowed to link into.
+ *
+ * 'pipeline' has no page of its own: next.config redirects /pipeline and
+ * /pipeline/:path* to /deals permanently. It stays on the list because the
+ * prompt used to hand the model /pipeline hrefs and a cached briefing may
+ * still carry them, and because a model that writes one from habit should get
+ * a working link rather than a dropped one.
+ */
 const BRIEFING_HREF_ROOTS: readonly string[] = [
-  'requests', 'invoices', 'clients', 'tasks', 'deals', 'leads', 'time',
-  'reports', 'financial-reports', 'calls', 'contracts', 'proposals',
+  'requests', 'invoices', 'clients', 'tasks', 'deals', 'pipeline', 'leads',
+  'time', 'reports', 'financial-reports', 'calls', 'contracts', 'proposals',
   'schedules', 'messages', 'overview', 'capacity', 'tracks', 'reviews',
   'files', 'docs', 'team', 'billing',
 ]

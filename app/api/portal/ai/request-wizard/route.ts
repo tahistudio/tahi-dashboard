@@ -64,7 +64,7 @@ interface WizardResponse {
   reason?: 'ai_unavailable'
 }
 
-// \u2500\u2500 Failure payloads \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// ── Failure payloads ─────────────────────────────────────────────────────────
 // This endpoint is client-facing, so a model that was never reached must not
 // come back as a 200 carrying a draft built by regex from the client's own
 // words. The panel renders `error` and paints a degraded answer as a notice.
@@ -81,20 +81,50 @@ const AI_RATE_LIMITED = {
   reason: 'ai_rate_limited',
 } as const
 
-// \u2500\u2500 Per-user daily cap \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// ── Per-user daily cap ───────────────────────────────────────────────────────
 // One Anthropic call per turn with nothing counting them is invisible spend the
-// moment the wizard opens to clients. A counter row per user per UTC day is the
-// cheapest brake the repo can carry today (no KV binding, no rate-limit helper
-// in lib/): read, compare, increment. Two turns landing in the same millisecond
-// can both read the same count, which costs at most one extra call over the cap.
-// The rows are keyed by day and never read again after it, so a periodic sweep
-// of `ai_wizard_turns:%` keys older than a week is all the housekeeping needed.
+// moment the wizard opens to clients. The repo has no KV binding and no
+// rate-limit helper in lib/, so the cheapest brake it can carry is a counter
+// row in `settings`.
+//
+// Two rules keep that from turning into litter. One row per user, not one per
+// user per day: GET /api/admin/settings selects every row and flattens it with
+// no key filter, so a key per day would grow that payload forever, while a key
+// per user is bounded by the portal roll and needs no sweep. And the row
+// carries the UTC day it belongs to, so a row left from an earlier day reads
+// as zero rather than as yesterday's spend.
+//
+// The write lands only after the model has actually answered, so a turn that
+// ends in a 502 or an upstream 429 costs the client nothing. Two turns landing
+// in the same millisecond can both read the same count, which costs at most one
+// extra call over the cap.
 
 const DAILY_TURN_CAP = 40
 const TURN_COUNTER_PREFIX = 'ai_wizard_turns'
 
-function turnCounterKey(userId: string, now: Date): string {
-  return `${TURN_COUNTER_PREFIX}:${userId}:${now.toISOString().slice(0, 10)}`
+function turnCounterKey(userId: string): string {
+  return `${TURN_COUNTER_PREFIX}:${userId}`
+}
+
+function utcDay(now: Date): string {
+  return now.toISOString().slice(0, 10)
+}
+
+/** Turns already spent today. A row left over from an earlier day reads as 0. */
+function turnsSpentToday(raw: string | null | undefined, today: string): number {
+  if (!raw) return 0
+  try {
+    const parsed = JSON.parse(raw) as { day?: unknown; count?: unknown }
+    if (parsed?.day !== today) return 0
+    const count = typeof parsed.count === 'number' ? parsed.count : 0
+    return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0
+  } catch {
+    return 0
+  }
+}
+
+function turnCounterValue(day: string, count: number): string {
+  return JSON.stringify({ day, count })
 }
 
 // ── System prompt ─────────────────────────────────────────────────────────────
@@ -369,15 +399,22 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // No key configured: the model was never reached, so the keyword draft goes
-  // back labelled rather than dressed up as model output.
+  // No key configured. In production that is a broken deploy, and a 200 that
+  // answers forever from a regex hides it from the logs and from monitoring, so
+  // it fails loudly there. Local dev keeps the keyword draft, flagged degraded
+  // and labelled on screen, so the wizard is still workable without a key.
   if (!process.env.ANTHROPIC_API_KEY) {
+    if (process.env.NODE_ENV === 'production') {
+      return NextResponse.json(AI_UNAVAILABLE, { status: 503 })
+    }
     return NextResponse.json({ ...handleDeterministic(messages), ...DEGRADED })
   }
 
-  // Spend brake before the call, not after it.
+  // Read the brake before the call. The write happens after it, so a failed
+  // turn does not spend one of the client's.
   const now = new Date()
-  const counterKey = turnCounterKey(userId, now)
+  const today = utcDay(now)
+  const counterKey = turnCounterKey(userId)
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
   const [counter] = await drizzle
@@ -385,7 +422,7 @@ export async function POST(req: NextRequest) {
     .from(schema.settings)
     .where(eq(schema.settings.key, counterKey))
     .limit(1)
-  const turnsToday = Number.parseInt(counter?.value ?? '0', 10) || 0
+  const turnsToday = turnsSpentToday(counter?.value, today)
   if (turnsToday >= DAILY_TURN_CAP) {
     return NextResponse.json(
       {
@@ -395,12 +432,14 @@ export async function POST(req: NextRequest) {
       { status: 429 },
     )
   }
-  const nextCount = String(turnsToday + 1)
-  const stamp = now.toISOString()
-  await drizzle
-    .insert(schema.settings)
-    .values({ key: counterKey, value: nextCount, updatedAt: stamp })
-    .onConflictDoUpdate({ target: schema.settings.key, set: { value: nextCount, updatedAt: stamp } })
+  const recordTurn = async () => {
+    const value = turnCounterValue(today, turnsToday + 1)
+    const stamp = now.toISOString()
+    await drizzle
+      .insert(schema.settings)
+      .values({ key: counterKey, value, updatedAt: stamp })
+      .onConflictDoUpdate({ target: schema.settings.key, set: { value, updatedAt: stamp } })
+  }
 
   const contextNote = context?.planType
     ? `The client's plan is "${context.planType}". Do not mention this to the user.`
@@ -412,6 +451,10 @@ export async function POST(req: NextRequest) {
     // Empty text is a failed call, not an answer. Say so rather than handing a
     // client a keyword draft under the model's name.
     if (!responseText) return NextResponse.json(AI_UNAVAILABLE, { status: 502 })
+    // The model answered, so the turn counts. A counter row that fails to write
+    // is not worth losing the answer over: the cap is a brake, not a gate, and
+    // the catch below would otherwise turn a good reply into a 502.
+    await recordTurn().catch(err => console.error('AI wizard turn counter write failed:', err))
     const { reply, requests } = parseRequestsFromResponse(responseText)
     const response: WizardResponse = {
       reply: reply || 'Could you tell me a bit more about what you need?',

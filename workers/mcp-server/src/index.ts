@@ -7,6 +7,8 @@
  * Full feature parity with the stdio MCP server (mcp-server/index.ts).
  */
 
+import { requestToolCall } from './request-tools'
+
 interface Env {
   TAHI_API_TOKEN: string
   OAUTH_CLIENT_ID: string
@@ -320,20 +322,15 @@ const TOOLS: ToolDef[] = [
     content: prop('string', 'Message content'),
     isInternal: prop('boolean', 'Whether the message is internal (team only)'),
   }, ['requestId', 'content']),
-  tool('bulk_update_request_status', 'Apply one status change, one assignee, or an archive to many requests at once. Mirrors the list view bulk bar. MUTATES MANY ROWS: confirm the id list and the change with the user before calling.', {
-    requestIds: { type: 'array', items: { type: 'string' }, description: 'Request IDs to update' },
-    status: prop('string', 'New status for every id: draft, submitted, in_review, in_progress, client_review, on_hold, delivered, cancelled, archived'),
-    assigneeId: prop('string', 'Team member ID to assign to every id, or empty string to unassign'),
-    archived: prop('boolean', 'True archives every id (equivalent to status "archived")'),
-  }, ['requestIds']),
-  tool('bulk_create_requests', 'Create the same request once per client, for a cross-client announcement or rollout. MUTATES MANY ROWS: confirm the client list with the user before calling.', {
-    orgIds: { type: 'array', items: { type: 'string' }, description: 'Client organisation IDs, one request created per id' },
-    title: prop('string', 'Title used for every created request'),
-    category: prop('string', 'Category: design, development, content, strategy, admin, bug'),
-    type: prop('string', 'Type: small_task (default), large_task, bug_fix, new_feature'),
-    description: prop('string', 'Description used for every created request'),
-    isInternal: prop('boolean', 'True files them Tahi-internal, hidden from every client portal'),
-  }, ['orgIds', 'title']),
+  // Bulk request tools (bulk_update_request_status, bulk_create_requests) are
+  // deliberately absent. Their only backend is PATCH|POST
+  // /api/admin/requests/bulk, which gates on isTahiAdmin alone: it loops over
+  // whatever ids it is handed with no per-row requireAccessToOrg, and writes
+  // `status` verbatim against no vocabulary. Exposing that over a service token
+  // that already bypasses access scoping would let one call scatter an
+  // unrecognised status across arbitrary rows and return {updated: N} as if it
+  // worked. They land in the same change as the route's scoping and status
+  // validation, not before it.
 
   // ── Request workflow steps ────────────────────────────────────────────
   tool('create_request_step', 'Add a workflow step to a request. Steps are visible to the client on their request detail.', {
@@ -396,6 +393,13 @@ const TOOLS: ToolDef[] = [
   tool('delete_kanban_column', 'Delete a board column. Refuses with 409 while requests still sit in it. DESTRUCTIVE: confirm with the user before calling.', {
     columnId: prop('string', 'Kanban column ID'),
   }, ['columnId']),
+  // End of the request surface. It covers /api/admin/requests in full; the
+  // three client-side capabilities (portal create with placement, portal review
+  // approve / request changes, portal capacity read) have no tool and cannot
+  // get one from here. This server authenticates with the service token, which
+  // lib/server-auth.ts resolves to the Tahi admin org, and every /api/portal
+  // route 403s that org. They are unreachable, not merely unwritten, until a
+  // portal impersonation token exists.
 
   // ── Read: Tasks ───────────────────────────────────────────────────────
   tool('list_tasks', 'List tasks with optional filters. Decision #046: tasks are always Tahi-internal. Filter by orgId for client-specific tasks; omit both orgId and type for everything.', {
@@ -1590,6 +1594,17 @@ async function executeTool(
   const json = (data: unknown) => JSON.stringify(data, null, 2)
   const s = (key: string) => args[key] ? String(args[key]) : undefined
 
+  // The request surface is a pure lookup, so it answers first and the switch
+  // below never sees those names.
+  const requestCall = requestToolCall(name, args)
+  if (requestCall) {
+    return json(
+      requestCall.method === 'GET'
+        ? await apiGet(requestCall.path, token, requestCall.query)
+        : await apiWrite(requestCall.path, token, requestCall.method, requestCall.body),
+    )
+  }
+
   switch (name) {
     // ── Overview & Reports ────────────────────────────────────────────
     case 'get_overview':
@@ -1632,134 +1647,9 @@ async function executeTool(
       return json(await apiWrite(`/api/admin/clients/${s('clientId')}/welcome-email`, token, 'POST'))
 
     // ── Requests ──────────────────────────────────────────────────────
-    case 'list_requests': {
-      const p: Record<string, string> = {}
-      if (s('status')) p.status = s('status')!
-      if (s('clientId')) p.orgId = s('clientId')!
-      if (s('limit')) p.limit = s('limit')!
-      if (s('page')) p.page = s('page')!
-      return json(await apiGet('/api/admin/requests', token, p))
-    }
-    case 'get_request':
-      return json(await apiGet(`/api/admin/requests/${s('requestId')}`, token))
-    case 'get_request_messages':
-      return json(await apiGet(`/api/admin/requests/${s('requestId')}/messages`, token))
-    case 'get_request_steps':
-      return json(await apiGet(`/api/admin/requests/${s('requestId')}/steps`, token))
-    case 'create_request':
-      return json(await apiWrite('/api/admin/requests', token, 'POST', args as Record<string, unknown>))
-    case 'update_request_status':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'PATCH', { status: s('status') }))
-    case 'assign_request':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'PATCH', { assigneeId: s('assigneeId') }))
-    case 'link_request_to_schedule_row':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'PATCH', {
-        scheduleRowId: typeof args.scheduleRowId === 'string' && args.scheduleRowId ? args.scheduleRowId : null,
-      }))
-    case 'delete_request':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'DELETE'))
-    case 'duplicate_request':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/duplicate`, token, 'POST'))
-    case 'update_request_fields': {
-      const patch: Record<string, unknown> = {}
-      if (s('category')) patch.category = s('category')
-      if (s('priority')) patch.priority = s('priority')
-      // '' clears the date (the tool schema cannot express null).
-      if (typeof args.startDate === 'string') patch.startDate = args.startDate || null
-      if (typeof args.dueDate === 'string') patch.dueDate = args.dueDate || null
-      // 0 clears the estimate for the same reason.
-      if (typeof args.estimatedHours === 'number') patch.estimatedHours = args.estimatedHours || null
-      // '' unlinks the capacity track.
-      if (typeof args.trackId === 'string') patch.trackId = args.trackId || null
-      // Checklists travel as a JSON string, the shape the detail rail PATCHes.
-      if (typeof args.checklists === 'string') patch.checklists = args.checklists
-      // Client visibility: true removes the request from the client portal.
-      if (typeof args.isInternal === 'boolean') patch.isInternal = args.isInternal
-      if (Object.keys(patch).length === 0) throw new Error('Pass at least one field to update')
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'PATCH', patch))
-    }
-    case 'post_request_message':
-      // The route reads `body`, not `content`. The tool keeps `content` as its
-      // public argument name and translates here; sending `content` on the wire
-      // 400d every call with "Message body or at least one attachment is required".
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/messages`, token, 'POST', {
-        body: s('content'), isInternal: args.isInternal ?? false,
-      }))
-    case 'bulk_update_request_status': {
-      const ids = Array.isArray(args.requestIds) ? args.requestIds : []
-      if (ids.length === 0) throw new Error('requestIds is required and must not be empty')
-      const patch: Record<string, unknown> = { ids }
-      if (s('status')) patch.status = s('status')
-      // '' unassigns, matching the bulk bar's Clear assignee.
-      if (typeof args.assigneeId === 'string') patch.assigneeId = args.assigneeId || null
-      if (args.archived === true) patch.archived = true
-      if (Object.keys(patch).length === 1) throw new Error('Pass status, assigneeId or archived')
-      return json(await apiWrite('/api/admin/requests/bulk', token, 'PATCH', patch))
-    }
-    case 'bulk_create_requests': {
-      const orgIds = Array.isArray(args.orgIds) ? args.orgIds : []
-      if (orgIds.length === 0) throw new Error('orgIds is required and must not be empty')
-      return json(await apiWrite('/api/admin/requests/bulk', token, 'POST', {
-        orgIds,
-        title: s('title'),
-        category: s('category'),
-        type: s('type'),
-        description: s('description'),
-        isInternal: args.isInternal ?? false,
-      }))
-    }
-
-    // ── Request workflow steps ────────────────────────────────────────
-    case 'create_request_step':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/steps`, token, 'POST', {
-        title: s('title'),
-        description: s('description'),
-        parentStepId: s('parentStepId'),
-        orderIndex: typeof args.orderIndex === 'number' ? args.orderIndex : undefined,
-      }))
-    case 'update_request_step': {
-      const patch: Record<string, unknown> = {}
-      if (s('title')) patch.title = s('title')
-      if (typeof args.description === 'string') patch.description = args.description || null
-      if (typeof args.completed === 'boolean') patch.completed = args.completed
-      if (typeof args.orderIndex === 'number') patch.orderIndex = args.orderIndex
-      // '' lifts the step to the top level.
-      if (typeof args.parentStepId === 'string') patch.parentStepId = args.parentStepId || null
-      if (typeof args.assigneeId === 'string') patch.assigneeId = args.assigneeId || null
-      if (Object.keys(patch).length === 0) throw new Error('Pass at least one field to update')
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/steps/${s('stepId')}`, token, 'PATCH', patch))
-    }
-    case 'delete_request_step':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/steps/${s('stepId')}`, token, 'DELETE'))
-
-    // ── Request time and files ────────────────────────────────────────
-    case 'list_request_time_entries':
-      return json(await apiGet(`/api/admin/requests/${s('requestId')}/time-entries`, token))
-    case 'log_request_time':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/time-entries`, token, 'POST', {
-        hours: args.hours,
-        description: s('description'),
-        billable: args.billable ?? true,
-        teamMemberId: s('teamMemberId'),
-      }))
-    case 'list_request_files':
-      return json(await apiGet(`/api/admin/requests/${s('requestId')}/files`, token))
-
-    // ── Kanban columns ────────────────────────────────────────────────
-    case 'list_kanban_columns': {
-      const p: Record<string, string> = {}
-      if (s('orgId')) p.orgId = s('orgId')!
-      return json(await apiGet('/api/admin/kanban-columns', token, p))
-    }
-    case 'create_kanban_column':
-      return json(await apiWrite('/api/admin/kanban-columns', token, 'POST', args as Record<string, unknown>))
-    case 'update_kanban_column': {
-      const { columnId, ...patch } = args
-      if (!columnId) throw new Error('columnId is required')
-      return json(await apiWrite(`/api/admin/kanban-columns/${columnId}`, token, 'PATCH', patch))
-    }
-    case 'delete_kanban_column':
-      return json(await apiWrite(`/api/admin/kanban-columns/${s('columnId')}`, token, 'DELETE'))
+    // The whole request surface lives in ./request-tools as a pure map from
+    // tool call to API call, so the field names on the wire are covered by a
+    // spec the root vitest run picks up (vitest excludes workers/**).
 
     // ── Tasks ─────────────────────────────────────────────────────────
     case 'list_tasks': {
@@ -2418,10 +2308,6 @@ async function executeTool(
       return json(await apiWrite('/api/admin/ai/task-wizard', token, 'POST', args as Record<string, unknown>))
     case 'ai_request_wizard':
       return json(await apiWrite('/api/admin/ai/request-wizard', token, 'POST', args as Record<string, unknown>))
-    case 'ai_triage_request':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/triage`, token, 'POST'))
-    case 'ai_draft_request_reply':
-      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/draft-reply`, token, 'POST'))
 
     // ── Finance reporting (Phase 10) ──────────────────────────────────
     case 'get_invoice_aging':
