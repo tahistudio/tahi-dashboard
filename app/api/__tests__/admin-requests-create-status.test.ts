@@ -23,11 +23,27 @@ vi.mock('@/lib/server-auth', () => ({
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org_tahi'),
 }))
 
-vi.mock('@/lib/db', () => ({
-  db: vi.fn().mockResolvedValue({
-    insert: vi.fn().mockReturnValue({ values: vi.fn().mockResolvedValue(undefined) }),
-    run: vi.fn().mockResolvedValue({ meta: { last_row_id: 1 } }),
-  }),
+vi.mock('@/lib/db', () => {
+  // The route resolves the client org before writing; the chain answers the
+  // lookup with a matching row so these cases exercise the status whitelist.
+  const rows = [{ id: 'org_client_1' }]
+  const chain: Record<string, unknown> = {}
+  for (const method of ['from', 'leftJoin', 'where', 'orderBy', 'offset']) {
+    chain[method] = vi.fn(() => chain)
+  }
+  chain.limit = vi.fn(() => Promise.resolve(rows))
+  return {
+    db: vi.fn().mockResolvedValue({
+      insert: vi.fn().mockReturnValue({ values: vi.fn().mockResolvedValue(undefined) }),
+      run: vi.fn().mockResolvedValue({ meta: { last_row_id: 1 } }),
+      select: vi.fn(() => chain),
+    }),
+  }
+})
+
+// Unrestricted caller, so these cases are about the status list only.
+vi.mock('@/lib/access-scoping', () => ({
+  resolveAccessScoping: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock('@/db/d1', () => ({

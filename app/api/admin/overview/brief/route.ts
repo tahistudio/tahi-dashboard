@@ -6,6 +6,7 @@ import { eq, and, inArray, notInArray, gte, isNotNull, desc, asc } from 'drizzle
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
 import { resolvePermissions, can } from '@/lib/permissions'
 import { resolveAccessScoping } from '@/lib/access-scoping'
+import { resolveBriefCacheKey } from '@/lib/brief-cache-key'
 import { overnightCutoff, daysPastDue } from '@/lib/overview-aggregates'
 
 export const dynamic = 'force-dynamic'
@@ -350,12 +351,12 @@ export async function computeBrief(
 
 // Read the cached brief from settings. Returns null on a missing / corrupt /
 // shape-mismatched row so the caller safely falls through to a recompute.
-export async function readBriefCache(drizzle: D1): Promise<CachedBrief | null> {
+export async function readBriefCache(drizzle: D1, cacheKey: string = BRIEF_CACHE_KEY): Promise<CachedBrief | null> {
   try {
     const [row] = await drizzle
       .select({ value: schema.settings.value })
       .from(schema.settings)
-      .where(eq(schema.settings.key, BRIEF_CACHE_KEY))
+      .where(eq(schema.settings.key, cacheKey))
       .limit(1)
     if (!row?.value) return null
     const parsed = JSON.parse(row.value) as Partial<CachedBrief>
@@ -376,11 +377,16 @@ export async function readBriefCache(drizzle: D1): Promise<CachedBrief | null> {
 // Upsert the computed brief into settings in one statement. Two page loads
 // on a stale morning both recompute and both write; a select-then-insert
 // raced itself here and the loser died on the settings.key primary key.
-export async function writeBriefCache(drizzle: D1, result: BriefResult, generatedAt: string): Promise<void> {
+export async function writeBriefCache(
+  drizzle: D1,
+  result: BriefResult,
+  generatedAt: string,
+  cacheKey: string = BRIEF_CACHE_KEY,
+): Promise<void> {
   const value = JSON.stringify({ ...result, generatedAt })
   await drizzle
     .insert(schema.settings)
-    .values({ key: BRIEF_CACHE_KEY, value, updatedAt: generatedAt })
+    .values({ key: cacheKey, value, updatedAt: generatedAt })
     .onConflictDoUpdate({
       target: schema.settings.key,
       set: { value, updatedAt: generatedAt },
@@ -404,6 +410,11 @@ export function isBriefFresh(generatedAt: string, now: Date): boolean {
 // Otherwise recomputes with the caller's own permissions, caches it, and
 // returns it. Response shape is unchanged ({ urgent, week, slept }) plus a
 // generatedAt stamp the card uses for its "Updated ..." line.
+//
+// The cache is keyed on the caller's resolved scope (allowed orgs + granted
+// brief features), so a scoped team member can never be served the owner's
+// brief and can never overwrite it with their narrower one. The unrestricted
+// owner scope keeps the plain key the morning cron writes.
 export async function GET(req: NextRequest) {
   const auth = await getRequestAuth(req)
   if (!isTahiAdmin(auth.orgId)) {
@@ -414,7 +425,9 @@ export async function GET(req: NextRequest) {
   const drizzle = database as D1
   const now = new Date()
 
-  const cached = await readBriefCache(drizzle)
+  const cacheKey = await resolveBriefCacheKey(drizzle, auth, BRIEF_CACHE_KEY)
+
+  const cached = await readBriefCache(drizzle, cacheKey)
   if (cached && isBriefFresh(cached.generatedAt, now)) {
     return NextResponse.json({
       urgent: cached.urgent,
@@ -426,7 +439,7 @@ export async function GET(req: NextRequest) {
 
   const result = await computeBrief(drizzle, auth)
   const generatedAt = now.toISOString()
-  await writeBriefCache(drizzle, result, generatedAt)
+  await writeBriefCache(drizzle, result, generatedAt, cacheKey)
   return NextResponse.json({ ...result, generatedAt })
 }
 

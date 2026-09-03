@@ -16,7 +16,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { and, asc, desc, eq, isNotNull } from 'drizzle-orm'
+import { and, asc, desc, eq, isNotNull, sql } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
 
 type Params = { params: Promise<{ id: string }> }
@@ -128,6 +128,9 @@ export async function POST(req: NextRequest, { params }: Params) {
     status: 'submitted',
     submittedById: userId,
     submittedByType: 'team_member',
+    // Same atomic, per-org request number the create routes use. Sub-requests
+    // used to be inserted with none at all and rendered with no '#'.
+    requestNumber: sql<number>`COALESCE((SELECT MAX(request_number) FROM requests WHERE org_id = ${parent.orgId}), 0) + 1`,
   })
 
   return NextResponse.json({ id: newId }, { status: 201 })

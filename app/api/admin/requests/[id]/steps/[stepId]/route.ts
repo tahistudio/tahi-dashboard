@@ -3,13 +3,33 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type Params = { params: Promise<{ id: string; stepId: string }> }
 
+/**
+ * A step is only reachable through the request that owns it, so both
+ * handlers resolve that request's org and check the caller's scope before
+ * they touch a row. Mirrors the guard on the collection route.
+ */
+async function guardRequestAccess(
+  database: D1,
+  userId: string | null,
+  requestId: string,
+): Promise<NextResponse | null> {
+  const [owner] = await database
+    .select({ orgId: schema.requests.orgId })
+    .from(schema.requests)
+    .where(eq(schema.requests.id, requestId))
+    .limit(1)
+  if (!owner) return NextResponse.json({ error: 'Request not found' }, { status: 404 })
+  return requireAccessToOrg(database, userId, owner.orgId)
+}
+
 // PATCH /api/admin/requests/[id]/steps/[stepId]
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id: requestId, stepId } = await params
@@ -23,6 +43,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   const database = await db() as unknown as D1
+
+  const denied = await guardRequestAccess(database, userId, requestId)
+  if (denied) return denied
 
   type Updates = Partial<typeof schema.requestSteps.$inferInsert>
   const updates: Updates = { updatedAt: new Date().toISOString() }
@@ -49,11 +72,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
 // DELETE /api/admin/requests/[id]/steps/[stepId]
 export async function DELETE(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id: requestId, stepId } = await params
   const database = await db() as unknown as D1
+
+  const denied = await guardRequestAccess(database, userId, requestId)
+  if (denied) return denied
 
   // Recursively delete children (SQLite self-ref FK doesn't auto-cascade)
   await deleteTree(database, stepId)

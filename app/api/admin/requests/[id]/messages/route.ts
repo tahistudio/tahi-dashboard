@@ -5,13 +5,17 @@ import { schema } from '@/db/d1'
 import { eq, and, asc, inArray } from 'drizzle-orm'
 import { notifyMentionedPerson, notifyOrgContacts, notifyTeamMember } from '@/lib/notifications'
 import { parseMentions } from '@/lib/parse-mentions'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 type Params = { params: Promise<{ id: string }> }
 
 // ── GET /api/admin/requests/[id]/messages ────────────────────────────────────
 // Returns all messages for a request (admin sees internal + external).
+// Access-scoped to the owning request's org: the thread is the whole
+// conversation with a client, internal notes included, so a team member
+// scoped elsewhere must not be able to read it by guessing an id.
 export async function GET(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -19,6 +23,15 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { id } = await params
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const [owner] = await drizzle
+    .select({ orgId: schema.requests.orgId })
+    .from(schema.requests)
+    .where(eq(schema.requests.id, id))
+    .limit(1)
+  if (!owner) return NextResponse.json({ error: 'Request not found' }, { status: 404 })
+  const denied = await requireAccessToOrg(drizzle, userId, owner.orgId)
+  if (denied) return denied
 
   const msgs = await drizzle
     .select({
@@ -114,6 +127,12 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (!request) {
       return NextResponse.json({ error: 'Request not found' }, { status: 404 })
     }
+
+    // The lookup above is also the authorisation: posting here emails the
+    // client's contacts, so a caller outside this request's org is refused
+    // before anything is written.
+    const denied = await requireAccessToOrg(drizzle, userId, request.orgId)
+    if (denied) return denied
 
     // Look up team member ID by Clerk user ID
     const [member] = await drizzle

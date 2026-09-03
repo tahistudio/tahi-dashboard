@@ -60,7 +60,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   const now = new Date().toISOString()
 
   // Same atomic request-number subquery the create route uses, so two
-  // concurrent duplicates cannot land on the same number.
+  // concurrent duplicates cannot land on the same number, and scoped to the
+  // source request's own org so the copy stays inside that client's private
+  // 1, 2, 3 sequence.
   await drizzle.run(sql`
     INSERT INTO requests (
       id, org_id, title, type, category, description, status, priority,
@@ -81,7 +83,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       ${source.isInternal ? 1 : 0},
       0,
       ${source.maxRevisions ?? 3},
-      COALESCE((SELECT MAX(request_number) FROM requests), 0) + 1,
+      COALESCE((SELECT MAX(request_number) FROM requests WHERE org_id = ${source.orgId}), 0) + 1,
       ${now},
       ${now}
     )

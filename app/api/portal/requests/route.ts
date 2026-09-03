@@ -7,6 +7,12 @@ import { getPlanLabel } from '@/lib/plan-utils'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 import { dispatchDomainEvent } from '@/lib/events'
 import { loadRequestParticipants, CLIENT_VISIBLE_TEAM_ROLES } from '@/lib/request-participants'
+import {
+  isRequestCategory,
+  isRequestType,
+  REQUEST_CATEGORIES,
+  REQUEST_TYPES,
+} from '@/lib/request-vocabulary'
 
 // ── GET /api/portal/requests ─────────────────────────────────────────────────
 // Returns requests scoped to the client's own org.
@@ -175,6 +181,34 @@ export async function POST(req: NextRequest) {
 
   if (!title?.trim()) {
     return NextResponse.json({ error: 'Request title is required' }, { status: 400 })
+  }
+
+  // Size and category are whitelisted here, not just in the dialog. The size
+  // control gates the large option client-side, and the category tiles are a
+  // fixed set, so anything else arriving on this route is a probe or a stale
+  // client. An unvalidated size in particular decided how much capacity the
+  // request occupies in the client's own capacity view.
+  if (type !== undefined && !isRequestType(type)) {
+    return NextResponse.json(
+      { error: `type must be one of: ${REQUEST_TYPES.join(', ')}` },
+      { status: 400 },
+    )
+  }
+  if (category !== undefined && category !== null && !isRequestCategory(category)) {
+    return NextResponse.json(
+      { error: `category must be one of: ${REQUEST_CATEGORIES.join(', ')}` },
+      { status: 400 },
+    )
+  }
+
+  // form_responses is read back as JSON by the detail page, so a value that
+  // cannot be parsed would land in a column nothing can render.
+  if (formResponses !== undefined && formResponses !== null) {
+    try {
+      JSON.parse(formResponses)
+    } catch {
+      return NextResponse.json({ error: 'formResponses must be valid JSON' }, { status: 400 })
+    }
   }
 
   // Client-submitted rich text is rendered to Tahi admins via

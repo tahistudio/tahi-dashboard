@@ -124,3 +124,55 @@ describe('POST /api/portal/requests', () => {
     expect(captured.runArgs).toHaveLength(0)
   })
 })
+
+/**
+ * The size control gates the large option client-side (a client whose plan has
+ * no large track cannot pick it) and the category tiles are a fixed set, so a
+ * value outside either list arriving here is a probe or a stale client. Size in
+ * particular decides how much of the client's capacity the request occupies.
+ */
+describe('POST /api/portal/requests, submitted vocabulary', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    captured.runArgs = []
+    process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
+    vi.mocked(getPortalAuth).mockResolvedValue(portalAuth())
+  })
+
+  it('accepts the two sizes and the six categories', async () => {
+    for (const type of ['small_task', 'large_task']) {
+      const res = await POST(makeRequest({ title: 'x', type }))
+      expect(res.status).toBe(201)
+    }
+    for (const category of ['design', 'development', 'content', 'strategy', 'admin', 'bug']) {
+      const res = await POST(makeRequest({ title: 'x', category }))
+      expect(res.status).toBe(201)
+    }
+  })
+
+  it('rejects a size outside the vocabulary before writing', async () => {
+    const res = await POST(makeRequest({ title: 'x', type: 'enormous_task' }))
+    expect(res.status).toBe(400)
+    const json = await res.json() as { error?: string }
+    expect(json.error).toContain('type must be one of')
+    expect(captured.runArgs).toHaveLength(0)
+  })
+
+  it('rejects a category outside the vocabulary before writing', async () => {
+    const res = await POST(makeRequest({ title: 'x', category: 'finance' }))
+    expect(res.status).toBe(400)
+    expect(captured.runArgs).toHaveLength(0)
+  })
+
+  it('rejects form responses that are not JSON', async () => {
+    const res = await POST(makeRequest({ title: 'x', formResponses: 'not json at all' }))
+    expect(res.status).toBe(400)
+    expect(captured.runArgs).toHaveLength(0)
+  })
+
+  it('accepts form responses that parse', async () => {
+    const res = await POST(makeRequest({ title: 'x', formResponses: '{"q1":"yes"}' }))
+    expect(res.status).toBe(201)
+    expect(captured.runArgs).toHaveLength(1)
+  })
+})
