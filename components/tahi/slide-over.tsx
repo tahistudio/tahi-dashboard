@@ -35,46 +35,33 @@
  *
  * variant="center" turns the same shell into a centred modal: a blurred
  * backdrop, a 38.75rem panel that rises and scales in over 200ms, a body
- * capped by the panel's own 90vh height so long forms scroll inside it, and
- * the three focus behaviours a modal owes a keyboard user (focus moves into
- * the panel on open and on every `contentKey` change, Tab cycles inside it,
- * focus returns to the trigger on close). The Tab handler is bound on document
- * rather than the panel so it still fires when a body swap has dropped focus
- * on <body>. Those focus rules are deliberately scoped to the centred variant
- * so the right-hand drawer keeps behaving exactly as its consumers expect.
+ * capped by the panel's own 90vh height so long forms scroll inside it.
  * Under prefers-reduced-motion both variants cross-fade instead of moving.
+ *
+ * Both variants own the three focus behaviours a modal owes a keyboard user:
+ * focus moves into the panel on open (and on every `contentKey` change), Tab
+ * cycles inside it, and focus returns to the trigger on close. The Tab handler
+ * is bound on document rather than the panel so it still fires when a body
+ * swap has dropped focus on <body>. The right-hand drawer used to be exempt,
+ * which left the mobile Filters sheet opening with focus still behind the
+ * scrim; the focus-in step bails when focus is already inside the panel, so a
+ * consumer that autofocuses its own field is unaffected either way.
+ *
+ * Escape closes the TOPMOST layer only. Inner layers (a Popover, a
+ * ConfirmDialog, a picker with its own React keydown handler) either claim the
+ * key with preventDefault or sit above this one on the shared overlay stack,
+ * and this handler stands down in both cases. Before that, dismissing a client
+ * picker inside the centred dialog unmounted the whole dialog with it.
  *
  * For short-form confirmations, <ConfirmDialog> is still the smaller tool.
  * For full-screen takeovers, use <FullScreenDialog> (not yet built).
  */
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useId, useRef, useState } from 'react'
 import { X } from 'lucide-react'
+import { focusablesIn, overlayLayers, shouldHandleEscape } from '@/components/tahi/overlay-stack'
 
 const EXIT_MS = 220
-
-/**
- * Everything Tab can land on inside a modal panel, in DOM order. tabindex="-1"
- * is excluded everywhere, not just on the catch-all: a roving-tabindex group
- * (the dialog's category tiles) is a pile of real buttons the browser skips,
- * and counting them would put the trap's "last stop" on something Tab never
- * reaches.
- */
-const FOCUSABLE_SELECTOR = [
-  'a[href]:not([tabindex="-1"])',
-  'button:not([disabled]):not([tabindex="-1"])',
-  'input:not([disabled]):not([tabindex="-1"])',
-  'select:not([disabled]):not([tabindex="-1"])',
-  'textarea:not([disabled]):not([tabindex="-1"])',
-  '[contenteditable="true"]:not([tabindex="-1"])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',')
-
-/** The visible focus stops inside a panel, in DOM order. */
-function focusablesIn(el: HTMLElement): HTMLElement[] {
-  return Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-    .filter(node => node.offsetParent !== null || node === document.activeElement)
-}
 
 export type SlideOverVariant = 'right' | 'center'
 
@@ -125,6 +112,7 @@ function SlideOverRoot({
   const centred = variant === 'center'
   const panelWidth = maxWidth ?? (centred ? '38.75rem' : '28rem')
   const panelRef = useRef<HTMLDivElement>(null)
+  const layerId = useId()
   // Track "rendered" separately from "open" so the close transition
   // can play before unmount. When open flips true → render immediately.
   // When open flips false → leave mounted, mark `closing`, unmount
@@ -147,11 +135,22 @@ function SlideOverRoot({
     return () => window.clearTimeout(t)
   }, [open, rendered])
 
+  // Claim a layer while open so Escape only ever closes the topmost overlay.
+  useEffect(() => {
+    if (!open) return
+    overlayLayers.push(layerId)
+    return () => overlayLayers.remove(layerId)
+  }, [open, layerId])
+
   // Escape closes plus body scroll lock, only while truly open
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      // A picker inside the panel may have already claimed the key, and a
+      // Popover or ConfirmDialog stacked on top of this one owns it outright.
+      if (!shouldHandleEscape(e, layerId)) return
+      e.preventDefault()
+      onClose()
     }
     document.addEventListener('keydown', onKey)
     const prevOverflow = document.body.style.overflow
@@ -160,25 +159,24 @@ function SlideOverRoot({
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = prevOverflow
     }
-  }, [open, onClose])
+  }, [open, onClose, layerId])
 
-  // Centred modals hand focus back to whatever opened them on close. Kept
+  // Both variants hand focus back to whatever opened them on close. Kept
   // apart from the focus-in effect below so a content swap cannot bounce focus
-  // out to the opener and back. The right-hand drawer is left alone: it has
-  // shipped without this and several consumers focus their own field.
+  // out to the opener and back.
   useEffect(() => {
-    if (!centred || !open) return
+    if (!open) return
     const opener = document.activeElement as HTMLElement | null
     return () => {
       if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus()
     }
-  }, [centred, open])
+  }, [open])
 
   // Focus moves into the panel on open, and again whenever `contentKey`
   // changes: swapping the body unmounts whatever held focus, which drops it on
   // <body>, outside the panel and outside the trap.
   useEffect(() => {
-    if (!centred || !open) return
+    if (!open) return
     const frame = window.requestAnimationFrame(() => {
       const el = panelRef.current
       if (!el) return
@@ -189,14 +187,14 @@ function SlideOverRoot({
       ;(first ?? el).focus()
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [centred, open, contentKey])
+  }, [open, contentKey])
 
-  // Tab cycles inside a centred panel rather than escaping to the page under
-  // it. Bound on document rather than the panel: after a body swap the focused
+  // Tab cycles inside the panel rather than escaping to the page under it.
+  // Bound on document rather than the panel: after a body swap the focused
   // control is unmounted and the keydown fires on <body>, which a handler on
   // the panel node would never see.
   useEffect(() => {
-    if (!centred || !open) return
+    if (!open) return
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Tab') return
       const el = panelRef.current
@@ -233,7 +231,7 @@ function SlideOverRoot({
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [centred, open])
+  }, [open])
 
   if (!rendered) return null
 
@@ -246,7 +244,9 @@ function SlideOverRoot({
       aria-modal="true"
       aria-labelledby={titleId}
       aria-label={titleId ? undefined : ariaLabel}
-      tabIndex={centred ? -1 : undefined}
+      // -1 on both variants: the focus-in step falls back to the panel itself
+      // when a body has no focusable control of its own.
+      tabIndex={-1}
       className={centred ? 'slide-over-center-panel' : 'slide-over-panel'}
       style={centred
         ? {
@@ -275,6 +275,9 @@ function SlideOverRoot({
             maxWidth: panelWidth,
             background: 'var(--color-bg)',
             boxShadow: '-8px 0 30px rgba(0, 0, 0, 0.12)',
+            // The panel is a focus target of last resort (tabIndex -1), so it
+            // must not paint a browser outline when it takes focus itself.
+            outline: 'none',
             display: 'flex',
             flexDirection: 'column',
             animation: closing

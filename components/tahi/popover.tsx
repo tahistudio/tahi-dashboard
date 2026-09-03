@@ -18,6 +18,15 @@
  *   - Matches trigger width by default; pass `width` to override.
  *   - Closes on outside click, Escape, and when the trigger scrolls off-
  *     screen. Repositions on scroll + resize.
+ *   - Keyboard: focus moves into the panel on open when the panel has
+ *     something focusable in it (a consumer that autofocuses its own field
+ *     keeps that focus), and returns to the anchor on close. Because the
+ *     portal is appended after the app root, without this a keyboard user
+ *     had to Tab past every remaining control on the page to reach an
+ *     option.
+ *   - Escape closes THIS panel only. The popover registers on the shared
+ *     overlay stack while open, so a SlideOver or ConfirmDialog underneath
+ *     stands down instead of unmounting along with it.
  *
  * Usage:
  *
@@ -30,8 +39,9 @@
  *   </Popover>
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { focusablesIn, isOrphanedFocus, overlayLayers, shouldHandleEscape } from '@/components/tahi/overlay-stack'
 
 interface PopoverProps {
   /** The element the popover is anchored to. Used for positioning + as the
@@ -87,6 +97,7 @@ export function Popover({
     placement: 'below' | 'above'
   } | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
+  const layerId = useId()
 
   useEffect(() => { setMounted(true) }, [])
 
@@ -182,15 +193,60 @@ export function Popover({
     }
   }, [open, anchorRef, onClose])
 
-  // Close on Escape.
+  // Claim a layer while open. Document keydown listeners fire in registration
+  // order, so without the stack an enclosing SlideOver (registered first)
+  // would swallow Escape and close the whole dialog under this panel.
+  useEffect(() => {
+    if (!open) return
+    overlayLayers.push(layerId)
+    return () => overlayLayers.remove(layerId)
+  }, [open, layerId])
+
+  // Close on Escape, topmost layer only, and mark the key as handled so
+  // nothing below reacts to the same press.
   useEffect(() => {
     if (!open) return
     function handle(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+      if (!shouldHandleEscape(e, layerId)) return
+      e.preventDefault()
+      e.stopPropagation()
+      onClose()
     }
     document.addEventListener('keydown', handle)
     return () => document.removeEventListener('keydown', handle)
-  }, [open, onClose])
+  }, [open, onClose, layerId])
+
+  // Move focus into the panel on open. The portal is appended to <body>, so
+  // the panel is last in tab order: leaving focus on the trigger meant
+  // tabbing through the rest of the page to reach the first option. Panels
+  // with nothing focusable in them (a plain summary card) are left alone, and
+  // so is a consumer that autofocused its own field.
+  useEffect(() => {
+    if (!open) return
+    const frame = requestAnimationFrame(() => {
+      const el = panelRef.current
+      if (!el) return
+      const active = document.activeElement
+      if (active && active !== el && el.contains(active)) return
+      const first = focusablesIn(el)[0]
+      if (first) first.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [open])
+
+  // Hand focus back to the anchor on close, but only when the panel was
+  // holding it: closing because the user clicked another control elsewhere
+  // must not yank focus off whatever they just clicked. By the time this
+  // cleanup runs the panel is unmounted, so "the panel had it" reads as
+  // focus having fallen back to the document.
+  useEffect(() => {
+    if (!open) return
+    const anchor = anchorRef.current
+    return () => {
+      if (!isOrphanedFocus(document.activeElement)) return
+      if (anchor && typeof anchor.focus === 'function' && document.contains(anchor)) anchor.focus()
+    }
+  }, [open, anchorRef])
 
   if (!open || !mounted) return null
 

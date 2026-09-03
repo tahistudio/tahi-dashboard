@@ -14,6 +14,14 @@
  * Filters sheet and the row is at its most crowded; the name is still carried
  * by `title` and `aria-label`, so the accessible name never changes with the
  * viewport.
+ *
+ * ARIA 1.2 wants every tab to reference its tabpanel. Pass `panelId` and each
+ * tab emits it as `aria-controls`; the page must then wrap the region it swaps
+ * (the list body) in an element carrying that id, `role="tabpanel"` and
+ * `tabIndex={0}`. It is opt-in on purpose: emitting `aria-controls` for an id
+ * that is not in the document is a worse defect than the missing reference,
+ * so the attribute only ships once the panel does. REQUESTS_VIEW_PANEL_ID is
+ * the id both ends should agree on.
  */
 
 import { useMemo } from 'react'
@@ -35,19 +43,28 @@ export function viewKeysFor(audience: RequestsAudience): RequestsViewKey[] {
   return REQUESTS_VIEW_KEYS.filter(key => !VIEW_META[key].adminOnly || audience === 'admin')
 }
 
+/** The id the switcher and the region it swaps should share. */
+export const REQUESTS_VIEW_PANEL_ID = 'requests-view-panel'
+
 export interface RequestsViewSwitcherProps {
   value: RequestsViewKey
   onChange: (next: RequestsViewKey) => void
   audience: RequestsAudience
+  /**
+   * id of the `role="tabpanel"` element these tabs switch. Emitted as
+   * `aria-controls` on every tab. Omit it while the page has no such element:
+   * a reference to an id that is not in the document is its own violation.
+   */
+  panelId?: string
 }
 
-export function RequestsViewSwitcher({ value, onChange, audience }: RequestsViewSwitcherProps) {
+export function RequestsViewSwitcher({ value, onChange, audience, panelId }: RequestsViewSwitcherProps) {
   const options = useMemo<SegmentedControlOption<RequestsViewKey>[]>(
     () => viewKeysFor(audience).map(key => {
       const { label, Icon } = VIEW_META[key]
-      return { value: key, label, icon: <Icon size={14} aria-hidden="true" /> }
+      return { value: key, label, icon: <Icon size={14} aria-hidden="true" />, panelId }
     }),
-    [audience],
+    [audience, panelId],
   )
 
   return (

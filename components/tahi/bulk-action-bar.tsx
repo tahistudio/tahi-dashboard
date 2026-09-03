@@ -194,7 +194,11 @@ export function BulkActionBar({
     <>
       <div
         className="flex items-center gap-2 flex-wrap"
-        role="toolbar"
+        // role="group", not "toolbar": a toolbar promises one tab stop with
+        // arrow-key movement between its controls, and every control here is
+        // an independent tab stop. The group carries the same label without
+        // promising a keyboard contract the bar does not implement.
+        role="group"
         aria-label={`${selectedCount} selected`}
         style={{
           padding: '0.5rem 0.75rem',
@@ -203,8 +207,13 @@ export function BulkActionBar({
           borderRadius: 'var(--radius-md)',
         }}
       >
+        {/* The count is the only feedback a keyboard user gets as the
+            selection grows, and the container's aria-label is not re-read
+            when it changes, so the count itself is the live region. */}
         <span
           className="text-sm font-semibold"
+          aria-live="polite"
+          aria-atomic="true"
           style={{ color: 'var(--color-brand-dark)', paddingLeft: '0.25rem' }}
         >
           {selectedCount} selected
@@ -222,7 +231,9 @@ export function BulkActionBar({
               borderRadius: 'var(--radius-md)',
               border: 'none',
               background: 'var(--color-brand)',
-              color: '#ffffff',
+              // The token that stays the same value in both themes, which is
+              // exactly what ink on a brand fill needs.
+              color: 'var(--color-text-on-dark)',
               cursor: primaryAction.disabled || busy ? 'not-allowed' : 'pointer',
               opacity: primaryAction.disabled || (busy && busyId !== primaryAction.id) ? 0.6 : 1,
               transition: 'background-color 150ms ease, opacity 150ms ease',
