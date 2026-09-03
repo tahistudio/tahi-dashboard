@@ -51,6 +51,7 @@ import { NextRequest } from 'next/server'
 import { POST as createRequest } from '@/app/api/admin/requests/route'
 import { PATCH as bulkPatch, POST as bulkCreate } from '@/app/api/admin/requests/bulk/route'
 import { GET as stepsList, POST as stepCreate } from '@/app/api/admin/requests/[id]/steps/route'
+import { DELETE as stepDelete } from '@/app/api/admin/requests/[id]/steps/[stepId]/route'
 import { GET as messagesList } from '@/app/api/admin/requests/[id]/messages/route'
 import { GET as timeEntriesList } from '@/app/api/admin/requests/[id]/time-entries/route'
 import { GET as filesList } from '@/app/api/admin/requests/[id]/files/route'
@@ -81,19 +82,25 @@ function makeChain(result: unknown, record: QueryRecord): Record<string, unknown
   return proxy
 }
 
+/**
+ * `results` answers SELECTs in order. Writes always resolve to an empty array
+ * so an update loop between two reads cannot eat a queued row set: several of
+ * these routes now read, write, then read again (the bulk PATCH re-reads the
+ * rows it touched before firing effects, exactly as the single PATCH does).
+ */
 function makeDb(results: unknown[] = []) {
   const queries: QueryRecord[] = []
   const queue = [...results]
-  const entry = (method: string, args: unknown[]) => {
+  const entry = (method: string, args: unknown[], result: unknown) => {
     const record: QueryRecord = { calls: [{ method, args }] }
     queries.push(record)
-    return makeChain(queue.length ? queue.shift() : [], record)
+    return makeChain(result, record)
   }
   const handle = {
-    select: (...args: unknown[]) => entry('select', args),
-    insert: (...args: unknown[]) => entry('insert', args),
-    update: (...args: unknown[]) => entry('update', args),
-    delete: (...args: unknown[]) => entry('delete', args),
+    select: (...args: unknown[]) => entry('select', args, queue.length ? queue.shift() : []),
+    insert: (...args: unknown[]) => entry('insert', args, []),
+    update: (...args: unknown[]) => entry('update', args, []),
+    delete: (...args: unknown[]) => entry('delete', args, []),
     run: async (...args: unknown[]) => {
       queries.push({ calls: [{ method: 'run', args }] })
       return {}
@@ -188,6 +195,18 @@ describe('POST /api/admin/requests', () => {
     expect(methodsUsed(queries)).not.toContain('run')
   })
 
+  it('answers 403 before looking the org up, so it is not an existence oracle', async () => {
+    // Same 403 whether or not org-b names a real client: the scope check runs
+    // first, so the org lookup that distinguishes the two never happens.
+    scopedTo(['org-a'])
+    const { handle, queries } = makeDb([[]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await createRequest(jsonReq('/api/admin/requests', 'POST', body))
+    expect(res.status).toBe(403)
+    expect(methodsUsed(queries)).not.toContain('select')
+  })
+
   it('404s an unknown client org rather than writing an orphan row', async () => {
     unrestricted()
     const { handle, queries } = makeDb([[]])
@@ -214,15 +233,23 @@ describe('POST /api/admin/requests', () => {
     expect(sql.params).toContain('org-b')
   })
 
-  it('rejects a brand that belongs to another client', async () => {
+  it('drops a brand that belongs to another client rather than failing the create', async () => {
+    // The dialog keeps the previously chosen brand in state when the client
+    // select changes, and hides the field for a client with no brands, so a
+    // 400 here fails a routine create against a control that is not on
+    // screen. The foreign brand still never reaches the row.
     unrestricted()
     // org lookup hits, brand lookup misses
     const { handle, queries } = makeDb([[{ id: 'org-b' }], []])
     vi.mocked(db).mockResolvedValue(handle as never)
 
     const res = await createRequest(jsonReq('/api/admin/requests', 'POST', { ...body, brandId: 'brand-of-someone-else' }))
-    expect(res.status).toBe(400)
-    expect(methodsUsed(queries)).not.toContain('run')
+    expect(res.status).toBe(201)
+
+    const insert = queries.find((q) => q.calls[0].method === 'run')
+    const sql = collect(insert!, 'run')
+    expect(sql.params).not.toContain('brand-of-someone-else')
+    expect(sql.params).toContain(null)
   })
 
   it('stores a brand that does belong to the client', async () => {
@@ -292,10 +319,12 @@ describe('PATCH /api/admin/requests/bulk', () => {
 
   it('fires the same notifications and domain event per row as the single PATCH', async () => {
     unrestricted()
-    const { handle } = makeDb([[
+    const rows = [
       { id: 'req-a', orgId: 'org-a', title: 'One', assigneeId: 'tm-1' },
       { id: 'req-b', orgId: 'org-b', title: 'Two', assigneeId: null },
-    ]])
+    ]
+    // Second set: the post-write re-read the effects are fed from.
+    const { handle } = makeDb([rows, rows])
     vi.mocked(db).mockResolvedValue(handle as never)
 
     const res = await bulkPatch(jsonReq('/api/admin/requests/bulk', 'PATCH', {
@@ -313,11 +342,32 @@ describe('PATCH /api/admin/requests/bulk', () => {
     expect(event.data?.status).toBe('delivered')
   })
 
+  it('notifies the incoming assignee, not the outgoing one, when both fields move', async () => {
+    // The pre-update rows carry tm-old; the post-write read carries tm-new.
+    // Feeding the pre-update rows to the effects is exactly the drift the
+    // shared helper exists to prevent.
+    unrestricted()
+    const { handle } = makeDb([
+      [{ id: 'req-a', orgId: 'org-a', title: 'One', assigneeId: 'tm-old' }],
+      [{ id: 'req-a', orgId: 'org-a', title: 'One', assigneeId: 'tm-new' }],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await bulkPatch(jsonReq('/api/admin/requests/bulk', 'PATCH', {
+      ids: ['req-a'],
+      status: 'in_progress',
+      assigneeId: 'tm-new',
+    }))
+    expect(res.status).toBe(200)
+    expect(vi.mocked(notifyTeamMember)).toHaveBeenCalledTimes(1)
+    const [, teamMemberId] = vi.mocked(notifyTeamMember).mock.calls[0]
+    expect(teamMemberId).toBe('tm-new')
+  })
+
   it('treats archived: true as the archived status for the effects too', async () => {
     unrestricted()
-    const { handle } = makeDb([[
-      { id: 'req-a', orgId: 'org-a', title: 'One', assigneeId: null },
-    ]])
+    const rows = [{ id: 'req-a', orgId: 'org-a', title: 'One', assigneeId: 'tm-1' }]
+    const { handle } = makeDb([rows, rows])
     vi.mocked(db).mockResolvedValue(handle as never)
 
     const res = await bulkPatch(jsonReq('/api/admin/requests/bulk', 'PATCH', {
@@ -327,6 +377,53 @@ describe('PATCH /api/admin/requests/bulk', () => {
     expect(res.status).toBe(200)
     const [, event] = vi.mocked(dispatchDomainEvent).mock.calls[0]
     expect(event.data?.status).toBe('archived')
+    // The assignee and the automations hear it; the client does not. Archiving
+    // is studio housekeeping, and a backlog clean-up would otherwise push one
+    // notification per row into every contact of every affected client.
+    expect(vi.mocked(notifyTeamMember)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(notifyOrgContacts)).not.toHaveBeenCalled()
+  })
+
+  it('resolves a selection larger than one D1 statement can bind', async () => {
+    // D1 caps bound parameters at 100 per statement. The rail fetches up to
+    // 500 rows and the table header selects the page, so a single IN over the
+    // selection failed the whole action with a 500 before it wrote anything.
+    unrestricted()
+    const ids = Array.from({ length: 150 }, (_, i) => `req-${i}`)
+    const rowsFor = (from: number, to: number) =>
+      ids.slice(from, to).map((id) => ({ id, orgId: 'org-a', title: id, assigneeId: null }))
+
+    const { handle, queries } = makeDb([
+      rowsFor(0, 90), rowsFor(90, 150),      // resolve, chunked
+      rowsFor(0, 90), rowsFor(90, 150),      // post-write re-read, chunked
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await bulkPatch(jsonReq('/api/admin/requests/bulk', 'PATCH', {
+      ids,
+      status: 'in_progress',
+    }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ updated: 150, notFound: [] })
+
+    // More than one select for the resolve, and no statement binds over 100.
+    const selects = queries.filter((q) => q.calls[0].method === 'select')
+    expect(selects.length).toBeGreaterThan(2)
+    for (const select of selects) {
+      expect(collect(select, 'where').params.length).toBeLessThanOrEqual(100)
+    }
+    // Every row came back, so every row was updated.
+    expect(queries.filter((q) => q.calls[0].method === 'update')).toHaveLength(150)
+  })
+
+  it('refuses a batch larger than the biggest selection the UI can make', async () => {
+    unrestricted()
+    const res = await bulkPatch(jsonReq('/api/admin/requests/bulk', 'PATCH', {
+      ids: Array.from({ length: 501 }, (_, i) => `req-${i}`),
+      status: 'in_progress',
+    }))
+    expect(res.status).toBe(400)
+    expect(vi.mocked(db)).not.toHaveBeenCalled()
   })
 
   it('fires nothing when only the assignee moved', async () => {
@@ -398,6 +495,69 @@ describe('POST /api/admin/requests/bulk', () => {
       expect(sql.text).toContain('MAX(request_number) FROM requests WHERE org_id')
     }
   })
+
+  it('fires request_created per row, as the single create does', async () => {
+    unrestricted()
+    const { handle } = makeDb([[{ id: 'org-a' }, { id: 'org-b' }]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await bulkCreate(jsonReq('/api/admin/requests/bulk', 'POST', {
+      orgIds: ['org-a', 'org-b'],
+      title: 'Quarterly check-in',
+    }))
+    expect(res.status).toBe(201)
+
+    expect(vi.mocked(dispatchDomainEvent)).toHaveBeenCalledTimes(2)
+    const [, event] = vi.mocked(dispatchDomainEvent).mock.calls[0]
+    expect(event.type).toBe('request_created')
+    expect(event.data?.source).toBe('admin_bulk')
+  })
+
+  it('answers 403 before looking the orgs up, so it is not an existence oracle', async () => {
+    scopedTo(['org-a'])
+    const { handle, queries } = makeDb([[]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await bulkCreate(jsonReq('/api/admin/requests/bulk', 'POST', {
+      orgIds: ['org-does-not-exist'],
+      title: 'Probe',
+    }))
+    expect(res.status).toBe(403)
+    expect(methodsUsed(queries)).not.toContain('select')
+  })
+
+  it('resolves more orgs than one D1 statement can bind', async () => {
+    unrestricted()
+    const orgIds = Array.from({ length: 150 }, (_, i) => `org-${i}`)
+    const { handle, queries } = makeDb([
+      orgIds.slice(0, 90).map((id) => ({ id })),
+      orgIds.slice(90).map((id) => ({ id })),
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await bulkCreate(jsonReq('/api/admin/requests/bulk', 'POST', {
+      orgIds,
+      title: 'Quarterly check-in',
+    }))
+    expect(res.status).toBe(201)
+    expect((await res.json() as { created: number }).created).toBe(150)
+
+    const selects = queries.filter((q) => q.calls[0].method === 'select')
+    expect(selects).toHaveLength(2)
+    for (const select of selects) {
+      expect(collect(select, 'where').params.length).toBeLessThanOrEqual(100)
+    }
+  })
+
+  it('refuses a batch larger than the biggest selection the UI can make', async () => {
+    unrestricted()
+    const res = await bulkCreate(jsonReq('/api/admin/requests/bulk', 'POST', {
+      orgIds: Array.from({ length: 501 }, (_, i) => `org-${i}`),
+      title: 'Too many',
+    }))
+    expect(res.status).toBe(400)
+    expect(vi.mocked(db)).not.toHaveBeenCalled()
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -447,6 +607,74 @@ describe('request sub-routes resolve the owning request', () => {
     )
     expect(res.status).toBe(403)
     expect(methodsUsed(queries)).not.toContain('insert')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// I2: DELETE /api/admin/requests/[id]/steps/[stepId]
+//
+// The request id in the path is the caller's choice, and deleteTree walks
+// children by parent_step_id with no request_id predicate. Pairing one of the
+// caller's own request ids with a step id belonging to another client used to
+// wipe that step's whole child subtree before the scoped delete returned
+// "Step not found". Steps are client-visible through
+// /api/portal/requests/[id]/steps, so those rows were gone from another
+// tenant's screen while the response read like a refusal.
+// ---------------------------------------------------------------------------
+describe('DELETE /api/admin/requests/[id]/steps/[stepId]', () => {
+  const stepParams = (id: string, stepId: string) => ({ params: Promise.resolve({ id, stepId }) })
+
+  it('deletes nothing when the step belongs to a different request', async () => {
+    unrestricted()
+    // owning request resolves, ownership lookup misses.
+    const { handle, queries } = makeDb([[{ orgId: 'org-a' }], []])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await stepDelete(
+      req('/api/admin/requests/req-a/steps/step-of-org-b', { method: 'DELETE' }),
+      stepParams('req-a', 'step-of-org-b'),
+    )
+    expect(res.status).toBe(404)
+    // Nothing was walked and nothing was removed: the tree walk used to run
+    // before this check and took the foreign step's children with it.
+    expect(methodsUsed(queries)).not.toContain('delete')
+  })
+
+  it('403s before touching the step when the request is another client\'s', async () => {
+    scopedTo(['org-a'])
+    const { handle, queries } = makeDb([[{ orgId: 'org-b' }]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await stepDelete(
+      req('/api/admin/requests/req-b/steps/step-1', { method: 'DELETE' }),
+      stepParams('req-b', 'step-1'),
+    )
+    expect(res.status).toBe(403)
+    expect(methodsUsed(queries)).not.toContain('delete')
+  })
+
+  it('deletes a step that does belong to the request in the path', async () => {
+    unrestricted()
+    const { handle, queries } = makeDb([
+      [{ orgId: 'org-a' }],       // owning request
+      [{ id: 'step-1' }],         // ownership check
+      [],                         // deleteTree: no children
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await stepDelete(
+      req('/api/admin/requests/req-a/steps/step-1', { method: 'DELETE' }),
+      stepParams('req-a', 'step-1'),
+    )
+    // The fake handle answers the final delete with no rows, which the route
+    // reads as "already gone"; what matters here is that it got that far and
+    // that the delete it issued carried both predicates.
+    expect(res.status).toBe(404)
+    const removals = queries.filter((q) => q.calls[0].method === 'delete')
+    expect(removals).toHaveLength(1)
+    const where = collect(removals[0], 'where')
+    expect(where.params).toContain('step-1')
+    expect(where.params).toContain('req-a')
   })
 })
 

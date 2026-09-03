@@ -26,6 +26,16 @@ import { requireAccessToOrg } from '@/lib/require-access'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
+/** D1 binds at most 100 parameters per statement, so an IN over a selection
+ *  has to be sliced. Same ceiling lib/delivery-aggregate works around. */
+const ID_CHUNK = 90
+
+function chunkIds<T>(ids: readonly T[]): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < ids.length; i += ID_CHUNK) out.push(ids.slice(i, i + ID_CHUNK))
+  return out
+}
+
 export async function POST(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -45,11 +55,17 @@ export async function POST(req: NextRequest) {
   const database = await db()
   const drizzle = database as Drizzle
 
-  // Validate access on each request.
-  const requests = await drizzle
-    .select({ id: schema.requests.id, orgId: schema.requests.orgId })
-    .from(schema.requests)
-    .where(inArray(schema.requests.id, body!.requestIds!))
+  // Validate access on each request. Chunked: the participants bar hands this
+  // whatever the table has selected, and one IN over more than 100 ids fails
+  // the whole call on D1's bind variable ceiling.
+  const requests: Array<{ id: string; orgId: string }> = []
+  for (const chunk of chunkIds(body!.requestIds!)) {
+    const part = await drizzle
+      .select({ id: schema.requests.id, orgId: schema.requests.orgId })
+      .from(schema.requests)
+      .where(inArray(schema.requests.id, chunk))
+    requests.push(...part)
+  }
 
   for (const r of requests) {
     const denied = await requireAccessToOrg(drizzle, userId, r.orgId)

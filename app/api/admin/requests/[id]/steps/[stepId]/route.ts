@@ -81,6 +81,21 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const denied = await guardRequestAccess(database, userId, requestId)
   if (denied) return denied
 
+  // The step has to belong to the request in the path BEFORE anything is
+  // deleted. guardRequestAccess only authorises the request id, which the
+  // caller chooses, and deleteTree walks children by parent_step_id alone: it
+  // carries no request_id predicate. Without this lookup a caller scoped to
+  // client A could pass one of A's request ids and a step id belonging to
+  // client B, and B's whole child subtree was gone by the time the scoped
+  // delete below returned "Step not found". PATCH never needed it because its
+  // single UPDATE carries and(id, requestId) itself.
+  const [owned] = await database
+    .select({ id: schema.requestSteps.id })
+    .from(schema.requestSteps)
+    .where(and(eq(schema.requestSteps.id, stepId), eq(schema.requestSteps.requestId, requestId)))
+    .limit(1)
+  if (!owned) return NextResponse.json({ error: 'Step not found' }, { status: 404 })
+
   // Recursively delete children (SQLite self-ref FK doesn't auto-cascade)
   await deleteTree(database, stepId)
 

@@ -18,7 +18,14 @@
  *      column, filter or status config knows about.
  *   3. Effects. A bulk status change notifies the assignee and the client's
  *      contacts and fires request_status_changed, exactly as the single
- *      PATCH does, through the shared lib/request-status-effects helper.
+ *      PATCH does, through the shared lib/request-status-effects helper. A
+ *      bulk create fires request_created the same way. An archive is the one
+ *      status the helper keeps from the client's bell (housekeeping, not a
+ *      delivery event); the assignee and the automations still hear it.
+ *
+ * Both halves are also bounded: ids are resolved in chunks small enough to
+ * bind in one D1 statement, and a batch larger than the biggest selection the
+ * UI can make is refused rather than run row by row until the Worker gives up.
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -28,9 +35,54 @@ import { schema } from '@/db/d1'
 import { eq, inArray, sql } from 'drizzle-orm'
 import { getOrgScope } from '@/lib/require-access'
 import { isPatchableStatus, PATCHABLE_STATUSES } from '@/lib/request-vocabulary'
-import { emitRequestStatusChanged } from '@/lib/request-status-effects'
+import { emitRequestStatusChanged, emitRequestCreated } from '@/lib/request-status-effects'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+/**
+ * D1 caps bound parameters at 100 per statement, so an `IN (...)` over a
+ * selection has to be sliced. Matches lib/delivery-aggregate's ID_CHUNK: the
+ * repo already learned this the hard way there.
+ */
+const ID_CHUNK = 90
+
+/**
+ * The largest batch either half will accept. The requests rail fetches at most
+ * 500 rows (`limit=500`) and the table's header checkbox selects that page, so
+ * this is the biggest selection a person can actually make; anything larger is
+ * a script. It matters because every row costs a sequential UPDATE plus a full
+ * round of status effects (a contacts query, N notification inserts, an
+ * automation pass and outgoing webhook fetches) inside one Worker invocation.
+ */
+const MAX_BATCH = 500
+
+/** Slice a list into chunks small enough to bind in one D1 statement. */
+function chunkIds<T>(ids: readonly T[]): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < ids.length; i += ID_CHUNK) out.push(ids.slice(i, i + ID_CHUNK))
+  return out
+}
+
+/** The row fields both the scope check and the status effects need. */
+type BulkRow = { id: string; orgId: string; title: string; assigneeId: string | null }
+
+/** Load the given requests in chunks D1 will accept. */
+async function loadRequestRows(drizzle: Drizzle, ids: readonly string[]): Promise<BulkRow[]> {
+  const rows: BulkRow[] = []
+  for (const chunk of chunkIds(ids)) {
+    const part = await drizzle
+      .select({
+        id: schema.requests.id,
+        orgId: schema.requests.orgId,
+        title: schema.requests.title,
+        assigneeId: schema.requests.assigneeId,
+      })
+      .from(schema.requests)
+      .where(inArray(schema.requests.id, chunk))
+    rows.push(...part)
+  }
+  return rows
+}
 
 /** Org ids in `targets` the caller may not touch. Empty for an unrestricted
  *  scope; everything for a caller with no scope at all (deny by default). */
@@ -71,32 +123,47 @@ export async function POST(req: NextRequest) {
   if (orgIds.length === 0) {
     return NextResponse.json({ error: 'orgIds is required and must not be empty' }, { status: 400 })
   }
+  if (orgIds.length > MAX_BATCH) {
+    return NextResponse.json({ error: `orgIds must hold at most ${MAX_BATCH} ids` }, { status: 400 })
+  }
 
   const database = await db()
   const drizzle = database as Drizzle
 
-  // Every target org has to exist. A typo used to write an orphan row that
-  // joins to a null org name and no client detail page can reach.
-  const known = await drizzle
-    .select({ id: schema.organisations.id })
-    .from(schema.organisations)
-    .where(inArray(schema.organisations.id, orgIds))
-  const knownIds = new Set(known.map((o) => o.id))
-  const unknown = orgIds.filter((id) => !knownIds.has(id))
-  if (unknown.length > 0) {
-    return NextResponse.json({ error: 'Unknown client org', orgIds: unknown }, { status: 404 })
-  }
-
-  // Access scoping over the whole batch, before anything is written.
+  // Access scoping over the whole batch, before anything is read or written.
+  // Scope first, existence second: with the lookup first a scoped caller got
+  // 404 for an org id that does not exist and 403 for one that does, which
+  // made this an existence oracle over every client id in the workspace. Now
+  // an id outside the caller's scope answers 403 either way, and the itemised
+  // 404 only reaches callers who may already see every org.
   const scope = await getOrgScope(drizzle, userId)
   const forbidden = outsideScope(scope, orgIds)
   if (forbidden.length > 0) {
     return NextResponse.json({ error: 'Forbidden', orgIds: forbidden }, { status: 403 })
   }
 
+  // Every target org has to exist. A typo used to write an orphan row that
+  // joins to a null org name and no client detail page can reach. Chunked:
+  // one IN over a 200-client batch blows D1's 100 bind variable ceiling and
+  // fails the whole call with a 500.
+  const knownIds = new Set<string>()
+  for (const chunk of chunkIds(orgIds)) {
+    const known = await drizzle
+      .select({ id: schema.organisations.id })
+      .from(schema.organisations)
+      .where(inArray(schema.organisations.id, chunk))
+    for (const o of known) knownIds.add(o.id)
+  }
+  const unknown = orgIds.filter((id) => !knownIds.has(id))
+  if (unknown.length > 0) {
+    return NextResponse.json({ error: 'Unknown client org', orgIds: unknown }, { status: 404 })
+  }
+
   const now = new Date().toISOString()
   const ids: string[] = []
   const title = body.title.trim()
+  const type = body.type ?? 'small_task'
+  const category = body.category ?? null
 
   for (const targetOrgId of orgIds) {
     const id = crypto.randomUUID()
@@ -114,8 +181,8 @@ export async function POST(req: NextRequest) {
         ${id},
         ${targetOrgId},
         ${title},
-        ${body.type ?? 'small_task'},
-        ${body.category ?? null},
+        ${type},
+        ${category},
         ${body.description ?? null},
         'submitted',
         'standard',
@@ -129,6 +196,21 @@ export async function POST(req: NextRequest) {
         ${now}
       )
     `)
+
+    // Same domain event the single create fires, per row. Without it a
+    // cross-client bulk create triggered no automation rule and no outgoing
+    // webhook, while the same rows filed one at a time triggered both.
+    await emitRequestCreated(drizzle, {
+      id,
+      orgId: targetOrgId,
+      title,
+      type,
+      category: category ?? 'development',
+      priority: 'standard',
+      status: 'submitted',
+      isInternal: !!body.isInternal,
+      source: 'admin_bulk',
+    })
   }
 
   return NextResponse.json({ created: ids.length, ids }, { status: 201 })
@@ -167,19 +249,18 @@ export async function PATCH(req: NextRequest) {
   if (ids.length === 0) {
     return NextResponse.json({ error: 'ids is required and must not be empty' }, { status: 400 })
   }
+  if (ids.length > MAX_BATCH) {
+    return NextResponse.json({ error: `ids must hold at most ${MAX_BATCH} ids` }, { status: 400 })
+  }
 
   const database = await db()
   const drizzle = database as Drizzle
 
-  const rows = await drizzle
-    .select({
-      id: schema.requests.id,
-      orgId: schema.requests.orgId,
-      title: schema.requests.title,
-      assigneeId: schema.requests.assigneeId,
-    })
-    .from(schema.requests)
-    .where(inArray(schema.requests.id, ids))
+  // Resolve the batch to its rows, chunked: D1 binds at most 100 parameters
+  // per statement, and the rail's "select all" over a 500-row page hands this
+  // far more than that. One IN over the lot threw before a single update ran
+  // and failed the whole action with a 500.
+  const rows = await loadRequestRows(drizzle, ids)
 
   // Access scoping over the whole batch. A batch that reaches outside the
   // caller's scope is refused whole, naming the ids, rather than partly
@@ -220,9 +301,15 @@ export async function PATCH(req: NextRequest) {
   // Same notifications and domain event the single PATCH fires, once per row
   // that actually moved. Without this a bulk "Mark delivered" left every one
   // of those clients unnotified and fired no automation.
+  //
+  // Re-read after the write, exactly as the single PATCH does. Feeding the
+  // pre-update rows in would notify the outgoing assignee on a body carrying
+  // both status and assigneeId, and never the incoming one: precisely the
+  // drift the shared helper exists to prevent.
   const nextStatus = typeof updates.status === 'string' ? updates.status : null
   if (nextStatus) {
-    for (const row of rows) {
+    const touched = await loadRequestRows(drizzle, rows.map((r) => r.id))
+    for (const row of touched) {
       await emitRequestStatusChanged(drizzle, {
         id: row.id,
         title: row.title,

@@ -5,7 +5,7 @@ import { schema } from '@/db/d1'
 import { eq, desc, and, ne, inArray, isNull, sql } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { requireAccessToOrg } from '@/lib/require-access'
-import { dispatchDomainEvent } from '@/lib/events'
+import { emitRequestCreated } from '@/lib/request-status-effects'
 import { loadRequestParticipants } from '@/lib/request-participants'
 import { CREATABLE_STATUSES, isCreatableStatus } from '@/lib/request-vocabulary'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
@@ -163,11 +163,21 @@ export async function POST(req: NextRequest) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // The client org has to exist (a typo used to write an orphan row that
-  // joins to a null org name and no client detail page can reach) and the
-  // caller has to be allowed to file work against it. Without this a team
-  // member scoped to one client could create work under any org id, and it
-  // landed client-visible.
+  // Access first, existence second. The caller has to be allowed to file work
+  // against this client (without this a team member scoped to one client could
+  // create work under any org id, and it landed client-visible), and the org
+  // has to exist (a typo used to write an orphan row that joins to a null org
+  // name and no client detail page can reach).
+  //
+  // The order matters as much as the checks. With the lookup first, a scoped
+  // caller got 404 for an org id that does not exist and 403 for one that
+  // does, which turned this endpoint into an existence oracle over every
+  // client id in the workspace. Scope first means an id outside the caller's
+  // scope answers 403 whether or not it names a real client; the itemised 404
+  // only reaches callers whose scope already lets them see every org.
+  const denied = await requireAccessToOrg(drizzle, userId, clientOrgId)
+  if (denied) return denied
+
   const [targetOrg] = await drizzle
     .select({ id: schema.organisations.id })
     .from(schema.organisations)
@@ -176,13 +186,20 @@ export async function POST(req: NextRequest) {
   if (!targetOrg) {
     return NextResponse.json({ error: 'Unknown client org' }, { status: 404 })
   }
-  const denied = await requireAccessToOrg(drizzle, userId, clientOrgId)
-  if (denied) return denied
 
   // Brand, when the client has brands. A contact linked to specific brands
   // only ever sees requests carrying one of their brand ids (the portal list
   // filters on it), so a request filed with the column left null never
   // reaches them. The brand has to belong to the client being filed against.
+  //
+  // A brand id that does not is dropped, not refused. The dialog keeps the
+  // previously selected brand in state when the client select changes, and
+  // hides the Brand field entirely for a client with no brands, so a 400 here
+  // would fail a routine "pick client A, look at brands, switch to client B,
+  // submit" with a message pointing at a control that is not on screen. The
+  // foreign brand never reaches the row either way; dropping it is the half
+  // that does not break the primary create loop. Revisit once the dialog
+  // clears brandId on every client change (audit I5, dialog half).
   let brandId: string | null = null
   if (body.brandId) {
     const [brand] = await drizzle
@@ -190,10 +207,7 @@ export async function POST(req: NextRequest) {
       .from(schema.brands)
       .where(and(eq(schema.brands.id, body.brandId), eq(schema.brands.orgId, clientOrgId)))
       .limit(1)
-    if (!brand) {
-      return NextResponse.json({ error: 'brandId does not belong to this client' }, { status: 400 })
-    }
-    brandId = brand.id
+    brandId = brand?.id ?? null
   }
 
   const id = crypto.randomUUID()
@@ -233,20 +247,18 @@ export async function POST(req: NextRequest) {
   `)
 
   // Fire the domain event (automations + outgoing webhooks). Non-blocking.
-  await dispatchDomainEvent(drizzle, {
-    type: 'request_created',
-    entityId: id,
-    entityType: 'request',
+  // Shared with the cross-client bulk create through lib/request-status-effects
+  // so the two create paths cannot drift the way the two PATCH paths did.
+  await emitRequestCreated(drizzle, {
+    id,
     orgId: clientOrgId,
-    data: {
-      title: title.trim(),
-      type: type ?? 'small_task',
-      category: category ?? 'development',
-      priority: priority ?? 'standard',
-      status,
-      isInternal: body.isInternal ? 1 : 0,
-      source: 'admin',
-    },
+    title: title.trim(),
+    type: type ?? 'small_task',
+    category: category ?? 'development',
+    priority: priority ?? 'standard',
+    status,
+    isInternal: !!body.isInternal,
+    source: 'admin',
   })
 
   return NextResponse.json({ id }, { status: 201 })
