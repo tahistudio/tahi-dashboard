@@ -209,6 +209,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     startDate?: string | null
     dueDate?: string | null
     scopeFlagged?: boolean
+    isInternal?: boolean
     trackId?: string | null
     checklists?: string
     scheduleRowId?: string | null
@@ -229,6 +230,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if ('startDate' in body) patch.startDate = body.startDate ?? null
   if ('dueDate' in body) patch.dueDate = body.dueDate ?? null
   if (body.scopeFlagged !== undefined) patch.scopeFlagged = body.scopeFlagged
+  // Client visibility. Both portal request routes filter on requests.isInternal,
+  // so flipping this on removes the request from the client's portal entirely.
+  // Studio-only by construction: this route is already admin-gated above.
+  if (body.isInternal !== undefined) patch.isInternal = body.isInternal
   if ('trackId' in body) patch.trackId = body.trackId ?? null
   if (body.checklists !== undefined) patch.checklists = body.checklists
   // '' and null both mean unlink (the MCP tool cannot send null).

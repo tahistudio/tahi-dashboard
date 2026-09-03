@@ -39,7 +39,12 @@ const TRIGGER_STYLE: React.CSSProperties = {
   color: 'var(--color-text)',
   textAlign: 'right',
   cursor: 'pointer',
-  maxWidth: '100%',
+  // The negative margins above make the button's MARGIN box 0.625rem
+  // narrower than its border box, and a plain 100% resolves against that
+  // margin box. Cancelling the two margins here is what stops the chevron
+  // from stealing 10px off the chip's right edge in every rail row. The
+  // inner span keeps its ellipsis, so long names still truncate.
+  maxWidth: 'calc(100% + 0.625rem)',
   transition: 'background-color 130ms ease',
 }
 

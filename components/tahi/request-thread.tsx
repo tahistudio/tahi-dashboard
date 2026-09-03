@@ -93,23 +93,37 @@ function MessageBubble({ msg, isOwn }: { msg: Message; isOwn: boolean }) {
           <span>{timeAgo}</span>
           {msg.editedAt && <span className="italic">(edited)</span>}
           {msg.isInternal && (
-            <span className="flex items-center gap-0.5 text-amber-600 font-medium">
-              <Lock size={10} />
+            <span
+              className="flex items-center gap-0.5 font-semibold"
+              style={{ color: 'var(--status-in-review-text)' }}
+            >
+              <Lock size={10} aria-hidden="true" />
               Internal
             </span>
           )}
         </div>
 
-        {/* Content */}
+        {/* Content. Internal is tested BEFORE own: an internal note you wrote
+            yourself is still an internal note, and painting it brand green
+            would make the one bubble the client must never see look exactly
+            like the ones they do see. Own-ness survives as the mirrored
+            corner only. Tokens are the in-review (amber) family rather than
+            --color-warning-bg, which has no dark override and would render a
+            cream bubble under --color-text in dark mode. */}
         <div
           className={cn(
             'px-4 py-3 rounded-[0_12px_0_12px] text-sm prose prose-sm max-w-none',
-            isOwn
-              ? 'bg-[var(--color-brand)] text-white prose-invert rounded-[12px_0_12px_0]'
-              : msg.isInternal
-                ? 'bg-amber-50 border border-amber-200 text-amber-900'
+            msg.isInternal
+              ? cn('border', isOwn && 'rounded-[12px_0_12px_0]')
+              : isOwn
+                ? 'bg-[var(--color-brand)] text-white prose-invert rounded-[12px_0_12px_0]'
                 : 'bg-[var(--color-bg)] border border-[var(--color-border)] text-[var(--color-text)]',
           )}
+          style={msg.isInternal ? {
+            background: 'var(--status-in-review-bg)',
+            borderColor: 'var(--status-in-review-border)',
+            color: 'var(--status-in-review-text)',
+          } : undefined}
           // HTML from Tiptap is sanitised server-side before storage
           dangerouslySetInnerHTML={{ __html: msg.body }}
         />

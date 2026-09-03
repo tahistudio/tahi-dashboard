@@ -17,13 +17,39 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Play, Pause, Square, ArrowRightLeft, Loader2, Plus, Clock } from 'lucide-react'
+import { Play, Square, ArrowRightLeft, Loader2, Plus, Clock } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { formatElapsed } from '@/lib/timer-helpers'
 import { notifyTimerChanged, subscribeToTimerChanges } from '@/lib/timer-events'
 import { Card } from '@/components/tahi/card'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { useToast } from '@/components/tahi/toast'
+
+/**
+ * Pause: two thin strokes, not Lucide's two filled bars. At 13px the filled
+ * version reads as a Stop button sitting next to the real Stop, so the
+ * prototype drew its own (requests-detail.jsx TimerGlyph). Play stays on
+ * Lucide's triangle, which is already unambiguous at this size.
+ */
+function PauseGlyph({ size = 13, style }: { size?: number; style?: React.CSSProperties }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={style}
+    >
+      <path d="M9 5v14" />
+      <path d="M15 5v14" />
+    </svg>
+  )
+}
 
 interface ActiveTimer {
   id: string
@@ -337,7 +363,7 @@ export function TimeCard({ requestId }: Props) {
               }}
             >
               {timer!.isPaused
-                ? <Pause size={14} style={{ color: 'var(--color-text-muted)' }} aria-hidden="true" />
+                ? <PauseGlyph size={14} style={{ color: 'var(--color-text-muted)' }} />
                 : <span
                     aria-hidden="true"
                     className="animate-pulse"
@@ -360,7 +386,7 @@ export function TimeCard({ requestId }: Props) {
             </div>
             <div className="flex items-center" style={{ gap: '0.375rem' }}>
               <ActionButton
-                icon={timer!.isPaused ? <Play size={13} /> : <Pause size={13} />}
+                icon={timer!.isPaused ? <Play size={13} /> : <PauseGlyph size={13} />}
                 label={timer!.isPaused ? 'Resume' : 'Pause'}
                 onClick={pauseResume}
                 disabled={acting}
