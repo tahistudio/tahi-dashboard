@@ -1,7 +1,22 @@
 'use client'
 
-import { useState } from 'react'
+/**
+ * <ConfirmDialog>. The short-form confirmation in front of every destructive
+ * write (archive, delete, bulk actions, drag-to-nest).
+ *
+ * It declares `role="dialog" aria-modal="true"`, so it owes a keyboard user
+ * the behaviours a modal implies, and now implements them rather than only
+ * announcing them: Cancel takes focus on open, Tab cycles inside the panel,
+ * Escape cancels (topmost layer only, via the shared overlay stack), body
+ * scroll is locked while it is up, and focus returns to whatever opened it.
+ * Before this, activating Delete from a menu unmounted the item holding focus,
+ * dropped focus on <body>, and left Tab walking the whole page behind the
+ * scrim before it reached Cancel.
+ */
+
+import { useEffect, useId, useRef, useState } from 'react'
 import { AlertTriangle, Loader2, X } from 'lucide-react'
+import { focusablesIn, isOrphanedFocus, lockBodyScroll, overlayLayers, shouldHandleEscape } from '@/components/tahi/overlay-stack'
 
 interface ConfirmDialogProps {
   open: boolean
@@ -33,6 +48,101 @@ export function ConfirmDialog({
   secondaryAction,
 }: ConfirmDialogProps) {
   const [loading, setLoading] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  const layerId = useId()
+
+  // Claim a layer while open so Escape closes this dialog and nothing under it.
+  useEffect(() => {
+    if (!open) return
+    overlayLayers.push(layerId)
+    return () => overlayLayers.remove(layerId)
+  }, [open, layerId])
+
+  // Escape cancels, but not while an action is in flight, for the same reason
+  // Cancel is disabled then: the write is already on its way.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!shouldHandleEscape(e, layerId)) return
+      if (loading) return
+      e.preventDefault()
+      onCancel()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, onCancel, loading, layerId])
+
+  // The same shared, refcounted body scroll lock <SlideOver> holds, in its own
+  // effect keyed on `open` alone. Two things were wrong with saving and
+  // restoring `document.body.style.overflow` here directly: this dialog is
+  // usually raised from inside a drawer that already holds the lock, so it
+  // captured 'hidden' as the value to put back, and the capture sat in an
+  // effect whose deps included an inline `onCancel` arrow, so it re-ran on
+  // every parent render. Counting holders makes both orderings, and the
+  // sibling-close-in-one-commit case, land on the original value.
+  useEffect(() => {
+    if (!open) return
+    return lockBodyScroll()
+  }, [open])
+
+  // Focus lands on Cancel, never on the destructive button.
+  useEffect(() => {
+    if (!open) return
+    const frame = requestAnimationFrame(() => {
+      const el = panelRef.current
+      if (!el) return
+      const active = document.activeElement
+      if (active && active !== el && el.contains(active)) return
+      const target = cancelRef.current ?? focusablesIn(el)[0]
+      if (target) target.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [open])
+
+  // Tab cycles inside the panel. Bound on document because the control that
+  // opened the dialog is usually a menu item that has already unmounted,
+  // which leaves the keydown firing on <body>.
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return
+      const el = panelRef.current
+      if (!el) return
+      const items = focusablesIn(el)
+      if (items.length === 0) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      const active = document.activeElement as HTMLElement | null
+      if (isOrphanedFocus(active)) {
+        e.preventDefault()
+        ;(e.shiftKey ? last : first).focus()
+        return
+      }
+      if (!active || !el.contains(active)) return
+      if (e.shiftKey && active === first) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [open])
+
+  // Focus returns to the opener on close. Skipped when the opener has gone
+  // (the menu item that raised the dialog usually has), since re-focusing
+  // <body> is what stranded focus in the first place.
+  useEffect(() => {
+    if (!open) return
+    const opener = document.activeElement as HTMLElement | null
+    if (isOrphanedFocus(opener)) return
+    return () => {
+      if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus()
+    }
+  }, [open])
 
   if (!open) return null
 
@@ -87,6 +197,7 @@ export function ConfirmDialog({
       }}
     >
       <div
+        ref={panelRef}
         style={{
           background: 'var(--color-bg)',
           borderRadius: '0.75rem',
@@ -141,6 +252,8 @@ export function ConfirmDialog({
             </p>
           </div>
           <button
+            type="button"
+            className="tahi-focus-ring"
             onClick={onCancel}
             style={{
               padding: '0.25rem',
@@ -166,7 +279,9 @@ export function ConfirmDialog({
           }}
         >
           <button
+            ref={cancelRef}
             type="button"
+            className="tahi-focus-ring"
             onClick={onCancel}
             disabled={loading}
             style={{
@@ -187,6 +302,7 @@ export function ConfirmDialog({
           {secondaryAction && (
             <button
               type="button"
+              className="tahi-focus-ring"
               onClick={() => void handleSecondary()}
               disabled={loading}
               style={{
@@ -207,6 +323,7 @@ export function ConfirmDialog({
           )}
           <button
             type="button"
+            className="tahi-focus-ring"
             onClick={() => void handleConfirm()}
             disabled={loading}
             style={{

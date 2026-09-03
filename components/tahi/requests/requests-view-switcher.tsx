@@ -14,6 +14,16 @@
  * Filters sheet and the row is at its most crowded; the name is still carried
  * by `title` and `aria-label`, so the accessible name never changes with the
  * viewport.
+ *
+ * OPEN: ARIA 1.2 wants every tab to reference its tabpanel, and these tabs
+ * emit no `aria-controls`. Closing it takes both ends at once: the page has to
+ * wrap the region it swaps (the list body in app/(dashboard)/requests/
+ * request-list.tsx) in an element with `role="tabpanel"`, an id and
+ * `tabIndex={0}`, and that id then reaches the tabs through the
+ * `SegmentedControl` option's existing `panelId` field. Nothing is plumbed
+ * here in the meantime, deliberately: emitting `aria-controls` for an id that
+ * is not in the document is a worse defect than the missing reference, and a
+ * prop with no caller is a contract only half written down.
  */
 
 import { useMemo } from 'react'

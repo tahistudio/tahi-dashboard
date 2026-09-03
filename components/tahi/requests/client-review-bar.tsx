@@ -51,7 +51,10 @@ export function ClientReviewBar({
             height: '1.75rem',
             borderRadius: '0 0.5rem 0 0.5rem',
             background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
-            color: '#ffffff',
+            // --color-text-on-dark resolves to the same value in both themes,
+            // which is what ink on a brand fill needs, so the house rule
+            // against hardcoded hex holds here too.
+            color: 'var(--color-text-on-dark)',
           }}
         >
           <CheckCircle2 size={14} />
@@ -81,7 +84,7 @@ export function ClientReviewBar({
               borderRadius: 'var(--radius-button)',
               border: 'none',
               background: locked ? 'var(--color-bg-tertiary)' : 'var(--color-brand)',
-              color: locked ? 'var(--color-text-subtle)' : '#ffffff',
+              color: locked ? 'var(--color-text-subtle)' : 'var(--color-text-on-dark)',
               cursor: locked ? 'not-allowed' : 'pointer',
               transition: 'background-color 150ms ease',
             }}

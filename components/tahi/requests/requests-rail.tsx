@@ -476,33 +476,47 @@ export function SaveDefaultControl({ isDefault, onSave, touch = false }: {
     whiteSpace: 'nowrap',
   }
 
-  if (isDefault) {
-    return (
-      <span style={{ ...shared, color: 'var(--color-text-subtle)' }}>
-        <Check size={13} aria-hidden="true" />
-        Your default
-      </span>
-    )
-  }
-
+  // One element across both states. Swapping the button for a <span> once the
+  // view was saved destroyed the element holding focus, so a keyboard user who
+  // pressed Enter here landed back on <body> and the next Tab restarted at the
+  // top of the document. `aria-disabled` rather than `disabled` keeps the
+  // settled control focusable and the label live, so the change announces in
+  // place instead of vanishing silently.
   return (
     <button
       type="button"
-      onClick={onSave}
+      onClick={() => { if (!isDefault) onSave() }}
+      aria-disabled={isDefault || undefined}
       className="tahi-focus-ring"
-      title="Remember this view, these filters, and this sort"
-      style={{ ...shared, color: 'var(--color-text-muted)', cursor: 'pointer', transition: 'color var(--motion-quick) var(--ease-out), background-color var(--motion-quick) var(--ease-out)' }}
+      title={isDefault
+        ? 'This view, these filters, and this sort are already your default'
+        : 'Remember this view, these filters, and this sort'}
+      style={{
+        ...shared,
+        color: isDefault ? 'var(--color-text-subtle)' : 'var(--color-text-muted)',
+        cursor: isDefault ? 'default' : 'pointer',
+        transition: 'color var(--motion-quick) var(--ease-out), background-color var(--motion-quick) var(--ease-out)',
+      }}
       onMouseEnter={e => {
+        if (isDefault) return
         e.currentTarget.style.color = 'var(--color-brand-dark)'
         e.currentTarget.style.background = 'var(--color-bg-secondary)'
       }}
+      // No early return on leave, even once this IS the default. Clicking the
+      // control with the mouse flips isDefault while the pointer is still
+      // over it, and the hover background was written imperatively above;
+      // React will not undo it, because the style prop's background reads
+      // 'transparent' on both sides of the change and the diff is a no-op.
+      // Skipping the reset left a permanently shaded pill.
       onMouseLeave={e => {
-        e.currentTarget.style.color = 'var(--color-text-muted)'
+        e.currentTarget.style.color = isDefault ? 'var(--color-text-subtle)' : 'var(--color-text-muted)'
         e.currentTarget.style.background = 'transparent'
       }}
     >
-      <Bookmark size={13} aria-hidden="true" />
-      Save as default
+      {isDefault
+        ? <Check size={13} aria-hidden="true" />
+        : <Bookmark size={13} aria-hidden="true" />}
+      <span aria-live="polite">{isDefault ? 'Your default' : 'Save as default'}</span>
     </button>
   )
 }

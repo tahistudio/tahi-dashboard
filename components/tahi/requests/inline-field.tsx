@@ -16,11 +16,27 @@
  *
  * Touch targets: the trigger is 44px tall under `md` and compresses to the
  * rail's natural 2rem above it.
+ *
+ * Keyboard rules the three editors share:
+ *   - Closing an editor hands focus back to the trigger that opened it, but
+ *     only when focus was orphaned on <body> by the unmount. Blur closes an
+ *     editor too, and blur is exactly the case where the user has already
+ *     moved focus somewhere deliberate: tabbing out, or clicking the next
+ *     row's trigger. Refocusing unconditionally killed both.
+ *   - Nothing writes on change. A native date input reports a COMPLETE value
+ *     the moment every segment is non-empty, so retyping the month of an
+ *     existing 2026-09-10 emits 2026-01-10 on the way to 2026-12-10, and
+ *     committing that persisted a request eight months early. The editor
+ *     holds a draft and writes on Enter and on blur only.
+ *   - An editor's baseline is the value it opened on, captured once. Escape
+ *     reverts to that, so a parent update landing mid-edit (an optimistic
+ *     patch, a refetch) cannot become the "original".
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown, Search } from 'lucide-react'
 import { Popover } from '@/components/tahi/popover'
+import { isOrphanedFocus } from '@/components/tahi/overlay-stack'
 
 // ── Shared trigger ───────────────────────────────────────────────────────
 
@@ -169,7 +185,7 @@ export function InlineMenuField({
       >
         {renderValue(value)}
       </InlineTrigger>
-      <Popover anchorRef={ref} open={open} onClose={() => setOpen(false)} align="end" width={width}>
+      <Popover anchorRef={ref} open={open} onClose={() => setOpen(false)} align="end" width={width} label={ariaLabel}>
         {searchable && (
           <div
             className="tahi-focus-within"
@@ -219,7 +235,18 @@ export function InlineMenuField({
                 key={o.value}
                 type="button"
                 role="menuitem"
-                onClick={() => { setOpen(false); onChange(o.value) }}
+                onClick={() => {
+                  setOpen(false)
+                  onChange(o.value)
+                  // Picking unmounts this item. <Popover> restores focus to
+                  // the anchor when the panel was holding it, and this makes
+                  // the keyboard path explicit rather than incidental. Guarded
+                  // the same way, so it cannot pull focus off a control the
+                  // click has already moved on to.
+                  requestAnimationFrame(() => {
+                    if (isOrphanedFocus(document.activeElement)) ref.current?.focus()
+                  })
+                }}
                 className="tahi-focus-ring min-h-11 md:min-h-8"
                 style={{
                   display: 'flex',
@@ -262,6 +289,113 @@ export function InlineMenuField({
 
 // ── Date field ───────────────────────────────────────────────────────────
 
+/**
+ * True when a native date input has all three segments filled with a real
+ * calendar date. The element reports '' until then, and reports a complete
+ * (but wrong) date the moment a single segment of an existing value changes,
+ * which is why the editor cannot treat every `input` event as a commit.
+ *
+ * @internal Exported for the unit tests.
+ */
+export function isCompleteDateValue(raw: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false
+  const [year, month, day] = raw.split('-').map(Number)
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false
+  const parsed = new Date(Date.UTC(year, month - 1, day))
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day
+}
+
+/**
+ * What a commit should write, given the draft in the input and the value the
+ * field currently holds. An empty draft clears the date; a complete draft
+ * sets it; a half-typed draft is not a value at all, so it leaves the field
+ * alone rather than writing a date the user never meant.
+ *
+ * @internal Exported for the unit tests.
+ */
+export function resolveDateCommit(
+  draft: string,
+  current: string | null,
+): { changed: boolean; value: string | null } {
+  const held = current ? current.slice(0, 10) : null
+  if (draft === '') return { changed: held !== null, value: null }
+  if (!isCompleteDateValue(draft)) return { changed: false, value: held }
+  return { changed: draft !== held, value: draft }
+}
+
+/** One open editing session of the Due field. */
+export interface DateEditorState {
+  /** What the input shows right now. */
+  draft: string
+  /**
+   * The value the editor opened on, as YYYY-MM-DD or ''. It is the baseline
+   * every commit is measured against and what Escape restores, and it never
+   * changes for the life of a session, so a parent update landing mid-edit
+   * cannot become the "original".
+   */
+  opened: string
+}
+
+/**
+ * What the editor can be told. `input` is every keystroke and every picker
+ * selection; `commit` is Enter and blur; `cancel` is Escape.
+ *
+ * `badInput` is how a native date input says "there is something typed in
+ * here that is not a date yet". Its value reads '' in that state, and
+ * committing that would clear a due date the user was only part way through.
+ */
+export type DateEditorEvent =
+  | { type: 'input'; raw: string }
+  | { type: 'commit'; raw: string; badInput?: boolean }
+  | { type: 'cancel' }
+
+export interface DateEditorResult {
+  state: DateEditorState
+  /**
+   * The value to hand the parent. Absent when the event writes nothing;
+   * `null` clears the date.
+   */
+  write?: string | null
+  /** True when the editor should close and hand focus back. */
+  close: boolean
+}
+
+/** Opens a session on the value the field currently holds. */
+export function openDateEditor(value: string | null): DateEditorState {
+  const opened = value ? value.slice(0, 10) : ''
+  return { draft: opened, opened }
+}
+
+/**
+ * The Due editor's whole policy, as a pure function so the sequence a real
+ * date input emits can be driven by a test.
+ *
+ * The rule that matters: `input` never writes. A native date input reports a
+ * COMPLETE value as soon as every segment is non-empty, so retyping one
+ * segment of an existing 2026-09-10 emits 2026-01-10 before it emits
+ * 2026-12-10. Committing on change turned that intermediate into a real
+ * PATCH, an audit-log entry and a due-date automation, and Escape could not
+ * undo it because the revert read back a `value` prop the optimistic patch
+ * had already overwritten. Only Enter and blur write, and they measure
+ * against the value the session opened on.
+ *
+ * @internal Exported for the unit tests.
+ */
+export function reduceDateEditor(state: DateEditorState, event: DateEditorEvent): DateEditorResult {
+  if (event.type === 'input') {
+    return { state: { ...state, draft: event.raw }, close: false }
+  }
+  if (event.type === 'cancel') {
+    return { state: { ...state, draft: state.opened }, close: true }
+  }
+  if (event.badInput) return { state, close: true }
+  const { changed, value } = resolveDateCommit(event.raw, state.opened || null)
+  if (!changed) return { state: { ...state, draft: event.raw }, close: true }
+  return { state: { ...state, draft: event.raw }, write: value, close: true }
+}
+
 export function InlineDateField({
   value,
   onChange,
@@ -276,28 +410,75 @@ export function InlineDateField({
   ariaLabel: string
   readOnly?: boolean
 }) {
-  const [editing, setEditing] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  // The session drives the render; the ref is the authoritative copy the event
+  // handlers read. Handlers on an unmounting input can fire with a closure
+  // from the render before the commit, and reading the ref is what stops a
+  // trailing blur after Enter from writing the same value twice.
+  const [session, setSession] = useState<DateEditorState | null>(null)
+  const sessionRef = useRef<DateEditorState | null>(null)
 
   if (readOnly) return <>{render(value)}</>
 
-  if (editing) {
+  function moveSession(next: DateEditorState | null) {
+    sessionRef.current = next
+    setSession(next)
+  }
+
+  function returnFocus() {
+    // The input has just unmounted. Pull focus back only when it landed on
+    // <body>: blur closes this editor too, and there the user has already
+    // moved focus somewhere deliberate (the next Tab stop, the next row's
+    // trigger) that must not be stolen.
+    requestAnimationFrame(() => {
+      if (isOrphanedFocus(document.activeElement)) triggerRef.current?.focus()
+    })
+  }
+
+  function apply(event: DateEditorEvent) {
+    const current = sessionRef.current
+    if (!current) return
+    const { state, write, close } = reduceDateEditor(current, event)
+    if (write !== undefined) onChange(write)
+    if (close) {
+      moveSession(null)
+      returnFocus()
+    } else {
+      moveSession(state)
+    }
+  }
+
+  if (session) {
     return (
       <input
         type="date"
-        defaultValue={value ? value.slice(0, 10) : ''}
+        value={session.draft}
         autoFocus
         aria-label={ariaLabel}
         className="min-h-11 md:min-h-8"
         style={INPUT_STYLE}
-        onChange={e => { onChange(e.target.value || null); setEditing(false) }}
-        onBlur={() => setEditing(false)}
-        onKeyDown={e => { if (e.key === 'Escape') setEditing(false) }}
+        onChange={e => apply({ type: 'input', raw: e.target.value })}
+        onBlur={e => apply({ type: 'commit', raw: e.target.value, badInput: e.target.validity.badInput })}
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            apply({ type: 'commit', raw: e.currentTarget.value, badInput: e.currentTarget.validity.badInput })
+          }
+          if (e.key === 'Escape') {
+            e.preventDefault()
+            apply({ type: 'cancel' })
+          }
+        }}
       />
     )
   }
 
   return (
-    <InlineTrigger label={ariaLabel} onClick={() => setEditing(true)}>
+    <InlineTrigger
+      label={ariaLabel}
+      buttonRef={triggerRef}
+      onClick={() => moveSession(openDateEditor(value))}
+    >
       {render(value)}
     </InlineTrigger>
   )
@@ -324,17 +505,40 @@ export function InlineNumberField({
   min?: number
   step?: number
 }) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(value != null ? String(value) : '')
-
-  useEffect(() => { setDraft(value != null ? String(value) : '') }, [value])
+  const [draft, setDraft] = useState('')
+  // The value the editor opened on, captured once. It is the baseline a
+  // commit is measured against and what Escape restores, so a parent update
+  // landing mid-edit cannot become the "original", and it is updated by a
+  // commit so a trailing blur cannot write the same value twice.
+  const opened = useRef<number | null>(null)
 
   if (readOnly) return <>{render(value)}</>
 
+  function openEditor() {
+    opened.current = value
+    setDraft(value != null ? String(value) : '')
+    setEditing(true)
+  }
+
+  function closeEditor() {
+    setEditing(false)
+    // Same guard as the date editor: blur closes this too, and there focus
+    // has already gone somewhere the user chose.
+    requestAnimationFrame(() => {
+      if (isOrphanedFocus(document.activeElement)) triggerRef.current?.focus()
+    })
+  }
+
   function commit() {
     const parsed = Number.parseFloat(draft)
-    onChange(Number.isFinite(parsed) && parsed > 0 ? parsed : null)
-    setEditing(false)
+    const next = Number.isFinite(parsed) && parsed > 0 ? parsed : null
+    if (next !== opened.current) {
+      opened.current = next
+      onChange(next)
+    }
+    closeEditor()
   }
 
   if (editing) {
@@ -353,7 +557,11 @@ export function InlineNumberField({
           onBlur={commit}
           onKeyDown={e => {
             if (e.key === 'Enter') { e.preventDefault(); commit() }
-            if (e.key === 'Escape') { setDraft(value != null ? String(value) : ''); setEditing(false) }
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              setDraft(opened.current != null ? String(opened.current) : '')
+              closeEditor()
+            }
           }}
         />
         {suffix && (
@@ -364,7 +572,7 @@ export function InlineNumberField({
   }
 
   return (
-    <InlineTrigger label={ariaLabel} onClick={() => setEditing(true)}>
+    <InlineTrigger label={ariaLabel} buttonRef={triggerRef} onClick={openEditor}>
       {render(value)}
     </InlineTrigger>
   )

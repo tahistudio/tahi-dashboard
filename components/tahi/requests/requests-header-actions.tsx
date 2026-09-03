@@ -58,10 +58,12 @@ export function RequestsHeaderActions({
               type="button"
               aria-label="More request actions"
               title="More request actions"
-              className="tahi-focus-ring inline-flex items-center justify-center"
+              // 2.75rem under md, back to the header's 2.25rem square above
+              // it. On a phone this is the only route to AI draft, Export CSV
+              // and Bulk create, so it cannot stay a 36px target. Sizing lives
+              // in the classes, not the inline style, or the style would win.
+              className="tahi-focus-ring inline-flex items-center justify-center w-11 h-11 md:w-9 md:h-9"
               style={{
-                width: '2.25rem',
-                height: '2.25rem',
                 border: '1px solid var(--color-border)',
                 borderRadius: 'var(--radius-md)',
                 background: 'var(--color-bg)',

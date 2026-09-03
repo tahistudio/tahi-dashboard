@@ -1450,6 +1450,50 @@ html.tahi-private [data-private] button {
   --badge-neutral-bg:     rgba(156, 163, 175, 0.10);
   --badge-neutral-text:   #BFC4BC;
   --badge-neutral-border: rgba(156, 163, 175, 0.25);
+
+  /* Category palette (dark). Same recipe as the status family above: a
+     translucent tint of the hue over whatever surface the chip sits on, plus
+     a lightened text colour from the verified badge ladder (all clear AA on
+     the #1C1B19 card and the #131211 canvas). Declared only in @theme before
+     this, which left the request dialog's six category tiles and every tinted
+     category chip on the board and the mobile list as near-white patches
+     under .dark. */
+  --cat-design-bg:        rgba(236, 72, 153, 0.15);
+  --cat-design-text:      #F3A9CE;
+
+  --cat-development-bg:   rgba(59, 130, 246, 0.15);
+  --cat-development-text: #98B7F7;
+
+  --cat-content-bg:       rgba(245, 158, 11, 0.15);
+  --cat-content-text:     #F4C77A;
+
+  --cat-strategy-bg:      rgba(139, 92, 246, 0.16);
+  --cat-strategy-text:    #C4B0F5;
+
+  --cat-admin-bg:         rgba(156, 163, 175, 0.10);
+  --cat-admin-text:       #BFC4BC;
+
+  --cat-bug-bg:           rgba(239, 68, 68, 0.15);
+  --cat-bug-text:         #F4A0A0;
+
+  /* Due-date surfaces (dark). Declared only in @theme before this (one
+     aliases --color-danger-bg, the other is a literal cream), so in dark mode
+     every request overdue or due within three days wore a near-white pill on
+     a near-black card, on the list, the mobile card, the board and the
+     timeline. Both halves move together, tint and ink, so the pair still
+     clears AA on the dark canvas.
+
+     --color-danger-bg and --color-warning-bg are deliberately NOT overridden
+     here: roughly a hundred call sites pair those fills with the
+     --color-danger / --color-warning inks, which cannot reach 4.5:1 on any
+     dark fill, and those inks cannot be lifted either because both double as
+     solid button fills carrying white text. Components that want a
+     theme-correct danger or warning chip should use the --badge-danger-* /
+     --badge-warning-* tokens, which already resolve for dark above. */
+  --color-overdue-bg:    rgba(239, 68, 68, 0.15);
+  --color-overdue-text:  #F4A0A0;
+  --color-due-soon-bg:   rgba(245, 158, 11, 0.15);
+  --color-due-soon-text: #F4C77A;
 }
 
 /* ============================================================
