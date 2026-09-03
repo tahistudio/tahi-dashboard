@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { primePage } from './helpers'
 
 /**
  * Requests board surfaces: kanban, workload, timeline (Slice C of the
@@ -89,6 +90,8 @@ async function openView(page: Page, name: string): Promise<void> {
 }
 
 test.describe('Requests board', () => {
+  test.beforeEach(async ({ page }) => { await primePage(page) })
+
   test('the kanban carries a column per pipeline status, On Hold included', async ({ page }) => {
     await gotoRequests(page)
     await openView(page, 'Kanban')

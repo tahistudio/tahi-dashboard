@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { primePage } from './helpers'
 
 /**
  * New request dialog (Slice DIALOG of the Requests alignment pass).
@@ -65,6 +66,8 @@ async function focusIsInsideDialog(page: Page): Promise<boolean> {
 }
 
 test.describe('New request dialog', () => {
+  test.beforeEach(async ({ page }) => { await primePage(page) })
+
   test('opens and closes on Escape', async ({ page }) => {
     await gotoRequests(page)
     const dialog = await openDialog(page)

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { primePage } from './helpers'
 
 /**
  * Request detail: the alignment pass (audit findings D1 to D13).
@@ -77,6 +78,8 @@ function activityFilter(page: Page) {
 }
 
 test.describe('Request detail', () => {
+  test.beforeEach(async ({ page }) => { await primePage(page) })
+
   test('the delivery spine is its own card above the two columns', async ({ page }) => {
     test.skip(!(await openFirstRequest(page)), 'No requests in this dataset.')
     test.skip(!(await portedDetailIsOn(page)), 'The rebuilt detail is super-admin gated.')
