@@ -18,7 +18,7 @@
  */
 
 import * as React from 'react'
-import { Filter, Search, X } from 'lucide-react'
+import { Filter, RotateCcw, Search, X } from 'lucide-react'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
@@ -70,6 +70,31 @@ function writePref(key: string, value: unknown): void {
 }
 
 /**
+ * Apply the saved default snapshot to any rail key this browser does not
+ * already hold. Runs once during the first client render, after the legacy
+ * migration and before `useUserPreference` hydrates, so a key the user has
+ * set since always wins.
+ *
+ * Scope, stated plainly so nobody reads more into it. Both the snapshot and
+ * the rail keys live in localStorage, so this fills a GAP IN ONE BROWSER: a
+ * key the user never touched, or one that has been cleared while the snapshot
+ * survived. It cannot carry a default to a second machine, and clearing
+ * storage takes the snapshot with it, so a fresh browser still opens on the
+ * built-in List / All requests view. Reaching further needs the snapshot
+ * persisted server-side (a settings key), which is open work on the API side.
+ * The Reset to default control is what applies the snapshot on demand.
+ */
+export function applyStoredRequestDefault(): void {
+  if (typeof window === 'undefined') return
+  const stored = readPref('requests.default')
+  if (!isRequestsSnapshot(stored)) return
+  if (readPref('requests.view') === undefined) writePref('requests.view', stored.view)
+  if (readPref('requests.savedView') === undefined) writePref('requests.savedView', stored.savedView)
+  if (readPref('requests.filters') === undefined) writePref('requests.filters', stored.filters)
+  if (readPref('requests.sort') === undefined) writePref('requests.sort', stored.sort)
+}
+
+/**
  * Carry the pre-rail preferences over to the new keys, once. Runs during the
  * first client render (before `useUserPreference` hydrates on mount), guarded
  * by its own flag so it never overwrites a choice the user has since made. The
@@ -117,6 +142,10 @@ export interface RequestsRailState {
   /** True when the live state matches the saved default exactly. */
   isDefault: boolean
   saveDefault: () => void
+  /** True once a default has been saved, so a reset has somewhere to go. */
+  hasDefault: boolean
+  /** Put the view, saved view, filters and sort back to the saved default. */
+  resetToDefault: () => void
 }
 
 /**
@@ -135,8 +164,16 @@ export function useRequestsRailState({
   /** Only users actually on the rail get their pre-rail keys migrated. */
   enabled?: boolean
 }): RequestsRailState {
-  // Runs during the first client render, ahead of every hydration effect below.
-  React.useState(() => { if (enabled) migrateLegacyRequestPreferences(); return null })
+  // Runs during the first client render, ahead of every hydration effect
+  // below: the legacy keys are carried over first, then the saved default
+  // fills whatever is still unset.
+  React.useState(() => {
+    if (enabled) {
+      migrateLegacyRequestPreferences()
+      applyStoredRequestDefault()
+    }
+    return null
+  })
 
   const [storedView, setStoredView] = useUserPreference<RequestsViewKey>(
     'requests.view',
@@ -184,6 +221,16 @@ export function useRequestsRailState({
     setStoredDefault({ view, savedView, filters, sort })
   }, [setStoredDefault, view, savedView, filters, sort])
 
+  // The snapshot's other reader: put everything back where the user saved it,
+  // so wandering off the default is recoverable without rebuilding it by hand.
+  const resetToDefault = React.useCallback(() => {
+    if (!storedDefault) return
+    setStoredView(storedDefault.view)
+    setSavedView(storedDefault.savedView)
+    setFilters(storedDefault.filters)
+    setSort(storedDefault.sort)
+  }, [storedDefault, setStoredView, setSavedView, setFilters, setSort])
+
   return {
     view,
     setView: setStoredView,
@@ -197,6 +244,8 @@ export function useRequestsRailState({
     setQuery,
     isDefault,
     saveDefault,
+    hasDefault: storedDefault !== null,
+    resetToDefault,
   }
 }
 
@@ -265,6 +314,9 @@ export interface RequestsRailLayoutProps {
   chips: readonly RequestsFilterChip[]
   onClearChip: (chip: RequestsFilterChip) => void
   onClearAll: () => void
+  /** Put the view back to the saved default. Omitted when there is no saved
+   *  default, or when the view already matches it. */
+  onResetDefault?: () => void
   query: string
   onQueryChange: (next: string) => void
   searchPlaceholder: string
@@ -281,6 +333,7 @@ export function RequestsRailLayout({
   chips,
   onClearChip,
   onClearAll,
+  onResetDefault,
   query,
   onQueryChange,
   searchPlaceholder,
@@ -414,7 +467,7 @@ export function RequestsRailLayout({
             view it has just set up. The row is here even with no chips at
             that width, which is exactly when it is only the save affordance. */}
         <div
-          className={chips.length > 0
+          className={chips.length > 0 || onResetDefault
             ? 'flex items-center flex-wrap'
             : 'flex lg:hidden items-center flex-wrap'}
           style={{ gap: '0.5rem' }}
@@ -422,6 +475,41 @@ export function RequestsRailLayout({
           {chips.map(chip => (
             <FilterChip key={chip.key} chip={chip} onClear={() => onClearChip(chip)} />
           ))}
+          {/* The other half of Save as default. Without a way back, the
+              snapshot only ever labelled itself; this is what makes saving
+              one worth the click once the user has wandered. */}
+          {onResetDefault && (
+            <button
+              type="button"
+              onClick={onResetDefault}
+              className="tahi-focus-ring inline-flex items-center h-11 lg:h-8"
+              style={{
+                gap: '0.375rem',
+                padding: '0 0.625rem',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--color-bg)',
+                fontFamily: 'inherit',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                color: 'var(--color-text-muted)',
+                whiteSpace: 'nowrap',
+                cursor: 'pointer',
+                transition: 'border-color 150ms ease, color 150ms ease',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.borderColor = 'var(--color-brand)'
+                e.currentTarget.style.color = 'var(--color-brand-dark)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = 'var(--color-border)'
+                e.currentTarget.style.color = 'var(--color-text-muted)'
+              }}
+            >
+              <RotateCcw size={13} aria-hidden="true" />
+              Reset to default
+            </button>
+          )}
           <div className="lg:hidden inline-flex items-center" style={{ marginLeft: 'auto' }}>
             <SaveDefaultControl isDefault={railProps.isDefault} onSave={railProps.onSaveDefault} touch />
           </div>

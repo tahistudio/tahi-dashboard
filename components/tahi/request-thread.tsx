@@ -1,8 +1,19 @@
 'use client'
 
 import { formatDistanceToNow } from 'date-fns'
-import { Lock, User } from 'lucide-react'
+import { Lock, Paperclip, User } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { apiPath } from '@/lib/api'
+import { sanitizeRichText } from '@/lib/sanitize-rich-text'
+
+/** One file stamped with a message id, as the admin thread route returns it. */
+interface MessageFile {
+  id: string
+  filename: string
+  storageKey: string
+  mimeType: string | null
+  sizeBytes: number | null
+}
 
 interface Message {
   id: string
@@ -12,6 +23,9 @@ interface Message {
   isInternal: boolean
   editedAt: string | null
   createdAt: string
+  /** Attachments posted with this message. Absent on the portal thread,
+   *  which does not return them yet. */
+  files?: MessageFile[]
   teamMemberName?: string | null
   teamMemberAvatar?: string | null
   // Resolved contact-author label from the portal API ("Sam (Acme)").
@@ -124,9 +138,46 @@ function MessageBubble({ msg, isOwn }: { msg: Message; isOwn: boolean }) {
             borderColor: 'var(--status-in-review-border)',
             color: 'var(--status-in-review-text)',
           } : undefined}
-          // HTML from Tiptap is sanitised server-side before storage
-          dangerouslySetInnerHTML={{ __html: msg.body }}
+          // Not every writer sanitises on the way in: the admin messages POST
+          // stores the body it is handed, and rows written before that gap was
+          // found are still in the table. The allowlist runs here so the
+          // reader is filtered whichever path wrote the row.
+          dangerouslySetInnerHTML={{ __html: sanitizeRichText(msg.body) }}
         />
+
+        {/* Files posted with this message, under the sentence that explains
+            them. The Files panel still lists every attachment on the request;
+            this is the one that says which reply carried it. */}
+        {(msg.files?.length ?? 0) > 0 && (
+          <ul
+            className={cn('flex flex-col gap-1 list-none p-0 m-0', isOwn ? 'items-end' : 'items-start')}
+            aria-label="Attachments"
+          >
+            {msg.files?.map(f => (
+              <li key={f.id}>
+                <a
+                  data-private
+                  href={apiPath(`/api/uploads/serve?key=${encodeURIComponent(f.storageKey)}`)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="tahi-focus-ring inline-flex items-center gap-1.5 text-xs min-h-11 md:min-h-7"
+                  style={{
+                    padding: '0.25rem 0.5rem',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text-muted)',
+                    textDecoration: 'none',
+                    maxWidth: '100%',
+                  }}
+                >
+                  <Paperclip size={11} aria-hidden="true" style={{ flexShrink: 0 }} />
+                  <span className="truncate">{f.filename}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   )

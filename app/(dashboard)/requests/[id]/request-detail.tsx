@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import useSWR from 'swr'
+import useSWR, { useSWRConfig } from 'swr'
 import { apiPath } from '@/lib/api'
 import {
   Clock, AlertTriangle, RefreshCw,
@@ -16,6 +16,11 @@ import { RequestThread } from '@/components/tahi/request-thread'
 import dynamic from 'next/dynamic'
 const MessageComposer = dynamic(() => import('@/components/tahi/message-composer').then(m => ({ default: m.MessageComposer })), { ssr: false })
 const AiTaskWizard = dynamic(() => import('@/components/tahi/ai-task-wizard').then(m => ({ default: m.AiTaskWizard })), { ssr: false })
+// The brief is stored HTML, so it is rendered through the allowlist rather
+// than injected raw: not every writer that can reach requests.description
+// sanitises on the way in. Loaded on demand for the same reason the composer
+// is, since the module it lives in carries the editor with it.
+const RichBriefProse = dynamic(() => import('@/components/tahi/rich-brief').then(m => ({ default: m.RichBriefProse })), { ssr: false })
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
@@ -31,7 +36,8 @@ import { TimeCard } from '@/components/tahi/time-card'
 import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
 import { fetchSchedulePhaseOptions } from '@/lib/schedule-phases'
 import { usePermissions } from '@/components/tahi/permissions-context'
-import { CATEGORY_CONFIG } from '@/lib/status-config'
+import { CATEGORY_CONFIG, EDITABLE_STATUSES, REQUEST_STATUS_CONFIG } from '@/lib/status-config'
+import { StatusChipSelect } from '@/components/tahi/status-chip-select'
 import { DeliverySpine, isPipelineStatus } from '@/components/tahi/requests/delivery-spine'
 import { SegmentedControl } from '@/components/tahi/segmented-control'
 import {
@@ -57,14 +63,13 @@ const STATUS_FLOW = [
   'delivered',
 ] as const
 
-const STATUS_LABELS: Record<string, string> = {
-  submitted: 'Submitted',
-  in_review: 'In Review',
-  in_progress: 'In Progress',
-  client_review: 'Client Review',
-  delivered: 'Delivered',
-  archived: 'Archived',
-  draft: 'Draft',
+/**
+ * The label a status reads as. Driven off the one REQUEST_STATUS_CONFIG map
+ * rather than a local list, so a status this page can now be moved into from
+ * the board or the bulk bar (on hold, cancelled) never prints as a raw slug.
+ */
+function statusLabel(status: string): string {
+  return REQUEST_STATUS_CONFIG[status]?.label ?? status
 }
 
 const PRIORITY_OPTIONS = [
@@ -176,6 +181,16 @@ interface Message {
   // server-computed own-message flag (portal stores authorId = contact.id).
   authorName?: string | null
   isOwn?: boolean
+  /** Files stamped with this message id. The admin thread route returns them
+   *  per message; the portal thread has none yet, so the bubble only shows
+   *  the row when they are there. */
+  files?: Array<{
+    id: string
+    filename: string
+    storageKey: string
+    mimeType: string | null
+    sizeBytes: number | null
+  }>
 }
 
 interface RequestFile {
@@ -298,9 +313,19 @@ function SuggestionApplyChip({
 // ---- Main Component ----------------------------------------------------------
 
 export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }: RequestDetailProps) {
-  const { isImpersonatingClient } = useImpersonation()
+  const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
   // Only switch to client view when impersonating a client, not a team member
   const isAdmin = isAdminProp && !isImpersonatingClient
+  // A super admin standing in a viewer's shoes reads the studio's page. The
+  // PATCH and DELETE calls behind these controls land as the real super admin
+  // and would genuinely mutate the row, so the lens has to hold on the client
+  // as well. Derived exactly as request-list.tsx derives it.
+  const isViewerImpersonation = isImpersonatingTeamMember &&
+    impersonatedAccessRules.length > 0 &&
+    impersonatedAccessRules.every(r => r.role === 'viewer')
+  /** Studio audience with a real write. Everything that mutates the request
+   *  hangs off this rather than off `isAdmin`. */
+  const canWrite = isAdmin && !isViewerImpersonation
   // Slice 6 of the Requests port ships the rebuilt detail behind the same
   // super-admin gate the list uses. Everyone else keeps today's detail
   // untouched, so a regression here can only reach Liam and Staci.
@@ -414,11 +439,50 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   )
   const fetchError = !!requestError
 
+  // The Requests list caches one entry per endpoint + query string, and this
+  // page cannot know which tab the user came from, so the write refreshes
+  // every cached list rather than naming one. Nothing refetches when no list
+  // is in the cache, which is the common case for a deep link.
+  const { mutate: mutateGlobal } = useSWRConfig()
+  const mutateRequestLists = useCallback(() => {
+    void mutateGlobal(
+      key => typeof key === 'string'
+        && (key.startsWith('/api/admin/requests?') || key.startsWith('/api/portal/requests?')),
+    )
+  }, [mutateGlobal])
+
+  /**
+   * How many writes this page has open.
+   *
+   * Every edit here paints local state first and confirms with the server
+   * after, and the request fetcher fans out to four endpoints, so a revalidate
+   * that was already in flight when a write landed answers with the PRE-write
+   * row. The mirror effect below would then paint that stale answer over the
+   * fresh one: the People card reverted to the old assignee, and an unrelated
+   * field patch could wipe an optimistic checklist. Holding the mirror while
+   * the page is still writing closes that window, and the write that takes the
+   * count back to zero asks for one fresh read, so nothing is lost.
+   */
+  const pendingWrites = useRef(0)
+  const beginWrite = useCallback(() => {
+    pendingWrites.current += 1
+  }, [])
+  const endWrite = useCallback((revalidate: boolean) => {
+    pendingWrites.current = Math.max(0, pendingWrites.current - 1)
+    if (pendingWrites.current === 0 && revalidate) {
+      void mutateRequest()
+      void mutateRequestLists()
+    }
+  }, [mutateRequest, mutateRequestLists])
+
   // Mirror fetched data into local state. Local state is the source of truth for
   // optimistic edits (patchRequest, checklists, participants, unlink), so each
   // refresh (mutateRequest) re-syncs everything exactly as loadRequest used to.
   useEffect(() => {
     if (!requestData) return
+    // A read that raced a write is stale by the time it arrives. endWrite()
+    // fires a fresh one the moment the last write settles.
+    if (pendingWrites.current > 0) return
     setRequest(requestData.request)
     setSubRequests(requestData.subRequests)
     setParentRequest(requestData.parent)
@@ -474,7 +538,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   async function handleSendMessage(
     html: string,
     _json: unknown,
-    _uploadedFiles: Array<{ fileId: string; filename: string }>,
+    uploadedFiles: Array<{ fileId: string; filename: string }>,
     visibility: 'public' | 'internal' = 'public',
   ) {
     const messageIsInternal = visibility === 'internal'
@@ -529,6 +593,12 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     const url = isAdmin
       ? apiPath(`/api/admin/requests/${requestId}/messages`)
       : apiPath(`/api/portal/requests/${requestId}/messages`)
+    // The composer has already confirmed each upload against the request, so
+    // the ids are handed over for the route to stamp message_id on. Without
+    // them a file attached to a specific reply only ever shows in the Files
+    // panel, detached from the sentence that explains it. Admin only: the
+    // portal route takes no attachment ids yet.
+    const attachmentFileIds = uploadedFiles.map(f => f.fileId)
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -536,6 +606,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         body: outgoingHtml,
         isInternal: messageIsInternal,
         conversationId: convId ?? undefined,
+        ...(isAdmin && attachmentFileIds.length > 0 ? { attachmentFileIds } : {}),
       }),
     })
     if (!res.ok) {
@@ -550,17 +621,37 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     await Promise.all([mutateRequest(), mutateFiles()])
   }
 
-  // Optimistic patch helper - updates local state immediately, PATCHes the
-  // server in the background, rolls back + toasts on failure. Every field-
-  // level mutation below goes through this so the UI never blinks.
+  /**
+   * Optimistic patch helper: updates local state immediately, PATCHes the
+   * server in the background, rolls back and toasts on failure. Every
+   * field-level mutation below goes through this so the UI never blinks.
+   *
+   * Resolves TRUE only when the server took the write, so a caller that
+   * mirrors the change somewhere else (the assignee / participants pair) can
+   * tell a 403 or a dropped connection from a save and stay out of the
+   * divergence it exists to prevent.
+   *
+   * Pass `revalidate: false` when the caller has more writes to make; it owns
+   * the beginWrite/endWrite pair around the whole sequence and the refresh
+   * fires once at the end.
+   */
   const patchRequest = useCallback(async (
     patch: Partial<Request>,
     successMsg?: string,
-  ) => {
-    if (!request) return
+    options?: { revalidate?: boolean },
+  ): Promise<boolean> => {
+    if (!request) return false
+    // One gate for every field write on this page. A viewer's lens is not a
+    // suggestion: the request is theirs to read, not to move.
+    if (!canWrite) {
+      showToast('Read-only while you are viewing as this team member')
+      return false
+    }
     const previous = request
     // Apply optimistically
     setRequest({ ...previous, ...patch })
+    let ok = false
+    beginWrite()
     try {
       const res = await fetch(apiPath(`/api/admin/requests/${requestId}`), {
         method: 'PATCH',
@@ -571,19 +662,29 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         setRequest(previous)
         const j = await res.json().catch(() => ({})) as { error?: string }
         showToast(j.error ?? 'Update failed - please retry')
-        return
+      } else {
+        ok = true
+        if (successMsg) showToast(successMsg)
       }
-      if (successMsg) showToast(successMsg)
     } catch {
       setRequest(previous)
       showToast('Network error - try again')
+    } finally {
+      // The optimistic paint above covers what the user typed; the revalidate
+      // fills in what only the server knows. A status move to delivered stamps
+      // deliveredAt and bumps updatedAt, and without this the Details card's
+      // Delivered row and the activity feed's "Request was delivered" event
+      // never appear until a hard reload. The list cache is refreshed too, so
+      // the board and the rail agree with the page that just wrote.
+      endWrite(ok && options?.revalidate !== false)
     }
-  }, [request, requestId, showToast])
+    return ok
+  }, [request, requestId, showToast, canWrite, beginWrite, endWrite])
 
   async function handleStatusChange(newStatus: string) {
     if (!request || request.status === newStatus) return
     setStatusUpdating(true)
-    await patchRequest({ status: newStatus }, `Moved to ${STATUS_LABELS[newStatus] ?? newStatus}`)
+    await patchRequest({ status: newStatus }, `Moved to ${statusLabel(newStatus)}`)
     setStatusUpdating(false)
   }
 
@@ -675,6 +776,11 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   async function saveChecklists(updated: Checklist[]) {
     const previous = checklists
     setChecklists(updated)
+    // Counted like every other write: the mirror effect reads checklists back
+    // out of requests.checklists, so a revalidate landing mid-save used to be
+    // able to paint the pre-tick list over the box the user just ticked.
+    beginWrite()
+    let saved = false
     try {
       const res = await fetch(apiPath(`/api/admin/requests/${requestId}`), {
         method: 'PATCH',
@@ -684,10 +790,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       if (!res.ok) {
         setChecklists(previous)
         showToast('Checklist update failed')
+      } else {
+        saved = true
       }
     } catch {
       setChecklists(previous)
       showToast('Network error - try again')
+    } finally {
+      endWrite(saved)
     }
   }
 
@@ -756,13 +866,98 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     await patchRequest({ priority }, 'Priority updated')
   }
 
+  /**
+   * The Assignee field in Details and the Assignees slot in People are one
+   * fact told twice: Details writes requests.assigneeId (what Workload, the
+   * "Assigned to me" view and the unassigned filter all read), People writes
+   * a request_participants row (what the avatars read). Changing one used to
+   * leave the other saying something different on the same screen, so each
+   * one now carries the other with it.
+   */
   async function handleAssigneeChange(assigneeId: string | null) {
     const name = assigneeId ? teamMembers.find(tm => tm.id === assigneeId)?.name ?? null : null
-    await patchRequest(
-      { assigneeId, assigneeName: name },
-      assigneeId ? `Assigned to ${name ?? 'team member'}` : 'Unassigned',
-    )
+    const previousAssigneeId = request?.assigneeId ?? null
+    // Both writes sit inside one begin/end pair, so the participant DELETE and
+    // POST land before the page asks the server for a fresh read. Without it
+    // the read could answer with the pre-write participants and the People
+    // card would snap back to the person who no longer holds this.
+    beginWrite()
+    let saved = false
+    try {
+      // A rejected PATCH (a 403 from access scoping, a 500, an offline tab)
+      // leaves requests.assigneeId exactly as it was. Mirroring it into
+      // request_participants anyway would create the divergence this pair
+      // exists to remove, so the mirror only follows a save the server took.
+      saved = await patchRequest(
+        { assigneeId, assigneeName: name },
+        assigneeId ? `Assigned to ${name ?? 'team member'}` : 'Unassigned',
+        { revalidate: false },
+      )
+      if (saved && canWrite && assigneeId !== previousAssigneeId) {
+        await syncAssigneeParticipant(previousAssigneeId, assigneeId, name)
+      }
+    } finally {
+      endWrite(saved)
+    }
   }
+
+  /**
+   * Make the participants list agree with the assignee field. Adds the new
+   * assignee's row (the POST de-dupes, so a repeat is free) and retires the
+   * person who was carrying it. Failures are non-fatal: the request field is
+   * already written, and the panel reloads from the server on the next visit.
+   */
+  const syncAssigneeParticipant = useCallback(async (
+    previousAssigneeId: string | null,
+    nextAssigneeId: string | null,
+    nextName: string | null,
+  ) => {
+    const stale = participants.filter(p =>
+      p.role === 'assignee'
+      && p.participantType === 'team_member'
+      && p.participantId === previousAssigneeId
+      && !p.id.startsWith('temp-'))
+    for (const row of stale) {
+      try {
+        const res = await fetch(apiPath(`/api/admin/requests/${requestId}/participants/${row.id}`), {
+          method: 'DELETE',
+        })
+        if (res.ok) setParticipants(prev => prev.filter(p => p.id !== row.id))
+      } catch { /* the panel re-reads on the next load */ }
+    }
+    if (!nextAssigneeId) return
+    if (participants.some(p => p.role === 'assignee' && p.participantId === nextAssigneeId)) return
+    try {
+      const res = await fetch(apiPath(`/api/admin/requests/${requestId}/participants`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ participantId: nextAssigneeId, participantType: 'team_member', role: 'assignee' }),
+      })
+      if (!res.ok) return
+      const data = await res.json() as { participant: { id: string; addedAt: string } }
+      setParticipants(prev => prev.some(p => p.id === data.participant.id)
+        ? prev
+        : [...prev, {
+            id: data.participant.id,
+            participantId: nextAssigneeId,
+            participantType: 'team_member',
+            role: 'assignee',
+            name: nextName,
+            avatar: null,
+            email: null,
+            addedAt: data.participant.addedAt,
+          }])
+    } catch { /* the panel re-reads on the next load */ }
+  }, [participants, requestId])
+
+  /**
+   * The other direction: People added or removed an assignee, so the request
+   * row follows. Writes the field only, which is what keeps this out of a
+   * loop with the sync above.
+   */
+  const mirrorAssigneeFromPeople = useCallback((assigneeId: string | null, name: string | null) => {
+    void patchRequest({ assigneeId, assigneeName: name })
+  }, [patchRequest])
 
   async function handleDueDateChange(dueDate: string | null) {
     setEditingDueDate(false)
@@ -951,7 +1146,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         <DetailRow label="Category">
           <InlineMenuField
             ariaLabel="Change category"
-            readOnly={!isAdmin}
+            readOnly={!canWrite}
             value={request.category ?? ''}
             options={CATEGORY_OPTIONS.map(c => ({
               value: c,
@@ -966,7 +1161,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         <DetailRow label="Priority">
           <InlineMenuField
             ariaLabel="Change priority"
-            readOnly={!isAdmin}
+            readOnly={!canWrite}
             value={request.priority}
             options={PRIORITY_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
             renderValue={v => (
@@ -997,6 +1192,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           <DetailRow label="Assignee">
             <InlineMenuField
               ariaLabel="Change assignee"
+              readOnly={!canWrite}
               searchable
               searchPlaceholder="Search team…"
               emptyMessage="No team members"
@@ -1020,6 +1216,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           <DetailRow label="Delivery phase">
             <InlineMenuField
               ariaLabel="Link to a delivery phase"
+              readOnly={!canWrite}
               searchable
               searchPlaceholder="Search phases…"
               emptyMessage="No schedule phases"
@@ -1042,7 +1239,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         <DetailRow label="Due date">
           <InlineDateField
             ariaLabel="Change due date"
-            readOnly={!isAdmin}
+            readOnly={!canWrite}
             value={request.dueDate}
             render={v => v
               ? <span>{formatDate(v)}</span>
@@ -1055,6 +1252,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           <DetailRow label="Estimated">
             <InlineNumberField
               ariaLabel="Change the estimate"
+              readOnly={!canWrite}
               suffix="h"
               value={request.estimatedHours}
               render={v => v != null
@@ -1247,12 +1445,17 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       <Card.Header bordered style={{ margin: 0, padding: '0.875rem 1.25rem' }}>
         <Card.Title as="h2">{newUi ? 'Brief' : 'Description'}</Card.Title>
       </Card.Header>
-      <div
-        data-private
-        className="prose prose-sm max-w-none"
-        style={{ padding: '1.25rem', color: 'var(--color-text)', fontSize: '0.875rem', lineHeight: 1.6 }}
-        dangerouslySetInnerHTML={{ __html: request.description }}
-      />
+      {/* Not every writer that can reach requests.description sanitises on
+          the way in (the bulk create and the sub-request create both store
+          what they are handed), so the allowlist runs here on the way out.
+          RichBriefProse also carries the list, link and emphasis styles the
+          editor writes for, which the bare prose classes had flattened. */}
+      <div data-private>
+        <RichBriefProse
+          html={request.description}
+          style={{ padding: '1.25rem', color: 'var(--color-text)', fontSize: '0.875rem', lineHeight: 1.6 }}
+        />
+      </div>
     </Card>
   ) : null
 
@@ -1383,7 +1586,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             )}
 
             {/* Header actions. Studio audiences on the ported detail only. */}
-            {newUi && isAdmin && (
+            {newUi && canWrite && (
               <RequestActionsMenu
                 requestId={request.id}
                 orgId={request.orgId}
@@ -1494,7 +1697,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                       fontWeight: isCurrent ? 600 : 400,
                     }}
                   >
-                    {STATUS_LABELS[s]}
+                    {statusLabel(s)}
                   </span>
                 </span>
               )
@@ -1566,7 +1769,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         ) : (
           <DeliverySpine
             status={request.status}
-            interactive={isAdmin}
+            interactive={canWrite}
             busy={statusUpdating}
             eta={request.dueDate ? `Due ${formatDate(request.dueDate)}` : null}
             onPick={handleStatusChange}
@@ -1581,6 +1784,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       {newUi && !isAdmin && request.status === 'client_review' && (
         <ClientReviewBar
           busy={approving}
+          disabled={isImpersonatingClient}
           onApprove={handleReviewApprove}
           onRequestChanges={handleRequestChange}
         />
@@ -1764,7 +1968,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
 
       {/* Sub-request creation dialog - opened from the <SubRequestsPanel>
           "New sub-request" button. Client is locked to parent's org. */}
-      {isAdmin && !request.parentRequestId && (
+      {canWrite && !request.parentRequestId && (
         <NewRequestDialog
           open={newSubOpen}
           onClose={() => setNewSubOpen(false)}
@@ -1998,15 +2202,27 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 </div>
               )}
 
-              <MessageComposer
-                onSubmit={handleSendMessage}
-                placeholder={isAdmin ? 'Reply to client or add an internal note…' : 'Add a comment or question…'}
-                canBeInternal={isAdmin}
-                clientName={request?.orgName ?? undefined}
-                requestId={requestId}
-                orgId={request?.orgId}
-                seed={composerSeed}
-              />
+              {/* Client view is a lens, not a login: every portal write
+                  answers 403, so the composer says so rather than letting
+                  someone type a reply the server will refuse. */}
+              {isImpersonatingClient ? (
+                <p
+                  className="text-xs"
+                  style={{ color: 'var(--color-text-subtle)', margin: 0, lineHeight: 1.5 }}
+                >
+                  {`You are reading this as ${request.orgName ?? 'the client'}. Replies are read-only in client view.`}
+                </p>
+              ) : (
+                <MessageComposer
+                  onSubmit={handleSendMessage}
+                  placeholder={isAdmin ? 'Reply to client or add an internal note…' : 'Add a comment or question…'}
+                  canBeInternal={isAdmin}
+                  clientName={request?.orgName ?? undefined}
+                  requestId={requestId}
+                  orgId={request?.orgId}
+                  seed={composerSeed}
+                />
+              )}
             </div>
           </Card>
 
@@ -2019,7 +2235,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
               parentRequestId={request.id}
               subRequests={subRequests}
               alwaysShow={isAdmin}
-              canCreate={isAdmin}
+              canCreate={canWrite}
               onCreated={() => { mutateRequest() }}
               onRequestNew={() => setNewSubOpen(true)}
               emptyMessage={newUi ? 'No sub-requests yet.' : undefined}
@@ -2037,6 +2253,11 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             requestId={requestId}
             orgId={request.orgId}
             emptyHint={newUi ? 'No files yet. Drop one here or upload.' : undefined}
+            /* Not canWrite: a client legitimately attaches files to their own
+               request, and canWrite is studio-only. What has to hold is the
+               viewer's lens, because the upload and the delete behind it land
+               as the real super admin and genuinely mutate the row. */
+            canMutate={!isViewerImpersonation}
           />
 
           {/* Activity log - collapsed by default at the bottom */}
@@ -2096,9 +2317,19 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     Status
                   </span>
                   <div style={{ flex: 1 }}>
+                    {/* The shared chip, driven off the same EDITABLE_STATUSES
+                        the list column uses. The old local copy carried its
+                        own six-status list, so a request the board had put on
+                        hold printed the raw slug here and could not be moved
+                        back or cancelled from the page that manages it.
+                        Archived is the one status left out: it is destructive,
+                        so it belongs behind the bulk bar's Danger confirm
+                        rather than one unguarded click away here. */}
                     <StatusChipSelect
-                      status={request.status}
+                      value={request.status}
+                      options={EDITABLE_STATUSES}
                       busy={statusUpdating}
+                      disabled={!canWrite}
                       onChange={handleStatusChange}
                     />
                   </div>
@@ -2108,7 +2339,8 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 <button
                   type="button"
                   onClick={handleScopeFlagToggle}
-                  className="flex items-center transition-colors"
+                  disabled={!canWrite}
+                  className="tahi-focus-ring flex items-center transition-colors min-h-11 md:min-h-8"
                   style={{
                     gap: '0.375rem',
                     padding: '0.3125rem 0.625rem',
@@ -2124,12 +2356,12 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     color: request.scopeFlagged
                       ? 'var(--color-danger)'
                       : 'var(--color-text-muted)',
-                    cursor: 'pointer',
-                    minHeight: '2rem',
+                    cursor: canWrite ? 'pointer' : 'not-allowed',
+                    opacity: canWrite ? 1 : 0.6,
                     justifyContent: 'flex-start',
                   }}
                   onMouseEnter={e => {
-                    if (!request.scopeFlagged) {
+                    if (canWrite && !request.scopeFlagged) {
                       e.currentTarget.style.borderColor = 'var(--color-warning)'
                       e.currentTarget.style.background = 'var(--color-warning-bg)'
                       e.currentTarget.style.color = 'var(--color-warning)'
@@ -2159,6 +2391,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     <InternalSwitch
                       checked={request.isInternal}
                       busy={internalUpdating}
+                      disabled={!canWrite}
                       describedById={INTERNAL_NOTE_ID}
                       onToggle={handleInternalToggle}
                     />
@@ -2179,8 +2412,8 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                   <button
                     type="button"
                     onClick={handleUnlinkFromParent}
-                    disabled={unlinkingParent}
-                    className="flex items-center transition-colors"
+                    disabled={unlinkingParent || !canWrite}
+                    className="tahi-focus-ring flex items-center transition-colors min-h-11 md:min-h-8"
                     style={{
                       gap: '0.375rem',
                       padding: '0.3125rem 0.625rem',
@@ -2190,13 +2423,12 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                       border: '1px solid var(--color-border)',
                       background: 'var(--color-bg)',
                       color: 'var(--color-text-muted)',
-                      cursor: unlinkingParent ? 'not-allowed' : 'pointer',
-                      opacity: unlinkingParent ? 0.6 : 1,
-                      minHeight: '2rem',
+                      cursor: unlinkingParent || !canWrite ? 'not-allowed' : 'pointer',
+                      opacity: unlinkingParent || !canWrite ? 0.6 : 1,
                       justifyContent: 'flex-start',
                     }}
                     onMouseEnter={e => {
-                      if (!unlinkingParent) {
+                      if (!unlinkingParent && canWrite) {
                         e.currentTarget.style.borderColor = 'var(--color-brand)'
                         e.currentTarget.style.background = 'var(--color-brand-50)'
                         e.currentTarget.style.color = 'var(--color-brand-dark)'
@@ -2223,7 +2455,8 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 <button
                   type="button"
                   onClick={() => setWizardOpen(true)}
-                  className="flex items-center transition-colors"
+                  disabled={!canWrite}
+                  className="tahi-focus-ring flex items-center transition-colors min-h-11 md:min-h-8"
                   style={{
                     gap: '0.375rem',
                     padding: '0.3125rem 0.625rem',
@@ -2233,11 +2466,11 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     border: '1px solid var(--color-border)',
                     background: 'var(--color-bg)',
                     color: 'var(--color-brand)',
-                    cursor: 'pointer',
-                    minHeight: '2rem',
+                    cursor: canWrite ? 'pointer' : 'not-allowed',
+                    opacity: canWrite ? 1 : 0.6,
                     justifyContent: 'flex-start',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-brand-50)' }}
+                  onMouseEnter={e => { if (canWrite) e.currentTarget.style.background = 'var(--color-brand-50)' }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg)' }}
                 >
                   <Wand2 size={12} aria-hidden="true" />
@@ -2246,8 +2479,8 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 <button
                   type="button"
                   onClick={runTriage}
-                  disabled={triageLoading}
-                  className="flex items-center transition-colors"
+                  disabled={triageLoading || !canWrite}
+                  className="tahi-focus-ring flex items-center transition-colors min-h-11 md:min-h-8"
                   style={{
                     gap: '0.375rem',
                     padding: '0.3125rem 0.625rem',
@@ -2257,12 +2490,11 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     border: '1px solid var(--color-border)',
                     background: 'var(--color-bg)',
                     color: 'var(--color-brand)',
-                    cursor: triageLoading ? 'not-allowed' : 'pointer',
-                    opacity: triageLoading ? 0.6 : 1,
-                    minHeight: '2rem',
+                    cursor: triageLoading || !canWrite ? 'not-allowed' : 'pointer',
+                    opacity: triageLoading || !canWrite ? 0.6 : 1,
                     justifyContent: 'flex-start',
                   }}
-                  onMouseEnter={e => { if (!triageLoading) e.currentTarget.style.background = 'var(--color-brand-50)' }}
+                  onMouseEnter={e => { if (!triageLoading && canWrite) e.currentTarget.style.background = 'var(--color-brand-50)' }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg)' }}
                 >
                   {triageLoading
@@ -2291,16 +2523,17 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             orgId={request.orgId}
             participants={participants}
             setParticipants={setParticipants}
-            isAdmin={isAdmin}
+            isAdmin={canWrite}
             lockPm={newUi}
             dedupeAcrossRoles={newUi}
+            onAssigneeMirror={mirrorAssigneeFromPeople}
           />
 
           {/* Checklists */}
           <ChecklistsPanel
             checklists={checklists}
             onSave={saveChecklists}
-            isAdmin={isAdmin}
+            isAdmin={canWrite}
           />
 
           {!newUi && detailsCard}
@@ -2310,7 +2543,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       {/* AI task wizard - seeded from this request. Opens with a pre-filled
           prompt the admin reviews and sends; tasks are reviewed + created
           inside the wizard exactly as on the tasks page. */}
-      {isAdmin && (
+      {canWrite && (
         <AiTaskWizard
           open={wizardOpen}
           onClose={() => setWizardOpen(false)}
@@ -2392,7 +2625,7 @@ function ActivityLog({
         createdAt: request.createdAt,
         updatedAt: request.updatedAt,
         deliveredAt: request.deliveredAt,
-        statusLabel: STATUS_LABELS[request.status] ?? request.status,
+        statusLabel: statusLabel(request.status),
         assigneeName: request.assigneeName,
       },
       messages.map(m => ({
@@ -2773,108 +3006,6 @@ function PeopleStack({ participants }: { participants: Participant[] }) {
   )
 }
 
-// ---- Status chip select ------------------------------------------------------
-
-// Editable status control rendered as a Badge chip, matching the requests list
-// status chip. Clicking opens a Popover of statuses; picking one fires onChange
-// (the parent runs the optimistic PATCH). Disabled while a change is in flight.
-const STATUS_CHOICES = [
-  'submitted',
-  'in_review',
-  'in_progress',
-  'client_review',
-  'delivered',
-  'archived',
-]
-
-function StatusChipSelect({
-  status,
-  busy,
-  onChange,
-}: {
-  status: string
-  busy: boolean
-  onChange: (next: string) => void
-}) {
-  const ref = useRef<HTMLButtonElement | null>(null)
-  const [open, setOpen] = useState(false)
-  // Always include the current status so non-standard values still render.
-  const choices = STATUS_CHOICES.includes(status)
-    ? STATUS_CHOICES
-    : [status, ...STATUS_CHOICES]
-
-  return (
-    <>
-      <button
-        ref={ref}
-        type="button"
-        onClick={() => { if (!busy) setOpen(o => !o) }}
-        disabled={busy}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        className="tahi-focus-ring inline-flex items-center"
-        style={{
-          gap: '0.375rem',
-          padding: '0.25rem 0.4375rem',
-          background: 'transparent',
-          border: '1px solid var(--color-border)',
-          borderRadius: 'var(--radius-md)',
-          cursor: busy ? 'not-allowed' : 'pointer',
-          opacity: busy ? 0.6 : 1,
-          minHeight: '2rem',
-          transition: 'border-color 150ms ease, background-color 150ms ease',
-        }}
-        onMouseEnter={e => { if (!busy) e.currentTarget.style.borderColor = 'var(--color-brand)' }}
-        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
-      >
-        <Badge tone={statusTone(status)} variant="soft" size="sm" leader="dot">
-          {STATUS_LABELS[status] ?? status}
-        </Badge>
-        {busy ? (
-          <Loader2 size={12} className="animate-spin" aria-hidden="true" style={{ color: 'var(--color-text-subtle)' }} />
-        ) : (
-          <ChevronDown size={12} aria-hidden="true" style={{ color: 'var(--color-text-subtle)' }} />
-        )}
-      </button>
-      <Popover anchorRef={ref} open={open} onClose={() => setOpen(false)} align="start" width="11rem">
-        <div role="listbox" aria-label="Status options">
-          {choices.map(s => {
-            const isActive = s === status
-            return (
-              <button
-                key={s}
-                type="button"
-                role="option"
-                aria-selected={isActive}
-                onClick={() => { onChange(s); setOpen(false) }}
-                className="w-full inline-flex items-center"
-                style={{
-                  gap: '0.5rem',
-                  padding: '0.4375rem 0.625rem',
-                  background: isActive ? 'var(--color-bg-secondary)' : 'transparent',
-                  border: 'none',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: 'var(--text-sm)',
-                  color: 'var(--color-text)',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'background-color 120ms ease',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-                onMouseLeave={e => { e.currentTarget.style.background = isActive ? 'var(--color-bg-secondary)' : 'transparent' }}
-              >
-                <Badge tone={statusTone(s)} variant="soft" size="sm" leader="dot">
-                  {STATUS_LABELS[s] ?? s}
-                </Badge>
-              </button>
-            )
-          })}
-        </div>
-      </Popover>
-    </>
-  )
-}
-
 // ---- Revision chip -----------------------------------------------------------
 
 /**
@@ -3004,22 +3135,26 @@ const INTERNAL_NOTE_ID = 'request-internal-note'
 function InternalSwitch({
   checked,
   busy = false,
+  disabled = false,
   describedById,
   onToggle,
 }: {
   checked: boolean
   busy?: boolean
+  /** Hard lock, e.g. a super admin standing in a viewer's shoes. */
+  disabled?: boolean
   describedById?: string
   onToggle: () => void | Promise<void>
 }) {
+  const locked = busy || disabled
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
       aria-describedby={describedById}
-      disabled={busy}
-      onClick={() => { if (!busy) void onToggle() }}
+      disabled={locked}
+      onClick={() => { if (!locked) void onToggle() }}
       className="tahi-focus-ring flex items-center min-h-11 md:min-h-8"
       style={{
         gap: '0.625rem',
@@ -3032,8 +3167,8 @@ function InternalSwitch({
         fontWeight: 500,
         color: 'var(--color-text)',
         textAlign: 'left',
-        cursor: busy ? 'not-allowed' : 'pointer',
-        opacity: busy ? 0.6 : 1,
+        cursor: locked ? 'not-allowed' : 'pointer',
+        opacity: locked ? 0.6 : 1,
         transition: 'opacity 130ms ease',
       }}
     >
@@ -3549,11 +3684,16 @@ interface FilesPanelProps {
   orgId: string
   /** Ported detail's empty-state line. Falls back to the original copy. */
   emptyHint?: string
+  /** False under a viewer's lens: view and download stay open, attaching and
+   *  deleting do not. Defaults to true so any other caller is unaffected. */
+  canMutate?: boolean
 }
 
 // Files are attachable by both studio and client: uploads authorise non-admins
-// server-side, so there is no admin gate on this panel.
-function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint }: FilesPanelProps) {
+// server-side, so there is no ADMIN gate on this panel. There is a write gate,
+// because a super admin standing in a viewer's shoes must not be able to
+// attach or destroy a file from a page they are only reading.
+function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint, canMutate = true }: FilesPanelProps) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -3662,6 +3802,7 @@ function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint }: FilesPane
           {/* Upload is available to clients too: the presign + confirm routes
               authorise non-admins and land the file under their own D1 org. The
               submit form promises clients can attach files, so honour that here. */}
+          {canMutate && (
           <>
             <input
               ref={fileInputRef}
@@ -3697,6 +3838,7 @@ function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint }: FilesPane
                 {uploading ? 'Uploading...' : 'Upload'}
               </button>
           </>
+          )}
           {files.length > 1 && (
             <button
               type="button"
@@ -3787,6 +3929,7 @@ function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint }: FilesPane
               <FileActions
                 file={f}
                 onDeleted={onRefresh}
+                canDelete={canMutate}
               />
             </div>
           ))}
@@ -3803,10 +3946,14 @@ function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint }: FilesPane
  * video, audio). Download forces attachment Content-Disposition. Delete
  * confirms via a Tahi dialog and hits DELETE /api/uploads/[fileId] which
  * removes from R2 + the files row.
+ *
+ * Delete is the only one of the three that writes, so it is the only one the
+ * viewer's lens takes away. Reading a file is what a viewer is for.
  */
-function FileActions({ file, onDeleted }: {
+function FileActions({ file, onDeleted, canDelete = true }: {
   file: { id: string; filename: string; storageKey: string; mimeType: string | null }
   onDeleted: () => void
+  canDelete?: boolean
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -3863,20 +4010,22 @@ function FileActions({ file, onDeleted }: {
       >
         <Download size={14} />
       </a>
-      <button
-        type="button"
-        onClick={() => setConfirmOpen(true)}
-        disabled={busy}
-        style={iconBtn}
-        aria-label={`Delete ${file.filename}`}
-        title="Delete"
-        onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = '#dc2626' }}
-        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
-      >
-        <Trash2 size={14} />
-      </button>
+      {canDelete && (
+        <button
+          type="button"
+          onClick={() => setConfirmOpen(true)}
+          disabled={busy}
+          style={iconBtn}
+          aria-label={`Delete ${file.filename}`}
+          title="Delete"
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-danger-bg)'; e.currentTarget.style.color = 'var(--color-danger)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
+        >
+          <Trash2 size={14} />
+        </button>
+      )}
       <ConfirmDialog
-        open={confirmOpen}
+        open={canDelete && confirmOpen}
         title="Delete file?"
         description={`Permanently removes "${file.filename}" from this request. The file is gone from R2 storage and any messages referencing it will lose the link. Cannot be undone.`}
         confirmLabel="Delete file"

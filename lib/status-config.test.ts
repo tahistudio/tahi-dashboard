@@ -7,6 +7,9 @@ import {
   REQUEST_STATUS_LABELS,
   TASK_STATUS_LABELS,
   REQUEST_STATUS_CONFIG,
+  EDITABLE_STATUSES,
+  CREATABLE_STATUSES,
+  canCreateAtStatus,
 } from './status-config'
 
 describe('REQUEST_STATUSES canonical vocabulary', () => {
@@ -67,6 +70,43 @@ describe('TASK_STATUSES canonical vocabulary', () => {
   it('has no duplicate values', () => {
     const values = TASK_STATUSES.map((s) => s.value)
     expect(new Set(values).size).toBe(values.length)
+  })
+})
+
+describe('EDITABLE_STATUSES (the inline chip vocabulary)', () => {
+  it('drops archived so no single click can archive a request', () => {
+    expect(EDITABLE_STATUSES.map((s) => s.value)).not.toContain('archived')
+  })
+
+  it('keeps everything else, in the canonical order', () => {
+    expect(EDITABLE_STATUSES.map((s) => s.value)).toEqual(
+      REQUEST_STATUSES.filter((s) => s.value !== 'archived').map((s) => s.value),
+    )
+  })
+})
+
+describe('CREATABLE_STATUSES (what the POST accepts)', () => {
+  it('refuses delivered and cancelled, whose side effects belong to the PATCH', () => {
+    expect(CREATABLE_STATUSES).not.toContain('delivered')
+    expect(CREATABLE_STATUSES).not.toContain('cancelled')
+  })
+
+  it('accepts the working statuses a board column can quick-add into', () => {
+    expect(CREATABLE_STATUSES).toEqual([
+      'submitted',
+      'in_review',
+      'in_progress',
+      'client_review',
+      'on_hold',
+      'archived',
+    ])
+  })
+
+  it('canCreateAtStatus agrees with the list', () => {
+    for (const s of REQUEST_STATUSES) {
+      expect(canCreateAtStatus(s.value)).toBe(CREATABLE_STATUSES.includes(s.value))
+    }
+    expect(canCreateAtStatus('not_a_status')).toBe(false)
   })
 })
 

@@ -71,9 +71,20 @@ interface CapacityTrack {
   currentRequest?: { id: string; title: string; status: string; dueDate: string | null } | null
 }
 
+/** One row of the server's queue, in the order the studio works it. */
+interface CapacityQueueRow {
+  id: string
+  title: string
+  status: string
+  dueDate?: string | null
+}
+
 interface CapacityResponse {
   subscription: { id: string; planType: string | null } | null
   tracks?: CapacityTrack[]
+  /** Ordered by queue_order then created_at, the same order the submit
+   *  confirmation counts positions in. */
+  queue?: CapacityQueueRow[]
 }
 
 interface StepsResponse {
@@ -95,6 +106,40 @@ const STATUS_PROGRESS: Record<string, number> = {
   in_progress: 0.5,
   client_review: 0.85,
   delivered: 1,
+}
+
+// ── Queue order ───────────────────────────────────────────────────────────────
+
+/**
+ * The Up next list: the requests still waiting to be picked up, in the order
+ * the server keeps them.
+ *
+ * `serverQueue` is /api/portal/capacity's `queue`, already sorted by
+ * queue_order then created_at and already scoped to the org. Rows are
+ * hydrated from `byId` where the list payload has a richer copy (participants,
+ * request number), and the submitted-only rule is kept so the section still
+ * means "waiting", not "everything not on a lane".
+ *
+ * `fallback` is the list payload, used when the endpoint predates the queue
+ * field so the strip survives an older deploy rather than emptying.
+ */
+export function orderQueue(
+  serverQueue: readonly CapacityQueueRow[] | undefined,
+  fallback: readonly CapacityStripRequest[],
+  laneIds: ReadonlySet<string>,
+  byId: ReadonlyMap<string, CapacityStripRequest>,
+): CapacityStripRequest[] {
+  if (Array.isArray(serverQueue)) {
+    return serverQueue
+      .filter(r => r.status === 'submitted' && !laneIds.has(r.id))
+      .map(r => byId.get(r.id) ?? {
+        id: r.id,
+        title: r.title,
+        status: r.status,
+        dueDate: r.dueDate ?? null,
+      })
+  }
+  return fallback.filter(r => r.status === 'submitted' && !laneIds.has(r.id))
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -149,10 +194,15 @@ export function CapacityStrip({
     return { lanes: filled, laneIds: taken }
   }, [tracks, requests, byId])
 
-  // Everything still waiting to be picked up, in the order the studio works it.
+  // Everything still waiting to be picked up, in the order the studio works
+  // it. That order lives on the server (queue_order, then created_at) and is
+  // what the submit confirmation counts positions in; the list payload this
+  // component also holds is sorted by updatedAt, so building the queue from
+  // it put a brand new request at the top under a "Next up" badge, the
+  // opposite of the position the client was just told.
   const queue = React.useMemo(
-    () => requests.filter(r => r.status === 'submitted' && !laneIds.has(r.id)),
-    [requests, laneIds],
+    () => orderQueue(data?.queue, requests, laneIds, byId),
+    [data, requests, laneIds, byId],
   )
 
   if (!data?.subscription || tracks.length === 0) return null

@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * <ClientReviewBar> — the one place a client can move a request.
+ * <ClientReviewBar>. The one place a client can move a request.
  *
  * Shown only while a request sits in client review and the viewer is a
  * client. Approve closes the request; Request changes hands it back to the
