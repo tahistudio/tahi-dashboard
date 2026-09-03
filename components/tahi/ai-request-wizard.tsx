@@ -24,9 +24,11 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Sparkles, Send } from 'lucide-react'
+import { Sparkles, Send, AlertTriangle } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { SlideOver } from '@/components/tahi/slide-over'
+import { SearchableSelect } from '@/components/tahi/searchable-select'
+import { looksLikeBriefHtml, plainTextToBriefHtml } from '@/components/tahi/rich-brief'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -44,6 +46,17 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   requests?: RequestDraft[]
+  /**
+   * Renders as a warning strip rather than an assistant bubble. Used when the
+   * model was never reached, so nobody mistakes a keyword draft or an error
+   * for something Claude said.
+   */
+  notice?: boolean
+}
+
+interface ClientOption {
+  id: string
+  name: string
 }
 
 interface AiRequestWizardPanelProps {
@@ -140,6 +153,63 @@ export function aiWizardProgress(answered: number, hasDraft: boolean): { percent
   return { percent: Math.round((safe / total) * 100), label: `${safe} / ${total}` }
 }
 
+/** Shown above a draft the model never touched, so nobody files it blind. */
+export const DEGRADED_PREFIX =
+  'AI is unavailable right now, so this is a rough draft built from your own words. Read it closely before you file it.'
+
+// ── Outbound create body ──────────────────────────────────────────────────────
+
+/**
+ * The brief as the request routes want it. Both wizards document their
+ * `description` as plain text and leave the conversion to the caller, and the
+ * detail page renders `requests.description` as HTML, so posting raw prose
+ * collapses every paragraph break into one block. The hand-back path into the
+ * dialog already converts; this is the same rule for the direct-create path.
+ */
+export function draftBriefHtml(description?: string | null): string {
+  if (!description) return ''
+  return looksLikeBriefHtml(description) ? description : plainTextToBriefHtml(description)
+}
+
+export interface CreateRequestBodyInput {
+  draft: RequestDraft
+  /** 'admin' posts on behalf of a client; 'client' is the portal. */
+  speaker?: 'client' | 'admin'
+  /** The client the admin flow files against. Ignored on the portal flow,
+   *  where the route derives the org from the caller's Clerk session. */
+  clientOrgId?: string | null
+  /** Only ever true when the person ticked it. An AI draft is normal client
+   *  work by default; internal hides it from the portal entirely. */
+  internalOnly?: boolean
+}
+
+/**
+ * The body the wizard POSTs to the create route.
+ *
+ * The admin route destructures `clientOrgId` and 400s without it, so sending
+ * `orgId` (as this used to) meant every AI create failed and nothing was ever
+ * written. Kept pure so a test can assert the field names rather than the
+ * dialog discovering them in production.
+ */
+export function buildCreateRequestBody(input: CreateRequestBodyInput): Record<string, unknown> {
+  const { draft, speaker, clientOrgId, internalOnly } = input
+  const body: Record<string, unknown> = {
+    title: draft.title,
+    description: draftBriefHtml(draft.description),
+    category: draft.category,
+    // The wizard's vocabulary is wider than the two sizes a request carries,
+    // so anything bigger than a small task lands on large.
+    type: draft.type === 'large_task' || draft.type === 'new_feature' ? 'large_task' : 'small_task',
+    priority: draft.priority,
+    estimatedHours: draft.estimatedHours,
+  }
+  if (speaker !== 'client') {
+    body.clientOrgId = clientOrgId ?? ''
+    if (internalOnly) body.isInternal = true
+  }
+  return body
+}
+
 // ── Local styles ──────────────────────────────────────────────────────────────
 
 const AI_WIZARD_CSS = `
@@ -186,6 +256,34 @@ export function AiRequestWizardPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
+  // Which client the admin flow files against. `context.orgId` wins when the
+  // caller already knows it (the dialog's own picker, or the rail's client
+  // filter); the standalone drawer opens with nothing, so the wizard asks.
+  const isAdminFlow = context.speaker !== 'client'
+  const [pickedClientId, setPickedClientId] = useState<string | null>(null)
+  const [clients, setClients] = useState<ClientOption[]>([])
+  const [clientsLoading, setClientsLoading] = useState(false)
+  const [internalOnly, setInternalOnly] = useState(false)
+  const needsClientPicker = isAdminFlow && !context.orgId
+  // `||`, not `??`: the dialog passes '' while its own picker is empty, and an
+  // empty string must fall through to the one this panel offers.
+  const targetOrgId = context.orgId || pickedClientId || ''
+
+  useEffect(() => {
+    if (!needsClientPicker) return
+    let cancelled = false
+    setClientsLoading(true)
+    fetch(apiPath('/api/admin/clients?status=active'))
+      .then(r => r.json() as Promise<{ organisations?: Array<{ id: string; name: string }> }>)
+      .then(data => {
+        if (cancelled) return
+        setClients((data.organisations ?? []).map(o => ({ id: o.id, name: o.name })))
+      })
+      .catch(() => { if (!cancelled) setClients([]) })
+      .finally(() => { if (!cancelled) setClientsLoading(false) })
+    return () => { cancelled = true }
+  }, [needsClientPicker])
+
   // Latest draft batch (the most recent assistant message with requests).
   const latestDrafts = (() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -197,6 +295,8 @@ export function AiRequestWizardPanel({
 
   const answered = messages.filter(m => m.role === 'user').length
   const progress = aiWizardProgress(answered, !!latestDrafts)
+  /** Nothing may be filed until the admin flow knows whose work this is. */
+  const createBlocked = isAdminFlow && !targetOrgId
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -224,20 +324,41 @@ export function AiRequestWizardPanel({
           context,
         }),
       })
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as { reply?: string; requests?: RequestDraft[]; done?: boolean }
+      const data = await res.json().catch(() => ({})) as {
+        reply?: string
+        requests?: RequestDraft[]
+        done?: boolean
+        degraded?: boolean
+        error?: string
+      }
+      // The route now says out loud when the model was not reached, so the
+      // panel repeats it instead of printing a generic apology (or, worse,
+      // rendering a keyword draft as if Claude wrote it).
+      if (!res.ok) {
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant',
+            notice: true,
+            content: data.error ?? 'Something went wrong drafting that. Could you try again?',
+          },
+        ])
+        return
+      }
+      const reply = data.reply ?? 'Could you tell me a bit more?'
       setMessages(prev => [
         ...prev,
         {
           role: 'assistant',
-          content: data.reply ?? 'Could you tell me a bit more?',
+          content: data.degraded ? `${DEGRADED_PREFIX}\n\n${reply}` : reply,
+          ...(data.degraded ? { notice: true } : {}),
           ...(data.requests && data.requests.length > 0 ? { requests: data.requests } : {}),
         },
       ])
     } catch {
       setMessages(prev => [
         ...prev,
-        { role: 'assistant', content: 'Something went wrong drafting that. Could you try again?' },
+        { role: 'assistant', notice: true, content: 'Something went wrong drafting that. Could you try again?' },
       ])
     } finally {
       setSending(false)
@@ -246,14 +367,12 @@ export function AiRequestWizardPanel({
 
   const handleCreate = useCallback(async () => {
     if (!latestDrafts || creating) return
-    // Admin flows need an explicit orgId passed in (they're drafting on
-    // behalf of a client). Portal flows derive orgId server-side from
-    // Clerk auth, so the front end doesn't need to send one.
-    const isAdminFlow = context.speaker !== 'client'
-    if (isAdminFlow && !context.orgId) {
+    // Admin flows file against a named client. Portal flows derive the org
+    // server-side from Clerk auth, so the front end sends nothing.
+    if (isAdminFlow && !targetOrgId) {
       setMessages(prev => [
         ...prev,
-        { role: 'assistant', content: 'I need a client to file this against. Go back to the form, pick a client, then come back.' },
+        { role: 'assistant', notice: true, content: 'Pick the client this is for and I will file it.' },
       ])
       return
     }
@@ -261,22 +380,15 @@ export function AiRequestWizardPanel({
     try {
       const results: boolean[] = []
       for (const draft of latestDrafts) {
-        const body: Record<string, unknown> = {
-          title: draft.title,
-          description: draft.description,
-          category: draft.category,
-          type: draft.type === 'large_task' || draft.type === 'new_feature' ? 'large_task' : 'small_task',
-          priority: draft.priority,
-          estimatedHours: draft.estimatedHours,
-        }
-        if (isAdminFlow) {
-          body.orgId = context.orgId
-          body.isInternal = true
-        }
         const res = await fetch(apiPath(submitEndpoint), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify(buildCreateRequestBody({
+            draft,
+            speaker: context.speaker,
+            clientOrgId: targetOrgId,
+            internalOnly,
+          })),
         })
         results.push(res.ok)
       }
@@ -285,6 +397,7 @@ export function AiRequestWizardPanel({
         ...prev,
         {
           role: 'assistant',
+          ...(allOk ? {} : { notice: true }),
           content: allOk
             ? `Done. ${latestDrafts.length === 1 ? 'Request has' : `All ${latestDrafts.length} requests have`} been created.`
             : 'Some requests could not be created. Try again or fall back to the standard form.',
@@ -294,12 +407,12 @@ export function AiRequestWizardPanel({
     } catch {
       setMessages(prev => [
         ...prev,
-        { role: 'assistant', content: 'Failed to create the request. Please try again.' },
+        { role: 'assistant', notice: true, content: 'Failed to create the request. Please try again.' },
       ])
     } finally {
       setCreating(false)
     }
-  }, [latestDrafts, creating, context.orgId, context.speaker, submitEndpoint, onRequestsCreated])
+  }, [latestDrafts, creating, isAdminFlow, targetOrgId, internalOnly, context.speaker, submitEndpoint, onRequestsCreated])
 
   return (
     <>
@@ -404,24 +517,46 @@ export function AiRequestWizardPanel({
         {messages.map((msg, i) => (
           <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
             <div
+              role={msg.notice ? 'status' : undefined}
               style={{
                 alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                display: msg.notice ? 'flex' : 'block',
+                gap: '0.5rem',
                 maxWidth: '85%',
                 padding: '0.625rem 0.875rem',
                 borderRadius: 'var(--radius-lg)',
-                background: msg.role === 'user' ? 'var(--color-brand)' : 'var(--color-bg-secondary)',
-                color: msg.role === 'user' ? 'white' : 'var(--color-text)',
+                border: msg.notice ? '1px solid var(--badge-warning-border)' : 'none',
+                background: msg.notice
+                  ? 'var(--badge-warning-bg)'
+                  : msg.role === 'user' ? 'var(--color-brand)' : 'var(--color-bg-secondary)',
+                color: msg.notice
+                  ? 'var(--badge-warning-text)'
+                  : msg.role === 'user' ? 'var(--color-text-on-dark)' : 'var(--color-text)',
                 fontSize: '0.875rem',
                 lineHeight: 1.5,
                 whiteSpace: 'pre-wrap',
               }}
             >
-              {msg.content}
+              {msg.notice && (
+                <AlertTriangle size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: '0.1875rem' }} />
+              )}
+              <span>{msg.content}</span>
             </div>
             {msg.requests && msg.requests.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.25rem' }}>
                 {msg.requests.map(draft => (
-                  <DraftCard key={draft.id} draft={draft} />
+                  <DraftCard
+                    key={draft.id}
+                    draft={draft}
+                    // One draft per card, so the person hands back the one they
+                    // are reading rather than whichever came first. Only the
+                    // latest batch is offered; older cards are transcript.
+                    onUse={
+                      onDraftToForm && msg.requests!.length > 1 && latestDrafts === msg.requests
+                        ? () => onDraftToForm(draft)
+                        : undefined
+                    }
+                  />
                 ))}
               </div>
             )}
@@ -459,6 +594,70 @@ export function AiRequestWizardPanel({
         flexShrink: 0,
         background: 'var(--color-bg)',
       }}>
+        {/* The client this gets filed against. The dialog supplies one through
+            context; the standalone drawer opens with none, and creating without
+            it used to 400 on every draft with nothing on screen to fix. */}
+        {latestDrafts && latestDrafts.length > 0 && needsClientPicker && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+            {/* A span, not a label: SearchableSelect's trigger is a portal'd
+                button with no id to point htmlFor at, and its own placeholder
+                is what a screen reader reads as the control's name. */}
+            <span
+              style={{
+                fontSize: '0.6875rem',
+                fontWeight: 700,
+                letterSpacing: '0.05em',
+                textTransform: 'uppercase',
+                color: 'var(--color-text-subtle)',
+              }}
+            >
+              Client
+            </span>
+            {clientsLoading ? (
+              <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)' }}>
+                Loading clients...
+              </span>
+            ) : (
+              <SearchableSelect
+                options={clients.map(c => ({ value: c.id, label: c.name }))}
+                value={pickedClientId}
+                onChange={setPickedClientId}
+                placeholder="Pick the client this is for..."
+                searchPlaceholder="Search clients..."
+                size="sm"
+              />
+            )}
+          </div>
+        )}
+
+        {/* Internal is a choice, never a default: an AI draft is normal client
+            work unless the person says otherwise. */}
+        {latestDrafts && latestDrafts.length > 0 && isAdminFlow && (
+          <label
+            className="min-h-11 md:min-h-8"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              fontSize: '0.75rem',
+              color: 'var(--color-text-muted)',
+              cursor: 'pointer',
+              transition: 'color 150ms ease',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-text)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
+          >
+            <input
+              type="checkbox"
+              checked={internalOnly}
+              onChange={e => setInternalOnly(e.target.checked)}
+              className="tahi-focus-ring"
+              style={{ width: '1rem', height: '1rem', accentColor: 'var(--color-brand)', cursor: 'pointer' }}
+            />
+            Internal only, hidden from the client portal
+          </label>
+        )}
+
         {latestDrafts && latestDrafts.length > 0 && (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             {/* Hand-back is the primary action wherever a form is waiting: the
@@ -479,7 +678,7 @@ export function AiRequestWizardPanel({
                   minHeight: '2.75rem',
                   padding: '0.625rem 0.875rem',
                   background: creating ? 'var(--color-brand-200)' : 'var(--color-brand)',
-                  color: 'white',
+                  color: 'var(--color-text-on-dark)',
                   border: 'none',
                   borderRadius: 'var(--radius-button)',
                   fontSize: '0.875rem',
@@ -494,7 +693,8 @@ export function AiRequestWizardPanel({
             <button
               type="button"
               onClick={handleCreate}
-              disabled={creating}
+              disabled={creating || createBlocked}
+              title={createBlocked ? 'Pick the client this is for first' : undefined}
               className="tahi-focus-ring"
               style={{
                 flex: onDraftToForm ? '0 0 auto' : 1,
@@ -506,13 +706,14 @@ export function AiRequestWizardPanel({
                 padding: '0.625rem 0.875rem',
                 background: onDraftToForm ? 'var(--color-bg)' : 'var(--color-brand)',
                 color: onDraftToForm
-                  ? (creating ? 'var(--color-text-subtle)' : 'var(--color-brand-dark)')
+                  ? (creating || createBlocked ? 'var(--color-text-subtle)' : 'var(--color-brand-dark)')
                   : 'var(--color-bg)',
                 border: onDraftToForm ? '1px solid var(--color-border)' : 'none',
                 borderRadius: 'var(--radius-button)',
                 fontSize: '0.875rem',
                 fontWeight: onDraftToForm ? 500 : 600,
-                cursor: creating ? 'not-allowed' : 'pointer',
+                cursor: creating || createBlocked ? 'not-allowed' : 'pointer',
+                opacity: createBlocked ? 0.6 : 1,
                 whiteSpace: 'nowrap',
               }}
             >
@@ -616,7 +817,7 @@ export function AiRequestWizard({ open, onClose, ...panel }: AiRequestWizardProp
 
 // ── Draft preview card ───────────────────────────────────────────────────────
 
-function DraftCard({ draft }: { draft: RequestDraft }) {
+function DraftCard({ draft, onUse }: { draft: RequestDraft; onUse?: () => void }) {
   const cat = CATEGORY_STYLES[draft.category]
   const pri = PRIORITY_STYLES[draft.priority]
   return (
@@ -645,6 +846,39 @@ function DraftCard({ draft }: { draft: RequestDraft }) {
         <Chip bg={pri.bg} text={pri.text}>{pri.label} priority</Chip>
         <Chip bg="var(--color-bg-tertiary)" text="var(--color-text-muted)">{draft.estimatedHours}h</Chip>
       </div>
+      {onUse && (
+        <button
+          type="button"
+          onClick={onUse}
+          className="tahi-focus-ring min-h-11 md:min-h-8"
+          style={{
+            alignSelf: 'flex-start',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.375rem',
+            padding: '0 0.75rem',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-button)',
+            background: 'var(--color-bg)',
+            color: 'var(--color-brand-dark)',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'border-color 150ms ease, background-color 150ms ease',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.borderColor = 'var(--color-brand)'
+            e.currentTarget.style.background = 'var(--color-brand-50)'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.borderColor = 'var(--color-border)'
+            e.currentTarget.style.background = 'var(--color-bg)'
+          }}
+        >
+          <Sparkles size={13} aria-hidden="true" />
+          Use this draft
+        </button>
+      )}
     </div>
   )
 }

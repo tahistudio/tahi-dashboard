@@ -284,12 +284,15 @@ const TOOLS: ToolDef[] = [
     priority: prop('string', 'Priority: standard or high'),
     type: prop('string', 'Type: small_task, large_task, bug_fix, content_update, new_feature, consultation, custom'),
     description: prop('string', 'Description of the request'),
+    startDate: prop('string', 'Start date in YYYY-MM-DD format'),
     dueDate: prop('string', 'Due date in YYYY-MM-DD format'),
+    estimatedHours: prop('number', 'Estimated hours for the work'),
+    isInternal: prop('boolean', 'True files the request Tahi-internal, hidden from the client portal. Defaults to false (client-visible).'),
     status: prop('string', 'Optional starting status. One of: submitted (default), in_review, in_progress, client_review, on_hold, archived. Delivered and cancelled are not creatable; move the request there with update_request_status.'),
   }, ['title', 'clientOrgId']),
   tool('update_request_status', 'Update the status of a request', {
     requestId: prop('string', 'Request ID'),
-    status: prop('string', 'New status: draft, submitted, in_review, in_progress, client_review, delivered, archived'),
+    status: prop('string', 'New status: draft, submitted, in_review, in_progress, client_review, on_hold, delivered, cancelled, archived'),
   }, ['requestId', 'status']),
   tool('assign_request', 'Assign a team member to a request', {
     requestId: prop('string', 'Request ID'),
@@ -301,12 +304,15 @@ const TOOLS: ToolDef[] = [
   tool('duplicate_request', 'Duplicate a request. Copies title, description, category, type, priority, client org and estimated hours into a brand new top-level request at status "submitted" (no thread, files, participants or due date). Returns the new request id.', {
     requestId: prop('string', 'Request ID to duplicate'),
   }, ['requestId']),
-  tool('update_request_fields', 'Update the editable fields on a request detail rail: category, priority, due date, estimated hours and internal visibility. Send only the fields you want to change. Use update_request_status for status and assign_request for the assignee.', {
+  tool('update_request_fields', 'Update the editable fields on a request detail rail: category, priority, start and due dates, estimated hours, capacity track, checklists and internal visibility. Send only the fields you want to change. Use update_request_status for status and assign_request for the assignee.', {
     requestId: prop('string', 'Request ID'),
     category: prop('string', 'Category: design, development, content, strategy, admin, bug'),
     priority: prop('string', 'Priority: standard or high'),
+    startDate: prop('string', 'Start date in YYYY-MM-DD format, or empty string to clear'),
     dueDate: prop('string', 'Due date in YYYY-MM-DD format, or empty string to clear'),
     estimatedHours: prop('number', 'Estimated hours, or 0 to clear'),
+    trackId: prop('string', 'Capacity track ID this request occupies, or empty string to unlink'),
+    checklists: prop('string', 'Checklists as a JSON string, the same shape the detail rail PATCHes'),
     isInternal: prop('boolean', 'True hides the request from the client portal entirely, false makes it visible to the client again'),
   }, ['requestId']),
   tool('post_request_message', 'Post a message on a request thread', {
@@ -314,6 +320,82 @@ const TOOLS: ToolDef[] = [
     content: prop('string', 'Message content'),
     isInternal: prop('boolean', 'Whether the message is internal (team only)'),
   }, ['requestId', 'content']),
+  tool('bulk_update_request_status', 'Apply one status change, one assignee, or an archive to many requests at once. Mirrors the list view bulk bar. MUTATES MANY ROWS: confirm the id list and the change with the user before calling.', {
+    requestIds: { type: 'array', items: { type: 'string' }, description: 'Request IDs to update' },
+    status: prop('string', 'New status for every id: draft, submitted, in_review, in_progress, client_review, on_hold, delivered, cancelled, archived'),
+    assigneeId: prop('string', 'Team member ID to assign to every id, or empty string to unassign'),
+    archived: prop('boolean', 'True archives every id (equivalent to status "archived")'),
+  }, ['requestIds']),
+  tool('bulk_create_requests', 'Create the same request once per client, for a cross-client announcement or rollout. MUTATES MANY ROWS: confirm the client list with the user before calling.', {
+    orgIds: { type: 'array', items: { type: 'string' }, description: 'Client organisation IDs, one request created per id' },
+    title: prop('string', 'Title used for every created request'),
+    category: prop('string', 'Category: design, development, content, strategy, admin, bug'),
+    type: prop('string', 'Type: small_task (default), large_task, bug_fix, new_feature'),
+    description: prop('string', 'Description used for every created request'),
+    isInternal: prop('boolean', 'True files them Tahi-internal, hidden from every client portal'),
+  }, ['orgIds', 'title']),
+
+  // ── Request workflow steps ────────────────────────────────────────────
+  tool('create_request_step', 'Add a workflow step to a request. Steps are visible to the client on their request detail.', {
+    requestId: prop('string', 'Request ID'),
+    title: prop('string', 'Step title'),
+    description: prop('string', 'Optional step description'),
+    parentStepId: prop('string', 'Parent step ID when nesting under an existing step'),
+    orderIndex: prop('number', 'Position within its level (default 0)'),
+  }, ['requestId', 'title']),
+  tool('update_request_step', 'Update one workflow step: title, description, completion, order, parent or assignee. Send only what changes.', {
+    requestId: prop('string', 'Request ID the step belongs to'),
+    stepId: prop('string', 'Step ID'),
+    title: prop('string', 'New step title'),
+    description: prop('string', 'New step description'),
+    completed: prop('boolean', 'True marks the step done and stamps completedAt, false reopens it'),
+    orderIndex: prop('number', 'New position within its level'),
+    parentStepId: prop('string', 'New parent step ID, or empty string to lift it to the top level'),
+    assigneeId: prop('string', 'Team member ID to own the step, or empty string to clear'),
+  }, ['requestId', 'stepId']),
+  tool('delete_request_step', 'Delete a workflow step and every step nested under it. DESTRUCTIVE: confirm with the user before calling.', {
+    requestId: prop('string', 'Request ID the step belongs to'),
+    stepId: prop('string', 'Step ID'),
+  }, ['requestId', 'stepId']),
+
+  // ── Request time and files ────────────────────────────────────────────
+  tool('list_request_time_entries', 'List the time logged against one request, with who logged it', {
+    requestId: prop('string', 'Request ID'),
+  }, ['requestId']),
+  tool('log_request_time', 'Log time against a request. Defaults the team member to the calling identity when none is given.', {
+    requestId: prop('string', 'Request ID'),
+    hours: prop('number', 'Hours worked, must be greater than 0'),
+    description: prop('string', 'What the time was spent on'),
+    billable: prop('boolean', 'Whether the entry is billable (default true)'),
+    teamMemberId: prop('string', 'Team member ID the entry belongs to'),
+  }, ['requestId', 'hours']),
+  tool('list_request_files', 'List the files attached to one request, with uploader and size', {
+    requestId: prop('string', 'Request ID'),
+  }, ['requestId']),
+
+  // ── Kanban columns ────────────────────────────────────────────────────
+  tool('list_kanban_columns', 'List the request board columns. Pass orgId for one client\'s board; it falls back to the global set with inherited:true when that client has none of its own.', {
+    orgId: prop('string', 'Client organisation ID for a per-client board'),
+  }),
+  tool('create_kanban_column', 'Create a board column, clone the global board for one client, or seed the default global board. Exactly one mode per call.', {
+    label: prop('string', 'Column label, e.g. "In Review". Required unless cloning or seeding.'),
+    statusValue: prop('string', 'The requests.status value this column holds. Defaults to a slug of the label.'),
+    colour: prop('string', 'Hex colour for the column marker'),
+    position: prop('number', 'Display order, lowest first'),
+    orgId: prop('string', 'Client organisation ID for a per-client column, omit for the global board'),
+    cloneFromGlobal: prop('boolean', 'True with orgId copies the global board to that client (no-op when they already have columns)'),
+    seedDefaults: prop('boolean', 'True installs the default global board when no global columns exist'),
+  }),
+  tool('update_kanban_column', 'Update one board column: label, colour, position or status value', {
+    columnId: prop('string', 'Kanban column ID'),
+    label: prop('string', 'New label'),
+    colour: prop('string', 'New hex colour'),
+    position: prop('number', 'New display order'),
+    statusValue: prop('string', 'New requests.status value this column holds'),
+  }, ['columnId']),
+  tool('delete_kanban_column', 'Delete a board column. Refuses with 409 while requests still sit in it. DESTRUCTIVE: confirm with the user before calling.', {
+    columnId: prop('string', 'Kanban column ID'),
+  }, ['columnId']),
 
   // ── Read: Tasks ───────────────────────────────────────────────────────
   tool('list_tasks', 'List tasks with optional filters. Decision #046: tasks are always Tahi-internal. Filter by orgId for client-specific tasks; omit both orgId and type for everything.', {
@@ -1239,6 +1321,12 @@ const TOOLS: ToolDef[] = [
     messages: { type: 'array', items: { type: 'object', properties: { role: { type: 'string' }, content: { type: 'string' } } }, description: 'Conversation history (pass full array each call)' },
     context: { type: 'object', properties: { orgId: { type: 'string' }, speaker: { type: 'string' }, planType: { type: 'string' } }, description: 'Optional context: orgId the request is for, speaker ("client" or "admin"), planType' },
   }, ['messages']),
+  tool('ai_triage_request', 'Suggest how to route one request: assignee, priority, track and a one-line reason. Returns suggestions only and never mutates the request; apply them with assign_request and update_request_fields.', {
+    requestId: prop('string', 'Request ID to triage'),
+  }, ['requestId']),
+  tool('ai_draft_request_reply', 'Draft a reply for a request thread, grounded in the request, the client and the recent thread. Returns draft text only and posts nothing; post it with post_request_message once a human has read it.', {
+    requestId: prop('string', 'Request ID to draft a reply for'),
+  }, ['requestId']),
 
   // ── Finance reporting (Phase 10) ──────────────────────────────────
   tool('get_invoice_aging', 'Outstanding invoices grouped by aging bucket (current/30/60/90+ days), in NZD'),
@@ -1576,19 +1664,102 @@ async function executeTool(
       const patch: Record<string, unknown> = {}
       if (s('category')) patch.category = s('category')
       if (s('priority')) patch.priority = s('priority')
-      // '' clears the due date (the tool schema cannot express null).
+      // '' clears the date (the tool schema cannot express null).
+      if (typeof args.startDate === 'string') patch.startDate = args.startDate || null
       if (typeof args.dueDate === 'string') patch.dueDate = args.dueDate || null
       // 0 clears the estimate for the same reason.
       if (typeof args.estimatedHours === 'number') patch.estimatedHours = args.estimatedHours || null
+      // '' unlinks the capacity track.
+      if (typeof args.trackId === 'string') patch.trackId = args.trackId || null
+      // Checklists travel as a JSON string, the shape the detail rail PATCHes.
+      if (typeof args.checklists === 'string') patch.checklists = args.checklists
       // Client visibility: true removes the request from the client portal.
       if (typeof args.isInternal === 'boolean') patch.isInternal = args.isInternal
       if (Object.keys(patch).length === 0) throw new Error('Pass at least one field to update')
       return json(await apiWrite(`/api/admin/requests/${s('requestId')}`, token, 'PATCH', patch))
     }
     case 'post_request_message':
+      // The route reads `body`, not `content`. The tool keeps `content` as its
+      // public argument name and translates here; sending `content` on the wire
+      // 400d every call with "Message body or at least one attachment is required".
       return json(await apiWrite(`/api/admin/requests/${s('requestId')}/messages`, token, 'POST', {
-        content: s('content'), isInternal: args.isInternal ?? false,
+        body: s('content'), isInternal: args.isInternal ?? false,
       }))
+    case 'bulk_update_request_status': {
+      const ids = Array.isArray(args.requestIds) ? args.requestIds : []
+      if (ids.length === 0) throw new Error('requestIds is required and must not be empty')
+      const patch: Record<string, unknown> = { ids }
+      if (s('status')) patch.status = s('status')
+      // '' unassigns, matching the bulk bar's Clear assignee.
+      if (typeof args.assigneeId === 'string') patch.assigneeId = args.assigneeId || null
+      if (args.archived === true) patch.archived = true
+      if (Object.keys(patch).length === 1) throw new Error('Pass status, assigneeId or archived')
+      return json(await apiWrite('/api/admin/requests/bulk', token, 'PATCH', patch))
+    }
+    case 'bulk_create_requests': {
+      const orgIds = Array.isArray(args.orgIds) ? args.orgIds : []
+      if (orgIds.length === 0) throw new Error('orgIds is required and must not be empty')
+      return json(await apiWrite('/api/admin/requests/bulk', token, 'POST', {
+        orgIds,
+        title: s('title'),
+        category: s('category'),
+        type: s('type'),
+        description: s('description'),
+        isInternal: args.isInternal ?? false,
+      }))
+    }
+
+    // ── Request workflow steps ────────────────────────────────────────
+    case 'create_request_step':
+      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/steps`, token, 'POST', {
+        title: s('title'),
+        description: s('description'),
+        parentStepId: s('parentStepId'),
+        orderIndex: typeof args.orderIndex === 'number' ? args.orderIndex : undefined,
+      }))
+    case 'update_request_step': {
+      const patch: Record<string, unknown> = {}
+      if (s('title')) patch.title = s('title')
+      if (typeof args.description === 'string') patch.description = args.description || null
+      if (typeof args.completed === 'boolean') patch.completed = args.completed
+      if (typeof args.orderIndex === 'number') patch.orderIndex = args.orderIndex
+      // '' lifts the step to the top level.
+      if (typeof args.parentStepId === 'string') patch.parentStepId = args.parentStepId || null
+      if (typeof args.assigneeId === 'string') patch.assigneeId = args.assigneeId || null
+      if (Object.keys(patch).length === 0) throw new Error('Pass at least one field to update')
+      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/steps/${s('stepId')}`, token, 'PATCH', patch))
+    }
+    case 'delete_request_step':
+      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/steps/${s('stepId')}`, token, 'DELETE'))
+
+    // ── Request time and files ────────────────────────────────────────
+    case 'list_request_time_entries':
+      return json(await apiGet(`/api/admin/requests/${s('requestId')}/time-entries`, token))
+    case 'log_request_time':
+      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/time-entries`, token, 'POST', {
+        hours: args.hours,
+        description: s('description'),
+        billable: args.billable ?? true,
+        teamMemberId: s('teamMemberId'),
+      }))
+    case 'list_request_files':
+      return json(await apiGet(`/api/admin/requests/${s('requestId')}/files`, token))
+
+    // ── Kanban columns ────────────────────────────────────────────────
+    case 'list_kanban_columns': {
+      const p: Record<string, string> = {}
+      if (s('orgId')) p.orgId = s('orgId')!
+      return json(await apiGet('/api/admin/kanban-columns', token, p))
+    }
+    case 'create_kanban_column':
+      return json(await apiWrite('/api/admin/kanban-columns', token, 'POST', args as Record<string, unknown>))
+    case 'update_kanban_column': {
+      const { columnId, ...patch } = args
+      if (!columnId) throw new Error('columnId is required')
+      return json(await apiWrite(`/api/admin/kanban-columns/${columnId}`, token, 'PATCH', patch))
+    }
+    case 'delete_kanban_column':
+      return json(await apiWrite(`/api/admin/kanban-columns/${s('columnId')}`, token, 'DELETE'))
 
     // ── Tasks ─────────────────────────────────────────────────────────
     case 'list_tasks': {
@@ -2247,6 +2418,10 @@ async function executeTool(
       return json(await apiWrite('/api/admin/ai/task-wizard', token, 'POST', args as Record<string, unknown>))
     case 'ai_request_wizard':
       return json(await apiWrite('/api/admin/ai/request-wizard', token, 'POST', args as Record<string, unknown>))
+    case 'ai_triage_request':
+      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/triage`, token, 'POST'))
+    case 'ai_draft_request_reply':
+      return json(await apiWrite(`/api/admin/requests/${s('requestId')}/draft-reply`, token, 'POST'))
 
     // ── Finance reporting (Phase 10) ──────────────────────────────────
     case 'get_invoice_aging':

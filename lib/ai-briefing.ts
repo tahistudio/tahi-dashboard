@@ -274,7 +274,44 @@ Maximum 5 items for today, 8 items for this week.`
 
 // ── Response parser ──────────────────────────────────────────────────────────
 
-function parseBriefingResponse(text: string): BriefingResponse {
+/** The categories a briefing item may carry. Anything else drops the item. */
+const BRIEFING_CATEGORIES: readonly BriefingItem['category'][] = [
+  'invoice', 'request', 'health', 'pipeline', 'capacity', 'task',
+]
+
+/** The priorities a briefing item may carry. Anything else drops the item. */
+const BRIEFING_PRIORITIES: readonly BriefingItem['priority'][] = ['high', 'medium', 'low']
+
+/** The dashboard sections a briefing row is allowed to link into. */
+const BRIEFING_HREF_ROOTS: readonly string[] = [
+  'requests', 'invoices', 'clients', 'tasks', 'deals', 'leads', 'time',
+  'reports', 'financial-reports', 'calls', 'contracts', 'proposals',
+  'schedules', 'messages', 'overview', 'capacity', 'tracks', 'reviews',
+  'files', 'docs', 'team', 'billing',
+]
+
+export function isBriefingCategory(value: string): value is BriefingItem['category'] {
+  return (BRIEFING_CATEGORIES as readonly string[]).includes(value)
+}
+
+export function isBriefingPriority(value: string): value is BriefingItem['priority'] {
+  return (BRIEFING_PRIORITIES as readonly string[]).includes(value)
+}
+
+/**
+ * Client-authored text reaches this prompt (stagnant request titles go in
+ * verbatim), so a link target coming back out of the model is untrusted. Only
+ * a same-origin path into a known dashboard section is kept: no scheme, no
+ * protocol-relative "//host", no traversal, no quotes.
+ */
+export function isSafeBriefingHref(value: string): boolean {
+  if (!value.startsWith('/') || value.startsWith('//')) return false
+  if (value.includes('..') || /["'<>\\\s]/.test(value)) return false
+  const root = value.slice(1).split(/[/?#]/)[0]
+  return BRIEFING_HREF_ROOTS.includes(root)
+}
+
+export function parseBriefingResponse(text: string): BriefingResponse {
   const summary = text.match(/<summary>([\s\S]*?)<\/summary>/)?.[1]?.trim() ?? 'No briefing available'
 
   const parseItems = (section: string): BriefingItem[] => {
@@ -285,12 +322,18 @@ function parseBriefingResponse(text: string): BriefingResponse {
     const itemRegex = /<item\s+category="([^"]*?)"\s+priority="([^"]*?)"(?:\s+href="([^"]*?)")?\s*>\s*<title>([\s\S]*?)<\/title>\s*<detail>([\s\S]*?)<\/detail>\s*<\/item>/g
     let match
     while ((match = itemRegex.exec(sectionMatch[1])) !== null) {
+      const category = match[1].trim()
+      const priority = match[2].trim()
+      // A steered category breaks every lookup keyed on the union, so the row
+      // goes rather than landing in the cache as a lie.
+      if (!isBriefingCategory(category) || !isBriefingPriority(priority)) continue
+      const href = match[3]?.trim()
       items.push({
-        category: match[1] as BriefingItem['category'],
-        priority: match[2] as BriefingItem['priority'],
+        category,
+        priority,
         title: match[4].trim(),
         detail: match[5].trim(),
-        href: match[3]?.trim() || undefined,
+        href: href && isSafeBriefingHref(href) ? href : undefined,
       })
     }
     return items

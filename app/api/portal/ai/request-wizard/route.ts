@@ -18,6 +18,10 @@
 
 import { getRequestAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
+import { HAIKU_MODEL } from '@/lib/ai-models'
+import { db } from '@/lib/db'
+import { schema } from '@/db/d1'
+import { eq } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,8 +50,8 @@ interface RequestDraft {
   category: 'design' | 'development' | 'content' | 'strategy'
   type: 'small_task' | 'large_task' | 'bug_fix' | 'new_feature'
   priority: 'standard' | 'high'
-  /** Included for prompt \u2194 UI consistency with the admin wizard. The
-   *  portal submit path ignores this value (clients don't set internal hours). */
+  /** Included so the prompt and the UI stay consistent with the admin wizard.
+   *  The portal submit path ignores this value (clients don't set internal hours). */
   estimatedHours: number
 }
 
@@ -55,6 +59,42 @@ interface WizardResponse {
   reply: string
   requests?: RequestDraft[]
   done: boolean
+  /** True when the answer came from the keyword fallback, not the model. */
+  degraded?: true
+  reason?: 'ai_unavailable'
+}
+
+// \u2500\u2500 Failure payloads \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// This endpoint is client-facing, so a model that was never reached must not
+// come back as a 200 carrying a draft built by regex from the client's own
+// words. The panel renders `error` and paints a degraded answer as a notice.
+
+const DEGRADED = { degraded: true, reason: 'ai_unavailable' } as const
+
+const AI_UNAVAILABLE = {
+  error: 'The AI assistant could not be reached. Try again shortly, or write the request yourself.',
+  reason: 'ai_unavailable',
+} as const
+
+const AI_RATE_LIMITED = {
+  error: 'The AI assistant is busy right now. Wait a moment and send that again.',
+  reason: 'ai_rate_limited',
+} as const
+
+// \u2500\u2500 Per-user daily cap \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// One Anthropic call per turn with nothing counting them is invisible spend the
+// moment the wizard opens to clients. A counter row per user per UTC day is the
+// cheapest brake the repo can carry today (no KV binding, no rate-limit helper
+// in lib/): read, compare, increment. Two turns landing in the same millisecond
+// can both read the same count, which costs at most one extra call over the cap.
+// The rows are keyed by day and never read again after it, so a periodic sweep
+// of `ai_wizard_turns:%` keys older than a week is all the housekeeping needed.
+
+const DAILY_TURN_CAP = 40
+const TURN_COUNTER_PREFIX = 'ai_wizard_turns'
+
+function turnCounterKey(userId: string, now: Date): string {
+  return `${TURN_COUNTER_PREFIX}:${userId}:${now.toISOString().slice(0, 10)}`
 }
 
 // ── System prompt ─────────────────────────────────────────────────────────────
@@ -70,7 +110,7 @@ BRAND VOICE:
 
 YOU ARE SPEAKING TO A CLIENT (NOT INTERNAL TAHI STAFF):
 - Never mention pricing, hour estimates, plan tiers, or internal tracks.
-- Never refer to "tasks" \u2014 they're "requests" from the client's side.
+- Never refer to "tasks", they are "requests" from the client's side.
 - Never say things like "our team will", "we'll get the designer on this", or anything that assumes internal staffing decisions. Just help scope the work.
 - If the client asks about cost or timeline, tell them the Tahi team will follow up once the request is submitted.
 
@@ -145,7 +185,7 @@ async function callClaudeHaiku(
     : systemPrompt
 
   const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+    model: HAIKU_MODEL,
     max_tokens: 1024,
     system: fullSystem,
     messages,
@@ -329,9 +369,38 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // No key configured: the model was never reached, so the keyword draft goes
+  // back labelled rather than dressed up as model output.
   if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json(handleDeterministic(messages))
+    return NextResponse.json({ ...handleDeterministic(messages), ...DEGRADED })
   }
+
+  // Spend brake before the call, not after it.
+  const now = new Date()
+  const counterKey = turnCounterKey(userId, now)
+  const database = await db()
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  const [counter] = await drizzle
+    .select({ value: schema.settings.value })
+    .from(schema.settings)
+    .where(eq(schema.settings.key, counterKey))
+    .limit(1)
+  const turnsToday = Number.parseInt(counter?.value ?? '0', 10) || 0
+  if (turnsToday >= DAILY_TURN_CAP) {
+    return NextResponse.json(
+      {
+        error: "You have reached today's limit for AI drafting. Write the request yourself, or try again later.",
+        reason: 'ai_daily_cap',
+      },
+      { status: 429 },
+    )
+  }
+  const nextCount = String(turnsToday + 1)
+  const stamp = now.toISOString()
+  await drizzle
+    .insert(schema.settings)
+    .values({ key: counterKey, value: nextCount, updatedAt: stamp })
+    .onConflictDoUpdate({ target: schema.settings.key, set: { value: nextCount, updatedAt: stamp } })
 
   const contextNote = context?.planType
     ? `The client's plan is "${context.planType}". Do not mention this to the user.`
@@ -340,7 +409,9 @@ export async function POST(req: NextRequest) {
   try {
     const anthropicMessages: AnthropicMessage[] = messages.map(m => ({ role: m.role, content: m.content }))
     const responseText = await callClaudeHaiku(anthropicMessages, SYSTEM_PROMPT, contextNote)
-    if (!responseText) return NextResponse.json(handleDeterministic(messages))
+    // Empty text is a failed call, not an answer. Say so rather than handing a
+    // client a keyword draft under the model's name.
+    if (!responseText) return NextResponse.json(AI_UNAVAILABLE, { status: 502 })
     const { reply, requests } = parseRequestsFromResponse(responseText)
     const response: WizardResponse = {
       reply: reply || 'Could you tell me a bit more about what you need?',
@@ -352,9 +423,9 @@ export async function POST(req: NextRequest) {
     console.error('Claude Haiku API error:', err)
     if (err instanceof Error && 'status' in err) {
       const statusErr = err as Error & { status: number }
-      if (statusErr.status === 429) return NextResponse.json(handleDeterministic(messages))
+      if (statusErr.status === 429) return NextResponse.json(AI_RATE_LIMITED, { status: 429 })
     }
-    return NextResponse.json(handleDeterministic(messages))
+    return NextResponse.json(AI_UNAVAILABLE, { status: 502 })
   }
 }
 
