@@ -2,8 +2,10 @@
 
 /**
  * The Requests rail frame: the 232px rail beside the main column, the view
- * switcher / search / count row, the active-filter chips, and the mobile
- * Filters sheet that stands in for the rail below 1024px.
+ * switcher / search / count row, the active-filter chips (which also carry
+ * Save as default below 1024px, where the rail's own foot is inside the
+ * sheet), and the mobile Filters sheet that stands in for the rail below
+ * 1024px.
  *
  * Also owns `useRequestsRailState`, the per-user preference layer behind it:
  * `requests.view`, `requests.savedView`, `requests.filters`, `requests.sort`
@@ -406,13 +408,24 @@ export function RequestsRailLayout({
           </span>
         </div>
 
-        {chips.length > 0 && (
-          <div className="flex items-center flex-wrap" style={{ gap: '0.5rem' }}>
-            {chips.map(chip => (
-              <FilterChip key={chip.key} chip={chip} onClear={() => onClearChip(chip)} />
-            ))}
+        {/* Chips, plus Save as default below lg. Above it the rail's own foot
+            carries that control; below it the rail is inside the Filters
+            sheet, and a phone should not have to open a sheet to keep the
+            view it has just set up. The row is here even with no chips at
+            that width, which is exactly when it is only the save affordance. */}
+        <div
+          className={chips.length > 0
+            ? 'flex items-center flex-wrap'
+            : 'flex lg:hidden items-center flex-wrap'}
+          style={{ gap: '0.5rem' }}
+        >
+          {chips.map(chip => (
+            <FilterChip key={chip.key} chip={chip} onClear={() => onClearChip(chip)} />
+          ))}
+          <div className="lg:hidden inline-flex items-center" style={{ marginLeft: 'auto' }}>
+            <SaveDefaultControl isDefault={railProps.isDefault} onSave={railProps.onSaveDefault} touch />
           </div>
-        )}
+        </div>
 
         {children}
       </div>
