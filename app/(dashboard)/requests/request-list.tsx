@@ -700,7 +700,8 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   )
 
   // Inline status change from list view. Optimistically patches the SWR cache,
-  // fires the PUT, and reverts by revalidating from the server on failure.
+  // fires the PATCH (the route has no PUT; the old PUT came back 405 and the
+  // optimistic row quietly reverted), and revalidates on failure.
   const handleStatusChange = useCallback(async (requestId: string, newStatus: string) => {
     const prev = requestsData
     const optimistic = prev
@@ -709,7 +710,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     mutateRequests(optimistic, { revalidate: false })
     try {
       const res = await fetch(apiPath(`/api/admin/requests/${requestId}`), {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       })

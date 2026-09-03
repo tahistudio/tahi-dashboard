@@ -6,6 +6,14 @@ import { eq, and, asc, count, gt, isNull, inArray } from 'drizzle-orm'
 import { notifyOrgContacts, notifyTeamMember } from '@/lib/notifications'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { dispatchDomainEvent } from '@/lib/events'
+import { REQUEST_STATUSES } from '@/lib/status-config'
+
+// The two vocabularies a PATCH may write. Anything else is a client bug or a
+// probe, and used to land in the row verbatim.
+// 'draft' is a real request state (the rail filters on it and the detail
+// shows an off-pipeline note) even though it is not a pipeline column.
+const PATCHABLE_STATUSES = new Set<string>([...REQUEST_STATUSES.map(s => s.value), 'draft'])
+const PATCHABLE_PRIORITIES = new Set<string>(['standard', 'high'])
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -219,10 +227,18 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const patch: Record<string, unknown> = { updatedAt: now }
 
   if (body.status !== undefined) {
+    if (!PATCHABLE_STATUSES.has(body.status)) {
+      return NextResponse.json({ error: `Unknown status: ${body.status}` }, { status: 400 })
+    }
     patch.status = body.status
     if (body.status === 'delivered') patch.deliveredAt = now
   }
-  if (body.priority !== undefined) patch.priority = body.priority
+  if (body.priority !== undefined) {
+    if (!PATCHABLE_PRIORITIES.has(body.priority)) {
+      return NextResponse.json({ error: `Unknown priority: ${body.priority}` }, { status: 400 })
+    }
+    patch.priority = body.priority
+  }
   // Category is edited in place from the detail rail's Details card.
   if (body.category !== undefined) patch.category = body.category
   if ('assigneeId' in body) patch.assigneeId = body.assigneeId ?? null
