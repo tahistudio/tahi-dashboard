@@ -7,6 +7,7 @@ import { resolveAccessScoping } from '@/lib/access-scoping'
 import { dispatchDomainEvent } from '@/lib/events'
 import { loadRequestParticipants } from '@/lib/request-participants'
 import { REQUEST_STATUSES } from '@/lib/status-config'
+import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
 /** Statuses a brand new request may be created at. The request vocabulary
  *  minus the two ends of its life: delivered and cancelled both carry side
@@ -183,7 +184,7 @@ export async function POST(req: NextRequest) {
       ${title.trim()},
       ${type ?? 'small_task'},
       ${category ?? 'development'},
-      ${description ?? null},
+      ${description ? sanitizeRichText(description) : null},
       ${status},
       ${priority ?? 'standard'},
       ${startDate ?? null},

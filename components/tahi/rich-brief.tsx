@@ -31,6 +31,7 @@ import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { Bold, Italic, List, Link as LinkIcon } from 'lucide-react'
+import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
 // ── Pure helpers ───────────────────────────────────────────────────────────────
 
@@ -329,8 +330,10 @@ export function RichBrief({ value, onChange, placeholder, ariaLabel }: RichBrief
 /**
  * A saved brief, read. Drop this in wherever a stored `requests.description`
  * is rendered so bullets, links and emphasis survive the trip out of the
- * editor. The HTML is trusted the same way the surrounding page already
- * trusts it: sanitise on the way into the database, not here.
+ * editor. The portal POST sanitises on the way in; this component runs the
+ * same allowlist again on the way out, so a description that arrived through
+ * any other writer (the admin routes, the MCP worker, an AI draft, an old
+ * plain-text row) can never carry markup past the allowlist into the page.
  */
 export function RichBriefProse({
   html, className, style,
@@ -345,7 +348,7 @@ export function RichBriefProse({
       <div
         className={['tahi-brief-prose', className].filter(Boolean).join(' ')}
         style={style}
-        dangerouslySetInnerHTML={{ __html: html }}
+        dangerouslySetInnerHTML={{ __html: sanitizeRichText(html) }}
       />
     </>
   )
