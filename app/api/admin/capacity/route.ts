@@ -10,6 +10,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, ne, asc, gte, desc } from 'drizzle-orm'
@@ -18,8 +19,10 @@ import { getTrackEntitlements, getTracksConfigSummary, resolveTracksConfig, buil
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 export async function GET(req: NextRequest) {
-  const { orgId: authOrgId } = await getRequestAuth(req)
+  const { orgId: authOrgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(authOrgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId: authOrgId }, 'capacity')
+  if (featureDenied) return featureDenied
 
   const targetOrgId = new URL(req.url).searchParams.get('orgId')
   if (!targetOrgId) return NextResponse.json({ error: 'orgId required' }, { status: 400 })
@@ -144,8 +147,10 @@ export async function GET(req: NextRequest) {
 
 // PATCH : reorder a request in the queue
 export async function PATCH(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'capacity')
+  if (featureDenied) return featureDenied
 
   const body = await req.json() as { requestId: string; queueOrder: number }
   if (!body.requestId || body.queueOrder === undefined) {

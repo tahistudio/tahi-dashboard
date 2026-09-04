@@ -31,7 +31,7 @@
  */
 
 import { schema } from '@/db/d1'
-import { eq, and, isNull, inArray } from 'drizzle-orm'
+import { eq, and, or, isNull, inArray } from 'drizzle-orm'
 import {
   SERVICE_USER_ID,
   hasAnyActiveRoleAssignment,
@@ -67,7 +67,7 @@ const FEATURE_RESOURCE: Readonly<Record<string, string>> = {
   sales_analytics: 'sales_analytics',
   affiliates: 'affiliates',
   announcements: 'announcements',
-  // The next five have no rows in the seeded permission catalogue (migrate
+  // The next six have no rows in the seeded permission catalogue (migrate
   // route seed 0041), so no role baseline can grant them: every team_member
   // is denied unless a feature_visibility allow lifts one. Deny by default
   // per audit finding T1.18.
@@ -76,9 +76,15 @@ const FEATURE_RESOURCE: Readonly<Record<string, string>> = {
   content_studio: 'content_studio',
   social: 'social',
   reviews: 'reviews',
+  // Cash, MRR, runway and reserves are studio-private: NOT the same resource as
+  // the operational `reports`. Seed 0041 grants reports.view to project_manager
+  // and to viewer (which takes every .view row), so sharing the resource would
+  // hand a first hire the money screens the moment they get either role. Its own
+  // unseeded resource means only admin+ (who pass by level) or an explicit
+  // feature_visibility allow can see it.
+  financial_reports: 'financial_reports',
   time: 'time_entries',
   reports: 'reports',
-  financial_reports: 'reports',
   team: 'team',
   settings: 'settings',
   docs: 'docs',
@@ -245,6 +251,32 @@ const SUPER_ADMIN_ROLE = 'super_admin'
 const ADMIN_ROLE = 'admin'
 
 /**
+ * Resolve whatever org id a caller carries into the D1 `organisations.id` that
+ * feature_visibility rows and `contacts.orgId` are keyed on.
+ *
+ * Two shapes reach the resolver and both must land on the same rows:
+ *   - the D1 uuid, from `getPortalAuth` (portal API routes), and
+ *   - the raw Clerk org id, from `getServerAuth` (dashboard layout, page guards).
+ * One query matching either column covers both; an exact `id` hit wins so an
+ * org whose D1 pk happens to equal another org's `clerkOrgId` cannot shadow it.
+ * Returns `null` when no org matches, which leaves the caller on the client
+ * default (allow) exactly as before this lookup existed.
+ */
+async function resolveClientOrgId(drizzle: D1, orgId: string): Promise<string | null> {
+  const rows = await drizzle
+    .select({ id: schema.organisations.id, clerkOrgId: schema.organisations.clerkOrgId })
+    .from(schema.organisations)
+    .where(or(
+      eq(schema.organisations.id, orgId),
+      eq(schema.organisations.clerkOrgId, orgId),
+    ))
+    .limit(2)
+  const exact = rows.find(r => r.id === orgId)
+  if (exact) return exact.id
+  return rows[0]?.id ?? null
+}
+
+/**
  * Resolve a Clerk (userId, orgId) into a full access object. Reads team
  * membership, roles, role permissions, and feature_visibility overrides.
  */
@@ -259,14 +291,24 @@ export async function resolvePermissions(
   // ── Client ──
   if (!isTeam) {
     const overrides = new Map<string, Effect>()
-    if (auth.orgId) {
+    // The caller's org arrives in one of TWO shapes and both must land on the
+    // same rows: portal API routes pass the resolved D1 `organisations.id`
+    // (getPortalAuth already looked it up), while the dashboard layout and the
+    // page guards pass the RAW CLERK org id (getServerAuth). feature_visibility
+    // subject ids and contacts.orgId are keyed on the D1 id only, so resolve it
+    // here, once, for both queries below. Without this an org provisioned the
+    // modern way (uuid pk + clerkOrgId link) matched nothing on the page path:
+    // the nav and the page failed open while the API 403'd, which is a dead
+    // surface instead of a hidden one.
+    const orgId = auth.orgId ? await resolveClientOrgId(drizzle, auth.orgId) : null
+    if (orgId) {
       // Org-level overrides are the baseline for everyone at this org.
       const orgRows = await drizzle
         .select({ featureKey: schema.featureVisibility.featureKey, effect: schema.featureVisibility.effect })
         .from(schema.featureVisibility)
         .where(and(
           eq(schema.featureVisibility.subjectType, 'organisation'),
-          eq(schema.featureVisibility.subjectId, auth.orgId),
+          eq(schema.featureVisibility.subjectId, orgId),
         ))
       for (const r of orgRows) overrides.set(r.featureKey, r.effect as Effect)
 
@@ -280,7 +322,7 @@ export async function resolvePermissions(
           .select({ id: schema.contacts.id })
           .from(schema.contacts)
           .where(and(
-            eq(schema.contacts.orgId, auth.orgId),
+            eq(schema.contacts.orgId, orgId),
             eq(schema.contacts.clerkUserId, auth.userId),
           ))
           .limit(1)
@@ -407,10 +449,11 @@ export async function resolvePermissions(
  * check, so a deny set in the permissions builder is enforced on the data and
  * not only hidden in the nav (audit item T1.18).
  *
- * `orgId` MUST be the resolved D1 organisation id (what `getPortalAuth` returns
- * as `orgId`), because that is the `subject_id` the builder writes for an
- * `organisation` row. Per-contact rows refine the org baseline and are resolved
- * inside `resolvePermissions` from the caller's Clerk user id.
+ * `orgId` may be EITHER the D1 organisation id (what `getPortalAuth` returns) or
+ * the raw Clerk org id (what `getServerAuth` returns): `resolvePermissions`
+ * normalises it to the D1 id, which is the `subject_id` the builder writes for
+ * an `organisation` row. Per-contact rows refine the org baseline and are
+ * resolved inside `resolvePermissions` from the caller's Clerk user id.
  *
  * Client features are ON by default: this returns false only when a row (org or
  * contact) explicitly denies the feature or one of its ancestors, or when the

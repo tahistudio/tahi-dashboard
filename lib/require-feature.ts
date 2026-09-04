@@ -44,14 +44,19 @@ import type { RequestAuthResult } from '@/lib/server-auth'
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 /**
- * Guard a caller against a FEATURE_TREE key.
+ * Guard a caller against a FEATURE_TREE key, or against SEVERAL at once.
  *
- * @returns a 403 `NextResponse` if the caller cannot see `featureKey`, else
- *          `null` (allowed - continue the handler).
+ * Pass an array when a route straddles two surfaces (POST /api/admin/derive-billing
+ * rewrites client billing fields AND is a money operation): every key must pass
+ * and they share ONE `resolvePermissions` call, so the stricter gate costs no
+ * extra D1 reads.
+ *
+ * @returns a 403 `NextResponse` if the caller cannot see `featureKey` (or any
+ *          key in the array), else `null` (allowed - continue the handler).
  */
 export async function requireFeature(
   auth: Pick<RequestAuthResult, 'userId' | 'orgId'>,
-  featureKey: string,
+  featureKey: string | readonly string[],
 ): Promise<NextResponse | null> {
   // INVARIANT: MCP / service-to-service token ALWAYS passes. `getRequestAuth`
   // mints userId 'api-service' ONLY for a verified TAHI_API_TOKEN, and MCP
@@ -75,7 +80,8 @@ export async function requireFeature(
   // assignment exists anywhere) passes team/shared features via `can`; team
   // members are gated by their role baseline + feature_visibility overrides,
   // and a roleless member on a seeded workspace is denied every key.
-  if (can(access, featureKey)) return null
+  const keys = typeof featureKey === 'string' ? [featureKey] : featureKey
+  if (keys.every(key => can(access, key))) return null
 
   return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 }
@@ -83,7 +89,11 @@ export async function requireFeature(
 /** The subset of `getPortalAuth`'s result a portal feature check needs. */
 export interface PortalFeatureAuth {
   userId: string | null
-  /** The RESOLVED D1 organisation id (getPortalAuth's `orgId`). */
+  /**
+   * The RESOLVED D1 organisation id (getPortalAuth's `orgId`). A raw Clerk org
+   * id also resolves correctly (`resolvePermissions` normalises either shape),
+   * which is what keeps the nav, the page guards and this route guard agreeing.
+   */
   orgId: string | null
   /** The caller's Clerk org, which is the Tahi org when an admin is previewing. */
   clerkOrgId?: string | null
@@ -111,6 +121,15 @@ export interface PortalFeatureAuth {
  *   - a caller whose Clerk org is the Tahi org passes. That is an admin
  *     previewing a client portal (`impersonating`), and previewing is
  *     read-only elsewhere, so it can only ever read.
+ *
+ * KNOWN RESIDUE (pre-existing, out of this slice): that second short-circuit is
+ * Tahi-org MEMBERSHIP, and the `tahi-impersonate-org` cookie `getPortalAuth`
+ * trusts is written client-side by impersonation-banner.tsx rather than by a
+ * permission-checked endpoint. So a roleless or narrowly scoped team member who
+ * is now refused every admin route can still set that cookie by hand and READ a
+ * client's portal data. Closing it means gating the impersonation branch on an
+ * actual grant and moving the cookie write behind an API route that checks the
+ * same thing.
  *
  * @returns a 403 `NextResponse` when the client's org (or their own contact
  *          row) denies `featureKey`, else `null` (allowed - continue).

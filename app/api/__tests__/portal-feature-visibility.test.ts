@@ -38,6 +38,10 @@ type Row = Record<string, unknown>
  */
 function makeDb(orgRows: Row[], contactRows: Row[] = [], contactRules: Row[] = []) {
   const queues = new Map<unknown, Row[][]>([
+    // The org row the resolver normalises against: portal routes hand it the D1
+    // id, the layout and the page guards hand it the Clerk id, and both land on
+    // the same feature_visibility rows because of this lookup.
+    [schema.organisations, [[{ id: CLIENT_ORG, clerkOrgId: 'clerk-org-client' }]]],
     [schema.featureVisibility, [orgRows, contactRules]],
     [schema.contacts, [contactRows]],
   ])

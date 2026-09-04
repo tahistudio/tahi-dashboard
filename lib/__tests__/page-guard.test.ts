@@ -140,3 +140,36 @@ describe('requirePageManage', () => {
     expect(await redirectedTo(() => requirePageManage())).toBeNull()
   })
 })
+
+describe('requirePageFeature - authentication and the client branch', () => {
+  it('redirects an anonymous caller to /sign-in instead of failing open', async () => {
+    // redirect() signals by THROWING NEXT_REDIRECT. It used to be thrown inside
+    // the fail-open catch, which swallowed it and rendered the page for someone
+    // with no session at all. The auth check now sits outside that catch.
+    vi.mocked(getServerAuth).mockResolvedValue({ userId: null, orgId: null } as never)
+    expect(await redirectedTo(() => requirePageFeature('financial_reports'))).toBe('/sign-in')
+    expect(await redirectedTo(() => requirePageManage())).toBe('/sign-in')
+    expect(await redirectedTo(() => requirePageAnyGrant())).toBe('/sign-in')
+    expect(resolvePermissions).not.toHaveBeenCalled()
+  })
+
+  it('fails open when the auth read itself throws', async () => {
+    vi.mocked(getServerAuth).mockRejectedValue(new Error('Clerk unavailable'))
+    expect(await redirectedTo(() => requirePageFeature('financial_reports'))).toBeNull()
+  })
+
+  it('redirects a CLIENT org whose feature_visibility denies the feature', async () => {
+    // The client half of the guard is live because resolvePermissions maps the
+    // Clerk org getServerAuth returns onto the D1 organisations.id the builder
+    // writes. Nav, page and portal API therefore agree.
+    vi.mocked(resolvePermissions).mockResolvedValue({
+      ...base(),
+      level: 'client',
+      audience: 'client',
+      viewableResources: null,
+      overrides: new Map([['tracks', 'deny' as const]]),
+    })
+    expect(await redirectedTo(() => requirePageFeature('tracks'))).toBe('/overview')
+    expect(await redirectedTo(() => requirePageFeature('requests'))).toBeNull()
+  })
+})

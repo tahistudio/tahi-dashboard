@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -15,10 +16,12 @@ type Params = { params: Promise<{ id: string }> }
 
 // ── POST /api/admin/subscriptions/[id]/change-cycle ─────────────────────────
 export async function POST(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'billing')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const body = await req.json() as { newCycle?: string }

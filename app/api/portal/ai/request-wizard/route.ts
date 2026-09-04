@@ -17,6 +17,7 @@
  */
 
 import { getRequestAuth } from '@/lib/server-auth'
+import { requirePortalFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { HAIKU_MODEL } from '@/lib/ai-models'
 import { db } from '@/lib/db'
@@ -378,6 +379,10 @@ export async function POST(req: NextRequest) {
   if (!userId || !orgId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  // A client denied Requests cannot draft one either. `orgId` here is the raw
+  // Clerk org (getRequestAuth); resolvePermissions normalises it to the D1 id.
+  const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId: orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   let body: WizardBody
   try {

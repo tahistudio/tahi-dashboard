@@ -38,6 +38,10 @@ import { GET as exportLeads } from '@/app/api/admin/export/leads/route'
 import { GET as leadsList } from '@/app/api/admin/leads/route'
 import { GET as clientDetail } from '@/app/api/admin/clients/[id]/route'
 import { GET as reportsOverview } from '@/app/api/admin/reports/overview/route'
+import { GET as commitmentsList } from '@/app/api/admin/commitments/route'
+import { GET as subscriptionsList } from '@/app/api/admin/subscriptions/route'
+import { GET as capacityRead } from '@/app/api/admin/capacity/route'
+import { POST as deriveBilling } from '@/app/api/admin/derive-billing/route'
 
 // ── fake D1: every chain resolves to no rows ────────────────────────────────
 
@@ -100,6 +104,18 @@ function asTaskHandler() {
   })
 }
 
+/**
+ * The seeded project_manager / viewer shape: migration 0078 grants them
+ * reports.view (viewer takes every .view row), which used to be enough to read
+ * financial health because `financial_reports` shared the `reports` resource.
+ */
+function asOpsReporter() {
+  vi.mocked(resolvePermissions).mockResolvedValue({
+    ...base(),
+    viewableResources: new Set(['reports', 'requests', 'tasks', 'organisations']),
+  })
+}
+
 const req = (url: string) => new NextRequest('http://localhost:3000' + url)
 const params = (id: string) => ({ params: Promise.resolve({ id }) })
 
@@ -110,6 +126,8 @@ const ROUTES: Array<[string, () => Promise<Response>]> = [
   ['GET /api/admin/leads', () => leadsList(req('/api/admin/leads'))],
   ['GET /api/admin/reports/overview', () => reportsOverview(req('/api/admin/reports/overview'))],
   ['GET /api/admin/clients/[id]', () => clientDetail(req('/api/admin/clients/org-1'), params('org-1'))],
+  ['GET /api/admin/commitments', () => commitmentsList(req('/api/admin/commitments'))],
+  ['GET /api/admin/subscriptions', () => subscriptionsList(req('/api/admin/subscriptions'))],
 ]
 
 beforeEach(() => {
@@ -143,5 +161,45 @@ describe('money and client-data admin routes enforce role', () => {
       const res = await call()
       expect(res.status, name).not.toBe(403)
     }
+  })
+})
+
+describe('the money routes outside the audit parenthetical', () => {
+  it('403s a roleless member on commitments, subscriptions, capacity and derive-billing', async () => {
+    asRoleless()
+    expect((await commitmentsList(req('/api/admin/commitments'))).status).toBe(403)
+    expect((await subscriptionsList(req('/api/admin/subscriptions'))).status).toBe(403)
+    expect((await capacityRead(req('/api/admin/capacity?orgId=org-1'))).status).toBe(403)
+    expect((await deriveBilling(req('/api/admin/derive-billing'))).status).toBe(403)
+  })
+
+  it('403s a scoped task handler on them too', async () => {
+    asTaskHandler()
+    expect((await commitmentsList(req('/api/admin/commitments'))).status).toBe(403)
+    expect((await subscriptionsList(req('/api/admin/subscriptions'))).status).toBe(403)
+    expect((await capacityRead(req('/api/admin/capacity?orgId=org-1'))).status).toBe(403)
+    expect((await deriveBilling(req('/api/admin/derive-billing'))).status).toBe(403)
+  })
+
+  it('403s derive-billing for a role that can see clients but not the money', async () => {
+    // It writes billingModel and retainerStartDate across every org, so it
+    // needs BOTH keys: the per-client sibling clients/[id]/auto-derive gates on
+    // 'clients', and it is a money operation on top.
+    vi.mocked(resolvePermissions).mockResolvedValue({
+      ...base(),
+      viewableResources: new Set(['organisations', 'requests']),
+    })
+    expect((await deriveBilling(req('/api/admin/derive-billing'))).status).toBe(403)
+  })
+})
+
+describe('financial_reports is not the operational reports resource', () => {
+  it('lets an ops reporter read /reports but not the money surfaces', async () => {
+    // The whole point of splitting the resource: seed 0078 hands reports.view
+    // to project_manager and to viewer, and cash / MRR / runway is not that.
+    asOpsReporter()
+    expect((await reportsOverview(req('/api/admin/reports/overview'))).status).not.toBe(403)
+    expect((await commitmentsList(req('/api/admin/commitments'))).status).toBe(403)
+    expect((await deriveBilling(req('/api/admin/derive-billing'))).status).toBe(403)
   })
 })

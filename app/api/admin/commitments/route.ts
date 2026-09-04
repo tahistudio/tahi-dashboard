@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -17,8 +18,10 @@ function isCadence(v: unknown): v is Cadence {
  * Returns all expense commitments, newest first.
  */
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'financial_reports')
+  if (featureDenied) return featureDenied
 
   const drizzle = (await db()) as D1
 
@@ -36,8 +39,10 @@ export async function GET(req: NextRequest) {
  * Body: { name, amount, currency?, cadence?, category?, vendor?, nextDueDate?, notes?, linkedXeroAccount?, active? }
  */
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'financial_reports')
+  if (featureDenied) return featureDenied
 
   const body = await req.json() as Partial<{
     name: string

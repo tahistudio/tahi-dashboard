@@ -158,6 +158,28 @@ describe('requireFeature', () => {
     expect((await requireFeature(auth, 'financial_reports'))?.status).toBe(403)
     expect((await requireFeature(auth, 'clients'))?.status).toBe(403)
   })
+
+  it('requires EVERY key when handed several, on one resolution', async () => {
+    // The shape /api/admin/derive-billing needs: client data AND money.
+    vi.mocked(resolvePermissions).mockResolvedValue({
+      ...base(),
+      viewableResources: new Set(['organisations', 'requests']),
+    })
+    expect(await requireFeature(auth, ['clients', 'requests'])).toBeNull()
+    expect((await requireFeature(auth, ['clients', 'financial_reports']))?.status).toBe(403)
+    expect(resolvePermissions).toHaveBeenCalledTimes(2) // one per call, not one per key
+  })
+
+  it('separates financial_reports from the operational reports resource', async () => {
+    // Seed 0078 gives project_manager and viewer reports.view. Cash, MRR and
+    // runway must not ride along on it.
+    vi.mocked(resolvePermissions).mockResolvedValue({
+      ...base(),
+      viewableResources: new Set(['reports']),
+    })
+    expect(await requireFeature(auth, 'reports')).toBeNull()
+    expect((await requireFeature(auth, 'financial_reports'))?.status).toBe(403)
+  })
 })
 
 // ── requirePortalFeature (portal routes) ─────────────────────────────────────
@@ -167,6 +189,9 @@ describe('requirePortalFeature', () => {
 
   function withRows(orgRows: Row[], contactRows: Row[] = [], contactOverrides: Row[] = []) {
     const queues = new Map<unknown, Row[][]>([
+      // The resolver normalises whatever org id it is handed to the D1 id first
+      // (this row), then reads the override tables against that id.
+      [schema.organisations, [[{ id: CLIENT_ORG, clerkOrgId: 'clerk-org-client' }]]],
       [schema.featureVisibility, [orgRows, contactOverrides]],
       [schema.contacts, [contactRows]],
     ])

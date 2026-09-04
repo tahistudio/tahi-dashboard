@@ -382,10 +382,17 @@ export function SubjectDetail({
           <span className="led">Data scope</span>
           {scoped ? (
             <ScopeControl member={member} orgs={orgs} onSave={(s) => onSaveScope(member, s)} />
-          ) : (
+          ) : roleName ? (
             <p className="ta-empty-note" style={{ marginBottom: 0 }}>
-              {roleName ? humaniseRole(roleName) : 'Full admin'} access - sees all clients. Assign a scoped role
+              {humaniseRole(roleName)} access - sees all clients. Assign a scoped role
               (Project manager, Task handler, or Viewer) to limit which clients they see.
+            </p>
+          ) : (
+            // Deny by default (lib/permissions.ts): no role is no access. Never
+            // say "full admin" here - the resolver denies this person every
+            // feature and lib/access-scoping.ts gives them an empty org list.
+            <p className="ta-empty-note" style={{ marginBottom: 0 }}>
+              No role: sees nothing. Assign a role to grant access.
             </p>
           )}
         </div>
@@ -400,7 +407,9 @@ export function SubjectDetail({
           <p className="ta-empty-note">
             {isClient
               ? 'No overrides - inherits the client-safe defaults.'
-              : 'No overrides - inherits the ' + (roleName ? humaniseRole(roleName) : 'full admin') + ' defaults.'}
+              : roleName
+                ? 'No overrides - inherits the ' + humaniseRole(roleName) + ' defaults.'
+                : 'No overrides - no role (no access). Assign a role to grant access.'}
           </p>
         ) : (
           <>
