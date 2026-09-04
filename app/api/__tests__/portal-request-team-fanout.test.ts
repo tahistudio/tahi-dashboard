@@ -32,6 +32,11 @@ interface DbMockHandles {
 // Mocks - vi.mock factories cannot reference outer variables (hoisted)
 // ---------------------------------------------------------------------------
 
+vi.mock('@/lib/require-feature', () => ({
+  requireFeature: vi.fn().mockResolvedValue(null),
+  requirePortalFeature: vi.fn().mockResolvedValue(null),
+}))
+
 vi.mock('@/lib/server-auth', () => ({
   getPortalAuth: vi.fn(),
 }))

@@ -41,7 +41,7 @@ vi.mock('@/lib/db', () => ({ db: vi.fn() }))
 
 vi.mock('@/lib/portal-access', () => ({ isOrgAdmin: vi.fn().mockResolvedValue(true) }))
 
-vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null), requirePortalFeature: vi.fn().mockResolvedValue(null) }))
 
 vi.mock('@/lib/access-scoping', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/access-scoping')>()),
