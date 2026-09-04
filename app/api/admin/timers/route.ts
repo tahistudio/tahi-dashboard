@@ -118,11 +118,12 @@ export async function POST(req: NextRequest) {
   const database = await db()
   const drizzle = database as Drizzle
 
-  // If target is a request, verify we can find it + pick orgId for the
-  // eventual timeEntry. (We don't currently scope-check here because the
-  // user already only has access to requests their team_member_access
-  // rows permit — picking up a timer on a scoped-out request is not a
-  // leak vector since the timer itself carries no request data beyond id.)
+  // Verify the target exists and derive the client the eventual timeEntry
+  // belongs to, from the target row itself. (We don't currently scope-check
+  // here because the user already only has access to requests their
+  // team_member_access rows permit. Picking up a timer on a scoped-out
+  // request is not a leak vector since the timer itself carries no request
+  // data beyond id.)
   let targetOrgId: string | null = null
   if (body.requestId) {
     const [r] = await drizzle
@@ -134,12 +135,24 @@ export async function POST(req: NextRequest) {
     targetOrgId = r.orgId
   } else if (body.taskId) {
     const [t] = await drizzle
-      .select({ orgId: schema.tasks.orgId })
+      .select({ orgId: schema.tasks.orgId, requestId: schema.tasks.requestId })
       .from(schema.tasks)
       .where(eq(schema.tasks.id, body.taskId))
       .limit(1)
     if (!t) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
-    targetOrgId = t.orgId // may be null for tahi_internal tasks
+    // tahi_internal tasks carry no orgId. Fall back to the request they
+    // hang off, then to the hidden internal studio org, so the hours
+    // survive the stop instead of being dropped for want of a client.
+    targetOrgId = t.orgId
+    if (!targetOrgId && t.requestId) {
+      const [r] = await drizzle
+        .select({ orgId: schema.requests.orgId })
+        .from(schema.requests)
+        .where(eq(schema.requests.id, t.requestId))
+        .limit(1)
+      targetOrgId = r?.orgId ?? null
+    }
+    if (!targetOrgId) targetOrgId = await ensureInternalOrg(drizzle)
   } else if (body.orgId) {
     const [o] = await drizzle
       .select({ id: schema.organisations.id })
@@ -166,9 +179,12 @@ export async function POST(req: NextRequest) {
     }, { status: 409 })
   }
 
+  // Auto-stop and log the previous one. It resolves its own client from
+  // its own target row: handing it the new target's org filed client A's
+  // hours against client B every time you switched timers.
+  let stopped: Awaited<ReturnType<typeof stopAndLogTimer>> | null = null
   if (existing && confirmed) {
-    // Auto-stop and log the previous one.
-    await stopAndLogTimer(drizzle, existing, userId, targetOrgId)
+    stopped = await stopAndLogTimer(drizzle, existing, userId)
   }
 
   const now = new Date().toISOString()
@@ -179,7 +195,10 @@ export async function POST(req: NextRequest) {
       userId,
       requestId: body.requestId ?? null,
       taskId: body.taskId ?? null,
-      orgId: body.general ? targetOrgId : (body.orgId ?? null),
+      // Always carry the client, whatever the target kind was. Task and
+      // request timers used to persist null here, so stopping one had no
+      // client to file the hours against and threw them away.
+      orgId: targetOrgId,
       startedAt: now,
       pausedAt: null,
       pausedSeconds: 0,
@@ -199,5 +218,8 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  return NextResponse.json({ id: newId, startedAt: now }, { status: 201 })
+  // `stopped` reports what happened to the timer we replaced, including
+  // logged:false with a reason, so switching timers cannot silently eat
+  // the hours you had already tracked.
+  return NextResponse.json({ id: newId, startedAt: now, stopped }, { status: 201 })
 }

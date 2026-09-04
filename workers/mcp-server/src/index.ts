@@ -8,15 +8,31 @@
  */
 
 import { requestToolCall } from './request-tools'
+import {
+  isAllowedRedirectUri,
+  parseAllowedRedirectHosts,
+  renderApprovalPage,
+  timingSafeEquals,
+} from './oauth-approval'
 
 interface Env {
   TAHI_API_TOKEN: string
   OAUTH_CLIENT_ID: string
   OAUTH_CLIENT_SECRET: string
+  // Pre shared key a Tahi admin types on the /authorize consent screen.
+  // Without it no authorization code is ever minted. Falls back to
+  // OAUTH_CLIENT_SECRET so the connector keeps working before the
+  // dedicated secret is set. Set it with:
+  //   wrangler secret put OAUTH_APPROVAL_KEY
+  OAUTH_APPROVAL_KEY?: string
+  // Extra hosts allowed as OAuth callback targets, comma separated.
+  // claude.ai, claude.com and loopback are always allowed.
+  OAUTH_REDIRECT_HOSTS?: string
   // Many Request Dashboard (the OLD client dashboard we are replacing).
-  // Both optional: when unset, the committed defaults below are used.
-  // Set the MANYREQUESTS_API_TOKEN secret to rotate the key without a code
-  // change (the env value wins over the committed default when present).
+  // The token is a secret and is never committed. Set it with:
+  //   wrangler secret put MANYREQUESTS_API_TOKEN
+  // When it is missing the manyrequests_* tools fail with a clear error and
+  // every other tool keeps working.
   MANYREQUESTS_API_TOKEN?: string
   MANYREQUESTS_BASE_URL?: string
 }
@@ -91,19 +107,26 @@ function apiWrite(path: string, token: string, method: string, body?: Record<str
 // data on the system we are migrating away from. Reads are safe; writes
 // mutate live data and are flagged for user confirmation in their tool text.
 //
-// The token is committed as a working default at the owner's instruction.
-// Rotate it by setting the MANYREQUESTS_API_TOKEN worker secret (it wins
-// over this default) or by editing the constant below.
+// The token is a live credential and lives only in the worker's secret
+// store. Set or rotate it with:
+//   wrangler secret put MANYREQUESTS_API_TOKEN
+// See workers/mcp-server/README.md.
 
 const MANYREQUESTS_DEFAULT_BASE_URL = 'https://tahistudio.manyrequests.com/api/v1'
-const MANYREQUESTS_DEFAULT_TOKEN = '2|bQxtsSRI8T2lo0lcoZAxSMKXUDM7s3PCX8gCQx202e8ebf08'
 
-type MrConfig = { token: string; baseUrl: string }
+const MANYREQUESTS_TOKEN_MISSING =
+  'ManyRequests is not configured on this worker. Set the token with: wrangler secret put MANYREQUESTS_API_TOKEN (see workers/mcp-server/README.md).'
 
-/** Resolve the ManyRequests config from env, falling back to the committed defaults. */
+type MrConfig = { token: string | null; baseUrl: string }
+
+/**
+ * Resolve the ManyRequests config from env. The token stays nullable so a
+ * missing secret only fails the manyrequests_* tools (with the message
+ * above) instead of every tool on the server.
+ */
 function mrConfigFromEnv(env: Env): MrConfig {
   return {
-    token: env.MANYREQUESTS_API_TOKEN || MANYREQUESTS_DEFAULT_TOKEN,
+    token: env.MANYREQUESTS_API_TOKEN?.trim() || null,
     baseUrl: env.MANYREQUESTS_BASE_URL || MANYREQUESTS_DEFAULT_BASE_URL,
   }
 }
@@ -114,6 +137,8 @@ async function mrFetch(
   cfg: MrConfig,
   opts?: { method?: string; body?: Record<string, unknown>; params?: Record<string, string> },
 ): Promise<unknown> {
+  if (!cfg.token) throw new Error(MANYREQUESTS_TOKEN_MISSING)
+
   const url = new URL(`${cfg.baseUrl}${path}`)
   if (opts?.params) {
     for (const [k, v] of Object.entries(opts.params)) {
@@ -2762,43 +2787,144 @@ async function verifyPkce(codeVerifier: string, codeChallenge: string, method: s
   return codeVerifier === codeChallenge
 }
 
-/** GET /authorize - OAuth authorization endpoint (auto-approves for valid client_id) */
-function handleAuthorize(request: Request, env: Env): Promise<Response> {
-  const url = new URL(request.url)
-  const clientId = url.searchParams.get('client_id')
-  const redirectUri = url.searchParams.get('redirect_uri')
-  const responseType = url.searchParams.get('response_type')
-  const state = url.searchParams.get('state')
-  const codeChallenge = url.searchParams.get('code_challenge')
-  const codeChallengeMethod = url.searchParams.get('code_challenge_method') ?? 'S256'
+// ---------------------------------------------------------------------------
+// /authorize: consent before any authorization code is minted
+// ---------------------------------------------------------------------------
+// GET  /authorize renders a consent page (never a code).
+// POST /authorize checks the pre shared approval key, then redirects back
+//      to the allowlisted callback with the code.
+// An authorization code exchanges for a full admin token over every
+// client's data, so knowing the client id must not be enough.
+
+type AuthorizeParams = {
+  clientId: string
+  redirectUri: string
+  state: string | null
+  codeChallenge: string
+  codeChallengeMethod: string
+}
+
+type AuthorizeCheck =
+  | { ok: true; value: AuthorizeParams }
+  | { ok: false; response: Response }
+
+/** The key a Tahi admin types on the consent screen. */
+function approvalKey(env: Env): string {
+  return (env.OAUTH_APPROVAL_KEY?.trim() || env.OAUTH_CLIENT_SECRET || '').trim()
+}
+
+function htmlResponse(body: string, status = 200): Response {
+  return new Response(body, {
+    status,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Content-Security-Policy': "frame-ancestors 'none'",
+      'X-Frame-Options': 'DENY',
+    },
+  })
+}
+
+/** Shared validation for both halves of the authorize flow. */
+function checkAuthorizeParams(source: URLSearchParams, env: Env): AuthorizeCheck {
+  const clientId = source.get('client_id')
+  const redirectUri = source.get('redirect_uri')
+  const responseType = source.get('response_type') ?? 'code'
+  const state = source.get('state')
+  const codeChallenge = source.get('code_challenge')
+  const codeChallengeMethod = source.get('code_challenge_method') ?? 'S256'
 
   if (responseType !== 'code') {
-    return Promise.resolve(corsResponse({ error: 'unsupported_response_type' }, 400))
+    return { ok: false, response: corsResponse({ error: 'unsupported_response_type' }, 400) }
   }
 
-  if (!clientId || clientId !== env.OAUTH_CLIENT_ID) {
-    return Promise.resolve(corsResponse({ error: 'invalid_client' }, 401))
+  if (!clientId || !timingSafeEquals(clientId, env.OAUTH_CLIENT_ID ?? '')) {
+    return { ok: false, response: corsResponse({ error: 'invalid_client' }, 401) }
   }
 
   if (!redirectUri || !codeChallenge) {
-    return Promise.resolve(corsResponse({ error: 'invalid_request', error_description: 'redirect_uri and code_challenge required' }, 400))
+    return {
+      ok: false,
+      response: corsResponse({ error: 'invalid_request', error_description: 'redirect_uri and code_challenge required' }, 400),
+    }
   }
 
-  // Auto-approve: generate auth code and redirect back
-  return createAuthCode(clientId, codeChallenge, codeChallengeMethod, redirectUri, env.OAUTH_CLIENT_SECRET)
-    .then((code) => {
-      const redirectUrl = new URL(redirectUri)
-      redirectUrl.searchParams.set('code', code)
-      if (state) redirectUrl.searchParams.set('state', state)
+  // The discovery document advertises S256 only, so anything else is a
+  // downgrade attempt rather than a real client.
+  if (codeChallengeMethod !== 'S256') {
+    return {
+      ok: false,
+      response: corsResponse({ error: 'invalid_request', error_description: 'code_challenge_method must be S256' }, 400),
+    }
+  }
 
-      return new Response(null, {
-        status: 302,
-        headers: {
-          Location: redirectUrl.toString(),
-          ...CORS_HEADERS,
-        },
-      })
-    })
+  if (!isAllowedRedirectUri(redirectUri, parseAllowedRedirectHosts(env.OAUTH_REDIRECT_HOSTS))) {
+    return {
+      ok: false,
+      response: corsResponse({ error: 'invalid_request', error_description: 'redirect_uri is not an approved callback' }, 400),
+    }
+  }
+
+  return { ok: true, value: { clientId, redirectUri, state, codeChallenge, codeChallengeMethod } }
+}
+
+/** GET /authorize - render the consent page. Never mints a code. */
+function handleAuthorizeGet(request: Request, env: Env): Response {
+  const url = new URL(request.url)
+  const check = checkAuthorizeParams(url.searchParams, env)
+  if (!check.ok) return check.response
+
+  if (!approvalKey(env)) {
+    return corsResponse(
+      { error: 'server_error', error_description: 'Approval is not configured. Set the OAUTH_APPROVAL_KEY worker secret.' },
+      503,
+    )
+  }
+
+  return htmlResponse(renderApprovalPage(check.value))
+}
+
+/** POST /authorize - approval submitted; mint the code and redirect back. */
+async function handleAuthorizePost(request: Request, env: Env): Promise<Response> {
+  const contentType = request.headers.get('Content-Type') ?? ''
+  if (!contentType.includes('application/x-www-form-urlencoded')) {
+    return corsResponse({ error: 'unsupported_content_type' }, 400)
+  }
+
+  const form = new URLSearchParams(await request.text())
+  const check = checkAuthorizeParams(form, env)
+  if (!check.ok) return check.response
+
+  const expected = approvalKey(env)
+  if (!expected) {
+    return corsResponse(
+      { error: 'server_error', error_description: 'Approval is not configured. Set the OAUTH_APPROVAL_KEY worker secret.' },
+      503,
+    )
+  }
+
+  if (!timingSafeEquals(form.get('approval_key') ?? '', expected)) {
+    return htmlResponse(
+      renderApprovalPage({ ...check.value, error: 'That approval key was not recognised.' }),
+      401,
+    )
+  }
+
+  const { clientId, redirectUri, codeChallenge, codeChallengeMethod, state } = check.value
+  const code = await createAuthCode(clientId, codeChallenge, codeChallengeMethod, redirectUri, env.OAUTH_CLIENT_SECRET)
+
+  const redirectUrl = new URL(redirectUri)
+  redirectUrl.searchParams.set('code', code)
+  if (state) redirectUrl.searchParams.set('state', state)
+
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: redirectUrl.toString(),
+      'Cache-Control': 'no-store',
+      ...CORS_HEADERS,
+    },
+  })
 }
 
 /** POST /oauth/token - Token exchange endpoint */
@@ -3013,20 +3139,21 @@ export default {
         return handleAuthServerMetadata(url.origin)
       }
 
-      // OAuth authorize endpoint (auto-approves for valid client_id)
+      // OAuth authorize endpoint: renders the consent page, mints nothing
       if (url.pathname === '/authorize') {
-        return handleAuthorize(request, env)
+        return handleAuthorizeGet(request, env)
       }
 
       // Server info
       if (url.pathname === '/' || url.pathname === '') {
         return corsResponse({
           name: 'Tahi Dashboard MCP Server',
-          version: '2.2.0',
+          version: '2.3.0',
           description: 'Access Tahi Dashboard data and operations through the Model Context Protocol',
-          auth: 'OAuth 2.0 client_credentials',
+          auth: 'OAuth 2.0 authorization_code with PKCE and an admin approval step',
           tokenEndpoint: `${url.origin}/oauth/token`,
           resourceMetadata: `${url.origin}/.well-known/oauth-protected-resource`,
+          manyRequestsConfigured: !!mrConfigFromEnv(env).token,
           toolCount: TOOLS.length,
           tools: TOOLS.map((t) => t.name),
         })
@@ -3038,6 +3165,12 @@ export default {
     // ── POST endpoints ────────────────────────────────────────────────
 
     if (request.method === 'POST') {
+      // Consent form submit. Public by design: the approval key inside the
+      // form body is what authorises it, not a bearer token.
+      if (url.pathname === '/authorize') {
+        return handleAuthorizePost(request, env)
+      }
+
       // OAuth token endpoint (no bearer auth required, uses client credentials)
       if (url.pathname === '/oauth/token') {
         return handleOAuthToken(request, env)

@@ -7,7 +7,7 @@
 
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
-import { INTERNAL_ORG_ID } from '@/lib/internal-org'
+import { INTERNAL_ORG_ID, ensureInternalOrg } from '@/lib/internal-org'
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 /**
@@ -70,6 +70,72 @@ export function isGeneralTimer(t: { requestId: string | null; taskId: string | n
 }
 
 /**
+ * Why a stopped timer produced no time entry. Kept as codes so the API
+ * response stays stable; timerLogFailureMessage turns one into words.
+ */
+export type TimerLogFailure = 'no_client' | 'no_team_member_row_for_user' | 'insert_failed'
+
+const TIMER_LOG_FAILURE_MESSAGES: Record<TimerLogFailure, string> = {
+  no_client: 'The hours were not logged: this timer is not attached to a request, task or client.',
+  no_team_member_row_for_user: 'The hours were not logged: your login is not linked to a team member.',
+  insert_failed: 'The hours were not logged: saving the time entry failed.',
+}
+
+/** Plain-words explanation for a logged:false stop. */
+export function timerLogFailureMessage(reason: string | null | undefined): string {
+  if (reason && reason in TIMER_LOG_FAILURE_MESSAGES) {
+    return TIMER_LOG_FAILURE_MESSAGES[reason as TimerLogFailure]
+  }
+  return 'The hours were not logged.'
+}
+
+/**
+ * Resolve which client a timer's hours belong to, from the timer's own
+ * target rows. Never from the caller: passing the org in used to file the
+ * previous client's hours against the next one when switching timers.
+ *
+ *   request timer : the request's org
+ *   task timer    : the task's org, else the org of the request it hangs
+ *                   off, else the hidden internal studio org (a
+ *                   tahi_internal task is still studio time worth keeping)
+ *   client timer  : the org already on the row
+ */
+export async function resolveTimerOrgId(
+  drizzle: Drizzle,
+  timer: { requestId: string | null; taskId: string | null; orgId: string | null },
+): Promise<string | null> {
+  if (timer.requestId) {
+    const [r] = await drizzle
+      .select({ orgId: schema.requests.orgId })
+      .from(schema.requests)
+      .where(eq(schema.requests.id, timer.requestId))
+      .limit(1)
+    return r?.orgId ?? timer.orgId ?? null
+  }
+
+  if (timer.taskId) {
+    const [t] = await drizzle
+      .select({ orgId: schema.tasks.orgId, requestId: schema.tasks.requestId })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.id, timer.taskId))
+      .limit(1)
+    if (t?.orgId) return t.orgId
+    if (t?.requestId) {
+      const [r] = await drizzle
+        .select({ orgId: schema.requests.orgId })
+        .from(schema.requests)
+        .where(eq(schema.requests.id, t.requestId))
+        .limit(1)
+      if (r?.orgId) return r.orgId
+    }
+    if (t) return ensureInternalOrg(drizzle)
+    return timer.orgId ?? null
+  }
+
+  return timer.orgId ?? null
+}
+
+/**
  * Stop an active timer and create a timeEntry row.
  * Lives here (not inside a route file) so Next.js doesn't complain about
  * non-route exports from app/api/**\/route.ts.
@@ -81,14 +147,22 @@ export function isGeneralTimer(t: { requestId: string | null; taskId: string | n
  * team_members.id, so we resolve the Clerk ID to the team_members row
  * before inserting. If there's no matching team_members row (shouldn't
  * happen for an admin starting a timer, but we handle it anyway) we
- * skip logging — the active timer is still cleared.
+ * skip logging, and say so in `reason` / `reasonMessage`, so the caller
+ * can tell the user instead of toasting success over lost hours.
  */
 export async function stopAndLogTimer(
   drizzle: Drizzle,
   timer: typeof schema.activeTimers.$inferSelect,
   userId: string,
-  orgIdHint: string | null,
-): Promise<{ hours: number; startedAt: string; endedAt: string; logged: boolean; reason?: string }> {
+): Promise<{
+  hours: number
+  startedAt: string
+  endedAt: string
+  logged: boolean
+  reason?: string
+  reasonMessage?: string
+  detail?: string
+}> {
   const seconds = elapsedSeconds(timer)
   // Store hours to 4 decimal places so a 10-second timer logs 0.0028h
   // instead of rounding to 0 and silently disappearing. The UI can round
@@ -103,27 +177,18 @@ export async function stopAndLogTimer(
     .limit(1)
   const teamMemberId = member?.id ?? null
 
-  // Derive orgId for the timeEntry. Priority: explicit hint → timer.orgId
-  // (client-direct timer) → request's orgId. If we still can't find one
-  // (Tahi-internal task) we skip logging — active timer is still cleared.
-  let orgId = orgIdHint ?? timer.orgId ?? null
-  if (!orgId && timer.requestId) {
-    const [r] = await drizzle
-      .select({ orgId: schema.requests.orgId })
-      .from(schema.requests)
-      .where(eq(schema.requests.id, timer.requestId))
-      .limit(1)
-    orgId = r?.orgId ?? null
-  }
+  // Derive orgId for the timeEntry from the timer's own target rows.
+  const orgId = await resolveTimerOrgId(drizzle, timer)
 
   const startedAt = timer.startedAt
   const endedAt = new Date().toISOString()
   const date = startedAt.slice(0, 10) // YYYY-MM-DD
 
   let logged = false
-  let reason: string | undefined
+  let reason: TimerLogFailure | undefined
+  let detail: string | undefined
   if (!orgId) {
-    reason = 'no_org_id'
+    reason = 'no_client'
   } else if (!teamMemberId) {
     reason = 'no_team_member_row_for_user'
   } else {
@@ -144,7 +209,8 @@ export async function stopAndLogTimer(
       })
       logged = true
     } catch (err) {
-      reason = err instanceof Error ? err.message : String(err)
+      reason = 'insert_failed'
+      detail = err instanceof Error ? err.message : String(err)
     }
   }
 
@@ -152,5 +218,13 @@ export async function stopAndLogTimer(
   // the user isn't stuck with a zombie timer after a schema issue.
   await drizzle.delete(schema.activeTimers).where(eq(schema.activeTimers.id, timer.id))
 
-  return { hours, startedAt, endedAt, logged, reason }
+  return {
+    hours,
+    startedAt,
+    endedAt,
+    logged,
+    reason,
+    reasonMessage: logged ? undefined : timerLogFailureMessage(reason),
+    detail,
+  }
 }
