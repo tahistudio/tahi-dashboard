@@ -20,7 +20,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
-import { notifyTeamMember } from '@/lib/notifications'
+import { notifyRequestTeam } from '@/lib/notify-request-team'
 import { dispatchDomainEvent } from '@/lib/events'
 import {
   buildReviewMessageHtml,
@@ -125,8 +125,13 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     // Best-effort side effects. Neither may fail the review itself.
     try {
-      if (request.assigneeId) {
-        await notifyTeamMember(drizzle, request.assigneeId, {
+      // Fan the verdict out to the assignee, the request's team participants
+      // and the client's PM, with the whole studio as the fallback: a delivery
+      // can be reviewed on a request whose assignee was cleared.
+      await notifyRequestTeam(
+        drizzle,
+        { requestId: id, orgId: request.orgId, assigneeId: request.assigneeId },
+        {
           type: 'request_status_changed',
           title: `${reviewDecisionLabel(decision)}: "${request.title}"`,
           body: decision === 'approve'
@@ -134,8 +139,8 @@ export async function POST(req: NextRequest, { params }: Params) {
             : 'The client asked for changes. It is back in progress.',
           entityType: 'request',
           entityId: id,
-        })
-      }
+        },
+      )
       await dispatchDomainEvent(drizzle, {
         type: 'request_status_changed',
         entityId: id,

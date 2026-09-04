@@ -8,8 +8,9 @@
  * the real DisplayCurrency provider (never a hardcoded FX rate).
  *
  * Composition (matches the design exactly):
- *   - optional ClientFirstRun welcome (ctx.home==='first') backed by real
- *     organisations.onboardingState via /api/portal/onboarding
+ *   - optional ClientFirstRun welcome (ctx.home==='first') backed by
+ *     /api/portal/onboarding, which derives the knowable steps and says
+ *     whether this org is a first run at all
  *   - masthead: TheWire (their pulse) -> Hero (project progress OR awaiting
  *     review, by ctx.clientType) -> Vitals -> NeedsYou
  *   - Zone "Your work": TrackBoard (retainer, reorderable queue) OR ProjectBoard
@@ -176,6 +177,9 @@ interface TeamResp {
 interface OnboardingResp {
   onboardingState: Record<string, boolean>
   onboardingLoomUrl: string | null
+  /** Server's verdict on whether this org is actually a new client. Older
+   *  deployments of the route omit it, so absent is treated as eligible. */
+  firstRunEligible?: boolean
 }
 
 /* ---------- status -> visual mapping (data-value hexes, documented per rule 2) ---------- */
@@ -314,6 +318,17 @@ function ClientFirstRun({ ctx }: { ctx: OverviewCtx }) {
   const ro = ctx.isReadOnly
   const [dismissed, setDismissed] = useState<boolean>(() => readDismissed())
   const { data, mutate } = useResource<OnboardingResp>(show && !dismissed ? '/api/portal/onboarding' : null)
+  // The switcher opts every client session in; the route decides whether the
+  // client is actually still setting up (firstRunEligible: it derives the two
+  // knowable steps and refuses to call an established org a first run). Latch
+  // on the first eligible payload with an outstanding step so finishing the
+  // last one keeps the completion state on screen.
+  const [wasIncomplete, setWasIncomplete] = useState(false)
+  useEffect(() => {
+    if (!data || data.firstRunEligible === false) return
+    const state = data.onboardingState ?? {}
+    if (CL_STEPS.some(s => !state[s.key])) setWasIncomplete(true)
+  }, [data])
 
   const dismiss = useCallback(() => {
     setDismissed(true)
@@ -346,11 +361,19 @@ function ClientFirstRun({ ctx }: { ctx: OverviewCtx }) {
   )
 
   if (!show || dismissed) return null
+  // Nothing until the real state has landed: rendering an all-unchecked panel
+  // first would flash a setup prompt at a client who finished months ago.
+  if (!data) return null
+  // An org with delivered work, or one that has simply been around a while, is
+  // not a first run whatever its onboardingState blob says. The exception is a
+  // client who was mid-setup in this same session.
+  if (data.firstRunEligible === false && !wasIncomplete) return null
 
-  const state = data?.onboardingState ?? {}
+  const state = data.onboardingState ?? {}
   const done = CL_STEPS.map(s => !!state[s.key])
   const doneN = done.filter(Boolean).length
   const nextIdx = done.findIndex(d => !d)
+  if (nextIdx === -1 && !wasIncomplete) return null
   const org = ctx.orgName || ctx.previewName || 'there'
 
   return (
@@ -359,7 +382,7 @@ function ClientFirstRun({ ctx }: { ctx: OverviewCtx }) {
         <div>
           <h2>Kia ora, {org}. Welcome to your studio.</h2>
           <p>
-            Everything Tahi makes for you lives here. Five small steps and you are fully set up, about eight minutes,
+            Everything Tahi makes for you lives here. Four small steps and you are fully set up, about seven minutes,
             and you can stop anytime.
           </p>
         </div>
@@ -735,18 +758,20 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       onAct: () => go('invoices'),
     })
   }
-  if (calls[0]) {
-    const c = calls[0]
+  // Only when there is somewhere to go. /calls is a studio page that redirects
+  // a client back to /overview, so a "Join" with no link would be a button that
+  // returns them to the page they pressed it on. The Next call card still shows
+  // the booking either way.
+  const c = calls[0]
+  const joinUrl = c?.meetingUrl
+  if (c && joinUrl) {
     needs.push({
       tone: 'call',
       ic: 'phone',
       title: c.title,
       sub: callWhen(c.whenISO, c.durationMin),
       verb: 'Join',
-      onAct: () => {
-        if (c.meetingUrl) window.open(c.meetingUrl, '_blank', 'noopener,noreferrer')
-        else go('calls')
-      },
+      onAct: () => window.open(joinUrl, '_blank', 'noopener,noreferrer'),
     })
   }
 
@@ -917,29 +942,18 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
                   )
                 }
               />
-              <div style={{ marginTop: 'auto', paddingTop: 12 }}>
-                <button
-                  className="ov-cta ghost"
-                  disabled={ro}
-                  style={{ width: '100%', height: 34, fontSize: 12.5 }}
-                  onClick={() => go('calls')}
-                >
-                  Book another time
-                </button>
+              {/* No client-side booking surface exists yet (/calls is a studio
+                  page that redirects a client back here), so this says how to
+                  move a call rather than offering a button that bounces. */}
+              <div className="ov-mini" style={{ marginTop: 'auto', paddingTop: 12 }}>
+                Need a different time? Reply to your confirmation email and we will move it.
               </div>
             </>
           ) : (
             <>
               <div className="ov-mini">No calls scheduled right now.</div>
-              <div style={{ marginTop: 'auto', paddingTop: 12 }}>
-                <button
-                  className="ov-cta ghost"
-                  disabled={ro}
-                  style={{ width: '100%', height: 34, fontSize: 12.5 }}
-                  onClick={() => go('calls')}
-                >
-                  Book a call
-                </button>
+              <div className="ov-mini" style={{ marginTop: 'auto', paddingTop: 12 }}>
+                Your lead sets the next one, or email us any time.
               </div>
             </>
           )}
@@ -1039,7 +1053,9 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
 
         {isProject ? (
           <Card span={5}>
-            <CardH ic="wallet" title="Your project" link="Details" onLink={() => go('proposals')} />
+            {/* No "Details" link: /proposals redirects a client to /requests,
+                and this branch removed it from the client nav for that reason. */}
+            <CardH ic="wallet" title="Your project" />
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <span style={{ font: "700 20px 'Manrope',sans-serif", color: 'var(--text)' }}>
                 {projectData?.project?.name ?? projectData?.scheduleTitle ?? 'Your project'}

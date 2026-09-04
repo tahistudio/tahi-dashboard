@@ -38,10 +38,17 @@ const isPublicRoute = createRouteMatcher([
   '/review/(.*)',
 ])
 
-// Admin-only routes : if a client hits these, redirect them to /requests
+// Admin-only routes : if a client hits these, redirect them to /requests.
+//
+// /billing is deliberately NOT here. app/(dashboard)/billing/page.tsx renders
+// an audience branch (<BillingContent isAdmin>) whose client half is a real
+// portal surface: plan, invoices and the Stripe customer portal, all fed by
+// org-scoped /api/portal/* routes. Clients are linked there from the overview
+// CTA map, the tracks upgrade button and every 'subscription' notification, so
+// a blanket matcher here bounced them off a page that works. The admin half is
+// still gated by requirePageFeature('billing') inside the page.
 const isAdminOnlyRoute = createRouteMatcher([
   '/clients(.*)',
-  '/billing(.*)',
   '/reports(.*)',
   '/time(.*)',
   '/team(.*)',

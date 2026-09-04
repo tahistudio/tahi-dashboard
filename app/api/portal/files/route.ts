@@ -58,8 +58,11 @@ export async function GET(req: NextRequest) {
   }
 
   const url = new URL(req.url)
+  // Default 8 for the overview "Recent files" card; the /files browser asks for
+  // a full page, so the ceiling is a browser-sized 100 rather than a card-sized
+  // 20 (the query overfetches 4x and filters internals in JS).
   const limitRaw = parseInt(url.searchParams.get('limit') ?? '', 10)
-  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 20) : 8
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 100) : 8
 
   const database = await db()
   const drizzle = database as D1

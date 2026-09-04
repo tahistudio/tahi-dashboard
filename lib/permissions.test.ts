@@ -393,10 +393,37 @@ describe('nav model - messaging hidden for V1', () => {
       userEmail: null, canManagePermissions: false,
     }))
     expect(visible).toEqual([
-      '/overview', '/requests', '/schedules',
+      '/overview', '/requests',
       '/files', '/services',
-      '/invoices', '/contracts', '/proposals',
+      '/invoices',
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Ship-readiness Tier 1 item 10: no client nav item may bounce. /schedules,
+// /contracts and /proposals redirect a client back to /requests, so they must
+// stay out of CLIENT_NAV until their pages grow a client branch.
+// ---------------------------------------------------------------------------
+
+describe('client nav - no dead ends (Tier 1 item 10)', () => {
+  const CLIENT_ONLY_REDIRECTS = ['/schedules', '/contracts', '/proposals']
+
+  it('carries none of the routes whose page redirects a client', () => {
+    for (const href of CLIENT_ONLY_REDIRECTS) {
+      expect(navHrefs(CLIENT_NAV)).not.toContain(href)
+    }
+  })
+
+  it('every client nav href is a page that renders for a client session', () => {
+    // Kept as an explicit allowlist so adding a nav entry forces a decision
+    // about whether the page actually has a client branch.
+    const CLIENT_RENDERABLE = new Set([
+      '/overview', '/requests', '/files', '/services', '/invoices', '/billing',
+    ])
+    for (const href of navHrefs(CLIENT_NAV)) {
+      expect(CLIENT_RENDERABLE.has(href)).toBe(true)
+    }
   })
 })
 
