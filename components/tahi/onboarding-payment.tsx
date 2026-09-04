@@ -153,6 +153,7 @@ export function OnboardingPayment(props: PaymentProps) {
   const [clientSecret, setClientSecret] = React.useState<string | null>(null)
   const [state, setState] = React.useState<'loading' | 'ready' | 'unavailable'>('loading')
   const [invoicing, setInvoicing] = React.useState(false)
+  const [invoiceError, setInvoiceError] = React.useState<string | null>(null)
   const sp = stripePromise()
 
   // "Invoice me": record the net-terms preference BEFORE advancing. The server
@@ -160,23 +161,45 @@ export function OnboardingPayment(props: PaymentProps) {
   // tells the studio, which is also what entitles the client to the portal.
   // Without it, completion later returned 402 and the layout bounced them back
   // into onboarding forever.
+  //
+  // The answer is READ, never assumed. The route refuses a caller who is not
+  // their org's workspace admin, and a refusal that advanced the client anyway
+  // would put them straight back in that loop with nothing recorded, no draft
+  // raised and nobody at the studio told. So we advance only on a recorded
+  // success, and otherwise stay on this step and say what happened.
   const chooseInvoice = React.useCallback(async () => {
     if (invoicing) return
     setInvoicing(true)
+    setInvoiceError(null)
     try {
-      await fetch('/api/onboarding/complete', {
+      const res = await fetch('/api/onboarding/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ billingMode: 'invoice', plan, addon, currency }),
       })
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean }
+      if (res.ok && json.ok === true) {
+        onInvoiced()
+        return
+      }
+      setInvoiceError(res.status === 402
+        ? 'Only the person who set up this workspace can switch it to invoicing. Ask them to finish this step, or email business@tahi.studio and we will set it up for you.'
+        : 'We could not set up net terms just now. Try again, or email business@tahi.studio and we will invoice you by hand.')
     } catch {
-      // Non-fatal: the studio still sees them in onboarding, and the final
-      // completion call retries the same route.
+      setInvoiceError('We could not reach the studio just now. Check your connection and try again.')
     } finally {
       setInvoicing(false)
-      onInvoiced()
     }
   }, [invoicing, plan, addon, currency, onInvoiced])
+
+  // Shared between the Stripe-unavailable fallback and the normal pay step, so
+  // a refusal is visible wherever the client clicked from.
+  const invoiceErrorNote = invoiceError ? (
+    <div className="ob-decline" role="alert">
+      <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 8v4M12 16h.01" /></svg>
+      {invoiceError}
+    </div>
+  ) : null
 
   React.useEffect(() => {
     if (!sp) { setState('unavailable'); return }
@@ -210,6 +233,7 @@ export function OnboardingPayment(props: PaymentProps) {
       <>
         <Summary planName={props.planName} baseUsd={baseUsd} addon={addon} trackUsd={trackUsd} currency={currency} />
         <p className="ob-sub" style={{ margin: '0 0 4px' }}>Card payment isn&apos;t available right now.</p>
+        {invoiceErrorNote}
         <div className="ob-footer">
           <button className="ob-back" onClick={props.onBack} disabled={invoicing}>Back</button>
           <button className="ob-next" onClick={() => void chooseInvoice()} disabled={invoicing}>
@@ -232,6 +256,7 @@ export function OnboardingPayment(props: PaymentProps) {
           <PayForm totalDisplay={fmt(total, currency)} onPaid={props.onPaid} onBack={props.onBack} />
         </Elements>
       )}
+      {invoiceErrorNote}
       <div className="ob-fallback">
         Prefer to be invoiced?{' '}
         <button

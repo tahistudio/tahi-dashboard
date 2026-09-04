@@ -11,6 +11,7 @@ import {
   isPaymentTerms,
   paymentTermDays,
   paymentTermsLabel,
+  selectBillingContacts,
   selectInvoiceRecipients,
 } from '@/lib/invoice-billing'
 
@@ -88,12 +89,26 @@ describe('selectInvoiceRecipients', () => {
     expect(out).toEqual([{ email: 'owner@acme.test', name: 'Ana' }])
   })
 
-  it('falls back to everyone with an email rather than sending nowhere', () => {
+  it('never broadcasts to the whole org when nobody is designated', () => {
+    // Orgs imported from ManyRequests carry no isPrimary and no portalRole
+    // 'admin'. Mailing the amount, the due date and the notes to a designer or
+    // a contractor at the client is worse than failing loudly, so this is
+    // empty and the route 400s.
     const out = selectInvoiceRecipients([
       { email: 'a@acme.test', name: 'A', portalRole: 'member', isPrimary: false },
       { email: 'b@acme.test', name: 'B', portalRole: 'member', isPrimary: null },
     ])
-    expect(out.map(r => r.email)).toEqual(['a@acme.test', 'b@acme.test'])
+    expect(out).toEqual([])
+  })
+
+  it('keeps the caller rows intact through selectBillingContacts', () => {
+    // The bell row needs contact ids, so the audience filter is generic over
+    // the row type rather than projecting to email + name.
+    const rows = [
+      { id: 'c1', email: 'owner@acme.test', name: 'Ana', portalRole: 'admin', isPrimary: true },
+      { id: 'c2', email: 'designer@acme.test', name: 'Dee', portalRole: 'member', isPrimary: false },
+    ]
+    expect(selectBillingContacts(rows).map(c => c.id)).toEqual(['c1'])
   })
 
   it('drops blank emails and de-duplicates case-insensitively', () => {

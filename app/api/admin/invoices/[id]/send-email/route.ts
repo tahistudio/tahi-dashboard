@@ -9,8 +9,8 @@ import { sendEmail } from '@/lib/email'
 import { InvoiceSentEmail } from '@/emails/invoice-sent'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { requireFeature } from '@/lib/require-feature'
-import { notifyOrgContacts } from '@/lib/notifications'
-import { invoiceReference, selectInvoiceRecipients } from '@/lib/invoice-billing'
+import { createNotifications, type NotificationRecipient } from '@/lib/notifications'
+import { invoiceReference, selectBillingContacts, selectInvoiceRecipients } from '@/lib/invoice-billing'
 import { stripeSecretKey } from '@/lib/stripe-key'
 
 type Params = { params: Promise<{ id: string }> }
@@ -64,6 +64,15 @@ async function resolvePayUrl(
 //     client);
 //   - it raises the client's in-app notification here rather than at draft
 //     creation, so a client is only ever told about a bill they can open.
+//
+// The bell row goes to the SAME billing audience as the email, never to every
+// contact at the org: the portal denies a plain member seat both the invoice
+// list and the invoice detail, so a bell row carrying the amount would be a
+// disclosure followed by a 403 on the click.
+//
+// Idempotent on a resend: sentAt is stamped once (it means FIRST send, which
+// is what receivables aging reads), the status is only promoted out of
+// 'draft', and a second send raises no second bell row.
 export async function POST(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
@@ -86,6 +95,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       currency: schema.invoices.currency,
       notes: schema.invoices.notes,
       dueDate: schema.invoices.dueDate,
+      sentAt: schema.invoices.sentAt,
       stripeInvoiceId: schema.invoices.stripeInvoiceId,
       stripeHostedInvoiceUrl: schema.invoices.stripeHostedInvoiceUrl,
     })
@@ -100,10 +110,22 @@ export async function POST(req: NextRequest, { params }: Params) {
   const denied = await requireAccessToOrg(drizzle, userId, invoiceRow.orgId)
   if (denied) return denied
 
+  // Nothing left to chase. The admin UI hides the button for these, but MCP
+  // send_invoice_email and a direct POST reach the same handler, so the rule
+  // lives here rather than in the button.
+  if (invoiceRow.status === 'paid' || invoiceRow.status === 'written_off') {
+    return NextResponse.json(
+      { error: `This invoice is ${invoiceRow.status === 'paid' ? 'already paid' : 'written off'}, so it cannot be sent again` },
+      { status: 409 },
+    )
+  }
+
   // Every billing contact at the org: the people who can also open the invoice
-  // once it lands (see lib/invoice-billing.selectInvoiceRecipients).
+  // once it lands (see lib/invoice-billing.selectBillingContacts). The id and
+  // the Clerk link come back too, because the bell row goes to this same set.
   const contacts = await drizzle
     .select({
+      id: schema.contacts.id,
       email: schema.contacts.email,
       name: schema.contacts.name,
       portalRole: schema.contacts.portalRole,
@@ -112,10 +134,17 @@ export async function POST(req: NextRequest, { params }: Params) {
     .from(schema.contacts)
     .where(eq(schema.contacts.orgId, invoiceRow.orgId))
 
-  const recipients = selectInvoiceRecipients(contacts)
+  const billingContacts = selectBillingContacts(contacts)
+  const recipients = selectInvoiceRecipients(billingContacts)
   if (recipients.length === 0) {
+    // Two different operator problems, two different messages: nobody is
+    // designated to receive bills, or the designated people have no email.
     return NextResponse.json(
-      { error: 'No contact with an email address on this client' },
+      {
+        error: billingContacts.length === 0
+          ? 'No billing contact designated for this client. Mark someone primary, or give them the admin portal role.'
+          : 'No contact with an email address on this client',
+      },
       { status: 400 },
     )
   }
@@ -172,30 +201,40 @@ export async function POST(req: NextRequest, { params }: Params) {
     )
   }
 
+  // A resend must not rewrite history. sentAt means FIRST send (receivables
+  // aging and any future dunning read it), and 'viewed' / 'overdue' are states
+  // this invoice has already earned, so only a draft is promoted.
   const now = new Date().toISOString()
+  const alreadySent = !!invoiceRow.sentAt
   await drizzle
     .update(schema.invoices)
     .set({
-      status: invoiceRow.status === 'paid' ? invoiceRow.status : 'sent',
-      sentAt: now,
+      ...(invoiceRow.status === 'draft' ? { status: 'sent' as const } : {}),
+      ...(alreadySent ? {} : { sentAt: now }),
       updatedAt: now,
     })
     .where(eq(schema.invoices.id, id))
 
-  // Bell row for the client, on SEND (not on draft creation). The invoice
-  // entity deep-links to /invoices/<id>, which both audiences can now open.
-  await notifyOrgContacts(drizzle, invoiceRow.orgId, {
-    type: 'invoice_created',
-    title: payUrl ? 'Invoice ready to pay' : 'New invoice',
-    body: `Invoice ${reference} for ${amountFormatted} ${currency} is due ${dueDateDisplay}.`,
-    entityType: 'invoice',
-    entityId: invoiceRow.id,
-  })
+  // Bell row for the client, on the FIRST send (not on draft creation, and not
+  // again on a resend or after stripe-create already announced it). It goes to
+  // the billing audience only: the portal denies a member seat this invoice,
+  // so a row they cannot open, carrying the amount, is a dead end and a leak.
+  if (!alreadySent) {
+    const notifyRecipients: NotificationRecipient[] = billingContacts.map(c => ({ contactId: c.id }))
+    await createNotifications(drizzle, notifyRecipients, {
+      type: 'invoice_created',
+      title: payUrl ? 'Invoice ready to pay' : 'New invoice',
+      body: `Invoice ${reference} for ${amountFormatted} ${currency} is due ${dueDateDisplay}.`,
+      entityType: 'invoice',
+      entityId: invoiceRow.id,
+    })
+  }
 
   return NextResponse.json({
     success: true,
     sentTo,
     failedTo: failed.map(f => f.email),
     payLink: !!payUrl,
+    notified: !alreadySent,
   })
 }

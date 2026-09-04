@@ -18,5 +18,20 @@
 -- ALTER TABLE ADD COLUMN cannot use IF NOT EXISTS in SQLite; the runtime
 -- runner (app/api/admin/db/migrate) swallows the "duplicate column name"
 -- error so re-running is safe.
+--
+-- MERGE ORDER, NOT OPTIONAL. Apply this to staging and then production D1
+-- BEFORE the code that references the columns is deployed, not after. Drizzle
+-- expands a bare .select() into an explicit column list from db/schema.ts, so
+-- from the moment the new schema ships, EXISTING surfaces break on a database
+-- without these columns ("no such column: payment_terms" -> 500): the clients
+-- list (app/api/admin/clients/route.ts), the client detail
+-- (app/api/admin/clients/[id]/route.ts), the data export
+-- (app/api/admin/danger/export/route.ts) and the portal invoice list. Both
+-- columns are additive and nullable, so applying them AHEAD of the deploy is
+-- harmless to the running code.
+--   1. POST /api/admin/db/migrate on staging, confirm 0086 applied
+--   2. deploy, then smoke /clients, /clients/[id], portal /invoices in that
+--      order
+--   3. repeat on production
 ALTER TABLE invoices ADD COLUMN stripe_hosted_invoice_url text;
 ALTER TABLE organisations ADD COLUMN payment_terms text;

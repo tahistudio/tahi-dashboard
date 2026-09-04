@@ -6,8 +6,8 @@ import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { requireFeature } from '@/lib/require-feature'
-import { notifyOrgContacts } from '@/lib/notifications'
-import { invoiceReference } from '@/lib/invoice-billing'
+import { createNotifications, type NotificationRecipient } from '@/lib/notifications'
+import { invoiceReference, selectBillingContacts } from '@/lib/invoice-billing'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -55,6 +55,7 @@ export async function POST(req: NextRequest) {
       orgId: schema.invoices.orgId,
       currency: schema.invoices.currency,
       dueDate: schema.invoices.dueDate,
+      sentAt: schema.invoices.sentAt,
       stripeInvoiceId: schema.invoices.stripeInvoiceId,
     })
     .from(schema.invoices)
@@ -174,24 +175,43 @@ export async function POST(req: NextRequest) {
     // returned: it is the client's pay link, so it has to survive this request
     // for the portal CTA and the invoice email to exist at all.
     const now = new Date().toISOString()
+    const alreadySent = !!invoice.sentAt
     await database.update(schema.invoices).set({
       stripeInvoiceId: finalized.id,
       stripeHostedInvoiceUrl: finalized.hosted_invoice_url ?? null,
       source: 'stripe',
       status: 'sent',
-      sentAt: now,
+      // sentAt means FIRST send. If the invoice was already emailed, keep it.
+      ...(alreadySent ? {} : { sentAt: now }),
       updatedAt: now,
     }).where(eq(schema.invoices.id, invoice.id))
 
     // Finalising in Stripe puts a real, payable bill in front of the client,
-    // so this is a send. Notifying happens here rather than at draft creation.
-    await notifyOrgContacts(database, invoice.orgId, {
-      type: 'invoice_created',
-      title: 'Invoice ready to pay',
-      body: `Invoice ${invoiceReference(invoice.id)} is ready. You can pay it from your portal.`,
-      entityType: 'invoice',
-      entityId: invoice.id,
-    })
+    // so this is a send. Notifying happens here rather than at draft creation,
+    // once per invoice (send-email skips its own bell when this already ran),
+    // and only to the billing contacts: the portal denies a plain member seat
+    // the invoice, so a bell row for them is a dead click.
+    if (!alreadySent) {
+      const contacts = await database
+        .select({
+          id: schema.contacts.id,
+          email: schema.contacts.email,
+          name: schema.contacts.name,
+          portalRole: schema.contacts.portalRole,
+          isPrimary: schema.contacts.isPrimary,
+        })
+        .from(schema.contacts)
+        .where(eq(schema.contacts.orgId, invoice.orgId))
+      const notifyRecipients: NotificationRecipient[] = selectBillingContacts(contacts)
+        .map(c => ({ contactId: c.id }))
+      await createNotifications(database, notifyRecipients, {
+        type: 'invoice_created',
+        title: 'Invoice ready to pay',
+        body: `Invoice ${invoiceReference(invoice.id)} is ready. You can pay it from your portal.`,
+        entityType: 'invoice',
+        entityId: invoice.id,
+      })
+    }
 
     return NextResponse.json({
       success: true,

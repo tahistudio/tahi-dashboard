@@ -36,6 +36,8 @@ function toImportable(inv: Stripe.Invoice): StripeInvoiceLike {
     customer: typeof inv.customer === 'string' ? inv.customer : inv.customer?.id ?? null,
     customer_name: inv.customer_name ?? null,
     currency: inv.currency ?? null,
+    // Carried through so a self-healed invoice still has the client's pay link.
+    hosted_invoice_url: inv.hosted_invoice_url ?? null,
     subtotal: inv.subtotal ?? 0,
     total: inv.total ?? 0,
     amount_paid: inv.amount_paid ?? 0,

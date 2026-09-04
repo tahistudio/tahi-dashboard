@@ -7,11 +7,20 @@
  *   - POST /api/admin/invoices/[id]/send-email
  *                                           all billing contacts, real
  *                                           template, pay link, status flip,
- *                                           client notification on SEND
+ *                                           client notification on SEND (to
+ *                                           the billing audience only, once,
+ *                                           and never for a settled invoice)
+ *   - POST /api/admin/invoices/stripe-create
+ *                                           the other send door: persists the
+ *                                           pay link and bells the same
+ *                                           billing audience
  *   - POST /api/admin/invoices              draft creation notifies NOBODY
  *   - POST /api/onboarding/complete         "invoice me" records the terms,
  *                                           raises a draft, tells the studio
- *                                           and completes instead of 402ing
+ *                                           and completes instead of 402ing,
+ *                                           but only from inside onboarding
+ *                                           and only for an org with nothing
+ *                                           else paying for it
  *
  * The fake D1 is the recorder from admin-scoping-routes.test.ts: only the
  * chain is thenable, and every call is recorded so a tenancy claim can be
@@ -42,6 +51,7 @@ vi.mock('@/lib/access-scoping', async (importOriginal) => ({
 vi.mock('@/lib/email', () => ({ sendEmail: vi.fn().mockResolvedValue({ success: true }) }))
 
 vi.mock('@/lib/notifications', () => ({
+  createNotifications: vi.fn().mockResolvedValue({ delivered: 0, skipped: 0 }),
   notifyOrgContacts: vi.fn().mockResolvedValue(undefined),
   notifyAllAdmins: vi.fn().mockResolvedValue(undefined),
 }))
@@ -64,15 +74,18 @@ vi.mock('@clerk/nextjs/server', () => ({
   }),
 }))
 
+import { clerkClient } from '@clerk/nextjs/server'
 import { db } from '@/lib/db'
+import { stripeSecretKey } from '@/lib/stripe-key'
 import { getPortalAuth } from '@/lib/server-auth'
 import { isOrgAdmin } from '@/lib/portal-access'
 import { sendEmail } from '@/lib/email'
-import { notifyOrgContacts, notifyAllAdmins } from '@/lib/notifications'
+import { createNotifications, notifyOrgContacts, notifyAllAdmins } from '@/lib/notifications'
 import { NextRequest } from 'next/server'
 
 import { GET as portalInvoiceDetail } from '@/app/api/portal/invoices/[id]/route'
 import { POST as sendInvoiceEmail } from '@/app/api/admin/invoices/[id]/send-email/route'
+import { POST as stripeCreate } from '@/app/api/admin/invoices/stripe-create/route'
 import { POST as createInvoice } from '@/app/api/admin/invoices/route'
 import { POST as completeOnboarding } from '@/app/api/onboarding/complete/route'
 
@@ -170,16 +183,30 @@ function clientAuth(over: Record<string, unknown> = {}) {
   } as never)
 }
 
+/** The Clerk user behind the caller. publicMetadata.onboardingComplete is the
+ *  "already through onboarding" signal the invoice-me guard reads. */
+function clerkUser(publicMetadata: Record<string, unknown> = {}) {
+  vi.mocked(clerkClient).mockResolvedValue({
+    users: {
+      getUser: vi.fn().mockResolvedValue({ publicMetadata }),
+      updateUser: vi.fn().mockResolvedValue({}),
+    },
+  } as never)
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   vi.stubEnv('NEXT_PUBLIC_TAHI_ORG_ID', 'org_tahi')
   vi.mocked(isOrgAdmin).mockResolvedValue(true)
   vi.mocked(sendEmail).mockResolvedValue({ success: true })
+  vi.mocked(stripeSecretKey).mockReturnValue(undefined)
+  clerkUser()
   clientAuth()
 })
 
 afterEach(() => {
   vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
 })
 
 // ---------------------------------------------------------------------------
@@ -278,14 +305,15 @@ const SEND_INVOICE = {
   currency: 'NZD',
   notes: null,
   dueDate: '2026-09-30',
+  sentAt: null,
   stripeInvoiceId: 'in_test',
   stripeHostedInvoiceUrl: 'https://invoice.stripe.com/i/acct_1/test_1',
 }
 
 const CONTACTS = [
-  { email: 'owner@acme.test', name: 'Ana Owner', portalRole: 'admin', isPrimary: true },
-  { email: 'finance@acme.test', name: 'Fin Ance', portalRole: 'admin', isPrimary: false },
-  { email: 'designer@acme.test', name: 'Dee Signer', portalRole: 'member', isPrimary: false },
+  { id: 'c-owner', email: 'owner@acme.test', name: 'Ana Owner', portalRole: 'admin', isPrimary: true },
+  { id: 'c-finance', email: 'finance@acme.test', name: 'Fin Ance', portalRole: 'admin', isPrimary: false },
+  { id: 'c-designer', email: 'designer@acme.test', name: 'Dee Signer', portalRole: 'member', isPrimary: false },
 ]
 
 describe('POST /api/admin/invoices/[id]/send-email', () => {
@@ -330,20 +358,80 @@ describe('POST /api/admin/invoices/[id]/send-email', () => {
     const patch = argOf(byEntry(queries, 'update')[0], 'set') as { status: string; sentAt: string }
     expect(patch.status).toBe('sent')
     expect(patch.sentAt).toBeTruthy()
-    expect(vi.mocked(notifyOrgContacts)).toHaveBeenCalledTimes(1)
-    const payload = vi.mocked(notifyOrgContacts).mock.calls[0][2]
+    expect(vi.mocked(createNotifications)).toHaveBeenCalledTimes(1)
+    const payload = vi.mocked(createNotifications).mock.calls[0][2]
     expect(payload.entityType).toBe('invoice')
     expect(payload.entityId).toBe('inv-1')
   })
 
+  it('bells the billing contacts only, never the whole org', async () => {
+    const { handle } = makeDb([[SEND_INVOICE], CONTACTS])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    await sendInvoiceEmail(req('/api/admin/invoices/inv-1/send-email', { method: 'POST' }), params('inv-1'))
+
+    // A member seat is 403d by both portal invoice routes, so a bell row
+    // carrying the amount would disclose the bill and then dead-end on click.
+    expect(vi.mocked(notifyOrgContacts)).not.toHaveBeenCalled()
+    expect(vi.mocked(createNotifications).mock.calls[0][1]).toEqual([
+      { contactId: 'c-owner' },
+      { contactId: 'c-finance' },
+    ])
+  })
+
+  it('does not re-stamp sentAt, demote the status or re-bell on a resend', async () => {
+    const chased = { ...SEND_INVOICE, status: 'overdue', sentAt: '2026-09-01T00:00:00.000Z' }
+    const { handle, queries } = makeDb([[chased], CONTACTS])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await sendInvoiceEmail(req('/api/admin/invoices/inv-1/send-email', { method: 'POST' }), params('inv-1'))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ notified: false })
+
+    // sentAt means FIRST send (receivables aging reads it) and 'overdue' is a
+    // state this invoice already earned.
+    const patch = argOf(byEntry(queries, 'update')[0], 'set') as Record<string, unknown>
+    expect(patch).not.toHaveProperty('sentAt')
+    expect(patch).not.toHaveProperty('status')
+    expect(vi.mocked(sendEmail)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(createNotifications)).not.toHaveBeenCalled()
+  })
+
+  it('409s a settled invoice instead of re-billing it', async () => {
+    for (const status of ['paid', 'written_off']) {
+      vi.clearAllMocks()
+      const { handle, queries } = makeDb([[{ ...SEND_INVOICE, status, sentAt: '2026-09-01T00:00:00.000Z' }]])
+      vi.mocked(db).mockResolvedValue(handle as never)
+
+      const res = await sendInvoiceEmail(req('/api/admin/invoices/inv-1/send-email', { method: 'POST' }), params('inv-1'))
+      expect(res.status).toBe(409)
+      expect(vi.mocked(sendEmail)).not.toHaveBeenCalled()
+      expect(byEntry(queries, 'update')).toHaveLength(0)
+      expect(vi.mocked(createNotifications)).not.toHaveBeenCalled()
+    }
+  })
+
+  it('400s when nobody is designated to receive bills, rather than mailing everyone', async () => {
+    // A ManyRequests import has no primary and no portalRole 'admin'.
+    const undesignated = CONTACTS.map(c => ({ ...c, portalRole: 'member', isPrimary: false }))
+    const { handle, queries } = makeDb([[SEND_INVOICE], undesignated])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await sendInvoiceEmail(req('/api/admin/invoices/inv-1/send-email', { method: 'POST' }), params('inv-1'))
+    expect(res.status).toBe(400)
+    expect((await res.json() as { error: string }).error).toMatch(/billing contact/i)
+    expect(vi.mocked(sendEmail)).not.toHaveBeenCalled()
+    expect(byEntry(queries, 'update')).toHaveLength(0)
+  })
+
   it('400s when no contact has an email, and never marks it sent', async () => {
-    const { handle, queries } = makeDb([[SEND_INVOICE], [{ email: '', name: 'Nobody', portalRole: 'admin', isPrimary: true }]])
+    const { handle, queries } = makeDb([[SEND_INVOICE], [{ id: 'c-1', email: '', name: 'Nobody', portalRole: 'admin', isPrimary: true }]])
     vi.mocked(db).mockResolvedValue(handle as never)
 
     const res = await sendInvoiceEmail(req('/api/admin/invoices/inv-1/send-email', { method: 'POST' }), params('inv-1'))
     expect(res.status).toBe(400)
     expect(byEntry(queries, 'update')).toHaveLength(0)
-    expect(vi.mocked(notifyOrgContacts)).not.toHaveBeenCalled()
+    expect(vi.mocked(createNotifications)).not.toHaveBeenCalled()
   })
 
   it('502s without marking sent when every send fails', async () => {
@@ -354,7 +442,7 @@ describe('POST /api/admin/invoices/[id]/send-email', () => {
     const res = await sendInvoiceEmail(req('/api/admin/invoices/inv-1/send-email', { method: 'POST' }), params('inv-1'))
     expect(res.status).toBe(502)
     expect(byEntry(queries, 'update')).toHaveLength(0)
-    expect(vi.mocked(notifyOrgContacts)).not.toHaveBeenCalled()
+    expect(vi.mocked(createNotifications)).not.toHaveBeenCalled()
   })
 
   it('404s an unknown invoice', async () => {
@@ -363,6 +451,42 @@ describe('POST /api/admin/invoices/[id]/send-email', () => {
 
     const res = await sendInvoiceEmail(req('/api/admin/invoices/nope/send-email', { method: 'POST' }), params('nope'))
     expect(res.status).toBe(404)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// POST /api/admin/invoices/stripe-create  (finalising is the other send door)
+// ---------------------------------------------------------------------------
+describe('POST /api/admin/invoices/stripe-create', () => {
+  it('bells the billing contacts only when it finalises', async () => {
+    vi.mocked(stripeSecretKey).mockReturnValue('sk_test_1')
+    // Every Stripe POST in this route wants an { id }; only finalize reads the
+    // hosted url, and an extra field on the others is harmless.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'in_new', hosted_invoice_url: 'https://invoice.stripe.com/i/acct_1/new' }),
+    }))
+
+    const invoice = { id: 'inv-1', orgId: 'org-a', currency: 'NZD', dueDate: '2026-09-30', sentAt: null, stripeInvoiceId: null }
+    const org = [{ id: 'org-a', name: 'Acme', stripeCustomerId: 'cus_1' }]
+    const items = [{ id: 'li-1', description: 'Retainer', quantity: 1, unitPriceUsd: 1500 }]
+    // invoice, org, line items, the update itself, then the contacts.
+    const { handle, queries } = makeDb([[invoice], org, items, [], CONTACTS])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await stripeCreate(jsonReq('/api/admin/invoices/stripe-create', { invoiceId: 'inv-1' }))
+    expect(res.status).toBe(200)
+
+    // The pay link is persisted, not just returned to the operator.
+    const patch = argOf(byEntry(queries, 'update')[0], 'set') as { stripeHostedInvoiceUrl: string; sentAt: string }
+    expect(patch.stripeHostedInvoiceUrl).toBe('https://invoice.stripe.com/i/acct_1/new')
+    expect(patch.sentAt).toBeTruthy()
+
+    expect(vi.mocked(notifyOrgContacts)).not.toHaveBeenCalled()
+    expect(vi.mocked(createNotifications).mock.calls[0][1]).toEqual([
+      { contactId: 'c-owner' },
+      { contactId: 'c-finance' },
+    ])
   })
 })
 
@@ -385,6 +509,7 @@ describe('POST /api/admin/invoices', () => {
     // The portal filters drafts out of both the list and the detail route, so
     // a bell row here pointed at something the client could not open.
     expect(vi.mocked(notifyOrgContacts)).not.toHaveBeenCalled()
+    expect(vi.mocked(createNotifications)).not.toHaveBeenCalled()
   })
 })
 
@@ -449,6 +574,56 @@ describe('POST /api/onboarding/complete with billingMode invoice', () => {
     expect(res.status).toBe(402)
     expect(byEntry(queries, 'update')).toHaveLength(0)
     expect(byEntry(queries, 'insert')).toHaveLength(0)
+  })
+
+  it('refuses to record terms for an org that already pays by card', async () => {
+    // Terms plus a live subscription is a double-billing trap: the client is
+    // charged monthly AND a draft for the same plan waits to be sent.
+    const activeSub = [{ status: 'active', stripeSubscriptionId: 'sub_1' }]
+    // org lookup, subscription guard, then the ordinary entitlement checks.
+    const { handle, queries } = makeDb([org, activeSub, [], [], activeSub])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await completeOnboarding(jsonReq('/api/onboarding/complete', {
+      billingMode: 'invoice', plan: 'maintain',
+    }))
+    // Still entitled, by the subscription they are actually paying on.
+    expect(res.status).toBe(200)
+    expect(byEntry(queries, 'update')).toHaveLength(0)
+    expect(byEntry(queries, 'insert')).toHaveLength(0)
+    expect(vi.mocked(notifyAllAdmins)).not.toHaveBeenCalled()
+  })
+
+  it('refuses a caller who has already finished onboarding', async () => {
+    // Otherwise any client workspace admin could POST this from the browser
+    // later and grant their org a standing portal entitlement plus a draft.
+    clerkUser({ onboardingComplete: true })
+    const { handle, queries } = makeDb([org, [], [], [], []])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await completeOnboarding(jsonReq('/api/onboarding/complete', {
+      billingMode: 'invoice', plan: 'maintain',
+    }))
+    expect(res.status).toBe(402)
+    expect(byEntry(queries, 'update')).toHaveLength(0)
+    expect(byEntry(queries, 'insert')).toHaveLength(0)
+    expect(vi.mocked(notifyAllAdmins)).not.toHaveBeenCalled()
+  })
+
+  it('records the quoted currency in the draft when an invoice cannot carry it', async () => {
+    // CAD is offered by the onboarding picker but no invoice row carries it,
+    // so the draft is priced in the fallback and says so.
+    const { handle, queries } = makeDb([org])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    await completeOnboarding(jsonReq('/api/onboarding/complete', {
+      billingMode: 'invoice', plan: 'maintain', currency: 'cad',
+    }))
+
+    const invoice = argOf(byEntry(queries, 'insert')[0], 'values') as { currency: string; notes: string }
+    expect(invoice.currency).toBe('USD')
+    expect(invoice.notes).toContain('CAD')
+    expect(invoice.notes).toMatch(/re-quote/i)
   })
 
   it('entitles a client already on net terms with no body at all', async () => {

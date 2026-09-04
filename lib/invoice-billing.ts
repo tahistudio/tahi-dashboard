@@ -83,28 +83,40 @@ export interface InvoiceRecipient {
 }
 
 /**
+ * The billing audience at an org: every contact the portal would let open an
+ * invoice. Billing is a workspace-admin surface (lib/portal-access.ts), so it
+ * is exactly portalRole 'admin' plus the primary contact.
+ *
+ * Deliberately NOT tolerant. An org with no admin and no primary (imported
+ * from ManyRequests, or created outside the two flows that set isPrimary) gets
+ * an EMPTY list, so the caller fails loudly rather than broadcasting the
+ * amount, the due date and the notes to a designer or a contractor at the
+ * client. Generic on the row type so a caller can keep its own columns (id,
+ * clerkUserId) on the rows that come back.
+ */
+export function selectBillingContacts<T extends BillingContactRow>(contacts: T[]): T[] {
+  return contacts.filter(c => c.portalRole === 'admin' || !!c.isPrimary)
+}
+
+/**
  * Who receives the invoice email.
  *
  * The old behaviour picked ONE contact (the primary, by an ORDER BY), so a
- * client whose finance person is a second seat never saw their bill. Billing
- * is a workspace-admin surface in the portal (lib/portal-access.ts), so the
- * email goes to exactly the people who can open the invoice once it lands:
- * every contact with portalRole 'admin' plus the primary contact.
+ * client whose finance person is a second seat never saw their bill. This is
+ * the billing audience above, narrowed to the rows with a usable email and
+ * de-duplicated case-insensitively, order preserved.
  *
- * If an org has no admin and no primary (badly seeded data), fall back to
- * every contact with an email rather than sending the invoice nowhere.
- * De-duplicated case-insensitively on email, order preserved.
+ * Empty means "nobody at this client is designated to receive bills", which is
+ * a 400 at the route, not a reason to mail everyone.
  */
 export function selectInvoiceRecipients(contacts: BillingContactRow[]): InvoiceRecipient[] {
-  const withEmail = contacts.filter((c): c is BillingContactRow & { email: string } =>
-    typeof c.email === 'string' && c.email.trim().length > 0)
-
-  const preferred = withEmail.filter(c => c.portalRole === 'admin' || !!c.isPrimary)
-  const chosen = preferred.length > 0 ? preferred : withEmail
+  const withEmail = selectBillingContacts(contacts).filter(
+    (c): c is BillingContactRow & { email: string } =>
+      typeof c.email === 'string' && c.email.trim().length > 0)
 
   const seen = new Set<string>()
   const out: InvoiceRecipient[] = []
-  for (const c of chosen) {
+  for (const c of withEmail) {
     const email = c.email.trim()
     const key = email.toLowerCase()
     if (seen.has(key)) continue

@@ -473,9 +473,9 @@ const TOOLS: ToolDef[] = [
     notes: prop('string', 'Invoice notes'),
     dueDate: prop('string', 'Due date in YYYY-MM-DD format'),
   }, ['orgId', 'amountUsd', 'totalUsd']),
-  tool('update_invoice', 'Update an existing invoice', {
+  tool('update_invoice', 'Update an existing invoice. This does NOT send it: flipping an invoice to the client is send_invoice_email, which is the only door that emails the billing contacts and raises their bell row.', {
     invoiceId: prop('string', 'Invoice ID'),
-    status: prop('string', 'Updated status: draft, sent, overdue, paid, cancelled'),
+    status: prop('string', 'Updated status: draft, overdue, paid, written_off. To send an invoice use send_invoice_email instead, which sets sent for you.'),
     amount: prop('number', 'Updated amount'),
     dueDate: prop('string', 'Updated due date in YYYY-MM-DD format'),
     orgId: prop('string', 'Reassign invoice to a different client organisation ID'),

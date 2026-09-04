@@ -62,6 +62,23 @@ interface InvoiceMeRequest {
 }
 
 /**
+ * Has this caller already been through onboarding? The Clerk flag is the same
+ * one the dashboard layout gates on, so it is the honest answer to "is this
+ * person mid-onboarding". Fail-open (false) on a Clerk hiccup: an unreadable
+ * flag must not block a genuine new client, and the workspace-admin and
+ * live-subscription guards still stand.
+ */
+async function callerAlreadyOnboarded(userId: string): Promise<boolean> {
+  try {
+    const clerk = await clerkClient()
+    const user = await clerk.users.getUser(userId)
+    return !!user.publicMetadata?.onboardingComplete
+  } catch {
+    return false
+  }
+}
+
+/**
  * "Invoice me" at the onboarding pay step.
  *
  * Records the client's net-terms preference, raises a DRAFT invoice for the
@@ -72,6 +89,19 @@ interface InvoiceMeRequest {
  *
  * Amounts are derived server-side from STRIPE_PLANS; nothing about the price
  * is taken from the request body.
+ *
+ * NARROW BY DESIGN. Recording net terms grants a standing portal entitlement,
+ * so it is only ever reachable from the onboarding pay step of a client who
+ * has nothing else paying for them:
+ *   - the caller must be their org's workspace admin (a member seat cannot);
+ *   - the org must not hold an active / trialing / past_due subscription (a
+ *     card-paying client would otherwise end up on net terms with a stray
+ *     draft for the same plan, which is a double-billing trap for whoever
+ *     reviews it);
+ *   - the caller must not have finished onboarding already (so a client whose
+ *     subscription was later cancelled cannot re-enter the portal this way).
+ * Anything else returns false and falls through to the ordinary entitlement
+ * checks, which is a 402 when nothing else entitles them.
  *
  * Returns true when the org now carries net terms (which entitles them).
  */
@@ -94,8 +124,22 @@ async function recordInvoiceMe(
     .limit(1)
   if (!org) return false
 
-  // Idempotent: a repeated click must not raise a second draft invoice.
+  // Idempotent: a repeated click must not raise a second draft invoice. Checked
+  // before the guards below so a retry of a recorded choice still resolves.
   if (isInvoicedTerms(org.paymentTerms)) return true
+
+  // Already paying by card: nothing to record, and a draft here would be a
+  // second bill for the same plan.
+  const [sub] = await database
+    .select({ status: schema.subscriptions.status })
+    .from(schema.subscriptions)
+    .where(eq(schema.subscriptions.orgId, orgId))
+    .limit(1)
+  if (sub && ACTIVE_SUB_STATUSES.has(sub.status)) return false
+
+  // Only from inside onboarding. A client who is already through it cannot
+  // grant themselves terms (or a draft) from the browser later on.
+  if (await callerAlreadyOnboarded(userId)) return false
 
   const terms = DEFAULT_INVOICE_TERMS
   await database
@@ -116,6 +160,14 @@ async function recordInvoiceMe(
   const presentment: PresentmentCurrency =
     INVOICE_CURRENCIES.includes(requested.toUpperCase()) ? requested : 'usd'
   const currency = presentment.toUpperCase()
+  // The picker offers a currency (CAD) that an invoice row cannot carry. When
+  // that happens the draft is priced and labelled in the fallback, and the
+  // currency the client was actually LOOKING at goes in the notes, so whoever
+  // reviews the draft before sending knows to re-quote rather than assuming
+  // the client agreed to this number.
+  const requoteNote = requested === presentment
+    ? ''
+    : ` They were quoted in ${requested.toUpperCase()}, which an invoice cannot carry yet, so re-quote this in ${currency} before sending.`
 
   let invoiceId: string | null = null
   if (plan) {
@@ -144,7 +196,7 @@ async function recordInvoiceMe(
       totalUsd: total,
       currency,
       dueDate: dueDateForTerms(now, terms),
-      notes: `Raised from onboarding: client chose to be invoiced (${paymentTermsLabel(terms)}).`,
+      notes: `Raised from onboarding: client chose to be invoiced (${paymentTermsLabel(terms)}).${requoteNote}`,
       createdAt: now,
       updatedAt: now,
     })
