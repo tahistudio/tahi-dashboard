@@ -12,6 +12,28 @@ Deploy from this directory:
 npx wrangler deploy
 ```
 
+## Cutover gate: merging this branch does not close the hole
+
+Two of the three Tier 1 security items only take effect once someone runs the
+commands below. Until all four steps are done, treat items 14 and 15 as open,
+whatever the branch says.
+
+1. **Rotate `MANYREQUESTS_API_TOKEN` in ManyRequests**, then
+   `npx wrangler secret put MANYREQUESTS_API_TOKEN` with the new value. The old
+   one is in git history and is live until it is rotated at the source.
+2. **Rotate `OAUTH_CLIENT_SECRET`** (`npx wrangler secret put
+   OAUTH_CLIENT_SECRET`). It signs every token, so a new value invalidates
+   everything issued under the old one.
+3. **Set `OAUTH_APPROVAL_KEY`** to a long random value (`openssl rand -base64
+   32`), not a reused secret.
+4. **Set `OAUTH_TOKEN_EPOCH` to now** (`date +%s`), then `npx wrangler deploy`.
+   Every token minted before that instant is refused from the next request on.
+
+Step 4 is what actually retires the tokens the old auto-approving endpoint
+handed out. Without it, a refresh token grabbed back then keeps minting fresh
+24 hour admin tokens over every client's data for up to 30 days, and each
+refresh extends the window by another 30 days.
+
 ## Secrets
 
 Nothing here carries a committed credential. Set each secret once, from this
@@ -21,7 +43,8 @@ directory:
 npx wrangler secret put TAHI_API_TOKEN
 npx wrangler secret put OAUTH_CLIENT_ID
 npx wrangler secret put OAUTH_CLIENT_SECRET
-npx wrangler secret put OAUTH_APPROVAL_KEY        # optional, see below
+npx wrangler secret put OAUTH_APPROVAL_KEY        # long and random, see below
+npx wrangler secret put OAUTH_TOKEN_EPOCH         # `date +%s` at deploy time
 npx wrangler secret put MANYREQUESTS_API_TOKEN
 ```
 
@@ -32,6 +55,28 @@ Optional, only if you need them:
 - `MANYREQUESTS_BASE_URL`: overrides the default ManyRequests API base URL.
 
 `wrangler secret list` shows what is set. Values are write only after that.
+
+### Revoking issued tokens
+
+Access tokens (24 hours) and refresh tokens (30 days) are self contained
+signed blobs. There is no server side session table to delete a row from, and
+the refresh grant issues a fresh 30 day refresh token on every use, so an
+unrevoked leak does not age out on its own.
+
+`OAUTH_TOKEN_EPOCH` is the lever. Every token carries an `iat` (issued at) in
+unix seconds, and the worker refuses any token whose `iat` is below the epoch,
+including old tokens that predate the claim and carry no `iat` at all. To kill
+every live session:
+
+```bash
+date +%s | npx wrangler secret put OAUTH_TOKEN_EPOCH
+npx wrangler deploy
+```
+
+Claude then walks the consent screen again on its next connection. Leave the
+secret unset only if you accept that nothing issued so far can be withdrawn.
+`GET /` reports `tokenEpochSet` (a boolean, never the value) so you can
+confirm the deploy picked it up.
 
 ### ManyRequests token
 
@@ -57,8 +102,9 @@ the client id could mint a full admin token.
    `response_type=code`, the client id, `code_challenge_method=S256`, and that
    `redirect_uri` is on the allowlist, then renders a consent page. No
    authorization code is minted here.
-3. A Tahi admin reads the callback host on that page and types the approval
-   key. The page posts back to `POST /authorize`.
+3. A Tahi admin reads the full callback address on that page (host and path,
+   because `https://claude.ai/anything-else` looks identical at host level)
+   and types the approval key. The page posts back to `POST /authorize`.
 4. On a matching key the worker mints a short lived authorization code (10
    minutes, bound to the PKCE challenge and the redirect URI) and 302s to the
    callback. A wrong key re-renders the page with a 401 and no code.
@@ -70,9 +116,16 @@ Nothing changes in the Claude connector configuration. The only visible
 difference is the consent screen in step 3.
 
 The approval key is `OAUTH_APPROVAL_KEY` when set, otherwise
-`OAUTH_CLIENT_SECRET`. Setting the dedicated secret is better: it can be
-rotated without invalidating every issued token, since `OAUTH_CLIENT_SECRET`
-also signs them.
+`OAUTH_CLIENT_SECRET`. Set the dedicated secret, long and random: it can be
+rotated without invalidating every issued token (since `OAUTH_CLIENT_SECRET`
+also signs them), and it is the value a guesser gets to grind against.
+
+`POST /authorize` is public, so it is throttled: eight rejected keys from one
+address inside ten minutes and the endpoint answers 429 until the window
+lapses. The counter lives in the worker isolate, which makes it a speed bump
+rather than a lock, so the real defence is key length. Every rejection is
+logged with the source address, and worker observability is on, so a grinding
+attempt is visible in `npx wrangler tail`.
 
 Refreshing an existing session does not show the consent screen. Claude keeps
 using the refresh token until it expires or is rejected.

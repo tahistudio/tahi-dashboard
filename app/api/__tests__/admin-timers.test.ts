@@ -35,7 +35,7 @@ vi.mock('@/db/d1', () => ({
   schema: {
     activeTimers: { _table: 'activeTimers', id: 1, userId: 1, requestId: 1, taskId: 1, orgId: 1 },
     requests: { _table: 'requests', id: 1, orgId: 1, title: 1, requestNumber: 1 },
-    tasks: { _table: 'tasks', id: 1, orgId: 1, requestId: 1, title: 1 },
+    tasks: { _table: 'tasks', id: 1, orgId: 1, requestId: 1, title: 1, type: 1 },
     organisations: { _table: 'organisations', id: 1, name: 1 },
     teamMembers: { _table: 'teamMembers', id: 1, clerkUserId: 1 },
     timeEntries: { _table: 'timeEntries' },
@@ -140,10 +140,28 @@ describe('POST /api/admin/timers', () => {
   })
 
   it('falls back to the studio org for a tahi_internal task instead of a null client', async () => {
-    state.rows.tasks = [{ orgId: null, requestId: null }]
+    state.rows.tasks = [{ orgId: null, requestId: null, type: 'tahi_internal' }]
     const res = await POST(makePost({ taskId: 'task_internal' }))
     expect(res.status).toBe(201)
     expect(startedTimer().orgId).toBe('org_tahi_internal')
+  })
+
+  it('keeps a tahi_internal task on the studio org even when it hangs off a client request', async () => {
+    // Following the request would file studio hours as billable client
+    // hours and inflate that client's retainer burn.
+    state.rows.tasks = [{ orgId: null, requestId: 'req_client', type: 'tahi_internal' }]
+    state.rows.requests = [{ orgId: 'org_client_a' }]
+    const res = await POST(makePost({ taskId: 'task_internal' }))
+    expect(res.status).toBe(201)
+    expect(startedTimer().orgId).toBe('org_tahi_internal')
+  })
+
+  it('still follows the linked request for a client task with no client of its own', async () => {
+    state.rows.tasks = [{ orgId: null, requestId: 'req_client', type: 'internal_client_task' }]
+    state.rows.requests = [{ orgId: 'org_client_a' }]
+    const res = await POST(makePost({ taskId: 'task_client' }))
+    expect(res.status).toBe(201)
+    expect(startedTimer().orgId).toBe('org_client_a')
   })
 
   it('files an auto-stopped timer against its own client, not the new target', async () => {

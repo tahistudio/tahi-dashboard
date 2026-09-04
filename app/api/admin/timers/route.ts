@@ -23,7 +23,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
-import { elapsedSeconds, secondsToHours, stopAndLogTimer, GENERAL_KINDS, generalTimerNotes, isGeneralTimer, type GeneralKind } from '@/lib/timer-helpers'
+import { elapsedSeconds, secondsToHours, stopAndLogTimer, GENERAL_KINDS, generalTimerNotes, isGeneralTimer, TAHI_INTERNAL_TASK_TYPE, type GeneralKind } from '@/lib/timer-helpers'
 import { ensureInternalOrg } from '@/lib/internal-org'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
     targetOrgId = r.orgId
   } else if (body.taskId) {
     const [t] = await drizzle
-      .select({ orgId: schema.tasks.orgId, requestId: schema.tasks.requestId })
+      .select({ orgId: schema.tasks.orgId, requestId: schema.tasks.requestId, type: schema.tasks.type })
       .from(schema.tasks)
       .where(eq(schema.tasks.id, body.taskId))
       .limit(1)
@@ -143,8 +143,11 @@ export async function POST(req: NextRequest) {
     // tahi_internal tasks carry no orgId. Fall back to the request they
     // hang off, then to the hidden internal studio org, so the hours
     // survive the stop instead of being dropped for want of a client.
+    // A tahi_internal task skips the request fallback: it is studio work
+    // whatever it hangs off, and billing it to that request's client would
+    // inflate their retainer burn.
     targetOrgId = t.orgId
-    if (!targetOrgId && t.requestId) {
+    if (!targetOrgId && t.requestId && t.type !== TAHI_INTERNAL_TASK_TYPE) {
       const [r] = await drizzle
         .select({ orgId: schema.requests.orgId })
         .from(schema.requests)

@@ -13,13 +13,21 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  APPROVAL_ATTEMPT_LIMIT,
+  APPROVAL_ATTEMPT_WINDOW_MS,
   DEFAULT_REDIRECT_HOSTS,
   escapeHtml,
+  failedApprovalCount,
   isAllowedRedirectUri,
+  isMintedBeforeEpoch,
   parseAllowedRedirectHosts,
+  parseTokenEpoch,
+  pruneApprovalAttempts,
+  recordFailedApproval,
   redirectHost,
   renderApprovalPage,
   timingSafeEquals,
+  type ApprovalAttempts,
 } from '../../../workers/mcp-server/src/oauth-approval'
 
 describe('parseAllowedRedirectHosts', () => {
@@ -80,6 +88,93 @@ describe('timingSafeEquals', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// Revocation. Closing /authorize does not retire the tokens the old
+// auto-approving endpoint already handed out: they are self contained signed
+// blobs, and the refresh grant re-issues a 30 day refresh token on every use.
+// OAUTH_TOKEN_EPOCH is the lever that kills them.
+// ---------------------------------------------------------------------------
+
+describe('parseTokenEpoch', () => {
+  it('reads a unix seconds value', () => {
+    expect(parseTokenEpoch('1757030400')).toBe(1757030400)
+    expect(parseTokenEpoch('  1757030400  ')).toBe(1757030400)
+    expect(parseTokenEpoch('1757030400.9')).toBe(1757030400)
+  })
+
+  it('treats unset, blank, junk and non-positive values as no epoch', () => {
+    expect(parseTokenEpoch(undefined)).toBe(0)
+    expect(parseTokenEpoch(null)).toBe(0)
+    expect(parseTokenEpoch('')).toBe(0)
+    expect(parseTokenEpoch('yesterday')).toBe(0)
+    expect(parseTokenEpoch('-5')).toBe(0)
+    expect(parseTokenEpoch('0')).toBe(0)
+  })
+})
+
+describe('isMintedBeforeEpoch', () => {
+  const epoch = 1_757_030_400
+
+  it('refuses tokens minted before the epoch and keeps the rest', () => {
+    expect(isMintedBeforeEpoch({ iat: epoch - 1 }, epoch)).toBe(true)
+    expect(isMintedBeforeEpoch({ iat: epoch }, epoch)).toBe(false)
+    expect(isMintedBeforeEpoch({ iat: epoch + 1 }, epoch)).toBe(false)
+  })
+
+  it('refuses a token with no iat, which is what revokes the old ones', () => {
+    expect(isMintedBeforeEpoch({}, epoch)).toBe(true)
+    expect(isMintedBeforeEpoch({ iat: 'soon' }, epoch)).toBe(true)
+    expect(isMintedBeforeEpoch({ iat: Number.NaN }, epoch)).toBe(true)
+  })
+
+  it('changes nothing while the epoch is unset', () => {
+    expect(isMintedBeforeEpoch({}, 0)).toBe(false)
+    expect(isMintedBeforeEpoch({ iat: 1 }, 0)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// POST /authorize is public, so a single shared key can be ground at request
+// rate. The counter is a speed bump, not a lock, and it must never lock out
+// the admin permanently.
+// ---------------------------------------------------------------------------
+
+describe('approval attempt throttling', () => {
+  const now = 1_757_030_400_000
+
+  function buckets(): ApprovalAttempts {
+    return new Map()
+  }
+
+  it('counts failures per source inside the window', () => {
+    const b = buckets()
+    expect(failedApprovalCount(b, '203.0.113.7', now)).toBe(0)
+    expect(recordFailedApproval(b, '203.0.113.7', now)).toBe(1)
+    expect(recordFailedApproval(b, '203.0.113.7', now + 1000)).toBe(2)
+    expect(failedApprovalCount(b, '203.0.113.7', now + 1000)).toBe(2)
+    // A different source is untouched by someone else's failures.
+    expect(failedApprovalCount(b, '198.51.100.4', now)).toBe(0)
+  })
+
+  it('lets the window lapse instead of locking the admin out forever', () => {
+    const b = buckets()
+    for (let i = 0; i < APPROVAL_ATTEMPT_LIMIT; i++) recordFailedApproval(b, 'ip', now)
+    expect(failedApprovalCount(b, 'ip', now)).toBeGreaterThanOrEqual(APPROVAL_ATTEMPT_LIMIT)
+    const after = now + APPROVAL_ATTEMPT_WINDOW_MS + 1
+    expect(failedApprovalCount(b, 'ip', after)).toBe(0)
+    expect(recordFailedApproval(b, 'ip', after)).toBe(1)
+  })
+
+  it('prunes lapsed windows so a spray of addresses cannot grow the map', () => {
+    const b = buckets()
+    recordFailedApproval(b, 'old', now)
+    recordFailedApproval(b, 'fresh', now + APPROVAL_ATTEMPT_WINDOW_MS)
+    pruneApprovalAttempts(b, now + APPROVAL_ATTEMPT_WINDOW_MS + 1)
+    expect(b.has('old')).toBe(false)
+    expect(b.has('fresh')).toBe(true)
+  })
+})
+
 describe('escapeHtml', () => {
   it('neutralises markup characters', () => {
     expect(escapeHtml('<script>"x"&\'y\'</script>')).toBe(
@@ -123,6 +218,22 @@ describe('renderApprovalPage', () => {
 
   it('never mints or shows a code', () => {
     expect(renderApprovalPage(params)).not.toContain('name="code"')
+  })
+
+  it('shows the whole callback, not just the host', () => {
+    // https://claude.ai/<anything-else> renders identically to the real
+    // callback when only the host is printed, so the human check the page
+    // asks for is impossible without the path.
+    const html = renderApprovalPage(params)
+    expect(html).toContain('https://claude.ai/api/mcp/auth_callback')
+    const forged = renderApprovalPage({ ...params, redirectUri: 'https://claude.ai/not-the-real-callback' })
+    expect(forged).toContain('https://claude.ai/not-the-real-callback')
+    expect(forged).not.toBe(html)
+  })
+
+  it('escapes the callback rather than reflecting markup from it', () => {
+    const html = renderApprovalPage({ ...params, redirectUri: 'https://claude.ai/"><script>alert(1)</script>' })
+    expect(html).not.toContain('<script>alert(1)</script>')
   })
 
   it('escapes hostile parameters instead of reflecting them', () => {

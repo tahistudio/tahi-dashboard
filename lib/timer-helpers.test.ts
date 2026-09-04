@@ -87,9 +87,9 @@ describe('resolveTimerOrgId', () => {
     expect(orgId).toBe('org_client_b')
   })
 
-  it('falls back to the linked request when the task carries no client', async () => {
+  it('falls back to the linked request when a client task carries no client', async () => {
     const { drizzle } = fakeDrizzle({
-      tasks: [{ orgId: null, requestId: 'req9' }],
+      tasks: [{ orgId: null, requestId: 'req9', type: 'internal_client_task' }],
       requests: [{ orgId: 'org_client_c' }],
     })
     const orgId = await resolveTimerOrgId(drizzle, { requestId: null, taskId: 'task1', orgId: null })
@@ -97,10 +97,21 @@ describe('resolveTimerOrgId', () => {
   })
 
   it('books a tahi_internal task against the hidden studio org rather than losing it', async () => {
-    const { drizzle, inserted } = fakeDrizzle({ tasks: [{ orgId: null, requestId: null }] })
+    const { drizzle, inserted } = fakeDrizzle({ tasks: [{ orgId: null, requestId: null, type: 'tahi_internal' }] })
     const orgId = await resolveTimerOrgId(drizzle, { requestId: null, taskId: 'task1', orgId: null })
     expect(orgId).toBe(INTERNAL_ORG_ID)
     expect(inserted[0]?.id).toBe(INTERNAL_ORG_ID)
+  })
+
+  it('never bills a tahi_internal task to the client of the request it hangs off', async () => {
+    // Studio work attached to a client's request is still studio work.
+    // Following the request here would file it as billable client hours.
+    const { drizzle } = fakeDrizzle({
+      tasks: [{ orgId: null, requestId: 'req9', type: 'tahi_internal' }],
+      requests: [{ orgId: 'org_client_c' }],
+    })
+    const orgId = await resolveTimerOrgId(drizzle, { requestId: null, taskId: 'task1', orgId: null })
+    expect(orgId).toBe(INTERNAL_ORG_ID)
   })
 
   it('keeps a client timer on its own client', async () => {
@@ -131,7 +142,17 @@ describe('timerLogFailureMessage', () => {
 
   it('stays honest about an unknown or missing reason', () => {
     expect(timerLogFailureMessage(undefined)).toBe('The hours were not logged.')
+    expect(timerLogFailureMessage(null)).toBe('The hours were not logged.')
     expect(timerLogFailureMessage('something_new')).toBe('The hours were not logged.')
+  })
+
+  it('does not hand back an inherited Object property as the message', () => {
+    // `reason in messages` walks the prototype chain, so a wire value of
+    // 'toString' would return a function, JSON.stringify would drop the
+    // field, and the UI would lose the explanation entirely.
+    for (const inherited of ['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__']) {
+      expect(timerLogFailureMessage(inherited)).toBe('The hours were not logged.')
+    }
   })
 
   it('never claims the hours landed', () => {

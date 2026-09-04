@@ -60,6 +60,81 @@ export function isAllowedRedirectUri(redirectUri: string, allowedHosts: string[]
 }
 
 /**
+ * Every token minted before this epoch (unix seconds) is refused, whatever
+ * its expiry says. The tokens this worker issues are self contained HMAC
+ * blobs with no server side store, and the refresh grant mints a fresh 30
+ * day refresh token on every use, so a refresh token grabbed while
+ * /authorize still auto-approved would otherwise live forever. Bumping
+ * OAUTH_TOKEN_EPOCH past the moment of the fix cuts every one of them off
+ * without touching OAUTH_CLIENT_SECRET.
+ *
+ * Junk, negative and missing values parse to 0, which disables the check.
+ */
+export function parseTokenEpoch(raw: string | undefined | null): number {
+  const trimmed = (raw ?? '').trim()
+  if (!trimmed) return 0
+  const parsed = Number(trimmed)
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0
+  return Math.floor(parsed)
+}
+
+/**
+ * Was this token minted before the epoch? A payload with no `iat` at all
+ * predates the claim, so it counts as older than any epoch: that is what
+ * revokes the tokens issued by the auto-approving endpoint.
+ */
+export function isMintedBeforeEpoch(payload: { iat?: unknown }, epoch: number): boolean {
+  if (epoch <= 0) return false
+  const iat = typeof payload.iat === 'number' && Number.isFinite(payload.iat) ? payload.iat : 0
+  return iat < epoch
+}
+
+// ---------------------------------------------------------------------------
+// Approval attempt throttling
+// ---------------------------------------------------------------------------
+// POST /authorize is public by design (the key in the form body is what
+// authorises it), so without a counter a single host can grind the key at
+// request rate with no signal to anyone. The buckets live in the worker
+// isolate rather than KV: it is a speed bump, not a lock, and it pairs with
+// logging every rejection so the attempt is visible in worker logs.
+
+export const APPROVAL_ATTEMPT_LIMIT = 8
+export const APPROVAL_ATTEMPT_WINDOW_MS = 10 * 60 * 1000
+
+export type ApprovalAttemptBucket = { count: number; resetAt: number }
+export type ApprovalAttempts = Map<string, ApprovalAttemptBucket>
+
+/** Failures recorded against this key inside the live window (0 once it lapses). */
+export function failedApprovalCount(buckets: ApprovalAttempts, key: string, now: number): number {
+  const bucket = buckets.get(key)
+  if (!bucket || bucket.resetAt <= now) return 0
+  return bucket.count
+}
+
+/** Record one rejected approval; returns the running count for the window. */
+export function recordFailedApproval(
+  buckets: ApprovalAttempts,
+  key: string,
+  now: number,
+  windowMs: number = APPROVAL_ATTEMPT_WINDOW_MS,
+): number {
+  const bucket = buckets.get(key)
+  if (!bucket || bucket.resetAt <= now) {
+    buckets.set(key, { count: 1, resetAt: now + windowMs })
+    return 1
+  }
+  bucket.count += 1
+  return bucket.count
+}
+
+/** Drop lapsed windows so a spray of source addresses cannot grow the map. */
+export function pruneApprovalAttempts(buckets: ApprovalAttempts, now: number): void {
+  for (const [key, bucket] of buckets) {
+    if (bucket.resetAt <= now) buckets.delete(key)
+  }
+}
+
+/**
  * Compare two secrets without leaking their length or first difference
  * through timing. Not constant time in the cryptographic sense (JS strings
  * are not), but it removes the trivial early exit.
@@ -162,6 +237,7 @@ export function renderApprovalPage(params: ApprovalPageParams): string {
   dl { margin: 0 0 1.25rem; font-size: 0.8125rem; }
   dt { color: var(--ink-muted); }
   dd { margin: 0 0 0.5rem; word-break: break-all; }
+  dd .full { display: block; color: var(--ink-muted); }
   label { display: block; font-size: 0.8125rem; font-weight: 600; margin-bottom: 0.375rem; }
   input[type="password"] {
     width: 100%;
@@ -206,12 +282,16 @@ export function renderApprovalPage(params: ApprovalPageParams): string {
     <p>
       This grants the Tahi Dashboard MCP connector full admin access to every
       client's data for 24 hours, with refresh. Only approve a request you
-      started yourself, and check the callback below before you do.
+      started yourself, and read the whole callback address below before you
+      do: the host on its own does not tell you where the code lands.
     </p>
     ${errorBlock}
     <dl>
       <dt>Callback</dt>
-      <dd>${escapeHtml(redirectHost(params.redirectUri))}</dd>
+      <dd>
+        <strong>${escapeHtml(redirectHost(params.redirectUri))}</strong>
+        <span class="full">${escapeHtml(params.redirectUri)}</span>
+      </dd>
       <dt>Client</dt>
       <dd>${escapeHtml(params.clientId)}</dd>
     </dl>

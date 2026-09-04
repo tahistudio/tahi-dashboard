@@ -9,6 +9,8 @@
   //   OAUTH_APPROVAL_KEY     key a Tahi admin types on the /authorize consent
   //                          screen (optional: falls back to OAUTH_CLIENT_SECRET)
   //   OAUTH_REDIRECT_HOSTS   optional extra callback hosts, comma separated
+  //   OAUTH_TOKEN_EPOCH      unix seconds; refuses every token minted before
+  //                          it. Bump on any suspected leak to revoke.
   //   MANYREQUESTS_API_TOKEN ManyRequests API bearer token
   //   MANYREQUESTS_BASE_URL  optional ManyRequests API base URL override
   //

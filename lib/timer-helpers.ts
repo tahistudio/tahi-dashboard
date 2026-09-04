@@ -50,6 +50,12 @@ export function isStaleTimer(lastPingAt: string, thresholdMs = 2 * 60 * 1000, no
   return now.getTime() - last > thresholdMs
 }
 
+/**
+ * tasks.type for studio-only work. The schema guarantees orgId is null on
+ * these rows, so they never bill to a client, whatever request they hang off.
+ */
+export const TAHI_INTERNAL_TASK_TYPE = 'tahi_internal'
+
 export const GENERAL_KINDS = ['request', 'task', 'client'] as const
 export type GeneralKind = (typeof GENERAL_KINDS)[number]
 
@@ -83,7 +89,10 @@ const TIMER_LOG_FAILURE_MESSAGES: Record<TimerLogFailure, string> = {
 
 /** Plain-words explanation for a logged:false stop. */
 export function timerLogFailureMessage(reason: string | null | undefined): string {
-  if (reason && reason in TIMER_LOG_FAILURE_MESSAGES) {
+  // hasOwnProperty, not `in`: `in` walks the prototype chain, so a reason of
+  // 'toString' or 'constructor' would return an inherited function instead
+  // of the fallback sentence, and JSON.stringify would then drop the field.
+  if (reason && Object.prototype.hasOwnProperty.call(TIMER_LOG_FAILURE_MESSAGES, reason)) {
     return TIMER_LOG_FAILURE_MESSAGES[reason as TimerLogFailure]
   }
   return 'The hours were not logged.'
@@ -99,6 +108,11 @@ export function timerLogFailureMessage(reason: string | null | undefined): strin
  *                   off, else the hidden internal studio org (a
  *                   tahi_internal task is still studio time worth keeping)
  *   client timer  : the org already on the row
+ *
+ * A tahi_internal task skips the request fallback on purpose. It carries no
+ * client by definition, and an internal task hung off a client's request
+ * would otherwise file studio hours against that client as billable and
+ * inflate their retainer burn.
  */
 export async function resolveTimerOrgId(
   drizzle: Drizzle,
@@ -115,12 +129,12 @@ export async function resolveTimerOrgId(
 
   if (timer.taskId) {
     const [t] = await drizzle
-      .select({ orgId: schema.tasks.orgId, requestId: schema.tasks.requestId })
+      .select({ orgId: schema.tasks.orgId, requestId: schema.tasks.requestId, type: schema.tasks.type })
       .from(schema.tasks)
       .where(eq(schema.tasks.id, timer.taskId))
       .limit(1)
     if (t?.orgId) return t.orgId
-    if (t?.requestId) {
+    if (t?.requestId && t.type !== TAHI_INTERNAL_TASK_TYPE) {
       const [r] = await drizzle
         .select({ orgId: schema.requests.orgId })
         .from(schema.requests)

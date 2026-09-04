@@ -9,10 +9,18 @@
 
 import { requestToolCall } from './request-tools'
 import {
+  APPROVAL_ATTEMPT_LIMIT,
+  APPROVAL_ATTEMPT_WINDOW_MS,
+  failedApprovalCount,
   isAllowedRedirectUri,
+  isMintedBeforeEpoch,
   parseAllowedRedirectHosts,
+  parseTokenEpoch,
+  pruneApprovalAttempts,
+  recordFailedApproval,
   renderApprovalPage,
   timingSafeEquals,
+  type ApprovalAttempts,
 } from './oauth-approval'
 
 interface Env {
@@ -28,6 +36,14 @@ interface Env {
   // Extra hosts allowed as OAuth callback targets, comma separated.
   // claude.ai, claude.com and loopback are always allowed.
   OAUTH_REDIRECT_HOSTS?: string
+  // Unix seconds. Every access token, refresh token and authorization code
+  // minted before this instant is refused, whatever its own expiry says.
+  // This is the revocation lever: tokens are self contained HMAC blobs and
+  // the refresh grant re-issues a 30 day refresh token on every use, so a
+  // token taken while /authorize still auto-approved would otherwise never
+  // die. Set it once to `date +%s` at deploy time:
+  //   wrangler secret put OAUTH_TOKEN_EPOCH
+  OAUTH_TOKEN_EPOCH?: string
   // Many Request Dashboard (the OLD client dashboard we are replacing).
   // The token is a secret and is never committed. Set it with:
   //   wrangler secret put MANYREQUESTS_API_TOKEN
@@ -2704,7 +2720,9 @@ async function validateSignedToken(token: string, secret: string): Promise<Recor
 
   const [encoded, signature] = parts
   const expectedSig = await hmacSign(encoded, secret)
-  if (signature !== expectedSig) return null
+  // Length safe compare: this is the one comparison that decides whether a
+  // token is genuine, so it gets the same treatment as the approval key.
+  if (!timingSafeEquals(signature, expectedSig)) return null
 
   try {
     const padded = encoded.replace(/-/g, '+').replace(/_/g, '/') + '=='.slice(0, (4 - (encoded.length % 4)) % 4)
@@ -2718,9 +2736,11 @@ async function validateSignedToken(token: string, secret: string): Promise<Recor
 
 /** Create a signed access token */
 async function createAccessToken(clientId: string, secret: string): Promise<{ token: string; expiresIn: number }> {
+  const now = Math.floor(Date.now() / 1000)
   const token = await createSignedToken({
     sub: clientId,
-    exp: Math.floor(Date.now() / 1000) + TOKEN_EXPIRY_SECONDS,
+    iat: now,
+    exp: now + TOKEN_EXPIRY_SECONDS,
     type: 'access_token',
   }, secret)
   return { token, expiresIn: TOKEN_EXPIRY_SECONDS }
@@ -2729,18 +2749,32 @@ async function createAccessToken(clientId: string, secret: string): Promise<{ to
 /** Create a signed refresh token (Decision #049). Long-lived so Claude can
  *  silently mint a new access token instead of forcing the user to re-auth. */
 async function createRefreshToken(clientId: string, secret: string): Promise<{ token: string; expiresIn: number }> {
+  const now = Math.floor(Date.now() / 1000)
   const token = await createSignedToken({
     sub: clientId,
-    exp: Math.floor(Date.now() / 1000) + REFRESH_EXPIRY_SECONDS,
+    iat: now,
+    exp: now + REFRESH_EXPIRY_SECONDS,
     type: 'refresh_token',
   }, secret)
   return { token, expiresIn: REFRESH_EXPIRY_SECONDS }
+}
+
+/**
+ * Refuse anything minted before OAUTH_TOKEN_EPOCH. Tokens carry no server
+ * side record, so this is the only way to kill a refresh token early: a
+ * payload with no `iat` predates the claim and is always older than a set
+ * epoch, which is what revokes everything the auto-approving /authorize
+ * handed out.
+ */
+function isRevokedByEpoch(payload: Record<string, unknown>, env: Env): boolean {
+  return isMintedBeforeEpoch(payload, parseTokenEpoch(env.OAUTH_TOKEN_EPOCH))
 }
 
 /** Validate an access token */
 async function validateAccessToken(token: string, env: Env): Promise<boolean> {
   const payload = await validateSignedToken(token, env.OAUTH_CLIENT_SECRET)
   if (!payload) return false
+  if (isRevokedByEpoch(payload, env)) return false
   return payload.sub === env.OAUTH_CLIENT_ID && payload.type === 'access_token'
 }
 
@@ -2749,6 +2783,7 @@ async function validateAccessToken(token: string, env: Env): Promise<boolean> {
 async function validateRefreshToken(token: string, env: Env): Promise<Record<string, unknown> | null> {
   const payload = await validateSignedToken(token, env.OAUTH_CLIENT_SECRET)
   if (!payload) return null
+  if (isRevokedByEpoch(payload, env)) return null
   if (payload.type !== 'refresh_token') return null
   if (payload.sub !== env.OAUTH_CLIENT_ID) return null
   return payload
@@ -2762,9 +2797,11 @@ async function createAuthCode(
   redirectUri: string,
   secret: string,
 ): Promise<string> {
+  const now = Math.floor(Date.now() / 1000)
   return createSignedToken({
     sub: clientId,
-    exp: Math.floor(Date.now() / 1000) + CODE_EXPIRY_SECONDS,
+    iat: now,
+    exp: now + CODE_EXPIRY_SECONDS,
     type: 'auth_code',
     cc: codeChallenge,
     ccm: codeChallengeMethod,
@@ -2795,6 +2832,10 @@ async function verifyPkce(codeVerifier: string, codeChallenge: string, method: s
 //      to the allowlisted callback with the code.
 // An authorization code exchanges for a full admin token over every
 // client's data, so knowing the client id must not be enough.
+//
+// Closing the door does not retire the keys already cut: set
+// OAUTH_TOKEN_EPOCH at deploy time to refuse every token minted before the
+// fix (see isRevokedByEpoch above).
 
 type AuthorizeParams = {
   clientId: string
@@ -2808,12 +2849,17 @@ type AuthorizeCheck =
   | { ok: true; value: AuthorizeParams }
   | { ok: false; response: Response }
 
-/** The key a Tahi admin types on the consent screen. */
+/**
+ * The key a Tahi admin types on the consent screen. Set OAUTH_APPROVAL_KEY
+ * to a long random value: the fallback to OAUTH_CLIENT_SECRET only exists so
+ * the connector keeps working before the dedicated secret is set, and it
+ * cannot be rotated without invalidating every issued token.
+ */
 function approvalKey(env: Env): string {
   return (env.OAUTH_APPROVAL_KEY?.trim() || env.OAUTH_CLIENT_SECRET || '').trim()
 }
 
-function htmlResponse(body: string, status = 200): Response {
+function htmlResponse(body: string, status = 200, extraHeaders?: Record<string, string>): Response {
   return new Response(body, {
     status,
     headers: {
@@ -2821,8 +2867,20 @@ function htmlResponse(body: string, status = 200): Response {
       'Cache-Control': 'no-store',
       'Content-Security-Policy': "frame-ancestors 'none'",
       'X-Frame-Options': 'DENY',
+      ...extraHeaders,
     },
   })
+}
+
+// Failed approval attempts, keyed by source address. Isolate local rather
+// than KV, so it is a speed bump against one host grinding the key, not a
+// distributed lock. Every rejection is also logged, which is the part an
+// operator can actually act on.
+const approvalAttempts: ApprovalAttempts = new Map()
+
+/** Source address for throttling. Cloudflare sets CF-Connecting-IP itself. */
+function attemptKey(request: Request): string {
+  return request.headers.get('CF-Connecting-IP')?.trim() || 'unknown'
 }
 
 /** Shared validation for both halves of the authorize flow. */
@@ -2903,12 +2961,34 @@ async function handleAuthorizePost(request: Request, env: Env): Promise<Response
     )
   }
 
+  const now = Date.now()
+  const source = attemptKey(request)
+  pruneApprovalAttempts(approvalAttempts, now)
+
+  if (failedApprovalCount(approvalAttempts, source, now) >= APPROVAL_ATTEMPT_LIMIT) {
+    console.warn(`[authorize] throttled: ${APPROVAL_ATTEMPT_LIMIT} failed approvals from ${source}`)
+    return htmlResponse(
+      renderApprovalPage({
+        ...check.value,
+        error: 'Too many failed approvals from this address. Wait ten minutes and try again.',
+      }),
+      429,
+      { 'Retry-After': String(Math.ceil(APPROVAL_ATTEMPT_WINDOW_MS / 1000)) },
+    )
+  }
+
   if (!timingSafeEquals(form.get('approval_key') ?? '', expected)) {
+    const count = recordFailedApproval(approvalAttempts, source, now)
+    console.warn(`[authorize] rejected approval key from ${source} (${count} in window)`)
     return htmlResponse(
       renderApprovalPage({ ...check.value, error: 'That approval key was not recognised.' }),
       401,
     )
   }
+
+  // A correct key clears the window: an admin who fat-fingered it twice
+  // should not be carrying those failures into the next hour.
+  approvalAttempts.delete(source)
 
   const { clientId, redirectUri, codeChallenge, codeChallengeMethod, state } = check.value
   const code = await createAuthCode(clientId, codeChallenge, codeChallengeMethod, redirectUri, env.OAUTH_CLIENT_SECRET)
@@ -2962,6 +3042,11 @@ async function handleOAuthToken(request: Request, env: Env): Promise<Response> {
     // Validate the auth code
     const codePayload = await validateSignedToken(code, env.OAUTH_CLIENT_SECRET)
     if (!codePayload || codePayload.type !== 'auth_code' || codePayload.sub !== clientId) {
+      return corsResponse({ error: 'invalid_grant', error_description: 'Invalid or expired authorization code' }, 400)
+    }
+
+    // A code minted before the epoch is dead even inside its ten minutes.
+    if (isRevokedByEpoch(codePayload, env)) {
       return corsResponse({ error: 'invalid_grant', error_description: 'Invalid or expired authorization code' }, 400)
     }
 
@@ -3154,6 +3239,9 @@ export default {
           tokenEndpoint: `${url.origin}/oauth/token`,
           resourceMetadata: `${url.origin}/.well-known/oauth-protected-resource`,
           manyRequestsConfigured: !!mrConfigFromEnv(env).token,
+          // Boolean only, never the value: lets an operator confirm the
+          // revocation epoch landed without opening a tool call.
+          tokenEpochSet: parseTokenEpoch(env.OAUTH_TOKEN_EPOCH) > 0,
           toolCount: TOOLS.length,
           tools: TOOLS.map((t) => t.name),
         })

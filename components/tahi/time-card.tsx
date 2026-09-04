@@ -162,9 +162,18 @@ export function TimeCard({ requestId }: Props) {
       if (res.status === 409) {
         setSwitchConfirm(true)
       } else if (res.ok) {
+        // Switching stops the previous timer server-side. If those hours
+        // could not be logged, say so: a plain "Timer started" over lost
+        // time is the same silent loss the stop path already guards.
+        const j = await res.json().catch(() => null) as
+          | { stopped?: { logged?: boolean; reasonMessage?: string } | null }
+          | null
         await fetchTimer()
         notifyTimerChanged()
         showToast('Timer started')
+        if (j?.stopped && j.stopped.logged === false) {
+          showToast(j.stopped.reasonMessage ?? 'The previous timer stopped without logging its hours.', 'warning')
+        }
       } else {
         const j = await res.json().catch(() => ({})) as { error?: string }
         showToast(j.error ?? `Couldn't start timer (${res.status})`)
@@ -208,17 +217,20 @@ export function TimeCard({ requestId }: Props) {
         method: 'DELETE',
       })
       if (res.ok) {
-        const data = await res.json() as { hours?: number; logged?: boolean; reason?: string }
+        const data = await res.json() as { hours?: number; logged?: boolean; reason?: string; reasonMessage?: string }
         setTimer(null)
         notifyTimerChanged()
         if (data.logged && typeof data.hours === 'number') {
           // Refresh entries so the new row appears in the list immediately.
           await fetchEntries()
           showToast(`Logged ${prettyHours(data.hours)}`)
-        } else if (data.reason) {
-          showToast(`Timer stopped — not logged (${data.reason})`)
         } else {
-          showToast('Timer stopped — not logged')
+          // The API already words the failure. Fall back to the raw code
+          // only if an older deploy is still answering without one.
+          showToast(
+            data.reasonMessage ?? (data.reason ? `Timer stopped. Not logged (${data.reason}).` : 'Timer stopped. The hours were not logged.'),
+            'warning',
+          )
         }
       } else {
         const j = await res.json().catch(() => ({})) as { error?: string }
