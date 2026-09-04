@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { primePage } from './helpers'
 
 /**
  * Settings control-room smoke (the imported Tahi Settings design).
@@ -33,6 +34,8 @@ function isMobile(viewport: { width: number } | null): boolean {
 }
 
 test.describe('Settings control room', () => {
+  test.beforeEach(async ({ page }) => { await primePage(page) })
+
   test('renders the grouped IA with no horizontal scroll', async ({ page }) => {
     await page.goto('/settings')
     await expect(page.locator('.set-h2').first()).toBeVisible({ timeout: 15_000 })
