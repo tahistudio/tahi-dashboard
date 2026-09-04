@@ -10,7 +10,11 @@
  *   - a failed send still returns the minted link so the operator can copy it,
  *   - `reuse` hands back the live invite instead of invalidating the one
  *     already sitting in the contact's inbox,
- *   - the org gate, the feature gate and access scoping all fail closed.
+ *   - persona is optional and defaults from the client's plan, so no caller
+ *     carries its own copy of the plan-to-persona rule,
+ *   - the org gate and access scoping fail closed, and the feature gate asks
+ *     for the feature the invite actually hands out: `clients` for a client
+ *     invite, `team` for a teammate onboarding link.
  *
  * Fake D1: a chainable select whose terminal answers from `captured`, and an
  * insert that records the row. Same shape as the other route tests here.
@@ -57,7 +61,7 @@ vi.mock('@/db/d1', () => ({
       id: 'id', token: 'token', flow: 'flow', orgId: 'org_id',
       contactEmail: 'contact_email', usedAt: 'used_at', createdAt: 'created_at',
     },
-    organisations: { id: 'id', name: 'name' },
+    organisations: { id: 'id', name: 'name', planType: 'plan_type' },
   },
 }))
 
@@ -98,7 +102,7 @@ function makeRequest(body: Record<string, unknown>): NextRequest {
   })
 }
 
-const ORG_ROW = [{ id: 'org_acme', name: 'Acme Corp' }]
+const ORG_ROW = [{ id: 'org_acme', name: 'Acme Corp', planType: 'scale' }]
 
 function clientBody(extra: Record<string, unknown> = {}) {
   return {
@@ -216,6 +220,27 @@ describe('POST /api/admin/onboarding-invites', () => {
     expect(captured.inserts).toHaveLength(0)
   })
 
+  it('derives the persona from the client plan when none is given', async () => {
+    captured.selectRows = [ORG_ROW]
+    const body = clientBody()
+    delete (body as Record<string, unknown>).persona
+
+    const res = await POST(makeRequest(body))
+    expect(res.status).toBe(200)
+    // planType 'scale' is a retainer, and the studio set this workspace up, so
+    // the token says already engaged: no payment step on their own portal.
+    expect(captured.inserts[0].persona).toBe('existing_retainer')
+  })
+
+  it('derives the project persona for a client with no retainer', async () => {
+    captured.selectRows = [[{ id: 'org_acme', name: 'Acme Corp', planType: null }]]
+    const body = clientBody()
+    delete (body as Record<string, unknown>).persona
+
+    await POST(makeRequest(body))
+    expect(captured.inserts[0].persona).toBe('existing_project')
+  })
+
   it('403s a caller outside the Tahi org', async () => {
     vi.mocked(getRequestAuth).mockResolvedValueOnce({
       userId: 'user_client', orgId: 'org_client', sessionId: 'sess_2',
@@ -232,6 +257,17 @@ describe('POST /api/admin/onboarding-invites', () => {
     const res = await POST(makeRequest(clientBody()))
     expect(res.status).toBe(403)
     expect(captured.inserts).toHaveLength(0)
+    expect(vi.mocked(requireFeature).mock.calls[0][1]).toBe('clients')
+  })
+
+  it('gates a team invite on the team feature, not on clients', async () => {
+    // A teammate onboarding link has nothing to do with the client list, so a
+    // team member who can manage the roster but not clients must still mint one.
+    const res = await POST(makeRequest({ flow: 'team', contactEmail: 'hire@tahi.studio' }))
+    expect(res.status).toBe(200)
+    expect(vi.mocked(requireFeature).mock.calls[0][1]).toBe('team')
+    const json = await res.json() as { path: string }
+    expect(json.path).toContain('/welcome?token=')
   })
 
   it('fails closed when the org is outside the caller access scope', async () => {

@@ -17,9 +17,21 @@
  * row before a hire signs in.
  *
  * HARD RULES (mirroring lib/team-link.ts, which owns the decision core):
- *   - Only ever CLAIMS a row that already exists at the caller's OWN org. It
- *     never creates one, and it never looks outside that org, so a person who
- *     is a contact at two clients cannot be linked to the wrong workspace.
+ *   - Only ever CLAIMS a row that already exists at the caller's OWN org, and
+ *     never creates one. The email match is org-scoped, so a claim can never
+ *     land on a contact row at some other client.
+ *   - ONE CLERK USER LINKS TO AT MOST ONE CONTACT ROW, INSTANCE WIDE. The
+ *     early-out below probes `contacts.clerkUserId = userId` with no org
+ *     filter, so once a person is linked anywhere they are never claimed again:
+ *     a fractional CMO who is a contact at Acme and is later invited into Beta
+ *     signs into Beta with no portal identity there, silently. That is
+ *     deliberate, not an oversight. Several portal routes resolve a contact by
+ *     clerkUserId ALONE with no orgId filter (app/api/portal/requests/route.ts,
+ *     app/api/uploads/confirm/route.ts), so a second linked row would be a
+ *     cross-tenant hazard, which is strictly worse than no identity. Scoping
+ *     this probe to the resolved org is only safe AFTER those lookups are
+ *     org-scoped; do not do one without the other. Multi-client contacts are a
+ *     Tier 3 item, waiting on the org switcher.
  *   - Verified email only. An unverified address can be attacker controlled.
  *   - Two rows sharing an email at one org links NEITHER. Guessing could hand
  *     the wrong portal role to the wrong person.
@@ -54,7 +66,10 @@ export type ContactLinkOutcome =
   | 'no_user'
   /** The Clerk org has no linked D1 organisation yet. */
   | 'no_org_row'
-  /** A contact already points at this Clerk user. No further work was done. */
+  /**
+   * A contact row ANYWHERE already points at this Clerk user. No further work
+   * was done, including at a different org (see the header note).
+   */
   | 'already_linked'
   /** No verified primary email on the Clerk account. */
   | 'email_unverified'
@@ -87,9 +102,12 @@ export async function linkContactOnSignIn(
   try {
     const drizzle = (await db()) as unknown as Drizzle
 
-    // Miss check first, scoped to nothing: if any contact anywhere already
-    // points at this Clerk user, the identity is resolved and we stop before
-    // paying for the Clerk round trip.
+    // Miss check first, deliberately INSTANCE WIDE: if any contact anywhere
+    // already points at this Clerk user, the identity is resolved and we stop
+    // before paying for the Clerk round trip. This is also what caps a Clerk
+    // user at one contact row across the whole instance, which the portal
+    // routes that look a contact up by clerkUserId alone depend on. See the
+    // module header before narrowing it.
     const [linked] = await drizzle
       .select({ id: schema.contacts.id })
       .from(schema.contacts)

@@ -238,6 +238,17 @@ export function ClientDetail({ clientId }: { clientId: string }) {
 
   const { org, contacts, subscription, tracks, recentRequests } = data
 
+  // Who the header "Invite to portal" button actually emails. The route sends
+  // to the primary contact only (fanning out to a whole roster is opt-in via
+  // `all`), and the payload is a live access token, so the control has to name
+  // its target rather than hide it in a hover tooltip. This label is both the
+  // title and the aria-label, so the icon-only state below sm announces the
+  // same thing a mouse user reads.
+  const inviteTarget = contacts.find(c => c.isPrimary) ?? contacts[0] ?? null
+  const inviteTargetLabel = inviteTarget
+    ? `Email a portal invite link to ${inviteTarget.email || inviteTarget.name}`
+    : 'Add a contact before inviting anyone'
+
   return (
     <div className="flex flex-col min-h-0">
       {/* ── Header ── */}
@@ -300,9 +311,8 @@ export function ClientDetail({ clientId }: { clientId: string }) {
                 variant="secondary"
                 size="sm"
                 disabled={invitingAll || contacts.length === 0}
-                title={contacts.length === 0
-                  ? 'Add a contact before inviting anyone'
-                  : 'Email every contact a link into this workspace'}
+                title={inviteTargetLabel}
+                aria-label={inviteTargetLabel}
                 onClick={async () => {
                   setInvitingAll(true)
                   try {
@@ -452,12 +462,7 @@ export function ClientDetail({ clientId }: { clientId: string }) {
           <ContractsTab clientId={clientId} />
         )}
         {activeTab === 'contacts' && (
-          <ContactsTab
-            clientId={clientId}
-            contacts={contacts}
-            orgPlanType={org.planType}
-            onUpdated={load}
-          />
+          <ContactsTab clientId={clientId} contacts={contacts} onUpdated={load} />
         )}
         {activeTab === 'calls' && (
           <DiscoveryCallsCard parentType="org" parentId={clientId} />
@@ -2461,12 +2466,10 @@ interface InviteState {
 function ContactsTab({
   clientId,
   contacts,
-  orgPlanType,
   onUpdated,
 }: {
   clientId: string
   contacts: Contact[]
-  orgPlanType: string | null
   onUpdated: () => void
 }) {
   const router = useRouter()
@@ -2479,12 +2482,12 @@ function ContactsTab({
   const [invites, setInvites] = useState<Record<string, InviteState>>({})
   const [copied, setCopied] = useState<string | null>(null)
 
-  // Retainer clients carry the retainer persona so their onboarding scene shows
-  // the plan they are already on. Either way it is an `existing_*` persona: the
-  // studio set this workspace up, so the client is never asked to pay here.
-  const persona = orgPlanType === 'maintain' || orgPlanType === 'scale'
-    ? 'existing_retainer'
-    : 'existing_project'
+  // Persona is deliberately NOT computed here. The mint route derives it from
+  // the org's plan with personaForPlanType (lib/onboarding-invites.ts), which is
+  // the same rule the welcome route and admin client creation use, so there is
+  // one copy of it and it lives next to the data it reads. Importing that module
+  // into this client component would pull db/d1 and the whole Drizzle schema
+  // into the browser bundle, so the server owns the decision instead.
 
   const handleInvite = async (contact: Contact) => {
     setInvites(prev => ({ ...prev, [contact.id]: { status: 'sending', link: '' } }))
@@ -2495,7 +2498,6 @@ function ContactsTab({
         body: JSON.stringify({
           flow: 'client',
           orgId: clientId,
-          persona,
           contactEmail: contact.email,
           contactName: contact.name,
           send: true,

@@ -32,8 +32,16 @@ interface SendResult {
  * onboarding invite token bound to their own address, so following it drops
  * them into the workspace the studio already built.
  *
+ * WHO GETS IT. The primary contact, and only them, unless you say otherwise.
+ * The payload is a claimable access token now, not an inert marketing link, so
+ * the blast radius has to be something the operator chose: a migrated client
+ * can carry an AP mailbox from a Xero import and a designer who left last year,
+ * and one click must not hand all three a live way into the workspace.
+ *
  * Body (all optional):
- *   contactId   - send to just this contact instead of everyone.
+ *   contactId   - send to exactly this contact instead of the primary one.
+ *   all         - true to fan out to every contact at the org that has an
+ *                 email. Explicit on purpose.
  *   persona     - override the persona carried on the token. Defaults to the
  *                 already-engaged persona for the org's plan, so an invited
  *                 client is never asked to pay for a workspace we set up.
@@ -59,6 +67,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const body = (await req.json().catch(() => ({}))) as {
     contactId?: string
+    all?: boolean
     persona?: string
   }
 
@@ -86,10 +95,18 @@ export async function POST(req: NextRequest, { params }: Params) {
     .from(schema.contacts)
     .where(eq(schema.contacts.orgId, id))
 
-  const targets = (body.contactId
-    ? allContacts.filter(c => c.id === body.contactId)
-    : allContacts
-  ).filter(c => !!c.email?.trim())
+  const withEmail = allContacts.filter(c => !!c.email?.trim())
+
+  // Default: the primary contact alone. `contactId` picks one; `all` fans out.
+  // Falling back to withEmail[0] when nobody is flagged primary keeps a client
+  // whose roster predates the isPrimary flag invitable from the same button.
+  let targets = withEmail
+  if (body.contactId) {
+    targets = withEmail.filter(c => c.id === body.contactId)
+  } else if (!body.all) {
+    const primary = withEmail.find(c => c.isPrimary) ?? withEmail[0]
+    targets = primary ? [primary] : []
+  }
 
   if (targets.length === 0) {
     return NextResponse.json(
@@ -124,6 +141,11 @@ export async function POST(req: NextRequest, { params }: Params) {
         orgName: org.name,
         // The CTA carries the token: this is what makes the welcome an invite.
         dashboardUrl: invite.link,
+        // A tokened link is email-bound and expires, so the email has to say
+        // both. Without them a click on day fifteen, or from a different
+        // account, is a bare 410/403 with nothing to explain it.
+        boundEmail: email.toLowerCase(),
+        expiresAt: invite.expiresAt || null,
       }),
     )
 

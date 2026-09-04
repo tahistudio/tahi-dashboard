@@ -69,6 +69,22 @@ export default async function DashboardLayout({
       onboardingComplete = true
     }
   }
+
+  // Client-login backfill. A second seat arriving by a Clerk organization
+  // invitation has a valid session and no contacts row pointing at them, so
+  // they resolve to no identity in the portal: no portal role, no
+  // notifications, messages stamped with a raw Clerk id. Claim their waiting
+  // row by VERIFIED email, scoped to their own org. It never creates a row and
+  // never overwrites an existing link (see lib/contact-link-server.ts).
+  //
+  // ORDER MATTERS: this runs BEFORE the onboarding redirect below. A colleague
+  // invited through Clerk has no publicMetadata.onboardingComplete (only POST
+  // /api/onboarding/complete ever writes it, and only the onboarding scenes
+  // call that), so gating the claim behind the redirect meant the audience it
+  // was written for never reached it. An already-linked user still costs one
+  // indexed lookup and nothing more, so running it first is free.
+  if (!isAdmin) await linkContactOnSignIn(userId, orgId)
+
   if (!onboardingComplete) redirect('/onboarding')
 
   // Team-login backfill. A hire's Clerk account and their team_members row are
@@ -79,15 +95,6 @@ export default async function DashboardLayout({
   // and never overwrites an existing link (see lib/team-link.ts), and an
   // already-linked user costs one indexed lookup and nothing more.
   if (isAdmin) await linkTeamMemberOnSignIn(userId, orgId)
-
-  // Client-login backfill, the same idea for the other audience. A second seat
-  // arriving by a Clerk organization invitation has a valid session and no
-  // contacts row pointing at them, so they resolve to no identity in the
-  // portal: no portal role, no notifications, messages stamped with a raw Clerk
-  // id. Claim their waiting row by VERIFIED email, scoped to their own org. It
-  // never creates a row and never overwrites an existing link
-  // (see lib/contact-link-server.ts).
-  if (!isAdmin) await linkContactOnSignIn(userId, orgId)
 
   // Granular permissions: resolve the caller's capabilities once, server-side,
   // and feed them to the sidebar + <Gate>. Fail-open (full access) if the

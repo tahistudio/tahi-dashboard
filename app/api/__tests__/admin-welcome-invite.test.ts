@@ -6,10 +6,13 @@
  * provisioned an empty workspace while their real data sat in an org they could
  * never reach. It also went to one contact and swallowed every outcome.
  *
- * Pinned here: every contact gets a link carrying a live invite bound to their
- * own address, a live invite is reused rather than re-minted, one contact can
- * be targeted, the caller learns what actually happened, and the org gate,
- * feature gate and access scoping all fail closed.
+ * Pinned here: the PRIMARY contact and only them by default (the payload is a
+ * claimable access token now, and a migrated client can carry an AP mailbox and
+ * a designer who left, so a fan-out has to be asked for), `all: true` fans out,
+ * `contactId` targets one, each link carries a live invite bound to its own
+ * recipient with the address and expiry rendered in the email, a live invite is
+ * reused rather than re-minted, the caller learns what actually happened, and
+ * the org gate, feature gate and access scoping all fail closed.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -117,7 +120,67 @@ describe('POST /api/admin/clients/[id]/welcome-email', () => {
     vi.mocked(sendEmail).mockResolvedValue({ success: true })
   })
 
-  it('mints an invite per contact and sends each a tokened link', async () => {
+  it('sends to the primary contact only by default', async () => {
+    captured.selectRows = [
+      ORG,
+      [
+        { id: 'c_2', email: 'raj@acme.com', name: 'Raj Patel', isPrimary: false },
+        { id: 'c_1', email: 'jane@acme.com', name: 'Jane Smith', isPrimary: true },
+      ],
+      [], // no live invite for jane
+    ]
+
+    const res = await POST(makeRequest(), params)
+    expect(res.status).toBe(200)
+    const json = await res.json() as WelcomeResponse
+
+    // Raj is first in the roster and still gets nothing: a live access token
+    // goes to the person the studio nominated, not to everyone on file.
+    expect(json.total).toBe(1)
+    expect(json.results?.[0].email).toBe('jane@acme.com')
+    expect(sendEmail).toHaveBeenCalledTimes(1)
+    expect(invites()).toHaveLength(1)
+    expect(invites()[0].contactEmail).toBe('jane@acme.com')
+    // A retainer client is already engaged, so no payment step.
+    expect(invites()[0].persona).toBe('existing_retainer')
+    expect(json.results?.[0].link).toContain('/onboarding?token=')
+  })
+
+  it('tells the email which address the link is bound to and when it expires', async () => {
+    captured.selectRows = [
+      ORG,
+      [{ id: 'c_1', email: 'Jane@Acme.com', name: 'Jane Smith', isPrimary: true }],
+      [],
+    ]
+
+    await POST(makeRequest(), params)
+    const element = vi.mocked(sendEmail).mock.calls[0][2] as {
+      props: { boundEmail?: string | null; expiresAt?: string | null; dashboardUrl: string }
+    }
+    // Without these the template cannot explain a 410 or a 403 to the person
+    // holding the link, which is the whole point of a self-diagnosing invite.
+    expect(element.props.boundEmail).toBe('jane@acme.com')
+    expect(Date.parse(element.props.expiresAt ?? '')).toBeGreaterThan(Date.now())
+    expect(element.props.dashboardUrl).toContain('/onboarding?token=')
+  })
+
+  it('falls back to the first contact when nobody is flagged primary', async () => {
+    captured.selectRows = [
+      ORG,
+      [
+        { id: 'c_2', email: 'raj@acme.com', name: 'Raj Patel', isPrimary: false },
+        { id: 'c_1', email: 'jane@acme.com', name: 'Jane Smith', isPrimary: false },
+      ],
+      [],
+    ]
+
+    const res = await POST(makeRequest(), params)
+    const json = await res.json() as WelcomeResponse
+    expect(json.total).toBe(1)
+    expect(json.results?.[0].email).toBe('raj@acme.com')
+  })
+
+  it('fans out to every contact only when all is asked for', async () => {
     captured.selectRows = [
       ORG,
       [
@@ -128,7 +191,7 @@ describe('POST /api/admin/clients/[id]/welcome-email', () => {
       [], // no live invite for raj
     ]
 
-    const res = await POST(makeRequest(), params)
+    const res = await POST(makeRequest({ all: true }), params)
     expect(res.status).toBe(200)
     const json = await res.json() as WelcomeResponse
 
@@ -137,9 +200,6 @@ describe('POST /api/admin/clients/[id]/welcome-email', () => {
     expect(invites()).toHaveLength(2)
     // Each token is bound to its own recipient: a forwarded link is useless.
     expect(invites().map(i => i.contactEmail).sort()).toEqual(['jane@acme.com', 'raj@acme.com'])
-    // A retainer client is already engaged, so no payment step.
-    expect(invites()[0].persona).toBe('existing_retainer')
-
     expect(sendEmail).toHaveBeenCalledTimes(2)
     for (const result of json.results ?? []) {
       expect(result.link).toContain('/onboarding?token=')

@@ -22,9 +22,13 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  *   - Single-use, claimed ATOMICALLY (UPDATE ... WHERE used_at IS NULL) before
  *     any membership is granted, so two racing requests cannot both win.
  *   - Expiry enforced.
- *   - The first person to accept a brand-new org's invite creates its Clerk org
- *     (and is its admin, as the owner); anyone joining an already-existing org
- *     is added as a plain member, never an admin.
+ *   - The first person to accept a brand-new org's invite creates its Clerk org;
+ *     anyone joining an already-existing Clerk org is added as a plain member,
+ *     never a Clerk admin.
+ *   - The portal role (contacts.portalRole, which is what the portal's own
+ *     organisation / brands / people routes check) is stricter still: see the
+ *     `shouldOwn` block below. Creating the Clerk org does NOT by itself make
+ *     the acceptor the workspace owner.
  *
  * Returns { orgId (D1), clerkOrgId }; the client then calls Clerk setActive.
  */
@@ -94,10 +98,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Whether this acceptance is what brings the Clerk org into existence. The
-  // person who does that is the workspace owner, not a guest.
-  const foundingMember = !org.clerkOrgId
-
   let clerkOrgId = org.clerkOrgId
   if (clerkOrgId) {
     // Join an existing Clerk org as a plain member (never auto-admin).
@@ -141,14 +141,30 @@ export async function POST(req: NextRequest) {
         id: schema.contacts.id,
         email: schema.contacts.email,
         portalRole: schema.contacts.portalRole,
+        isPrimary: schema.contacts.isPrimary,
       })
       .from(schema.contacts)
       .where(eq(schema.contacts.orgId, org.id))
 
     const match = existing.find(c => c.email?.trim().toLowerCase() === inviteEmail)
-    // Owner when they brought the workspace into being, or when nobody at this
-    // org can administer it yet. Otherwise a plain member: deny by default.
-    const shouldOwn = foundingMember || !existing.some(c => c.portalRole === 'admin')
+    // Who gets to own the workspace.
+    //
+    // Deliberately NOT "whoever accepts first". An invite can be sent to every
+    // contact at a client, and a migrated org can arrive with portal_role
+    // 'member' on every row, so "first acceptor at an org with no admin" handed
+    // the keys to whichever address happened to click first: an AP mailbox from
+    // a Xero import, a designer who left. The owner then arrived second and
+    // landed as a plain member on their own workspace.
+    //
+    // So promotion needs BOTH a workspace with no administrator yet AND a
+    // genuine claim to be its owner: either nobody is on the roster at all (the
+    // true founding case), or the row this invite matches is the org's primary
+    // contact. Everyone else is a member, and Tahi promotes them explicitly via
+    // set_contact_portal_role. `foundingMember` (this acceptance created the
+    // Clerk org) is NOT sufficient on its own: an intern can be the first to
+    // click.
+    const orgHasAdmin = existing.some(c => c.portalRole === 'admin')
+    const shouldOwn = !orgHasAdmin && (existing.length === 0 || !!match?.isPrimary)
     const portalRole = shouldOwn ? 'admin' : 'member'
 
     if (match) {

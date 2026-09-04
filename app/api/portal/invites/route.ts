@@ -3,7 +3,7 @@ import { clerkClient } from '@clerk/nextjs/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,6 +14,15 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  * Invite colleagues to the authenticated client's org. Body: { emails: string[] }.
  * Each becomes a Clerk organization invitation (role org:member); they get an
  * email immediately. Returns a per-email result so the UI can report failures.
+ *
+ * WORKSPACE ADMIN ONLY, exactly like its sibling POST /api/portal/people. The
+ * two routes now do the same thing (Clerk invitation plus a roster row), so a
+ * weaker gate here would simply be the way round the gate there: a plain member
+ * seat could add an outsider to the roster and, once the contact link claims
+ * the row on first sign-in, hand them a full portal identity. The self-serve
+ * onboarding step that calls this is run by the person who provisioned the
+ * workspace, and all three creation paths now stamp that person portalRole
+ * 'admin', so nobody legitimate loses the ability to invite.
  *
  * A successful invitation also writes the waiting `contacts` row, deny by
  * default (portalRole 'member', clerkUserId still null). That row is the thing
@@ -45,9 +54,57 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No valid emails' }, { status: 400 })
   }
 
+  const database = (await db()) as D1
+
+  // Workspace-admin gate, the same one POST /api/portal/people applies. Read
+  // through the caller's own contact row: a session with no linked contact is
+  // not an admin, so this is deny by default.
+  const [caller] = await database
+    .select({ portalRole: schema.contacts.portalRole })
+    .from(schema.contacts)
+    .where(and(eq(schema.contacts.orgId, orgId), eq(schema.contacts.clerkUserId, userId)))
+    .limit(1)
+  if (caller?.portalRole !== 'admin') {
+    return NextResponse.json(
+      { error: 'Only workspace admins can invite teammates' },
+      { status: 403 },
+    )
+  }
+
+  // The roster, read once, before anything is sent. Two jobs: skip an address
+  // that already has portal access (re-inviting someone who is already in is
+  // noise), and keep the contact write case-insensitively idempotent, because a
+  // second row with the same email at one org is exactly what makes
+  // lib/contact-link-server.ts refuse to link either of them.
+  //
+  // A roster entry with no clerk_user_id is NOT skipped: that is someone the
+  // studio added by hand who has never been let in, and sending them the
+  // invitation is the whole point of this route.
+  let roster: { email: string | null; clerkUserId: string | null }[] = []
+  try {
+    roster = await database
+      .select({ email: schema.contacts.email, clerkUserId: schema.contacts.clerkUserId })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.orgId, orgId))
+  } catch (err) {
+    console.error('[portal-invites] failed to read the roster:', err)
+  }
+  const known = new Set(
+    roster.map(c => c.email?.trim().toLowerCase()).filter((e): e is string => !!e),
+  )
+  const alreadyIn = new Set(
+    roster
+      .filter(c => !!c.clerkUserId)
+      .map(c => c.email?.trim().toLowerCase())
+      .filter((e): e is string => !!e),
+  )
+
   const clerk = await clerkClient()
   const results = await Promise.all(
     emails.map(async emailAddress => {
+      if (alreadyIn.has(emailAddress.toLowerCase())) {
+        return { email: emailAddress, invited: false, error: 'Already has access to this workspace' }
+      }
       try {
         await clerk.organizations.createOrganizationInvitation({
           organizationId: clerkOrgId,
@@ -65,14 +122,7 @@ export async function POST(req: NextRequest) {
   const invitedEmails = results.filter(r => r.invited).map(r => r.email.toLowerCase())
   if (invitedEmails.length > 0) {
     try {
-      const database = (await db()) as D1
-      const existing = await database
-        .select({ email: schema.contacts.email })
-        .from(schema.contacts)
-        .where(eq(schema.contacts.orgId, orgId))
-      const known = new Set(existing.map(c => c.email?.trim().toLowerCase()))
       const now = new Date().toISOString()
-
       for (const email of invitedEmails) {
         if (known.has(email)) continue
         known.add(email)

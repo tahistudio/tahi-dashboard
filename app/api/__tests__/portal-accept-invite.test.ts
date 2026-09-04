@@ -9,9 +9,10 @@
  *
  * These tests pin the resulting rules:
  *   - a missing contact is created and linked to the Clerk user,
- *   - the founding member (the acceptance that creates the Clerk org) owns the
- *     workspace,
- *   - so does the first acceptor at an org with no admin yet,
+ *   - an empty org's first acceptor owns the workspace,
+ *   - so does the org's PRIMARY contact when nobody administers it yet,
+ *   - a non-primary acceptor is a plain member even when they are the one who
+ *     creates the Clerk org, and even when the org has no admin at all,
  *   - a later joiner at an org that already has an admin is a plain member,
  *   - an existing admin is never demoted,
  *   - the email binding and single-use claim still fail closed.
@@ -72,7 +73,7 @@ vi.mock('@/db/d1', () => ({
   schema: {
     onboardingInvites: { __table: 'onboarding_invites', id: 'id', usedAt: 'used_at', usedByUserId: 'used_by_user_id' },
     organisations: { __table: 'organisations', id: 'id', name: 'name', clerkOrgId: 'clerk_org_id' },
-    contacts: { __table: 'contacts', id: 'id', orgId: 'org_id', email: 'email', portalRole: 'portal_role', clerkUserId: 'clerk_user_id' },
+    contacts: { __table: 'contacts', id: 'id', orgId: 'org_id', email: 'email', portalRole: 'portal_role', isPrimary: 'is_primary', clerkUserId: 'clerk_user_id' },
   },
 }))
 
@@ -185,10 +186,11 @@ describe('POST /api/portal/accept-invite', () => {
     expect(inserted[0].portalRole).toBe('admin')
   })
 
-  it('makes the founding member an admin even when other contacts exist', async () => {
-    // No Clerk org yet, so this acceptance is what creates the workspace.
+  it('makes the primary contact an admin when they found the workspace', async () => {
+    // No Clerk org yet, so this acceptance is what creates the workspace, and
+    // jane is the org's primary contact.
     queue({ id: 'org_acme', name: 'Acme Corp', clerkOrgId: null }, [
-      { id: 'c_1', email: 'jane@acme.com', portalRole: 'member' },
+      { id: 'c_1', email: 'jane@acme.com', portalRole: 'member', isPrimary: true },
     ])
 
     const res = await POST(makeRequest())
@@ -202,9 +204,9 @@ describe('POST /api/portal/accept-invite', () => {
     expect(contactSet.portalRole).toBe('admin')
   })
 
-  it('promotes the first acceptor at an org that has no admin yet', async () => {
+  it('promotes the primary contact at an org that has no admin yet', async () => {
     queue({ id: 'org_acme', name: 'Acme Corp', clerkOrgId: 'clerk_org_1' }, [
-      { id: 'c_1', email: 'jane@acme.com', portalRole: 'member' },
+      { id: 'c_1', email: 'jane@acme.com', portalRole: 'member', isPrimary: true },
       { id: 'c_2', email: 'someone@acme.com', portalRole: 'member' },
     ])
 
@@ -213,9 +215,44 @@ describe('POST /api/portal/accept-invite', () => {
     expect(contactSet.portalRole).toBe('admin')
   })
 
+  it('leaves a non-primary acceptor a member even when they create the Clerk org', async () => {
+    // The escalation this guards: the studio stamps the primary contact admin
+    // at creation, an intern is added as a member, an invite reaches both, and
+    // the intern clicks first. Founding the Clerk org must not hand them the
+    // workspace.
+    clerkState.email = 'intern@acme.com'
+    inviteState.value = invite({ contactEmail: 'intern@acme.com', contactName: 'Sam Intern' })
+    queue({ id: 'org_acme', name: 'Acme Corp', clerkOrgId: null }, [
+      { id: 'c_1', email: 'owner@acme.com', portalRole: 'admin', isPrimary: true },
+      { id: 'c_2', email: 'intern@acme.com', portalRole: 'member' },
+    ])
+
+    const res = await POST(makeRequest())
+    expect(res.status).toBe(200)
+    expect(clerkState.createOrganization).toHaveBeenCalled()
+    const contactSet = contactUpdates()[contactUpdates().length - 1].set
+    expect(contactSet.clerkUserId).toBe('user_client')
+    expect(contactSet.portalRole).toBe('member')
+  })
+
+  it('leaves a non-primary acceptor a member at a migrated org with no admin', async () => {
+    // Every row on a migrated client can still read portal_role 'member'. The
+    // AP mailbox clicking first must not take the workspace off the owner.
+    clerkState.email = 'accounts@acme.com'
+    inviteState.value = invite({ contactEmail: 'accounts@acme.com', contactName: 'Acme Accounts' })
+    queue({ id: 'org_acme', name: 'Acme Corp', clerkOrgId: 'clerk_org_1' }, [
+      { id: 'c_1', email: 'owner@acme.com', portalRole: 'member', isPrimary: true },
+      { id: 'c_2', email: 'accounts@acme.com', portalRole: 'member' },
+    ])
+
+    await POST(makeRequest())
+    const contactSet = contactUpdates()[contactUpdates().length - 1].set
+    expect(contactSet.portalRole).toBe('member')
+  })
+
   it('leaves a later joiner as a member when the org already has an admin', async () => {
     queue({ id: 'org_acme', name: 'Acme Corp', clerkOrgId: 'clerk_org_1' }, [
-      { id: 'c_1', email: 'owner@acme.com', portalRole: 'admin' },
+      { id: 'c_1', email: 'owner@acme.com', portalRole: 'admin', isPrimary: true },
       { id: 'c_2', email: 'jane@acme.com', portalRole: 'member' },
     ])
 
@@ -227,7 +264,7 @@ describe('POST /api/portal/accept-invite', () => {
 
   it('never demotes an existing admin', async () => {
     queue({ id: 'org_acme', name: 'Acme Corp', clerkOrgId: 'clerk_org_1' }, [
-      { id: 'c_1', email: 'jane@acme.com', portalRole: 'admin' },
+      { id: 'c_1', email: 'jane@acme.com', portalRole: 'admin', isPrimary: true },
       { id: 'c_2', email: 'other@acme.com', portalRole: 'admin' },
     ])
 

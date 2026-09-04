@@ -11,6 +11,11 @@
  * the org, no row for an address Clerk refused, the write scoped to the
  * caller's own org, and a D1 failure never losing an invitation Clerk has
  * already sent.
+ *
+ * Also pinned, and the reason this route is no longer the soft way in: it is
+ * WORKSPACE ADMIN ONLY, the same gate POST /api/portal/people applies. The two
+ * routes now do the same thing, so a plain member could otherwise add an
+ * outsider to the roster here and get exactly what the sibling route refuses.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -40,12 +45,12 @@ vi.mock('@clerk/nextjs/server', () => ({
 
 vi.mock('drizzle-orm', () => {
   const stub = (...args: unknown[]) => ({ args })
-  return { eq: stub }
+  return { eq: stub, and: stub }
 })
 
 vi.mock('@/db/d1', () => ({
   schema: {
-    contacts: { __table: 'contacts', id: 'id', orgId: 'org_id', email: 'email' },
+    contacts: { __table: 'contacts', id: 'id', orgId: 'org_id', email: 'email', portalRole: 'portal_role', clerkUserId: 'clerk_user_id' },
   },
 }))
 
@@ -53,7 +58,11 @@ vi.mock('@/lib/db', () => {
   const answer = () => Promise.resolve(captured.selectRows.length ? captured.selectRows.shift()! : [])
   const chain: Record<string, unknown> = {}
   chain.from = vi.fn(() => chain)
-  chain.where = vi.fn(() => answer())
+  // Terminal at `where` (the roster read) or at `limit` (the admin-gate probe).
+  chain.where = vi.fn(() => {
+    const promise = answer() as Promise<unknown[]> & { limit?: unknown }
+    return Object.assign(promise, { limit: vi.fn(() => promise) })
+  })
   const tableName = (t: unknown) => (t as { __table?: string })?.__table ?? 'unknown'
   return {
     db: vi.fn().mockResolvedValue({
@@ -96,6 +105,12 @@ function makeRequest(emails: string[]): NextRequest {
 
 const contacts = () => captured.inserts.filter(r => r.__table === 'contacts')
 
+/** The admin-gate probe answers first, then the roster read. */
+const ADMIN_CALLER = [{ portalRole: 'admin' }]
+function queue(roster: Record<string, unknown>[] = [], caller = ADMIN_CALLER) {
+  captured.selectRows = [caller, roster]
+}
+
 describe('POST /api/portal/invites', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -109,7 +124,7 @@ describe('POST /api/portal/invites', () => {
   })
 
   it('writes a waiting contact row per invited colleague, deny by default', async () => {
-    captured.selectRows = [[]]
+    queue()
 
     const res = await POST(makeRequest(['Raj@Acme.com', 'sam@acme.com']))
     expect(res.status).toBe(200)
@@ -128,7 +143,7 @@ describe('POST /api/portal/invites', () => {
   })
 
   it('does not duplicate someone who is already a contact', async () => {
-    captured.selectRows = [[{ email: 'RAJ@acme.com' }]]
+    queue([{ email: 'RAJ@acme.com', clerkUserId: null }])
 
     await POST(makeRequest(['raj@acme.com', 'sam@acme.com']))
     const rows = contacts()
@@ -137,7 +152,7 @@ describe('POST /api/portal/invites', () => {
   })
 
   it('writes no row for an address Clerk refused', async () => {
-    captured.selectRows = [[]]
+    queue()
     clerkState.failFor = new Set(['sam@acme.com'])
 
     const res = await POST(makeRequest(['raj@acme.com', 'sam@acme.com']))
@@ -147,7 +162,7 @@ describe('POST /api/portal/invites', () => {
   })
 
   it('keeps the invitations Clerk already sent when the contact write fails', async () => {
-    captured.selectRows = [[]]
+    queue()
     captured.insertThrows = true
 
     const res = await POST(makeRequest(['raj@acme.com']))
@@ -173,6 +188,52 @@ describe('POST /api/portal/invites', () => {
   it('400s when no address is usable', async () => {
     const res = await POST(makeRequest(['not-an-email']))
     expect(res.status).toBe(400)
+    expect(contacts()).toHaveLength(0)
+  })
+
+  it('refuses a plain member, the same as POST /api/portal/people would', async () => {
+    queue([], [{ portalRole: 'member' }])
+
+    const res = await POST(makeRequest(['outsider@x.com']))
+    expect(res.status).toBe(403)
+    const json = await res.json() as { error: string }
+    expect(json.error).toContain('admin')
+    // Neither half of the invitation happened: no Clerk invite, no roster row.
+    expect(clerkState.calls).toHaveLength(0)
+    expect(contacts()).toHaveLength(0)
+  })
+
+  it('refuses a session with no contact row at all', async () => {
+    queue([], [])
+
+    const res = await POST(makeRequest(['outsider@x.com']))
+    expect(res.status).toBe(403)
+    expect(clerkState.calls).toHaveLength(0)
+    expect(contacts()).toHaveLength(0)
+  })
+
+  it('does not re-invite someone who already has portal access', async () => {
+    // On the roster AND linked to a Clerk user: they are already in, so there
+    // is nothing to invite them to.
+    queue([{ email: 'raj@acme.com', clerkUserId: 'user_raj' }])
+
+    const res = await POST(makeRequest(['Raj@Acme.com', 'sam@acme.com']))
+    const json = await res.json() as { invited: number; results: { email: string; invited: boolean }[] }
+    expect(json.invited).toBe(1)
+    expect(clerkState.calls.map(c => c.emailAddress)).toEqual(['sam@acme.com'])
+    expect(contacts().map(r => r.email)).toEqual(['sam@acme.com'])
+  })
+
+  it('still invites a roster entry that has never signed in', async () => {
+    // A contact the studio added by hand has a row but no login. Sending them
+    // the invitation is the whole point of this route.
+    queue([{ email: 'raj@acme.com', clerkUserId: null }])
+
+    const res = await POST(makeRequest(['raj@acme.com']))
+    const json = await res.json() as { invited: number }
+    expect(json.invited).toBe(1)
+    expect(clerkState.calls.map(c => c.emailAddress)).toEqual(['raj@acme.com'])
+    // No second row: the one already there is what they will claim.
     expect(contacts()).toHaveLength(0)
   })
 })

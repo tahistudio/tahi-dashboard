@@ -9,7 +9,10 @@
  *   - a tokened invite is minted and emailed,
  *   - the response reports the real outcome so the toast can tell the truth,
  *   - an invite or Resend failure never loses the client that was just created,
- *   - no contact email means no invite, and the six-field create still works.
+ *   - no contact email means no invite, and the six-field create still works,
+ *   - a malformed address is refused BEFORE anything is written, so there is no
+ *     dangling live invite bound to a mailbox that cannot receive mail,
+ *   - the route carries the `clients` feature gate now that it sends real mail.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -32,6 +35,10 @@ vi.mock('@/lib/email', () => ({
 
 vi.mock('@/lib/access-scoping', () => ({
   resolveAccessScoping: vi.fn().mockResolvedValue(null),
+}))
+
+vi.mock('@/lib/require-feature', () => ({
+  requireFeature: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock('drizzle-orm', () => {
@@ -66,8 +73,9 @@ vi.mock('@/lib/db', () => {
 })
 
 import { POST } from '@/app/api/admin/clients/route'
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { sendEmail } from '@/lib/email'
+import { requireFeature } from '@/lib/require-feature'
 
 function makeRequest(body: Record<string, unknown>): NextRequest {
   return new NextRequest('http://localhost:3000/api/admin/clients', {
@@ -87,6 +95,7 @@ describe('POST /api/admin/clients invite', () => {
     captured.inserts = []
     process.env.NEXT_PUBLIC_APP_URL = 'https://portal.tahi.studio'
     vi.mocked(sendEmail).mockResolvedValue({ success: true })
+    vi.mocked(requireFeature).mockResolvedValue(null)
   })
 
   it('creates the primary contact as the workspace admin and emails a tokened invite', async () => {
@@ -173,6 +182,31 @@ describe('POST /api/admin/clients invite', () => {
     expect(json.invite).toBeNull()
     expect(rows('contacts')).toHaveLength(0)
     expect(rows('onboarding_invites')).toHaveLength(0)
+    expect(sendEmail).not.toHaveBeenCalled()
+  })
+
+  it('refuses a malformed contact email before writing anything', async () => {
+    const res = await POST(makeRequest({
+      name: 'Acme Corp',
+      primaryContactEmail: 'jane@acme',
+    }))
+    expect(res.status).toBe(400)
+    // Nothing at all: no org, no contact, and above all no live invite token
+    // bound to an address that cannot receive it.
+    expect(captured.inserts).toHaveLength(0)
+    expect(sendEmail).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when the caller cannot see the clients feature', async () => {
+    vi.mocked(requireFeature).mockResolvedValue(
+      NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
+    )
+    const res = await POST(makeRequest({
+      name: 'Acme Corp',
+      primaryContactEmail: 'jane@acme.com',
+    }))
+    expect(res.status).toBe(403)
+    expect(captured.inserts).toHaveLength(0)
     expect(sendEmail).not.toHaveBeenCalled()
   })
 })
