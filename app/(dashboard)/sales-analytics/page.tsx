@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { requirePageFeature } from '@/lib/page-guard'
 import { getServerAuth } from '@/lib/server-auth'
 import { SalesAnalyticsContent } from './sales-analytics-content'
 
@@ -9,5 +10,6 @@ export default async function SalesAnalyticsPage() {
   if (!userId) redirect('/sign-in')
   if (orgId !== process.env.NEXT_PUBLIC_TAHI_ORG_ID) redirect('/requests')
 
+  await requirePageFeature('sales_analytics')
   return <SalesAnalyticsContent />
 }

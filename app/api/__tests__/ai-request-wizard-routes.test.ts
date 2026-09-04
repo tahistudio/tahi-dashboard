@@ -43,6 +43,13 @@ vi.mock('@/db/d1', () => ({
 
 vi.mock('drizzle-orm', () => ({ eq: (a: unknown, b: unknown) => ({ a, b }) }))
 
+// The portal wizard now refuses a client whose org is denied Requests. That
+// gate is covered end to end in portal-feature-visibility.test.ts; stub it here
+// so these spend/limit tests keep their minimal settings-only schema mock.
+vi.mock('@/lib/require-feature', () => ({
+  requirePortalFeature: vi.fn().mockResolvedValue(null),
+}))
+
 import { POST as adminPost } from '@/app/api/admin/ai/request-wizard/route'
 import { POST as portalPost } from '@/app/api/portal/ai/request-wizard/route'
 import { NextRequest } from 'next/server'

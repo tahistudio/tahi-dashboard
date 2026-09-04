@@ -28,6 +28,7 @@
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
@@ -98,8 +99,10 @@ function bucketCadence(meanGapDays: number): 'monthly' | 'quarterly' | 'annual' 
 }
 
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'financial_reports')
+  if (featureDenied) return featureDenied
 
   const body = await req.json().catch(() => ({})) as { apply?: boolean; commitmentId?: string }
   const apply = body.apply === true

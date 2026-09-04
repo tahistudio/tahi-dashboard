@@ -1,5 +1,6 @@
 import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
+import { requirePageFeature } from '@/lib/page-guard'
 import { TimeList } from './time-list'
 
 export const metadata = { title: 'Time Tracking - Tahi Dashboard' }
@@ -9,5 +10,6 @@ export default async function TimePage() {
   if (!userId) redirect('/sign-in')
   if (orgId !== process.env.NEXT_PUBLIC_TAHI_ORG_ID) redirect('/requests')
 
+  await requirePageFeature('time')
   return <TimeList />
 }

@@ -1876,7 +1876,7 @@ const MIGRATIONS: Migration[] = [
   },
   {
     name: '0078',
-    description: 'Granular permissions: seed Liam + Staci as super_admin so the level hierarchy is correct out of the box (super_admin is un-lockable + manages permissions). Deterministic assignment ids + INSERT OR IGNORE make it idempotent. Other team members stay role-less (= default admin) until assigned via the builder.',
+    description: 'Granular permissions: seed Liam + Staci as super_admin so the level hierarchy is correct out of the box (super_admin is un-lockable + manages permissions). Deterministic assignment ids + INSERT OR IGNORE make it idempotent. Every other team member stays role-less, which is DENY BY DEFAULT: no feature, no page and no guarded API route until a role is assigned via the builder (lib/permissions.ts resolves them to an empty viewable set).',
     statements: [
       `INSERT OR IGNORE INTO team_member_roles (id, team_member_id, role_id, started_at, created_at) VALUES
         ('tmr-superadmin-liam', 'b3025c04-6cdd-4154-822c-5d4fbfb95b76', 'role-super-admin', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),

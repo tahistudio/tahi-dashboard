@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -10,10 +11,12 @@ type Params = { params: Promise<{ id: string }> }
 // ── GET /api/admin/leads/[id] ──────────────────────────────────────────────
 // Returns the lead + denormalised owner + the activity timeline.
 export async function GET(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'leads')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()
@@ -114,6 +117,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'leads')
+  if (featureDenied) return featureDenied
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -270,10 +275,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
 // ── DELETE /api/admin/leads/[id] ───────────────────────────────────────────
 export async function DELETE(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'leads')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { db } from '@/lib/db'
 import { applyBillingDerivationToAllOrgs } from '@/lib/billing-derivation'
 
@@ -16,10 +17,12 @@ type AnyDb = Parameters<typeof applyBillingDerivationToAllOrgs>[0]
  * Response: { count: number; appliedTo: number; skipped: number; results: ApplyResult[] }
  */
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, ['clients', 'financial_reports'])
+  if (featureDenied) return featureDenied
 
   const database = (await db()) as unknown as AnyDb
   const results = await applyBillingDerivationToAllOrgs(database)

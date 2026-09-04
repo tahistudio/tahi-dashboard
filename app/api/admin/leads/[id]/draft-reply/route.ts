@@ -16,6 +16,7 @@
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -80,10 +81,12 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'leads')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()
@@ -317,10 +320,12 @@ export async function POST(
 // Just so the path serves something on GET (debugging convenience).
 // Same gate as POST: drafted sales replies are admin-only data.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'leads')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()

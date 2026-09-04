@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { resolvePermissions } from '@/lib/permissions'
+import { resolvePermissions, decideFeature } from '@/lib/permissions'
 import { schema } from '@/db/d1'
 
 /**
@@ -32,7 +32,11 @@ function makeDrizzle(queues: Map<unknown, Row[][]>) {
 }
 
 const CLIENT_ORG = 'org-client-1'
+const CLIENT_CLERK_ORG = 'clerk-org-client-1'
 const CLIENT_USER = 'user-client-1'
+
+/** The org row the resolver normalises against before reading any override. */
+const ORG_ROW = { id: CLIENT_ORG, clerkOrgId: CLIENT_CLERK_ORG }
 
 beforeEach(() => {
   process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org-tahi-admin'
@@ -54,6 +58,7 @@ describe('resolvePermissions — client per-contact overrides', () => {
         ],
       ],
       [schema.contacts, [[{ id: 'contact-1' }]]],
+      [schema.organisations, [[ORG_ROW]]],
     ])
     const access = await resolvePermissions(makeDrizzle(queues), {
       userId: CLIENT_USER,
@@ -71,6 +76,7 @@ describe('resolvePermissions — client per-contact overrides', () => {
     const queues = new Map<unknown, Row[][]>([
       [schema.featureVisibility, [[{ featureKey: 'invoices', effect: 'deny' }]]],
       [schema.contacts, [[]]], // no matching contact
+      [schema.organisations, [[ORG_ROW]]],
     ])
     const access = await resolvePermissions(makeDrizzle(queues), {
       userId: CLIENT_USER,
@@ -85,6 +91,7 @@ describe('resolvePermissions — client per-contact overrides', () => {
       [schema.featureVisibility, [[{ featureKey: 'invoices', effect: 'deny' }]]],
       // contacts should never be queried; leave it empty to prove the point.
       [schema.contacts, [[{ id: 'should-not-be-used' }]]],
+      [schema.organisations, [[ORG_ROW]]],
     ])
     const access = await resolvePermissions(makeDrizzle(queues), {
       userId: 'api-service',
@@ -94,5 +101,60 @@ describe('resolvePermissions — client per-contact overrides', () => {
     expect(access.overrides.get('invoices')).toBe('deny')
     // The contacts queue is untouched because the api-service short-circuits.
     expect(queues.get(schema.contacts)?.length).toBe(1)
+  })
+})
+
+describe('resolvePermissions - client org id normalisation', () => {
+  it('finds the org overrides when handed the CLERK org id (the page-guard path)', async () => {
+    // getServerAuth hands the layout and lib/page-guard.ts the raw Clerk org,
+    // while getPortalAuth hands the API routes the D1 uuid. Both must resolve
+    // to the same feature_visibility rows, or a deny hides the API and leaves
+    // the nav and the page rendering: a dead surface instead of a hidden one.
+    const queues = new Map<unknown, Row[][]>([
+      [schema.organisations, [[ORG_ROW]]],
+      [schema.featureVisibility, [[{ featureKey: 'tracks', effect: 'deny' }], []]],
+      [schema.contacts, [[]]],
+    ])
+    const access = await resolvePermissions(makeDrizzle(queues), {
+      userId: CLIENT_USER,
+      orgId: CLIENT_CLERK_ORG,
+    })
+
+    expect(access.level).toBe('client')
+    expect(access.overrides.get('tracks')).toBe('deny')
+    expect(decideFeature(access, 'tracks')).toBe(false)
+  })
+
+  it('prefers an exact D1 id match over another org clerk_org_id', async () => {
+    const queues = new Map<unknown, Row[][]>([
+      [schema.organisations, [[
+        { id: 'org-other', clerkOrgId: CLIENT_ORG },
+        { id: CLIENT_ORG, clerkOrgId: CLIENT_CLERK_ORG },
+      ]]],
+      [schema.featureVisibility, [[{ featureKey: 'files', effect: 'deny' }], []]],
+      [schema.contacts, [[]]],
+    ])
+    const access = await resolvePermissions(makeDrizzle(queues), {
+      userId: CLIENT_USER,
+      orgId: CLIENT_ORG,
+    })
+
+    expect(access.orgId).toBe(CLIENT_ORG)
+    expect(access.overrides.get('files')).toBe('deny')
+  })
+
+  it('leaves an unknown org on the client defaults rather than guessing', async () => {
+    const queues = new Map<unknown, Row[][]>([
+      [schema.organisations, [[]]],
+      [schema.featureVisibility, [[{ featureKey: 'tracks', effect: 'deny' }], []]],
+      [schema.contacts, [[]]],
+    ])
+    const access = await resolvePermissions(makeDrizzle(queues), {
+      userId: CLIENT_USER,
+      orgId: 'org-nobody-has',
+    })
+
+    expect(access.overrides.size).toBe(0)
+    expect(decideFeature(access, 'tracks')).toBe(true)
   })
 })

@@ -1,4 +1,5 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { requirePortalFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -9,11 +10,13 @@ import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 // List conversations for the current client org where visibility = 'external'.
 // Includes unread count, last message preview, participant info.
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId } = await getPortalAuth(req)
 
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'messages')
+  if (featureDenied) return featureDenied
 
   const database = await db()
 
@@ -223,11 +226,13 @@ export async function GET(req: NextRequest) {
 // Body: { type: 'direct', content? }
 export async function POST(req: NextRequest) {
   try {
-    const { orgId, userId, impersonating } = await getPortalAuth(req)
+    const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
 
     if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
+    const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'messages')
+    if (featureDenied) return featureDenied
     if (impersonating) {
       return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
     }

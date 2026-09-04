@@ -24,6 +24,11 @@ const state: { rows: Row[]; selectWheres: Op[]; updateSets: Row[] } = {
 }
 
 vi.mock('@/lib/server-auth', () => ({ getPortalAuth: vi.fn() }))
+// The client feature_visibility gate is covered in portal-feature-visibility.test.ts;
+// stub it so this file keeps its minimal schema mock (no feature_visibility table).
+vi.mock('@/lib/require-feature', () => ({
+  requirePortalFeature: vi.fn().mockResolvedValue(null),
+}))
 vi.mock('@/lib/notifications', () => ({ notifyTeamMember: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('@/lib/events', () => ({ dispatchDomainEvent: vi.fn().mockResolvedValue(undefined) }))
 

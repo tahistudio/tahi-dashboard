@@ -65,14 +65,14 @@ function RoleSelect({
         current ? (
           <RoleChip roleName={current.name} />
         ) : (
-          <span style={{ color: 'var(--text-muted)' }}>No role (full admin)</span>
+          <span style={{ color: 'var(--text-muted)' }}>No role (no access)</span>
         )
       }
       opts={[
         {
           value: null,
-          title: 'No role (full admin)',
-          desc: 'Tahi default - unrestricted until a role scopes them',
+          title: 'No role (no access)',
+          desc: 'Deny by default: they see nothing until you assign a role',
         },
         ...roles.map((r) => ({
           value: r.id,
@@ -382,10 +382,17 @@ export function SubjectDetail({
           <span className="led">Data scope</span>
           {scoped ? (
             <ScopeControl member={member} orgs={orgs} onSave={(s) => onSaveScope(member, s)} />
-          ) : (
+          ) : roleName ? (
             <p className="ta-empty-note" style={{ marginBottom: 0 }}>
-              {roleName ? humaniseRole(roleName) : 'Full admin'} access - sees all clients. Assign a scoped role
+              {humaniseRole(roleName)} access - sees all clients. Assign a scoped role
               (Project manager, Task handler, or Viewer) to limit which clients they see.
+            </p>
+          ) : (
+            // Deny by default (lib/permissions.ts): no role is no access. Never
+            // say "full admin" here - the resolver denies this person every
+            // feature and lib/access-scoping.ts gives them an empty org list.
+            <p className="ta-empty-note" style={{ marginBottom: 0 }}>
+              No role: sees nothing. Assign a role to grant access.
             </p>
           )}
         </div>
@@ -400,7 +407,9 @@ export function SubjectDetail({
           <p className="ta-empty-note">
             {isClient
               ? 'No overrides - inherits the client-safe defaults.'
-              : 'No overrides - inherits the ' + (roleName ? humaniseRole(roleName) : 'full admin') + ' defaults.'}
+              : roleName
+                ? 'No overrides - inherits the ' + humaniseRole(roleName) + ' defaults.'
+                : 'No overrides - no role (no access). Assign a role to grant access.'}
           </p>
         ) : (
           <>
@@ -586,7 +595,11 @@ export function ContactDetail({
 // Re-export for the pane's list line ("Sees N clients").
 export function scopeLine(member: SubjectMember, totalOrgs: number, orgs: SubjectOrg[]): string {
   const roleName = member.roles[0]?.roleName ?? null
-  if (!roleName || !SCOPED_ROLES.has(roleName)) return 'Sees all clients'
+  // Deny by default: no role is no access, not full access. Both axes agree -
+  // lib/permissions.ts denies every feature and lib/access-scoping.ts resolves
+  // to an empty org list, so the line must not read "Sees all clients".
+  if (!roleName) return 'No role: sees nothing'
+  if (!SCOPED_ROLES.has(roleName)) return 'Sees all clients'
   const scope: MemberScope | null = member.scope
   if (!scope) return 'Sees no clients'
   if (scope.scopeType === 'all_clients') return 'Sees all clients'

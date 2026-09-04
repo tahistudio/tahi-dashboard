@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getPortalAuth } from '@/lib/server-auth'
+import { requirePortalFeature } from '@/lib/require-feature'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, isNull } from 'drizzle-orm'
@@ -12,10 +13,12 @@ import { eq, and, isNull } from 'drizzle-orm'
 // 3. Category global form (no org)
 // 4. Global default form (no org, no category, isDefault=1)
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId } = await getPortalAuth(req)
   if (!userId || !orgId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const url = new URL(req.url)
   const category = url.searchParams.get('category') ?? null

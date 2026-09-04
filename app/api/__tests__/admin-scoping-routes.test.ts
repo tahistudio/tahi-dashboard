@@ -116,13 +116,34 @@ function whereOf(record: QueryRecord): Collected {
 // ---------------------------------------------------------------------------
 // Scope fixtures
 // ---------------------------------------------------------------------------
+/**
+ * A resolved access object complete enough for the real `decideFeature` to run:
+ * the deals routes now also call `requireFeature` (audit item T1.16), and that
+ * shares this same mocked resolver. `viewableResources: null` keeps the FEATURE
+ * axis open so these tests stay about the ORG-SCOPING axis; the feature axis has
+ * its own coverage in permissions-route-guards.test.ts.
+ */
+function access(isAdmin: boolean) {
+  return {
+    userId: 'user_member',
+    orgId: 'org_tahi',
+    level: isAdmin ? 'admin' : 'team_member',
+    audience: 'team',
+    isSuperAdmin: false,
+    isAdmin,
+    canManagePermissions: isAdmin,
+    viewableResources: null,
+    overrides: new Map<string, 'allow' | 'deny'>(),
+  }
+}
+
 function unrestricted() {
-  vi.mocked(resolvePermissions).mockResolvedValue({ isAdmin: true } as never)
+  vi.mocked(resolvePermissions).mockResolvedValue(access(true) as never)
   vi.mocked(resolveAccessScoping).mockResolvedValue(null)
 }
 
 function scopedTo(orgIds: string[]) {
-  vi.mocked(resolvePermissions).mockResolvedValue({ isAdmin: false } as never)
+  vi.mocked(resolvePermissions).mockResolvedValue(access(false) as never)
   vi.mocked(resolveAccessScoping).mockResolvedValue(orgIds)
 }
 
