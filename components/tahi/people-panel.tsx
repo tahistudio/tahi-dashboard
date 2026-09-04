@@ -110,23 +110,42 @@ function Avatar({ name, avatar, size = 24 }: { name: string | null; avatar: stri
   )
 }
 
+/** The prototype's `.pr-role` line, used when a person has no email to show. */
+const ROLE_LINE: Record<Participant['role'], string> = {
+  pm: 'Project manager',
+  assignee: 'Assignee',
+  follower: 'Follower',
+}
+
+/** One empty line for every slot in the card, at the rail's quiet size. */
+const RAIL_EMPTY_STYLE: React.CSSProperties = {
+  margin: 0,
+  padding: '0.375rem 0',
+  fontSize: '0.78125rem',
+  fontWeight: 500,
+  color: 'var(--color-text-subtle)',
+}
+
 function RoleHeader({ icon, label, count }: { icon: React.ReactNode; label: string; count: number }) {
   return (
-    <div className="flex items-center" style={{ gap: '0.5rem', marginBottom: '0.5rem' }}>
-      <span style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true">{icon}</span>
+    <div className="flex items-center" style={{ gap: '0.4375rem', marginBottom: '0.375rem' }}>
+      <span style={{ color: 'var(--color-text-subtle)', display: 'inline-flex' }} aria-hidden="true">{icon}</span>
       <h4
         style={{
-          fontSize: '0.6875rem',
-          fontWeight: 600,
-          letterSpacing: '0.04em',
+          fontSize: '0.625rem',
+          fontWeight: 700,
+          letterSpacing: '0.05em',
           textTransform: 'uppercase',
-          color: 'var(--color-text-muted)',
+          color: 'var(--color-text-subtle)',
           margin: 0,
           flex: 1,
         }}
       >{label}</h4>
       {count > 0 && (
-        <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>{count}</span>
+        <span
+          className="tabular-nums"
+          style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)' }}
+        >{count}</span>
       )}
     </div>
   )
@@ -148,29 +167,30 @@ function Row({
     <div
       className="flex items-center"
       style={{
-        gap: '0.5rem',
+        gap: '0.5625rem',
         padding: '0.3125rem 0',
-        minHeight: '1.875rem',
+        minHeight: '2.375rem',
         opacity: isPending ? 0.7 : 1,
         transition: 'opacity 150ms ease',
       }}
     >
-      <Avatar name={p.name} avatar={p.avatar} />
+      <Avatar name={p.name} avatar={p.avatar} size={28} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <p
           className="truncate"
-          style={{ fontSize: '0.8125rem', color: 'var(--color-text)', margin: 0, lineHeight: 1.3 }}
+          style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)', margin: 0, lineHeight: 1.3 }}
         >
           {p.name ?? 'Unknown'}
         </p>
-        {p.email && (
-          <p
-            className="truncate"
-            style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', margin: 0, lineHeight: 1.2 }}
-          >
-            {p.email}
-          </p>
-        )}
+        {/* The prototype's `.pr-role`: the second line says who this person is
+            to the request. The email is the more useful version of that for a
+            contact, so it wins the slot when there is one. */}
+        <p
+          className="truncate"
+          style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)', margin: 0, lineHeight: 1.25 }}
+        >
+          {p.email ?? ROLE_LINE[p.role]}
+        </p>
       </div>
       {canRemove && (
         <button
@@ -179,15 +199,14 @@ function Row({
           disabled={removing || isPending}
           aria-label={`Remove ${p.name ?? 'participant'}`}
           title={isPending ? 'Saving…' : 'Remove'}
+          className="tahi-focus-ring flex items-center justify-center flex-shrink-0 h-11 w-11 md:h-6 md:w-6"
           style={{
-            width: '1.5rem', height: '1.5rem',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
             borderRadius: 'var(--radius-sm)',
             background: 'transparent',
             border: 'none',
             color: 'var(--color-text-subtle)',
             cursor: (removing || isPending) ? 'not-allowed' : 'pointer',
-            flexShrink: 0,
+            transition: 'background-color 130ms ease, color 130ms ease',
           }}
           onMouseEnter={e => {
             if (!removing && !isPending) {
@@ -510,7 +529,7 @@ export function PeoplePanel({
   // --- render -------------------------------------------------------------
 
   const body = (
-    <div style={{ padding: embedded ? 0 : '0.875rem 1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+    <div style={{ padding: embedded ? 0 : '0.8125rem 0.875rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
       {/* PM */}
       <section aria-label="Project manager">
         <RoleHeader icon={<UserCog size={12} />} label="Project manager" count={pm ? 1 : 0} />
@@ -528,7 +547,7 @@ export function PeoplePanel({
             onClick={() => setPmOpen(v => !v)}
           />
         ) : (
-          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>No PM assigned.</p>
+          <p style={RAIL_EMPTY_STYLE}>No PM assigned.</p>
         )}
 
         <Popover
@@ -575,7 +594,7 @@ export function PeoplePanel({
             style={{ marginTop: assignees.length > 0 ? '0.375rem' : 0 }}
           />
         ) : assignees.length === 0 ? (
-          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>No assignees yet.</p>
+          <p style={RAIL_EMPTY_STYLE}>No assignees yet.</p>
         ) : null}
 
         <Popover
@@ -623,7 +642,7 @@ export function PeoplePanel({
             style={{ marginTop: followers.length > 0 ? '0.375rem' : 0 }}
           />
         ) : followers.length === 0 ? (
-          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>No followers yet.</p>
+          <p style={RAIL_EMPTY_STYLE}>No followers yet.</p>
         ) : null}
 
         <Popover
@@ -661,17 +680,46 @@ export function PeoplePanel({
   return (
     <Card padding="none">
       <div
+        className="flex items-center"
         style={{
-          padding: '0.75rem 1rem',
+          gap: '0.5rem',
+          padding: '0.6875rem 0.875rem',
           borderBottom: '1px solid var(--color-border-subtle)',
         }}
       >
+        <span
+          aria-hidden="true"
+          className="inline-flex items-center justify-center flex-shrink-0"
+          style={{
+            width: '1.5rem',
+            height: '1.5rem',
+            borderRadius: 'var(--radius-leaf-sm)',
+            background: 'var(--color-bg-secondary)',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          <Users size={14} />
+        </span>
         <h3
-          className="text-xs font-semibold uppercase"
-          style={{ color: 'var(--color-text-muted)', letterSpacing: '0.04em', margin: 0 }}
+          className="uppercase"
+          style={{
+            margin: 0,
+            fontSize: '0.6875rem',
+            fontWeight: 700,
+            letterSpacing: '0.05em',
+            color: 'var(--color-text-subtle)',
+          }}
         >
           People
         </h3>
+        {participants.length > 0 && (
+          <span
+            className="tabular-nums"
+            style={{ fontSize: '0.71875rem', fontWeight: 600, color: 'var(--color-text-subtle)' }}
+          >
+            {participants.length}
+          </span>
+        )}
       </div>
       {body}
     </Card>
@@ -692,13 +740,13 @@ const AddButton = React.forwardRef<HTMLButtonElement, {
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex items-center transition-colors"
+      className="tahi-focus-ring flex items-center justify-center w-full transition-colors min-h-11 md:min-h-9"
       style={{
-        gap: '0.3125rem',
-        padding: '0.3125rem 0.625rem',
-        fontSize: '0.75rem',
-        fontWeight: 500,
-        borderRadius: 'var(--radius-button)',
+        gap: '0.375rem',
+        padding: '0 0.75rem',
+        fontSize: '0.78125rem',
+        fontWeight: 600,
+        borderRadius: 'var(--radius-md)',
         border: '1px dashed var(--color-border)',
         background: 'transparent',
         color: 'var(--color-text-muted)',
@@ -717,7 +765,7 @@ const AddButton = React.forwardRef<HTMLButtonElement, {
         e.currentTarget.style.color = 'var(--color-text-muted)'
       }}
     >
-      <Plus size={12} aria-hidden="true" />
+      <Plus size={13} aria-hidden="true" />
       {label}
     </button>
   )

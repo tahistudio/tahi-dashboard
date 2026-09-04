@@ -21,7 +21,7 @@
 
 import * as React from 'react'
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, ArrowUpRight, ChevronDown, Sparkles, RefreshCw, ListChecks, Check } from 'lucide-react'
+import { Plus, ArrowUpRight, ChevronDown, Sparkles, RefreshCw, ListChecks, Check, CalendarDays } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { Input } from '@/components/tahi/input'
@@ -103,6 +103,8 @@ const PARENT_PATH: Record<CallParentType, string> = {
 // ── Main component ────────────────────────────────────────────────────────
 
 export interface DiscoveryCallsCardProps {
+  /** Head title. Defaults to "Calls"; the request rail says what kind. */
+  title?: string
   parentType: CallParentType
   parentId: string
   /** Fires after any mutation. Lets the parent page refetch its own
@@ -117,6 +119,7 @@ export interface DiscoveryCallsCardProps {
 }
 
 export function DiscoveryCallsCard({
+  title = 'Calls',
   parentType,
   parentId,
   onChanged,
@@ -220,33 +223,74 @@ export function DiscoveryCallsCard({
 
   return (
     <section style={{
-      padding: '0.875rem 1rem',
       background: 'var(--color-bg)',
-      border: '1px solid var(--color-border-subtle)',
+      border: '1px solid var(--color-border)',
       borderRadius: 'var(--radius-card)',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '0.625rem',
+      boxShadow: 'var(--shadow-xs)',
+      overflow: 'hidden',
     }}>
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
-        <div style={{
-          fontSize: '0.625rem',
-          fontWeight: 600,
-          letterSpacing: '0.06em',
+      {/* The rail's head, shared with every card beside it: icon tile, 11px
+          uppercase title, count, action hard right. The old bare label read a
+          third of the size of its neighbours and sat on a card with no head
+          rule at all, which is what made this block look like an afterthought
+          in the request rail. */}
+      <header
+        className="flex items-center"
+        style={{
+          gap: '0.5rem',
+          padding: '0.6875rem 0.875rem',
+          borderBottom: '1px solid var(--color-border-subtle)',
+        }}
+      >
+        <span
+          aria-hidden="true"
+          className="inline-flex items-center justify-center flex-shrink-0"
+          style={{
+            width: '1.5rem',
+            height: '1.5rem',
+            borderRadius: 'var(--radius-leaf-sm)',
+            background: 'var(--color-bg-secondary)',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          <CalendarDays size={14} />
+        </span>
+        <h3 style={{
+          margin: 0,
+          fontSize: '0.6875rem',
+          fontWeight: 700,
+          letterSpacing: '0.05em',
           textTransform: 'uppercase',
           color: 'var(--color-text-subtle)',
-        }}>Calls</div>
-        {!showForm && (
-          <TahiButton
-            size="sm"
-            variant="secondary"
-            onClick={() => setShowForm(true)}
-            iconLeft={<Plus className="w-3.5 h-3.5" />}
+        }}>{title}</h3>
+        {calls.length > 0 && (
+          <span
+            className="tabular-nums"
+            style={{ fontSize: '0.71875rem', fontWeight: 600, color: 'var(--color-text-subtle)' }}
           >
-            Schedule
-          </TahiButton>
+            {calls.length}
+          </span>
+        )}
+        {!showForm && (
+          <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>
+            <TahiButton
+              size="sm"
+              variant="secondary"
+              onClick={() => setShowForm(true)}
+              iconLeft={<Plus className="w-3.5 h-3.5" />}
+            >
+              Schedule
+            </TahiButton>
+          </span>
         )}
       </header>
+
+      <div style={{
+        padding: '0.8125rem 0.875rem',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.625rem',
+      }}>
 
       {showForm && (
         <CallScheduleForm
@@ -256,12 +300,12 @@ export function DiscoveryCallsCard({
       )}
 
       {loading && !showForm && calls.length === 0 && (
-        <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>Loading calls...</p>
+        <p style={CALLS_EMPTY_STYLE}>Loading calls…</p>
       )}
 
       {!loading && calls.length === 0 && !showForm && (
-        <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-subtle)', lineHeight: 1.5 }}>
-          No calls yet. Schedule one to start tracking transcripts, outcomes, and scope.
+        <p style={CALLS_EMPTY_STYLE}>
+          No calls booked yet. Schedule one to start tracking transcripts, outcomes and scope.
         </p>
       )}
 
@@ -304,6 +348,7 @@ export function DiscoveryCallsCard({
           </ul>
         </div>
       )}
+      </div>
     </section>
   )
 }
@@ -316,6 +361,22 @@ interface CallScheduleBody {
   durationMinutes?: number
   googleMeetUrl?: string | null
   attendees?: Array<{ name?: string; email?: string; role?: string }>
+}
+
+/**
+ * One quiet line for loading and for nothing-yet. Same geometry as the
+ * prototype's `.rqd-empty` and as the Checklists card's `.tahi-rail-empty`,
+ * so the two whole-card empties in the request rail read as one voice rather
+ * than two sizes of grey.
+ */
+const CALLS_EMPTY_STYLE: React.CSSProperties = {
+  margin: 0,
+  padding: '1.125rem 0.75rem',
+  textAlign: 'center',
+  fontSize: '0.8125rem',
+  fontWeight: 500,
+  lineHeight: 1.55,
+  color: 'var(--color-text-subtle)',
 }
 
 function SubSectionLabel({ children }: { children: React.ReactNode }) {

@@ -51,7 +51,10 @@ const TRIGGER_STYLE: React.CSSProperties = {
   background: 'transparent',
   borderRadius: 'var(--radius-sm)',
   font: 'inherit',
-  fontSize: '0.8125rem',
+  // Matches the Details row's value cell (the prototype's `.dr-v`), so an
+  // editable row and a read-only one read at exactly the same weight.
+  fontSize: '0.78125rem',
+  fontWeight: 600,
   color: 'var(--color-text)',
   textAlign: 'right',
   cursor: 'pointer',
@@ -114,13 +117,15 @@ const INPUT_STYLE: React.CSSProperties = {
   height: '2rem',
   padding: '0 0.5625rem',
   border: '1px solid var(--color-brand)',
-  borderRadius: 'var(--radius-sm)',
+  borderRadius: 'var(--radius-md)',
   background: 'var(--color-bg)',
-  fontSize: '0.8125rem',
+  fontSize: '0.78125rem',
   fontWeight: 600,
   color: 'var(--color-text)',
   outline: 'none',
-  boxShadow: '0 0 0 3px var(--color-brand-50)',
+  // A mix rather than --color-brand-50, so the halo stays a tint of the brand
+  // on the dark surface too instead of a pale block.
+  boxShadow: '0 0 0 0.1875rem color-mix(in srgb, var(--color-brand) 14%, transparent)',
 }
 
 // ── Menu field ───────────────────────────────────────────────────────────

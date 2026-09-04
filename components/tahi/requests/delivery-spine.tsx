@@ -22,10 +22,89 @@
  * The parent decides whether to render the spine at all; when the current
  * status is off-pipeline the spine shows no current step rather than
  * pretending the request is at "Submitted".
+ *
+ * Hover and focus live in SPINE_CSS rather than in inline handlers, because
+ * the prototype's affordance is entirely on the step's CHILDREN: the node
+ * grows a brand ring and the label tints brand, while the step box itself
+ * stays transparent (no grey wash). A parent cannot style a child from an
+ * inline style, and an inline style would in any case outrank the rule, so
+ * the node's own resting ring is a class too. Scoped to this component the
+ * way <CapacityStrip> keeps CAPACITY_CSS, so nothing lands in globals.css.
  */
 
 import { Check } from 'lucide-react'
 import { REQUEST_STATUS_LABELS } from '@/lib/status-config'
+
+/**
+ * The step's whole visual state machine. Ported from the prototype's
+ * `.req-spine-*` rules (requests.css) plus the round-two hover in
+ * requests-detail.css: brand border and a 0.3125rem brand halo on the node,
+ * brand-dark label, and a 1px lift on the step. The focus ring itself stays
+ * with `.tahi-focus-ring` on the button, so keyboard users get both.
+ */
+const SPINE_CSS = `
+.tahi-spine-node{
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-full);
+  border: 0.125rem solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-brand);
+  transition:
+    background-color var(--motion-base) var(--ease-out),
+    border-color var(--motion-base) var(--ease-out),
+    box-shadow var(--motion-base) var(--ease-out);
+}
+.tahi-spine-node.is-reached{ border-color: var(--color-brand); }
+.tahi-spine-node.is-done{ background: var(--color-brand); color: var(--color-bg); }
+.tahi-spine-node.is-current{
+  box-shadow: 0 0 0 0.25rem color-mix(in srgb, var(--color-brand) 16%, transparent);
+}
+.tahi-spine-dot{
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: var(--radius-full);
+  background: var(--color-border);
+  transition: background-color var(--motion-base) var(--ease-out);
+}
+.tahi-spine-node.is-current .tahi-spine-dot{ background: currentColor; }
+.tahi-spine-lbl{
+  max-width: 100%;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--color-text-subtle);
+  transition: color var(--motion-base) var(--ease-out);
+}
+.tahi-spine-lbl.is-reached{ color: var(--color-text); }
+.tahi-spine-lbl.is-current{ color: var(--color-link); font-weight: 700; }
+.tahi-spine-step{ transition: transform var(--motion-base) var(--ease-out); }
+.tahi-spine-step:hover:not(:disabled),
+.tahi-spine-step:focus-visible{ transform: translateY(-0.0625rem); }
+.tahi-spine-step:hover:not(:disabled) .tahi-spine-node,
+.tahi-spine-step:focus-visible .tahi-spine-node{
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 0.3125rem color-mix(in srgb, var(--color-brand) 20%, transparent);
+}
+.tahi-spine-step:hover:not(:disabled) .tahi-spine-dot,
+.tahi-spine-step:focus-visible .tahi-spine-dot{ background: var(--color-brand); }
+.tahi-spine-step:hover:not(:disabled) .tahi-spine-lbl,
+.tahi-spine-step:focus-visible .tahi-spine-lbl{ color: var(--color-link); }
+@media (prefers-reduced-motion: reduce){
+  .tahi-spine-step,
+  .tahi-spine-node,
+  .tahi-spine-dot,
+  .tahi-spine-lbl{ transition: none; }
+  .tahi-spine-step:hover:not(:disabled),
+  .tahi-spine-step:focus-visible{ transform: none; }
+}
+`
 
 /** The delivery pipeline, in order. Matches the default kanban columns. */
 export const PIPELINE_STATUSES = [
@@ -53,7 +132,6 @@ interface DeliverySpineProps {
   eta?: string | null
 }
 
-const NODE_SIZE = '1.5rem'
 /**
  * Vertical padding on the step box. Identical for both audiences, so the
  * studio spine and the client spine draw the same geometry, and folded into
@@ -61,7 +139,8 @@ const NODE_SIZE = '1.5rem'
  * resolves from the containing block's PADDING box, not its border box.
  */
 const STEP_PAD_TOP = '0.25rem'
-/** Half the node minus half the connector, measured from the node's top edge. */
+/** Half the node minus half the connector, measured from the node's top edge.
+ *  The node itself is 1.5rem with a 0.125rem ring, both set in SPINE_CSS. */
 const NODE_WAIST = '0.6875rem'
 /** Where the connector sits, so the bar hits the node's waist exactly. */
 const CONNECTOR_TOP = `calc(${STEP_PAD_TOP} + ${NODE_WAIST})`
@@ -86,6 +165,7 @@ export function DeliverySpine({
         padding: '1rem 1.125rem',
       }}
     >
+      <style>{SPINE_CSS}</style>
       <div
         className="flex items-center"
         style={{ gap: '0.5rem', marginBottom: '0.875rem' }}
@@ -148,45 +228,23 @@ export function DeliverySpine({
               )}
               <span
                 aria-hidden="true"
-                className="flex items-center justify-center"
-                style={{
-                  position: 'relative',
-                  zIndex: 1,
-                  width: NODE_SIZE,
-                  height: NODE_SIZE,
-                  borderRadius: '50%',
-                  boxSizing: 'border-box',
-                  border: `0.125rem solid ${reached ? 'var(--color-brand)' : 'var(--color-border)'}`,
-                  background: done ? 'var(--color-brand)' : 'var(--color-bg)',
-                  color: done ? 'var(--color-bg)' : 'var(--color-brand)',
-                  boxShadow: current
-                    ? '0 0 0 0.25rem color-mix(in srgb, var(--color-brand) 16%, transparent)'
-                    : 'none',
-                  transition: 'background-color 200ms ease, border-color 200ms ease',
-                }}
+                className={[
+                  'tahi-spine-node',
+                  reached ? 'is-reached' : '',
+                  done ? 'is-done' : '',
+                  current ? 'is-current' : '',
+                ].filter(Boolean).join(' ')}
               >
                 {done
                   ? <Check size={13} strokeWidth={3} />
-                  : (
-                    <span
-                      style={{
-                        width: '0.4375rem',
-                        height: '0.4375rem',
-                        borderRadius: '50%',
-                        background: current ? 'currentColor' : 'var(--color-border)',
-                      }}
-                    />
-                  )}
+                  : <span className="tahi-spine-dot" />}
               </span>
               <span
-                className="truncate"
-                style={{
-                  maxWidth: '100%',
-                  fontSize: '0.6875rem',
-                  fontWeight: current ? 700 : 600,
-                  lineHeight: 1.25,
-                  color: reached ? 'var(--color-link)' : 'var(--color-text-subtle)',
-                }}
+                className={[
+                  'tahi-spine-lbl truncate',
+                  reached ? 'is-reached' : '',
+                  current ? 'is-current' : '',
+                ].filter(Boolean).join(' ')}
               >
                 {label}
               </span>
@@ -229,7 +287,7 @@ export function DeliverySpine({
                 aria-current={current ? 'step' : undefined}
                 title={current ? `This request is at ${label}` : `Move to ${label}`}
                 onClick={() => { if (!busy && !current) onPick?.(s) }}
-                className="tahi-focus-ring min-h-11 md:min-h-0"
+                className="tahi-spine-step tahi-focus-ring min-h-11 md:min-h-0"
                 style={{
                   ...stepLayout,
                   border: 'none',
@@ -238,10 +296,7 @@ export function DeliverySpine({
                   font: 'inherit',
                   cursor: busy ? 'not-allowed' : current ? 'default' : 'pointer',
                   opacity: busy ? 0.6 : 1,
-                  transition: 'background-color 150ms ease',
                 }}
-                onMouseEnter={e => { if (!busy) e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
               >
                 {inner}
               </button>

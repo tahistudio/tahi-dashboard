@@ -70,6 +70,15 @@ import {
   countSavedViews,
   type RequestsAudience,
 } from '@/lib/requests-views'
+import {
+  EMPTY_REQUESTS_URL_NARROW,
+  buildRequestsNarrowChips,
+  clearRequestsNarrow,
+  hasRequestsUrlNarrow,
+  matchesRequestsUrlNarrow,
+  readRequestsUrlState,
+  type RequestsUrlNarrow,
+} from '@/lib/requests-url-state'
 
 // AI wizard modal -- only opened on click, defer to reduce first-paint JS.
 const AiRequestWizard = dynamic(
@@ -522,6 +531,13 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   const canWriteRequests = isAdmin && !isViewerImpersonation
   const searchParams = useSearchParams()
   const router = useRouter()
+  // What the URL asked for, read once. Every hero link on a request detail
+  // page lands here ("everything in this category", "the rest of this
+  // person's work", "sorted newest first"), so the list has to be able to
+  // open on a state it was handed rather than only the one it remembers.
+  // A state initialiser, so a later re-render never re-applies it over a
+  // choice the user has since made.
+  const [urlState] = useState(() => readRequestsUrlState(searchParams))
   // Persisted per-user preferences (Decision #047).
   const [view, setView] = useUserPreference<ViewMode>(
     'requests.viewMode',
@@ -583,9 +599,15 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     : isAdmin ? 'admin' : 'client'
   const rail = useRequestsRailState({
     audience,
-    initialQuery: searchParams.get('q') ?? '',
+    initialQuery: urlState.query ?? '',
     enabled: railOn,
+    initialUrlState: urlState,
   })
+
+  // Priority and assignee are not rail dimensions (there is no control for
+  // either), so a link that names one narrows the rows here and raises its own
+  // clearable chip instead of pretending the rail owns it.
+  const [urlNarrow, setUrlNarrow] = useState<RequestsUrlNarrow>(() => urlState.narrow)
 
   const { showToast } = useToast()
   // Used to revalidate one expanded row's sub-request panel after a child is
@@ -682,15 +704,39 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   )
 
   const railRows = useMemo(
-    () => applyRequestViews(requests, {
-      audience,
-      savedView: rail.savedView,
-      filters: rail.filters,
-      query: rail.query,
-      sort: rail.sort,
-      assigneeId: impersonatedTeamMemberId,
-    }),
-    [requests, audience, rail.savedView, rail.filters, rail.query, rail.sort, impersonatedTeamMemberId],
+    () => {
+      const rows = applyRequestViews(requests, {
+        audience,
+        savedView: rail.savedView,
+        filters: rail.filters,
+        query: rail.query,
+        sort: rail.sort,
+        assigneeId: impersonatedTeamMemberId,
+      })
+      // Applied after the rail's own pipeline so the ordering is untouched:
+      // this only ever removes rows.
+      return hasRequestsUrlNarrow(urlNarrow)
+        ? rows.filter(r => matchesRequestsUrlNarrow(r, urlNarrow))
+        : rows
+    },
+    [requests, audience, rail.savedView, rail.filters, rail.query, rail.sort, impersonatedTeamMemberId, urlNarrow],
+  )
+
+  // Names for the assignee chip, read off the rows already loaded rather than
+  // fetched: the person a link narrows to is on at least one of them.
+  const assigneeNames = useMemo(() => {
+    const byId: Record<string, string> = {}
+    for (const r of requests) {
+      for (const p of r.participants ?? []) {
+        if (p.type === 'team_member' && p.name) byId[p.id] = p.name
+      }
+    }
+    return byId
+  }, [requests])
+
+  const railNarrowChips = useMemo(
+    () => buildRequestsNarrowChips(urlNarrow, assigneeNames),
+    [urlNarrow, assigneeNames],
   )
 
   const railChips = useMemo(
@@ -1426,6 +1472,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // than a label the control read back to itself.
   const handleResetDefault = useCallback(() => {
     rail.resetToDefault()
+    setUrlNarrow(EMPTY_REQUESTS_URL_NARROW)
     showToast('Back to your default view', 'success')
   }, [rail, showToast])
 
@@ -1440,6 +1487,9 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       rail.setFilters({ ...DEFAULT_REQUEST_FILTERS })
       rail.setSavedView(null)
       rail.setSort({ ...DEFAULT_REQUEST_SORT })
+      // The link-only dimensions are on screen as chips, so Clear all has to
+      // reach them too.
+      setUrlNarrow(EMPTY_REQUESTS_URL_NARROW)
       return
     }
     setDateRange({ from: null, to: null })
@@ -1537,6 +1587,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     && effectiveView === 'list'
     && rail.query.trim() === ''
     && railChips.length === 0
+    && railNarrowChips.length === 0
     && !rail.savedView
 
   // The workload cards read as an absolute claim ("3 of 5", tinted against a
@@ -1545,7 +1596,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // everyone. The card keeps the narrowing (filtering the board by client is
   // worth having) and says so out loud instead.
   const workloadNarrowed = railOn
-    ? rail.query.trim() !== '' || railChips.length > 0 || !!rail.savedView
+    ? rail.query.trim() !== '' || railChips.length > 0 || railNarrowChips.length > 0 || !!rail.savedView
     : search.trim() !== ''
       || categoryFilter !== 'all'
       || typeFilter !== 'all'
@@ -1885,6 +1936,8 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
             }
             chips={railChips}
             onClearChip={chip => rail.setFilters({ ...rail.filters, [chip.key]: DEFAULT_REQUEST_FILTERS[chip.key] })}
+            narrowChips={railNarrowChips}
+            onClearNarrowChip={chip => setUrlNarrow(n => clearRequestsNarrow(n, chip.key))}
             onClearAll={clearAllFilters}
             // Only offered once there is a saved default to go back to and the
             // view has actually wandered off it.

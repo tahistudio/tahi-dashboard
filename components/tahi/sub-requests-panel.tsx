@@ -16,7 +16,7 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { Plus } from 'lucide-react'
+import { Layers, Plus } from 'lucide-react'
 import { Card } from '@/components/tahi/card'
 import { Badge, statusTone } from '@/components/tahi/badge'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -105,37 +105,49 @@ export function SubRequestsPanel({
 
   return (
     <Card padding="none">
+      {/* The prototype's `.req-block-head`: an icon slot, a 13.5px/700 title in
+          full text colour, the count beside it, and the action hard right. The
+          "N of M done" line stays, because a parent's progress is the reason
+          this block exists. */}
       <div
+        className="flex items-center"
         style={{
-          padding: 'var(--space-4) var(--space-5)',
-          borderBottom: total > 0 ? '1px solid var(--color-border-subtle)' : undefined,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 'var(--space-3)',
+          padding: '0.8125rem 1rem',
+          borderBottom: '1px solid var(--color-border-subtle)',
+          gap: '0.5625rem',
         }}
       >
-        <div>
-          <h3
-            style={{
-              fontSize: 'var(--text-md)',
-              fontWeight: 600,
-              color: 'var(--color-text)',
-              margin: 0,
-            }}
+        <span
+          aria-hidden="true"
+          className="inline-flex flex-shrink-0"
+          style={{ color: 'var(--color-text-muted)' }}
+        >
+          <Layers size={16} />
+        </span>
+        <h3
+          style={{
+            fontSize: '0.84375rem',
+            fontWeight: 700,
+            color: 'var(--color-text)',
+            margin: 0,
+          }}
+        >
+          Sub-requests
+        </h3>
+        {total > 0 && (
+          <span
+            className="tabular-nums"
+            style={{ fontSize: '0.71875rem', fontWeight: 600, color: 'var(--color-text-subtle)' }}
           >
-            Sub-requests
-          </h3>
-          {total > 0 && (
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 'var(--space-0-5) 0 0' }}>
-              {doneCount} of {total} done
-            </p>
-          )}
-        </div>
+            {doneCount}/{total} done
+          </span>
+        )}
         {canCreate && onRequestNew && (
-          <TahiButton variant="secondary" size="sm" onClick={onRequestNew} iconLeft={<Plus size={13} />}>
-            New sub-request
-          </TahiButton>
+          <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>
+            <TahiButton variant="secondary" size="sm" onClick={onRequestNew} iconLeft={<Plus size={13} />}>
+              New sub-request
+            </TahiButton>
+          </span>
         )}
       </div>
 
@@ -144,8 +156,10 @@ export function SubRequestsPanel({
         <p
           style={{
             margin: 0,
-            padding: 'var(--space-5)',
-            fontSize: 'var(--text-sm)',
+            padding: '1.125rem 1rem',
+            fontSize: '0.8125rem',
+            fontWeight: 500,
+            lineHeight: 1.55,
             color: 'var(--color-text-subtle)',
             textAlign: 'center',
           }}
@@ -156,20 +170,31 @@ export function SubRequestsPanel({
 
       {/* List of children */}
       {total > 0 && (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-          {subRequests.map((sub, i) => (
+        <ul
+          style={{
+            listStyle: 'none',
+            margin: 0,
+            padding: '0.9375rem 1rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.5rem',
+          }}
+        >
+          {subRequests.map(sub => (
             <li
               key={sub.id}
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 'var(--space-3)',
-                padding: 'var(--space-3) var(--space-5)',
-                borderBottom: i < total - 1 ? '1px solid var(--color-border-subtle)' : undefined,
-                transition: 'background 150ms ease',
+                gap: '0.625rem',
+                padding: '0.5625rem 0.6875rem',
+                border: '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                background: 'var(--color-bg-secondary)',
+                transition: 'border-color 140ms ease',
               }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-subtle)' }}
             >
               {/* Status dot via Badge dot */}
               <Badge
@@ -183,26 +208,33 @@ export function SubRequestsPanel({
 
               <Link
                 href={`/requests/${sub.id}`}
+                title={sub.title}
+                className="tahi-focus-ring flex items-center min-h-11 md:min-h-0"
                 style={{
                   flex: 1,
                   minWidth: 0,
-                  fontSize: 'var(--text-sm)',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: '0.8125rem',
                   fontWeight: 500,
                   color: 'var(--color-text)',
                   textDecoration: 'none',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
+                  transition: 'color 140ms ease',
                 }}
-                onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand)' }}
+                onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-link)' }}
                 onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text)' }}
               >
                 {sub.requestNumber && (
-                  <span style={{ color: 'var(--color-text-subtle)', marginRight: 'var(--space-2)', fontWeight: 400 }}>
+                  <span
+                    className="tabular-nums flex-shrink-0"
+                    style={{ color: 'var(--color-text-subtle)', marginRight: '0.5rem', fontWeight: 600 }}
+                  >
                     #{String(sub.requestNumber).padStart(3, '0')}
                   </span>
                 )}
-                {sub.title}
+                <span className="truncate">{sub.title}</span>
               </Link>
 
               {sub.size && (
