@@ -7,6 +7,7 @@
  * and a plain line about rescheduling.
  */
 import { Body, Head, Html, Preview } from '@react-email/components'
+import { formatSlotLong } from '@/lib/kickoff-slot'
 import {
   DetailCard,
   DetailRow,
@@ -28,6 +29,13 @@ export interface KickoffBookedEmailProps {
   companyName: string
   /** ISO timestamp of the booked slot. */
   scheduledAt: string
+  /**
+   * IANA zone to render the time in, normally the one the client picked in.
+   * This template renders on a Cloudflare worker whose runtime clock is UTC, so
+   * without it the confirmation would quote a time the client never chose.
+   * Falls back to the studio's own zone, never to UTC.
+   */
+  timeZone?: string | null
   durationMinutes: number
   /** Studio host name, when one is assigned. */
   hostName?: string | null
@@ -41,22 +49,13 @@ export default function KickoffBookedEmail({
   contactFirstName,
   companyName,
   scheduledAt,
+  timeZone,
   durationMinutes,
   hostName,
   meetingUrl,
   portalUrl,
 }: KickoffBookedEmailProps) {
-  const start = new Date(scheduledAt)
-  const when = Number.isFinite(start.getTime())
-    ? start.toLocaleString('en-NZ', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-        hour: 'numeric',
-        minute: '2-digit',
-        timeZoneName: 'short',
-      })
-    : scheduledAt
+  const when = formatSlotLong(scheduledAt, { timeZone }) || scheduledAt
 
   return (
     <Html>

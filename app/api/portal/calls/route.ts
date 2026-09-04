@@ -7,6 +7,8 @@ import { eq, and, asc, gte } from 'drizzle-orm'
 import { notifyAllAdmins } from '@/lib/notifications'
 import { sendEmail } from '@/lib/email'
 import { publicUrl } from '@/lib/app-url'
+import { formatSlotSummary, resolveTimeZone } from '@/lib/kickoff-slot'
+import { mergeUpcomingCalls, type RawPortalCall } from '@/lib/portal-calls'
 import KickoffBookedEmail from '@/emails/kickoff-booked'
 
 export const dynamic = 'force-dynamic'
@@ -77,14 +79,7 @@ export async function GET(req: NextRequest) {
   // which makes lexicographic comparison unreliable near boundaries).
   const cutoffMs = Date.now() - 30 * 60_000
 
-  type RawCall = {
-    id: string
-    title: string
-    scheduledAt: string
-    durationMinutes: number
-    meetingUrl: string | null
-    attendees: string | null
-  }
+  type RawCall = RawPortalCall // shape shared with lib/portal-calls
 
   let scheduled: RawCall[] = []
   try {
@@ -130,16 +125,10 @@ export async function GET(req: NextRequest) {
     discovery = []
   }
 
-  const merged = [
-    ...scheduled.map((c) => ({ ...c, source: 'scheduled' as const })),
-    ...discovery.map((c) => ({ ...c, source: 'discovery' as const })),
-  ]
-    .filter((c) => {
-      const ms = new Date(c.scheduledAt).getTime()
-      return Number.isFinite(ms) && ms >= cutoffMs
-    })
-    .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())
-    .slice(0, limit)
+  // One entry per real meeting. A booking writes both tables, so without the
+  // collapse the same call appears twice and a stale mirror can sort ahead of
+  // the row a re-book moved.
+  const merged = mergeUpcomingCalls(scheduled, discovery, { cutoffMs, limit })
 
   // Resolve avatars by matching attendee emails to Tahi team members.
   const emails = new Set<string>()
@@ -192,7 +181,14 @@ export async function GET(req: NextRequest) {
 // impersonation, like every portal write.
 //
 // Re-booking is idempotent per org + title: picking another slot moves the
-// existing upcoming call instead of stacking duplicates.
+// existing upcoming call instead of stacking duplicates. The mirror is keyed to
+// the same id and moves with it, so the two tables cannot disagree about when
+// the meeting is (the studio's /calls index reads the mirror exclusively).
+//
+// `timeZone` is the visitor's own IANA zone. The picker promises wall-clock in
+// their timezone, and this worker runs in UTC, so every artefact that outlives
+// the screen (the confirmation email, the studio's bell row) is formatted
+// against it rather than against the runtime's clock.
 export async function POST(req: NextRequest) {
   const { orgId, userId, impersonating } = await getPortalAuth(req)
 
@@ -203,7 +199,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
   }
 
-  let body: { scheduledAt?: unknown; title?: unknown; durationMinutes?: unknown; notes?: unknown }
+  let body: {
+    scheduledAt?: unknown
+    title?: unknown
+    durationMinutes?: unknown
+    notes?: unknown
+    timeZone?: unknown
+  }
   try {
     body = (await req.json()) as typeof body
   } catch {
@@ -227,6 +229,10 @@ export async function POST(req: NextRequest) {
     ? Math.min(240, Math.max(15, Math.round(rawDuration)))
     : 30
   const notes = typeof body.notes === 'string' && body.notes.trim() ? body.notes.trim() : null
+  // Unknown or missing zones fall back to the studio's own clock, never to the
+  // worker's UTC runtime.
+  const timeZone = resolveTimeZone(typeof body.timeZone === 'string' ? body.timeZone : null)
+  const description = `Booked by the client from onboarding (${timeZone}).`
 
   const database = await db()
   const drizzle = database as D1
@@ -321,6 +327,7 @@ export async function POST(req: NextRequest) {
         .set({
           scheduledAt,
           durationMinutes,
+          description,
           attendees: JSON.stringify(attendees),
           ...(notes ? { notes } : {}),
           updatedAt: now,
@@ -331,7 +338,7 @@ export async function POST(req: NextRequest) {
         id,
         orgId,
         title,
-        description: 'Booked by the client from onboarding.',
+        description,
         scheduledAt,
         durationMinutes,
         meetingUrl: null,
@@ -349,33 +356,57 @@ export async function POST(req: NextRequest) {
   }
 
   // Mirror into discovery_calls so the studio's unified calls widget and the
-  // /calls index see it immediately. Best effort, exactly like the admin route.
-  if (!existingId) {
-    try {
+  // /calls index see it immediately (that index reads discovery_calls only).
+  // The mirror carries the SAME id as the scheduled row, so a re-book moves one
+  // row instead of leaving a stale twin behind for both sides to read. Best
+  // effort, exactly like the admin route.
+  const mirrorAttendees = JSON.stringify(
+    attendees.map(a => ({ name: a.name, email: a.email, role: a.type })),
+  )
+  try {
+    const [mirror] = await drizzle
+      .select({ id: schema.discoveryCalls.id })
+      .from(schema.discoveryCalls)
+      .where(eq(schema.discoveryCalls.id, id))
+      .limit(1)
+    if (mirror) {
+      await drizzle
+        .update(schema.discoveryCalls)
+        .set({
+          title,
+          scheduledAt,
+          durationMinutes,
+          status: 'scheduled',
+          attendees: mirrorAttendees,
+          updatedAt: now,
+        })
+        .where(eq(schema.discoveryCalls.id, id))
+    } else {
       await drizzle.insert(schema.discoveryCalls).values({
-        id: crypto.randomUUID(),
+        id,
         orgId,
         title,
         scheduledAt,
         durationMinutes,
         status: 'scheduled',
         meetingType: 'client',
-        attendees: JSON.stringify(attendees.map(a => ({ name: a.name, email: a.email, role: a.type }))),
+        attendees: mirrorAttendees,
         createdById: userId,
         createdAt: now,
         updatedAt: now,
       })
-    } catch {
-      // Older D1s without the columns still have the scheduled_calls row.
     }
+  } catch {
+    // Older D1s without the columns still have the scheduled_calls row.
   }
 
-  // Tell the studio. Never fails the booking.
+  // Tell the studio, in the client's own clock rather than a raw ISO string.
+  const whenForHumans = formatSlotSummary(scheduledAt, { timeZone, withZone: true }) || scheduledAt
   try {
     await notifyAllAdmins(drizzle, {
       type: 'call_scheduled',
       title: `${orgName} booked a ${title.toLowerCase()}`,
-      body: `${contact?.name ?? 'A client'} picked ${scheduledAt}.`,
+      body: `${contact?.name ?? 'A client'} picked ${whenForHumans}.`,
       entityType: 'call',
       entityId: id,
     })
@@ -394,6 +425,7 @@ export async function POST(req: NextRequest) {
           contactFirstName: contact.name.split(' ')[0] || 'there',
           companyName: orgName,
           scheduledAt,
+          timeZone,
           durationMinutes,
           hostName: host?.name ?? null,
           meetingUrl: null,
@@ -406,5 +438,5 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ id, scheduledAt, durationMinutes, emailed }, { status: 201 })
+  return NextResponse.json({ id, scheduledAt, timeZone, durationMinutes, emailed }, { status: 201 })
 }

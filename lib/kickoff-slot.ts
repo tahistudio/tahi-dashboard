@@ -43,11 +43,82 @@ export function slotIso(day: Date, label: string): string | null {
   return dt ? dt.toISOString() : null
 }
 
+/**
+ * The studio's own clock. Every artefact that outlives the picker (the
+ * confirmation email, the studio's bell row) is rendered on a server whose
+ * runtime timezone is UTC, so a formatter with no explicit zone would tell the
+ * client "1:30 am" about the 1:30 pm they just clicked. When we do not know the
+ * visitor's zone we fall back to this rather than to UTC.
+ */
+export const STUDIO_TIME_ZONE = 'Pacific/Auckland'
+
+/** True when this runtime can format against the given IANA zone. */
+export function isValidTimeZone(tz: string): boolean {
+  if (!tz || typeof tz !== 'string') return false
+  try {
+    new Intl.DateTimeFormat('en-NZ', { timeZone: tz }).format(new Date(0))
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Caller-supplied zone -> something safe to format with. Never throws. */
+export function resolveTimeZone(tz: string | null | undefined): string {
+  if (typeof tz === 'string' && isValidTimeZone(tz.trim())) return tz.trim()
+  return STUDIO_TIME_ZONE
+}
+
+/** The zone the person in front of the picker is actually living in. */
+export function visitorTimeZone(): string {
+  try {
+    return resolveTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone)
+  } catch {
+    return STUDIO_TIME_ZONE
+  }
+}
+
+export interface SlotFormatOptions {
+  /** IANA zone to render in. Defaults to the studio's own clock. */
+  timeZone?: string | null
+  locale?: string
+  /** Append the zone abbreviation, e.g. "NZST". */
+  withZone?: boolean
+}
+
 /** Human summary for the confirmation copy, e.g. "Tue 9 Sep, 1:30 pm". */
-export function formatSlotSummary(iso: string, locale = 'en-NZ'): string {
+export function formatSlotSummary(iso: string, options: SlotFormatOptions = {}): string {
   const dt = new Date(iso)
   if (!Number.isFinite(dt.getTime())) return ''
-  const day = dt.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' })
-  const time = dt.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' })
+  const { locale = 'en-NZ', withZone = false } = options
+  const timeZone = resolveTimeZone(options.timeZone)
+  const day = dt.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short', timeZone })
+  const time = dt.toLocaleTimeString(locale, {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone,
+    ...(withZone ? { timeZoneName: 'short' as const } : {}),
+  })
   return `${day}, ${time}`
+}
+
+/** Long form for the email, e.g. "Wednesday, 9 September at 1:30 pm NZST". */
+export function formatSlotLong(iso: string, options: SlotFormatOptions = {}): string {
+  const dt = new Date(iso)
+  if (!Number.isFinite(dt.getTime())) return ''
+  const { locale = 'en-NZ' } = options
+  const timeZone = resolveTimeZone(options.timeZone)
+  const day = dt.toLocaleDateString(locale, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    timeZone,
+  })
+  const time = dt.toLocaleTimeString(locale, {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone,
+    timeZoneName: 'short',
+  })
+  return `${day} at ${time}`
 }

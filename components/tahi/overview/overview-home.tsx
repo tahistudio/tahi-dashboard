@@ -19,9 +19,10 @@
  * (the dashboard layout redirects incomplete clients to /onboarding). That is a
  * different thing from the in-portal first-run checklist, which is the studio's
  * side of setup: welcome video, brand assets, first request, billing. So the
- * client home always asks for 'first', and <ClientFirstRun> reads the real
- * organisations.onboardingState via /api/portal/onboarding and renders nothing
- * once every step is already done (ship readiness audit, Tier 1 item 19).
+ * client home always asks for 'first', and <ClientFirstRun> reads
+ * /api/portal/onboarding, which derives the knowable steps and returns
+ * firstRunEligible, and renders nothing for an org that is not actually a new
+ * client (ship readiness audit, Tier 1 item 19).
  */
 
 import { useCallback } from 'react'
@@ -74,8 +75,11 @@ export function OverviewHome({
   )
 
   // Client portal session (not the Tahi admin org). 'first' opts the checklist
-  // in; it self-hides once organisations.onboardingState says every step is
-  // done, so an established client never sees it.
+  // in; GET /api/portal/onboarding decides whether it paints. That route
+  // derives the knowable steps rather than trusting the onboardingState blob
+  // (every import path seeds it '{}') and returns firstRunEligible: false for
+  // an org with delivered work or more than a month of history, so an
+  // established client is never greeted as a new one.
   if (!isAdmin) {
     const ctx: OverviewCtx = {
       audience: 'client',

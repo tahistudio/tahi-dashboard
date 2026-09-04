@@ -35,7 +35,7 @@ import {
   type LedgerStep,
 } from '@/components/tahi/onboarding-shell'
 import { OnboardingPayment } from '@/components/tahi/onboarding-payment'
-import { formatSlotSummary, slotIso } from '@/lib/kickoff-slot'
+import { formatSlotSummary, slotIso, visitorTimeZone } from '@/lib/kickoff-slot'
 import type { ClientEntry } from '@/lib/onboarding-entry'
 
 export interface OnboardingLead {
@@ -388,7 +388,11 @@ export function OnboardingContent({
 
   // Book the picked kickoff slot for real, then finish. A booking failure keeps
   // the client on the step with a retry rather than swallowing the time they
-  // just chose; "I'll book from my studio" is still there as the way out.
+  // just chose; the skip link is still there as the way out.
+  //
+  // The API's own error strings ('Forbidden', 'Read-only in client view') are
+  // never rendered: the last screen of onboarding is the worst place to show a
+  // client the word "Forbidden". They go to the console for us instead.
   const bookKickoffAndFinish = async () => {
     if (!slot) { onComplete(); return }
     setBookError(null)
@@ -397,16 +401,24 @@ export function OnboardingContent({
       const res = await fetch('/api/portal/calls', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scheduledAt: slot, title: 'Kickoff call', durationMinutes: 30 }),
+        body: JSON.stringify({
+          scheduledAt: slot,
+          title: 'Kickoff call',
+          durationMinutes: 30,
+          // The picker's times are wall-clock in the visitor's zone; the worker
+          // runs in UTC, so the confirmation email needs to be told which clock.
+          timeZone: visitorTimeZone(),
+        }),
       })
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string }
-        setBookError(j.error ?? 'We could not hold that time. Try another slot, or book from your studio.')
+        console.error('[onboarding] kickoff booking failed', res.status, j.error)
+        setBookError('We could not hold that time. Try another slot, or we will follow up by email.')
         return
       }
       onComplete()
     } catch {
-      setBookError('We could not hold that time. Try another slot, or book from your studio.')
+      setBookError('We could not hold that time. Try another slot, or we will follow up by email.')
     } finally {
       setBooking(false)
     }
@@ -586,7 +598,9 @@ export function OnboardingContent({
     title = 'Book your kickoff.'
     sub = `The proper hello. Grab a time with ${lead.first} to set direction together, this is where it really starts.`
     primary = slot ? 'Book and enter your studio' : 'Enter your studio'
-    skip = 'I&apos;ll book from my studio'.replace('&apos;', "'")
+    // No client-side booking surface exists yet, so the skip and trust copy
+    // promise an email rather than a page the client cannot open.
+    skip = 'Not now, email me about a time'
     body = (
       <>
         <div className="ob-kickoff-lead">
@@ -602,8 +616,8 @@ export function OnboardingContent({
         <div className="ob-trust">
           <Check size={13} />
           {slot
-            ? `${formatSlotSummary(slot)}. We will email you the confirmation.`
-            : 'Reschedule any time from your studio.'}
+            ? `${formatSlotSummary(slot, { timeZone: visitorTimeZone() })}. We will email you the confirmation.`
+            : 'Need a different time later? Reply to the confirmation and we will move it.'}
         </div>
       </>
     )

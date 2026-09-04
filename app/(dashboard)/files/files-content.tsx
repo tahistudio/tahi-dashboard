@@ -10,13 +10,16 @@
  * resolver forces a client's files under their own org prefix.
  *
  * Three states, per the list-view contract: loading skeleton, honest empty
- * state with the upload CTA, and the populated table.
+ * state with the upload CTA, and the populated table. A fetch failure only
+ * takes over the surface when there is no list to show; a failed revalidation
+ * on top of a good list is a banner, so an upload never blanks the table.
  */
 
 import { useCallback, useRef, useState } from 'react'
 import { Download, FolderOpen, Upload } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useResource } from '@/lib/use-resource'
+import { Callout } from '@/components/tahi/callout'
 import { Card } from '@/components/tahi/card'
 import { DataTable } from '@/components/tahi/data-table'
 import { EmptyState } from '@/components/tahi/empty-state'
@@ -49,7 +52,7 @@ interface PresignResponse {
 function FileMobileCard({ file }: { file: PortalFile }) {
   return (
     <a
-      href={file.url}
+      href={apiPath(file.url)}
       download
       className="tahi-focus-ring"
       style={{
@@ -95,7 +98,12 @@ export function FilesContent() {
   const inputRef = useRef<HTMLInputElement>(null)
 
   const files = data?.items ?? []
-  const failed = !!error
+  // SWR keeps the previous payload across a failed revalidation, so a failure
+  // only replaces the surface when there is nothing left to show. A revalidate
+  // that fails while a good list is on screen (the mutate() right after an
+  // upload is the likely one) gets a banner above the table it still has.
+  const failed = !!error && !data
+  const staleWarning = !!error && !!data
 
   const uploadOne = useCallback(async (file: File) => {
     const mime = file.type || 'application/octet-stream'
@@ -144,7 +152,9 @@ export function FilesContent() {
       }
       if (ok > 0) {
         showToast(ok === 1 ? 'File uploaded' : `${ok} files uploaded`, 'success')
-        await mutate()
+        // A failed revalidation is a banner, not an unhandled rejection: the
+        // upload already succeeded and the list on screen is still good.
+        await mutate().catch(() => {})
       }
     } finally {
       setUploading(false)
@@ -186,6 +196,16 @@ export function FilesContent() {
         tabIndex={-1}
       />
 
+      {staleWarning ? (
+        <Callout
+          tone="warning"
+          title="This list may be out of date"
+          action={{ label: 'Refresh', onClick: () => { void mutate().catch(() => {}) } }}
+        >
+          We could not reach your library just now. Anything you uploaded is safe, it may take a moment to appear.
+        </Callout>
+      ) : null}
+
       <Card padding="none">
         {failed ? (
           <EmptyState
@@ -193,7 +213,7 @@ export function FilesContent() {
             title="We could not load your files"
             description="Something went wrong reaching your library. Try again in a moment."
             action={
-              <TahiButton variant="secondary" size="sm" onClick={() => { void mutate() }}>
+              <TahiButton variant="secondary" size="sm" onClick={() => { void mutate().catch(() => {}) }}>
                 Try again
               </TahiButton>
             }
@@ -209,7 +229,7 @@ export function FilesContent() {
                 minWidth: '14rem',
                 render: r => (
                   <a
-                    href={r.url}
+                    href={apiPath(r.url)}
                     className="tahi-focus-ring"
                     download
                     data-private
@@ -252,7 +272,7 @@ export function FilesContent() {
                 width: '6rem',
                 render: r => (
                   <a
-                    href={r.url}
+                    href={apiPath(r.url)}
                     download
                     className="tahi-focus-ring"
                     aria-label={`Download ${r.name}`}

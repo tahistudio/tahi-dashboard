@@ -3,7 +3,17 @@
  * instant instead of an opaque "2-1:30 pm" id.
  */
 import { describe, it, expect } from 'vitest'
-import { parseSlotTime, slotDateTime, slotIso, formatSlotSummary } from '@/lib/kickoff-slot'
+import {
+  parseSlotTime,
+  slotDateTime,
+  slotIso,
+  formatSlotSummary,
+  formatSlotLong,
+  isValidTimeZone,
+  resolveTimeZone,
+  visitorTimeZone,
+  STUDIO_TIME_ZONE,
+} from '@/lib/kickoff-slot'
 
 describe('parseSlotTime', () => {
   it('parses the picker labels', () => {
@@ -86,7 +96,9 @@ describe('slotIso', () => {
 describe('formatSlotSummary', () => {
   it('renders a short human summary', () => {
     const iso = slotIso(new Date(2026, 8, 9), '1:30 pm')!
-    const summary = formatSlotSummary(iso)
+    // Explicit zone: the picker builds a local instant, and the formatter now
+    // defaults to the studio clock rather than to whatever the runtime is.
+    const summary = formatSlotSummary(iso, { timeZone: visitorTimeZone() })
     expect(summary).toContain('9')
     expect(summary).toContain('Sep')
     expect(summary.length).toBeGreaterThan(0)
@@ -94,5 +106,79 @@ describe('formatSlotSummary', () => {
 
   it('is empty for an unparseable timestamp', () => {
     expect(formatSlotSummary('not-a-date')).toBe('')
+  })
+})
+
+/**
+ * The confirmation email and the studio's bell row render on a Cloudflare
+ * worker whose runtime clock is UTC. Without an explicit zone, the client who
+ * picked 1:30 pm NZ was emailed "1:30 am UTC", which is the one mistake a
+ * confirmation exists to prevent.
+ */
+describe('timezone resolution', () => {
+  it('accepts a real IANA zone', () => {
+    expect(isValidTimeZone('Pacific/Auckland')).toBe(true)
+    expect(isValidTimeZone('America/New_York')).toBe(true)
+  })
+
+  it('rejects junk rather than throwing', () => {
+    expect(isValidTimeZone('Middle/Earth')).toBe(false)
+    expect(isValidTimeZone('')).toBe(false)
+  })
+
+  it('falls back to the studio clock, never to UTC', () => {
+    expect(resolveTimeZone(null)).toBe(STUDIO_TIME_ZONE)
+    expect(resolveTimeZone('Middle/Earth')).toBe(STUDIO_TIME_ZONE)
+    expect(resolveTimeZone(undefined)).toBe(STUDIO_TIME_ZONE)
+  })
+
+  it('keeps a valid zone, trimmed', () => {
+    expect(resolveTimeZone('  Europe/London ')).toBe('Europe/London')
+  })
+
+  it('always resolves the visitor zone to something formattable', () => {
+    expect(isValidTimeZone(visitorTimeZone())).toBe(true)
+  })
+})
+
+describe('zone-aware formatting', () => {
+  // 2026-09-09T01:30:00Z is 1:30 pm in Auckland, still 8 September in New York.
+  const iso = '2026-09-09T01:30:00.000Z'
+
+  it('renders the summary in the requested zone', () => {
+    const nz = formatSlotSummary(iso, { timeZone: 'Pacific/Auckland' })
+    expect(nz).toContain('9')
+    expect(nz).toContain('Sep')
+    expect(nz).toMatch(/1:30/)
+  })
+
+  it('renders a different zone as a different wall clock', () => {
+    const nz = formatSlotSummary(iso, { timeZone: 'Pacific/Auckland' })
+    const ny = formatSlotSummary(iso, { timeZone: 'America/New_York' })
+    expect(ny).not.toBe(nz)
+    expect(ny).toContain('8')
+  })
+
+  it('appends the zone abbreviation on request', () => {
+    const withZone = formatSlotSummary(iso, { timeZone: 'Pacific/Auckland', withZone: true })
+    const without = formatSlotSummary(iso, { timeZone: 'Pacific/Auckland' })
+    expect(withZone.length).toBeGreaterThan(without.length)
+    expect(withZone.startsWith(without)).toBe(true)
+  })
+
+  it('long form names the day, the month and the zone', () => {
+    const long = formatSlotLong(iso, { timeZone: 'Pacific/Auckland' })
+    expect(long).toContain('September')
+    expect(long).toContain(' at ')
+    expect(long).toMatch(/1:30/)
+  })
+
+  it('does not fall back to the runtime clock when the zone is junk', () => {
+    expect(formatSlotLong(iso, { timeZone: 'Middle/Earth' }))
+      .toBe(formatSlotLong(iso, { timeZone: STUDIO_TIME_ZONE }))
+  })
+
+  it('is empty for an unparseable timestamp', () => {
+    expect(formatSlotLong('not-a-date')).toBe('')
   })
 })

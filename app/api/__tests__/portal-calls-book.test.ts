@@ -6,6 +6,11 @@
  * and client-view impersonation, refuse a past or unparseable time, move an
  * existing upcoming call instead of stacking duplicates, notify the studio and
  * email the client.
+ *
+ * The discovery_calls mirror is keyed to the same id and must move with a
+ * re-book: the studio's /calls index reads that table exclusively, so a stale
+ * mirror shows the studio a time the client already abandoned. The visitor's
+ * timezone has to reach the email too, since this route runs on a UTC worker.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -125,12 +130,15 @@ vi.mock('@/lib/db', () => {
 })
 
 // Import after mocks are set up
+import type { ReactElement } from 'react'
 import { POST } from '@/app/api/portal/calls/route'
 import { NextRequest } from 'next/server'
 import * as dbModule from '@/lib/db'
 import { getPortalAuth } from '@/lib/server-auth'
 import { notifyAllAdmins } from '@/lib/notifications'
 import { sendEmail } from '@/lib/email'
+import { formatSlotSummary, STUDIO_TIME_ZONE } from '@/lib/kickoff-slot'
+import type { KickoffBookedEmailProps } from '@/emails/kickoff-booked'
 
 const dbMock = (dbModule as unknown as { __mock: DbMockHandles }).__mock
 
@@ -159,14 +167,22 @@ function inFuture(hours: number): string {
   return new Date(Date.now() + hours * 3_600_000).toISOString()
 }
 
-/** The happy-path lookup queue: contact, org, PM, then no existing call. */
-function seedLookups(options: { existingCall?: Row[] } = {}) {
+/** The happy-path lookup queue: contact, org, PM, then no existing call and no
+ *  existing mirror row. */
+function seedLookups(options: { existingCall?: Row[]; existingMirror?: Row[] } = {}) {
   dbMock.state.queues = {
     contacts: [[{ id: 'ct_1', name: 'Ava Reid', email: 'ava@acme.test' }]],
     organisations: [[{ name: 'Acme Co' }]],
     team_member_access: [[{ id: 'tm_pm', name: 'Liam Miller', email: 'liam@tahi.studio' }]],
     scheduled_calls: [options.existingCall ?? []],
+    discovery_calls: [options.existingMirror ?? []],
   }
+}
+
+/** Props handed to <KickoffBookedEmail> on the most recent send. */
+function emailProps(): KickoffBookedEmailProps {
+  const element = vi.mocked(sendEmail).mock.calls[0][2] as ReactElement<KickoffBookedEmailProps>
+  return element.props
 }
 
 beforeEach(() => {
@@ -286,7 +302,7 @@ describe('POST /api/portal/calls - booking', () => {
   })
 
   it('moves an existing upcoming call instead of stacking a duplicate', async () => {
-    seedLookups({ existingCall: [{ id: 'call_existing' }] })
+    seedLookups({ existingCall: [{ id: 'call_existing' }], existingMirror: [{ id: 'call_existing' }] })
     const when = inFuture(72)
     const res = await POST(bookRequest({ scheduledAt: when }))
     expect(res.status).toBe(201)
@@ -298,6 +314,70 @@ describe('POST /api/portal/calls - booking', () => {
     const moved = dbMock.state.updates.find(u => u.table === 'scheduled_calls')
     expect(moved).toBeDefined()
     expect(new Date(moved!.values.scheduledAt as string).getTime()).toBe(new Date(when).getTime())
+  })
+
+  // The studio's /calls index reads discovery_calls exclusively, and GET
+  // /api/portal/calls merges both tables. A mirror left behind at the old time
+  // means the client and the studio are each told a different hour by the
+  // feature whose whole job is agreeing on one.
+  it('moves the discovery_calls mirror with it, not just the scheduled row', async () => {
+    seedLookups({ existingCall: [{ id: 'call_existing' }], existingMirror: [{ id: 'call_existing' }] })
+    const when = inFuture(72)
+    await POST(bookRequest({ scheduledAt: when }))
+
+    const mirror = dbMock.state.updates.find(u => u.table === 'discovery_calls')
+    expect(mirror).toBeDefined()
+    expect(new Date(mirror!.values.scheduledAt as string).getTime()).toBe(new Date(when).getTime())
+    expect(mirror!.values.status).toBe('scheduled')
+  })
+
+  it('keys the mirror to the scheduled call id so one update covers both', async () => {
+    seedLookups()
+    const res = await POST(bookRequest({ scheduledAt: inFuture(24) }))
+    const json = await res.json() as { id: string }
+    const mirrored = dbMock.state.inserts.find(i => i.table === 'discovery_calls')!
+    expect(mirrored.values.id).toBe(json.id)
+  })
+
+  it('back-fills a missing mirror on a re-book rather than leaving the studio blind', async () => {
+    seedLookups({ existingCall: [{ id: 'call_existing' }], existingMirror: [] })
+    await POST(bookRequest({ scheduledAt: inFuture(72) }))
+    const mirrored = dbMock.state.inserts.find(i => i.table === 'discovery_calls')
+    expect(mirrored).toBeDefined()
+    expect(mirrored!.values.id).toBe('call_existing')
+  })
+})
+
+// The worker runs in UTC. Every artefact that outlives the picker has to quote
+// the client's own clock, or the confirmation contradicts what they clicked.
+describe('POST /api/portal/calls - timezone', () => {
+  it('passes the picker zone through to the confirmation email', async () => {
+    seedLookups()
+    await POST(bookRequest({ scheduledAt: inFuture(24), timeZone: 'America/New_York' }))
+    const props = emailProps()
+    expect(props.timeZone).toBe('America/New_York')
+  })
+
+  it('falls back to the studio clock when the zone is missing or junk', async () => {
+    seedLookups()
+    await POST(bookRequest({ scheduledAt: inFuture(24) }))
+    expect(emailProps().timeZone).toBe(STUDIO_TIME_ZONE)
+
+    vi.clearAllMocks()
+    vi.mocked(getPortalAuth).mockResolvedValue(portalAuth())
+    vi.mocked(sendEmail).mockResolvedValue({ success: true })
+    seedLookups()
+    await POST(bookRequest({ scheduledAt: inFuture(24), timeZone: 'Middle/Earth' }))
+    expect(emailProps().timeZone).toBe(STUDIO_TIME_ZONE)
+  })
+
+  it('gives the studio a human time in the bell row, never a raw ISO string', async () => {
+    seedLookups()
+    const when = inFuture(24)
+    await POST(bookRequest({ scheduledAt: when, timeZone: 'Pacific/Auckland' }))
+    const [, payload] = vi.mocked(notifyAllAdmins).mock.calls[0]
+    expect(payload.body).not.toContain(new Date(when).toISOString())
+    expect(payload.body).toContain(formatSlotSummary(when, { timeZone: 'Pacific/Auckland', withZone: true }))
   })
 
   it('clamps a silly duration into a bookable range', async () => {
