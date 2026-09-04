@@ -20,6 +20,7 @@ import { schema } from '@/db/d1'
 import { inArray } from 'drizzle-orm'
 import { resolvePermissions, featureMap, applyModuleGates, MODULE_SETTING_KEYS } from '@/lib/permissions'
 import { linkTeamMemberOnSignIn } from '@/lib/team-link-server'
+import { linkContactOnSignIn } from '@/lib/contact-link-server'
 import './app-shell.css'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -68,6 +69,22 @@ export default async function DashboardLayout({
       onboardingComplete = true
     }
   }
+
+  // Client-login backfill. A second seat arriving by a Clerk organization
+  // invitation has a valid session and no contacts row pointing at them, so
+  // they resolve to no identity in the portal: no portal role, no
+  // notifications, messages stamped with a raw Clerk id. Claim their waiting
+  // row by VERIFIED email, scoped to their own org. It never creates a row and
+  // never overwrites an existing link (see lib/contact-link-server.ts).
+  //
+  // ORDER MATTERS: this runs BEFORE the onboarding redirect below. A colleague
+  // invited through Clerk has no publicMetadata.onboardingComplete (only POST
+  // /api/onboarding/complete ever writes it, and only the onboarding scenes
+  // call that), so gating the claim behind the redirect meant the audience it
+  // was written for never reached it. An already-linked user still costs one
+  // indexed lookup and nothing more, so running it first is free.
+  if (!isAdmin) await linkContactOnSignIn(userId, orgId)
+
   if (!onboardingComplete) redirect('/onboarding')
 
   // Team-login backfill. A hire's Clerk account and their team_members row are

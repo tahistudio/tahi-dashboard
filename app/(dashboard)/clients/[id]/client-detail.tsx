@@ -13,6 +13,7 @@ import { ActivityTimeline, ActivityItem, type ActivityType } from '@/components/
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { SkeletonList } from '@/components/tahi/skeletons'
+import { useToast } from '@/components/tahi/toast'
 import {
   Globe,
   Building2,
@@ -20,6 +21,7 @@ import {
   User,
   Edit2,
   Check,
+  Copy,
   X,
   Plus,
   Layers,
@@ -216,7 +218,9 @@ type TabId = typeof TABS[number]['id']
 
 export function ClientDetail({ clientId }: { clientId: string }) {
   const router = useRouter()
+  const { showToast } = useToast()
   const [activeTab, setActiveTab] = useState<TabId>('overview')
+  const [invitingAll, setInvitingAll] = useState(false)
 
   // SWR-backed client record. `mutate` (aliased load) refetches after edits,
   // archive, etc. Any fetch error (e.g. a 404) bounces back to /clients,
@@ -233,6 +237,17 @@ export function ClientDetail({ clientId }: { clientId: string }) {
   if (!data) return null
 
   const { org, contacts, subscription, tracks, recentRequests } = data
+
+  // Who the header "Invite to portal" button actually emails. The route sends
+  // to the primary contact only (fanning out to a whole roster is opt-in via
+  // `all`), and the payload is a live access token, so the control has to name
+  // its target rather than hide it in a hover tooltip. This label is both the
+  // title and the aria-label, so the icon-only state below sm announces the
+  // same thing a mouse user reads.
+  const inviteTarget = contacts.find(c => c.isPrimary) ?? contacts[0] ?? null
+  const inviteTargetLabel = inviteTarget
+    ? `Email a portal invite link to ${inviteTarget.email || inviteTarget.name}`
+    : 'Add a contact before inviting anyone'
 
   return (
     <div className="flex flex-col min-h-0">
@@ -295,17 +310,47 @@ export function ClientDetail({ clientId }: { clientId: string }) {
               <TahiButton
                 variant="secondary"
                 size="sm"
+                disabled={invitingAll || contacts.length === 0}
+                title={inviteTargetLabel}
+                aria-label={inviteTargetLabel}
                 onClick={async () => {
+                  setInvitingAll(true)
                   try {
                     const res = await fetch(apiPath(`/api/admin/clients/${clientId}/welcome-email`), { method: 'POST' })
-                    if (!res.ok) throw new Error('Failed')
+                    const json = await res.json() as {
+                      error?: string
+                      sent?: number
+                      total?: number
+                      results?: { email: string; sent: boolean; error?: string }[]
+                    }
+                    if (!res.ok && !json.results) {
+                      showToast(json.error ?? 'Could not send the invite', 'error')
+                      return
+                    }
+                    const sent = json.sent ?? 0
+                    const total = json.total ?? 0
+                    if (sent === 0) {
+                      const first = json.results?.find(r => !r.sent)?.error
+                      showToast(first ? `Invite not sent: ${first}` : 'Invite not sent', 'error')
+                    } else if (sent < total) {
+                      showToast(`Invite sent to ${sent} of ${total} contacts`, 'warning')
+                    } else {
+                      showToast(total === 1
+                        ? `Invite sent to ${json.results?.[0]?.email ?? 'the contact'}`
+                        : `Invite sent to all ${total} contacts`, 'success')
+                    }
+                    await load()
                   } catch {
-                    // silently fail
+                    showToast('Could not send the invite', 'error')
+                  } finally {
+                    setInvitingAll(false)
                   }
                 }}
               >
-                <Mail className="w-3.5 h-3.5 sm:mr-1.5" />
-                <span className="hidden sm:inline">Welcome Email</span>
+                {invitingAll
+                  ? <Loader2 className="w-3.5 h-3.5 sm:mr-1.5 animate-spin" />
+                  : <Mail className="w-3.5 h-3.5 sm:mr-1.5" />}
+                <span className="hidden sm:inline">{invitingAll ? 'Sending...' : 'Invite to portal'}</span>
               </TahiButton>
               <TahiButton
                 variant="secondary"
@@ -2407,6 +2452,17 @@ function InvoicesTab({ clientId }: { clientId: string }) {
 
 // ── Contacts tab ───────────────────────────────────────────────────────────────
 
+/**
+ * Per-contact invite state. `link` is kept after a send so the operator always
+ * has a copy-link fallback, which is the only recovery when Resend is down or
+ * the address bounces.
+ */
+interface InviteState {
+  status: 'sending' | 'sent' | 'failed'
+  link: string
+  error?: string
+}
+
 function ContactsTab({
   clientId,
   contacts,
@@ -2417,11 +2473,81 @@ function ContactsTab({
   onUpdated: () => void
 }) {
   const router = useRouter()
+  const { showToast } = useToast()
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [form, setForm] = useState({ name: '', email: '', role: '', isPrimary: false })
   const [startingDm, setStartingDm] = useState<string | null>(null)
+  const [invites, setInvites] = useState<Record<string, InviteState>>({})
+  const [copied, setCopied] = useState<string | null>(null)
+
+  // Persona is deliberately NOT computed here. The mint route derives it from
+  // the org's plan with personaForPlanType (lib/onboarding-invites.ts), which is
+  // the same rule the welcome route and admin client creation use, so there is
+  // one copy of it and it lives next to the data it reads. Importing that module
+  // into this client component would pull db/d1 and the whole Drizzle schema
+  // into the browser bundle, so the server owns the decision instead.
+
+  const handleInvite = async (contact: Contact) => {
+    setInvites(prev => ({ ...prev, [contact.id]: { status: 'sending', link: '' } }))
+    try {
+      const res = await fetch(apiPath('/api/admin/onboarding-invites'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          flow: 'client',
+          orgId: clientId,
+          contactEmail: contact.email,
+          contactName: contact.name,
+          send: true,
+          reuse: true,
+        }),
+      })
+      const json = await res.json() as {
+        error?: string
+        link?: string
+        emailed?: boolean
+        emailError?: string
+      }
+      if (!res.ok) {
+        setInvites(prev => ({
+          ...prev,
+          [contact.id]: { status: 'failed', link: '', error: json.error ?? 'Could not create the invite' },
+        }))
+        showToast(json.error ?? 'Could not create the invite', 'error')
+        return
+      }
+      const link = json.link ?? ''
+      if (json.emailed) {
+        setInvites(prev => ({ ...prev, [contact.id]: { status: 'sent', link } }))
+        showToast(`Invite sent to ${contact.email}`, 'success')
+      } else {
+        setInvites(prev => ({
+          ...prev,
+          [contact.id]: { status: 'failed', link, error: json.emailError ?? 'Email not sent' },
+        }))
+        showToast('Invite link created, but the email did not send. Copy the link instead.', 'warning')
+      }
+    } catch {
+      setInvites(prev => ({
+        ...prev,
+        [contact.id]: { status: 'failed', link: '', error: 'Network error' },
+      }))
+      showToast('Could not create the invite', 'error')
+    }
+  }
+
+  const handleCopyLink = async (contactId: string, link: string) => {
+    try {
+      await navigator.clipboard.writeText(link)
+      setCopied(contactId)
+      showToast('Invite link copied', 'success')
+      window.setTimeout(() => setCopied(c => (c === contactId ? null : c)), 2000)
+    } catch {
+      showToast('Could not copy the link', 'error')
+    }
+  }
 
   const handleStartDm = async (contact: Contact) => {
     setStartingDm(contact.id)
@@ -2633,6 +2759,52 @@ function ContactsTab({
                       {startingDm === contact.id ? 'Opening...' : 'Message'}
                     </button>
                   </div>
+
+                  {/* Invite to portal. This is the only in-product way to hand a
+                      client a login: it mints a tokened link bound to this
+                      address and emails it. The copy-link fallback stays
+                      available afterwards, because a failed send is the one
+                      case where the operator needs the link by hand. */}
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => { void handleInvite(contact) }}
+                      disabled={invites[contact.id]?.status === 'sending'}
+                      className="tahi-focus-ring inline-flex min-h-[2.75rem] items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-2.5 text-xs font-medium text-[var(--color-text)] transition-colors hover:border-[var(--color-brand)] hover:text-[var(--color-brand)] disabled:cursor-not-allowed disabled:opacity-60 md:min-h-[1.875rem]"
+                      aria-label={contact.clerkUserId
+                        ? `Resend the portal invite to ${contact.name}`
+                        : `Invite ${contact.name} to the portal`}
+                    >
+                      {invites[contact.id]?.status === 'sending'
+                        ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                        : <Mail className="w-3 h-3" aria-hidden="true" />}
+                      {invites[contact.id]?.status === 'sending'
+                        ? 'Sending...'
+                        : invites[contact.id]?.status === 'sent'
+                          ? 'Invite sent'
+                          : contact.clerkUserId
+                            ? 'Resend invite'
+                            : 'Invite to portal'}
+                    </button>
+
+                    {invites[contact.id]?.link && (
+                      <button
+                        onClick={() => { void handleCopyLink(contact.id, invites[contact.id].link) }}
+                        className="tahi-focus-ring inline-flex min-h-[2.75rem] items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-brand)] hover:text-[var(--color-brand)] md:min-h-[1.875rem]"
+                        aria-label={`Copy the invite link for ${contact.name}`}
+                      >
+                        {copied === contact.id
+                          ? <Check className="w-3 h-3" aria-hidden="true" />
+                          : <Copy className="w-3 h-3" aria-hidden="true" />}
+                        {copied === contact.id ? 'Copied' : 'Copy link'}
+                      </button>
+                    )}
+                  </div>
+
+                  {invites[contact.id]?.status === 'failed' && (
+                    <p aria-live="polite" className="mt-1.5 text-xs text-[var(--color-danger)]">
+                      {invites[contact.id].error ?? 'Invite email did not send.'}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>

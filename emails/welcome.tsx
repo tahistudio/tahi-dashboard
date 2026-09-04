@@ -1,9 +1,18 @@
 /**
- * <WelcomeEmail> — sent on client onboarding. Sets the tone for the
+ * <WelcomeEmail>: sent on client onboarding. Sets the tone for the
  * relationship: warm, brief, with a single clear CTA into the portal.
+ *
+ * That CTA is an invite link now, not a bare portal URL (see
+ * app/api/admin/clients/[id]/welcome-email/route.ts), which means it is bound
+ * to one address and it expires. Pass `boundEmail` and `expiresAt` whenever the
+ * link carries a token so the email can say so plainly: a click after the
+ * expiry, or from a different account, otherwise reads as the product being
+ * broken rather than the link being spent.
  */
 import { Body, Head, Html, Preview, Section, Text } from '@react-email/components'
 import {
+  DetailCard,
+  DetailRow,
   EMAIL_TOKENS,
   EmailCard,
   EmailEyebrow,
@@ -21,6 +30,22 @@ interface WelcomeEmailProps {
   contactName: string
   orgName: string
   dashboardUrl: string
+  /** The address the link is bound to. Shown so a mismatch is self-diagnosing. */
+  boundEmail?: string | null
+  /** ISO timestamp. Rendered as a plain date when present. */
+  expiresAt?: string | null
+}
+
+function formatExpiry(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const ms = Date.parse(iso)
+  if (Number.isNaN(ms)) return null
+  return new Date(ms).toLocaleDateString('en-NZ', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
 }
 
 const features: { title: string; body: string }[] = [
@@ -62,8 +87,12 @@ export function WelcomeEmail({
   contactName,
   orgName,
   dashboardUrl,
+  boundEmail,
+  expiresAt,
 }: WelcomeEmailProps) {
   const firstName = contactName.split(' ')[0] ?? contactName
+  const expiry = formatExpiry(expiresAt)
+  const bound = boundEmail?.trim() || null
   return (
     <Html>
       <Head />
@@ -95,6 +124,21 @@ export function WelcomeEmail({
             </Section>
 
             <PrimaryButton href={dashboardUrl}>Open your portal</PrimaryButton>
+
+            {bound || expiry ? (
+              <DetailCard>
+                <DetailRow label="Workspace" value={orgName} first />
+                {bound ? <DetailRow label="Invite sent to" value={bound} /> : null}
+                {expiry ? <DetailRow label="Link valid until" value={expiry} /> : null}
+              </DetailCard>
+            ) : null}
+
+            {bound ? (
+              <EmailParagraph subtle>
+                This link only works for {bound}, so forwarding it will not give anyone else
+                access. If it has stopped working, reply here and we will send a fresh one.
+              </EmailParagraph>
+            ) : null}
 
             <EmailFootnote>
               Got a question or need a hand getting set up? Just reply to this email or send

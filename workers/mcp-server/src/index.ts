@@ -266,13 +266,14 @@ const TOOLS: ToolDef[] = [
   }, ['clientId']),
 
   // ── Write: Clients ────────────────────────────────────────────────────
-  tool('create_client', 'Create a new client organisation', {
+  tool('create_client', 'Create a new client organisation. WARNING: supplying primaryContactEmail also emails that address a live, claimable portal invite link unless sendInvite is false. Leave the email off, or pass sendInvite false, when creating a placeholder or backfill record.', {
     name: prop('string', 'Client company name'),
     website: prop('string', 'Client website URL'),
     industry: prop('string', 'Industry sector'),
     planType: prop('string', 'Plan type: maintain, scale, tune, launch, hourly, custom, none'),
-    primaryContactEmail: prop('string', 'Primary contact email address'),
+    primaryContactEmail: prop('string', 'Primary contact email address. Triggers a real invite email, see sendInvite'),
     primaryContactName: prop('string', 'Primary contact full name'),
+    sendInvite: prop('boolean', 'Email a portal invite link to primaryContactEmail (default true). Pass false to create the client without inviting anyone'),
   }, ['name']),
   tool('update_client', 'Update a client organisation', {
     clientId: prop('string', 'Client organisation ID'),
@@ -298,9 +299,20 @@ const TOOLS: ToolDef[] = [
     clientId: prop('string', 'Client organisation ID'),
     teamMemberId: prop('string', 'Team member ID to assign as PM'),
   }, ['clientId', 'teamMemberId']),
-  tool('send_welcome_email', 'Send a welcome/onboarding email to a client', {
+  tool('send_welcome_email', 'Email a client a welcome message whose CTA is a live, claimable portal invite link. Goes to the primary contact only unless contactId or all is given. Following the link signs that person into this workspace, so treat it as granting access, not as marketing.', {
     clientId: prop('string', 'Client organisation ID'),
+    contactId: prop('string', 'Send to exactly this contact instead of the primary one'),
+    all: prop('boolean', 'Send to EVERY contact at this client that has an email address. Off by default: each recipient gets their own live access link'),
   }, ['clientId']),
+  tool('invite_client_contact', 'Mint an onboarding invite link for a client contact and email it to them. The link is bound to contactEmail and signs them into the pre-created workspace with no payment step.', {
+    clientId: prop('string', 'Client organisation ID'),
+    contactEmail: prop('string', 'Email address the invite link is bound to'),
+    contactName: prop('string', 'Contact full name, used in the email'),
+    persona: prop('string', 'Persona carried on the token: existing_retainer, existing_project, retainer, project. Omit it and the client plan decides (retainer plans get existing_retainer, everything else existing_project)'),
+    expiresInDays: prop('number', 'Link lifetime in days (default 14)'),
+    send: prop('boolean', 'Email the link (default true). Pass false to only mint a link to copy'),
+    reuse: prop('boolean', 'Reuse a live invite for this contact instead of minting another (default true)'),
+  }, ['clientId', 'contactEmail']),
 
   // ── Read: Requests ────────────────────────────────────────────────────
   tool('list_requests', 'List work requests with optional filtering', {
@@ -1685,7 +1697,25 @@ async function executeTool(
     case 'assign_client_pm':
       return json(await apiWrite(`/api/admin/clients/${s('clientId')}/pm`, token, 'PUT', { teamMemberId: s('teamMemberId') }))
     case 'send_welcome_email':
-      return json(await apiWrite(`/api/admin/clients/${s('clientId')}/welcome-email`, token, 'POST'))
+      return json(await apiWrite(`/api/admin/clients/${s('clientId')}/welcome-email`, token, 'POST', {
+        contactId: s('contactId'),
+        all: args.all === true,
+      }))
+    case 'invite_client_contact':
+      return json(await apiWrite('/api/admin/onboarding-invites', token, 'POST', {
+        flow: 'client',
+        orgId: s('clientId'),
+        // Omitted persona means "read it off the client's plan", which the route
+        // does with the same helper the other invite paths use.
+        persona: s('persona'),
+        contactEmail: s('contactEmail'),
+        contactName: s('contactName'),
+        expiresInDays: args.expiresInDays,
+        // Delivery and reuse default on: an assistant asking to invite someone
+        // means "get them in", not "mint a token nobody receives".
+        send: args.send !== false,
+        reuse: args.reuse !== false,
+      }))
 
     // ── Requests ──────────────────────────────────────────────────────
     // The whole request surface lives in ./request-tools as a pure map from

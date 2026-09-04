@@ -22,9 +22,13 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  *   - Single-use, claimed ATOMICALLY (UPDATE ... WHERE used_at IS NULL) before
  *     any membership is granted, so two racing requests cannot both win.
  *   - Expiry enforced.
- *   - The first person to accept a brand-new org's invite creates its Clerk org
- *     (and is its admin, as the owner); anyone joining an already-existing org
- *     is added as a plain member, never an admin.
+ *   - The first person to accept a brand-new org's invite creates its Clerk org;
+ *     anyone joining an already-existing Clerk org is added as a plain member,
+ *     never a Clerk admin.
+ *   - The portal role (contacts.portalRole, which is what the portal's own
+ *     organisation / brands / people routes check) is stricter still: see the
+ *     `shouldOwn` block below. Creating the Clerk org does NOT by itself make
+ *     the acceptor the workspace owner.
  *
  * Returns { orgId (D1), clerkOrgId }; the client then calls Clerk setActive.
  */
@@ -119,12 +123,73 @@ export async function POST(req: NextRequest) {
       .where(eq(schema.organisations.id, org.id))
   }
 
-  // Link the matching contact to this Clerk user (best-effort).
+  // Link (or create) the contact row for this Clerk user.
+  //
+  // Two things used to go wrong here. An invite sent to someone with no contact
+  // row linked nothing at all, so the person had a login and no identity in the
+  // product: no notifications, no participant record, messages stamped with a
+  // raw Clerk id. And portalRole was never set, so even the founding member of
+  // a workspace landed on the 'member' default and was refused by their own
+  // organisation, brands and people routes.
+  //
+  // Best-effort throughout: a failure here must not undo a membership that has
+  // already been granted.
+  const inviteEmail = invite.contactEmail.toLowerCase()
   try {
-    await database
-      .update(schema.contacts)
-      .set({ clerkUserId: userId, updatedAt: now })
-      .where(and(eq(schema.contacts.orgId, org.id), eq(schema.contacts.email, invite.contactEmail.toLowerCase())))
+    const existing = await database
+      .select({
+        id: schema.contacts.id,
+        email: schema.contacts.email,
+        portalRole: schema.contacts.portalRole,
+        isPrimary: schema.contacts.isPrimary,
+      })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.orgId, org.id))
+
+    const match = existing.find(c => c.email?.trim().toLowerCase() === inviteEmail)
+    // Who gets to own the workspace.
+    //
+    // Deliberately NOT "whoever accepts first". An invite can be sent to every
+    // contact at a client, and a migrated org can arrive with portal_role
+    // 'member' on every row, so "first acceptor at an org with no admin" handed
+    // the keys to whichever address happened to click first: an AP mailbox from
+    // a Xero import, a designer who left. The owner then arrived second and
+    // landed as a plain member on their own workspace.
+    //
+    // So promotion needs BOTH a workspace with no administrator yet AND a
+    // genuine claim to be its owner: either nobody is on the roster at all (the
+    // true founding case), or the row this invite matches is the org's primary
+    // contact. Everyone else is a member, and Tahi promotes them explicitly via
+    // set_contact_portal_role. `foundingMember` (this acceptance created the
+    // Clerk org) is NOT sufficient on its own: an intern can be the first to
+    // click.
+    const orgHasAdmin = existing.some(c => c.portalRole === 'admin')
+    const shouldOwn = !orgHasAdmin && (existing.length === 0 || !!match?.isPrimary)
+    const portalRole = shouldOwn ? 'admin' : 'member'
+
+    if (match) {
+      await database
+        .update(schema.contacts)
+        .set({
+          clerkUserId: userId,
+          updatedAt: now,
+          // Never demote: an existing admin stays an admin.
+          ...(match.portalRole === 'admin' ? {} : { portalRole }),
+        })
+        .where(and(eq(schema.contacts.id, match.id), eq(schema.contacts.orgId, org.id)))
+    } else {
+      await database.insert(schema.contacts).values({
+        id: crypto.randomUUID(),
+        orgId: org.id,
+        name: invite.contactName?.trim() || inviteEmail.split('@')[0],
+        email: inviteEmail,
+        clerkUserId: userId,
+        isPrimary: existing.length === 0,
+        portalRole,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
   } catch {
     // non-fatal
   }

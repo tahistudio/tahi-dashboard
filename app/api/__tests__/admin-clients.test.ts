@@ -16,6 +16,13 @@ vi.mock('@/lib/server-auth', () => ({
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org_tahi'),
 }))
 
+// The route carries a `clients` feature gate now that creating a client also
+// emails a live portal invite. Allowed here; the gate itself is covered in
+// admin-clients-invite.test.ts.
+vi.mock('@/lib/require-feature', () => ({
+  requireFeature: vi.fn().mockResolvedValue(null),
+}))
+
 vi.mock('@/lib/db', () => ({
   db: vi.fn().mockResolvedValue({
     insert: vi.fn().mockReturnValue({ values: vi.fn().mockResolvedValue(undefined) }),
