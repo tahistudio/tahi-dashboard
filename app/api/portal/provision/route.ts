@@ -106,6 +106,11 @@ export async function POST(req: NextRequest) {
   })
 
   // Primary contact = the signed-in user.
+  //
+  // portalRole 'admin': this person just created the workspace, so they own it.
+  // The column defaults to 'member', and the organisation, brands and people
+  // portal routes all require an admin contact, so leaving the default here
+  // refused the owner on their own workspace until someone hand-edited D1.
   try {
     const user = await clerk.users.getUser(userId)
     const email = user.emailAddresses[0]?.emailAddress
@@ -118,6 +123,7 @@ export async function POST(req: NextRequest) {
         email: email.toLowerCase(),
         clerkUserId: userId,
         isPrimary: true,
+        portalRole: 'admin',
         createdAt: now,
         updatedAt: now,
       })

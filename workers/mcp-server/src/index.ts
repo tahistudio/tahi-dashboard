@@ -260,6 +260,15 @@ const TOOLS: ToolDef[] = [
   tool('send_welcome_email', 'Send a welcome/onboarding email to a client', {
     clientId: prop('string', 'Client organisation ID'),
   }, ['clientId']),
+  tool('invite_client_contact', 'Mint an onboarding invite link for a client contact and email it to them. The link is bound to contactEmail and signs them into the pre-created workspace with no payment step.', {
+    clientId: prop('string', 'Client organisation ID'),
+    contactEmail: prop('string', 'Email address the invite link is bound to'),
+    contactName: prop('string', 'Contact full name, used in the email'),
+    persona: prop('string', 'Persona carried on the token: existing_retainer, existing_project, retainer, project. Defaults to existing_project'),
+    expiresInDays: prop('number', 'Link lifetime in days (default 14)'),
+    send: prop('boolean', 'Email the link (default true). Pass false to only mint a link to copy'),
+    reuse: prop('boolean', 'Reuse a live invite for this contact instead of minting another (default true)'),
+  }, ['clientId', 'contactEmail']),
 
   // ── Read: Requests ────────────────────────────────────────────────────
   tool('list_requests', 'List work requests with optional filtering', {
@@ -1645,6 +1654,19 @@ async function executeTool(
       return json(await apiWrite(`/api/admin/clients/${s('clientId')}/pm`, token, 'PUT', { teamMemberId: s('teamMemberId') }))
     case 'send_welcome_email':
       return json(await apiWrite(`/api/admin/clients/${s('clientId')}/welcome-email`, token, 'POST'))
+    case 'invite_client_contact':
+      return json(await apiWrite('/api/admin/onboarding-invites', token, 'POST', {
+        flow: 'client',
+        orgId: s('clientId'),
+        persona: s('persona') ?? 'existing_project',
+        contactEmail: s('contactEmail'),
+        contactName: s('contactName'),
+        expiresInDays: args.expiresInDays,
+        // Delivery and reuse default on: an assistant asking to invite someone
+        // means "get them in", not "mint a token nobody receives".
+        send: args.send !== false,
+        reuse: args.reuse !== false,
+      }))
 
     // ── Requests ──────────────────────────────────────────────────────
     // The whole request surface lives in ./request-tools as a pure map from

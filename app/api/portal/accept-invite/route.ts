@@ -94,6 +94,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Whether this acceptance is what brings the Clerk org into existence. The
+  // person who does that is the workspace owner, not a guest.
+  const foundingMember = !org.clerkOrgId
+
   let clerkOrgId = org.clerkOrgId
   if (clerkOrgId) {
     // Join an existing Clerk org as a plain member (never auto-admin).
@@ -119,12 +123,57 @@ export async function POST(req: NextRequest) {
       .where(eq(schema.organisations.id, org.id))
   }
 
-  // Link the matching contact to this Clerk user (best-effort).
+  // Link (or create) the contact row for this Clerk user.
+  //
+  // Two things used to go wrong here. An invite sent to someone with no contact
+  // row linked nothing at all, so the person had a login and no identity in the
+  // product: no notifications, no participant record, messages stamped with a
+  // raw Clerk id. And portalRole was never set, so even the founding member of
+  // a workspace landed on the 'member' default and was refused by their own
+  // organisation, brands and people routes.
+  //
+  // Best-effort throughout: a failure here must not undo a membership that has
+  // already been granted.
+  const inviteEmail = invite.contactEmail.toLowerCase()
   try {
-    await database
-      .update(schema.contacts)
-      .set({ clerkUserId: userId, updatedAt: now })
-      .where(and(eq(schema.contacts.orgId, org.id), eq(schema.contacts.email, invite.contactEmail.toLowerCase())))
+    const existing = await database
+      .select({
+        id: schema.contacts.id,
+        email: schema.contacts.email,
+        portalRole: schema.contacts.portalRole,
+      })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.orgId, org.id))
+
+    const match = existing.find(c => c.email?.trim().toLowerCase() === inviteEmail)
+    // Owner when they brought the workspace into being, or when nobody at this
+    // org can administer it yet. Otherwise a plain member: deny by default.
+    const shouldOwn = foundingMember || !existing.some(c => c.portalRole === 'admin')
+    const portalRole = shouldOwn ? 'admin' : 'member'
+
+    if (match) {
+      await database
+        .update(schema.contacts)
+        .set({
+          clerkUserId: userId,
+          updatedAt: now,
+          // Never demote: an existing admin stays an admin.
+          ...(match.portalRole === 'admin' ? {} : { portalRole }),
+        })
+        .where(and(eq(schema.contacts.id, match.id), eq(schema.contacts.orgId, org.id)))
+    } else {
+      await database.insert(schema.contacts).values({
+        id: crypto.randomUUID(),
+        orgId: org.id,
+        name: invite.contactName?.trim() || inviteEmail.split('@')[0],
+        email: inviteEmail,
+        clerkUserId: userId,
+        isPrimary: existing.length === 0,
+        portalRole,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
   } catch {
     // non-fatal
   }

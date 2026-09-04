@@ -1,3 +1,4 @@
+import { createElement } from 'react'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -6,6 +7,9 @@ import { eq, desc, like, or, and, ne, inArray, sql } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { dispatchDomainEvent } from '@/lib/events'
 import { INTERNAL_ORG_STATUS } from '@/lib/internal-org'
+import { createInvite, personaForPlanType } from '@/lib/onboarding-invites'
+import { sendEmail } from '@/lib/email'
+import { ClientInviteEmail } from '@/emails/client-invite'
 
 // ── GET /api/admin/clients ──────────────────────────────────────────────────
 // Query params: ?status=active&plan=maintain&search=acme&page=1
@@ -116,7 +120,7 @@ export async function GET(req: NextRequest) {
 
 // ── POST /api/admin/clients ─────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -124,6 +128,8 @@ export async function POST(req: NextRequest) {
   const body = await req.json() as {
     name?: string; website?: string; industry?: string; planType?: string
     primaryContactEmail?: string; primaryContactName?: string
+    /** Opt out of the invite email the dialog promises. Defaults to sending. */
+    sendInvite?: boolean
   }
   const { name, website, industry, planType, primaryContactEmail, primaryContactName } = body
 
@@ -151,17 +157,67 @@ export async function POST(req: NextRequest) {
 
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // If a primary contact email was provided, create the contact record
-  if (primaryContactEmail?.trim()) {
+  // If a primary contact email was provided, create the contact record and mint
+  // the invite the dialog promises.
+  //
+  // portalRole 'admin': this is the first person at a brand new workspace, so
+  // they are its owner. Leaving them on the 'member' default is what used to
+  // refuse an owner on their own portal (organisation, brands and people all
+  // require an admin contact) until someone hand-edited the column.
+  const invite: { email: string; link: string; emailed: boolean; error?: string } | null =
+    primaryContactEmail?.trim()
+      ? { email: primaryContactEmail.trim().toLowerCase(), link: '', emailed: false }
+      : null
+
+  if (primaryContactEmail?.trim() && invite) {
+    const contactName = primaryContactName?.trim() || primaryContactEmail.split('@')[0]
+
     await drizzle.insert(schema.contacts).values({
       id: crypto.randomUUID(),
       orgId: id,
-      name: primaryContactName?.trim() || primaryContactEmail.split('@')[0],
-      email: primaryContactEmail.trim().toLowerCase(),
+      name: contactName,
+      email: invite.email,
       isPrimary: true,
+      portalRole: 'admin',
       createdAt: now,
       updatedAt: now,
     })
+
+    // The client row is the thing that must survive. An invite or a Resend
+    // hiccup is reported on the response, never allowed to fail the create and
+    // leave the operator thinking no client exists when one does.
+    try {
+      const minted = await createInvite(drizzle, {
+        flow: 'client',
+        orgId: id,
+        // The commercial conversation already happened offline, so the invited
+        // client is never shown a payment step on a workspace we set up.
+        persona: personaForPlanType(planType),
+        contactEmail: invite.email,
+        contactName,
+        createdById: userId ?? null,
+      })
+      invite.link = minted.link
+
+      if (body.sendInvite !== false) {
+        const outcome = await sendEmail(
+          invite.email,
+          `Your ${name.trim()} portal is ready`,
+          createElement(ClientInviteEmail, {
+            contactName,
+            orgName: name.trim(),
+            inviteUrl: minted.link,
+            boundEmail: invite.email,
+            expiresAt: minted.expiresAt,
+          }),
+        )
+        invite.emailed = outcome.success
+        if (!outcome.success) invite.error = outcome.error ?? 'Failed to send'
+      }
+    } catch (err) {
+      console.error('[clients] invite for the new client failed:', err)
+      invite.error = 'Could not create the invite'
+    }
   }
 
   // If a retainer plan was selected, create a subscription + provision tracks
@@ -231,5 +287,5 @@ export async function POST(req: NextRequest) {
     },
   })
 
-  return NextResponse.json({ id }, { status: 201 })
+  return NextResponse.json({ id, invite }, { status: 201 })
 }

@@ -152,8 +152,23 @@ export function ClientList() {
         const data = await res.json() as { error?: string }
         throw new Error(data.error ?? 'Failed to create client')
       }
-      const data = await res.json() as { id?: string }
-      showToast('Client created successfully')
+      const data = await res.json() as {
+        id?: string
+        invite?: { email: string; link: string; emailed: boolean; error?: string } | null
+      }
+      // Report what actually happened to the invite. The dialog promises an
+      // email, so silently swallowing a failed send is what left an operator
+      // believing a client had been let in when they had not.
+      if (!data.invite) {
+        showToast('Client created. Add a contact to invite them to the portal.')
+      } else if (data.invite.emailed) {
+        showToast(`Client created and invite sent to ${data.invite.email}`)
+      } else {
+        showToast(
+          `Client created, but the invite email did not send. Resend it from the client page.`,
+          'warning',
+        )
+      }
       closeDialog()
       await mutateClients()
       if (data.id) {
@@ -536,7 +551,7 @@ export function ClientList() {
               icon={<Users className="w-6 h-6" />}
               title={scopedOrgs.length === 0 ? 'No clients yet' : 'No matches'}
               description={scopedOrgs.length === 0
-                ? 'Add your first client to get started. They will receive an invite email to access their portal.'
+                ? 'Add your first client to get started. Give them a primary contact and we email that person a link into their portal.'
                 : 'Try clearing a filter or adjusting your search.'}
               action={
                 scopedOrgs.length === 0 && !isViewerImpersonation ? (
@@ -559,7 +574,7 @@ export function ClientList() {
         onClose={closeDialog}
         icon={<Building2 size={15} />}
         title="Add new client"
-        subtitle="Creates their portal and sends an invite email."
+        subtitle="Creates their workspace. Add a primary contact and we email them an invite link."
         maxWidth="48rem"
       >
         <SlideOver.Body>
@@ -707,7 +722,7 @@ function NewClientForm({
         flexDirection: 'column',
         gap: '0.5rem',
       }}>
-        <SectionLabel>Primary contact (optional, invite sent on save)</SectionLabel>
+        <SectionLabel>Primary contact (optional, we email them an invite link on save)</SectionLabel>
 
         {/* Name + email split: name is shorter on average, email gets the
             wider column. 1fr / 1.5fr keeps both readable. */}
