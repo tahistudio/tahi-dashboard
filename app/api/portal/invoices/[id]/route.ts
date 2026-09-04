@@ -1,4 +1,5 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { requirePortalFeature } from '@/lib/require-feature'
 import { isOrgAdmin } from '@/lib/portal-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -20,7 +21,11 @@ type Params = { params: Promise<{ id: string }> }
 // Drafts are excluded here exactly as they are in the list: a draft is the
 // studio's working copy and is not a bill the client owes.
 export async function GET(req: NextRequest, { params }: Params) {
-  const { orgId, userId, impersonating } = await getPortalAuth(req)
+  const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
+
+  const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'invoices')
+
+  if (featureDenied) return featureDenied
 
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

@@ -1,4 +1,5 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { requirePortalFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -51,7 +52,11 @@ function fileType(filename: string, mimeType: string | null): string {
 // internal message are excluded so nothing private leaks. Honest empty [] when
 // there are no files. Read-only, safe under Client-view impersonation.
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId } = await getPortalAuth(req)
+
+  const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'files')
+
+  if (featureDenied) return featureDenied
 
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

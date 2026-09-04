@@ -16,6 +16,7 @@
  */
 
 import { getPortalAuth } from '@/lib/server-auth'
+import { requirePortalFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -35,7 +36,11 @@ type Params = { params: Promise<{ id: string }> }
 
 export async function POST(req: NextRequest, { params }: Params) {
   try {
-    const { orgId, userId, impersonating } = await getPortalAuth(req)
+    const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
+
+    const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'requests')
+
+    if (featureDenied) return featureDenied
 
     if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
