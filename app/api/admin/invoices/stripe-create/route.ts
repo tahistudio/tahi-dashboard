@@ -6,7 +6,6 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
-import { requireFeature } from '@/lib/require-feature'
 import { createNotifications, type NotificationRecipient } from '@/lib/notifications'
 import { invoiceReference, selectBillingContacts } from '@/lib/invoice-billing'
 

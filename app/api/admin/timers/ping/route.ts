@@ -12,6 +12,7 @@
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -20,6 +21,8 @@ import { eq } from 'drizzle-orm'
 export async function POST(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const deniedFeature = await requireFeature({ userId, orgId }, 'time')
+  if (deniedFeature) return deniedFeature
   if (!userId) return new NextResponse(null, { status: 204 })
 
   const database = await db()
