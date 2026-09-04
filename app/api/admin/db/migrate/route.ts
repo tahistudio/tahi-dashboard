@@ -2003,6 +2003,14 @@ const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    name: '0086',
+    description: 'Portal pay link + client payment terms. invoices.stripe_hosted_invoice_url persists Stripe\'s hosted invoice page at finalise time so the portal and the invoice email can carry a Pay now CTA (it used to be fetched, copied to the clipboard and discarded). organisations.payment_terms records a client who chose "invoice me" at onboarding (net_7 | net_14 | net_30; null / card = card on file), which is also what entitles them to the portal without a live subscription. Additive only; duplicate-column errors are swallowed upstream so re-runs are idempotent.',
+    statements: [
+      `ALTER TABLE invoices ADD COLUMN stripe_hosted_invoice_url text`,
+      `ALTER TABLE organisations ADD COLUMN payment_terms text`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

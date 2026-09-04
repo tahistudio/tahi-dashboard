@@ -23,6 +23,10 @@ export interface StripeInvoiceLike {
   customer?: string | null
   customer_name?: string | null
   currency?: string | null
+  /** Stripe's hosted invoice page. Persisted so the client gets a Pay now CTA
+   *  in the portal and in the invoice email. Present on any finalised invoice;
+   *  null while it is still a draft in Stripe. */
+  hosted_invoice_url?: string | null
   subtotal?: number
   total?: number
   amount_paid?: number
@@ -87,6 +91,9 @@ export async function importStripeInvoice(
       .set({
         status: localStatus,
         ...(paidAt ? { paidAt } : {}),
+        // Refresh the client's pay link, but never clobber a stored one with a
+        // null (a webhook payload for a paid invoice may omit it).
+        ...(inv.hosted_invoice_url ? { stripeHostedInvoiceUrl: inv.hosted_invoice_url } : {}),
         updatedAt: now,
       })
       .where(eq(schema.invoices.id, existing[0].id))
@@ -141,6 +148,10 @@ export async function importStripeInvoice(
     id: invoiceId,
     orgId: matchedOrgId,
     stripeInvoiceId: inv.id,
+    // The pay link travels with the invoice. A retainer client's recurring
+    // Stripe invoice arrives through this path as status 'sent', and without
+    // this it would land in the portal with no Pay now CTA anywhere.
+    stripeHostedInvoiceUrl: inv.hosted_invoice_url ?? null,
     source: 'stripe',
     status: mapStripeStatus(inv.status),
     amountUsd: subtotal / 100,

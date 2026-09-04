@@ -526,14 +526,14 @@ const TOOLS: ToolDef[] = [
     notes: prop('string', 'Invoice notes'),
     dueDate: prop('string', 'Due date in YYYY-MM-DD format'),
   }, ['orgId', 'amountUsd', 'totalUsd']),
-  tool('update_invoice', 'Update an existing invoice', {
+  tool('update_invoice', 'Update an existing invoice. This does NOT send it: flipping an invoice to the client is send_invoice_email, which is the only door that emails the billing contacts and raises their bell row.', {
     invoiceId: prop('string', 'Invoice ID'),
-    status: prop('string', 'Updated status: draft, sent, overdue, paid, cancelled'),
+    status: prop('string', 'Updated status: draft, overdue, paid, written_off. To send an invoice use send_invoice_email instead, which sets sent for you.'),
     amount: prop('number', 'Updated amount'),
     dueDate: prop('string', 'Updated due date in YYYY-MM-DD format'),
     orgId: prop('string', 'Reassign invoice to a different client organisation ID'),
   }, ['invoiceId']),
-  tool('send_invoice_email', 'Send an invoice email to the client', {
+  tool('send_invoice_email', 'Send an invoice to the client: emails every billing contact (portal admins + the primary contact) the invoice with a Stripe pay link and a portal deep link, marks the invoice sent, and raises the client bell row. Creating a draft invoice does NOT notify anyone; this is the send.', {
     invoiceId: prop('string', 'Invoice ID'),
   }, ['invoiceId']),
 
@@ -1768,6 +1768,9 @@ async function executeTool(
       return json(await apiWrite(`/api/admin/invoices/${invoiceId}`, token, 'PATCH', body))
     }
     case 'send_invoice_email':
+      // The route owns the behaviour (all billing contacts, real template, pay
+      // link, status flip, client notification), so the tool stays a proxy and
+      // gains it automatically. Returns { sentTo, failedTo, payLink }.
       return json(await apiWrite(`/api/admin/invoices/${s('invoiceId')}/send-email`, token, 'POST'))
 
     // ── Time Tracking ─────────────────────────────────────────────────

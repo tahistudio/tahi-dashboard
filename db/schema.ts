@@ -54,6 +54,11 @@ export const organisations = sqliteTable('organisations', {
   onboardingState: text('onboarding_state').default('{}'),
   parentOrgId: text('parent_org_id'),
   preferredCurrency: text('preferred_currency').default('USD'),
+  // How this client pays (migration 0086). null / 'card' = card on file via
+  // Stripe. A net-terms value ('net_7' | 'net_14' | 'net_30') means they chose
+  // "invoice me" at onboarding, which is also what entitles them to the portal
+  // without a live subscription. See lib/invoice-billing.ts.
+  paymentTerms: text('payment_terms'),
   convertedFromProjectId: text('converted_from_project_id'),
   internalNotes: text('internal_notes'),
   // JSON array of brand names, e.g. ["Brand A", "Brand B"]
@@ -739,6 +744,10 @@ export const invoices = sqliteTable('invoices', {
   projectId: text('project_id'),
   subscriptionId: text('subscription_id'),
   stripeInvoiceId: text('stripe_invoice_id'),
+  // Stripe's hosted invoice page (migration 0086). Persisted the moment the
+  // Stripe invoice is finalised so a client can be handed a Pay now CTA in the
+  // portal and in the invoice email without an admin re-deriving the link.
+  stripeHostedInvoiceUrl: text('stripe_hosted_invoice_url'),
   xeroInvoiceId: text('xero_invoice_id'),
   source: text('source').default('manual'), // 'manual' | 'xero' | 'stripe'
   // draft | sent | viewed | paid | overdue | written_off

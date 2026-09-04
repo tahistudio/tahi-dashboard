@@ -1,7 +1,9 @@
 'use client'
 
+import type * as React from 'react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import useSWR from 'swr'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   Plus, FileText, RefreshCw, Download, X as XIcon,
@@ -32,8 +34,11 @@ interface Invoice {
   orgName: string | null
   status: string
   source: string | null
-  stripeInvoiceId: string | null
-  xeroInvoiceId: string | null
+  // Admin projection only; the portal list withholds the integration ids.
+  stripeInvoiceId?: string | null
+  xeroInvoiceId?: string | null
+  /** Stripe hosted invoice page, served to the client so they can pay. */
+  payUrl?: string | null
   totalAmount: number
   currency: string | null
   dueDate: string | null
@@ -89,6 +94,27 @@ function effectiveStatus(inv: { status: string; dueDate: string | null }): strin
   return isOverdue(inv.dueDate, inv.status) && inv.status === 'sent' ? 'overdue' : inv.status
 }
 
+/** A bill the client still owes, with somewhere to pay it. */
+function isPayable(inv: Invoice): boolean {
+  return !!inv.payUrl && inv.status !== 'paid' && inv.status !== 'written_off'
+}
+
+// Height comes from the min-h-11 / md:min-h-9 utilities on the element so the
+// touch target is 2.75rem on mobile without making every desktop row taller.
+const PAY_LINK_STYLE: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: '0.375rem 0.875rem',
+  borderRadius: 'var(--radius-leaf-sm)',
+  background: 'var(--color-brand)',
+  color: 'var(--color-bg)',
+  fontSize: '0.8125rem',
+  fontWeight: 600,
+  textDecoration: 'none',
+  whiteSpace: 'nowrap',
+}
+
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
 function StatusBadge({ status, dueDate }: { status: string; dueDate: string | null }) {
@@ -101,6 +127,78 @@ function SourceBadge({ source }: { source: string | null }) {
   const key = source ?? 'manual'
   const cfg = SOURCE_TONE[key] ?? SOURCE_TONE['manual']
   return <Badge tone={cfg.tone} variant="soft" size="sm">{cfg.label}</Badge>
+}
+
+// ─── Client mobile card ───────────────────────────────────────────────────────
+// The client's column set (amount, status, due, created, pay) is about 41rem
+// wide, so below md the table put Pay now off the right edge of a 375px screen
+// behind a horizontal scroll. One invoice as a card instead: the amount and the
+// status on the top line, the dates under it, and the pay button in the body
+// where a thumb can reach it.
+
+function InvoiceMobileCard({
+  invoice,
+  amountLabel,
+  onOpen,
+}: {
+  invoice: Invoice
+  amountLabel: string
+  onOpen: () => void
+}) {
+  return (
+    <div
+      onClick={onOpen}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.625rem',
+        padding: '0.875rem',
+        borderBottom: '1px solid var(--color-border-subtle)',
+        cursor: 'pointer',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+        {/* A real link, so the card is reachable by keyboard as well as by tap
+            (the wrapping div's onClick is the thumb-sized version of this). */}
+        <Link
+          data-private
+          href={`/invoices/${invoice.id}`}
+          className="tahi-focus-ring"
+          onClick={e => e.stopPropagation()}
+          style={{
+            fontSize: '1.0625rem',
+            fontWeight: 600,
+            color: 'var(--color-text)',
+            textDecoration: 'none',
+            borderRadius: 'var(--radius-sm)',
+          }}
+        >
+          {amountLabel}
+        </Link>
+        <StatusBadge status={invoice.status} dueDate={invoice.dueDate} />
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', fontSize: '0.78125rem', color: 'var(--color-text-muted)' }}>
+        <span style={{ color: isOverdue(invoice.dueDate, invoice.status) ? 'var(--color-danger)' : 'var(--color-text-muted)' }}>
+          Due {formatDate(invoice.dueDate)}
+        </span>
+        <span style={{ color: 'var(--color-text-subtle)' }}>Issued {formatDate(invoice.createdAt)}</span>
+      </div>
+
+      {isPayable(invoice) && invoice.payUrl && (
+        <a
+          href={invoice.payUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          className="tahi-focus-ring min-h-11"
+          style={{ ...PAY_LINK_STYLE, alignSelf: 'flex-start' }}
+        >
+          Pay now
+        </a>
+      )}
+    </div>
+  )
 }
 
 // ─── Create Invoice Slide-over ────────────────────────────────────────────────
@@ -814,8 +912,43 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
       ),
     })
 
+    // Client-only pay affordance. A row still opens the invoice; this is the
+    // one-click path to Stripe's hosted page for a bill that is actually owed.
+    // Rendered by hand rather than through the `link` column config, because
+    // that renders an empty focusable button on every row without an href.
+    if (!isAdmin) {
+      cols.push({
+        key: 'pay',
+        header: '',
+        align: 'right',
+        width: '7rem',
+        render: r => (isPayable(r) && r.payUrl ? (
+          <a
+            href={r.payUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            className="tahi-focus-ring min-h-11 md:min-h-9"
+            style={PAY_LINK_STYLE}
+          >
+            Pay now
+          </a>
+        ) : null),
+      })
+    }
+
     return cols
   }, [isAdmin, displayCurrency, formatNativeWithDisplay])
+
+  // Cards below md for the client audience only: theirs is the column set that
+  // pushed Pay now off a 375px screen. The admin table keeps its h-scroll.
+  const renderMobileCard = useCallback((r: Invoice) => (
+    <InvoiceMobileCard
+      invoice={r}
+      amountLabel={formatInvoiceCurrency(r.totalAmount, r.currency)}
+      onOpen={() => router.push(`/invoices/${r.id}`)}
+    />
+  ), [router])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -976,6 +1109,7 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
             getRowId={r => r.id}
             defaultSort={{ key: 'createdAt', dir: 'desc' }}
             loading={loading}
+            mobileCard={isAdmin ? undefined : renderMobileCard}
             empty={
               <EmptyState
                 icon={<FileText className="w-6 h-6" />}

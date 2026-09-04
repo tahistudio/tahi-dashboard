@@ -51,6 +51,9 @@ export async function GET(req: NextRequest) {
         dueDate: schema.invoices.dueDate,
         sentAt: schema.invoices.sentAt,
         paidAt: schema.invoices.paidAt,
+        // Stripe's hosted invoice page, persisted at finalise time. Drives the
+        // client's Pay now CTA straight from the list row.
+        payUrl: schema.invoices.stripeHostedInvoiceUrl,
         createdAt: schema.invoices.createdAt,
         updatedAt: schema.invoices.updatedAt,
       })
@@ -74,6 +77,9 @@ export async function GET(req: NextRequest) {
         dueDate: schema.invoices.dueDate,
         sentAt: schema.invoices.sentAt,
         paidAt: schema.invoices.paidAt,
+        // Stripe's hosted invoice page, persisted at finalise time. Drives the
+        // client's Pay now CTA straight from the list row.
+        payUrl: schema.invoices.stripeHostedInvoiceUrl,
         createdAt: schema.invoices.createdAt,
         updatedAt: schema.invoices.updatedAt,
       })
