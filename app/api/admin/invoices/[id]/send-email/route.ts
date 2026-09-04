@@ -1,39 +1,95 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { createElement } from 'react'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { desc, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { publicUrl } from '@/lib/app-url'
+import { sendEmail } from '@/lib/email'
+import { InvoiceSentEmail } from '@/emails/invoice-sent'
+import { requireAccessToOrg } from '@/lib/require-access'
+import { requireFeature } from '@/lib/require-feature'
+import { notifyOrgContacts } from '@/lib/notifications'
+import { invoiceReference, selectInvoiceRecipients } from '@/lib/invoice-billing'
+import { stripeSecretKey } from '@/lib/stripe-key'
 
 type Params = { params: Promise<{ id: string }> }
 
-// POST /api/admin/invoices/[id]/send-email
-// Sends an invoice notification email to the client's primary contact via Resend.
+/**
+ * Resolve the client's pay link.
+ *
+ * Prefers the persisted column (written when the Stripe invoice is finalised).
+ * For invoices finalised before that column existed, ask Stripe once and
+ * backfill, so an old invoice still emails with a working Pay button.
+ * Returns null when the invoice was never pushed to Stripe.
+ */
+async function resolvePayUrl(
+  drizzle: ReturnType<typeof import('drizzle-orm/d1').drizzle>,
+  invoice: { id: string; stripeInvoiceId: string | null; stripeHostedInvoiceUrl: string | null },
+): Promise<string | null> {
+  if (invoice.stripeHostedInvoiceUrl) return invoice.stripeHostedInvoiceUrl
+  if (!invoice.stripeInvoiceId) return null
+
+  const key = stripeSecretKey()
+  if (!key) return null
+
+  try {
+    const res = await fetch(`https://api.stripe.com/v1/invoices/${invoice.stripeInvoiceId}`, {
+      headers: { Authorization: `Bearer ${key}` },
+    })
+    if (!res.ok) return null
+    const data = await res.json() as { hosted_invoice_url?: string | null }
+    const url = data.hosted_invoice_url ?? null
+    if (url) {
+      await drizzle
+        .update(schema.invoices)
+        .set({ stripeHostedInvoiceUrl: url, updatedAt: new Date().toISOString() })
+        .where(eq(schema.invoices.id, invoice.id))
+    }
+    return url
+  } catch {
+    // Non-fatal: the email still goes out with the portal link.
+    return null
+  }
+}
+
+// ── POST /api/admin/invoices/[id]/send-email ─────────────────────────────────
+// Sends the invoice to the client, then marks it sent.
+//
+// This is the "send" motion for an invoice, so it does three things the old
+// one-contact, inline-HTML version did not:
+//   - it reaches every billing contact, not whichever row ORDER BY returned;
+//   - it uses the real React Email template with a Stripe pay link and a
+//     PORTAL deep link (the old CTA pointed at the admin page, which 403s a
+//     client);
+//   - it raises the client's in-app notification here rather than at draft
+//     creation, so a client is only ever told about a bill they can open.
 export async function POST(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+
+  const deniedFeature = await requireFeature({ userId, orgId }, 'invoices')
+  if (deniedFeature) return deniedFeature
 
   const { id } = await params
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // Fetch invoice with org name
   const [invoiceRow] = await drizzle
     .select({
       id: schema.invoices.id,
       orgId: schema.invoices.orgId,
-      orgName: schema.organisations.name,
       status: schema.invoices.status,
       totalUsd: schema.invoices.totalUsd,
       currency: schema.invoices.currency,
       notes: schema.invoices.notes,
       dueDate: schema.invoices.dueDate,
-      createdAt: schema.invoices.createdAt,
+      stripeInvoiceId: schema.invoices.stripeInvoiceId,
+      stripeHostedInvoiceUrl: schema.invoices.stripeHostedInvoiceUrl,
     })
     .from(schema.invoices)
-    .leftJoin(schema.organisations, eq(schema.invoices.orgId, schema.organisations.id))
     .where(eq(schema.invoices.id, id))
     .limit(1)
 
@@ -41,22 +97,26 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
   }
 
-  // Find primary contact for this org
-  const [contact] = await drizzle
+  const denied = await requireAccessToOrg(drizzle, userId, invoiceRow.orgId)
+  if (denied) return denied
+
+  // Every billing contact at the org: the people who can also open the invoice
+  // once it lands (see lib/invoice-billing.selectInvoiceRecipients).
+  const contacts = await drizzle
     .select({
       email: schema.contacts.email,
       name: schema.contacts.name,
-      clerkUserId: schema.contacts.clerkUserId,
+      portalRole: schema.contacts.portalRole,
+      isPrimary: schema.contacts.isPrimary,
     })
     .from(schema.contacts)
     .where(eq(schema.contacts.orgId, invoiceRow.orgId))
-    .orderBy(desc(schema.contacts.isPrimary))
-    .limit(1)
 
-  if (!contact?.email) {
+  const recipients = selectInvoiceRecipients(contacts)
+  if (recipients.length === 0) {
     return NextResponse.json(
-      { error: 'No contact found for this client' },
-      { status: 400 }
+      { error: 'No contact with an email address on this client' },
+      { status: 400 },
     )
   }
 
@@ -65,82 +125,77 @@ export async function POST(req: NextRequest, { params }: Params) {
   // per-event notification preferences. Preferences apply only to
   // notification-style pings such as the in-app bell row.
 
-  if (!process.env.RESEND_API_KEY) {
-    return NextResponse.json(
-      { error: 'Email service is not configured' },
-      { status: 500 }
-    )
-  }
-
-  const invoiceUrl = publicUrl(`/invoices/${invoiceRow.id}`)
-  const formattedTotal = new Intl.NumberFormat('en-US', {
+  const currency = invoiceRow.currency ?? 'NZD'
+  const amountFormatted = new Intl.NumberFormat('en-NZ', {
     style: 'currency',
-    currency: invoiceRow.currency ?? 'USD',
+    currency,
   }).format(invoiceRow.totalUsd)
   const dueDateDisplay = invoiceRow.dueDate
-    ? new Date(invoiceRow.dueDate).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      })
+    ? new Date(invoiceRow.dueDate.includes('T') ? invoiceRow.dueDate : `${invoiceRow.dueDate}T00:00:00`)
+        .toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' })
     : 'On receipt'
 
-  const invoiceNumber = invoiceRow.id.slice(0, 8).toUpperCase()
+  const reference = invoiceReference(invoiceRow.id)
+  // Client-openable deep link. /invoices/[id] renders from the portal API for
+  // a client audience, so this no longer lands them on a 403.
+  const invoiceUrl = publicUrl(`/invoices/${invoiceRow.id}`)
+  const payUrl = await resolvePayUrl(drizzle, invoiceRow)
 
-  try {
-    const { Resend } = await import('resend')
-    const resend = new Resend(process.env.RESEND_API_KEY)
+  // One email per recipient (no shared To header), so a colleague's bad
+  // address never blocks the rest and each greeting is addressed properly.
+  const subject = `Invoice ${reference} from Tahi Studio`
+  const outcomes = await Promise.all(recipients.map(async (r) => {
+    const res = await sendEmail(
+      r.email,
+      subject,
+      createElement(InvoiceSentEmail, {
+        clientName: r.name,
+        invoiceId: invoiceRow.id,
+        amountFormatted,
+        currency,
+        dueDate: dueDateDisplay,
+        notes: invoiceRow.notes ?? undefined,
+        invoiceUrl,
+        paymentUrl: payUrl ?? undefined,
+      }),
+    )
+    return { email: r.email, ok: res.success, error: res.error }
+  }))
 
-    await resend.emails.send({
-      from: 'Tahi Studio <business@tahi.studio>',
-      to: contact.email,
-      subject: `Invoice #${invoiceNumber} from Tahi Studio`,
-      html: `<div style="font-family: Manrope, -apple-system, BlinkMacSystemFont, sans-serif; max-width: 560px; margin: 0 auto; padding: 2rem; background: #ffffff;">
-        <div style="text-align: center; margin-bottom: 2rem;">
-          <h1 style="color: #5A824E; font-size: 1.5rem; margin: 0;">Tahi Studio</h1>
-        </div>
-        <h2 style="color: #121A0F; font-size: 1.25rem; margin-bottom: 0.5rem;">Invoice #${invoiceNumber}</h2>
-        <p style="color: #5a6657; font-size: 0.9375rem; line-height: 1.6; margin-bottom: 1.5rem;">
-          Hi ${contact.name},<br /><br />
-          A new invoice has been generated for your account.
-        </p>
-        <div style="background: #f7f9f6; border: 1px solid #e8f0e6; border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem;">
-          <table style="width: 100%; border-collapse: collapse;">
-            <tr>
-              <td style="color: #8a9987; font-size: 0.8125rem; padding: 0.25rem 0;">Amount</td>
-              <td style="color: #121A0F; font-size: 0.9375rem; font-weight: 600; text-align: right;">${formattedTotal}</td>
-            </tr>
-            <tr>
-              <td style="color: #8a9987; font-size: 0.8125rem; padding: 0.25rem 0;">Due Date</td>
-              <td style="color: #121A0F; font-size: 0.9375rem; text-align: right;">${dueDateDisplay}</td>
-            </tr>
-            ${invoiceRow.notes ? `<tr>
-              <td style="color: #8a9987; font-size: 0.8125rem; padding: 0.25rem 0;">Description</td>
-              <td style="color: #121A0F; font-size: 0.9375rem; text-align: right;">${invoiceRow.notes}</td>
-            </tr>` : ''}
-          </table>
-        </div>
-        <div style="text-align: center; margin-bottom: 2rem;">
-          <a href="${invoiceUrl}" style="display: inline-block; background: #5A824E; color: #ffffff; text-decoration: none; padding: 0.75rem 2rem; border-radius: 0 16px 0 16px; font-weight: 600; font-size: 0.9375rem;">View Invoice</a>
-        </div>
-        <hr style="border: none; border-top: 1px solid #e8f0e6; margin: 1.5rem 0;" />
-        <p style="color: #8a9987; font-size: 0.75rem; text-align: center;">Tahi Studio Dashboard</p>
-      </div>`,
-    })
+  const sentTo = outcomes.filter(o => o.ok).map(o => o.email)
+  const failed = outcomes.filter(o => !o.ok)
 
-    // Update invoice status to sent and record sentAt timestamp
-    const now = new Date().toISOString()
-    await drizzle
-      .update(schema.invoices)
-      .set({ status: 'sent', sentAt: now, updatedAt: now })
-      .where(eq(schema.invoices.id, id))
-
-    return NextResponse.json({ success: true, sentTo: contact.email })
-  } catch (err) {
-    console.error('Failed to send invoice email:', err)
+  if (sentTo.length === 0) {
     return NextResponse.json(
-      { error: 'Failed to send email' },
-      { status: 500 }
+      { error: 'Failed to send email', message: failed[0]?.error ?? 'Unknown error' },
+      { status: 502 },
     )
   }
+
+  const now = new Date().toISOString()
+  await drizzle
+    .update(schema.invoices)
+    .set({
+      status: invoiceRow.status === 'paid' ? invoiceRow.status : 'sent',
+      sentAt: now,
+      updatedAt: now,
+    })
+    .where(eq(schema.invoices.id, id))
+
+  // Bell row for the client, on SEND (not on draft creation). The invoice
+  // entity deep-links to /invoices/<id>, which both audiences can now open.
+  await notifyOrgContacts(drizzle, invoiceRow.orgId, {
+    type: 'invoice_created',
+    title: payUrl ? 'Invoice ready to pay' : 'New invoice',
+    body: `Invoice ${reference} for ${amountFormatted} ${currency} is due ${dueDateDisplay}.`,
+    entityType: 'invoice',
+    entityId: invoiceRow.id,
+  })
+
+  return NextResponse.json({
+    success: true,
+    sentTo,
+    failedTo: failed.map(f => f.email),
+    payLink: !!payUrl,
+  })
 }

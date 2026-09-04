@@ -1,0 +1,22 @@
+-- Migration 0086: Portal pay link + client payment terms
+--
+-- Two additive columns that close the "a client cannot open or pay an
+-- invoice" gap:
+--
+--   invoices.stripe_hosted_invoice_url
+--     Stripe's hosted invoice page, persisted the moment the Stripe invoice
+--     is finalised. Previously it was fetched, copied to the operator's
+--     clipboard and thrown away, so no per-invoice Pay now CTA could exist
+--     for the client and no invoice email could carry a pay link.
+--
+--   organisations.payment_terms
+--     null / 'card' = card on file via Stripe. 'net_7' | 'net_14' | 'net_30'
+--     records a client who chose "invoice me" at onboarding. That preference
+--     is also what entitles them to the portal without a live subscription,
+--     so onboarding stops looping on a 402.
+--
+-- ALTER TABLE ADD COLUMN cannot use IF NOT EXISTS in SQLite; the runtime
+-- runner (app/api/admin/db/migrate) swallows the "duplicate column name"
+-- error so re-running is safe.
+ALTER TABLE invoices ADD COLUMN stripe_hosted_invoice_url text;
+ALTER TABLE organisations ADD COLUMN payment_terms text;

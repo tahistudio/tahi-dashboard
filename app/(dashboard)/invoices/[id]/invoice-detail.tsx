@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from 'react'
 import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, RefreshCw, FileText, Sparkles, Send, X } from 'lucide-react'
+import { ArrowLeft, RefreshCw, FileText, Sparkles, Send, X, CreditCard, Mail } from 'lucide-react'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { apiPath } from '@/lib/api'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
@@ -19,8 +19,12 @@ interface InvoiceRow {
   orgName: string | null
   projectId: string | null
   subscriptionId: string | null
-  stripeInvoiceId: string | null
-  xeroInvoiceId: string | null
+  // Admin projection only. The portal projection deliberately withholds the
+  // Stripe / Xero ids, so these are absent for a client audience.
+  stripeInvoiceId?: string | null
+  xeroInvoiceId?: string | null
+  // Stripe hosted invoice page, served to the client so they can pay.
+  payUrl?: string | null
   source: string | null
   status: string
   amountUsd: number
@@ -96,8 +100,11 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
   const { displayCurrency, formatNativeWithDisplay } = useDisplayCurrency()
   const [patching, setPatching] = useState<string | null>(null)
 
+  // Audience-correct source. A client is not allowed on the admin route (it
+  // 403s them), so the client branch reads the org-scoped portal detail route,
+  // which returns the same { invoice, items } shape plus the pay link.
   const { data, isLoading: loading, error: fetchError, mutate } = useSWR<{ invoice?: InvoiceRow; items?: LineItem[] }>(
-    `/api/admin/invoices/${invoiceId}`
+    isAdmin ? `/api/admin/invoices/${invoiceId}` : `/api/portal/invoices/${invoiceId}`
   )
   const invoice = data?.invoice ?? null
   const items = data?.items ?? []
@@ -260,6 +267,48 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
           />
         </div>
 
+        {/* Client pay CTA. Only for a bill that is actually payable, and only
+            when Stripe has given us a hosted invoice page for it. */}
+        {!isAdmin && invoice.payUrl && status !== 'paid' && status !== 'written_off' && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              flexWrap: 'wrap',
+              marginTop: '1.5rem',
+              paddingTop: '1.25rem',
+              borderTop: '1px solid var(--color-border-subtle)',
+            }}
+          >
+            <a
+              href={invoice.payUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="tahi-focus-ring"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '0.625rem 1.25rem',
+                minHeight: '2.75rem',
+                borderRadius: 'var(--radius-leaf-sm)',
+                background: 'var(--color-brand)',
+                color: 'var(--color-bg)',
+                fontSize: '0.875rem',
+                fontWeight: 600,
+                textDecoration: 'none',
+              }}
+            >
+              <CreditCard style={{ width: 15, height: 15 }} aria-hidden="true" />
+              Pay {formatInvoiceCurrency(invoice.totalUsd, invoice.currency)}
+            </a>
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
+              Secure payment page, hosted by Stripe.
+            </span>
+          </div>
+        )}
+
         {/* Admin actions */}
         {isAdmin && (
           <div
@@ -272,12 +321,17 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
               borderTop: '1px solid var(--color-border-subtle)',
             }}
           >
-            {invoice.status === 'draft' && (
-              <ActionButton
-                label={patching === 'sent' ? 'Sending...' : 'Send to Client'}
+            {/* Sending means emailing them, not just flipping a column. The
+                route mails every billing contact with the pay link and marks
+                the invoice sent, so this replaces the old status-only PATCH.
+                Withheld once the invoice is settled or voided: there is
+                nothing left to chase. */}
+            {invoice.status !== 'paid' && invoice.status !== 'written_off' && (
+              <SendInvoiceEmailButton
+                invoiceId={invoice.id}
                 disabled={patching !== null}
-                onClick={() => patchStatus('sent')}
-                variant="primary"
+                primary={invoice.status === 'draft'}
+                onSent={() => void mutate()}
               />
             )}
             {(invoice.status === 'sent' || invoice.status === 'overdue') && (
@@ -593,6 +647,101 @@ function ActionButton({
     >
       {label}
     </button>
+  )
+}
+
+// ─── Send invoice email ─────────────────────────────────────────────────────
+// The admin's "send" motion. POSTs to the send-email route, which mails every
+// billing contact the real template (pay link + portal deep link) and flips the
+// invoice to sent. Reports who it actually reached rather than a bare success.
+
+function SendInvoiceEmailButton({
+  invoiceId,
+  disabled,
+  primary,
+  onSent,
+}: {
+  invoiceId: string
+  disabled: boolean
+  primary: boolean
+  onSent: () => void
+}) {
+  const [sending, setSending] = useState(false)
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
+
+  const send = useCallback(async () => {
+    setSending(true)
+    setResult(null)
+    try {
+      const res = await fetch(apiPath(`/api/admin/invoices/${invoiceId}/send-email`), { method: 'POST' })
+      const body = await res.json().catch(() => ({})) as {
+        sentTo?: string[]
+        failedTo?: string[]
+        error?: string
+        message?: string
+      }
+      if (!res.ok) {
+        throw new Error(body.message || body.error || `HTTP ${res.status}`)
+      }
+      const to = body.sentTo ?? []
+      const failed = body.failedTo ?? []
+      setResult({
+        ok: true,
+        message: failed.length > 0
+          ? `Sent to ${to.join(', ')}. Could not reach ${failed.join(', ')}.`
+          : `Sent to ${to.join(', ')}.`,
+      })
+      onSent()
+    } catch (err) {
+      setResult({ ok: false, message: err instanceof Error ? err.message : 'Send failed' })
+    } finally {
+      setSending(false)
+    }
+  }, [invoiceId, onSent])
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      <button
+        type="button"
+        onClick={() => void send()}
+        disabled={disabled || sending}
+        className="tahi-focus-ring"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '0.5625rem 1.125rem',
+          borderRadius: '0.5rem',
+          fontSize: '0.875rem',
+          fontWeight: 600,
+          cursor: disabled || sending ? 'not-allowed' : 'pointer',
+          opacity: disabled || sending ? 0.6 : 1,
+          transition: 'opacity 0.15s',
+          minHeight: '2.75rem',
+          background: primary ? 'var(--color-brand)' : 'var(--color-bg)',
+          color: primary ? 'var(--color-bg)' : 'var(--color-text)',
+          border: primary ? 'none' : '1px solid var(--color-border)',
+        }}
+      >
+        {sending
+          ? <RefreshCw style={{ width: 14, height: 14 }} className="animate-spin" aria-hidden="true" />
+          : <Mail style={{ width: 14, height: 14 }} aria-hidden="true" />}
+        {sending ? 'Sending...' : primary ? 'Email to client' : 'Resend email'}
+      </button>
+      {result && (
+        <p
+          role="status"
+          style={{
+            margin: 0,
+            fontSize: '0.75rem',
+            lineHeight: 1.5,
+            color: result.ok ? 'var(--color-success)' : 'var(--color-danger)',
+          }}
+        >
+          {result.message}
+        </p>
+      )}
+    </div>
   )
 }
 

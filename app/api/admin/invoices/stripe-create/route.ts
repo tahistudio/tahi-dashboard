@@ -4,6 +4,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { requireAccessToOrg } from '@/lib/require-access'
+import { requireFeature } from '@/lib/require-feature'
+import { notifyOrgContacts } from '@/lib/notifications'
+import { invoiceReference } from '@/lib/invoice-billing'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -28,8 +32,13 @@ async function stripePost(path: string, body: Record<string, string>, key: strin
  * returns hosted payment URL.
  */
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  // Money route: the Tahi org alone is not enough, the seat must be able to
+  // see Invoices (CLAUDE.md rule 11 + the role contract in lib/require-feature).
+  const deniedFeature = await requireFeature({ userId, orgId }, 'invoices')
+  if (deniedFeature) return deniedFeature
 
   const body = await req.json() as { invoiceId: string }
   if (!body.invoiceId) return NextResponse.json({ error: 'invoiceId is required' }, { status: 400 })
@@ -54,6 +63,10 @@ export async function POST(req: NextRequest) {
 
   if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
 
+  // Access scoping: a team member may only bill the clients they can see.
+  const denied = await requireAccessToOrg(database, userId, invoice.orgId)
+  if (denied) return denied
+
   if (invoice.stripeInvoiceId) {
     // Already has Stripe invoice, try to get URL
     try {
@@ -62,6 +75,14 @@ export async function POST(req: NextRequest) {
       })
       if (existing.ok) {
         const data = await existing.json() as { hosted_invoice_url?: string }
+        // Backfill the column for invoices finalised before it existed, so the
+        // client's Pay now CTA works without another admin round trip.
+        if (data.hosted_invoice_url) {
+          await database.update(schema.invoices).set({
+            stripeHostedInvoiceUrl: data.hosted_invoice_url,
+            updatedAt: new Date().toISOString(),
+          }).where(eq(schema.invoices.id, invoice.id))
+        }
         return NextResponse.json({
           stripeInvoiceId: invoice.stripeInvoiceId,
           payUrl: data.hosted_invoice_url,
@@ -149,15 +170,28 @@ export async function POST(req: NextRequest) {
       hosted_invoice_url: string | null
     }
 
-    // Update local invoice
+    // Update local invoice. The hosted invoice URL is PERSISTED, not just
+    // returned: it is the client's pay link, so it has to survive this request
+    // for the portal CTA and the invoice email to exist at all.
     const now = new Date().toISOString()
     await database.update(schema.invoices).set({
       stripeInvoiceId: finalized.id,
+      stripeHostedInvoiceUrl: finalized.hosted_invoice_url ?? null,
       source: 'stripe',
       status: 'sent',
       sentAt: now,
       updatedAt: now,
     }).where(eq(schema.invoices.id, invoice.id))
+
+    // Finalising in Stripe puts a real, payable bill in front of the client,
+    // so this is a send. Notifying happens here rather than at draft creation.
+    await notifyOrgContacts(database, invoice.orgId, {
+      type: 'invoice_created',
+      title: 'Invoice ready to pay',
+      body: `Invoice ${invoiceReference(invoice.id)} is ready. You can pay it from your portal.`,
+      entityType: 'invoice',
+      entityId: invoice.id,
+    })
 
     return NextResponse.json({
       success: true,

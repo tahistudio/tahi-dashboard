@@ -32,6 +32,23 @@ function stripePromise(): Promise<Stripe | null> | null {
   return _stripePromise
 }
 
+/**
+ * The "invoice me" affordance inside .ob-fallback. A real <button> (the old
+ * <a> with no href could not be reached by keyboard) styled to match the
+ * scene's own `.ob-fallback a` rule, using the onboarding CSS vars so it stays
+ * correct without touching globals.css.
+ */
+const INVOICE_LINK_STYLE: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  font: 'inherit',
+  fontWeight: 600,
+  color: 'var(--ob-brand-dark)',
+  textDecoration: 'none',
+  cursor: 'pointer',
+}
+
 /** Format a minor-unit amount in the given currency (no cents, prices are whole). */
 function fmt(minor: number, currency: PresentmentCurrency): string {
   return new Intl.NumberFormat('en-US', {
@@ -135,7 +152,31 @@ export function OnboardingPayment(props: PaymentProps) {
   const [currency, setCurrency] = React.useState<PresentmentCurrency>('usd')
   const [clientSecret, setClientSecret] = React.useState<string | null>(null)
   const [state, setState] = React.useState<'loading' | 'ready' | 'unavailable'>('loading')
+  const [invoicing, setInvoicing] = React.useState(false)
   const sp = stripePromise()
+
+  // "Invoice me": record the net-terms preference BEFORE advancing. The server
+  // writes organisations.paymentTerms, raises a draft invoice for this plan and
+  // tells the studio, which is also what entitles the client to the portal.
+  // Without it, completion later returned 402 and the layout bounced them back
+  // into onboarding forever.
+  const chooseInvoice = React.useCallback(async () => {
+    if (invoicing) return
+    setInvoicing(true)
+    try {
+      await fetch('/api/onboarding/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ billingMode: 'invoice', plan, addon, currency }),
+      })
+    } catch {
+      // Non-fatal: the studio still sees them in onboarding, and the final
+      // completion call retries the same route.
+    } finally {
+      setInvoicing(false)
+      onInvoiced()
+    }
+  }, [invoicing, plan, addon, currency, onInvoiced])
 
   React.useEffect(() => {
     if (!sp) { setState('unavailable'); return }
@@ -170,8 +211,10 @@ export function OnboardingPayment(props: PaymentProps) {
         <Summary planName={props.planName} baseUsd={baseUsd} addon={addon} trackUsd={trackUsd} currency={currency} />
         <p className="ob-sub" style={{ margin: '0 0 4px' }}>Card payment isn&apos;t available right now.</p>
         <div className="ob-footer">
-          <button className="ob-back" onClick={props.onBack}>Back</button>
-          <button className="ob-next" onClick={onInvoiced}>Continue, invoice me</button>
+          <button className="ob-back" onClick={props.onBack} disabled={invoicing}>Back</button>
+          <button className="ob-next" onClick={() => void chooseInvoice()} disabled={invoicing}>
+            {invoicing ? <span className="ob-spin" /> : 'Continue, invoice me'}
+          </button>
         </div>
         <div className="ob-fallback">We&apos;ll set up net terms and email your first invoice.</div>
       </>
@@ -189,7 +232,22 @@ export function OnboardingPayment(props: PaymentProps) {
           <PayForm totalDisplay={fmt(total, currency)} onPaid={props.onPaid} onBack={props.onBack} />
         </Elements>
       )}
-      <div className="ob-fallback">Prefer to be invoiced? <a onClick={onInvoiced}>We&apos;ll set up net terms.</a></div>
+      <div className="ob-fallback">
+        Prefer to be invoiced?{' '}
+        <button
+          type="button"
+          className="tahi-focus-ring"
+          onClick={() => void chooseInvoice()}
+          disabled={invoicing}
+          style={{
+            ...INVOICE_LINK_STYLE,
+            opacity: invoicing ? 0.6 : 1,
+            cursor: invoicing ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {invoicing ? 'Setting up net terms...' : "We'll set up net terms."}
+        </button>
+      </div>
     </>
   )
 }

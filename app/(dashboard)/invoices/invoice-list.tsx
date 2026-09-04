@@ -1,5 +1,6 @@
 'use client'
 
+import type * as React from 'react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
@@ -32,8 +33,11 @@ interface Invoice {
   orgName: string | null
   status: string
   source: string | null
-  stripeInvoiceId: string | null
-  xeroInvoiceId: string | null
+  // Admin projection only; the portal list withholds the integration ids.
+  stripeInvoiceId?: string | null
+  xeroInvoiceId?: string | null
+  /** Stripe hosted invoice page, served to the client so they can pay. */
+  payUrl?: string | null
   totalAmount: number
   currency: string | null
   dueDate: string | null
@@ -87,6 +91,27 @@ function isOverdue(dueDate: string | null, status: string): boolean {
 
 function effectiveStatus(inv: { status: string; dueDate: string | null }): string {
   return isOverdue(inv.dueDate, inv.status) && inv.status === 'sent' ? 'overdue' : inv.status
+}
+
+/** A bill the client still owes, with somewhere to pay it. */
+function isPayable(inv: Invoice): boolean {
+  return !!inv.payUrl && inv.status !== 'paid' && inv.status !== 'written_off'
+}
+
+// Height comes from the min-h-11 / md:min-h-9 utilities on the element so the
+// touch target is 2.75rem on mobile without making every desktop row taller.
+const PAY_LINK_STYLE: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: '0.375rem 0.875rem',
+  borderRadius: 'var(--radius-leaf-sm)',
+  background: 'var(--color-brand)',
+  color: 'var(--color-bg)',
+  fontSize: '0.8125rem',
+  fontWeight: 600,
+  textDecoration: 'none',
+  whiteSpace: 'nowrap',
 }
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -813,6 +838,31 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
         </span>
       ),
     })
+
+    // Client-only pay affordance. A row still opens the invoice; this is the
+    // one-click path to Stripe's hosted page for a bill that is actually owed.
+    // Rendered by hand rather than through the `link` column config, because
+    // that renders an empty focusable button on every row without an href.
+    if (!isAdmin) {
+      cols.push({
+        key: 'pay',
+        header: '',
+        align: 'right',
+        width: '7rem',
+        render: r => (isPayable(r) && r.payUrl ? (
+          <a
+            href={r.payUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            className="tahi-focus-ring min-h-11 md:min-h-9"
+            style={PAY_LINK_STYLE}
+          >
+            Pay now
+          </a>
+        ) : null),
+      })
+    }
 
     return cols
   }, [isAdmin, displayCurrency, formatNativeWithDisplay])

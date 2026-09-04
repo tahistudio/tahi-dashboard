@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, inArray } from 'drizzle-orm'
-import { notifyOrgContacts } from '@/lib/notifications'
 import { getOrgScope, requireAccessToOrg } from '@/lib/require-access'
+import { requireFeature } from '@/lib/require-feature'
 import { dispatchDomainEvent } from '@/lib/events'
 
 // ── GET /api/admin/invoices ───────────────────────────────────────────────────
@@ -15,6 +15,11 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+
+  // Money route: the Tahi org alone is not enough, the seat must be able to
+  // see Invoices (CLAUDE.md rule 11 + the role contract in lib/require-feature).
+  const deniedFeature = await requireFeature({ userId, orgId }, 'invoices')
+  if (deniedFeature) return deniedFeature
 
   const url = new URL(req.url)
   const statusParam = url.searchParams.get('status') ?? 'all'
@@ -80,6 +85,9 @@ export async function POST(req: NextRequest) {
   if (!isTahiAdmin(authOrgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+
+  const deniedFeature = await requireFeature({ userId, orgId: authOrgId }, 'invoices')
+  if (deniedFeature) return deniedFeature
 
   const body = await req.json() as {
     orgId?: string
@@ -165,19 +173,12 @@ export async function POST(req: NextRequest) {
 
   await drizzle.insert(schema.invoiceItems).values(itemRows)
 
-  // Notify client contacts about the new invoice. notifyOrgContacts keys the
-  // rows on each contact's Clerk user id (the id the bell queries and the
-  // preferences filter on) and skips contacts without a linked login.
-  // totalAmount is already a dollar amount in the invoice's currency, not
-  // cents. (We don't store amounts in minor units anywhere.)
-  const formattedAmount = `${currency} ${totalAmount.toFixed(2)}`
-  await notifyOrgContacts(drizzle, body.orgId, {
-    type: 'invoice_created',
-    title: 'New invoice created',
-    body: `An invoice for ${formattedAmount} has been created for your account`,
-    entityType: 'invoice',
-    entityId: invoiceId,
-  })
+  // Deliberately NO client notification here. This route only ever creates a
+  // DRAFT, the portal filters drafts out of both the list and the detail
+  // route, and a draft is the studio's working copy rather than a bill the
+  // client owes. Telling them about it pointed at something they could not
+  // open. The client is notified when the invoice is actually sent, in
+  // invoices/[id]/send-email and invoices/stripe-create.
 
   // Fire the domain event (automations + outgoing webhooks). Non-blocking.
   await dispatchDomainEvent(drizzle, {
