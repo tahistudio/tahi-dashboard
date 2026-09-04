@@ -11,7 +11,10 @@
  * `requests.view`, `requests.savedView`, `requests.filters`, `requests.sort`
  * and the `requests.default` snapshot, plus a one-time migration off the
  * pre-rail `requests.viewMode` / `requests.activeTab` / `requests.sortKey`
- * keys so nobody loses the view they had.
+ * keys so nobody loses the view they had. The URL's share of the state lives
+ * there too, both the per-dimension overrides and the link-only narrowing
+ * (priority, person), because the saved-view stand-down needs to see all of
+ * it at once to know when it can lift.
  *
  * The main column is `min-width: 0`, so the kanban and timeline scroll inside
  * it and the page header above keeps the same width in every view.
@@ -46,7 +49,15 @@ import {
   type RequestsFilterChip,
   type RequestsRailProps,
 } from '@/components/tahi/requests/requests-rail'
-import type { RequestsNarrowChip, RequestsUrlState } from '@/lib/requests-url-state'
+import {
+  EMPTY_REQUESTS_URL_NARROW,
+  clearRequestsNarrow,
+  requestsUrlStillNarrows,
+  type RequestsNarrowChip,
+  type RequestsNarrowKey,
+  type RequestsUrlNarrow,
+  type RequestsUrlState,
+} from '@/lib/requests-url-state'
 
 // ── Preference migration ─────────────────────────────────────────────────────
 
@@ -140,6 +151,17 @@ export interface RequestsRailState {
   setSort: (next: RequestsSort) => void
   query: string
   setQuery: (next: string) => void
+  /**
+   * The link-only dimensions (priority, person). Held here rather than in the
+   * page, because they are half of what stands the saved view down: the
+   * stand-down has to lift when the LAST url-derived narrowing goes, and only
+   * the hook can see both halves at once.
+   */
+  narrow: RequestsUrlNarrow
+  /** Drop one link-only dimension, keeping the other. */
+  clearNarrow: (key: RequestsNarrowKey) => void
+  /** Drop both, e.g. from the chip row's Clear all. */
+  clearAllNarrow: () => void
   /** True when the live state matches the saved default exactly. */
   isDefault: boolean
   saveDefault: () => void
@@ -198,7 +220,9 @@ export function useRequestsRailState({
     sort: RequestsSort | null
     /** A URL that narrows the list stands the stored saved view down, so a
      *  link cannot land on a pre-filter that hides the very rows it named.
-     *  See `clearsSavedView` in lib/requests-url-state.ts. */
+     *  See `clearsSavedView` in lib/requests-url-state.ts. Held with the rest
+     *  of the URL's share, and only ever consulted while a URL-derived
+     *  narrowing is still on screen (see `savedView` below). */
     clearSavedView: boolean
   }>(() => ({
     filters: initialUrlState?.filters ?? {},
@@ -206,6 +230,13 @@ export function useRequestsRailState({
     sort: initialUrlState?.sort ?? null,
     clearSavedView: initialUrlState?.clearsSavedView ?? false,
   }))
+
+  // Priority and person have no rail control, so they narrow the rows on
+  // their own and raise their own clearable chips. They live here rather than
+  // in the page because they are the other half of the stand-down above.
+  const [narrow, setNarrow] = React.useState<RequestsUrlNarrow>(
+    () => initialUrlState?.narrow ?? EMPTY_REQUESTS_URL_NARROW,
+  )
 
   const [storedView, setStoredView] = useUserPreference<RequestsViewKey>(
     'requests.view',
@@ -240,7 +271,13 @@ export function useRequestsRailState({
   // So does one the URL stood down: a link that names a status or a person is
   // the more specific instruction, and a stored pre-filter that hides those
   // rows would answer it with an empty list.
-  const activeSavedView = urlOverrides.clearSavedView ? null : storedSavedView
+  //
+  // The stand-down lasts exactly as long as the narrowing that caused it.
+  // Clear the last URL-derived chip and the user's saved view comes back on
+  // its own, rather than staying quietly suppressed for the rest of the page
+  // with nothing on screen to explain it.
+  const stillNarrowed = requestsUrlStillNarrows(urlOverrides.filters, narrow)
+  const activeSavedView = urlOverrides.clearSavedView && stillNarrowed ? null : storedSavedView
   const savedView = activeSavedView && savedViewsFor(audience).some(v => v.key === activeSavedView)
     ? activeSavedView
     : null
@@ -284,18 +321,42 @@ export function useRequestsRailState({
     setStoredSavedView(next)
   }, [setStoredSavedView])
 
+  const clearNarrow = React.useCallback((key: RequestsNarrowKey) => {
+    setNarrow(n => clearRequestsNarrow(n, key))
+  }, [])
+
+  const clearAllNarrow = React.useCallback(() => {
+    setNarrow(EMPTY_REQUESTS_URL_NARROW)
+  }, [])
+
   const isDefault = snapshotsEqual(storedDefault, { view, savedView, filters, sort })
 
+  // Saving is the user adopting what is on screen, so the URL's share of it
+  // stops being an override and becomes the preference. Writing only the
+  // snapshot would record `?category=design` while `requests.filters` still
+  // said `all`, and because `applyStoredRequestDefault` only fills keys that
+  // are unset, the next plain visit would open on the OLD filters with
+  // "Reset to default" as the sole tell that the save never took.
   const saveDefault = React.useCallback(() => {
     setStoredDefault({ view, savedView, filters, sort })
-  }, [setStoredDefault, view, savedView, filters, sort])
+    setStoredView(view)
+    setStoredSavedView(savedView)
+    setStoredFilters(filters)
+    setStoredSort(sort)
+    setUrlOverrides({ filters: {}, view: null, sort: null, clearSavedView: false })
+  }, [
+    setStoredDefault, setStoredView, setStoredSavedView, setStoredFilters, setStoredSort,
+    view, savedView, filters, sort,
+  ])
 
   // The snapshot's other reader: put everything back where the user saved it,
   // so wandering off the default is recoverable without rebuilding it by hand.
-  // Every override goes too, or the URL would keep overruling the reset.
+  // Every override goes too, the link-only dimensions included, or the URL
+  // would keep overruling the reset.
   const resetToDefault = React.useCallback(() => {
     if (!storedDefault) return
     setUrlOverrides({ filters: {}, view: null, sort: null, clearSavedView: false })
+    setNarrow(EMPTY_REQUESTS_URL_NARROW)
     setStoredView(storedDefault.view)
     setStoredSavedView(storedDefault.savedView)
     setStoredFilters(storedDefault.filters)
@@ -313,6 +374,9 @@ export function useRequestsRailState({
     setSort,
     query,
     setQuery,
+    narrow,
+    clearNarrow,
+    clearAllNarrow,
     isDefault,
     saveDefault,
     hasDefault: storedDefault !== null,

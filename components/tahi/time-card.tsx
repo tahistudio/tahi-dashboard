@@ -402,7 +402,12 @@ export function TimeCard({ requestId }: Props) {
                 fontWeight: 700,
                 letterSpacing: '0.02em',
                 lineHeight: 1.1,
-                color: running ? 'var(--color-brand-dark)' : 'var(--color-text)',
+                // --color-link, not --color-brand-dark: brand-dark has no
+                // .dark override, so the running readout would sit at roughly
+                // 2.4:1 on the dark card, under the 3:1 floor for large text.
+                // The link token is the same green in light mode and lifts to
+                // #93C98A in dark.
+                color: running ? 'var(--color-link)' : 'var(--color-text)',
               }}
             >
               {/* The numerals cannot tell running from paused on their own:

@@ -17,6 +17,11 @@
  *     parentId={deal.id}
  *     onChanged={() => refetchDeal()}
  *   />
+ *
+ * Two chromes, picked with `variant`. `plain` (the default) is the quiet
+ * bordered box the client-detail Calls tab, deal detail and both leads
+ * surfaces are laid out around. `variant="rail"` is the request detail
+ * sidebar's head, so the card sits in that rail as a peer of its neighbours.
  */
 
 import * as React from 'react'
@@ -105,6 +110,20 @@ const PARENT_PATH: Record<CallParentType, string> = {
 export interface DiscoveryCallsCardProps {
   /** Head title. Defaults to "Calls"; the request rail says what kind. */
   title?: string
+  /**
+   * Which chrome the card wears.
+   *
+   * `plain` is the original: a quiet 10px label over a borderless body, which
+   * is what the client-detail Calls tab, deal detail and both leads surfaces
+   * were designed around and still expect.
+   *
+   * `rail` is the request-detail sidebar's head, shared with every card beside
+   * it: icon tile, 11px uppercase title, count, action hard right, a head rule
+   * and the same outline the neighbours carry. Opt-in, because the four
+   * surfaces above have their own card rhythm and were not part of the
+   * requests brief.
+   */
+  variant?: 'plain' | 'rail'
   parentType: CallParentType
   parentId: string
   /** Fires after any mutation. Lets the parent page refetch its own
@@ -120,6 +139,7 @@ export interface DiscoveryCallsCardProps {
 
 export function DiscoveryCallsCard({
   title = 'Calls',
+  variant = 'plain',
   parentType,
   parentId,
   onChanged,
@@ -221,76 +241,82 @@ export function DiscoveryCallsCard({
   const upcoming = calls.filter(c => new Date(c.scheduledAt).getTime() >= now && c.status === 'scheduled')
   const past = calls.filter(c => !upcoming.includes(c))
 
+  const isRail = variant === 'rail'
+  const scheduleButton = !showForm && (
+    <TahiButton
+      size="sm"
+      variant="secondary"
+      onClick={() => setShowForm(true)}
+      iconLeft={<Plus className="w-3.5 h-3.5" />}
+    >
+      Schedule
+    </TahiButton>
+  )
+  const emptyStyle = isRail ? CALLS_EMPTY_RAIL_STYLE : CALLS_EMPTY_PLAIN_STYLE
+
   return (
-    <section style={{
-      background: 'var(--color-bg)',
-      border: '1px solid var(--color-border)',
-      borderRadius: 'var(--radius-card)',
-      boxShadow: 'var(--shadow-xs)',
-      overflow: 'hidden',
-    }}>
-      {/* The rail's head, shared with every card beside it: icon tile, 11px
-          uppercase title, count, action hard right. The old bare label read a
-          third of the size of its neighbours and sat on a card with no head
-          rule at all, which is what made this block look like an afterthought
-          in the request rail. */}
-      <header
-        className="flex items-center"
-        style={{
-          gap: '0.5rem',
-          padding: '0.6875rem 0.875rem',
-          borderBottom: '1px solid var(--color-border-subtle)',
-        }}
-      >
-        <span
-          aria-hidden="true"
-          className="inline-flex items-center justify-center flex-shrink-0"
+    <section style={isRail ? RAIL_SECTION_STYLE : PLAIN_SECTION_STYLE}>
+      {isRail ? (
+        /* The rail's head, shared with every card beside it: icon tile, 11px
+           uppercase title, count, action hard right. The bare label read a
+           third of the size of its neighbours and sat on a card with no head
+           rule at all, which is what made this block look like an afterthought
+           in the request rail. */
+        <header
+          className="flex items-center"
           style={{
-            width: '1.5rem',
-            height: '1.5rem',
-            borderRadius: 'var(--radius-leaf-sm)',
-            background: 'var(--color-bg-secondary)',
-            color: 'var(--color-text-muted)',
+            gap: '0.5rem',
+            padding: '0.6875rem 0.875rem',
+            borderBottom: '1px solid var(--color-border-subtle)',
           }}
         >
-          <CalendarDays size={14} />
-        </span>
-        <h3 style={{
-          margin: 0,
-          fontSize: '0.6875rem',
-          fontWeight: 700,
-          letterSpacing: '0.05em',
-          textTransform: 'uppercase',
-          color: 'var(--color-text-subtle)',
-        }}>{title}</h3>
-        {calls.length > 0 && (
           <span
-            className="tabular-nums"
-            style={{ fontSize: '0.71875rem', fontWeight: 600, color: 'var(--color-text-subtle)' }}
+            aria-hidden="true"
+            className="inline-flex items-center justify-center flex-shrink-0"
+            style={{
+              width: '1.5rem',
+              height: '1.5rem',
+              borderRadius: 'var(--radius-leaf-sm)',
+              background: 'var(--color-bg-secondary)',
+              color: 'var(--color-text-muted)',
+            }}
           >
-            {calls.length}
+            <CalendarDays size={14} />
           </span>
-        )}
-        {!showForm && (
-          <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>
-            <TahiButton
-              size="sm"
-              variant="secondary"
-              onClick={() => setShowForm(true)}
-              iconLeft={<Plus className="w-3.5 h-3.5" />}
+          <h3 style={{
+            margin: 0,
+            fontSize: '0.6875rem',
+            fontWeight: 700,
+            letterSpacing: '0.05em',
+            textTransform: 'uppercase',
+            color: 'var(--color-text-subtle)',
+          }}>{title}</h3>
+          {calls.length > 0 && (
+            <span
+              className="tabular-nums"
+              style={{ fontSize: '0.71875rem', fontWeight: 600, color: 'var(--color-text-subtle)' }}
             >
-              Schedule
-            </TahiButton>
-          </span>
-        )}
-      </header>
+              {calls.length}
+            </span>
+          )}
+          {scheduleButton && (
+            <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>{scheduleButton}</span>
+          )}
+        </header>
+      ) : (
+        <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+          <div style={{
+            fontSize: '0.625rem',
+            fontWeight: 600,
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+            color: 'var(--color-text-subtle)',
+          }}>{title}</div>
+          {scheduleButton}
+        </header>
+      )}
 
-      <div style={{
-        padding: '0.8125rem 0.875rem',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.625rem',
-      }}>
+      <div style={isRail ? RAIL_BODY_STYLE : PLAIN_BODY_STYLE}>
 
       {showForm && (
         <CallScheduleForm
@@ -300,11 +326,11 @@ export function DiscoveryCallsCard({
       )}
 
       {loading && !showForm && calls.length === 0 && (
-        <p style={CALLS_EMPTY_STYLE}>Loading calls…</p>
+        <p style={emptyStyle}>Loading calls...</p>
       )}
 
       {!loading && calls.length === 0 && !showForm && (
-        <p style={CALLS_EMPTY_STYLE}>
+        <p style={emptyStyle}>
           No calls booked yet. Schedule one to start tracking transcripts, outcomes and scope.
         </p>
       )}
@@ -363,13 +389,55 @@ interface CallScheduleBody {
   attendees?: Array<{ name?: string; email?: string; role?: string }>
 }
 
+/** The original card: a bordered box that is its own flex column, with the
+ *  head and the body as siblings inside it. */
+const PLAIN_SECTION_STYLE: React.CSSProperties = {
+  padding: '0.875rem 1rem',
+  background: 'var(--color-bg)',
+  border: '1px solid var(--color-border-subtle)',
+  borderRadius: 'var(--radius-card)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.625rem',
+}
+
+const PLAIN_BODY_STYLE: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.625rem',
+}
+
+/** The request rail: the head rule needs to run edge to edge, so the padding
+ *  moves off the box and onto the body. */
+const RAIL_SECTION_STYLE: React.CSSProperties = {
+  background: 'var(--color-bg)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-card)',
+  boxShadow: 'var(--shadow-xs)',
+  overflow: 'hidden',
+}
+
+const RAIL_BODY_STYLE: React.CSSProperties = {
+  padding: '0.8125rem 0.875rem',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.625rem',
+}
+
+/** The original quiet line for loading and for nothing-yet. */
+const CALLS_EMPTY_PLAIN_STYLE: React.CSSProperties = {
+  margin: 0,
+  fontSize: '0.75rem',
+  lineHeight: 1.5,
+  color: 'var(--color-text-subtle)',
+}
+
 /**
- * One quiet line for loading and for nothing-yet. Same geometry as the
- * prototype's `.rqd-empty` and as the Checklists card's `.tahi-rail-empty`,
- * so the two whole-card empties in the request rail read as one voice rather
- * than two sizes of grey.
+ * The rail's version. Same geometry as the prototype's `.rqd-empty` and as
+ * the Checklists card's `.tahi-rail-empty`, so the two whole-card empties in
+ * the request rail read as one voice rather than two sizes of grey.
  */
-const CALLS_EMPTY_STYLE: React.CSSProperties = {
+const CALLS_EMPTY_RAIL_STYLE: React.CSSProperties = {
   margin: 0,
   padding: '1.125rem 0.75rem',
   textAlign: 'center',

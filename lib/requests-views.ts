@@ -266,7 +266,7 @@ export function matchesQuery(row: RequestRow, query: string): boolean {
 
 // ── Sort ─────────────────────────────────────────────────────────────────────
 
-export type RequestsSortKey = 'due' | 'updated' | 'priority' | 'client'
+export type RequestsSortKey = 'due' | 'updated' | 'created' | 'priority' | 'client'
 export type RequestsSortDir = 'asc' | 'desc'
 
 export interface RequestsSort {
@@ -279,6 +279,7 @@ export const DEFAULT_REQUEST_SORT: RequestsSort = { key: 'due', dir: 'asc' }
 export const REQUEST_SORT_KEYS: readonly { value: RequestsSortKey; label: string }[] = [
   { value: 'due',      label: 'Due'      },
   { value: 'updated',  label: 'Updated'  },
+  { value: 'created',  label: 'Created'  },
   { value: 'priority', label: 'Priority' },
   { value: 'client',   label: 'Client'   },
 ]
@@ -288,6 +289,7 @@ export const REQUEST_SORT_KEYS: readonly { value: RequestsSortKey; label: string
 const SORT_DIR_LABELS: Record<RequestsSortKey, readonly [string, string]> = {
   due:      ['Soonest first', 'Latest first'],
   updated:  ['Newest first',  'Oldest first'],
+  created:  ['Newest first',  'Oldest first'],
   priority: ['Highest first', 'Lowest first'],
   client:   ['A to Z',        'Z to A'],
 }
@@ -314,11 +316,13 @@ function dueValue(row: RequestRow): string {
 }
 
 function sortValue(row: RequestRow, key: RequestsSortKey): string | number {
-  if (key === 'updated') {
+  if (key === 'updated' || key === 'created') {
     // Negated so the newest timestamp is the smallest value: ascending then
     // reads as "Newest first", which is what the direction label promises.
-    if (!row.updatedAt) return Number.MAX_SAFE_INTEGER
-    const t = Date.parse(row.updatedAt)
+    // An unparseable or missing stamp sorts last either way.
+    const raw = key === 'created' ? row.createdAt : row.updatedAt
+    if (!raw) return Number.MAX_SAFE_INTEGER
+    const t = Date.parse(raw)
     return Number.isNaN(t) ? Number.MAX_SAFE_INTEGER : -t
   }
   if (key === 'priority') {

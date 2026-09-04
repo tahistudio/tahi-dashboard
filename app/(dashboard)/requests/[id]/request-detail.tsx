@@ -114,6 +114,24 @@ const DETAIL_CSS = `
 }
 .tahi-avatar-link:hover{ transform: translateY(-0.0625rem); }
 
+/* The header people stack. Overlapping is a desktop affordance: every bubble
+   but the first has its left edge under the neighbour above it in the
+   z-stack, which is fine to read and impossible to aim a thumb at. Below md
+   the seats unstack and each linked one grows to a full 2.75rem target. */
+.tahi-people-stack{ display: flex; align-items: center; }
+.tahi-people-seat{ display: inline-flex; position: relative; margin-left: -0.4375rem; }
+.tahi-people-seat:first-child{ margin-left: 0; }
+@media (max-width: 47.9375rem){
+  .tahi-people-stack{ gap: 0.125rem; }
+  .tahi-people-seat{ margin-left: 0; }
+  a.tahi-people-seat{
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
 /* Rail: the quiet head action (add, remove) shared by every card. */
 .tahi-rail-head-action{
   border: none;
@@ -195,7 +213,8 @@ const DETAIL_CSS = `
   text-align: left;
   cursor: pointer;
 }
-.tahi-check:disabled{ cursor: default; }
+/* The read-only drawing: same row, no pointer, no hover promise. */
+.tahi-check.is-static{ cursor: default; }
 .tahi-check-box{
   display: inline-flex;
   align-items: center;
@@ -217,7 +236,7 @@ const DETAIL_CSS = `
   border-color: var(--color-brand);
   color: var(--color-text-on-dark);
 }
-.tahi-check:hover:not(:disabled) .tahi-check-box,
+.tahi-check:not(.is-static):hover .tahi-check-box,
 .tahi-check:focus-visible .tahi-check-box{ border-color: var(--color-brand); }
 .tahi-check-label{
   min-width: 0;
@@ -1885,7 +1904,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 <Link
                   href={requestsListHref({ assignee: request.assigneeId })}
                   data-private
-                  title={`See everything ${request.assigneeName} is leading`}
+                  title={`See everything ${request.assigneeName} is on`}
                   className="tahi-meta-link tahi-focus-ring min-h-11 md:min-h-0"
                 >
                   <User size={12} className="tahi-meta-ic" aria-hidden="true" />
@@ -2588,6 +2607,10 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                       busy={statusUpdating}
                       disabled={!canWrite}
                       onChange={handleStatusChange}
+                      // The prototype's `.req-timer-btn` shape, which every
+                      // other command in this card already wears. The list
+                      // column keeps the 2.75rem default.
+                      density="compact"
                     />
                   </div>
                 </div>
@@ -2754,7 +2777,12 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           )}
 
           {isAdmin && newUi && (
-            <DiscoveryCallsCard title="Discovery calls" parentType="request" parentId={requestId} />
+            <DiscoveryCallsCard
+              title="Discovery calls"
+              variant="rail"
+              parentType="request"
+              parentId={requestId}
+            />
           )}
 
           {/* Details, then People, then Checklists on the ported rail;
@@ -3199,10 +3227,13 @@ function PeopleStack({
 }: {
   participants: Participant[]
   /**
-   * Turn each teammate's bubble into a door to their work. Studio audiences
-   * only: the list's assignee narrowing is a studio dimension, and there is no
-   * per-teammate page in this app to send anyone else to. Contacts are never
-   * linked, in either audience, because nothing narrows the list by contact.
+   * Turn each teammate's bubble into a door to their work. The list's
+   * `?assignee=` narrowing matches everyone ON a request, pm and follower
+   * included, so a PM bubble lands on a list that still contains the request
+   * it was clicked from. Studio audiences only: the dimension is a studio
+   * one, and there is no per-teammate page in this app to send anyone else
+   * to. Contacts are never linked, in either audience, because nothing
+   * narrows the list by contact.
    */
   linkPeople?: boolean
 }) {
@@ -3248,7 +3279,7 @@ function PeopleStack({
       aria-label={`${ordered.length} ${ordered.length === 1 ? 'person' : 'people'}`}
     >
       <div
-        className="flex items-center"
+        className="tahi-people-stack"
         style={{ paddingRight: overflow > 0 ? '0.25rem' : 0 }}
       >
         {visible.map(({ p, accent }, i) => {
@@ -3274,12 +3305,10 @@ function PeopleStack({
               {initialsOf(name) || '?'}
             </span>
           )
-          const stackStyle: React.CSSProperties = {
-            display: 'inline-flex',
-            marginLeft: i === 0 ? 0 : '-0.4375rem',
-            position: 'relative',
-            zIndex: visible.length - i,
-          }
+          // Only the z-order is inline. The overlap itself lives in
+          // .tahi-people-seat, so it can come off below md where the bubbles
+          // become touch targets.
+          const stackStyle: React.CSSProperties = { zIndex: visible.length - i }
           if (linkPeople && p.participantType === 'team_member') {
             return (
               <Link
@@ -3287,7 +3316,7 @@ function PeopleStack({
                 data-private
                 href={requestsListHref({ assignee: p.participantId })}
                 title={`${name} - ${roleLabel}. See everything they are on.`}
-                className="tahi-avatar-link tahi-focus-ring"
+                className="tahi-people-seat tahi-avatar-link tahi-focus-ring"
                 style={stackStyle}
               >
                 {bubble}
@@ -3295,7 +3324,13 @@ function PeopleStack({
             )
           }
           return (
-            <span key={p.id} data-private title={`${name} - ${roleLabel}`} style={stackStyle}>
+            <span
+              key={p.id}
+              data-private
+              title={`${name} - ${roleLabel}`}
+              className="tahi-people-seat"
+              style={stackStyle}
+            >
               {bubble}
             </span>
           )
@@ -3408,9 +3443,9 @@ function RevisionChip({
 // on the right, and an optional action slot after it. The tile uses the leaf
 // radius, which is what the design system reserves for icon backgrounds.
 //
-// `overflow` is a prop rather than a constant because the rail's menus render
-// through the portalled <Popover>, but the cards that host an inline editor
-// still need `visible` so a focus ring at the edge of a row is not clipped.
+// Overflow stays hidden on every card, with no escape hatch: each rail menu
+// leaves through the shared portalled <Popover> rather than out of the card
+// box, so nothing inside needs to spill past the rounded corners.
 
 /** The icon tile in a rail card head. Decorative: the title carries meaning. */
 function RailHeadIcon({ children }: { children: React.ReactNode }) {
@@ -3995,23 +4030,41 @@ function ChecklistsPanel({ checklists, onSave, isAdmin }: ChecklistsPanelProps) 
 
             {/* Items. The whole box-and-label is one control, so the label is
                 a target too, with the remove button as its sibling rather
-                than nested inside it. */}
+                than nested inside it.
+
+                Checklists are client-visible, and a client cannot tick one.
+                They get the same drawing as a reading, not a control they are
+                barred from: an element named after the STATE it reports, out
+                of the tab order because there is nothing to operate. Only a
+                viewer who can toggle gets the button and its aria-pressed. */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
               {cl.items.map((item, ii) => (
                 <div key={ii} className="flex items-center" style={{ gap: '0.375rem' }}>
-                  <button
-                    type="button"
-                    disabled={!isAdmin}
-                    onClick={() => { if (isAdmin) toggleItem(ci, ii) }}
-                    aria-pressed={item.done}
-                    aria-label={item.done ? `Mark ${item.label} incomplete` : `Mark ${item.label} complete`}
-                    className={`tahi-check tahi-focus-ring min-h-11 md:min-h-0${item.done ? ' is-done' : ''}`}
-                  >
-                    <span aria-hidden="true" className="tahi-check-box">
-                      <Check size={12} strokeWidth={3} />
+                  {isAdmin ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleItem(ci, ii)}
+                      aria-pressed={item.done}
+                      aria-label={item.done ? `Mark ${item.label} incomplete` : `Mark ${item.label} complete`}
+                      className={`tahi-check tahi-focus-ring min-h-11 md:min-h-0${item.done ? ' is-done' : ''}`}
+                    >
+                      <span aria-hidden="true" className="tahi-check-box">
+                        <Check size={12} strokeWidth={3} />
+                      </span>
+                      <span className="tahi-check-label">{item.label}</span>
+                    </button>
+                  ) : (
+                    <span
+                      role="img"
+                      aria-label={`${item.label}: ${item.done ? 'completed' : 'not completed'}`}
+                      className={`tahi-check is-static${item.done ? ' is-done' : ''}`}
+                    >
+                      <span aria-hidden="true" className="tahi-check-box">
+                        <Check size={12} strokeWidth={3} />
+                      </span>
+                      <span className="tahi-check-label">{item.label}</span>
                     </span>
-                    <span className="tahi-check-label">{item.label}</span>
-                  </button>
+                  )}
                   {isAdmin && (
                     <button
                       type="button"

@@ -48,6 +48,14 @@ interface StatusChipSelectProps {
   busy?: boolean
   /** Chip size. Defaults to 'sm' to sit inline in dense rows. */
   size?: BadgeSize
+  /**
+   * Trigger height. `default` is the 2.75rem touch target the requests-list
+   * status column wears at every width. `compact` keeps that target below md
+   * and drops to 2.25rem from md up, so the chip lines up with the other
+   * commands in the request detail's Actions card, which all sit at
+   * `min-h-11 md:min-h-9`.
+   */
+  density?: 'default' | 'compact'
   /** Popover alignment against the trigger. */
   align?: 'start' | 'end'
   /** Popover width. Defaults to 11rem. */
@@ -58,6 +66,11 @@ interface StatusChipSelectProps {
 
 const TRIGGER_MIN_HEIGHT = '2.75rem'
 
+// Both spellings written out in full: a Tailwind class must never be
+// assembled from parts at runtime, or the compiler cannot see it.
+const TRIGGER_CLASS = 'tahi-focus-ring inline-flex items-center'
+const TRIGGER_CLASS_COMPACT = 'tahi-focus-ring inline-flex items-center min-h-11 md:min-h-9'
+
 export function StatusChipSelect({
   value,
   options,
@@ -65,6 +78,7 @@ export function StatusChipSelect({
   disabled = false,
   busy = false,
   size = 'sm',
+  density = 'default',
   align = 'start',
   width = '11rem',
   'aria-label': ariaLabel = 'Change status',
@@ -121,7 +135,7 @@ export function StatusChipSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
-        className="tahi-focus-ring inline-flex items-center"
+        className={density === 'compact' ? TRIGGER_CLASS_COMPACT : TRIGGER_CLASS}
         style={{
           gap: '0.375rem',
           padding: '0.25rem 0.4375rem',
@@ -130,7 +144,9 @@ export function StatusChipSelect({
           borderRadius: 'var(--radius-md)',
           cursor: locked ? 'not-allowed' : 'pointer',
           opacity: locked && !pending ? 0.6 : 1,
-          minHeight: TRIGGER_MIN_HEIGHT,
+          // The compact trigger carries its height in classes so it can drop
+          // at md; an inline minHeight would win over both.
+          minHeight: density === 'compact' ? undefined : TRIGGER_MIN_HEIGHT,
           transition: 'border-color 150ms ease, background-color 150ms ease',
         }}
         onMouseEnter={(e) => {

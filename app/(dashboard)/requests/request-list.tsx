@@ -71,13 +71,10 @@ import {
   type RequestsAudience,
 } from '@/lib/requests-views'
 import {
-  EMPTY_REQUESTS_URL_NARROW,
   buildRequestsNarrowChips,
-  clearRequestsNarrow,
   hasRequestsUrlNarrow,
   matchesRequestsUrlNarrow,
   readRequestsUrlState,
-  type RequestsUrlNarrow,
 } from '@/lib/requests-url-state'
 
 // AI wizard modal -- only opened on click, defer to reduce first-paint JS.
@@ -604,10 +601,12 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     initialUrlState: urlState,
   })
 
-  // Priority and assignee are not rail dimensions (there is no control for
+  // Priority and person are not rail dimensions (there is no control for
   // either), so a link that names one narrows the rows here and raises its own
-  // clearable chip instead of pretending the rail owns it.
-  const [urlNarrow, setUrlNarrow] = useState<RequestsUrlNarrow>(() => urlState.narrow)
+  // clearable chip instead of pretending the rail owns it. The state lives in
+  // the rail hook, which needs to see it to know when the saved-view
+  // stand-down can lift.
+  const urlNarrow = rail.narrow
 
   const { showToast } = useToast()
   // Used to revalidate one expanded row's sub-request panel after a child is
@@ -722,9 +721,9 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     [requests, audience, rail.savedView, rail.filters, rail.query, rail.sort, impersonatedTeamMemberId, urlNarrow],
   )
 
-  // Names for the assignee chip, read off the rows already loaded rather than
+  // Names for the person chip, read off the rows already loaded rather than
   // fetched: the person a link narrows to is on at least one of them.
-  const assigneeNames = useMemo(() => {
+  const teamMemberNames = useMemo(() => {
     const byId: Record<string, string> = {}
     for (const r of requests) {
       for (const p of r.participants ?? []) {
@@ -735,8 +734,8 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   }, [requests])
 
   const railNarrowChips = useMemo(
-    () => buildRequestsNarrowChips(urlNarrow, assigneeNames),
-    [urlNarrow, assigneeNames],
+    () => buildRequestsNarrowChips(urlNarrow, teamMemberNames),
+    [urlNarrow, teamMemberNames],
   )
 
   const railChips = useMemo(
@@ -1472,7 +1471,6 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   // than a label the control read back to itself.
   const handleResetDefault = useCallback(() => {
     rail.resetToDefault()
-    setUrlNarrow(EMPTY_REQUESTS_URL_NARROW)
     showToast('Back to your default view', 'success')
   }, [rail, showToast])
 
@@ -1489,7 +1487,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
       rail.setSort({ ...DEFAULT_REQUEST_SORT })
       // The link-only dimensions are on screen as chips, so Clear all has to
       // reach them too.
-      setUrlNarrow(EMPTY_REQUESTS_URL_NARROW)
+      rail.clearAllNarrow()
       return
     }
     setDateRange({ from: null, to: null })
@@ -1937,7 +1935,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
             chips={railChips}
             onClearChip={chip => rail.setFilters({ ...rail.filters, [chip.key]: DEFAULT_REQUEST_FILTERS[chip.key] })}
             narrowChips={railNarrowChips}
-            onClearNarrowChip={chip => setUrlNarrow(n => clearRequestsNarrow(n, chip.key))}
+            onClearNarrowChip={chip => rail.clearNarrow(chip.key)}
             onClearAll={clearAllFilters}
             // Only offered once there is a saved default to go back to and the
             // view has actually wandered off it.

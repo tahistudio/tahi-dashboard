@@ -20,16 +20,20 @@
  *   priority=<slug>     not a rail dimension: returned under `narrow`.
  *   assignee=<id>       not a rail dimension: returned under `narrow`.
  *   view=<key>          list | kanban | workload | timeline (board = kanban).
- *   sort=<key>&dir=…    due | updated | priority | client, plus the `created`
- *                       alias described below.
+ *   sort=<key>&dir=…    due | updated | created | priority | client.
  *   q=<text>            the search box.
  *
- * The `created` alias. The rail's sort vocabulary has no creation-date key,
- * and its recency key (`updated`) is comparator-negated so that ASCENDING
- * reads as "newest first". `?sort=created&dir=desc` means "newest first" in
- * plain URL terms, so it maps to `{ key: 'updated', dir: 'asc' }`: the
- * direction is flipped, not dropped, and the list opens on the ordering the
- * link promised.
+ * The flipped directions. `created` and `updated` are comparator-negated in
+ * `lib/requests-views.ts`, so ASCENDING already reads as "newest first". A URL
+ * says `dir=desc` for newest first in plain language, so those two keys flip
+ * on the way in and the list opens on the ordering the link promised. Only
+ * `created` flips today: no link names `updated`, and flipping it now would
+ * silently change what an existing `?sort=updated&dir=…` URL does.
+ *
+ * What `assignee` means. It narrows to everyone the person is ON, not only
+ * what they are the assignee of: the header's people stack links every
+ * teammate bubble here, PM and follower included, and an assignee-only match
+ * would land a PM on a list that excludes the very request they clicked from.
  *
  * Nothing here touches React or the DOM, so it is unit-tested directly.
  */
@@ -141,11 +145,10 @@ function flip(dir: RequestsSortDir): RequestsSortDir {
   return dir === 'asc' ? 'desc' : 'asc'
 }
 
-/** Sort keys the URL may name that the rail does not carry verbatim. */
-const SORT_ALIASES: Record<string, { key: RequestsSortKey; flip: boolean }> = {
-  // See the module header: `updated` is negated, so ascending is newest first.
-  created: { key: 'updated', flip: true },
-}
+/** Keys whose rail comparator is negated, so the URL's plain-language
+ *  direction is the opposite of the rail's. See the module header for why
+ *  `updated` is deliberately not on this list. */
+const FLIPPED_SORT_KEYS: readonly string[] = ['created']
 
 export function readRequestsUrlView(params: ReadableSearchParams): RequestsViewKey | null {
   const raw = read(params, 'view')
@@ -160,9 +163,8 @@ export function readRequestsUrlSort(params: ReadableSearchParams): RequestsSort 
   if (raw === null) return null
   const dirRaw = read(params, 'dir')
   const dir: RequestsSortDir = dirRaw === 'desc' ? 'desc' : 'asc'
-  const alias = SORT_ALIASES[raw]
-  if (alias) return { key: alias.key, dir: alias.flip ? flip(dir) : dir }
-  return isSortKey(raw) ? { key: raw, dir } : null
+  if (!isSortKey(raw)) return null
+  return { key: raw, dir: FLIPPED_SORT_KEYS.includes(raw) ? flip(dir) : dir }
 }
 
 /**
@@ -205,20 +207,55 @@ export function readRequestsUrlState(params: ReadableSearchParams): RequestsUrlS
 
 // ── Narrow dimensions ────────────────────────────────────────────────────────
 
+/** One person on a request, as both list APIs return them. */
+export interface NarrowableParticipant {
+  id: string
+  type: string
+}
+
 /** The row shape the narrow dimensions read. A list row is a superset. */
 export interface NarrowableRow {
   priority?: string | null
   assigneeId?: string | null
+  /** The pm / assignee / follower cast, when the row carries it. */
+  participants?: readonly NarrowableParticipant[] | null
 }
 
 export function hasRequestsUrlNarrow(narrow: RequestsUrlNarrow): boolean {
   return narrow.priority !== null || narrow.assignee !== null
 }
 
+/**
+ * Is any URL-derived narrowing still on screen, across both halves of it: the
+ * rail dimensions the URL overrode, and the link-only ones?
+ *
+ * The saved-view stand-down (`clearsSavedView`) lasts exactly as long as this
+ * is true. Once the user has cleared the last chip the link raised, their
+ * stored saved view is the only opinion left, so it comes back rather than
+ * staying quietly suppressed with nothing on screen to explain it.
+ */
+export function requestsUrlStillNarrows(
+  filters: Partial<RequestsFilters>,
+  narrow: RequestsUrlNarrow,
+): boolean {
+  return Object.keys(filters).length > 0 || hasRequestsUrlNarrow(narrow)
+}
+
+/**
+ * True when this teammate is on the request at all: its assignee, or any of
+ * pm / assignee / follower in the participant cast. The assignee column is
+ * still checked on its own, because a request whose cast was never filled in
+ * still has one.
+ */
+function isOnRequest(row: NarrowableRow, teamMemberId: string): boolean {
+  if ((row.assigneeId ?? '') === teamMemberId) return true
+  return (row.participants ?? []).some(p => p.type === 'team_member' && p.id === teamMemberId)
+}
+
 /** True when the row survives every narrow dimension the URL named. */
 export function matchesRequestsUrlNarrow(row: NarrowableRow, narrow: RequestsUrlNarrow): boolean {
   if (narrow.priority !== null && (row.priority ?? '') !== narrow.priority) return false
-  if (narrow.assignee !== null && (row.assigneeId ?? '') !== narrow.assignee) return false
+  if (narrow.assignee !== null && !isOnRequest(row, narrow.assignee)) return false
   return true
 }
 
@@ -227,13 +264,17 @@ function titleCase(value: string): string {
 }
 
 /**
- * The clearable chips for the narrow dimensions. `assigneeNames` maps a team
+ * The clearable chips for the narrow dimensions. `teamMemberNames` maps a team
  * member id to their name; an id with no name still gets a chip, because a
  * filter the user cannot see is a filter they cannot clear.
+ *
+ * The person chip says "Person", not "Assignee": the dimension matches anyone
+ * on the request, so naming it after one of the three roles would describe a
+ * narrower cut than the rows on screen.
  */
 export function buildRequestsNarrowChips(
   narrow: RequestsUrlNarrow,
-  assigneeNames: Readonly<Record<string, string>> = {},
+  teamMemberNames: Readonly<Record<string, string>> = {},
 ): RequestsNarrowChip[] {
   const chips: RequestsNarrowChip[] = []
   if (narrow.priority !== null) {
@@ -242,8 +283,8 @@ export function buildRequestsNarrowChips(
   if (narrow.assignee !== null) {
     chips.push({
       key: 'assignee',
-      dimension: 'Assignee',
-      label: assigneeNames[narrow.assignee] ?? 'Selected teammate',
+      dimension: 'Person',
+      label: teamMemberNames[narrow.assignee] ?? 'Selected teammate',
     })
   }
   return chips

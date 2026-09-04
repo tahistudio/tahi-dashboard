@@ -8,6 +8,7 @@ import {
   readRequestsUrlSort,
   readRequestsUrlState,
   readRequestsUrlView,
+  requestsUrlStillNarrows,
 } from '@/lib/requests-url-state'
 
 /** The helper only needs `.get`, so a plain URLSearchParams is the fixture. */
@@ -102,13 +103,19 @@ describe('readRequestsUrlSort', () => {
   })
 
   it('maps sort=created&dir=desc to the rail ordering that reads newest first', () => {
-    // `updated` is comparator-negated, so ascending IS newest first. The
-    // header's "Created" link promises newest first; this is what delivers it.
-    expect(readRequestsUrlSort(params('sort=created&dir=desc'))).toEqual({ key: 'updated', dir: 'asc' })
+    // `created` is comparator-negated, so ascending IS newest first. The
+    // header's "Created" link promises newest first; this is what delivers it,
+    // and it orders by creation rather than by last update.
+    expect(readRequestsUrlSort(params('sort=created&dir=desc'))).toEqual({ key: 'created', dir: 'asc' })
   })
 
-  it('flips the created alias the other way too', () => {
-    expect(readRequestsUrlSort(params('sort=created&dir=asc'))).toEqual({ key: 'updated', dir: 'desc' })
+  it('flips the created direction the other way too', () => {
+    expect(readRequestsUrlSort(params('sort=created&dir=asc'))).toEqual({ key: 'created', dir: 'desc' })
+  })
+
+  it('leaves the unflipped keys exactly as the URL named them', () => {
+    expect(readRequestsUrlSort(params('sort=updated&dir=desc'))).toEqual({ key: 'updated', dir: 'desc' })
+    expect(readRequestsUrlSort(params('sort=due&dir=asc'))).toEqual({ key: 'due', dir: 'asc' })
   })
 
   it('ignores an unknown sort key, and a direction with no key', () => {
@@ -171,7 +178,7 @@ describe('matchesRequestsUrlNarrow', () => {
     expect(matchesRequestsUrlNarrow(row, { priority: 'standard', assignee: null })).toBe(false)
   })
 
-  it('narrows on assignee', () => {
+  it('narrows on the assignee column', () => {
     expect(matchesRequestsUrlNarrow(row, { priority: null, assignee: 'tm-1' })).toBe(true)
     expect(matchesRequestsUrlNarrow(row, { priority: null, assignee: 'tm-2' })).toBe(false)
   })
@@ -184,6 +191,46 @@ describe('matchesRequestsUrlNarrow', () => {
   it('requires every named dimension to match', () => {
     expect(matchesRequestsUrlNarrow(row, { priority: 'high', assignee: 'tm-2' })).toBe(false)
   })
+
+  // The header's people stack links the PM and follower bubbles here too, so
+  // an assignee-only match would answer "see everything they are on" with a
+  // list that excludes the request the link was clicked from.
+  it('keeps a row where the person is the PM rather than the assignee', () => {
+    const led = {
+      assigneeId: 'tm-9',
+      participants: [
+        { id: 'tm-1', type: 'team_member' },
+        { id: 'tm-9', type: 'team_member' },
+      ],
+    }
+    expect(matchesRequestsUrlNarrow(led, { priority: null, assignee: 'tm-1' })).toBe(true)
+  })
+
+  it('keeps a row where the person is only a follower', () => {
+    const watched = {
+      assigneeId: 'tm-9',
+      participants: [{ id: 'tm-4', type: 'team_member' }],
+    }
+    expect(matchesRequestsUrlNarrow(watched, { priority: null, assignee: 'tm-4' })).toBe(true)
+  })
+
+  it('drops a row the person is not on at all', () => {
+    const other = {
+      assigneeId: 'tm-9',
+      participants: [{ id: 'tm-4', type: 'team_member' }],
+    }
+    expect(matchesRequestsUrlNarrow(other, { priority: null, assignee: 'tm-1' })).toBe(false)
+  })
+
+  it('never matches a contact who happens to share an id', () => {
+    const row2 = { assigneeId: null, participants: [{ id: 'tm-1', type: 'contact' }] }
+    expect(matchesRequestsUrlNarrow(row2, { priority: null, assignee: 'tm-1' })).toBe(false)
+  })
+
+  it('still narrows a row whose cast was never filled in', () => {
+    expect(matchesRequestsUrlNarrow({ assigneeId: 'tm-1', participants: null }, { priority: null, assignee: 'tm-1' })).toBe(true)
+    expect(matchesRequestsUrlNarrow({ assigneeId: 'tm-2', participants: [] }, { priority: null, assignee: 'tm-1' })).toBe(false)
+  })
 })
 
 describe('narrow chips', () => {
@@ -193,16 +240,17 @@ describe('narrow chips', () => {
   })
 
   it('builds a clearable chip per narrowed dimension', () => {
+    // "Person", not "Assignee": the dimension matches anyone on the request.
     const chips = buildRequestsNarrowChips({ priority: 'high', assignee: 'tm-1' }, { 'tm-1': 'Staci Bonnie' })
     expect(chips).toEqual([
       { key: 'priority', dimension: 'Priority', label: 'High' },
-      { key: 'assignee', dimension: 'Assignee', label: 'Staci Bonnie' },
+      { key: 'assignee', dimension: 'Person', label: 'Staci Bonnie' },
     ])
   })
 
-  it('still chips an assignee whose name is not loaded, so it can be cleared', () => {
+  it('still chips a person whose name is not loaded, so it can be cleared', () => {
     const chips = buildRequestsNarrowChips({ priority: null, assignee: 'tm-9' })
-    expect(chips).toEqual([{ key: 'assignee', dimension: 'Assignee', label: 'Selected teammate' }])
+    expect(chips).toEqual([{ key: 'assignee', dimension: 'Person', label: 'Selected teammate' }])
   })
 
   it('builds nothing when nothing is narrowed', () => {
@@ -212,5 +260,30 @@ describe('narrow chips', () => {
   it('clears one dimension and keeps the other', () => {
     expect(clearRequestsNarrow({ priority: 'high', assignee: 'tm-1' }, 'priority'))
       .toEqual({ priority: null, assignee: 'tm-1' })
+  })
+})
+
+describe('requestsUrlStillNarrows', () => {
+  it('is true while a rail dimension is overridden', () => {
+    expect(requestsUrlStillNarrows({ category: 'design' }, EMPTY_REQUESTS_URL_NARROW)).toBe(true)
+  })
+
+  it('is true while a link-only dimension is set', () => {
+    expect(requestsUrlStillNarrows({}, { priority: 'high', assignee: null })).toBe(true)
+    expect(requestsUrlStillNarrows({}, { priority: null, assignee: 'tm-1' })).toBe(true)
+  })
+
+  // This is what lifts the saved-view stand-down: clear the last chip the link
+  // raised and the user's stored saved view is the only opinion left.
+  it('is false once the last narrowing has been cleared', () => {
+    expect(requestsUrlStillNarrows({}, EMPTY_REQUESTS_URL_NARROW)).toBe(false)
+    expect(requestsUrlStillNarrows({}, clearRequestsNarrow({ priority: 'high', assignee: null }, 'priority')))
+      .toBe(false)
+  })
+
+  it('stays true while the other half is still narrowing', () => {
+    expect(requestsUrlStillNarrows({}, clearRequestsNarrow({ priority: 'high', assignee: 'tm-1' }, 'priority')))
+      .toBe(true)
+    expect(requestsUrlStillNarrows({ status: 'delivered' }, EMPTY_REQUESTS_URL_NARROW)).toBe(true)
   })
 })
