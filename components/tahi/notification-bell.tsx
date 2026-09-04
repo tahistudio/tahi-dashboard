@@ -5,7 +5,11 @@ import { useRouter } from 'next/navigation'
 import { apiPath } from '@/lib/api'
 import { Popover } from '@/components/tahi/popover'
 import { ShellIcon } from '@/components/tahi/shell-icons'
-import { notificationHref, type NotificationEntityType } from '@/lib/notification-links'
+import {
+  notificationHref,
+  type NotificationAudience,
+  type NotificationEntityType,
+} from '@/lib/notification-links'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,7 +55,12 @@ function iconFor(n: Notification) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function NotificationBell() {
+/**
+ * @param audience Which route map a click resolves through. 'team' for a Tahi
+ *   session, 'client' for a portal session: most admin surfaces 403 or redirect
+ *   a client, so a shared map sent them to dead ends.
+ */
+export function NotificationBell({ audience = 'team' }: { audience?: NotificationAudience } = {}) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
@@ -221,9 +230,9 @@ export function NotificationBell() {
     setOpen(false)
     // Deep-link to the entity when it has a navigable route; otherwise the
     // click just marks it read. The resolver is shared with the server helper.
-    const href = notificationHref(n.entityType as NotificationEntityType | null, n.entityId)
+    const href = notificationHref(n.entityType as NotificationEntityType | null, n.entityId, audience)
     if (href) router.push(href)
-  }, [markOneRead, router])
+  }, [markOneRead, router, audience])
 
   const hasUnread = unreadCount > 0
 

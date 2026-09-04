@@ -15,10 +15,13 @@
  *   impersonating client  -> ClientHome (read-only)
  *   impersonating teammate-> TeammateHome (read-only)
  *
- * Note: a client only reaches /overview once onboarding is complete (the
- * dashboard layout redirects incomplete clients to /onboarding), so the client
- * home runs in its steady state; the design's first-run welcome is retained in
- * ClientHome for completeness but does not trigger for a real completed client.
+ * Note: a client only reaches /overview once the ONBOARDING FLOW is complete
+ * (the dashboard layout redirects incomplete clients to /onboarding). That is a
+ * different thing from the in-portal first-run checklist, which is the studio's
+ * side of setup: welcome video, brand assets, first request, billing. So the
+ * client home always asks for 'first', and <ClientFirstRun> reads the real
+ * organisations.onboardingState via /api/portal/onboarding and renders nothing
+ * once every step is already done (ship readiness audit, Tier 1 item 19).
  */
 
 import { useCallback } from 'react'
@@ -70,27 +73,30 @@ export function OverviewHome({
     [router],
   )
 
-  // Client portal session (not the Tahi admin org).
+  // Client portal session (not the Tahi admin org). 'first' opts the checklist
+  // in; it self-hides once organisations.onboardingState says every step is
+  // done, so an established client never sees it.
   if (!isAdmin) {
     const ctx: OverviewCtx = {
       audience: 'client',
       isReadOnly: false,
       go,
-      home: 'steady',
+      home: 'first',
       userName,
       orgName,
     }
     return <ClientHome ctx={ctx} />
   }
 
-  // Admin session previewing a client ("View as client").
+  // Admin session previewing a client ("View as client"). Same checklist, but
+  // read-only: the portal onboarding PATCH refuses an impersonated write.
   if (isImpersonatingClient) {
     const ctx: OverviewCtx = {
       audience: 'client',
       isReadOnly: true,
       previewName: impersonatedOrgName ?? orgName,
       go,
-      home: 'steady',
+      home: 'first',
       userName,
       orgName: impersonatedOrgName ?? orgName,
     }

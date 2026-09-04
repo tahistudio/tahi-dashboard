@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
-import { notifyTeamMember } from '@/lib/notifications'
+import { notifyRequestTeam } from '@/lib/notify-request-team'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
 type Params = { params: Promise<{ id: string }> }
@@ -81,24 +81,26 @@ export async function POST(req: NextRequest, { params }: Params) {
       .set({ updatedAt: new Date().toISOString() })
       .where(eq(schema.requests.id, id))
 
-    // Notify the request assignee about the client message
+    // Tell the studio. Fan out to the assignee, every team participant and the
+    // client's PM, falling back to the whole team when the request has not been
+    // triaged yet (which is exactly when a first message tends to arrive).
     const [reqInfo] = await drizzle
       .select({ assigneeId: schema.requests.assigneeId, title: schema.requests.title })
       .from(schema.requests)
       .where(eq(schema.requests.id, id))
       .limit(1)
 
-    // assigneeId is a teamMembers.id; notifyTeamMember resolves it to the
-    // Clerk user id the bell queries, so the team actually sees the ping.
-    if (reqInfo?.assigneeId) {
-      await notifyTeamMember(drizzle, reqInfo.assigneeId, {
+    await notifyRequestTeam(
+      drizzle,
+      { requestId: id, orgId, assigneeId: reqInfo?.assigneeId ?? null },
+      {
         type: 'new_message',
-        title: `New client message on "${reqInfo.title}"`,
+        title: `New client message on "${reqInfo?.title ?? 'your request'}"`,
         body: safeBody.slice(0, 200),
         entityType: 'request',
         entityId: id,
-      })
-    }
+      },
+    )
 
     return NextResponse.json({ id: msgId }, { status: 201 })
   } catch (err) {

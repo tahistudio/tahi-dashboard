@@ -63,16 +63,20 @@ export type NotificationEntityType =
   | 'cron'
 
 /**
- * Resolve where a notification click should take the user. Returns null when
- * the entity has no navigable route (the bell then just marks it read).
- * Entities with a detail page deep-link to it; list-only surfaces (messages,
- * calls, announcements) land on the list.
+ * Who is clicking. The two audiences do not share a route map: most admin
+ * surfaces 403 or redirect a client session, so one map for both meant a
+ * client's bell threw them at a page they cannot open.
  */
-export function notificationHref(
-  entityType: NotificationEntityType | null | undefined,
+export type NotificationAudience = 'team' | 'client'
+
+/**
+ * Team (Tahi org) route map. Entities with a detail page deep-link to it;
+ * list-only surfaces (messages, calls, announcements) land on the list.
+ */
+function teamHref(
+  entityType: NotificationEntityType,
   entityId: string | null | undefined,
 ): string | null {
-  if (!entityType) return null
   switch (entityType) {
     case 'request':      return entityId ? `/requests/${entityId}` : '/requests'
     case 'task':         return entityId ? `/tasks/${entityId}` : '/tasks'
@@ -96,4 +100,67 @@ export function notificationHref(
     case 'system':          return null
     default:             return null
   }
+}
+
+/**
+ * Client portal route map. Only routes whose page renders for a client session
+ * appear here; everything else resolves to null so the bell marks the row read
+ * without a bounce.
+ *
+ * Deliberate nulls: tasks are not a client surface (DECISIONS.md), and
+ * /schedules, /contracts, /proposals, /calls, /clients, /deals, /leads all
+ * redirect a client back to /requests.
+ *
+ * `invoice` lands on the portal list rather than /invoices/{id}: the invoice
+ * detail page still fetches /api/admin/invoices, which 403s a client. Make it
+ * a deep link in the same change that gives the detail page a portal branch.
+ */
+function clientHref(
+  entityType: NotificationEntityType,
+  entityId: string | null | undefined,
+): string | null {
+  switch (entityType) {
+    case 'request':      return entityId ? `/requests/${entityId}` : '/requests'
+    case 'invoice':      return '/invoices'
+    case 'subscription': return '/billing'
+    // Their own workspace: name, brands, people and plan all live in settings.
+    case 'organisation': return '/settings'
+    // Client comms ride request threads; /messages redirects them to /requests.
+    case 'message':      return '/requests'
+    // Announcements render as banners on the portal home.
+    case 'announcement': return '/overview'
+    case 'task':
+    case 'contract':
+    case 'proposal':
+    case 'deal':
+    case 'lead':
+    case 'schedule':
+    case 'call':
+    case 'affiliate':
+    case 'finance_anomaly':
+    case 'content_week':
+    case 'cron':
+    case 'system':
+      return null
+    default:             return null
+  }
+}
+
+/**
+ * Resolve where a notification click should take the user, for their audience.
+ * Returns null when the entity has no navigable route for them (the bell then
+ * just marks it read).
+ *
+ * Defaults to the team map so existing callers keep their behaviour; the bell
+ * passes the real audience.
+ */
+export function notificationHref(
+  entityType: NotificationEntityType | null | undefined,
+  entityId: string | null | undefined,
+  audience: NotificationAudience = 'team',
+): string | null {
+  if (!entityType) return null
+  return audience === 'client'
+    ? clientHref(entityType, entityId)
+    : teamHref(entityType, entityId)
 }

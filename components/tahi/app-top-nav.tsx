@@ -90,7 +90,9 @@ export function AppTopNav({ isAdmin }: AppTopNavProps) {
         {isAdmin && <TimerChip />}
         {isAdmin && <span className="tb-divider" aria-hidden="true" />}
         {isAdmin && <BriefingTrigger />}
-        <NotificationBell />
+        {/* isAdmin here is Tahi-org membership, which is exactly whose
+            notifications the bell shows, so it also picks the route map. */}
+        <NotificationBell audience={isAdmin ? 'team' : 'client'} />
         <CurrencySwitcher />
       </div>
 

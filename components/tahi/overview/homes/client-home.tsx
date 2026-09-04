@@ -314,6 +314,16 @@ function ClientFirstRun({ ctx }: { ctx: OverviewCtx }) {
   const ro = ctx.isReadOnly
   const [dismissed, setDismissed] = useState<boolean>(() => readDismissed())
   const { data, mutate } = useResource<OnboardingResp>(show && !dismissed ? '/api/portal/onboarding' : null)
+  // The switcher opts every client session in; this panel decides whether the
+  // client is actually still setting up. Latch on the first payload that has an
+  // outstanding step so finishing the last one keeps the completion state on
+  // screen, while a long-standing client who was already done never sees it.
+  const [wasIncomplete, setWasIncomplete] = useState(false)
+  useEffect(() => {
+    if (!data) return
+    const state = data.onboardingState ?? {}
+    if (CL_STEPS.some(s => !state[s.key])) setWasIncomplete(true)
+  }, [data])
 
   const dismiss = useCallback(() => {
     setDismissed(true)
@@ -346,11 +356,15 @@ function ClientFirstRun({ ctx }: { ctx: OverviewCtx }) {
   )
 
   if (!show || dismissed) return null
+  // Nothing until the real state has landed: rendering an all-unchecked panel
+  // first would flash a setup prompt at a client who finished months ago.
+  if (!data) return null
 
-  const state = data?.onboardingState ?? {}
+  const state = data.onboardingState ?? {}
   const done = CL_STEPS.map(s => !!state[s.key])
   const doneN = done.filter(Boolean).length
   const nextIdx = done.findIndex(d => !d)
+  if (nextIdx === -1 && !wasIncomplete) return null
   const org = ctx.orgName || ctx.previewName || 'there'
 
   return (
@@ -359,7 +373,7 @@ function ClientFirstRun({ ctx }: { ctx: OverviewCtx }) {
         <div>
           <h2>Kia ora, {org}. Welcome to your studio.</h2>
           <p>
-            Everything Tahi makes for you lives here. Five small steps and you are fully set up, about eight minutes,
+            Everything Tahi makes for you lives here. Four small steps and you are fully set up, about seven minutes,
             and you can stop anytime.
           </p>
         </div>

@@ -14,8 +14,9 @@
  *
  * Steps are assembled by buildSteps(). The final cream "portal" screens from the
  * design are omitted; on finish we call onComplete (the page routes into the
- * studio). Payment is simulated (doPay) with a clear seam for Stripe; invites
- * are local with a seam for persistence.
+ * studio). Payment runs through <OnboardingPayment> (Stripe), invites through
+ * /api/portal/invites, and the kickoff slot through POST /api/portal/calls,
+ * which writes the scheduled_calls row and emails the confirmation.
  */
 
 import * as React from 'react'
@@ -34,6 +35,7 @@ import {
   type LedgerStep,
 } from '@/components/tahi/onboarding-shell'
 import { OnboardingPayment } from '@/components/tahi/onboarding-payment'
+import { formatSlotSummary, slotIso } from '@/lib/kickoff-slot'
 import type { ClientEntry } from '@/lib/onboarding-entry'
 
 export interface OnboardingLead {
@@ -168,6 +170,11 @@ function VideoModal({ open, onClose, lead }: { open: boolean; onClose: () => voi
   )
 }
 
+/**
+ * The chip value is the slot's real ISO instant, not an opaque "2-1:30 pm" id,
+ * so the kickoff step can POST a bookable time straight from state. Times are
+ * wall-clock in the visitor's own timezone (see lib/kickoff-slot).
+ */
 function SlotPicker({ calDays, slot, setSlot }: { calDays: Date[]; slot: string | null; setSlot: (s: string) => void }) {
   return (
     <div className="ob-cal">
@@ -179,8 +186,9 @@ function SlotPicker({ calDays, slot, setSlot }: { calDays: Date[]; slot: string 
             <div className="ob-cal-d"><b>{wd}</b><span>{dom}</span></div>
             <div className="ob-slots">
               {SLOT_TIMES.map(time => {
-                const id = di + '-' + time
-                return <button key={time} className={cn('ob-slot-chip', slot === id && 'on')} onClick={() => setSlot(id)}>{time}</button>
+                const iso = slotIso(d, time)
+                if (!iso) return null
+                return <button key={time} className={cn('ob-slot-chip', slot === iso && 'on')} onClick={() => setSlot(iso)}>{time}</button>
               })}
             </div>
           </div>
@@ -281,7 +289,10 @@ export function OnboardingContent({
   const [dir, setDir] = React.useState(1)
   const [plan, setPlan] = React.useState('scale')
   const [addon, setAddon] = React.useState(false)
+  // The picked kickoff slot, held as the real ISO instant it represents.
   const [slot, setSlot] = React.useState<string | null>(null)
+  const [booking, setBooking] = React.useState(false)
+  const [bookError, setBookError] = React.useState<string | null>(null)
   const [videoOpen, setVideoOpen] = React.useState(false)
   const [invites, setInvites] = React.useState<string[]>([])
   const [inviteEmail, setInviteEmail] = React.useState('')
@@ -373,6 +384,32 @@ export function OnboardingContent({
       }
     }
     next()
+  }
+
+  // Book the picked kickoff slot for real, then finish. A booking failure keeps
+  // the client on the step with a retry rather than swallowing the time they
+  // just chose; "I'll book from my studio" is still there as the way out.
+  const bookKickoffAndFinish = async () => {
+    if (!slot) { onComplete(); return }
+    setBookError(null)
+    setBooking(true)
+    try {
+      const res = await fetch('/api/portal/calls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduledAt: slot, title: 'Kickoff call', durationMinutes: 30 }),
+      })
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        setBookError(j.error ?? 'We could not hold that time. Try another slot, or book from your studio.')
+        return
+      }
+      onComplete()
+    } catch {
+      setBookError('We could not hold that time. Try another slot, or book from your studio.')
+    } finally {
+      setBooking(false)
+    }
   }
 
   const money = (n: number) => '$' + n.toLocaleString('en-US')
@@ -562,7 +599,12 @@ export function OnboardingContent({
           <span className="ob-kickoff-t"><b>30 min with {lead.first}</b><small>Video call, we&apos;ll align on direction, no prep needed.</small></span>
         </div>
         <SlotPicker calDays={calDays} slot={slot} setSlot={setSlot} />
-        <div className="ob-trust"><Check size={13} /> Reschedule any time from your studio.</div>
+        <div className="ob-trust">
+          <Check size={13} />
+          {slot
+            ? `${formatSlotSummary(slot)}. We will email you the confirmation.`
+            : 'Reschedule any time from your studio.'}
+        </div>
       </>
     )
   }
@@ -571,6 +613,8 @@ export function OnboardingContent({
   // invites first (sendInvitesAndNext routes to onComplete when it is last).
   const isLast = idx >= steps.length - 1
   if (isLast && stepId !== 'pay' && stepId !== 'invite' && !inChooser) onPrimary = onComplete
+  // Kickoff writes the call before it lets the client through.
+  if (stepId === 'kickoff' && !inChooser) onPrimary = bookKickoffAndFinish
 
   const sceneHeadline = clientType === 'existing' ? 'Good to have you back.' : 'You&apos;re known, expected, and in good hands.'.replace('&apos;', "'")
 
@@ -605,13 +649,18 @@ export function OnboardingContent({
                   {title && <h1 className="ob-h1">{title}</h1>}
                   {sub && <p className="ob-sub">{sub}</p>}
                   {joinError && <div className="ob-decline" role="alert">{joinError}</div>}
+                  {bookError && <div className="ob-decline" role="alert">{bookError}</div>}
                   {body}
                 </div>
               </div>
               {footer && (
                 <div className={cn('ob-footer', idx === 0 && 'end')}>
-                  {idx > 0 && <button className="ob-back" onClick={back} disabled={provisioning}>Back</button>}
-                  {primary && <button className="ob-next" onClick={onPrimary} disabled={provisioning}>{provisioning ? 'Setting up your workspace' : primary}</button>}
+                  {idx > 0 && <button className="ob-back" onClick={back} disabled={provisioning || booking}>Back</button>}
+                  {primary && (
+                    <button className="ob-next" onClick={onPrimary} disabled={provisioning || booking}>
+                      {provisioning ? 'Setting up your workspace' : booking ? 'Booking your call' : primary}
+                    </button>
+                  )}
                 </div>
               )}
               {skip && <div style={{ marginTop: '14px', textAlign: 'center' }}><button className="ob-skip" onClick={next}>{skip} &rarr;</button></div>}

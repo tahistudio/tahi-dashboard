@@ -38,19 +38,17 @@ jobs:
             echo "::error::Missing TAHI_DASHBOARD_URL or TAHI_CRON_SECRET secret"
             exit 1
           fi
-          # The app is mounted at /dashboard (Webflow Cloud COSMIC_MOUNT_PATH).
-          # Auto-append it if the configured URL doesn't already include it so
-          # the variable can be set either as the bare domain or the full path.
+          # The app serves at the domain ROOT (Cloudflare direct). The old
+          # Webflow Cloud /dashboard basePath is gone, so never append it:
+          # doing so 404s the briefing. Strip a legacy suffix defensively so a
+          # stale TAHI_DASHBOARD_URL still resolves.
           base="${DASHBOARD_URL%/}"
-          case "$base" in
-            */dashboard) url="$base/api/admin/ai/briefing/cron" ;;
-            *)           url="$base/dashboard/api/admin/ai/briefing/cron" ;;
-          esac
+          base="${base%/dashboard}"
+          url="$base/api/admin/ai/briefing/cron"
           force_header=()
           if [ "$FORCE" = "true" ]; then
-            # Send both the query param and the header. On Webflow Cloud the
-            # /dashboard basePath rewrite strips the query string, so the header
-            # is what actually reaches the handler.
+            # Send both the query param and the header. The header is the
+            # belt-and-braces path for any proxy that drops the query string.
             url="$url?force=1"
             force_header=(-H "x-cron-force: 1")
             echo "FORCE run: bypassing the NZ time window and dedup guard"
@@ -82,10 +80,8 @@ jobs:
           CRON_SECRET: ${{ secrets.TAHI_CRON_SECRET }}
         run: |
           base="${DASHBOARD_URL%/}"
-          case "$base" in
-            */dashboard) url="$base/api/admin/ai/briefing/cron" ;;
-            *)           url="$base/dashboard/api/admin/ai/briefing/cron" ;;
-          esac
+          base="${base%/dashboard}"
+          url="$base/api/admin/ai/briefing/cron"
           echo "Waiting 60s for background generation to finish..."
           sleep 60
           resp=$(curl -sS "$url" -H "x-cron-secret: ${CRON_SECRET}")

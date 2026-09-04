@@ -10,9 +10,11 @@ name: Dashboard cron triggers
 # GH Actions is external and reliable.
 #
 # Required GitHub repo settings:
-#   - Variable: TAHI_DASHBOARD_URL = https://tahi-test-dashboard.webflow.io
+#   - Variable: TAHI_DASHBOARD_URL = https://portal.tahi.studio
+#                                     (the app serves at the domain root; a
+#                                      legacy /dashboard suffix is stripped)
 #   - Secret:   TAHI_CRON_SECRET   = the same string set as TAHI_CRON_SECRET
-#                                     env var on Webflow Cloud
+#                                     env var on the Worker
 #
 # Note: GitHub Actions cron has up to 5-10 min delay during peak load.
 # All our crons are designed with windows that tolerate that drift —
@@ -166,12 +168,13 @@ jobs:
             echo "::error::Missing TAHI_DASHBOARD_URL or TAHI_CRON_SECRET"
             exit 1
           fi
-          # Auto-append /dashboard basePath if not in URL.
+          # The app serves at the domain ROOT (Cloudflare direct). The old
+          # Webflow Cloud /dashboard basePath is gone, so never append it:
+          # doing so 404s every cron. Strip a legacy suffix defensively so a
+          # stale TAHI_DASHBOARD_URL still resolves.
           base="${DASHBOARD_URL%/}"
-          case "$base" in
-            */dashboard) root="$base/api/admin" ;;
-            *)           root="$base/dashboard/api/admin" ;;
-          esac
+          base="${base%/dashboard}"
+          root="$base/api/admin"
           overall_status=0
           for target in $TARGETS; do
             # Most targets live under /cron/, but sync-* lives under

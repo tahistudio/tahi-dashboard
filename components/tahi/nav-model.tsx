@@ -103,6 +103,15 @@ export const ADMIN_NAV: NavGroup[] = [
   },
 ]
 
+/**
+ * The client rail. Every entry here MUST resolve to a page that renders for a
+ * client session: a nav item that bounces is worse than no nav item at all.
+ *
+ * Removed 2026-09-05 because their pages redirect a client straight back to
+ * /requests (no client branch exists yet): Schedule (/schedules), Contracts
+ * (/contracts), Proposals (/proposals). They are Tier 3 client surfaces; add
+ * the entry back in the same commit that gives the page a client branch.
+ */
 export const CLIENT_NAV: NavGroup[] = [
   {
     group: 'Your project',
@@ -110,7 +119,6 @@ export const CLIENT_NAV: NavGroup[] = [
       { label: 'Overview', href: '/overview',  icon: 'overview',  clientVisible: true },
       { label: 'Requests', href: '/requests',  icon: 'requests',  clientVisible: true },
       // Messages is hidden for V1 (see the ADMIN_NAV note above).
-      { label: 'Schedule', href: '/schedules', icon: 'schedules', clientVisible: true },
     ],
   },
   {
@@ -123,9 +131,7 @@ export const CLIENT_NAV: NavGroup[] = [
   {
     group: 'Billing',
     items: [
-      { label: 'Invoices',  href: '/invoices',  icon: 'invoices',  clientVisible: true },
-      { label: 'Contracts', href: '/contracts', icon: 'contracts', clientVisible: true },
-      { label: 'Proposals', href: '/proposals', icon: 'proposals', clientVisible: true },
+      { label: 'Invoices', href: '/invoices', icon: 'invoices', clientVisible: true },
     ],
   },
 ]
