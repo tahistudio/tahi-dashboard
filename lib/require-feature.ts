@@ -38,7 +38,7 @@
 
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { resolvePermissions, can } from '@/lib/permissions'
+import { resolvePermissions, can, clientCanSeeFeature } from '@/lib/permissions'
 import type { RequestAuthResult } from '@/lib/server-auth'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -71,10 +71,65 @@ export async function requireFeature(
   // in code so it cannot be regressed by a change to the decision core.
   if (access.isSuperAdmin) return null
 
-  // admin level (explicit admin role, or the Tahi-org "no role assigned"
-  // default) passes team/shared features via `can`; team members are gated by
-  // their role baseline + feature_visibility overrides.
+  // admin level (an explicit admin role, or an unseeded workspace where no role
+  // assignment exists anywhere) passes team/shared features via `can`; team
+  // members are gated by their role baseline + feature_visibility overrides,
+  // and a roleless member on a seeded workspace is denied every key.
   if (can(access, featureKey)) return null
+
+  return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+}
+
+/** The subset of `getPortalAuth`'s result a portal feature check needs. */
+export interface PortalFeatureAuth {
+  userId: string | null
+  /** The RESOLVED D1 organisation id (getPortalAuth's `orgId`). */
+  orgId: string | null
+  /** The caller's Clerk org, which is the Tahi org when an admin is previewing. */
+  clerkOrgId?: string | null
+  impersonating?: boolean
+}
+
+/**
+ * Guard a PORTAL route against a client-audience FEATURE_TREE key.
+ *
+ * Denying a client org a feature in the permissions builder used to remove it
+ * from their nav only: a deep link or a direct fetch still served the data
+ * (audit item T1.18). Call this after the standard portal auth gate so the
+ * denial is enforced on the data as well:
+ *
+ *   export const GET = definePortalRoute(async (req, auth) => {
+ *     const denied = await requirePortalFeature(auth, 'requests')
+ *     if (denied) return denied
+ *     // ... this client can see Requests; run the handler ...
+ *   })
+ *
+ * SECURITY INVARIANT (never violate): this narrows a CLIENT only. The MCP
+ * service token and the studio's own identities always pass, so a client-side
+ * deny can never lock the studio out of its own data:
+ *   - `api-service` (verified TAHI_API_TOKEN) passes, as in `requireFeature`;
+ *   - a caller whose Clerk org is the Tahi org passes. That is an admin
+ *     previewing a client portal (`impersonating`), and previewing is
+ *     read-only elsewhere, so it can only ever read.
+ *
+ * @returns a 403 `NextResponse` when the client's org (or their own contact
+ *          row) denies `featureKey`, else `null` (allowed - continue).
+ */
+export async function requirePortalFeature(
+  auth: PortalFeatureAuth,
+  featureKey: string,
+): Promise<NextResponse | null> {
+  if (auth.userId === 'api-service') return null
+
+  const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
+  if (tahiOrgId && (auth.clerkOrgId === tahiOrgId || auth.orgId === tahiOrgId)) return null
+
+  const database = await db()
+  const allowed = await clientCanSeeFeature(database as DrizzleDB, {
+    userId: auth.userId,
+    orgId: auth.orgId,
+  }, featureKey)
+  if (allowed) return null
 
   return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 }

@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -29,10 +30,12 @@ interface XeroBrandingTheme {
  * Body: { invoiceIds?: string[] } | { invoiceId?: string } | { orgId?: string }
  */
 export async function POST(req: NextRequest) {
-  const { orgId: authOrgId } = await getRequestAuth(req)
+  const { orgId: authOrgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(authOrgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: authOrgId }, 'invoices')
+  if (featureDenied) return featureDenied
 
   const body = (await req.json().catch(() => ({}))) as {
     invoiceId?: string

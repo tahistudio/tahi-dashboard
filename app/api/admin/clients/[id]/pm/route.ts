@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -9,10 +10,12 @@ type Params = { params: Promise<{ id: string }> }
 // GET /api/admin/clients/[id]/pm
 // Returns the assigned PM for this client.
 export async function GET(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'clients')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()
@@ -52,10 +55,12 @@ export async function GET(req: NextRequest, { params }: Params) {
 // Assigns a team member as PM for this client.
 // Body: { pmId: string | null }
 export async function PUT(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'clients')
+  if (featureDenied) return featureDenied
 
   const { id: clientOrgId } = await params
   const body = await req.json() as { pmId?: string | null }

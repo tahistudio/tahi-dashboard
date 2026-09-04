@@ -1,4 +1,5 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { requirePortalFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -70,13 +71,15 @@ function requestPhrase(
 // external-visible only (never internal requests/messages). Honest empty [] when
 // there is no recent activity. Read-only, safe under Client-view impersonation.
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId } = await getPortalAuth(req)
 
   // Deny if not authenticated or if this is the Tahi admin org (no impersonation
   // target). An impersonating admin resolves to the target org and reads safely.
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'overview')
+  if (featureDenied) return featureDenied
 
   const database = await db()
   const drizzle = database as D1

@@ -1,5 +1,6 @@
 import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
+import { requirePageFeature } from '@/lib/page-guard'
 import { CallsContent } from './calls-content'
 
 export const metadata = { title: 'Calls - Tahi Dashboard' }
@@ -9,5 +10,6 @@ export default async function CallsPage() {
   if (!userId) redirect('/sign-in')
   const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
   if (!isAdmin) redirect('/overview')
+  await requirePageFeature('calls')
   return <CallsContent />
 }

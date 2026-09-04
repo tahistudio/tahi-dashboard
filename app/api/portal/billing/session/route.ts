@@ -1,4 +1,5 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { requirePortalFeature } from '@/lib/require-feature'
 import { isOrgAdmin } from '@/lib/portal-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -15,10 +16,12 @@ import { stripeSecretKey } from '@/lib/stripe-key'
  * Client view sees the impersonated org, read-only). Reject the Tahi admin org.
  */
 export async function GET(req: NextRequest) {
-  const { orgId, userId, impersonating } = await getPortalAuth(req)
+  const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
   if (!userId || !orgId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'invoices')
+  if (featureDenied) return featureDenied
 
   const stripeKey = stripeSecretKey()
   if (!stripeKey) {

@@ -1,4 +1,5 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { requirePortalFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -17,12 +18,14 @@ import {
 // ── GET /api/portal/requests ─────────────────────────────────────────────────
 // Returns requests scoped to the client's own org.
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId } = await getPortalAuth(req)
 
   // Deny if not authenticated or if this is the Tahi admin org (admins use /api/admin/requests)
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const url = new URL(req.url)
   const status = url.searchParams.get('status') ?? 'active'
@@ -202,11 +205,13 @@ export async function POST(req: NextRequest) {
   // getPortalAuth resolves the caller's Clerk org -> the D1 organisations.id, so
   // the row is written under the correct tenant id (getRequestAuth would store
   // the raw Clerk org id, which mismatches every clerkOrgId-provisioned client).
-  const { orgId, userId, impersonating } = await getPortalAuth(req)
+  const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
 
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'requests')
+  if (featureDenied) return featureDenied
   if (impersonating) {
     return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
   }

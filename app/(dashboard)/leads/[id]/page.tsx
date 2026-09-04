@@ -1,5 +1,6 @@
 import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
+import { requirePageFeature } from '@/lib/page-guard'
 import { LeadPageContent } from './lead-page-content'
 
 export const metadata = { title: 'Lead — Tahi Dashboard' }
@@ -13,6 +14,7 @@ export default async function LeadFullPage({
   if (!userId) redirect('/sign-in')
   const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
   if (!isAdmin) redirect('/overview')
+  await requirePageFeature('leads')
 
   const { id } = await params
   return <LeadPageContent leadId={id} />

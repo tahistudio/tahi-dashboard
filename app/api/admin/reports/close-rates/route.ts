@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -8,10 +9,12 @@ import { isNonLinearStage, buildJourneyMap, inferStagesVisited, type StageInfo, 
 // ── GET /api/admin/reports/close-rates ─────────────────────────────────────
 // Returns stage conversion rates, win/loss counts over time, and revenue per stage.
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'sales_analytics')
+  if (featureDenied) return featureDenied
 
   const database = await db()
 

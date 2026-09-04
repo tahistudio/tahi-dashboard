@@ -1,4 +1,5 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { requirePortalFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -9,12 +10,14 @@ import { eq, and, ne, asc } from 'drizzle-orm'
 // requests. Internal-only requests (isInternal=true) are never exposed to the
 // client, matching every other portal route.
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId } = await getPortalAuth(req)
 
   // Deny if not authenticated or if this is the admin org
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'tracks')
+  if (featureDenied) return featureDenied
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>

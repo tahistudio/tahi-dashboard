@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { stripeSecretKey } from '@/lib/stripe-key'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -28,8 +29,10 @@ async function stripePost(path: string, body: Record<string, string>, key: strin
  * returns hosted payment URL.
  */
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'invoices')
+  if (featureDenied) return featureDenied
 
   const body = await req.json() as { invoiceId: string }
   if (!body.invoiceId) return NextResponse.json({ error: 'invoiceId is required' }, { status: 400 })

@@ -36,6 +36,13 @@ vi.mock('@/lib/server-auth', () => ({
   getPortalAuth: vi.fn(),
 }))
 
+// The client feature_visibility gate is covered end to end in
+// portal-feature-visibility.test.ts. Stub it here so these numbering tests can
+// keep their minimal schema mock (it has no feature_visibility table).
+vi.mock('@/lib/require-feature', () => ({
+  requirePortalFeature: vi.fn().mockResolvedValue(null),
+}))
+
 vi.mock('@/lib/sanitize-rich-text', () => ({
   sanitizeRichText: (s: string) => s,
 }))

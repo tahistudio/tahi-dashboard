@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -13,6 +14,8 @@ type RouteContext = { params: Promise<{ id: string }> }
 export async function GET(req: NextRequest, ctx: RouteContext) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'deals')
+  if (featureDenied) return featureDenied
 
   const { id } = await ctx.params
   const database = await db() as unknown as D1
@@ -33,6 +36,8 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
 export async function POST(req: NextRequest, ctx: RouteContext) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'deals')
+  if (featureDenied) return featureDenied
 
   const { id: dealId } = await ctx.params
   const body = await req.json() as {

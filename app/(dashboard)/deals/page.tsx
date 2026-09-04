@@ -1,5 +1,6 @@
 import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
+import { requirePageFeature } from '@/lib/page-guard'
 import { DealsContent } from './deals-content'
 
 export const metadata = { title: 'Deals - Tahi Dashboard' }
@@ -11,5 +12,6 @@ export default async function DealsPage() {
   const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
   if (!isAdmin) redirect('/overview')
 
+  await requirePageFeature('deals')
   return <DealsContent />
 }

@@ -1,5 +1,6 @@
 import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
+import { requirePageFeature } from '@/lib/page-guard'
 import { RoundTableDetail } from './round-table-detail'
 
 export const metadata = { title: 'Round table — Tahi Dashboard' }
@@ -13,6 +14,7 @@ export default async function RoundTableDetailPage({
   if (!userId) redirect('/sign-in')
   const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
   if (!isAdmin) redirect('/overview')
+  await requirePageFeature('content_studio')
 
   const { id } = await params
   return <RoundTableDetail draftId={id} />

@@ -16,8 +16,12 @@
  *
  * DENY BY DEFAULT: a Tahi-org identity with NO active role assigned sees
  * nothing until a role is granted (it resolves to `team_member` with an EMPTY
- * viewable set, which `decideFeature` treats as "holds no grant"). Two narrow
- * exceptions, both explicit and both evaluated before the deny path:
+ * viewable set, which `decideFeature` treats as "holds no grant"). Nothing
+ * means nothing: every nav item, every guarded page (`requirePageFeature` /
+ * `requirePageAnyGrant`) and every guarded API route (`requireFeature`) refuse
+ * them, including features that carry no role resource of their own. Say it
+ * that way in any UI copy too - "no role" is no access, never full admin.
+ * Two narrow exceptions, both explicit and both evaluated before the deny path:
  *   - the MCP service token (`api-service`), which has no team_member row by
  *     design and must keep full admin for CLAUDE.md rule 14 parity;
  *   - a workspace with zero active role assignments anywhere (a fresh or
@@ -113,6 +117,23 @@ export function featureResource(featureKey: string): string | undefined {
 // ── pure decision ─────────────────────────────────────────────────────────────
 
 /**
+ * True when the caller holds NO permission grant at all: a Tahi-org identity
+ * with no active role assignment (its `viewableResources` is an empty Set,
+ * never null). This is the deny-by-default marker and it means denied
+ * EVERYWHERE - every page, every admin route, every ungated feature key - until
+ * an admin grants a role or lifts one feature with an explicit
+ * feature_visibility allow.
+ *
+ * null `viewableResources` is the opposite (unrestricted: admin+, client, the
+ * MCP service token, or an unseeded workspace) and returns false here.
+ *
+ * Pure, so page and route guards can share one definition of "roleless".
+ */
+export function holdsNoGrant(access: Pick<ResolvedAccess, 'viewableResources'>): boolean {
+  return access.viewableResources !== null && access.viewableResources.size === 0
+}
+
+/**
  * Decide whether `access` can see `featureKey`. Pure: no DB, fully testable.
  * Order: unknown key -> allow unless the caller holds no grant; wrong audience
  * -> deny; super_admin -> allow; explicit override (most-specific
@@ -125,7 +146,7 @@ export function decideFeature(access: ResolvedAccess, featureKey: string): boole
   // (overview, messages, content_studio...), not unknown keys either. Only an
   // explicit feature_visibility allow below can lift a single feature, because
   // that is a deliberate grant rather than a default.
-  const noGrant = access.viewableResources !== null && access.viewableResources.size === 0
+  const noGrant = holdsNoGrant(access)
 
   const node = getFeatureNode(featureKey)
   if (!node) return !noGrant // not a gateable feature
@@ -377,4 +398,32 @@ export async function resolvePermissions(
     isSuperAdmin, isAdmin, canManagePermissions: isAdmin,
     viewableResources, overrides,
   }
+}
+
+// ── client (portal) feature check ────────────────────────────────────────────
+
+/**
+ * Can this CLIENT see `featureKey`? The single client-side feature_visibility
+ * check, so a deny set in the permissions builder is enforced on the data and
+ * not only hidden in the nav (audit item T1.18).
+ *
+ * `orgId` MUST be the resolved D1 organisation id (what `getPortalAuth` returns
+ * as `orgId`), because that is the `subject_id` the builder writes for an
+ * `organisation` row. Per-contact rows refine the org baseline and are resolved
+ * inside `resolvePermissions` from the caller's Clerk user id.
+ *
+ * Client features are ON by default: this returns false only when a row (org or
+ * contact) explicitly denies the feature or one of its ancestors, or when the
+ * key is not a client-audience feature at all.
+ *
+ * The route wrapper `requirePortalFeature` (lib/require-feature.ts) adds the
+ * 403 plus the studio-side short-circuits; portal routes call that, not this.
+ */
+export async function clientCanSeeFeature(
+  drizzle: D1,
+  auth: { userId: string | null; orgId: string | null },
+  featureKey: string,
+): Promise<boolean> {
+  const access = await resolvePermissions(drizzle, auth)
+  return decideFeature(access, featureKey)
 }

@@ -1,5 +1,6 @@
 import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
+import { requirePageFeature } from '@/lib/page-guard'
 import { ContactDetail } from './contact-detail'
 import { ErrorBoundary } from '@/components/tahi/error-boundary'
 
@@ -14,6 +15,7 @@ export default async function ContactDetailPage({ params }: Props) {
     redirect('/overview')
   }
 
+  await requirePageFeature('clients')
   const { id } = await params
   return (
     <ErrorBoundary fallbackTitle="Contact failed to load">

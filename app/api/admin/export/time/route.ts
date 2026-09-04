@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -8,10 +9,12 @@ import { eq, and, gte, lte, desc } from 'drizzle-orm'
 // Returns time entries as CSV.
 // Query params: dateFrom, dateTo, orgId, teamMemberId
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'time')
+  if (featureDenied) return featureDenied
 
   const url = new URL(req.url)
   const orgIdFilter = url.searchParams.get('orgId')
