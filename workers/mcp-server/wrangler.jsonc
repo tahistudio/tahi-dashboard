@@ -1,4 +1,21 @@
 {
+  // Secrets this worker needs. Values never live in this file or in git:
+  // set each one with `wrangler secret put <NAME>` from workers/mcp-server.
+  // See README.md for the full procedure.
+  //
+  //   TAHI_API_TOKEN         bearer token the worker uses against the dashboard API
+  //   OAUTH_CLIENT_ID        client id the Claude connector is configured with
+  //   OAUTH_CLIENT_SECRET    signing key for auth codes and access tokens
+  //   OAUTH_APPROVAL_KEY     key a Tahi admin types on the /authorize consent
+  //                          screen (optional: falls back to OAUTH_CLIENT_SECRET)
+  //   OAUTH_REDIRECT_HOSTS   optional extra callback hosts, comma separated
+  //   OAUTH_TOKEN_EPOCH      unix seconds; refuses every token minted before
+  //                          it. Bump on any suspected leak to revoke.
+  //   MANYREQUESTS_API_TOKEN ManyRequests API bearer token
+  //   MANYREQUESTS_BASE_URL  optional ManyRequests API base URL override
+  //
+  // Declared as comments on purpose: a `vars` entry with an empty value would
+  // shadow the real secret at deploy time.
   "name": "tahi-mcp-server",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-12",

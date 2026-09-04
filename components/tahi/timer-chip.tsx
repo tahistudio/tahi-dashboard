@@ -240,11 +240,20 @@ export function TimerChip() {
           'warning',
         )
       } else if (res.ok) {
+        // A confirmed switch stops the previous timer server-side. If those
+        // hours could not be logged, say so rather than toasting success
+        // over the loss.
+        const j = await res.json().catch(() => null) as
+          | { stopped?: { logged?: boolean; reasonMessage?: string } | null }
+          | null
         await fetchTimer()
         notifyTimerChanged()
         setOpen(false)
         setPickerQuery('')
         showToast('Timer started', 'success')
+        if (j?.stopped && j.stopped.logged === false) {
+          showToast(j.stopped.reasonMessage ?? 'The previous timer stopped without logging its hours.', 'warning')
+        }
       } else {
         const j = await res.json().catch(() => ({})) as { error?: string }
         showToast(j.error ?? `Couldn't start timer (${res.status})`, 'error')
@@ -290,14 +299,16 @@ export function TimerChip() {
         method: 'DELETE',
       })
       if (res.ok) {
-        const data = await res.json() as { logged?: boolean; hours?: number; reason?: string }
+        const data = await res.json() as { logged?: boolean; hours?: number; reason?: string; reasonMessage?: string }
         setTimer(null)
         setStaleTimer(null)
         notifyTimerChanged()
         if (action === 'log' && data.logged && typeof data.hours === 'number') {
           showToast(`Timer stopped. ${prettyHoursShort(data.hours)} logged.`, 'success')
-        } else if (action === 'log' && data.reason) {
-          showToast(`Stopped. Not logged (${data.reason}).`, 'warning')
+        } else if (action === 'log' && (data.reasonMessage || data.reason)) {
+          // The API words the failure. The raw code is only a fallback for
+          // an older deploy that answers without one.
+          showToast(data.reasonMessage ?? `Stopped. Not logged (${data.reason}).`, 'warning')
         } else {
           showToast(action === 'discard' ? 'Timer discarded' : 'Timer stopped', 'success')
         }

@@ -551,10 +551,16 @@ export const activeTimers = sqliteTable('active_timers', {
   // request_reads.user_id and other Clerk-sourced user columns. No FK
   // because Clerk user IDs live outside the D1 schema.
   userId: text('user_id').notNull(),
-  // Exactly one of requestId / taskId / orgId MUST be set (check enforced
-  // in API layer). orgId enables "track time against this client" without
-  // pinning it to a specific request or task — useful for client calls,
-  // admin work, etc.
+  // The POST body accepts exactly one target: requestId, taskId, or orgId
+  // as the target itself (checked in the API layer). orgId-as-target is
+  // "track time against this client" without pinning it to a specific
+  // request or task, useful for client calls, admin work, etc.
+  //
+  // orgId is then ALWAYS persisted, whatever the target kind was: it is the
+  // client the hours file against when the timer stops. Task and request
+  // timers used to store null here, so stopping one had no client, skipped
+  // the time entry and deleted the timer anyway. Do not "restore" the old
+  // exactly-one-column invariant.
   requestId: text('request_id').references(() => requests.id, { onDelete: 'cascade' }),
   taskId: text('task_id'),
   orgId: text('org_id').references(() => organisations.id, { onDelete: 'cascade' }),

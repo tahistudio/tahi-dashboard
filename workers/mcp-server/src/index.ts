@@ -8,15 +8,47 @@
  */
 
 import { requestToolCall } from './request-tools'
+import {
+  APPROVAL_ATTEMPT_LIMIT,
+  APPROVAL_ATTEMPT_WINDOW_MS,
+  failedApprovalCount,
+  isAllowedRedirectUri,
+  isMintedBeforeEpoch,
+  parseAllowedRedirectHosts,
+  parseTokenEpoch,
+  pruneApprovalAttempts,
+  recordFailedApproval,
+  renderApprovalPage,
+  timingSafeEquals,
+  type ApprovalAttempts,
+} from './oauth-approval'
 
 interface Env {
   TAHI_API_TOKEN: string
   OAUTH_CLIENT_ID: string
   OAUTH_CLIENT_SECRET: string
+  // Pre shared key a Tahi admin types on the /authorize consent screen.
+  // Without it no authorization code is ever minted. Falls back to
+  // OAUTH_CLIENT_SECRET so the connector keeps working before the
+  // dedicated secret is set. Set it with:
+  //   wrangler secret put OAUTH_APPROVAL_KEY
+  OAUTH_APPROVAL_KEY?: string
+  // Extra hosts allowed as OAuth callback targets, comma separated.
+  // claude.ai, claude.com and loopback are always allowed.
+  OAUTH_REDIRECT_HOSTS?: string
+  // Unix seconds. Every access token, refresh token and authorization code
+  // minted before this instant is refused, whatever its own expiry says.
+  // This is the revocation lever: tokens are self contained HMAC blobs and
+  // the refresh grant re-issues a 30 day refresh token on every use, so a
+  // token taken while /authorize still auto-approved would otherwise never
+  // die. Set it once to `date +%s` at deploy time:
+  //   wrangler secret put OAUTH_TOKEN_EPOCH
+  OAUTH_TOKEN_EPOCH?: string
   // Many Request Dashboard (the OLD client dashboard we are replacing).
-  // Both optional: when unset, the committed defaults below are used.
-  // Set the MANYREQUESTS_API_TOKEN secret to rotate the key without a code
-  // change (the env value wins over the committed default when present).
+  // The token is a secret and is never committed. Set it with:
+  //   wrangler secret put MANYREQUESTS_API_TOKEN
+  // When it is missing the manyrequests_* tools fail with a clear error and
+  // every other tool keeps working.
   MANYREQUESTS_API_TOKEN?: string
   MANYREQUESTS_BASE_URL?: string
 }
@@ -91,19 +123,26 @@ function apiWrite(path: string, token: string, method: string, body?: Record<str
 // data on the system we are migrating away from. Reads are safe; writes
 // mutate live data and are flagged for user confirmation in their tool text.
 //
-// The token is committed as a working default at the owner's instruction.
-// Rotate it by setting the MANYREQUESTS_API_TOKEN worker secret (it wins
-// over this default) or by editing the constant below.
+// The token is a live credential and lives only in the worker's secret
+// store. Set or rotate it with:
+//   wrangler secret put MANYREQUESTS_API_TOKEN
+// See workers/mcp-server/README.md.
 
 const MANYREQUESTS_DEFAULT_BASE_URL = 'https://tahistudio.manyrequests.com/api/v1'
-const MANYREQUESTS_DEFAULT_TOKEN = '2|bQxtsSRI8T2lo0lcoZAxSMKXUDM7s3PCX8gCQx202e8ebf08'
 
-type MrConfig = { token: string; baseUrl: string }
+const MANYREQUESTS_TOKEN_MISSING =
+  'ManyRequests is not configured on this worker. Set the token with: wrangler secret put MANYREQUESTS_API_TOKEN (see workers/mcp-server/README.md).'
 
-/** Resolve the ManyRequests config from env, falling back to the committed defaults. */
+type MrConfig = { token: string | null; baseUrl: string }
+
+/**
+ * Resolve the ManyRequests config from env. The token stays nullable so a
+ * missing secret only fails the manyrequests_* tools (with the message
+ * above) instead of every tool on the server.
+ */
 function mrConfigFromEnv(env: Env): MrConfig {
   return {
-    token: env.MANYREQUESTS_API_TOKEN || MANYREQUESTS_DEFAULT_TOKEN,
+    token: env.MANYREQUESTS_API_TOKEN?.trim() || null,
     baseUrl: env.MANYREQUESTS_BASE_URL || MANYREQUESTS_DEFAULT_BASE_URL,
   }
 }
@@ -114,6 +153,8 @@ async function mrFetch(
   cfg: MrConfig,
   opts?: { method?: string; body?: Record<string, unknown>; params?: Record<string, string> },
 ): Promise<unknown> {
+  if (!cfg.token) throw new Error(MANYREQUESTS_TOKEN_MISSING)
+
   const url = new URL(`${cfg.baseUrl}${path}`)
   if (opts?.params) {
     for (const [k, v] of Object.entries(opts.params)) {
@@ -2679,7 +2720,9 @@ async function validateSignedToken(token: string, secret: string): Promise<Recor
 
   const [encoded, signature] = parts
   const expectedSig = await hmacSign(encoded, secret)
-  if (signature !== expectedSig) return null
+  // Length safe compare: this is the one comparison that decides whether a
+  // token is genuine, so it gets the same treatment as the approval key.
+  if (!timingSafeEquals(signature, expectedSig)) return null
 
   try {
     const padded = encoded.replace(/-/g, '+').replace(/_/g, '/') + '=='.slice(0, (4 - (encoded.length % 4)) % 4)
@@ -2693,9 +2736,11 @@ async function validateSignedToken(token: string, secret: string): Promise<Recor
 
 /** Create a signed access token */
 async function createAccessToken(clientId: string, secret: string): Promise<{ token: string; expiresIn: number }> {
+  const now = Math.floor(Date.now() / 1000)
   const token = await createSignedToken({
     sub: clientId,
-    exp: Math.floor(Date.now() / 1000) + TOKEN_EXPIRY_SECONDS,
+    iat: now,
+    exp: now + TOKEN_EXPIRY_SECONDS,
     type: 'access_token',
   }, secret)
   return { token, expiresIn: TOKEN_EXPIRY_SECONDS }
@@ -2704,18 +2749,32 @@ async function createAccessToken(clientId: string, secret: string): Promise<{ to
 /** Create a signed refresh token (Decision #049). Long-lived so Claude can
  *  silently mint a new access token instead of forcing the user to re-auth. */
 async function createRefreshToken(clientId: string, secret: string): Promise<{ token: string; expiresIn: number }> {
+  const now = Math.floor(Date.now() / 1000)
   const token = await createSignedToken({
     sub: clientId,
-    exp: Math.floor(Date.now() / 1000) + REFRESH_EXPIRY_SECONDS,
+    iat: now,
+    exp: now + REFRESH_EXPIRY_SECONDS,
     type: 'refresh_token',
   }, secret)
   return { token, expiresIn: REFRESH_EXPIRY_SECONDS }
+}
+
+/**
+ * Refuse anything minted before OAUTH_TOKEN_EPOCH. Tokens carry no server
+ * side record, so this is the only way to kill a refresh token early: a
+ * payload with no `iat` predates the claim and is always older than a set
+ * epoch, which is what revokes everything the auto-approving /authorize
+ * handed out.
+ */
+function isRevokedByEpoch(payload: Record<string, unknown>, env: Env): boolean {
+  return isMintedBeforeEpoch(payload, parseTokenEpoch(env.OAUTH_TOKEN_EPOCH))
 }
 
 /** Validate an access token */
 async function validateAccessToken(token: string, env: Env): Promise<boolean> {
   const payload = await validateSignedToken(token, env.OAUTH_CLIENT_SECRET)
   if (!payload) return false
+  if (isRevokedByEpoch(payload, env)) return false
   return payload.sub === env.OAUTH_CLIENT_ID && payload.type === 'access_token'
 }
 
@@ -2724,6 +2783,7 @@ async function validateAccessToken(token: string, env: Env): Promise<boolean> {
 async function validateRefreshToken(token: string, env: Env): Promise<Record<string, unknown> | null> {
   const payload = await validateSignedToken(token, env.OAUTH_CLIENT_SECRET)
   if (!payload) return null
+  if (isRevokedByEpoch(payload, env)) return null
   if (payload.type !== 'refresh_token') return null
   if (payload.sub !== env.OAUTH_CLIENT_ID) return null
   return payload
@@ -2737,9 +2797,11 @@ async function createAuthCode(
   redirectUri: string,
   secret: string,
 ): Promise<string> {
+  const now = Math.floor(Date.now() / 1000)
   return createSignedToken({
     sub: clientId,
-    exp: Math.floor(Date.now() / 1000) + CODE_EXPIRY_SECONDS,
+    iat: now,
+    exp: now + CODE_EXPIRY_SECONDS,
     type: 'auth_code',
     cc: codeChallenge,
     ccm: codeChallengeMethod,
@@ -2762,43 +2824,187 @@ async function verifyPkce(codeVerifier: string, codeChallenge: string, method: s
   return codeVerifier === codeChallenge
 }
 
-/** GET /authorize - OAuth authorization endpoint (auto-approves for valid client_id) */
-function handleAuthorize(request: Request, env: Env): Promise<Response> {
-  const url = new URL(request.url)
-  const clientId = url.searchParams.get('client_id')
-  const redirectUri = url.searchParams.get('redirect_uri')
-  const responseType = url.searchParams.get('response_type')
-  const state = url.searchParams.get('state')
-  const codeChallenge = url.searchParams.get('code_challenge')
-  const codeChallengeMethod = url.searchParams.get('code_challenge_method') ?? 'S256'
+// ---------------------------------------------------------------------------
+// /authorize: consent before any authorization code is minted
+// ---------------------------------------------------------------------------
+// GET  /authorize renders a consent page (never a code).
+// POST /authorize checks the pre shared approval key, then redirects back
+//      to the allowlisted callback with the code.
+// An authorization code exchanges for a full admin token over every
+// client's data, so knowing the client id must not be enough.
+//
+// Closing the door does not retire the keys already cut: set
+// OAUTH_TOKEN_EPOCH at deploy time to refuse every token minted before the
+// fix (see isRevokedByEpoch above).
+
+type AuthorizeParams = {
+  clientId: string
+  redirectUri: string
+  state: string | null
+  codeChallenge: string
+  codeChallengeMethod: string
+}
+
+type AuthorizeCheck =
+  | { ok: true; value: AuthorizeParams }
+  | { ok: false; response: Response }
+
+/**
+ * The key a Tahi admin types on the consent screen. Set OAUTH_APPROVAL_KEY
+ * to a long random value: the fallback to OAUTH_CLIENT_SECRET only exists so
+ * the connector keeps working before the dedicated secret is set, and it
+ * cannot be rotated without invalidating every issued token.
+ */
+function approvalKey(env: Env): string {
+  return (env.OAUTH_APPROVAL_KEY?.trim() || env.OAUTH_CLIENT_SECRET || '').trim()
+}
+
+function htmlResponse(body: string, status = 200, extraHeaders?: Record<string, string>): Response {
+  return new Response(body, {
+    status,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Content-Security-Policy': "frame-ancestors 'none'",
+      'X-Frame-Options': 'DENY',
+      ...extraHeaders,
+    },
+  })
+}
+
+// Failed approval attempts, keyed by source address. Isolate local rather
+// than KV, so it is a speed bump against one host grinding the key, not a
+// distributed lock. Every rejection is also logged, which is the part an
+// operator can actually act on.
+const approvalAttempts: ApprovalAttempts = new Map()
+
+/** Source address for throttling. Cloudflare sets CF-Connecting-IP itself. */
+function attemptKey(request: Request): string {
+  return request.headers.get('CF-Connecting-IP')?.trim() || 'unknown'
+}
+
+/** Shared validation for both halves of the authorize flow. */
+function checkAuthorizeParams(source: URLSearchParams, env: Env): AuthorizeCheck {
+  const clientId = source.get('client_id')
+  const redirectUri = source.get('redirect_uri')
+  const responseType = source.get('response_type') ?? 'code'
+  const state = source.get('state')
+  const codeChallenge = source.get('code_challenge')
+  const codeChallengeMethod = source.get('code_challenge_method') ?? 'S256'
 
   if (responseType !== 'code') {
-    return Promise.resolve(corsResponse({ error: 'unsupported_response_type' }, 400))
+    return { ok: false, response: corsResponse({ error: 'unsupported_response_type' }, 400) }
   }
 
-  if (!clientId || clientId !== env.OAUTH_CLIENT_ID) {
-    return Promise.resolve(corsResponse({ error: 'invalid_client' }, 401))
+  if (!clientId || !timingSafeEquals(clientId, env.OAUTH_CLIENT_ID ?? '')) {
+    return { ok: false, response: corsResponse({ error: 'invalid_client' }, 401) }
   }
 
   if (!redirectUri || !codeChallenge) {
-    return Promise.resolve(corsResponse({ error: 'invalid_request', error_description: 'redirect_uri and code_challenge required' }, 400))
+    return {
+      ok: false,
+      response: corsResponse({ error: 'invalid_request', error_description: 'redirect_uri and code_challenge required' }, 400),
+    }
   }
 
-  // Auto-approve: generate auth code and redirect back
-  return createAuthCode(clientId, codeChallenge, codeChallengeMethod, redirectUri, env.OAUTH_CLIENT_SECRET)
-    .then((code) => {
-      const redirectUrl = new URL(redirectUri)
-      redirectUrl.searchParams.set('code', code)
-      if (state) redirectUrl.searchParams.set('state', state)
+  // The discovery document advertises S256 only, so anything else is a
+  // downgrade attempt rather than a real client.
+  if (codeChallengeMethod !== 'S256') {
+    return {
+      ok: false,
+      response: corsResponse({ error: 'invalid_request', error_description: 'code_challenge_method must be S256' }, 400),
+    }
+  }
 
-      return new Response(null, {
-        status: 302,
-        headers: {
-          Location: redirectUrl.toString(),
-          ...CORS_HEADERS,
-        },
-      })
-    })
+  if (!isAllowedRedirectUri(redirectUri, parseAllowedRedirectHosts(env.OAUTH_REDIRECT_HOSTS))) {
+    return {
+      ok: false,
+      response: corsResponse({ error: 'invalid_request', error_description: 'redirect_uri is not an approved callback' }, 400),
+    }
+  }
+
+  return { ok: true, value: { clientId, redirectUri, state, codeChallenge, codeChallengeMethod } }
+}
+
+/** GET /authorize - render the consent page. Never mints a code. */
+function handleAuthorizeGet(request: Request, env: Env): Response {
+  const url = new URL(request.url)
+  const check = checkAuthorizeParams(url.searchParams, env)
+  if (!check.ok) return check.response
+
+  if (!approvalKey(env)) {
+    return corsResponse(
+      { error: 'server_error', error_description: 'Approval is not configured. Set the OAUTH_APPROVAL_KEY worker secret.' },
+      503,
+    )
+  }
+
+  return htmlResponse(renderApprovalPage(check.value))
+}
+
+/** POST /authorize - approval submitted; mint the code and redirect back. */
+async function handleAuthorizePost(request: Request, env: Env): Promise<Response> {
+  const contentType = request.headers.get('Content-Type') ?? ''
+  if (!contentType.includes('application/x-www-form-urlencoded')) {
+    return corsResponse({ error: 'unsupported_content_type' }, 400)
+  }
+
+  const form = new URLSearchParams(await request.text())
+  const check = checkAuthorizeParams(form, env)
+  if (!check.ok) return check.response
+
+  const expected = approvalKey(env)
+  if (!expected) {
+    return corsResponse(
+      { error: 'server_error', error_description: 'Approval is not configured. Set the OAUTH_APPROVAL_KEY worker secret.' },
+      503,
+    )
+  }
+
+  const now = Date.now()
+  const source = attemptKey(request)
+  pruneApprovalAttempts(approvalAttempts, now)
+
+  if (failedApprovalCount(approvalAttempts, source, now) >= APPROVAL_ATTEMPT_LIMIT) {
+    console.warn(`[authorize] throttled: ${APPROVAL_ATTEMPT_LIMIT} failed approvals from ${source}`)
+    return htmlResponse(
+      renderApprovalPage({
+        ...check.value,
+        error: 'Too many failed approvals from this address. Wait ten minutes and try again.',
+      }),
+      429,
+      { 'Retry-After': String(Math.ceil(APPROVAL_ATTEMPT_WINDOW_MS / 1000)) },
+    )
+  }
+
+  if (!timingSafeEquals(form.get('approval_key') ?? '', expected)) {
+    const count = recordFailedApproval(approvalAttempts, source, now)
+    console.warn(`[authorize] rejected approval key from ${source} (${count} in window)`)
+    return htmlResponse(
+      renderApprovalPage({ ...check.value, error: 'That approval key was not recognised.' }),
+      401,
+    )
+  }
+
+  // A correct key clears the window: an admin who fat-fingered it twice
+  // should not be carrying those failures into the next hour.
+  approvalAttempts.delete(source)
+
+  const { clientId, redirectUri, codeChallenge, codeChallengeMethod, state } = check.value
+  const code = await createAuthCode(clientId, codeChallenge, codeChallengeMethod, redirectUri, env.OAUTH_CLIENT_SECRET)
+
+  const redirectUrl = new URL(redirectUri)
+  redirectUrl.searchParams.set('code', code)
+  if (state) redirectUrl.searchParams.set('state', state)
+
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: redirectUrl.toString(),
+      'Cache-Control': 'no-store',
+      ...CORS_HEADERS,
+    },
+  })
 }
 
 /** POST /oauth/token - Token exchange endpoint */
@@ -2836,6 +3042,11 @@ async function handleOAuthToken(request: Request, env: Env): Promise<Response> {
     // Validate the auth code
     const codePayload = await validateSignedToken(code, env.OAUTH_CLIENT_SECRET)
     if (!codePayload || codePayload.type !== 'auth_code' || codePayload.sub !== clientId) {
+      return corsResponse({ error: 'invalid_grant', error_description: 'Invalid or expired authorization code' }, 400)
+    }
+
+    // A code minted before the epoch is dead even inside its ten minutes.
+    if (isRevokedByEpoch(codePayload, env)) {
       return corsResponse({ error: 'invalid_grant', error_description: 'Invalid or expired authorization code' }, 400)
     }
 
@@ -3013,20 +3224,24 @@ export default {
         return handleAuthServerMetadata(url.origin)
       }
 
-      // OAuth authorize endpoint (auto-approves for valid client_id)
+      // OAuth authorize endpoint: renders the consent page, mints nothing
       if (url.pathname === '/authorize') {
-        return handleAuthorize(request, env)
+        return handleAuthorizeGet(request, env)
       }
 
       // Server info
       if (url.pathname === '/' || url.pathname === '') {
         return corsResponse({
           name: 'Tahi Dashboard MCP Server',
-          version: '2.2.0',
+          version: '2.3.0',
           description: 'Access Tahi Dashboard data and operations through the Model Context Protocol',
-          auth: 'OAuth 2.0 client_credentials',
+          auth: 'OAuth 2.0 authorization_code with PKCE and an admin approval step',
           tokenEndpoint: `${url.origin}/oauth/token`,
           resourceMetadata: `${url.origin}/.well-known/oauth-protected-resource`,
+          manyRequestsConfigured: !!mrConfigFromEnv(env).token,
+          // Boolean only, never the value: lets an operator confirm the
+          // revocation epoch landed without opening a tool call.
+          tokenEpochSet: parseTokenEpoch(env.OAUTH_TOKEN_EPOCH) > 0,
           toolCount: TOOLS.length,
           tools: TOOLS.map((t) => t.name),
         })
@@ -3038,6 +3253,12 @@ export default {
     // ── POST endpoints ────────────────────────────────────────────────
 
     if (request.method === 'POST') {
+      // Consent form submit. Public by design: the approval key inside the
+      // form body is what authorises it, not a bearer token.
+      if (url.pathname === '/authorize') {
+        return handleAuthorizePost(request, env)
+      }
+
       // OAuth token endpoint (no bearer auth required, uses client credentials)
       if (url.pathname === '/oauth/token') {
         return handleOAuthToken(request, env)

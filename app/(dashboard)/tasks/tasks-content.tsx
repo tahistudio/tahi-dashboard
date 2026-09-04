@@ -2412,7 +2412,17 @@ function TaskTimerButton({ taskId }: { taskId: string }) {
     try {
       const res = await fetch(apiPath(`/api/admin/timers/${active.id}?action=log`), { method: 'DELETE' })
       if (res.ok) {
-        showToast('Timer stopped', 'success')
+        // The route stops the timer either way, but only reports
+        // logged:true when a time entry was actually written. Saying
+        // "stopped" over lost hours is how the tracking silently died.
+        const data = await res.json().catch(() => null) as
+          | { logged?: boolean; hours?: number; reasonMessage?: string }
+          | null
+        if (data && data.logged === false) {
+          showToast(data.reasonMessage ?? 'Timer stopped. The hours were not logged.', 'warning')
+        } else {
+          showToast('Timer stopped', 'success')
+        }
         notifyTimerChanged()
         await mutate()
         void globalMutate(`/api/admin/time-entries?taskId=${taskId}`)
