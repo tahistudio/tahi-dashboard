@@ -6,9 +6,16 @@
  * Three things in one card so the user has a single place to think about
  * time on this request:
  *
- *   1. Live timer controls (start / pause / stop / switch prompt).
+ *   1. A big centred readout with the live timer controls under it
+ *      (start / pause / stop / switch prompt).
  *   2. Manual log form (collapsed by default; opens on click).
  *   3. Total hours + a compact list of recent entries.
+ *
+ * The readout is mounted in every state, not only while a timer runs: a rail
+ * card that shows the clock only after you press Start reads as a button
+ * rather than as the place time lives. The caption underneath is what carries
+ * the state, including the one case the numerals cannot ("Running on ...",
+ * where 00:00:00 is the truth for THIS request but looks like a fault).
  *
  * All mutations are optimistic — we mutate local state immediately, fire
  * the server call, roll back + toast on error.
@@ -313,119 +320,167 @@ export function TimeCard({ requestId }: Props) {
   }
 
   const totalHours = entries.reduce((s, e) => s + e.hours, 0)
+  const running = !!onThis && !timer!.isPaused
+
+  // One line under the numerals, saying which of the four states the card is
+  // in. "Running elsewhere" is the one that matters most: the clock above it
+  // reads 00:00:00 for this request, and without this line that looks broken.
+  const entriesCaption = entries.length === 0
+    ? 'No time logged yet'
+    : `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'} logged`
+  const readoutCaption = onThis
+    ? (timer!.isPaused ? 'Timer paused' : 'Timer running')
+    : onOther
+      ? `Running on ${timer!.targetTitle ?? 'another item'}`
+      : entriesCaption
 
   return (
     <Card padding="none" style={{ overflow: 'hidden' }}>
       <div
+        className="flex items-center"
         style={{
-          padding: '0.75rem 1rem',
+          gap: '0.5rem',
+          padding: '0.6875rem 0.875rem',
           borderBottom: '1px solid var(--color-border-subtle)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
         }}
       >
+        <span
+          aria-hidden="true"
+          className="inline-flex items-center justify-center flex-shrink-0"
+          style={{
+            width: '1.5rem',
+            height: '1.5rem',
+            borderRadius: 'var(--radius-leaf-sm)',
+            background: 'var(--color-bg-secondary)',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          <Clock size={14} />
+        </span>
         <h3
-          className="text-xs font-semibold uppercase"
-          style={{ color: 'var(--color-text-muted)', letterSpacing: '0.04em', margin: 0 }}
+          className="uppercase"
+          style={{
+            margin: 0,
+            fontSize: '0.6875rem',
+            fontWeight: 700,
+            letterSpacing: '0.05em',
+            color: 'var(--color-text-subtle)',
+          }}
         >
           Time
         </h3>
         {entriesLoaded && totalHours > 0 && (
-          <span className="font-mono tabular-nums" style={{ fontSize: '0.75rem', color: 'var(--color-text)', fontWeight: 600 }}>
+          <span
+            className="tabular-nums"
+            style={{ marginLeft: 'auto', fontSize: '0.71875rem', fontWeight: 600, color: 'var(--color-text-muted)' }}
+          >
             {prettyHours(totalHours)} logged
           </span>
         )}
       </div>
 
-      {/* Timer row */}
+      {/* The readout. Centred and large, the way the prototype draws it
+          (`.req-timecard` / `.req-timer-big`), and mounted whether or not a
+          timer is running: a rail card that only shows the clock once you
+          have started one reads as a button, not as a place time lives. The
+          line under it is what changes state, not the numerals. */}
       <div
         style={{
-          padding: '0.875rem 1rem',
+          padding: '0.875rem',
           borderBottom: '1px solid var(--color-border-subtle)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '0.625rem',
         }}
       >
         {!timerLoaded ? (
-          <div style={{ height: '2.25rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)' }} />
-        ) : onThis ? (
-          <>
+          <div style={{ height: '4.5rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)' }} />
+        ) : (
+          <div style={{ textAlign: 'center', padding: '0.25rem 0' }}>
             <div
+              className="tabular-nums flex items-center justify-center"
               style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                padding: '0.625rem 0.75rem',
-                background: timer!.isPaused ? 'var(--color-bg-secondary)' : 'var(--color-brand-50)',
-                border: `1px solid ${timer!.isPaused ? 'var(--color-border)' : 'var(--color-brand-100)'}`,
-                borderRadius: 'var(--radius-md)',
-                gap: '0.375rem',
+                gap: '0.4375rem',
+                fontSize: '1.875rem',
+                fontWeight: 700,
+                letterSpacing: '0.02em',
+                lineHeight: 1.1,
+                // --color-link, not --color-brand-dark: brand-dark has no
+                // .dark override, so the running readout would sit at roughly
+                // 2.4:1 on the dark card, under the 3:1 floor for large text.
+                // The link token is the same green in light mode and lifts to
+                // #93C98A in dark.
+                color: running ? 'var(--color-link)' : 'var(--color-text)',
               }}
             >
-              {timer!.isPaused
-                ? <PauseGlyph size={14} style={{ color: 'var(--color-text-muted)' }} />
-                : <span
-                    aria-hidden="true"
-                    className="animate-pulse"
-                    style={{
-                      width: '0.5rem', height: '0.5rem', borderRadius: '50%',
-                      background: 'var(--color-brand)',
-                    }}
+              {/* The numerals cannot tell running from paused on their own:
+                  both are a frozen-looking clock at a glance. A pulsing dot
+                  says live, the two-stroke pause glyph says held, and neither
+                  is present when this request has no timer at all. */}
+              {running && (
+                <span
+                  aria-hidden="true"
+                  className="animate-pulse flex-shrink-0"
+                  style={{
+                    width: '0.5rem', height: '0.5rem', borderRadius: 'var(--radius-full)',
+                    background: 'var(--color-brand)',
+                  }}
+                />
+              )}
+              {onThis && timer!.isPaused && (
+                <PauseGlyph size={18} style={{ flexShrink: 0, color: 'var(--color-text-subtle)' }} />
+              )}
+              {formatElapsed(seconds)}
+            </div>
+            <div
+              style={{
+                marginTop: '0.125rem',
+                fontSize: '0.75rem',
+                fontWeight: 500,
+                color: 'var(--color-text-muted)',
+              }}
+            >
+              {readoutCaption}
+            </div>
+
+            <div className="flex items-center" style={{ gap: '0.5rem', marginTop: '0.75rem' }}>
+              {onThis ? (
+                <>
+                  <ActionButton
+                    icon={timer!.isPaused ? <Play size={13} /> : <PauseGlyph size={13} />}
+                    label={timer!.isPaused ? 'Resume' : 'Pause'}
+                    onClick={pauseResume}
+                    disabled={acting}
                   />
-              }
-              <span
-                className="font-mono tabular-nums"
-                style={{
-                  fontSize: '1.125rem', fontWeight: 700,
-                  color: timer!.isPaused ? 'var(--color-text-muted)' : 'var(--color-brand-dark)',
-                  letterSpacing: '0.02em',
-                }}
-              >
-                {formatElapsed(seconds)}
-              </span>
+                  <ActionButton
+                    icon={<Square size={13} />}
+                    label="Stop & log"
+                    onClick={stop}
+                    disabled={acting}
+                    variant="primary"
+                  />
+                </>
+              ) : onOther ? (
+                <ActionButton
+                  icon={<ArrowRightLeft size={13} />}
+                  label="Switch to this request"
+                  onClick={() => void start(false)}
+                  disabled={acting}
+                  variant="primary"
+                />
+              ) : (
+                <ActionButton
+                  icon={acting ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+                  label={acting ? 'Starting…' : 'Start timer'}
+                  onClick={() => void start(false)}
+                  disabled={acting}
+                  variant="primary"
+                />
+              )}
             </div>
-            <div className="flex items-center" style={{ gap: '0.375rem' }}>
-              <ActionButton
-                icon={timer!.isPaused ? <Play size={13} /> : <PauseGlyph size={13} />}
-                label={timer!.isPaused ? 'Resume' : 'Pause'}
-                onClick={pauseResume}
-                disabled={acting}
-              />
-              <ActionButton
-                icon={<Square size={13} />}
-                label="Stop & log"
-                onClick={stop}
-                disabled={acting}
-                variant="primary"
-              />
-            </div>
-          </>
-        ) : onOther ? (
-          <>
-            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: 0, lineHeight: 1.4 }}>
-              Timer is running on
-              <span style={{ fontWeight: 600, color: 'var(--color-text)' }}> {timer!.targetTitle ?? 'another item'}</span>.
-            </p>
-            <ActionButton
-              icon={<ArrowRightLeft size={13} />}
-              label="Switch to this request"
-              onClick={() => void start(false)}
-              disabled={acting}
-            />
-          </>
-        ) : (
-          <ActionButton
-            icon={acting ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-            label={acting ? 'Starting…' : 'Start timer'}
-            onClick={() => void start(false)}
-            disabled={acting}
-            variant="primary"
-          />
+          </div>
         )}
       </div>
 
       {/* Manual log + entries */}
-      <div style={{ padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      <div style={{ padding: '0.8125rem 0.875rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
         {/* Entry list */}
         {entriesLoaded && entries.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
@@ -463,21 +518,6 @@ export function TimeCard({ requestId }: Props) {
               </p>
             )}
           </div>
-        )}
-
-        {entriesLoaded && entries.length === 0 && (
-          <p
-            className="flex items-center"
-            style={{
-              gap: '0.375rem',
-              fontSize: '0.75rem',
-              color: 'var(--color-text-subtle)',
-              margin: 0,
-            }}
-          >
-            <Clock size={12} aria-hidden="true" />
-            No time logged yet.
-          </p>
         )}
 
         {/* Manual log form — collapsed behind a small button. Two modes:
@@ -639,18 +679,17 @@ export function TimeCard({ requestId }: Props) {
           <button
             type="button"
             onClick={() => setLogOpen(true)}
-            className="inline-flex items-center transition-colors"
+            className="tahi-focus-ring flex items-center justify-center w-full transition-colors min-h-11 md:min-h-9"
             style={{
-              gap: '0.3125rem',
-              padding: '0.3125rem 0.625rem',
-              fontSize: '0.6875rem',
-              fontWeight: 500,
-              borderRadius: 'var(--radius-button)',
+              gap: '0.375rem',
+              padding: '0 0.75rem',
+              fontSize: '0.78125rem',
+              fontWeight: 600,
+              borderRadius: 'var(--radius-md)',
               border: '1px dashed var(--color-border)',
               background: 'transparent',
               color: 'var(--color-text-muted)',
               cursor: 'pointer',
-              alignSelf: 'flex-start',
               marginTop: '0.25rem',
             }}
             onMouseEnter={e => {
@@ -662,7 +701,7 @@ export function TimeCard({ requestId }: Props) {
               e.currentTarget.style.color = 'var(--color-text-muted)'
             }}
           >
-            <Plus size={11} aria-hidden="true" />
+            <Plus size={13} aria-hidden="true" />
             Log time manually
           </button>
         )}
@@ -702,19 +741,19 @@ function ActionButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex items-center justify-center flex-1 transition-colors"
+      className="tahi-focus-ring flex items-center justify-center flex-1 transition-colors min-h-11 md:min-h-9"
       style={{
         gap: '0.375rem',
-        padding: '0.4375rem 0.75rem',
-        fontSize: '0.75rem',
-        fontWeight: 500,
-        borderRadius: 'var(--radius-button)',
-        border: isPrimary ? 'none' : '1px solid var(--color-border)',
+        padding: '0 0.75rem',
+        fontSize: '0.78125rem',
+        fontWeight: 600,
+        borderRadius: 'var(--radius-md)',
+        border: isPrimary ? '1px solid var(--color-brand)' : '1px solid var(--color-border)',
         background: isPrimary ? 'var(--color-brand)' : 'var(--color-bg)',
-        color: isPrimary ? '#ffffff' : 'var(--color-text)',
+        color: isPrimary ? 'var(--color-text-on-dark)' : 'var(--color-text)',
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.6 : 1,
-        minHeight: '2rem',
+        minWidth: 0,
       }}
       onMouseEnter={e => {
         if (!disabled) {
@@ -732,9 +771,10 @@ function ActionButton({
           e.currentTarget.style.color = 'var(--color-text)'
         }
       }}
+      title={label}
     >
-      <span aria-hidden="true" style={{ display: 'inline-flex' }}>{icon}</span>
-      {label}
+      <span aria-hidden="true" style={{ display: 'inline-flex', flexShrink: 0 }}>{icon}</span>
+      <span className="truncate">{label}</span>
     </button>
   )
 }

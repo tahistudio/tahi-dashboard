@@ -225,6 +225,31 @@ test.describe('Request detail', () => {
     expect(briefBox && threadBox && briefBox.y < threadBox.y).toBe(true)
   })
 
+  test('a hero meta link opens the list already filtered', async ({ page }) => {
+    test.skip(!(await openFirstRequest(page)), 'No requests in this dataset.')
+
+    // The status chip in the header is a door to "everything at this status".
+    // Both audiences get it, so this needs no gate beyond the data check.
+    const statusLink = page.locator('a[href^="/requests?status="]').first()
+    test.skip((await statusLink.count()) === 0, 'This request has no status chip.')
+
+    const href = await statusLink.getAttribute('href')
+    const status = new URL(href ?? '', 'http://localhost').searchParams.get('status')
+    expect(status).toBeTruthy()
+
+    await statusLink.click()
+    await expect(page).toHaveURL(new RegExp(`/requests\\?status=${status}$`), { timeout: 20_000 })
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Requests', { timeout: 20_000 })
+
+    // The param has to land as a real, clearable filter, not just a URL the
+    // list ignores: the chips row is what proves it reached the rail state.
+    await expect(
+      page.getByRole('button', { name: 'Clear the status filter' }),
+    ).toBeVisible({ timeout: 20_000 })
+
+    await expectNoHorizontalScroll(page)
+  })
+
   test('the detail page fits its viewport in both projects', async ({ page }) => {
     test.skip(!(await openFirstRequest(page)), 'No requests in this dataset.')
     await expectNoHorizontalScroll(page)

@@ -11,7 +11,10 @@
  * `requests.view`, `requests.savedView`, `requests.filters`, `requests.sort`
  * and the `requests.default` snapshot, plus a one-time migration off the
  * pre-rail `requests.viewMode` / `requests.activeTab` / `requests.sortKey`
- * keys so nobody loses the view they had.
+ * keys so nobody loses the view they had. The URL's share of the state lives
+ * there too, both the per-dimension overrides and the link-only narrowing
+ * (priority, person), because the saved-view stand-down needs to see all of
+ * it at once to know when it can lift.
  *
  * The main column is `min-width: 0`, so the kanban and timeline scroll inside
  * it and the page header above keeps the same width in every view.
@@ -46,6 +49,15 @@ import {
   type RequestsFilterChip,
   type RequestsRailProps,
 } from '@/components/tahi/requests/requests-rail'
+import {
+  EMPTY_REQUESTS_URL_NARROW,
+  clearRequestsNarrow,
+  requestsUrlStillNarrows,
+  type RequestsNarrowChip,
+  type RequestsNarrowKey,
+  type RequestsUrlNarrow,
+  type RequestsUrlState,
+} from '@/lib/requests-url-state'
 
 // ── Preference migration ─────────────────────────────────────────────────────
 
@@ -139,6 +151,17 @@ export interface RequestsRailState {
   setSort: (next: RequestsSort) => void
   query: string
   setQuery: (next: string) => void
+  /**
+   * The link-only dimensions (priority, person). Held here rather than in the
+   * page, because they are half of what stands the saved view down: the
+   * stand-down has to lift when the LAST url-derived narrowing goes, and only
+   * the hook can see both halves at once.
+   */
+  narrow: RequestsUrlNarrow
+  /** Drop one link-only dimension, keeping the other. */
+  clearNarrow: (key: RequestsNarrowKey) => void
+  /** Drop both, e.g. from the chip row's Clear all. */
+  clearAllNarrow: () => void
   /** True when the live state matches the saved default exactly. */
   isDefault: boolean
   saveDefault: () => void
@@ -158,11 +181,24 @@ export function useRequestsRailState({
   audience,
   initialQuery = '',
   enabled = true,
+  initialUrlState,
 }: {
   audience: RequestsAudience
   initialQuery?: string
   /** Only users actually on the rail get their pre-rail keys migrated. */
   enabled?: boolean
+  /**
+   * What the URL asked for, read once on the first render (see
+   * `lib/requests-url-state.ts`). Each named dimension sits OVER the stored
+   * preference rather than replacing it, so `?category=design` narrows the
+   * category and leaves the user's status, client and sort exactly as they
+   * left them. Touching a control drops the override for that dimension and
+   * persists what is on screen, which is what makes a chip clearable.
+   *
+   * Read in a state initialiser, so a later render passing a different object
+   * changes nothing: this is the entry state, not a controlled prop.
+   */
+  initialUrlState?: RequestsUrlState
 }): RequestsRailState {
   // Runs during the first client render, ahead of every hydration effect
   // below: the legacy keys are carried over first, then the saved default
@@ -175,22 +211,49 @@ export function useRequestsRailState({
     return null
   })
 
+  // The URL's share of the state, held separately from the stored keys so it
+  // can win per dimension without ever being written to localStorage on its
+  // own. Cleared the moment the user sets that dimension by hand.
+  const [urlOverrides, setUrlOverrides] = React.useState<{
+    filters: Partial<RequestsFilters>
+    view: RequestsViewKey | null
+    sort: RequestsSort | null
+    /** A URL that narrows the list stands the stored saved view down, so a
+     *  link cannot land on a pre-filter that hides the very rows it named.
+     *  See `clearsSavedView` in lib/requests-url-state.ts. Held with the rest
+     *  of the URL's share, and only ever consulted while a URL-derived
+     *  narrowing is still on screen (see `savedView` below). */
+    clearSavedView: boolean
+  }>(() => ({
+    filters: initialUrlState?.filters ?? {},
+    view: initialUrlState?.view ?? null,
+    sort: initialUrlState?.sort ?? null,
+    clearSavedView: initialUrlState?.clearsSavedView ?? false,
+  }))
+
+  // Priority and person have no rail control, so they narrow the rows on
+  // their own and raise their own clearable chips. They live here rather than
+  // in the page because they are the other half of the stand-down above.
+  const [narrow, setNarrow] = React.useState<RequestsUrlNarrow>(
+    () => initialUrlState?.narrow ?? EMPTY_REQUESTS_URL_NARROW,
+  )
+
   const [storedView, setStoredView] = useUserPreference<RequestsViewKey>(
     'requests.view',
     'list',
     { validator: oneOf<RequestsViewKey>(REQUESTS_VIEW_KEYS) },
   )
-  const [storedSavedView, setSavedView] = useUserPreference<string | null>(
+  const [storedSavedView, setStoredSavedView] = useUserPreference<string | null>(
     'requests.savedView',
     null,
     { validator: isSavedViewKey },
   )
-  const [storedFilters, setFilters] = useUserPreference<RequestsFilters>(
+  const [storedFilters, setStoredFilters] = useUserPreference<RequestsFilters>(
     'requests.filters',
     DEFAULT_REQUEST_FILTERS,
     { validator: isRequestsFilters },
   )
-  const [sort, setSort] = useUserPreference<RequestsSort>(
+  const [storedSort, setStoredSort] = useUserPreference<RequestsSort>(
     'requests.sort',
     DEFAULT_REQUEST_SORT,
     { validator: isRequestsSort },
@@ -202,38 +265,107 @@ export function useRequestsRailState({
   )
   const [query, setQuery] = React.useState(initialQuery)
 
-  const view = normaliseViewKey(storedView, audience)
+  const view = normaliseViewKey(urlOverrides.view ?? storedView, audience)
 
   // A saved view this audience does not have means All requests, not nothing.
-  const savedView = storedSavedView && savedViewsFor(audience).some(v => v.key === storedSavedView)
-    ? storedSavedView
+  // So does one the URL stood down: a link that names a status or a person is
+  // the more specific instruction, and a stored pre-filter that hides those
+  // rows would answer it with an empty list.
+  //
+  // The stand-down lasts exactly as long as the narrowing that caused it.
+  // Clear the last URL-derived chip and the user's saved view comes back on
+  // its own, rather than staying quietly suppressed for the rest of the page
+  // with nothing on screen to explain it.
+  const stillNarrowed = requestsUrlStillNarrows(urlOverrides.filters, narrow)
+  const activeSavedView = urlOverrides.clearSavedView && stillNarrowed ? null : storedSavedView
+  const savedView = activeSavedView && savedViewsFor(audience).some(v => v.key === activeSavedView)
+    ? activeSavedView
     : null
 
-  // Only Tahi has a client picker, so nobody else can be narrowed by one.
+  // Only Tahi has a client picker, so nobody else can be narrowed by one,
+  // whether the narrowing came from storage or from the URL.
   const filters = React.useMemo<RequestsFilters>(
-    () => (audience === 'admin' ? storedFilters : { ...storedFilters, client: 'all' }),
-    [audience, storedFilters],
+    () => {
+      const merged = { ...storedFilters, ...urlOverrides.filters }
+      return audience === 'admin' ? merged : { ...merged, client: 'all' }
+    },
+    [audience, storedFilters, urlOverrides.filters],
   )
+
+  const sort = urlOverrides.sort ?? storedSort
+
+  // Setting a dimension by hand persists what is on screen (URL value
+  // included) and drops the override, so the control, the chip and the stored
+  // preference cannot disagree afterwards.
+  const setView = React.useCallback((next: RequestsViewKey) => {
+    setUrlOverrides(o => (o.view === null ? o : { ...o, view: null }))
+    setStoredView(next)
+  }, [setStoredView])
+
+  const setFilters = React.useCallback((next: RequestsFilters) => {
+    setUrlOverrides(o => (Object.keys(o.filters).length === 0 ? o : { ...o, filters: {} }))
+    setStoredFilters(next)
+  }, [setStoredFilters])
+
+  const setSort = React.useCallback((next: RequestsSort) => {
+    setUrlOverrides(o => (o.sort === null ? o : { ...o, sort: null }))
+    setStoredSort(next)
+  }, [setStoredSort])
+
+  // Picking a saved view by hand is the user overruling the link, so the
+  // stand-down lifts and the stored key is authoritative again. Without this,
+  // choosing "All active" after following a status link would write the key
+  // and still render All requests.
+  const setSavedView = React.useCallback((next: string | null) => {
+    setUrlOverrides(o => (o.clearSavedView ? { ...o, clearSavedView: false } : o))
+    setStoredSavedView(next)
+  }, [setStoredSavedView])
+
+  const clearNarrow = React.useCallback((key: RequestsNarrowKey) => {
+    setNarrow(n => clearRequestsNarrow(n, key))
+  }, [])
+
+  const clearAllNarrow = React.useCallback(() => {
+    setNarrow(EMPTY_REQUESTS_URL_NARROW)
+  }, [])
 
   const isDefault = snapshotsEqual(storedDefault, { view, savedView, filters, sort })
 
+  // Saving is the user adopting what is on screen, so the URL's share of it
+  // stops being an override and becomes the preference. Writing only the
+  // snapshot would record `?category=design` while `requests.filters` still
+  // said `all`, and because `applyStoredRequestDefault` only fills keys that
+  // are unset, the next plain visit would open on the OLD filters with
+  // "Reset to default" as the sole tell that the save never took.
   const saveDefault = React.useCallback(() => {
     setStoredDefault({ view, savedView, filters, sort })
-  }, [setStoredDefault, view, savedView, filters, sort])
+    setStoredView(view)
+    setStoredSavedView(savedView)
+    setStoredFilters(filters)
+    setStoredSort(sort)
+    setUrlOverrides({ filters: {}, view: null, sort: null, clearSavedView: false })
+  }, [
+    setStoredDefault, setStoredView, setStoredSavedView, setStoredFilters, setStoredSort,
+    view, savedView, filters, sort,
+  ])
 
   // The snapshot's other reader: put everything back where the user saved it,
   // so wandering off the default is recoverable without rebuilding it by hand.
+  // Every override goes too, the link-only dimensions included, or the URL
+  // would keep overruling the reset.
   const resetToDefault = React.useCallback(() => {
     if (!storedDefault) return
+    setUrlOverrides({ filters: {}, view: null, sort: null, clearSavedView: false })
+    setNarrow(EMPTY_REQUESTS_URL_NARROW)
     setStoredView(storedDefault.view)
-    setSavedView(storedDefault.savedView)
-    setFilters(storedDefault.filters)
-    setSort(storedDefault.sort)
-  }, [storedDefault, setStoredView, setSavedView, setFilters, setSort])
+    setStoredSavedView(storedDefault.savedView)
+    setStoredFilters(storedDefault.filters)
+    setStoredSort(storedDefault.sort)
+  }, [storedDefault, setStoredView, setStoredSavedView, setStoredFilters, setStoredSort])
 
   return {
     view,
-    setView: setStoredView,
+    setView,
     savedView,
     setSavedView,
     filters,
@@ -242,6 +374,9 @@ export function useRequestsRailState({
     setSort,
     query,
     setQuery,
+    narrow,
+    clearNarrow,
+    clearAllNarrow,
     isDefault,
     saveDefault,
     hasDefault: storedDefault !== null,
@@ -251,7 +386,11 @@ export function useRequestsRailState({
 
 // ── Chips ────────────────────────────────────────────────────────────────────
 
-function FilterChip({ chip, onClear }: { chip: RequestsFilterChip; onClear: () => void }) {
+/** Both chip sources render through the same box: the rail's own dimensions
+ *  and the URL-only ones (priority, assignee) that have no rail control. */
+type AnyFilterChip = Pick<RequestsFilterChip, 'dimension' | 'label' | 'dot'>
+
+function FilterChip({ chip, onClear }: { chip: AnyFilterChip; onClear: () => void }) {
   return (
     <span
       className="inline-flex items-center h-11 lg:h-8"
@@ -313,6 +452,10 @@ export interface RequestsRailLayoutProps {
   switcher: React.ReactNode
   chips: readonly RequestsFilterChip[]
   onClearChip: (chip: RequestsFilterChip) => void
+  /** Chips for the dimensions only a link can set (priority, assignee). They
+   *  sit after the rail's own so the row reads rail first, URL second. */
+  narrowChips?: readonly RequestsNarrowChip[]
+  onClearNarrowChip?: (chip: RequestsNarrowChip) => void
   onClearAll: () => void
   /** Put the view back to the saved default. Omitted when there is no saved
    *  default, or when the view already matches it. */
@@ -332,6 +475,8 @@ export function RequestsRailLayout({
   switcher,
   chips,
   onClearChip,
+  narrowChips = [],
+  onClearNarrowChip,
   onClearAll,
   onResetDefault,
   query,
@@ -342,7 +487,8 @@ export function RequestsRailLayout({
   children,
 }: RequestsRailLayoutProps) {
   const [sheetOpen, setSheetOpen] = React.useState(false)
-  const activeCount = chips.length + (railProps.savedView ? 1 : 0)
+  const activeCount = chips.length + narrowChips.length + (railProps.savedView ? 1 : 0)
+  const anyChips = chips.length > 0 || narrowChips.length > 0
 
   return (
     <div className="flex" style={{ gap: '1.25rem' }}>
@@ -467,13 +613,20 @@ export function RequestsRailLayout({
             view it has just set up. The row is here even with no chips at
             that width, which is exactly when it is only the save affordance. */}
         <div
-          className={chips.length > 0 || onResetDefault
+          className={anyChips || onResetDefault
             ? 'flex items-center flex-wrap'
             : 'flex lg:hidden items-center flex-wrap'}
           style={{ gap: '0.5rem' }}
         >
           {chips.map(chip => (
             <FilterChip key={chip.key} chip={chip} onClear={() => onClearChip(chip)} />
+          ))}
+          {narrowChips.map(chip => (
+            <FilterChip
+              key={`narrow-${chip.key}`}
+              chip={chip}
+              onClear={() => onClearNarrowChip?.(chip)}
+            />
           ))}
           {/* The other half of Save as default. Without a way back, the
               snapshot only ever labelled itself; this is what makes saving

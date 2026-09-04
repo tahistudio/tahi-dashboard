@@ -397,6 +397,27 @@ describe('compareRequests', () => {
     expect(ids(sortRequests(rows, { key: 'updated', dir: 'desc' })).slice(0, 2)).toEqual(['never', 'old'])
   })
 
+  it('sorts by created newest first on asc', () => {
+    const rows = [
+      req({ id: 'old', createdAt: '2026-08-01T00:00:00.000Z' }),
+      req({ id: 'new', createdAt: '2026-09-01T00:00:00.000Z' }),
+      req({ id: 'never', createdAt: null }),
+    ]
+    expect(ids(sortRequests(rows, { key: 'created', dir: 'asc' }))).toEqual(['new', 'old', 'never'])
+    expect(ids(sortRequests(rows, { key: 'created', dir: 'desc' })).slice(0, 2)).toEqual(['never', 'old'])
+  })
+
+  // The header's "Created" link promises creation order, and a request made
+  // last year but touched this morning must not outrank one made yesterday.
+  it('orders by creation, not by last update', () => {
+    const rows = [
+      req({ id: 'ancient', createdAt: '2025-01-01T00:00:00.000Z', updatedAt: '2026-09-04T00:00:00.000Z' }),
+      req({ id: 'recent',  createdAt: '2026-09-03T00:00:00.000Z', updatedAt: '2026-09-03T00:00:00.000Z' }),
+    ]
+    expect(ids(sortRequests(rows, { key: 'created', dir: 'asc' }))).toEqual(['recent', 'ancient'])
+    expect(ids(sortRequests(rows, { key: 'updated', dir: 'asc' }))).toEqual(['ancient', 'recent'])
+  })
+
   it('sorts by priority highest first on asc', () => {
     const rows = [
       req({ id: 'low', priority: 'low' }),

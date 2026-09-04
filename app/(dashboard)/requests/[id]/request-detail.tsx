@@ -8,7 +8,7 @@ import {
   User, CheckCircle2, Loader2, Activity,
   FileText, Image as ImageIcon, Download, Paperclip,
   Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud, ChevronDown, Eye,
-  Sparkles, Wand2, X, Check, Lock, Archive, MessageSquare, PauseCircle, Ban,
+  Sparkles, Wand2, X, Check, Lock, Archive, MessageSquare, PauseCircle, Ban, Tag,
 } from 'lucide-react'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import Link from 'next/link'
@@ -61,6 +61,213 @@ const STATUS_FLOW = [
   'client_review',
   'delivered',
 ] as const
+
+/**
+ * Header meta and rail card chrome, as one scoped sheet.
+ *
+ * The meta row's affordance is on the link's CHILDREN (the icon and the bold
+ * value tint with it), and a rail card head's icon tile is a hover-free
+ * descendant of a head that may or may not be interactive, so neither can be
+ * expressed as an inline style on a single element. Scoped here the way
+ * <CapacityStrip> keeps CAPACITY_CSS, rather than in globals.css, because
+ * nothing outside this page uses them.
+ *
+ * Every link keeps `.tahi-focus-ring` for the keyboard ring; these rules only
+ * ever set colour and background, so they never fight it.
+ */
+const DETAIL_CSS = `
+.tahi-meta-link{
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: -0.125rem -0.3125rem;
+  padding: 0.125rem 0.3125rem;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  transition:
+    color var(--motion-quick) var(--ease-out),
+    background-color var(--motion-quick) var(--ease-out);
+}
+.tahi-meta-link b{ color: var(--color-text); font-weight: 600; }
+.tahi-meta-ic{ display: inline-flex; flex-shrink: 0; color: var(--color-text-subtle); transition: color var(--motion-quick) var(--ease-out); }
+.tahi-meta-link:hover,
+.tahi-meta-link:focus-visible{ color: var(--color-link); background: var(--color-bg-secondary); }
+.tahi-meta-link:hover b,
+.tahi-meta-link:focus-visible b,
+.tahi-meta-link:hover .tahi-meta-ic,
+.tahi-meta-link:focus-visible .tahi-meta-ic{ color: var(--color-link); }
+.tahi-chip-link{
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-full);
+  color: inherit;
+  text-decoration: none;
+  transition: opacity var(--motion-quick) var(--ease-out);
+}
+.tahi-chip-link:hover{ opacity: 0.82; }
+.tahi-avatar-link{
+  display: inline-flex;
+  border-radius: var(--radius-full);
+  text-decoration: none;
+  transition: transform var(--motion-quick) var(--ease-out);
+}
+.tahi-avatar-link:hover{ transform: translateY(-0.0625rem); }
+
+/* The header people stack. Overlapping is a desktop affordance: every bubble
+   but the first has its left edge under the neighbour above it in the
+   z-stack, which is fine to read and impossible to aim a thumb at. Below md
+   the seats unstack and each linked one grows to a full 2.75rem target. */
+.tahi-people-stack{ display: flex; align-items: center; }
+.tahi-people-seat{ display: inline-flex; position: relative; margin-left: -0.4375rem; }
+.tahi-people-seat:first-child{ margin-left: 0; }
+@media (max-width: 47.9375rem){
+  .tahi-people-stack{ gap: 0.125rem; }
+  .tahi-people-seat{ margin-left: 0; }
+  a.tahi-people-seat{
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+/* Rail: the quiet head action (add, remove) shared by every card. */
+.tahi-rail-head-action{
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-subtle);
+  cursor: pointer;
+  transition:
+    color var(--motion-quick) var(--ease-out),
+    background-color var(--motion-quick) var(--ease-out);
+}
+.tahi-rail-head-action:hover,
+.tahi-rail-head-action:focus-visible{ color: var(--color-text); background: var(--color-bg-secondary); }
+.tahi-rail-head-action:disabled{ opacity: 0.4; cursor: not-allowed; }
+.tahi-rail-head-action:disabled:hover{ color: var(--color-text-subtle); background: none; }
+.tahi-rail-x{
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-subtle);
+  cursor: pointer;
+  transition:
+    color var(--motion-quick) var(--ease-out),
+    background-color var(--motion-quick) var(--ease-out);
+}
+.tahi-rail-x:hover,
+.tahi-rail-x:focus-visible{ color: var(--color-danger); background: var(--color-danger-bg); }
+
+/* Rail: the one inline text input. Quiet at rest, because the add-a-step row
+   is always on screen and a permanent brand outline reads as an error. On
+   focus it takes the same brand halo as the Details editors, so the page has
+   a single "you are editing" signal. */
+.tahi-rail-input{
+  min-width: 0;
+  height: 2.75rem;
+  padding: 0 0.5625rem;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text);
+  outline: none;
+  transition:
+    border-color var(--motion-quick) var(--ease-out),
+    box-shadow var(--motion-quick) var(--ease-out);
+}
+@media (min-width: 48rem){ .tahi-rail-input{ height: 2rem; } }
+.tahi-rail-input::placeholder{ color: var(--color-text-subtle); }
+.tahi-rail-input:focus{
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 0.1875rem color-mix(in srgb, var(--color-brand) 14%, transparent);
+}
+
+/* Rail: one empty state, so no two cards word their nothing differently. */
+.tahi-rail-empty{
+  margin: 0;
+  padding: 1.125rem 0.75rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.55;
+  color: var(--color-text-subtle);
+}
+
+/* Checklist rows, ported from .req-check / .req-check-box / .req-check-label. */
+.tahi-check{
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.4375rem 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+/* The read-only drawing: same row, no pointer, no hover promise. */
+.tahi-check.is-static{ cursor: default; }
+.tahi-check-box{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: var(--radius-sm);
+  border: 0.09375rem solid var(--color-border);
+  background: var(--color-bg);
+  color: transparent;
+  transition:
+    background-color var(--motion-quick) var(--ease-out),
+    border-color var(--motion-quick) var(--ease-out),
+    color var(--motion-quick) var(--ease-out);
+}
+.tahi-check.is-done .tahi-check-box{
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+  color: var(--color-text-on-dark);
+}
+.tahi-check:not(.is-static):hover .tahi-check-box,
+.tahi-check:focus-visible .tahi-check-box{ border-color: var(--color-brand); }
+.tahi-check-label{
+  min-width: 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--color-text);
+  transition: color var(--motion-quick) var(--ease-out);
+}
+.tahi-check.is-done .tahi-check-label{
+  color: var(--color-text-subtle);
+  text-decoration: line-through;
+}
+@media (prefers-reduced-motion: reduce){
+  .tahi-meta-link,
+  .tahi-meta-ic,
+  .tahi-chip-link,
+  .tahi-avatar-link,
+  .tahi-rail-head-action,
+  .tahi-rail-x,
+  .tahi-check-box,
+  .tahi-check-label{ transition: none; }
+  .tahi-avatar-link:hover{ transform: none; }
+}
+`
+
+/** Where a hero link sends you, so every one of them is built the same way. */
+const REQUESTS_LIST = '/requests'
+function requestsListHref(params: Record<string, string>): string {
+  return `${REQUESTS_LIST}?${new URLSearchParams(params).toString()}`
+}
 
 /**
  * The label a status reads as. Driven off the one REQUEST_STATUS_CONFIG map
@@ -1137,13 +1344,13 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   // keeps it last. The ported rows edit in place, the legacy rows keep
   // their searchable selects and click-to-edit due date.
   const detailsCard = newUi ? (
-    <SidebarCard title="Details">
-      <div className="flex flex-col" style={{ gap: '0.875rem' }}>
+    <SidebarCard title="Details" icon={<Tag size={14} />} bodyPadding="0.25rem 0.875rem">
+      <dl style={{ margin: 0 }}>
         <DetailRow label="Type">
           <span className="capitalize">{request.type.replace(/_/g, ' ')}</span>
         </DetailRow>
 
-        <DetailRow label="Category">
+        <DetailRow label="Category" divided>
           <InlineMenuField
             ariaLabel="Change category"
             readOnly={!canWrite}
@@ -1158,7 +1365,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           />
         </DetailRow>
 
-        <DetailRow label="Priority">
+        <DetailRow label="Priority" divided>
           <InlineMenuField
             ariaLabel="Change priority"
             readOnly={!canWrite}
@@ -1189,7 +1396,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         </DetailRow>
 
         {isAdmin && (
-          <DetailRow label="Assignee">
+          <DetailRow label="Assignee" divided>
             <InlineMenuField
               ariaLabel="Change assignee"
               readOnly={!canWrite}
@@ -1213,7 +1420,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         )}
 
         {isAdmin && (phaseOptions.length > 0 || request.scheduleRowId) && (
-          <DetailRow label="Delivery phase">
+          <DetailRow label="Delivery phase" divided>
             <InlineMenuField
               ariaLabel="Link to a delivery phase"
               readOnly={!canWrite}
@@ -1236,7 +1443,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           </DetailRow>
         )}
 
-        <DetailRow label="Due date">
+        <DetailRow label="Due date" divided>
           <InlineDateField
             ariaLabel="Change due date"
             readOnly={!canWrite}
@@ -1249,7 +1456,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         </DetailRow>
 
         {isAdmin && (
-          <DetailRow label="Estimated">
+          <DetailRow label="Estimated" divided>
             <InlineNumberField
               ariaLabel="Change the estimate"
               readOnly={!canWrite}
@@ -1267,11 +1474,11 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         )}
 
         {request.deliveredAt && (
-          <DetailRow label="Delivered">
+          <DetailRow label="Delivered" divided>
             {formatDate(request.deliveredAt)}
           </DetailRow>
         )}
-      </div>
+      </dl>
     </SidebarCard>
     ) : (
     <SidebarCard title="Details">
@@ -1468,6 +1675,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
 
   return (
     <div className="flex flex-col" style={{ gap: '1.5rem', maxWidth: '68.75rem' }}>
+      <style>{DETAIL_CSS}</style>
       {/* Breadcrumb - includes parent when this request is a sub-request */}
       <Breadcrumb
         items={[
@@ -1511,21 +1719,48 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             {request.requestNumber != null && (
               <span style={{ color: 'var(--color-border)' }} aria-hidden="true">·</span>
             )}
-            <StatusBadge status={request.status} />
+            {/* Every header chip is a way into the list filtered by what it
+                says. Both audiences get these two: status and priority are
+                filter dimensions on the portal list as well as the studio
+                one, so neither link is a door a client cannot open. */}
+            <Link
+              href={requestsListHref({ status: request.status })}
+              title={`See all ${statusLabel(request.status).toLowerCase()} requests`}
+              className="tahi-chip-link tahi-focus-ring min-h-11 md:min-h-0"
+            >
+              <StatusBadge status={request.status} />
+            </Link>
             {request.priority === 'high' && (
-              <span
-                className="inline-flex items-center rounded-full"
-                style={{
-                  padding: '0.125rem 0.5rem',
-                  fontSize: '0.6875rem',
-                  fontWeight: 500,
-                  background: 'var(--priority-high-bg)',
-                  color: 'var(--priority-high-text)',
-                  border: '1px solid var(--priority-high-border)',
-                }}
+              <Link
+                href={requestsListHref({ priority: 'high' })}
+                title="See all high priority requests"
+                className="tahi-chip-link tahi-focus-ring min-h-11 md:min-h-0"
               >
-                High priority
-              </span>
+                <span
+                  className="inline-flex items-center rounded-full"
+                  style={{
+                    padding: '0.125rem 0.5rem',
+                    fontSize: '0.6875rem',
+                    fontWeight: 500,
+                    background: 'var(--priority-high-bg)',
+                    color: 'var(--priority-high-text)',
+                    border: '1px solid var(--priority-high-border)',
+                  }}
+                >
+                  High priority
+                </span>
+              </Link>
+            )}
+            {/* Category is not a chip on this row, but it is a dimension, so
+                it earns the same door when the request carries one. */}
+            {request.category && (
+              <Link
+                href={requestsListHref({ category: request.category })}
+                title={`See all ${categoryLabel(request.category).toLowerCase()} requests`}
+                className="tahi-chip-link tahi-focus-ring min-h-11 md:min-h-0"
+              >
+                <CategoryChip value={request.category} />
+              </Link>
             )}
             {/* Internal request: the one chip that says a client cannot see
                 this page at all. Studio audiences only, because the portal
@@ -1613,7 +1848,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             >
               {request.title}
             </h1>
-            <PeopleStack participants={participants} />
+            <PeopleStack participants={participants} linkPeople={isAdmin} />
           </div>
 
           {/* Client + created */}
@@ -1621,32 +1856,69 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             className="flex items-center flex-wrap"
             style={{ gap: '0.875rem', marginTop: '0.625rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}
           >
+            {/* The client. A studio audience gets the door to their record;
+                a client is already inside their own account and has no
+                /clients route to follow, so for them the name stays text. */}
             {request.orgName && (
-              <span data-private className="flex items-center" style={{ gap: '0.375rem' }}>
-                <User size={12} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
-                {request.orgName}
-              </span>
+              isAdmin ? (
+                <Link
+                  href={`/clients/${request.orgId}`}
+                  data-private
+                  title={`Open ${request.orgName}`}
+                  className="tahi-meta-link tahi-focus-ring min-h-11 md:min-h-0"
+                >
+                  <OrgAvatar name={request.orgName} />
+                  <b>{request.orgName}</b>
+                </Link>
+              ) : (
+                <span data-private className="flex items-center" style={{ gap: '0.375rem' }}>
+                  <OrgAvatar name={request.orgName} />
+                  {request.orgName}
+                </span>
+              )
             )}
-            <span className="flex items-center" style={{ gap: '0.375rem' }}>
-              <Calendar size={12} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
-              Created {formatDate(request.createdAt)}
-            </span>
+            <Link
+              href={requestsListHref({ sort: 'created', dir: 'desc' })}
+              title="See every request, newest first"
+              className="tahi-meta-link tahi-focus-ring min-h-11 md:min-h-0"
+            >
+              <Calendar size={12} className="tahi-meta-ic" aria-hidden="true" />
+              Created <b>{formatDate(request.createdAt)}</b>
+            </Link>
             {request.dueDate && (
-              <span className="flex items-center" style={{ gap: '0.375rem' }}>
-                <Clock size={12} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
-                Due {formatDate(request.dueDate)}
-              </span>
+              <Link
+                href={requestsListHref({ view: 'timeline' })}
+                title="See this on the requests timeline"
+                className="tahi-meta-link tahi-focus-ring min-h-11 md:min-h-0"
+              >
+                <Clock size={12} className="tahi-meta-ic" aria-hidden="true" />
+                Due <b>{formatDate(request.dueDate)}</b>
+              </Link>
             )}
             {/* Who is carrying this. The rail and the header stack both know,
-                but neither says it in words, so the sub-meta does. */}
+                but neither says it in words, so the sub-meta does. There is no
+                per-teammate page in this app, so the door is the list narrowed
+                to their work. */}
             {newUi && isAdmin && request.assigneeName && (
-              <span data-private className="flex items-center" style={{ gap: '0.375rem' }}>
-                <User size={12} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
-                Led by{' '}
-                <strong style={{ color: 'var(--color-text)', fontWeight: 600 }}>
-                  {request.assigneeName}
-                </strong>
-              </span>
+              request.assigneeId ? (
+                <Link
+                  href={requestsListHref({ assignee: request.assigneeId })}
+                  data-private
+                  title={`See everything ${request.assigneeName} is on`}
+                  className="tahi-meta-link tahi-focus-ring min-h-11 md:min-h-0"
+                >
+                  <User size={12} className="tahi-meta-ic" aria-hidden="true" />
+                  Led by <b>{request.assigneeName}</b>
+                </Link>
+              ) : (
+                <span data-private className="flex items-center" style={{ gap: '0.375rem' }}>
+                  <User size={12} style={{ color: 'var(--color-text-subtle)' }} aria-hidden="true" />
+                  Led by{' '}
+                  <strong style={{ color: 'var(--color-text)', fontWeight: 600 }}>
+                    {request.assigneeName}
+                  </strong>
+                </span>
+              )
             )}
           </div>
         </div>
@@ -2303,20 +2575,24 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
 
           {/* Actions: status dropdown, scope flag toggle, make top-level */}
           {isAdmin && (
-            <SidebarCard title="Actions">
-              <div className="flex flex-col" style={{ gap: '0.5rem' }}>
-                {/* Status: editable chip matching the requests list status chip */}
-                <div className="flex items-center" style={{ gap: '0.5rem' }}>
+            <SidebarCard title="Actions" icon={<Sparkles size={14} />}>
+              <div className="flex flex-col" style={{ gap: '0.6875rem' }}>
+                {/* Status: editable chip matching the requests list status chip.
+                    Same key column as a Details row, so the two cards line up
+                    down the rail rather than each inventing a gutter. */}
+                <div className="flex items-center" style={{ gap: '0.625rem' }}>
                   <span
-                    className="text-xs font-medium"
+                    className="flex-shrink-0"
                     style={{
-                      color: 'var(--color-text-subtle)',
-                      width: '4.5rem', flexShrink: 0,
+                      width: '4.875rem',
+                      fontSize: '0.78125rem',
+                      fontWeight: 500,
+                      color: 'var(--color-text-muted)',
                     }}
                   >
                     Status
                   </span>
-                  <div style={{ flex: 1 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     {/* The shared chip, driven off the same EDITABLE_STATUSES
                         the list column uses. The old local copy carried its
                         own six-status list, so a request the board had put on
@@ -2331,6 +2607,10 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                       busy={statusUpdating}
                       disabled={!canWrite}
                       onChange={handleStatusChange}
+                      // The prototype's `.req-timer-btn` shape, which every
+                      // other command in this card already wears. The list
+                      // column keeps the 2.75rem default.
+                      density="compact"
                     />
                   </div>
                 </div>
@@ -2340,13 +2620,9 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                   type="button"
                   onClick={handleScopeFlagToggle}
                   disabled={!canWrite}
-                  className="tahi-focus-ring flex items-center transition-colors min-h-11 md:min-h-8"
+                  className={RAIL_ACTION_CLASS}
                   style={{
-                    gap: '0.375rem',
-                    padding: '0.3125rem 0.625rem',
-                    fontSize: '0.75rem',
-                    fontWeight: 500,
-                    borderRadius: 'var(--radius-button)',
+                    ...RAIL_ACTION_STYLE,
                     border: request.scopeFlagged
                       ? '1px solid var(--color-danger)'
                       : '1px solid var(--color-border)',
@@ -2358,7 +2634,6 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                       : 'var(--color-text-muted)',
                     cursor: canWrite ? 'pointer' : 'not-allowed',
                     opacity: canWrite ? 1 : 0.6,
-                    justifyContent: 'flex-start',
                   }}
                   onMouseEnter={e => {
                     if (canWrite && !request.scopeFlagged) {
@@ -2376,7 +2651,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                   }}
                   aria-pressed={request.scopeFlagged}
                 >
-                  <AlertTriangle size={12} aria-hidden="true" />
+                  <AlertTriangle size={13} aria-hidden="true" />
                   {request.scopeFlagged ? 'Scope flagged' : 'Flag scope creep'}
                 </button>
 
@@ -2397,8 +2672,13 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     />
                     <p
                       id={INTERNAL_NOTE_ID}
-                      className="text-xs"
-                      style={{ color: 'var(--color-text-subtle)', margin: 0, lineHeight: 1.45 }}
+                      style={{
+                        margin: 0,
+                        fontSize: '0.71875rem',
+                        fontWeight: 500,
+                        lineHeight: 1.45,
+                        color: 'var(--color-text-subtle)',
+                      }}
                     >
                       {request.isInternal
                         ? 'Hidden from the client portal.'
@@ -2413,19 +2693,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     type="button"
                     onClick={handleUnlinkFromParent}
                     disabled={unlinkingParent || !canWrite}
-                    className="tahi-focus-ring flex items-center transition-colors min-h-11 md:min-h-8"
+                    className={RAIL_ACTION_CLASS}
                     style={{
-                      gap: '0.375rem',
-                      padding: '0.3125rem 0.625rem',
-                      fontSize: '0.75rem',
-                      fontWeight: 500,
-                      borderRadius: 'var(--radius-button)',
+                      ...RAIL_ACTION_STYLE,
                       border: '1px solid var(--color-border)',
                       background: 'var(--color-bg)',
                       color: 'var(--color-text-muted)',
                       cursor: unlinkingParent || !canWrite ? 'not-allowed' : 'pointer',
                       opacity: unlinkingParent || !canWrite ? 0.6 : 1,
-                      justifyContent: 'flex-start',
                     }}
                     onMouseEnter={e => {
                       if (!unlinkingParent && canWrite) {
@@ -2441,8 +2716,8 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     }}
                   >
                     {unlinkingParent
-                      ? <Loader2 size={12} className="animate-spin" aria-hidden="true" />
-                      : <RefreshCw size={12} aria-hidden="true" />}
+                      ? <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+                      : <RefreshCw size={13} aria-hidden="true" />}
                     Make top-level
                   </button>
                 )}
@@ -2451,55 +2726,45 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                     existing task wizard seeded from this request; "Suggest
                     triage" fetches routing suggestions into the banner above.
                     Neither changes anything without an explicit follow-up. */}
-                <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '0.25rem 0' }} aria-hidden="true" />
+                <div style={{ height: '1px', background: 'var(--color-border-subtle)', margin: '0.25rem 0' }} aria-hidden="true" />
                 <button
                   type="button"
                   onClick={() => setWizardOpen(true)}
                   disabled={!canWrite}
-                  className="tahi-focus-ring flex items-center transition-colors min-h-11 md:min-h-8"
+                  className={RAIL_ACTION_CLASS}
                   style={{
-                    gap: '0.375rem',
-                    padding: '0.3125rem 0.625rem',
-                    fontSize: '0.75rem',
-                    fontWeight: 500,
-                    borderRadius: 'var(--radius-button)',
+                    ...RAIL_ACTION_STYLE,
                     border: '1px solid var(--color-border)',
                     background: 'var(--color-bg)',
                     color: 'var(--color-brand)',
                     cursor: canWrite ? 'pointer' : 'not-allowed',
                     opacity: canWrite ? 1 : 0.6,
-                    justifyContent: 'flex-start',
                   }}
                   onMouseEnter={e => { if (canWrite) e.currentTarget.style.background = 'var(--color-brand-50)' }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg)' }}
                 >
-                  <Wand2 size={12} aria-hidden="true" />
+                  <Wand2 size={13} aria-hidden="true" />
                   AI: break into tasks
                 </button>
                 <button
                   type="button"
                   onClick={runTriage}
                   disabled={triageLoading || !canWrite}
-                  className="tahi-focus-ring flex items-center transition-colors min-h-11 md:min-h-8"
+                  className={RAIL_ACTION_CLASS}
                   style={{
-                    gap: '0.375rem',
-                    padding: '0.3125rem 0.625rem',
-                    fontSize: '0.75rem',
-                    fontWeight: 500,
-                    borderRadius: 'var(--radius-button)',
+                    ...RAIL_ACTION_STYLE,
                     border: '1px solid var(--color-border)',
                     background: 'var(--color-bg)',
                     color: 'var(--color-brand)',
                     cursor: triageLoading || !canWrite ? 'not-allowed' : 'pointer',
                     opacity: triageLoading || !canWrite ? 0.6 : 1,
-                    justifyContent: 'flex-start',
                   }}
                   onMouseEnter={e => { if (!triageLoading && canWrite) e.currentTarget.style.background = 'var(--color-brand-50)' }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg)' }}
                 >
                   {triageLoading
-                    ? <Loader2 size={12} className="animate-spin" aria-hidden="true" />
-                    : <Sparkles size={12} aria-hidden="true" />}
+                    ? <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+                    : <Sparkles size={13} aria-hidden="true" />}
                   {triageLoading ? 'Analysing…' : 'AI: suggest triage'}
                 </button>
                 {triageError && (
@@ -2511,7 +2776,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             </SidebarCard>
           )}
 
-          {isAdmin && newUi && <DiscoveryCallsCard parentType="request" parentId={requestId} />}
+          {isAdmin && newUi && (
+            <DiscoveryCallsCard
+              title="Discovery calls"
+              variant="rail"
+              parentType="request"
+              parentId={requestId}
+            />
+          )}
 
           {/* Details, then People, then Checklists on the ported rail;
               the legacy rail keeps Details last. */}
@@ -2902,6 +3174,45 @@ function formatActivityDate(iso: string) {
   }
 }
 
+// ---- Header avatars ----------------------------------------------------------
+
+/** Initials from a person or company name, capped at two letters. */
+function initialsOf(name: string): string {
+  return name
+    .split(' ')
+    .map(s => s[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase()
+}
+
+/**
+ * The client's bubble in the header sub-meta. Organisations carry no logo on
+ * the detail payload, so this is initials rather than an image with a
+ * fallback: there is nothing to fall back FROM.
+ */
+function OrgAvatar({ name }: { name: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-flex items-center justify-center flex-shrink-0"
+      style={{
+        width: '1.125rem',
+        height: '1.125rem',
+        borderRadius: 'var(--radius-full)',
+        background: 'var(--color-brand-100)',
+        color: 'var(--color-brand-dark)',
+        fontSize: '0.5rem',
+        fontWeight: 700,
+        lineHeight: 1,
+      }}
+    >
+      {initialsOf(name)}
+    </span>
+  )
+}
+
 // ---- People Stack (header) ---------------------------------------------------
 
 /**
@@ -2910,7 +3221,22 @@ function formatActivityDate(iso: string) {
  * people collapse into a "+N" chip. Purely visual - the full list of
  * people is managed in the sidebar People panel.
  */
-function PeopleStack({ participants }: { participants: Participant[] }) {
+function PeopleStack({
+  participants,
+  linkPeople = false,
+}: {
+  participants: Participant[]
+  /**
+   * Turn each teammate's bubble into a door to their work. The list's
+   * `?assignee=` narrowing matches everyone ON a request, pm and follower
+   * included, so a PM bubble lands on a list that still contains the request
+   * it was clicked from. Studio audiences only: the dimension is a studio
+   * one, and there is no per-teammate page in this app to send anyone else
+   * to. Contacts are never linked, in either audience, because nothing
+   * narrows the list by contact.
+   */
+  linkPeople?: boolean
+}) {
   const pm = participants.find(p => p.role === 'pm') ?? null
   const assignees = participants.filter(p => p.role === 'assignee')
   const followers = participants.filter(p => p.role === 'follower')
@@ -2953,39 +3279,62 @@ function PeopleStack({ participants }: { participants: Participant[] }) {
       aria-label={`${ordered.length} ${ordered.length === 1 ? 'person' : 'people'}`}
     >
       <div
-        className="flex items-center"
+        className="tahi-people-stack"
         style={{ paddingRight: overflow > 0 ? '0.25rem' : 0 }}
       >
-        {visible.map(({ p, accent }, i) => (
-          <span
-            key={p.id}
-            title={`${p.name ?? 'Unknown'}${p.role === 'pm' ? ' - PM' : p.role === 'assignee' ? ' - Assignee' : ' - Follower'}`}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '1.75rem',
-              height: '1.75rem',
-              borderRadius: '9999px',
-              background: accent === 'pm' ? 'var(--color-brand-100)' : 'var(--color-bg-tertiary)',
-              color: accent === 'pm' ? 'var(--color-brand-dark)' : 'var(--color-text)',
-              fontSize: '0.625rem',
-              fontWeight: 600,
-              border: `2px solid var(--color-bg)`,
-              marginLeft: i === 0 ? 0 : '-0.4375rem',
-              position: 'relative',
-              zIndex: visible.length - i,
-              boxShadow: accent === 'pm' ? '0 0 0 1px var(--color-brand)' : undefined,
-            }}
-          >
-            {(p.name ?? '?')
-              .split(' ')
-              .map(s => s[0])
-              .slice(0, 2)
-              .join('')
-              .toUpperCase()}
-          </span>
-        ))}
+        {visible.map(({ p, accent }, i) => {
+          const roleLabel = p.role === 'pm' ? 'PM' : p.role === 'assignee' ? 'Assignee' : 'Follower'
+          const name = p.name ?? 'Unknown'
+          const bubble = (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '1.75rem',
+                height: '1.75rem',
+                borderRadius: 'var(--radius-full)',
+                background: accent === 'pm' ? 'var(--color-brand-100)' : 'var(--color-bg-tertiary)',
+                color: accent === 'pm' ? 'var(--color-brand-dark)' : 'var(--color-text)',
+                fontSize: '0.625rem',
+                fontWeight: 600,
+                border: '2px solid var(--color-bg)',
+                boxShadow: accent === 'pm' ? '0 0 0 1px var(--color-brand)' : undefined,
+              }}
+            >
+              {initialsOf(name) || '?'}
+            </span>
+          )
+          // Only the z-order is inline. The overlap itself lives in
+          // .tahi-people-seat, so it can come off below md where the bubbles
+          // become touch targets.
+          const stackStyle: React.CSSProperties = { zIndex: visible.length - i }
+          if (linkPeople && p.participantType === 'team_member') {
+            return (
+              <Link
+                key={p.id}
+                data-private
+                href={requestsListHref({ assignee: p.participantId })}
+                title={`${name} - ${roleLabel}. See everything they are on.`}
+                className="tahi-people-seat tahi-avatar-link tahi-focus-ring"
+                style={stackStyle}
+              >
+                {bubble}
+              </Link>
+            )
+          }
+          return (
+            <span
+              key={p.id}
+              data-private
+              title={`${name} - ${roleLabel}`}
+              className="tahi-people-seat"
+              style={stackStyle}
+            >
+              {bubble}
+            </span>
+          )
+        })}
       </div>
       {overflow > 0 && (
         <span
@@ -3088,27 +3437,116 @@ function RevisionChip({
 // Each request-detail sidebar block renders as its own standalone card
 // (kept separate rather than the deal-detail "one card, many sections"
 // pattern). Composed from the shared <Card> primitive with bordered header.
-function SidebarCard({ title, children }: { title: string; children: React.ReactNode }) {
+//
+// One head shape for every card in the rail, ported from the prototype's
+// `.req-rail-head`: an icon tile, an 11px uppercase title, an optional count
+// on the right, and an optional action slot after it. The tile uses the leaf
+// radius, which is what the design system reserves for icon backgrounds.
+//
+// Overflow stays hidden on every card, with no escape hatch: each rail menu
+// leaves through the shared portalled <Popover> rather than out of the card
+// box, so nothing inside needs to spill past the rounded corners.
+
+/** The icon tile in a rail card head. Decorative: the title carries meaning. */
+function RailHeadIcon({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-flex items-center justify-center flex-shrink-0"
+      style={{
+        width: '1.5rem',
+        height: '1.5rem',
+        borderRadius: 'var(--radius-leaf-sm)',
+        background: 'var(--color-bg-secondary)',
+        color: 'var(--color-text-muted)',
+      }}
+    >
+      {children}
+    </span>
+  )
+}
+
+/** The head's tabular count, e.g. how many calls or checklists a card holds. */
+function RailHeadCount({ value }: { value: number }) {
+  return (
+    <span
+      className="tabular-nums"
+      style={{ fontSize: '0.71875rem', fontWeight: 600, color: 'var(--color-text-subtle)' }}
+    >
+      {value}
+    </span>
+  )
+}
+
+function SidebarCard({
+  title,
+  icon,
+  count,
+  action,
+  bodyPadding = '0.8125rem 0.875rem',
+  children,
+}: {
+  title: string
+  icon?: React.ReactNode
+  count?: number
+  /** Sits hard right in the head: an add button, a toggle. */
+  action?: React.ReactNode
+  /** Prototype default. Details passes a tighter vertical pad, because its
+   *  rows carry their own rhythm and dividers. */
+  bodyPadding?: string
+  children: React.ReactNode
+}) {
   return (
     <Card padding="none" style={{ overflow: 'hidden' }}>
       <div
+        className="flex items-center"
         style={{
-          padding: '0.75rem 1rem',
+          gap: '0.5rem',
+          padding: '0.6875rem 0.875rem',
           borderBottom: '1px solid var(--color-border-subtle)',
         }}
       >
+        {icon && <RailHeadIcon>{icon}</RailHeadIcon>}
         <h3
-          className="text-xs font-semibold uppercase"
-          style={{ color: 'var(--color-text-muted)', letterSpacing: '0.04em' }}
+          className="uppercase"
+          style={{
+            margin: 0,
+            fontSize: '0.6875rem',
+            fontWeight: 700,
+            letterSpacing: '0.05em',
+            color: 'var(--color-text-subtle)',
+          }}
         >
           {title}
         </h3>
+        {count != null && <RailHeadCount value={count} />}
+        {action && <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>{action}</span>}
       </div>
-      <div style={{ padding: '1rem' }}>
+      <div style={{ padding: bodyPadding }}>
         {children}
       </div>
     </Card>
   )
+}
+
+// ---- Actions card controls ---------------------------------------------------
+
+/**
+ * Every command in the Actions card wears the rail's one button shape, ported
+ * from the prototype's `.req-timer-btn`: full width, 2.25rem tall from md up
+ * and 2.75rem below it, a 12.5px/600 label with the icon on the left. Each
+ * caller supplies only what differs (border, fill, text, hover), so the four
+ * of them cannot drift apart again.
+ */
+const RAIL_ACTION_CLASS = 'tahi-focus-ring flex items-center w-full min-h-11 md:min-h-9'
+const RAIL_ACTION_STYLE: React.CSSProperties = {
+  gap: '0.4375rem',
+  padding: '0 0.6875rem',
+  fontSize: '0.78125rem',
+  fontWeight: 600,
+  borderRadius: 'var(--radius-md)',
+  justifyContent: 'flex-start',
+  transition: 'background-color 140ms ease, border-color 140ms ease, color 140ms ease',
 }
 
 // ---- Internal switch ---------------------------------------------------------
@@ -3163,7 +3601,7 @@ function InternalSwitch({
         border: 'none',
         background: 'transparent',
         borderRadius: 'var(--radius-sm)',
-        fontSize: '0.75rem',
+        fontSize: '0.78125rem',
         fontWeight: 500,
         color: 'var(--color-text)',
         textAlign: 'left',
@@ -3206,24 +3644,59 @@ function InternalSwitch({
 
 // ---- Detail Row --------------------------------------------------------------
 
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * One Details row, at the prototype's rhythm (`.req-detail-row`): a fixed
+ * 4.875rem key column, the value hard right at 12.5px/600, and a hairline
+ * between rows. `divided` rather than a `+` selector, so the separator is a
+ * property of the list the caller builds and this stays inline-styled.
+ */
+function DetailRow({
+  label,
+  divided = false,
+  children,
+}: {
+  label: string
+  /** Draw the hairline above this row. False on the first row of a card. */
+  divided?: boolean
+  children: React.ReactNode
+}) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
-      <dt className="text-xs font-medium flex-shrink-0" style={{ color: 'var(--color-text-subtle)', paddingTop: '0.1875rem' }}>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.625rem',
+        padding: '0.4375rem 0',
+        borderTop: divided ? '1px solid var(--color-border-subtle)' : undefined,
+      }}
+    >
+      <dt
+        className="flex-shrink-0"
+        style={{
+          width: '4.875rem',
+          fontSize: '0.78125rem',
+          fontWeight: 500,
+          color: 'var(--color-text-muted)',
+        }}
+      >
         {label}
       </dt>
       {/* The value cell grows into the row instead of shrink-wrapping the
           trigger's margin box, so an inline editor gets the whole width the
           rail can spare before its label starts to ellipsis. */}
       <dd
-        className="text-sm text-right"
+        className="text-right"
         style={{
+          margin: 0,
+          fontSize: '0.78125rem',
+          fontWeight: 600,
           color: 'var(--color-text)',
           flex: '1 1 auto',
           minWidth: 0,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'flex-end',
+          gap: '0.4375rem',
         }}
       >
         {children}
@@ -3402,86 +3875,55 @@ function ChecklistsPanel({ checklists, onSave, isAdmin }: ChecklistsPanelProps) 
     onSave(updated)
   }
 
-  return (
-    <div
-      className="bg-[var(--color-bg)] rounded-xl overflow-hidden"
-      style={{ border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xs)' }}
-    >
-      <div
-        className="flex items-center justify-between"
-        style={{ padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}
-      >
-        <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-          <ListChecks size={14} style={{ color: 'var(--color-text-subtle)' }} />
-          Checklists
-          {checklists.length > 0 && (
-            <span
-              className="text-xs font-normal rounded-full"
-              style={{
-                padding: '0.0625rem 0.4375rem',
-                background: 'var(--color-bg-tertiary)',
-                color: 'var(--color-text-subtle)',
-              }}
-            >
-              {checklists.length}
-            </span>
-          )}
-        </h2>
-        {isAdmin && !addingChecklist && (
-          <button
-            type="button"
-            onClick={() => setAddingChecklist(true)}
-            className="flex items-center gap-1 text-xs font-medium transition-colors"
-            style={{
-              padding: '0.375rem 0.75rem',
-              borderRadius: 'var(--radius-button)',
-              border: '1px solid var(--color-brand)',
-              color: 'var(--color-brand)',
-              background: 'var(--color-bg)',
-              cursor: 'pointer',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-brand-50)' }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg)' }}
-          >
-            <Plus size={12} />
-            Add Checklist
-          </button>
-        )}
-      </div>
+  const total = checklists.length
 
-      {/* Add new checklist form */}
+  return (
+    <SidebarCard
+      title="Checklists"
+      icon={<ListChecks size={14} />}
+      count={total}
+      action={isAdmin && !addingChecklist ? (
+        <button
+          type="button"
+          onClick={() => setAddingChecklist(true)}
+          aria-label="Add a checklist"
+          title="Add a checklist"
+          className="tahi-rail-head-action tahi-focus-ring inline-flex items-center justify-center h-11 w-11 md:h-6 md:w-6"
+        >
+          <Plus size={15} aria-hidden="true" />
+        </button>
+      ) : undefined}
+    >
+      {/* Add a checklist. The input owns the brand ring the way every other
+          inline editor in the rail does, so there is one edit affordance on
+          this page rather than two. */}
       {addingChecklist && (
-        <div className="flex items-center gap-2" style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--color-row-border)' }}>
+        <div className="flex items-center" style={{ gap: '0.375rem', marginBottom: total > 0 ? '0.625rem' : 0 }}>
           <input
             type="text"
             value={newChecklistTitle}
             onChange={e => setNewChecklistTitle(e.target.value)}
-            placeholder="Checklist title..."
+            placeholder="Name the checklist…"
+            aria-label="New checklist title"
             autoFocus
-            className="flex-1 focus:outline-none"
-            style={{
-              padding: '0.375rem 0.5rem',
-              fontSize: '0.8125rem',
-              border: '1px solid var(--color-border)',
-              borderRadius: '0.25rem',
-              color: 'var(--color-text)',
-              background: 'var(--color-bg)',
-            }}
+            className="tahi-rail-input flex-1"
             onKeyDown={e => {
               if (e.key === 'Enter') { e.preventDefault(); addChecklist() }
-              if (e.key === 'Escape') setAddingChecklist(false)
+              if (e.key === 'Escape') { setAddingChecklist(false); setNewChecklistTitle('') }
             }}
           />
           <button
             type="button"
             onClick={addChecklist}
-            className="text-xs font-semibold"
+            className="tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 h-11 md:h-8"
             style={{
-              padding: '0.375rem 0.75rem',
+              padding: '0 0.625rem',
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              border: '1px solid var(--color-brand)',
               background: 'var(--color-brand)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '0.25rem',
+              color: 'var(--color-text-on-dark)',
+              borderRadius: 'var(--radius-md)',
               cursor: 'pointer',
             }}
           >
@@ -3490,13 +3932,16 @@ function ChecklistsPanel({ checklists, onSave, isAdmin }: ChecklistsPanelProps) 
           <button
             type="button"
             onClick={() => { setAddingChecklist(false); setNewChecklistTitle('') }}
-            className="text-xs"
+            className="tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 h-11 md:h-8"
             style={{
-              padding: '0.375rem',
-              background: 'none',
+              padding: '0 0.5rem',
+              fontSize: '0.75rem',
+              fontWeight: 500,
               border: 'none',
+              background: 'transparent',
+              color: 'var(--color-text-muted)',
+              borderRadius: 'var(--radius-md)',
               cursor: 'pointer',
-              color: 'var(--color-text-subtle)',
             }}
           >
             Cancel
@@ -3504,174 +3949,168 @@ function ChecklistsPanel({ checklists, onSave, isAdmin }: ChecklistsPanelProps) 
         </div>
       )}
 
-      {checklists.length === 0 && !addingChecklist ? (
-        <div className="flex flex-col items-center justify-center text-center" style={{ padding: '2.5rem 1.5rem', gap: '0.375rem' }}>
-          <ListChecks size={18} style={{ color: 'var(--color-text-subtle)', marginBottom: '0.25rem' }} />
-          <p className="text-sm" style={{ color: 'var(--color-text-subtle)' }}>No checklists yet.</p>
-        </div>
-      ) : (
-        <div>
-          {checklists.map((cl, ci) => {
-            const doneCount = cl.items.filter(i => i.done).length
-            const totalCount = cl.items.length
-            const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0
+      {total === 0 && !addingChecklist && (
+        <p className="tahi-rail-empty">
+          {isAdmin ? 'No checklists yet. Add one to break this down.' : 'No checklists yet.'}
+        </p>
+      )}
 
-            return (
-              <div
-                key={ci}
-                style={{ borderBottom: ci < checklists.length - 1 ? '1px solid var(--color-row-border)' : 'none' }}
+      {checklists.map((cl, ci) => {
+        const doneCount = cl.items.filter(i => i.done).length
+        const totalCount = cl.items.length
+        const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0
+
+        return (
+          <div
+            key={ci}
+            style={{
+              paddingTop: ci === 0 ? 0 : '0.75rem',
+              marginTop: ci === 0 ? 0 : '0.75rem',
+              borderTop: ci === 0 ? undefined : '1px solid var(--color-border-subtle)',
+            }}
+          >
+            <div className="flex items-center" style={{ gap: '0.5rem', marginBottom: '0.375rem' }}>
+              <span
+                className="truncate"
+                style={{ fontSize: '0.78125rem', fontWeight: 600, color: 'var(--color-text)', minWidth: 0 }}
               >
-                {/* Checklist header */}
-                <div className="flex items-center justify-between" style={{ padding: '0.75rem 1.25rem' }}>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{cl.title}</span>
-                    {totalCount > 0 && (
-                      <span className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
-                        {doneCount}/{totalCount}
+                {cl.title}
+              </span>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => removeChecklist(ci)}
+                  aria-label={`Remove the ${cl.title} checklist`}
+                  title="Remove checklist"
+                  className="tahi-rail-x tahi-focus-ring inline-flex items-center justify-center h-11 w-11 md:h-6 md:w-6"
+                  style={{ marginLeft: 'auto' }}
+                >
+                  <Trash2 size={13} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+
+            {/* Progress. Ported from `.req-check-progress`: a 0.375rem track
+                with the fraction beside it, not under it. */}
+            {totalCount > 0 && (
+              <div className="flex items-center" style={{ gap: '0.5625rem', marginBottom: '0.375rem' }}>
+                <div
+                  role="progressbar"
+                  aria-valuenow={progress}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`${cl.title} progress`}
+                  style={{
+                    flex: 1,
+                    height: '0.375rem',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--color-bg-secondary)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <span
+                    style={{
+                      display: 'block',
+                      height: '100%',
+                      width: `${progress}%`,
+                      borderRadius: 'var(--radius-sm)',
+                      background: progress === 100 ? 'var(--color-success)' : 'var(--color-brand)',
+                      transition: 'width var(--motion-medium) var(--ease-out)',
+                    }}
+                  />
+                </div>
+                <span
+                  className="tabular-nums flex-shrink-0"
+                  style={{ fontSize: '0.71875rem', fontWeight: 600, color: 'var(--color-text-muted)' }}
+                >
+                  {doneCount}/{totalCount}
+                </span>
+              </div>
+            )}
+
+            {/* Items. The whole box-and-label is one control, so the label is
+                a target too, with the remove button as its sibling rather
+                than nested inside it.
+
+                Checklists are client-visible, and a client cannot tick one.
+                They get the same drawing as a reading, not a control they are
+                barred from: an element named after the STATE it reports, out
+                of the tab order because there is nothing to operate. Only a
+                viewer who can toggle gets the button and its aria-pressed. */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
+              {cl.items.map((item, ii) => (
+                <div key={ii} className="flex items-center" style={{ gap: '0.375rem' }}>
+                  {isAdmin ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleItem(ci, ii)}
+                      aria-pressed={item.done}
+                      aria-label={item.done ? `Mark ${item.label} incomplete` : `Mark ${item.label} complete`}
+                      className={`tahi-check tahi-focus-ring min-h-11 md:min-h-0${item.done ? ' is-done' : ''}`}
+                    >
+                      <span aria-hidden="true" className="tahi-check-box">
+                        <Check size={12} strokeWidth={3} />
                       </span>
-                    )}
-                  </div>
+                      <span className="tahi-check-label">{item.label}</span>
+                    </button>
+                  ) : (
+                    <span
+                      role="img"
+                      aria-label={`${item.label}: ${item.done ? 'completed' : 'not completed'}`}
+                      className={`tahi-check is-static${item.done ? ' is-done' : ''}`}
+                    >
+                      <span aria-hidden="true" className="tahi-check-box">
+                        <Check size={12} strokeWidth={3} />
+                      </span>
+                      <span className="tahi-check-label">{item.label}</span>
+                    </span>
+                  )}
                   {isAdmin && (
                     <button
                       type="button"
-                      onClick={() => removeChecklist(ci)}
-                      className="transition-colors"
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem', color: 'var(--color-text-subtle)' }}
-                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-danger)' }}
-                      onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-subtle)' }}
-                      aria-label="Remove checklist"
+                      onClick={() => removeItem(ci, ii)}
+                      aria-label={`Remove ${item.label}`}
+                      title="Remove item"
+                      className="tahi-rail-x tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 h-11 w-11 md:h-6 md:w-6"
+                      style={{ marginLeft: 'auto' }}
                     >
-                      <Trash2 size={13} />
+                      <X size={13} aria-hidden="true" />
                     </button>
                   )}
                 </div>
+              ))}
+            </div>
 
-                {/* Progress bar */}
-                {totalCount > 0 && (
-                  <div style={{ padding: '0 1.25rem 0.5rem' }}>
-                    <div style={{ height: 4, borderRadius: 2, background: 'var(--color-bg-tertiary)', overflow: 'hidden' }}>
-                      <div
-                        style={{
-                          height: '100%',
-                          width: `${progress}%`,
-                          background: progress === 100 ? 'var(--color-success)' : 'var(--color-brand)',
-                          borderRadius: 2,
-                          transition: 'width 0.2s',
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Items */}
-                <div style={{ padding: '0 1.25rem 0.5rem' }}>
-                  {cl.items.map((item, ii) => (
-                    <div
-                      key={ii}
-                      className="flex items-center gap-2"
-                      style={{ padding: '0.25rem 0' }}
-                    >
-                      {isAdmin ? (
-                        <button
-                          type="button"
-                          onClick={() => toggleItem(ci, ii)}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            cursor: 'pointer',
-                            padding: 0,
-                            color: item.done ? 'var(--color-brand)' : 'var(--color-text-subtle)',
-                            flexShrink: 0,
-                          }}
-                          aria-label={item.done ? 'Mark incomplete' : 'Mark complete'}
-                        >
-                          <CheckCircle2 size={16} style={{ opacity: item.done ? 1 : 0.4 }} />
-                        </button>
-                      ) : (
-                        // Read-only for clients: progress, not a control.
-                        <span
-                          role="img"
-                          aria-label={item.done ? 'Completed' : 'Not completed'}
-                          style={{
-                            display: 'inline-flex',
-                            color: item.done ? 'var(--color-brand)' : 'var(--color-text-subtle)',
-                            flexShrink: 0,
-                          }}
-                        >
-                          <CheckCircle2 size={16} style={{ opacity: item.done ? 1 : 0.4 }} />
-                        </span>
-                      )}
-                      <span
-                        className="text-sm flex-1"
-                        style={{
-                          color: item.done ? 'var(--color-text-subtle)' : 'var(--color-text)',
-                          textDecoration: item.done ? 'line-through' : 'none',
-                        }}
-                      >
-                        {item.label}
-                      </span>
-                      {isAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => removeItem(ci, ii)}
-                          className="transition-colors"
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.125rem', color: 'var(--color-text-subtle)', opacity: 0.5 }}
-                          onMouseEnter={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.color = 'var(--color-danger)' }}
-                          onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
-                          aria-label="Remove item"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                {/* Add item */}
-                {isAdmin && (
-                  <div className="flex items-center gap-2" style={{ padding: '0.25rem 1.25rem 0.75rem' }}>
-                    <input
-                      type="text"
-                      value={newItemLabels[ci] ?? ''}
-                      onChange={e => setNewItemLabels(prev => ({ ...prev, [ci]: e.target.value }))}
-                      placeholder="Add item..."
-                      className="flex-1 focus:outline-none"
-                      style={{
-                        padding: '0.25rem 0.5rem',
-                        fontSize: '0.8125rem',
-                        border: '1px solid var(--color-border-subtle)',
-                        borderRadius: '0.25rem',
-                        color: 'var(--color-text)',
-                        background: 'var(--color-bg)',
-                      }}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') { e.preventDefault(); addItem(ci) }
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => addItem(ci)}
-                      className="flex items-center gap-1 text-xs transition-colors"
-                      style={{
-                        padding: '0.25rem 0.5rem',
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                        color: 'var(--color-brand)',
-                        fontWeight: 500,
-                      }}
-                    >
-                      <Plus size={12} />
-                      Add
-                    </button>
-                  </div>
-                )}
+            {/* Add an item. One quiet full-width row, the way the prototype's
+                `.rqd-add` sits under its list. */}
+            {isAdmin && (
+              <div className="flex items-center" style={{ gap: '0.375rem', marginTop: '0.25rem' }}>
+                <input
+                  type="text"
+                  value={newItemLabels[ci] ?? ''}
+                  onChange={e => setNewItemLabels(prev => ({ ...prev, [ci]: e.target.value }))}
+                  placeholder="Name the step…"
+                  aria-label={`Add a step to ${cl.title}`}
+                  className="tahi-rail-input flex-1"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.preventDefault(); addItem(ci) }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => addItem(ci)}
+                  aria-label={`Add the step to ${cl.title}`}
+                  title="Add step"
+                  className="tahi-rail-head-action tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 h-11 w-11 md:h-8 md:w-8"
+                >
+                  <Plus size={14} aria-hidden="true" />
+                </button>
               </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
+            )}
+          </div>
+        )
+      })}
+    </SidebarCard>
   )
 }
 
