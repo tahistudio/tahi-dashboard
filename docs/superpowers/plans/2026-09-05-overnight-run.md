@@ -39,3 +39,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - Claude Design has less context than we do. If the design omits a field, dropdown or action that the reader map or the repo needs, the port ADDS it. The design sets look, density and vocabulary; the repo's data model and the reader maps are the spec.
 - Mobile first, every page, 375px. The mobile top nav bar is too crowded: declutter it (brand mark, page title, search, bell, account; Track time, Daily brief, currency and theme move into a More sheet). Tier 1 item, being built now.
+
+## Run log
+
+- 22:50 NZST start. Landed before midnight: IC.1 to IC.5 invoices, IC.4a Xero pay rail (migration 0091 on both D1s), predictive autofill TP.5 (migration 0090 indexes on both D1s, legacy request dialog removed), Playwright coverage for blockers/week strip/AI create, My week note removed, email preview set sent.
+- 23:30 NZST usage limit hit; six agent workflows died mid-run (portal designers, sales designers, top-nav build, pay-path studio build, Clients critique). 01:20 NZST reset; resumed portal design, top nav, pay-path studio, Clients critique. Sales design queued behind the portal design to pace the limit.
