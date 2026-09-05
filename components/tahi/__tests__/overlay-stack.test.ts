@@ -3,6 +3,7 @@ import {
   createBodyScrollLock,
   createOverlayLayerStack,
   lockBodyScroll,
+  shouldDismissOnBackdrop,
   shouldHandleEscape,
   type ScrollLockTarget,
 } from '@/components/tahi/overlay-stack'
@@ -83,6 +84,37 @@ describe('shouldHandleEscape', () => {
     // and everything typed with it.
     expect(shouldHandleEscape(escape(), 'dialog', stack)).toBe(false)
     expect(shouldHandleEscape(escape(), 'popover', stack)).toBe(true)
+  })
+})
+
+describe('shouldDismissOnBackdrop', () => {
+  const scrim = { id: 'scrim' }
+  const panel = { id: 'panel' }
+
+  it('dismisses when the scrim itself was pressed and it is topmost', () => {
+    const stack = createOverlayLayerStack()
+    stack.push('sheet')
+    expect(shouldDismissOnBackdrop({ target: scrim, currentTarget: scrim }, 'sheet', stack)).toBe(true)
+  })
+
+  it('ignores a press that bubbled up from the panel', () => {
+    const stack = createOverlayLayerStack()
+    stack.push('sheet')
+    expect(shouldDismissOnBackdrop({ target: panel, currentTarget: scrim }, 'sheet', stack)).toBe(false)
+  })
+
+  it('stands down while a nested overlay is open above the sheet', () => {
+    const stack = createOverlayLayerStack()
+    stack.push('sheet')
+    stack.push('popover')
+
+    // Tapping the scrim to dismiss a currency list opened INSIDE the sheet.
+    // The popover closes on mousedown, so arming has to be decided then,
+    // while it still owns the top, not on the click that follows.
+    expect(shouldDismissOnBackdrop({ target: scrim, currentTarget: scrim }, 'sheet', stack)).toBe(false)
+
+    stack.remove('popover')
+    expect(shouldDismissOnBackdrop({ target: scrim, currentTarget: scrim }, 'sheet', stack)).toBe(true)
   })
 })
 

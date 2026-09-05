@@ -410,6 +410,24 @@
   justify-content: center;
 }
 
+/* Slot 1's other face: a back link to the parent segment on a detail route.
+   Same box as the brand so the bar does not shift when the slot swaps. */
+.tb-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  margin-left: -0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md-shell);
+  background: none;
+  color: var(--text-muted);
+  transition: background 0.14s var(--ease), color 0.14s var(--ease);
+}
+.tb-back:hover { background: var(--bg-secondary); color: var(--text); }
+
 /* The More trigger. Wears the viewer's avatar (it is also the account control)
    and a live dot while a timer runs, so moving the tracker into the sheet never
    hides that state. */
@@ -752,7 +770,9 @@
   padding: 0.5rem 0.75rem max(1.375rem, env(safe-area-inset-bottom));
 }
 .msheet-surface .msheet-grab { background: var(--border); }
-.msheet-surface .ms-glabel { color: var(--text-faint); }
+/* --text-faint is the rail sheet's label ink on a dark panel. On this one it
+   is #8a9987 on #ffffff at 11px, about 3.0:1, under AA for text this size. */
+.msheet-surface .ms-glabel { color: var(--text-muted); }
 
 /* Sheet header: who you are signed in as. */
 .tbs-head { display: flex; align-items: center; gap: 0.75rem; padding: 0.25rem 0.75rem 0.75rem; min-width: 0; }
@@ -786,9 +806,13 @@
 .tbs-row .tbs-val { margin-left: auto; flex-shrink: 0; font: 600 0.6875rem 'Manrope', sans-serif; letter-spacing: 0.03em; text-transform: uppercase; color: var(--text-muted); background: var(--bg-secondary); padding: 0.1875rem 0.5rem; border-radius: 999px; }
 .tbs-row:hover .tbs-val { background: var(--border-subtle); }
 .tbs-row .tbs-val.on { color: var(--brand-strong); background: var(--brand-100); }
-.tbs-row.danger { color: var(--color-danger); }
-.tbs-row.danger .tbs-ic { color: var(--color-danger); }
-.tbs-row.danger:hover { background: var(--color-danger-bg); }
+/* --badge-danger-*, not --color-danger: globals.css resolves the badge pair for
+   both themes, while --color-danger cannot reach 4.5:1 on any dark fill and
+   --color-danger-bg is deliberately never overridden in dark (hovering Sign out
+   flashed a near-white row on the dark sheet). */
+.tbs-row.danger { color: var(--badge-danger-text); }
+.tbs-row.danger .tbs-ic { color: var(--badge-danger-text); }
+.tbs-row.danger:hover { background: var(--badge-danger-bg); }
 /* The tracker and the brief supply their own trigger markup, so give their
    wrappers the row's full width. */
 .tbs-slot { width: 100%; }
@@ -820,7 +844,27 @@
     box-shadow: none;
   }
   .tb-bell:hover { background: var(--bg-secondary); border-color: transparent; box-shadow: none; }
-  .tb-bell-dot { top: 0.5rem; right: 0.5rem; }
+  /* The button sits directly on the bar here, so the dot's ring has to be the
+     bar's fill: --bg would draw a white halo in light and a #1c1b19 one in dark. */
+  .tb-bell-dot { top: 0.5rem; right: 0.5rem; border-color: var(--cream); }
+
+  /* The sheet is the only way to run the time tracker on a phone, so every
+     control in its panel gets a real target: the source tabs sat at ~29px, the
+     search at a hard 34px, the picker rows at ~33px and the clear button at
+     ~20px. The list also drops its own scroll region, because a nested
+     scroller inside an already-scrolling sheet is a trap on a touch screen. */
+  .tt-sheet .tt-btn,
+  .tt-sheet .tt-seg-b,
+  .tt-sheet .tt-opt { min-height: 2.75rem; }
+  .tt-sheet .tt-search { height: auto; min-height: 2.75rem; }
+  .tt-sheet .tt-search-x {
+    width: 2.75rem;
+    height: 2.75rem;
+    margin-right: -0.5rem;
+    align-items: center;
+    justify-content: center;
+  }
+  .tt-sheet .tt-list { max-height: none; overflow-y: visible; }
 
   /* Impersonation strip: the exit is the one control that must never squash,
      so the message wraps under it instead (same treatment as .ann-bar). */

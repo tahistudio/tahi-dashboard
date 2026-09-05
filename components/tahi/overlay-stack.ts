@@ -66,6 +66,29 @@ export function shouldHandleEscape(
 }
 
 /**
+ * True when a pointer event on an overlay's scrim should dismiss that overlay.
+ *
+ * Two rules, and both are load-bearing on a bottom sheet that hosts other
+ * overlays. The event has to have landed on the scrim itself, not bubbled up
+ * from the panel; and this layer has to be the topmost one. Without the second
+ * rule, tapping the scrim to dismiss a popover opened from inside the sheet
+ * takes the sheet with it: the popover closes on mousedown, so by the time the
+ * click arrives the sheet is topmost again. Arm on mousedown (while the
+ * popover still owns the top), act on the click.
+ *
+ * Structurally typed rather than taking a DOM event so the rule stays testable
+ * in this module's DOM-free environment.
+ */
+export function shouldDismissOnBackdrop(
+  event: { target: unknown; currentTarget: unknown },
+  layerId: string,
+  stack: OverlayLayerStack = overlayLayers,
+): boolean {
+  if (event.target !== event.currentTarget) return false
+  return stack.isTop(layerId)
+}
+
+/**
  * Everything Tab can land on inside an overlay panel, in DOM order.
  * tabindex="-1" is excluded everywhere, not just on the catch-all: a
  * roving-tabindex group (the request dialog's category tiles) is a pile of

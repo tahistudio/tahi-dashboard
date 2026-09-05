@@ -1,8 +1,10 @@
 'use client'
 
 /**
- * <TopBarMore>. The phone-only "More" control in the top bar, and the bottom
- * sheet it opens.
+ * <TopBarMore>. The phone-only account-and-tools control in the top bar, and
+ * the bottom sheet it opens. It is deliberately NOT called "More": the bottom
+ * tab bar ships a visible More tab on the same 375px screen, and two sheets
+ * both announcing as "More" is the confusion this one has to avoid.
  *
  * Why it exists: below md the bar was carrying six controls plus a breadcrumb
  * in 3.5rem, so every button squashed under its own 2.75rem touch target, and
@@ -21,8 +23,9 @@
  * dot: moving the tracker into a sheet must not hide that it is running.
  *
  * Sheet chrome is the shell's existing bottom sheet (.msheet-overlay/.msheet,
- * shared with the nav's More sheet) in its surface variant, and the Escape /
- * body-scroll / route-change behaviour comes from the shared useBottomSheet.
+ * shared with the nav's More sheet) in its surface variant, and the modal
+ * behaviour (layered Escape, scrim dismiss, body-scroll lock, focus trap and
+ * restore, close on route change) comes from the shared useBottomSheet.
  */
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
@@ -45,6 +48,10 @@ import { buildMoreSections, type MoreItemId } from '@/lib/top-bar-more-items'
 
 const THEME_KEY = 'tahi-theme'
 
+// The rail's breakpoint, as a media query. Everything this component drives is
+// `md:hidden`, so nothing above it should cost a request.
+const PHONE_QUERY = '(max-width: 47.9375rem)'
+
 type TimerStatus = 'idle' | 'running' | 'paused'
 
 interface TopBarMoreProps {
@@ -66,16 +73,31 @@ export function TopBarMore({ showAsAdmin }: TopBarMoreProps) {
   const [dark, setDark] = useState(false)
   const [timerStatus, setTimerStatus] = useState<TimerStatus>('idle')
   const [loadingClientView, setLoadingClientView] = useState(false)
+  const [isPhone, setIsPhone] = useState(false)
 
   const close = useCallback(() => setOpen(false), [])
-  useBottomSheet(open, close)
+  const { panelRef, overlayProps } = useBottomSheet(open, close)
+
+  // Below md only. Tracked rather than assumed so a tablet rotating into phone
+  // width picks the dot up, and so the desktop bar pays nothing for it.
+  useEffect(() => {
+    const mq = window.matchMedia(PHONE_QUERY)
+    const apply = () => setIsPhone(mq.matches)
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [])
 
   // ── live timer dot ────────────────────────────────────────────────────────
-  // One read on mount, then whatever the shared timer bus announces. Every
-  // component that mutates a timer calls notifyTimerChanged(), including the
-  // <TimerChip> inside this sheet, so the dot follows without a poll of its own.
+  // One read once the viewport is actually a phone, then whatever the shared
+  // timer bus announces. Every component that mutates a timer calls
+  // notifyTimerChanged(), including the <TimerChip> inside this sheet, so the
+  // dot follows without a poll of its own. The `isPhone` gate matters: this
+  // component mounts at every width, and a <TimerChip> holding the same state
+  // is mounted a few nodes away, so without it every admin page load on desktop
+  // made two identical GET /api/admin/timers calls for a dot nobody can see.
   const readTimer = useCallback(async () => {
-    if (!showAsAdmin) return
+    if (!showAsAdmin || !isPhone) return
     try {
       const res = await fetch(apiPath('/api/admin/timers'))
       if (!res.ok) return
@@ -84,7 +106,7 @@ export function TopBarMore({ showAsAdmin }: TopBarMoreProps) {
     } catch {
       // offline or transient: leave the dot as it is rather than lying.
     }
-  }, [showAsAdmin])
+  }, [showAsAdmin, isPhone])
 
   useEffect(() => { void readTimer() }, [readTimer])
   useEffect(() => subscribeToTimerChanges(() => { void readTimer() }), [readTimer])
@@ -210,20 +232,26 @@ export function TopBarMore({ showAsAdmin }: TopBarMoreProps) {
         onClick={() => setOpen(v => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={timerRunning ? `More, timer ${timerStatus}` : 'More'}
+        aria-label={
+          timerRunning
+            ? `Your account and tools, timer ${timerStatus}`
+            : 'Your account and tools'
+        }
       >
         <span className="tb-more-av">{avatar}</span>
         {timerRunning && <span className="tb-more-dot" aria-hidden="true" />}
       </button>
 
       {open && (
-        <div className="msheet-overlay md:hidden" onClick={close}>
+        <div className="msheet-overlay md:hidden" {...overlayProps}>
           <div
+            ref={panelRef}
+            tabIndex={-1}
             className="msheet msheet-surface"
             onClick={e => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
-            aria-label="More"
+            aria-label="Your account and tools"
           >
             <div className="msheet-grab" aria-hidden="true" />
 

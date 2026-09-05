@@ -26,8 +26,9 @@
  * Admin-only. Clients never see this.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import Link from 'next/link'
+import { createPortal } from 'react-dom'
 import { Loader2, ExternalLink } from 'lucide-react'
 import { ShellIcon } from '@/components/tahi/shell-icons'
 import { apiPath } from '@/lib/api'
@@ -35,6 +36,7 @@ import { formatElapsed, isStaleTimer } from '@/lib/timer-helpers'
 import { notifyTimerChanged, subscribeToTimerChanges } from '@/lib/timer-events'
 import { useToast } from '@/components/tahi/toast'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
+import { overlayLayers, shouldHandleEscape } from '@/components/tahi/overlay-stack'
 
 interface ActiveTimerResponse {
   timer: {
@@ -121,6 +123,7 @@ export function TimerChip({ variant = 'bar' }: TimerChipProps) {
   const [pickerQuery, setPickerQuery] = useState('')
 
   const rootRef = useRef<HTMLDivElement>(null)
+  const layerId = useId()
   const { showToast } = useToast()
 
   // --- fetch + heartbeat ---------------------------------------------------
@@ -168,6 +171,16 @@ export function TimerChip({ variant = 'bar' }: TimerChipProps) {
     return () => clearInterval(id)
   }, [timer])
 
+  // The panel is a real overlay layer while it is open, even though it is not
+  // built on the shared <Popover>. In the sheet variant it opens INSIDE the
+  // mobile account sheet, and without a claim on the stack, Escape (and a tap
+  // on the scrim) closed the panel and the whole sheet under it in one go.
+  useEffect(() => {
+    if (!open) return
+    overlayLayers.push(layerId)
+    return () => overlayLayers.remove(layerId)
+  }, [open, layerId])
+
   // Outside-click + Escape close the panel (replaces the shared Popover).
   useEffect(() => {
     if (!open) return
@@ -175,7 +188,10 @@ export function TimerChip({ variant = 'bar' }: TimerChipProps) {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false)
+      if (!shouldHandleEscape(e, layerId)) return
+      e.preventDefault()
+      e.stopPropagation()
+      setOpen(false)
     }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
@@ -183,7 +199,7 @@ export function TimerChip({ variant = 'bar' }: TimerChipProps) {
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
     }
-  }, [open])
+  }, [open, layerId])
 
   // Clear the picker query whenever the panel closes.
   useEffect(() => { if (!open) setPickerQuery('') }, [open])
@@ -493,8 +509,13 @@ export function TimerChip({ variant = 'bar' }: TimerChipProps) {
         </div>
       )}
 
-      {/* Stale-timer recovery prompt */}
-      {staleTimer && timer && timer.id === staleTimer.id && (
+      {/* Stale-timer recovery prompt.
+          Portalled to <body> because the chip is deliberately mounted inside a
+          hidden wrapper on two surfaces (below md, where the sheet re-offers it,
+          and during a Client view preview, where it keeps heartbeating). A
+          display:none ancestor would swallow the dialog while its body-scroll
+          lock still took hold: an unscrollable page with no dialog on it. */}
+      {staleTimer && timer && timer.id === staleTimer.id && createPortal(
         <ConfirmDialog
           open
           title="Was your timer still running?"
@@ -507,7 +528,8 @@ export function TimerChip({ variant = 'bar' }: TimerChipProps) {
             setStaleTimer(null)
           }}
           onCancel={() => setStaleTimer(null)}
-        />
+        />,
+        document.body,
       )}
     </div>
   )

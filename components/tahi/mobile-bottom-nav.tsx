@@ -120,9 +120,10 @@ export function MobileBottomNav({ isAdmin = false, features, clientPortalRole }:
   const active     = (href: string) => isRouteActive(pathname, href)
   const closeSheet = useCallback(() => setSheetOpen(false), [])
 
-  // Escape dismisses, the page underneath stops scrolling, a route change
-  // closes. Shared with the top bar's More sheet so the two behave identically.
-  useBottomSheet(sheetOpen, closeSheet)
+  // Escape (topmost layer only), scrim dismiss, body-scroll lock, focus trap
+  // and close-on-route-change. Shared with the top bar's More sheet so the two
+  // behave identically.
+  const { panelRef, overlayProps } = useBottomSheet(sheetOpen, closeSheet)
 
   return (
     <>
@@ -165,8 +166,10 @@ export function MobileBottomNav({ isAdmin = false, features, clientPortalRole }:
           so nothing is hidden. Settings row pinned at the bottom.
           Overlay click and Escape both dismiss.                          */}
       {sheetOpen && (
-        <div className="msheet-overlay md:hidden" onClick={closeSheet}>
+        <div className="msheet-overlay md:hidden" {...overlayProps}>
           <div
+            ref={panelRef}
+            tabIndex={-1}
             className="msheet"
             onClick={e => e.stopPropagation()}
             role="dialog"

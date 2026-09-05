@@ -10,17 +10,23 @@
  * Below md the bar is five slots and nothing else, because the forest rail is
  * hidden there and the bar was trying to be a toolbar as well as a location:
  *
- *   [brand] [page name .............] [search] [notifications] [More]
+ *   [back-or-brand] [page name ......] [search] [notifications] [account]
+ *
+ * Slot 1 is the brand on a top-level route and a back link to the parent
+ * segment on a detail route (two or more path segments). On a phone that link
+ * is the only in-app way off /requests/{id} back to the list: the rail is
+ * hidden and the bottom tabs only reach top-level destinations.
  *
  * The tracker, the brief and the currency switcher stay mounted (they keep
  * polling and heartbeating) but are hidden by CSS and re-offered inside the
- * More sheet, where <TopBarMore> also carries the account controls the rail
+ * account sheet, where <TopBarMore> also carries the account controls the rail
  * owns on desktop. See components/tahi/top-bar-more.tsx.
  *
  * Impersonation is shown by the dedicated <ImpersonationBanner> strip above
  * this bar, not here, but it is read here: while previewing the portal as a
- * client the bar drops the studio tools and the bell switches audience, so the
- * preview is honest instead of showing team chrome over client data.
+ * client the bar hides the studio tools and the bell switches audience, so the
+ * preview is honest instead of showing team chrome over client data. Hides,
+ * not unmounts, for the tracker: it owns the timer heartbeat.
  */
 
 import { useState, useEffect } from 'react'
@@ -64,6 +70,14 @@ export function AppTopNav({ isAdmin, brandName, brandLogoUrl }: AppTopNavProps) 
   const showAsAdmin = isAdmin && !isImpersonatingClient
   const crumb = resolveCrumb(pathname, showAsAdmin)
 
+  // Slot 1 below md: back on a detail route, brand on a top-level one. A Link
+  // to the parent segment rather than router.back(), so it is a predictable
+  // destination even when the detail page was opened from a notification, a
+  // deep link or another detail page.
+  const segments = pathname.split('/').filter(Boolean)
+  const parentHref = segments.length >= 2 ? '/' + segments.slice(0, -1).join('/') : null
+  const parentLabel = parentHref ? resolveCrumb(parentHref, showAsAdmin).label : ''
+
   useEffect(() => {
     function handleGlobalKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
@@ -79,17 +93,28 @@ export function AppTopNav({ isAdmin, brandName, brandLogoUrl }: AppTopNavProps) 
 
   return (
     <header className="tahi-topbar">
-      {/* Phone-only brand mark. The rail owns the lockup from md up. */}
-      <Link href="/overview" className="tb-brand md:hidden tahi-focus-ring" aria-label={`${brandLabel} home`}>
-        {brandLogoUrl && !logoError ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={brandLogoUrl} alt="" onError={() => setLogoError(true)} />
-        ) : brandName ? (
-          <span className="tb-brand-initial" aria-hidden="true">{brandLabel.charAt(0).toUpperCase()}</span>
-        ) : (
-          <TahiIconMark size={28} title="Tahi" />
-        )}
-      </Link>
+      {/* Phone-only slot 1. The rail owns the lockup and the wayfinding from
+          md up, so both variants carry md:hidden. */}
+      {parentHref ? (
+        <Link
+          href={parentHref}
+          className="tb-back md:hidden tahi-focus-ring"
+          aria-label={`Back to ${parentLabel}`}
+        >
+          <ShellIcon n="back" s={20} />
+        </Link>
+      ) : (
+        <Link href="/overview" className="tb-brand md:hidden tahi-focus-ring" aria-label={`${brandLabel} home`}>
+          {brandLogoUrl && !logoError ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={brandLogoUrl} alt="" onError={() => setLogoError(true)} />
+          ) : brandName ? (
+            <span className="tb-brand-initial" aria-hidden="true">{brandLabel.charAt(0).toUpperCase()}</span>
+          ) : (
+            <TahiIconMark size={28} title="Tahi" />
+          )}
+        </Link>
+      )}
 
       <div className="tb-crumb">
         {crumb.group && (
@@ -133,8 +158,16 @@ export function AppTopNav({ isAdmin, brandName, brandLogoUrl }: AppTopNavProps) 
         )}
         {/* Kept mounted below md (the tracker must keep heartbeating and the
             brief must keep its unread rule) but hidden: both are re-offered as
-            rows inside the More sheet. */}
-        {showAsAdmin && <div className="hidden md:flex"><TimerChip /></div>}
+            rows inside the account sheet.
+            The tracker hangs off isAdmin, not showAsAdmin, and is only HIDDEN
+            during a preview. Its 30s heartbeat lives inside <TimerChip> and a
+            timer reads as stale after two minutes, so unmounting it for the
+            length of a Client view preview was enough to come back to the
+            "your timer hasn't heartbeated" recovery prompt offering to log only
+            up to when it went quiet. */}
+        {isAdmin && (
+          <div className={showAsAdmin ? 'hidden md:flex' : 'hidden'}><TimerChip /></div>
+        )}
         {showAsAdmin && <span className="tb-divider hidden md:inline-block" aria-hidden="true" />}
         {showAsAdmin && <div className="hidden md:flex"><BriefingTrigger /></div>}
         {/* showAsAdmin here is Tahi-org membership minus an active client
