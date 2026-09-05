@@ -63,11 +63,12 @@ vi.mock('@/db/d1', () => ({
       isInternal: 'is_internal',
       assigneeId: 'assignee_id',
       title: 'title',
+      requestNumber: 'request_number',
       status: 'status',
       updatedAt: 'updated_at',
       deliveredAt: 'delivered_at',
     },
-    contacts: { _table: 'contacts', id: 'id', clerkUserId: 'clerk_user_id' },
+    contacts: { _table: 'contacts', id: 'id', name: 'name', email: 'email', clerkUserId: 'clerk_user_id' },
     messages: { _table: 'messages' },
     requestParticipants: {
       _table: 'request_participants',
@@ -187,8 +188,8 @@ describe('POST /api/portal/requests/[id]/messages - studio fan-out', () => {
     vi.mocked(createNotifications).mockResolvedValue({ delivered: 3, skipped: 0 })
     dbMock.state.queues = {
       requests: [
-        [{ id: 'req_1', orgId: 'org_client' }],                       // ownership check
-        [{ assigneeId: 'tm_assignee', title: 'New homepage' }],       // notify lookup
+        // One read: ownership check and notification subject in the same row.
+        [{ id: 'req_1', orgId: 'org_client', assigneeId: 'tm_assignee', title: 'New homepage', requestNumber: 4 }],
       ],
       contacts: [[{ id: 'ct_1' }]],
       request_participants: [[
@@ -213,8 +214,7 @@ describe('POST /api/portal/requests/[id]/messages - studio fan-out', () => {
   it('falls back to the whole studio when the request is unassigned', async () => {
     dbMock.state.queues = {
       requests: [
-        [{ id: 'req_1', orgId: 'org_client' }],
-        [{ assigneeId: null, title: 'Just submitted' }],
+        [{ id: 'req_1', orgId: 'org_client', assigneeId: null, title: 'Just submitted', requestNumber: 1 }],
       ],
       contacts: [[{ id: 'ct_1' }]],
       request_participants: [[]],
@@ -236,8 +236,7 @@ describe('POST /api/portal/requests/[id]/messages - studio fan-out', () => {
     vi.mocked(createNotifications).mockResolvedValue({ delivered: 0, skipped: 1 })
     dbMock.state.queues = {
       requests: [
-        [{ id: 'req_1', orgId: 'org_client' }],
-        [{ assigneeId: 'tm_never_signed_in', title: 'Orphaned' }],
+        [{ id: 'req_1', orgId: 'org_client', assigneeId: 'tm_never_signed_in', title: 'Orphaned', requestNumber: 2 }],
       ],
       contacts: [[{ id: 'ct_1' }]],
       request_participants: [[]],
@@ -253,8 +252,7 @@ describe('POST /api/portal/requests/[id]/messages - studio fan-out', () => {
     vi.mocked(createNotifications).mockResolvedValue({ delivered: 0, skipped: 0 })
     dbMock.state.queues = {
       requests: [
-        [{ id: 'req_1', orgId: 'org_client' }],
-        [{ assigneeId: 'tm_muted', title: 'Muted' }],
+        [{ id: 'req_1', orgId: 'org_client', assigneeId: 'tm_muted', title: 'Muted', requestNumber: 3 }],
       ],
       contacts: [[{ id: 'ct_1' }]],
       request_participants: [[]],

@@ -7,6 +7,8 @@ import { eq, desc, asc, and, ne, sql, inArray, notInArray } from 'drizzle-orm'
 import { getPlanLabel, resolveTracksConfig } from '@/lib/plan-utils'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 import { dispatchDomainEvent } from '@/lib/events'
+import { notifyAllAdmins } from '@/lib/notifications'
+import { studioNewRequestEmailPlan } from '@/lib/notification-email'
 import { loadRequestParticipants, CLIENT_VISIBLE_TEAM_ROLES } from '@/lib/request-participants'
 import {
   isRequestCategory,
@@ -396,18 +398,58 @@ export async function POST(req: NextRequest) {
     },
   })
 
-  if (!placement) {
-    return NextResponse.json({ id }, { status: 201 })
-  }
-
-  // With a placement the caller is the confirmation screen, which needs the
-  // request number, where the request landed in the queue, and whether this
-  // client is on a retainer at all.
+  // Tell the studio. A request emailed in already woke somebody up (the email
+  // intake webhook calls notifyAllAdmins); one filed in the product we are
+  // asking clients to move to notified nobody, and the only signal was a badge
+  // on a board someone had to open. The number is the client's own per-org
+  // sequence, so the client name goes with it or "REQ-3" means nothing.
   const [row] = await drizzle2
     .select({ requestNumber: schema.requests.requestNumber })
     .from(schema.requests)
     .where(eq(schema.requests.id, id))
     .limit(1)
+  const requestNumber = row?.requestNumber ?? null
+
+  const [org] = await drizzle2
+    .select({ name: schema.organisations.name })
+    .from(schema.organisations)
+    .where(eq(schema.organisations.id, orgId))
+    .limit(1)
+  const clientName = org?.name ?? 'a client'
+
+  const [submitter] = await drizzle2
+    .select({ name: schema.contacts.name })
+    .from(schema.contacts)
+    .where(eq(schema.contacts.clerkUserId, userId))
+    .limit(1)
+
+  const cleanTitle = title.trim()
+  await notifyAllAdmins(drizzle2, {
+    type: 'request_created',
+    title: requestNumber
+      ? `New request REQ-${requestNumber}: ${cleanTitle}`
+      : `New request: ${cleanTitle}`,
+    body: submitter?.name ? `From ${clientName}, ${submitter.name}` : `From ${clientName}`,
+    entityType: 'request',
+    entityId: id,
+    email: studioNewRequestEmailPlan({
+      requestId: id,
+      requestTitle: cleanTitle,
+      requestNumber,
+      clientName,
+      category: category ?? 'development',
+      priority,
+      submittedBy: submitter?.name ?? null,
+    }),
+  })
+
+  if (!placement) {
+    return NextResponse.json({ id }, { status: 201 })
+  }
+
+  // With a placement the caller is the confirmation screen, which also needs
+  // where the request landed in the queue and whether this client is on a
+  // retainer at all.
 
   // Position among the requests still waiting to be picked up, in the order
   // the capacity view reads them. A null queue_order sorts as zero so an older
@@ -434,7 +476,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     id,
-    requestNumber: row?.requestNumber ?? null,
+    requestNumber,
     placement,
     queuePosition: index >= 0 ? index + 1 : null,
     planLabel: sub ? getPlanLabel(sub.planType) : null,

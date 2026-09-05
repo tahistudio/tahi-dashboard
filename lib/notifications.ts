@@ -14,11 +14,19 @@
  * must never be written there directly; rows keyed on them are invisible to
  * everyone. Call sites therefore pass typed recipients and this module
  * resolves them to Clerk user ids, skipping people without a linked login.
+ *
+ * Email: a payload may carry an `email` plan, and then the same recipients
+ * also get the same event in their inbox (lib/notification-email.ts). One call
+ * site, two channels, so the bell and the email can never drift. The email
+ * path deliberately does NOT drop people without a Clerk login: an invited
+ * contact who has not signed in yet is invisible to the bell and reachable
+ * only by email, which is exactly the person a studio reply is aimed at.
  */
 
 import { schema } from '@/db/d1'
 import { eq, inArray } from 'drizzle-orm'
 import { filterRecipientsByInAppPref } from './notification-preferences'
+import { sendNotificationEmails, type NotificationEmailPlan } from './notification-email'
 
 // The event / entity vocabulary and the deep-link resolver live in a
 // client-safe module so the bell and this helper share one source of truth.
@@ -70,6 +78,12 @@ type NotificationPayload = {
   body?: string | null
   entityType?: NotificationEntityType | null
   entityId?: string | null
+  /**
+   * Optional inbox twin. When present the same recipients also receive the
+   * event as email, rendered per person from a React Email template. Best
+   * effort: a send failure is a logged warning, never an exception.
+   */
+  email?: NotificationEmailPlan
 }
 
 /**
@@ -142,17 +156,12 @@ async function resolveRecipients(
   return { resolved, skipped }
 }
 
-/**
- * Insert multiple notification rows (one per recipient).
- * Resolves domain ids to Clerk user ids, drops muted recipients, and
- * swallows errors so a notification failure never blocks the primary action.
- */
-export async function createNotifications(
+/** The bell half: resolve, filter, insert. Never throws. */
+async function insertNotificationRows(
   database: DrizzleDB,
   recipients: NotificationRecipient[],
   shared: NotificationPayload,
 ): Promise<NotifyResult> {
-  if (recipients.length === 0) return NO_RESULT
   try {
     const { resolved, skipped } = await resolveRecipients(database, recipients)
     if (resolved.length === 0) return { delivered: 0, skipped }
@@ -180,6 +189,30 @@ export async function createNotifications(
     console.error('[createNotifications] failed to insert notifications:', err)
     return NO_RESULT
   }
+}
+
+/**
+ * Insert multiple notification rows (one per recipient), and send the same
+ * event as email when the payload carries a plan.
+ *
+ * Resolves domain ids to Clerk user ids, drops muted recipients, and swallows
+ * errors so a notification failure never blocks the primary action.
+ *
+ * The email send is NOT conditional on the bell insert landing: a client org
+ * whose contacts have all been invited but never signed in produces zero bell
+ * rows and still has to be told.
+ */
+export async function createNotifications(
+  database: DrizzleDB,
+  recipients: NotificationRecipient[],
+  shared: NotificationPayload,
+): Promise<NotifyResult> {
+  if (recipients.length === 0) return NO_RESULT
+  const result = await insertNotificationRows(database, recipients, shared)
+  if (shared.email) {
+    await sendNotificationEmails(database, recipients, shared.type, shared.email)
+  }
+  return result
 }
 
 interface CreateNotificationParams extends NotificationPayload {
@@ -275,6 +308,12 @@ export async function resolveParticipants(
  * Skips when the mention id matches the sender id (no self-pings).
  * Silently no-ops if the mention id can't be resolved to a Clerk
  * user, e.g. team members that haven't been invited yet.
+ *
+ * `allowContacts: false` stops the contacts fallback dead. The composer's
+ * mention chips carry no trustworthy table hint (lib/parse-mentions always
+ * reports 'team_member'), so a caller writing something a client must never
+ * see has to be able to say "team members only" here rather than filter on a
+ * type it cannot rely on.
  */
 export async function notifyMentionedPerson(
   database: DrizzleDB,
@@ -286,6 +325,8 @@ export async function notifyMentionedPerson(
     body?: string | null
     entityType: NotificationEntityType
     entityId: string
+    /** Default true. False on an internal note or an internal request. */
+    allowContacts?: boolean
   },
 ): Promise<void> {
   if (params.mentionedId === params.senderTeamMemberId) return
@@ -309,7 +350,9 @@ export async function notifyMentionedPerson(
       return
     }
 
-    // Fall back to contacts (portal users).
+    // Fall back to contacts (portal users), unless the caller has told us this
+    // message is studio-only.
+    if (params.allowContacts === false) return
     const ct = await database
       .select({ clerkUserId: schema.contacts.clerkUserId })
       .from(schema.contacts)
@@ -331,9 +374,27 @@ export async function notifyMentionedPerson(
 }
 
 /**
- * Notify every Tahi team member with a linked Clerk account. The audience
- * emitter for internal events (new request, delivery off track, invoice paid).
- * One call, no recipient plumbing at the call site.
+ * What being put on a request means, said in the second person.
+ *
+ * Shared by the single participants POST and the bulk assign bar so the two
+ * cannot drift, and deliberately shaped like the task assignment copy
+ * ("Task assigned to you: ...") so the bell reads as one voice whichever
+ * surface the work arrived from.
+ */
+export function requestParticipantTitle(role: string, requestTitle: string): string {
+  if (role === 'assignee') return `Request assigned to you: "${requestTitle}"`
+  if (role === 'pm') return `You are now PM on: "${requestTitle}"`
+  return `You were added to: "${requestTitle}"`
+}
+
+/**
+ * Notify every Tahi team member. The audience emitter for internal events
+ * (new request, delivery off track, invoice paid). One call, no recipient
+ * plumbing at the call site.
+ *
+ * Hands the module typed teamMembers ids rather than pre-filtering on
+ * clerkUserId: the bell path still skips anyone without a linked login, and
+ * the email path now reaches them.
  */
 export async function notifyAllAdmins(
   database: DrizzleDB,
@@ -341,35 +402,95 @@ export async function notifyAllAdmins(
 ): Promise<void> {
   try {
     const members = await database
-      .select({ clerkUserId: schema.teamMembers.clerkUserId })
+      .select({ id: schema.teamMembers.id })
       .from(schema.teamMembers)
     const recipients: NotificationRecipient[] = members
-      .filter((m): m is { clerkUserId: string } => !!m.clerkUserId)
-      .map((m) => ({ clerkUserId: m.clerkUserId, userType: 'team_member' as const }))
+      .filter((m): m is { id: string } => !!m.id)
+      .map((m) => ({ teamMemberId: m.id }))
     await createNotifications(database, recipients, payload)
   } catch (err) {
     console.error('[notifyAllAdmins] failed:', err)
   }
 }
 
+export interface OrgContactAudience {
+  /**
+   * requests.brand_id for the thing being announced. Pass it and the audience
+   * is narrowed to the contacts who can actually open that row in the portal.
+   *
+   * The portal request list is brand scoped (app/api/portal/requests GET): a
+   * contact with brand links only sees requests whose brand is one of theirs,
+   * and a contact with no brand links sees everything. Without this the email
+   * was strictly wider than the portal, so a contact scoped to brand A got a
+   * subject line carrying brand B's request title plus 900 characters of the
+   * studio's reply, and a link they would be refused.
+   *
+   * Omit the option entirely (not `{ brandId: null }`) when the caller has not
+   * read the brand: the audience then stays org wide, which is what every
+   * pre-existing call site did.
+   */
+  brandId: string | null
+}
+
 /**
- * Notify every contact at a client org with a linked Clerk account. The
- * audience emitter for client-facing events (status changed, message posted,
- * invoice sent). Contacts without a Clerk login yet are skipped.
+ * Narrow an org's contacts to the ones the portal would show this brand's work
+ * to. Same rule as the portal GET, in the same direction: no brand links means
+ * no scoping, so an ordinary single brand client is unaffected.
+ */
+async function contactsForBrand(
+  database: DrizzleDB,
+  contactIds: string[],
+  brandId: string | null,
+): Promise<string[]> {
+  if (contactIds.length === 0) return contactIds
+  const links = await database
+    .select({
+      contactId: schema.brandContacts.contactId,
+      brandId: schema.brandContacts.brandId,
+    })
+    .from(schema.brandContacts)
+    .where(inArray(schema.brandContacts.contactId, contactIds))
+  if (links.length === 0) return contactIds
+
+  const brandsByContact = new Map<string, Set<string>>()
+  for (const link of links) {
+    if (!link.contactId || !link.brandId) continue
+    const set = brandsByContact.get(link.contactId) ?? new Set<string>()
+    set.add(link.brandId)
+    brandsByContact.set(link.contactId, set)
+  }
+  return contactIds.filter((id) => {
+    const brands = brandsByContact.get(id)
+    if (!brands || brands.size === 0) return true
+    return brandId !== null && brands.has(brandId)
+  })
+}
+
+/**
+ * Notify every contact at a client org, optionally narrowed to the ones who can
+ * see the brand the event belongs to. The audience emitter for client-facing
+ * events (status changed, message posted, invoice sent).
+ *
+ * A contact without a Clerk login gets no bell row (there is no id to key one
+ * on) but DOES get the email when the payload carries a plan. That gap was the
+ * whole reason an invited client heard nothing when the studio replied.
  */
 export async function notifyOrgContacts(
   database: DrizzleDB,
   orgId: string,
   payload: NotificationPayload,
+  audience?: OrgContactAudience,
 ): Promise<void> {
   try {
     const contacts = await database
-      .select({ clerkUserId: schema.contacts.clerkUserId })
+      .select({ id: schema.contacts.id })
       .from(schema.contacts)
       .where(eq(schema.contacts.orgId, orgId))
-    const recipients: NotificationRecipient[] = contacts
-      .filter((c): c is { clerkUserId: string } => !!c.clerkUserId)
-      .map((c) => ({ clerkUserId: c.clerkUserId, userType: 'contact' as const }))
+    let contactIds = contacts.filter((c): c is { id: string } => !!c.id).map((c) => c.id)
+    if (audience) {
+      contactIds = await contactsForBrand(database, contactIds, audience.brandId)
+    }
+    const recipients: NotificationRecipient[] = contactIds.map((id) => ({ contactId: id }))
     await createNotifications(database, recipients, payload)
   } catch (err) {
     console.error('[notifyOrgContacts] failed:', err)

@@ -22,9 +22,10 @@ interface CapturedSql {
  * the org's tracks override), so every other case leaves this empty and the
  * chain answers with no rows.
  */
-const captured: { runArgs: CapturedSql[]; selectResults: unknown[] } = {
+const captured: { runArgs: CapturedSql[]; selectResults: unknown[]; tables: unknown[] } = {
   runArgs: [],
   selectResults: [],
+  tables: [],
 }
 
 // ---------------------------------------------------------------------------
@@ -54,8 +55,22 @@ vi.mock('@/lib/events', () => ({
 vi.mock('@/db/d1', () => ({
   schema: {
     subscriptions: { orgId: 'org_id', status: 'status', planType: 'plan_type', hasPrioritySupport: 'has_priority_support' },
-    organisations: { id: 'id', tracksMode: 'tracks_mode', customSmallTracks: 'custom_small_tracks', customLargeTracks: 'custom_large_tracks' },
+    organisations: { id: 'id', name: 'name', tracksMode: 'tracks_mode', customSmallTracks: 'custom_small_tracks', customLargeTracks: 'custom_large_tracks' },
+    // Read back after the insert for the studio notification: the per-org
+    // number for the title, the org name, the submitter's name.
+    requests: { id: 'id', orgId: 'org_id', requestNumber: 'request_number', isInternal: 'is_internal', status: 'status', createdAt: 'created_at', queueOrder: 'queue_order' },
+    contacts: { id: 'id', name: 'name', clerkUserId: 'clerk_user_id' },
   },
+}))
+
+// The studio fan-out has its own suite (portal-request-created-notify);
+// stubbed here so these numbering tests keep their minimal schema mock.
+vi.mock('@/lib/notifications', () => ({
+  notifyAllAdmins: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('@/lib/notification-email', () => ({
+  studioNewRequestEmailPlan: vi.fn(() => ({ subject: 's', render: () => null })),
 }))
 
 // Capture the `sql` template. eq/and are called by the entitlement lookup; the
@@ -81,9 +96,15 @@ vi.mock('drizzle-orm', () => {
 vi.mock('@/lib/db', () => {
   // A chainable select whose terminal `limit` answers from selectResults.
   const chain: Record<string, unknown> = {}
-  for (const method of ['from', 'leftJoin', 'where', 'orderBy', 'offset']) {
+  for (const method of ['leftJoin', 'where', 'orderBy', 'offset']) {
     chain[method] = vi.fn(() => chain)
   }
+  // Recording which table each select reads is how the suite proves a small
+  // task never pays for the plan entitlement lookup.
+  chain.from = vi.fn((table: unknown) => {
+    captured.tables.push(table)
+    return chain
+  })
   chain.limit = vi.fn(() => Promise.resolve(
     captured.selectResults.length ? captured.selectResults.shift() : [],
   ))
@@ -101,6 +122,7 @@ vi.mock('@/lib/db', () => {
 import { POST } from '@/app/api/portal/requests/route'
 import { NextRequest } from 'next/server'
 import { getPortalAuth } from '@/lib/server-auth'
+import { schema } from '@/db/d1'
 
 type PortalAuth = Awaited<ReturnType<typeof getPortalAuth>>
 
@@ -128,6 +150,7 @@ describe('POST /api/portal/requests', () => {
     vi.clearAllMocks()
     captured.runArgs = []
     captured.selectResults = []
+    captured.tables = []
     process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
     vi.mocked(getPortalAuth).mockResolvedValue(portalAuth())
   })
@@ -178,6 +201,7 @@ describe('POST /api/portal/requests, submitted vocabulary', () => {
     vi.clearAllMocks()
     captured.runArgs = []
     captured.selectResults = []
+    captured.tables = []
     process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
     vi.mocked(getPortalAuth).mockResolvedValue(portalAuth())
   })
@@ -232,6 +256,7 @@ describe('POST /api/portal/requests, large_task entitlement', () => {
     vi.clearAllMocks()
     captured.runArgs = []
     captured.selectResults = []
+    captured.tables = []
     process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
     vi.mocked(getPortalAuth).mockResolvedValue(portalAuth())
   })
@@ -291,8 +316,15 @@ describe('POST /api/portal/requests, large_task entitlement', () => {
     plan({ planType: 'maintain', hasPrioritySupport: false })
     const res = await POST(makeRequest({ title: 'Tweak the footer', type: 'small_task' }))
     expect(res.status).toBe(201)
-    // The entitlement lookup is the only SELECT the POST issues, so an
-    // untouched queue proves a small request pays nothing for this check.
-    expect(captured.selectResults).toHaveLength(2)
+    // A small request never touches the plan tables. The reads it does make
+    // are the post-insert ones the studio notification needs.
+    expect(captured.tables).not.toContain(schema.subscriptions)
+    expect(captured.tables).toContain(schema.requests)
+  })
+
+  it('does look a plan up for a large_task', async () => {
+    plan({ planType: 'scale', hasPrioritySupport: false })
+    await POST(makeRequest({ title: 'Full rebuild', type: 'large_task' }))
+    expect(captured.tables).toContain(schema.subscriptions)
   })
 })
