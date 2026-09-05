@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { primePage } from './helpers'
+import { primePage, filterChip } from './helpers'
 
 /**
  * Request detail: the alignment pass (audit findings D1 to D13).
@@ -256,11 +256,10 @@ test.describe('Request detail', () => {
 
     // The param has to land as a real, clearable filter, not just a URL the
     // list ignores: the chips row is what proves it reached the rail state.
-    // first(): the rail select and the chip both offer to clear the status,
-    // and either one on screen proves the param reached the rail state.
-    await expect(
-      page.getByRole('button', { name: 'Clear the status filter' }).first(),
-    ).toBeVisible({ timeout: 20_000 })
+    // The rail select's own clear button carries the same accessible name and
+    // comes first in DOM order, so this scopes to the chip rather than taking
+    // whichever the page offers (see filterChip in e2e/helpers.ts).
+    await expect(filterChip(page, 'status')).toBeVisible({ timeout: 20_000 })
 
     await expectNoHorizontalScroll(page)
   })
