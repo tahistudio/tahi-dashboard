@@ -73,8 +73,12 @@ export function SidebarCard({
   bodyPadding = '0.8125rem 0.875rem',
   children,
 }: SidebarCardProps) {
+  // flexShrink 0: the task detail's slide-over body is a flex column with
+  // overflow auto, and a shrinkable card there collapses to its header and
+  // clips its rows once the column overflows (the Waiting on rows and the
+  // Level control were both being cut off).
   return (
-    <Card padding="none" style={{ overflow: 'hidden' }}>
+    <Card padding="none" style={{ overflow: 'hidden', flexShrink: 0 }}>
       <div
         className="flex items-center"
         style={{
