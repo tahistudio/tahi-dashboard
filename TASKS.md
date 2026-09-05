@@ -114,7 +114,24 @@ Source: `docs/superpowers/audits/2026-09-06-invoice-channel-assessment.json`. Ve
 - [ ] IC.6 = CT.13 (1.5d) - [BE] Guard the hourly Xero export (idempotency, billing-model filter, currency, no silent zero-rate skip).
 - [ ] IC.7 = CT.14 (2.5d) - [BE/FE] Real invoice numbers from the settings prefix (zero readers today), unique, mirrored to Xero or from it (decision), the bank reference.
 
-Decisions only Liam can make: DRAFT or AUTHORISED on push; two channels or three; is the Stripe payment service attached to the Xero branding themes in use (xero-sync matches themes by currency code in the name); backfill channels by hand or by rule; who owns the invoice number on the Xero rail; does a hand mark-paid push back to the rail; who sends the Xero-rail email (dashboard or Xero); should the export get a UI button; should the client see their channel named.
+Decisions only Liam can make: ANSWERED.
+
+**Liam's answers (2026-09-06):**
+- Push as DRAFT for now; add a studio setting later to flip to auto-approve once the system is trusted.
+- Two channels only: `stripe` and `xero` (not three). Xero carries its own pay-now link (Xero's OnlineInvoiceUrl / the Stripe card link Xero surfaces), which is NOT tied to branding themes, so stop the currency-in-theme-name matching and read the pay link straight off the invoice.
+- Invoice number: Tahi's own sequence pushed into Xero (we control it; CT.14 already wants a real number). Both would be unique; he does not mind, so use ours.
+- A hand mark-paid from the dashboard pushes the payment back to the rail (mark paid in Xero, void the open Stripe invoice).
+- Xero-rail email: both, behind a studio toggle (send our template with the portal link, let Xero send its PDF, or both).
+- Backfill channel per client BY HAND (a short pass over the client book), not by rule, so a wrong guess never bills a client through the wrong system.
+- The client sees only what they need to act: for a Xero invoice, a How to pay block (amount, due date, invoice number as reference, and the pay-now link when present). No internal channel label.
+
+
+## Tasks and requests polish (Liam, 2026-09-06 evening)
+
+- [ ] TP.1 - [Design first, then FE] **AI first-start bar.** The quick-add / "Draft with AI" entry bar as a reusable component (a first start for an AI request or task): quick type to add, or hand off to the AI wizard. Add to Tasks and Requests, and put it on the home page. Liam left a comment on it in Claude Design. Reuse the tasks quick-add and the AI wizard already shipped.
+- [x] TP.2 - [FE] Removed the My week rail note ("My week always shows your own open plate..."), 7ffa602a. The inert filter controls already say it.
+- [ ] TP.3 - [Design first, then FE/BE] **My week: real week dates + multi-day allocation.** The planner shows the open task list against the actual dates of the week, and a long or big task or request can be placed into MULTIPLE days (spanned across the days it will take), not just dropped on one due date. Needs a design and probably a schema decision (a per-day allocation, distinct from the single due date). This extends the shipped My week strip.
+- [ ] TP.4 - [Design first, then FE] **Notifications page (not urgent).** An All notifications and Past notifications page: the full history behind the bell, simple list with read state. Design in Claude Design first. Low priority.
 
 ## Client library and catalogue (Liam, 2026-09-06)
 
