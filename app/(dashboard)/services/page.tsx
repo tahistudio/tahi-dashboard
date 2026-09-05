@@ -1,4 +1,5 @@
 import { getServerAuth } from '@/lib/server-auth'
+import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { requirePageFeature, requirePageAnyGrant } from '@/lib/page-guard'
 import { AdminServicesContent, PortalServicesContent } from './services-content'
@@ -17,5 +18,9 @@ export default async function ServicesPage() {
   if (isAdmin) await requirePageAnyGrant()
   else await requirePageFeature('services')
 
-  return isAdmin ? <AdminServicesContent /> : <PortalServicesContent />
+  // A Tahi login previewing the portal as a client (the impersonation cookie
+  // makes the portal routes answer for that org) sees what the client sees:
+  // the read-only catalogue, never the admin editor.
+  const previewing = isAdmin && Boolean((await cookies()).get('tahi-impersonate-org')?.value)
+  return isAdmin && !previewing ? <AdminServicesContent /> : <PortalServicesContent />
 }
