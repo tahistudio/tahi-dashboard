@@ -587,7 +587,7 @@ export function TasksContent() {
 
   const handlePlan = useCallback(async (taskId: string, dueDate: string | null, groupName: string) => {
     const ok = await patchTask(taskId, { dueDate })
-    if (ok) showToast(dueDate ? `Planned for ${groupName.toLowerCase()}` : 'Date cleared')
+    if (ok) showToast(dueDate ? `Planned for ${groupName}` : 'Date cleared')
   }, [patchTask, showToast])
 
   // The client the rail is narrowed to, when it is narrowed to one. Both the

@@ -402,7 +402,12 @@ export async function POST(req: NextRequest) {
   const contextNote = contextParts.join(' ')
 
   try {
-    const anthropicMessages: AnthropicMessage[] = messages.map(m => ({ role: m.role, content: m.content }))
+    // The wizard seeds its transcript with an assistant greeting, and the
+    // Messages API refuses a conversation whose first turn is not the user's.
+    // Drop leading assistant turns; the model wrote them, it does not need
+    // them back.
+    const firstUserTurn = messages.findIndex(m => m.role === 'user')
+    const anthropicMessages: AnthropicMessage[] = (firstUserTurn > 0 ? messages.slice(firstUserTurn) : messages).map(m => ({ role: m.role, content: m.content }))
     const responseText = await callClaudeHaiku(anthropicMessages, SYSTEM_PROMPT, contextNote)
     // Empty text is a failed call, not an answer. Say so rather than filing a
     // keyword draft under the model's name.

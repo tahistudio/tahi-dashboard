@@ -1473,9 +1473,10 @@ const TOOLS: ToolDef[] = [
   tool('get_xero_branding_themes', 'Get available Xero branding themes'),
 
   // ── AI ────────────────────────────────────────────────────────────
-  tool('ai_task_wizard', 'Conversational AI wizard that drafts Tahi-internal task(s) from a natural-language description. Multi-turn: call repeatedly until done:true, then create the returned task drafts.', {
+  tool('ai_task_wizard', 'Draft tasks from a conversation, or from the text of a brief. Multi-turn: call repeatedly until done:true. It never creates anything: file a draft with create_task (which accepts subtasks for the checklist items).', {
     messages: { type: 'array', items: { type: 'object', properties: { role: { type: 'string' }, content: { type: 'string' } } }, description: 'Conversation history (pass full array each call)' },
-    context: { type: 'object', properties: { orgId: { type: 'string' }, trackType: { type: 'string' } }, description: 'Optional context: orgId (present = for a client), trackType (small/large)' },
+    context: { type: 'object', properties: { orgId: { type: 'string' }, trackType: { type: 'string' }, requestId: { type: 'string' }, level: { type: 'string' } }, description: 'Optional context: orgId (present = for a client), trackType (small/large), requestId to link, level (client_task | internal_client_task | tahi_internal)' },
+    documentText: { type: 'string', description: 'Plain text of a brief, meeting notes or an email to draft from. Paste the text; binary uploads go through the dashboard.' },
   }, ['messages']),
   tool('ai_request_wizard', 'Conversational AI wizard that drafts client-facing request(s) from a natural-language description. Decision #048. Use for client work; use ai_task_wizard for internal tasks.', {
     messages: { type: 'array', items: { type: 'object', properties: { role: { type: 'string' }, content: { type: 'string' } } }, description: 'Conversation history (pass full array each call)' },
