@@ -291,7 +291,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
     if (body.assigneeId !== actor?.id) {
       await notifyTeamMember(drizzle, body.assigneeId, {
-        type: 'task_assigned',
+        type: 'request_assigned',
         // The shared helper, so this line and the bulk assign bar cannot drift.
         // This PATCH is the sole owner of the assignment ping: both UI paths
         // (the detail header and the People panel) end up making it, and the

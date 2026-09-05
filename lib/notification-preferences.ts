@@ -34,6 +34,10 @@ export type PreferenceUserType = 'team_member' | 'contact'
 export const PREF_EVENT_TYPES: readonly NotificationEventType[] = [
   'request_status_changed',
   'request_created',
+  // A studio-side toggle: no client is ever assigned a request. It is listed
+  // here so the three assignment routes emit an event a team member can
+  // actually mute, at the channel defaults below (bell on, email on).
+  'request_assigned',
   'new_message',
   'invoice_created',
   'invoice_paid',
