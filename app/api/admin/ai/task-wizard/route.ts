@@ -755,10 +755,13 @@ export async function POST(req: NextRequest) {
 
     if (documentKind) {
       // The brief rides on the last thing the person said, so the instruction
-      // and the document arrive as one turn.
-      const lastIndex = anthropicMessages.length - 1
-      const instruction = typeof anthropicMessages[lastIndex].content === 'string'
-        ? anthropicMessages[lastIndex].content as string
+      // and the document arrive as one turn. If the last turn is somehow the
+      // assistant's, the brief gets a turn of its own rather than being put
+      // into the model's mouth.
+      const lastMessage = anthropicMessages[anthropicMessages.length - 1]
+      const carrier = lastMessage.role === 'user' ? anthropicMessages.length - 1 : anthropicMessages.length
+      const instruction = lastMessage.role === 'user' && typeof lastMessage.content === 'string'
+        ? lastMessage.content
         : ''
       const spokenInstruction = instruction.trim().length > 0
         ? instruction
@@ -778,7 +781,7 @@ export async function POST(req: NextRequest) {
             { type: 'text', text: spokenInstruction },
           ]
 
-      anthropicMessages[lastIndex] = { role: 'user', content }
+      anthropicMessages[carrier] = { role: 'user', content }
     }
 
     const { text: responseText, usage } = await callClaudeHaiku(anthropicMessages, SYSTEM_PROMPT, contextNote)
