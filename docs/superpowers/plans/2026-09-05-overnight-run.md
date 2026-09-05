@@ -56,6 +56,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 04:20 NZST touch polish live (17a490b2): all TahiButtons 2.75rem below md app-wide, hero row and More sheet tidy.
 
+- 04:50 NZST portal design complete in Claude Design (portal-home, portal-files, portal-money, portal-account modules wired into the shell by the integrator, zero errors; critic finishing). Portal port launched in three slices: home + client request views, invoices + services showcase, notifications + account + offline. Files-as-Drive and client Messages stay design-only tonight (schema needed). Client walk agent running on the QA server. Sales designers still writing.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - [x] More sheet Track time row left-aligned (17a490b2).
