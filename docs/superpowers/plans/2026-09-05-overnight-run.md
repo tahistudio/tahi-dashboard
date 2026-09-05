@@ -48,6 +48,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 - 02:25 NZST IC.4b pay-path studio side live (10fbd6e9). Mobile top bar (More sheet) merged and in final checks. Clients port and portal design running.
 - 02:35 NZST mobile top bar live (5dfb08cb): five slots plus a More sheet with account, tools and sign out.
 
+- 03:25 NZST portal design: one of four designers hung for 70 minutes with no activity; stopped the run and resumed from cache (three designers' modules kept), so the fourth reruns, then the integrator and critic.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - More sheet: the Track time row label is centred (the timer pill's sheet variant keeps its centred label) while every other row is left-aligned with its icon. Left-align it.
