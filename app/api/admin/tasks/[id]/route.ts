@@ -4,30 +4,28 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { createNotification } from '@/lib/notifications'
-import { requireAccessToOrg, getOrgScope } from '@/lib/require-access'
+import { requireAccessToOrg } from '@/lib/require-access'
 import { TASK_PRIORITIES } from '@/lib/task-priorities'
+import { TASK_STATUSES } from '@/lib/status-config'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 /**
- * Shared scope gate for a single task, mirroring the PATCH rules:
- * client tasks (orgId set) require access to that org; Tahi-internal tasks
- * (orgId null) require unrestricted access. Returns a NextResponse to short
- * circuit on denial, or null when the caller may proceed.
+ * A task with a client is guarded by that client. A task with no client is
+ * the studio's own housekeeping, and every team member on this surface is in
+ * the studio, so it is allowed. The list route applies exactly the same rule
+ * (see the isNull clause in ../route.ts); before the port the two disagreed
+ * about how they hid the same rows, one by filtering and one by 403ing.
+ *
+ * Returns a NextResponse to short circuit on denial, or null to proceed.
  */
 async function guardTaskAccess(
   drizzle: Drizzle,
   userId: string | null,
   taskOrgId: string | null,
 ): Promise<NextResponse | null> {
-  if (taskOrgId) {
-    return requireAccessToOrg(drizzle, userId, taskOrgId)
-  }
-  const scope = await getOrgScope(drizzle, userId)
-  if (scope !== null) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-  return null
+  if (!taskOrgId) return null
+  return requireAccessToOrg(drizzle, userId, taskOrgId)
 }
 
 // ── GET /api/admin/tasks/[id] ─────────────────────────────────────────────
@@ -103,6 +101,7 @@ export async function PATCH(
     assigneeId?: string | null
     assigneeType?: string | null
     dueDate?: string | null
+    estimatedHours?: number | null
     trackId?: string | null
     position?: number | null
     requestId?: string | null
@@ -140,14 +139,13 @@ export async function PATCH(
   }
   if (body.description !== undefined) updates.description = body.description
   if (body.status !== undefined) {
-    const validStatuses = ['todo', 'in_progress', 'blocked', 'done']
-    if (!validStatuses.includes(body.status)) {
+    if (!TASK_STATUSES.some(s => s.value === body.status)) {
       return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
     }
     updates.status = body.status
-    if (body.status === 'done') {
-      updates.completedAt = now
-    }
+    // Reopening a task must take its completion stamp with it, or the list
+    // keeps printing "Done 3 days ago" beside an open row.
+    updates.completedAt = body.status === 'done' ? now : null
   }
   if (body.priority !== undefined) {
     if (!(TASK_PRIORITIES as readonly string[]).includes(body.priority)) {
@@ -158,6 +156,13 @@ export async function PATCH(
   if (body.assigneeId !== undefined) updates.assigneeId = body.assigneeId
   if (body.assigneeType !== undefined) updates.assigneeType = body.assigneeType
   if (body.dueDate !== undefined) updates.dueDate = body.dueDate
+  if (body.estimatedHours !== undefined) {
+    const hours = body.estimatedHours
+    if (hours !== null && (typeof hours !== 'number' || !Number.isFinite(hours) || hours < 0)) {
+      return NextResponse.json({ error: 'Invalid estimate' }, { status: 400 })
+    }
+    updates.estimatedHours = hours
+  }
   if (body.trackId !== undefined) updates.trackId = body.trackId
   if (body.position !== undefined) updates.position = body.position
   if (body.requestId !== undefined) updates.requestId = body.requestId
