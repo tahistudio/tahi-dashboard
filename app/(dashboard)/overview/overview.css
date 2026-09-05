@@ -96,11 +96,19 @@
 .ln-q + .ln-q{ margin-top:6px; }
 .ln-q .ln-q-pos{ flex-shrink:0; width:18px; height:18px; border-radius:6px; background:var(--brand-100); color:var(--brand-strong); font:700 10.5px 'Manrope',sans-serif; display:flex; align-items:center; justify-content:center; }
 .ln-q .ln-q-t{ flex:1; min-width:0; font:600 12.5px 'Manrope',sans-serif; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.ln-q .ln-q-ctl{ display:flex; gap:2px; opacity:0; transition:opacity .14s; }
-.ln-q:hover .ln-q-ctl, .ln-q:focus-within .ln-q-ctl{ opacity:1; }
-.ln-q .ln-q-ctl button{ width:22px; height:22px; border:none; background:none; border-radius:6px; color:var(--text-muted); cursor:pointer; display:flex; align-items:center; justify-content:center; }
-.ln-q .ln-q-ctl button:hover:not(:disabled){ background:var(--bg-secondary); color:var(--text); }
+/* Reordering the queue is the only write control a client has on this home, so
+   it is always on screen. It used to be an opacity:0 hover reveal at 22px
+   square: unreachable on touch, half the 44px minimum, and invisible to anyone
+   who never hovers the row. Resting state now carries its own hairline and fill
+   so it reads as a control, 2rem on a fine pointer and 2.75rem on a coarse one. */
+.ln-q .ln-q-ctl{ display:flex; gap:0.25rem; flex-shrink:0; }
+.ln-q .ln-q-ctl button{ width:2rem; height:2rem; border:1px solid var(--border); background:var(--bg-secondary); border-radius:0.5rem; color:var(--text-muted); cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background .14s var(--ease), border-color .14s var(--ease), color .14s var(--ease); }
+.ln-q .ln-q-ctl button:hover:not(:disabled){ background:var(--brand-100); border-color:var(--brand); color:var(--brand-strong); }
+.ln-q .ln-q-ctl button:focus-visible{ outline:0.125rem solid var(--brand); outline-offset:0.0625rem; }
 .ln-q .ln-q-ctl button:disabled{ opacity:.3; cursor:default; }
+@media (pointer: coarse){
+  .ln-q .ln-q-ctl button{ width:2.75rem; height:2.75rem; }
+}
 .ln-add{ display:block; width:100%; margin-top:6px; text-align:left; border:1px dashed var(--border-strong); background:none; border-radius:9px; padding:7px 10px; font:600 12px 'Manrope',sans-serif; color:var(--text-muted); cursor:pointer; }
 .ln-add:hover{ background:var(--brand-100); color:var(--brand-strong); }
 
@@ -417,6 +425,8 @@
   .ov-vital:nth-child(even)::before{ display:block; }
   .ov-vital:nth-child(n+3){ border-top:1px solid var(--border); }
   .ov-tb-lanes{ grid-template-columns:1fr; }
+  /* Narrow enough to be a phone whatever the pointer reports. */
+  .ln-q .ln-q-ctl button{ width:2.75rem; height:2.75rem; }
   /* mobile fit fixes */
   .ov-hero-fig{ display:none; }
   .ov-hero .ov-hero-num{ font-size:36px; }

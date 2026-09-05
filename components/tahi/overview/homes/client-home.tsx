@@ -29,6 +29,13 @@ import type { CSSProperties, ReactNode } from 'react'
 import { useResource } from '@/lib/use-resource'
 import { apiPath } from '@/lib/api'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
+import {
+  fileOpenDestination,
+  invoicePayDestination,
+  partitionClientRequests,
+  requestRouteId,
+  type HomeDestination,
+} from '@/lib/client-home-signals'
 import type { OverviewCtx } from '@/components/tahi/overview/ctx'
 import {
   useOvFormat,
@@ -120,6 +127,8 @@ interface InvoiceRow {
   dueDate: string | null
   sentAt: string | null
   paidAt: string | null
+  /** Stripe's hosted invoice page, returned by /api/portal/invoices. */
+  payUrl: string | null
   createdAt: string
 }
 interface InvoicesResp {
@@ -186,14 +195,16 @@ interface OnboardingResp {
 
 type ChipTone = 'brand' | 'info' | 'warn' | 'muted' | 'rose'
 
-/** Client-facing request status meta: leading dot colour + right chip. delivered
- *  and client_review both read as "your review" (client action pending). */
+/** Client-facing request status meta: leading dot colour + right chip. Only
+ *  client_review reads as "your review": delivered is the terminal state the
+ *  client's own approval writes, so it reads as done and sits in the quiet
+ *  brand tone the closed statuses share. */
 const REQ_META: Record<string, { label: string; dot: string; chip: ChipTone }> = {
   submitted: { label: 'Queued', dot: '#8a9987', chip: 'muted' },
   in_review: { label: 'In review', dot: '#C9A227', chip: 'warn' },
   in_progress: { label: 'In build', dot: '#2A6FDB', chip: 'info' },
   client_review: { label: 'Review', dot: '#C9A227', chip: 'warn' },
-  delivered: { label: 'Review', dot: '#C9A227', chip: 'warn' },
+  delivered: { label: 'Delivered', dot: '#5A824E', chip: 'brand' },
   on_hold: { label: 'On hold', dot: '#8a9987', chip: 'muted' },
   completed: { label: 'Done', dot: '#5A824E', chip: 'brand' },
   archived: { label: 'Archived', dot: '#8a9987', chip: 'muted' },
@@ -217,11 +228,6 @@ const STAGE_PCT: Record<string, number> = {
 function stagePct(status: string): number {
   return STAGE_PCT[status] ?? 20
 }
-
-/** Client-facing request buckets. review = waiting on the client; open = still
- *  moving through the studio. Module-scoped so they stay referentially stable. */
-const REVIEW_SET = ['client_review', 'delivered']
-const OPEN_SET = ['submitted', 'in_review', 'in_progress', 'on_hold']
 
 /* ---------- small helpers ---------- */
 
@@ -700,8 +706,14 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   const tracks = useMemo(() => tracksData?.items ?? [], [tracksData])
 
   // ── derived: requests ───────────────────────────────────────────────────────
-  const inReview = useMemo(() => requests.filter(r => REVIEW_SET.includes(r.status)), [requests])
-  const openReqs = useMemo(() => requests.filter(r => OPEN_SET.includes(r.status)), [requests])
+  // /api/portal/requests?status=active only excludes 'archived', so this list
+  // carries the client's whole delivered history. partitionClientRequests keeps
+  // that history out of the review signal: only client_review is waiting on
+  // them, and approving a delivery now moves it OUT of the count rather than
+  // parking it there forever.
+  const buckets = useMemo(() => partitionClientRequests(requests), [requests])
+  const inReview = buckets.review
+  const openReqs = buckets.open
   const nextDelivery = useMemo(() => {
     const dated = openReqs
       .filter(r => r.dueDate)
@@ -723,6 +735,23 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   const invDueDisplay =
     unpaid.length === 0 ? '0' : invSameCurrency ? formatNative(invSum, unpaid[0]?.currency ?? 'NZD') : String(unpaid.length)
 
+  // ── row destinations ────────────────────────────────────────────────────────
+  // Every row on this home used to route to the list it came from. These land
+  // on the item instead: a hosted pay page or a served file opens in a new tab,
+  // anything in-app goes through the switcher's go().
+  const openDestination = useCallback(
+    (dest: HomeDestination) => {
+      if (dest.kind === 'route') {
+        go(dest.routeId)
+        return
+      }
+      // In-app paths need the basePath prefix that next/navigation applies for
+      // us and window.open does not; a hosted pay link is already absolute.
+      window.open(dest.url.startsWith('/') ? apiPath(dest.url) : dest.url, '_blank', 'noopener,noreferrer')
+    },
+    [go],
+  )
+
   // ── wire ────────────────────────────────────────────────────────────────────
   const wire: WireEvent[] = (activityData?.items ?? []).map(e => ({
     color: e.color,
@@ -743,7 +772,10 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         .map(r => r.title)
         .join(' · '),
       verb: 'Review',
-      onAct: () => go('requests'),
+      // One waiting delivery opens that delivery; several open the list they
+      // are all on.
+      onAct: () =>
+        inReview.length === 1 ? go(requestRouteId(inReview[0].id)) : go('requests'),
     })
   }
   if (nearestUnpaid) {
@@ -755,7 +787,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         nearestUnpaid.dueDate,
       )}`,
       verb: 'Pay',
-      onAct: () => go('invoices'),
+      onAct: () => openDestination(invoicePayDestination(nearestUnpaid)),
     })
   }
   // Only when there is somewhere to go. /calls is a studio page that redirects
@@ -908,7 +940,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
                     title={r.title}
                     sub={`${meta.label} · updated ${deliveryLabel(r.updatedAt)}`}
                     right={<span className={'ov-chip ' + meta.chip}>{meta.label}</span>}
-                    onClick={() => go('requests')}
+                    onClick={() => go(requestRouteId(r.id))}
                   />
                 )
               })}
@@ -971,7 +1003,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
                   title={f.name}
                   sub={`Shared by ${f.uploadedBy}${f.ago ? ` · ${f.ago}` : ''}`}
                   right={<span className="ov-chip muted">{f.type}</span>}
-                  onClick={() => go('files')}
+                  onClick={() => openDestination(fileOpenDestination(f))}
                 />
               ))}
             </div>
@@ -1013,7 +1045,10 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
 
       <Zone label="Billing">
         <Card span={7} edge="warn">
-          <CardH ic="receipt" title="Invoices" link="Billing" onLink={() => go('invoices')} />
+          {/* The link goes to /invoices, so it says so. "Billing" pointed at a
+              different page in the client's head (and at a real /billing route
+              that is not in their nav). */}
+          <CardH ic="receipt" title="Invoices" link="All invoices" onLink={() => go('invoices')} />
           {invoices.length > 0 ? (
             <div className="ov-rows">
               {invoices.slice(0, 4).map(inv => {
@@ -1035,7 +1070,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
                             className="ov-cta"
                             disabled={ro}
                             style={{ height: 28, fontSize: 11.5, padding: '0 10px', ...payDisabled }}
-                            onClick={() => go('invoices')}
+                            onClick={() => openDestination(invoicePayDestination(inv))}
                           >
                             Pay
                           </button>
