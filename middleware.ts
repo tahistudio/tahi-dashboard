@@ -15,6 +15,29 @@ const isPublicRoute = createRouteMatcher([
   // x-cron-secret in the route handler (Decision #043). Clerk's middleware
   // doesn't know about that header so must let the request through.
   '/api/admin/ai/briefing/cron(.*)',
+  // The other scheduled targets in .github/workflows/dashboard-crons.yml.
+  // Each handler checks x-cron-secret (or Bearer) itself and otherwise falls
+  // back to requiring a Tahi admin session, so an unauthenticated call without
+  // the secret is refused by the route, not by Clerk. Only the scheduled
+  // routes are listed; the rest of /api/admin/cron stays behind Clerk.
+  '/api/admin/cron/pre-call-digest(.*)',
+  '/api/admin/cron/auto-promote-calls(.*)',
+  '/api/admin/cron/leads-ai(.*)',
+  '/api/admin/cron/sync-xero(.*)',
+  '/api/admin/cron/sync-stripe(.*)',
+  '/api/admin/cron/daily-summary(.*)',
+  '/api/admin/cron/affiliate-reactivation(.*)',
+  '/api/admin/cron/snapshot-metrics(.*)',
+  '/api/admin/cron/finance-anomaly-scan(.*)',
+  '/api/admin/cron/content-auto-backfill(.*)',
+  '/api/admin/cron/content-gap-hunt(.*)',
+  '/api/admin/cron/schema-watchdog(.*)',
+  '/api/admin/cron/indexing-reverser(.*)',
+  '/api/admin/cron/publish-scheduled(.*)',
+  '/api/admin/integrations/google/sync-calendar(.*)',
+  '/api/admin/integrations/google/sync-drive-transcripts(.*)',
+  '/api/admin/integrations/airwallex/sync(.*)',
+  '/api/admin/overview/brief/refresh(.*)',
   // OAuth callbacks from third-party providers (Google, Xero, etc.) need
   // to bypass Clerk middleware because the cross-origin redirect from
   // accounts.google.com / login.xero.com loses the Clerk session cookie
