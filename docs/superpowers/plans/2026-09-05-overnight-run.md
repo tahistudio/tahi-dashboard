@@ -54,6 +54,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 04:00 NZST Clients list and detail LIVE on production (2f270013). Touch polish fixer running.
 
+- 04:20 NZST touch polish live (17a490b2): all TahiButtons 2.75rem below md app-wide, hero row and More sheet tidy.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
-- More sheet: the Track time row label is centred (the timer pill's sheet variant keeps its centred label) while every other row is left-aligned with its icon. Left-align it.
+- [x] More sheet Track time row left-aligned (17a490b2).
