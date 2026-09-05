@@ -127,20 +127,28 @@ export function parseQuickAdd(
     }
   }
 
-  // 4. Client. An @mention is lifted out; a bare name stays in the title,
-  //    because it is usually doing real work there ("Kowtow redirect map").
+  // 4. Client, in two passes so explicitness beats array order. An @mention
+  //    anywhere in the list wins over a bare name from any other client:
+  //    with clients [Design, Kowtow], "Design review @Kowtow" is a Kowtow
+  //    task, not a Design one with a stray mention left in its title. Only
+  //    when nothing was mentioned does a bare name count, and a bare name
+  //    stays in the title, because it is usually doing real work there
+  //    ("Kowtow redirect map").
   let orgId: string | null = null
   for (const client of clients) {
-    const name = escapeRegExp(client.name)
-    const mention = text.match(new RegExp(`\\s@${name}\\b`, 'i'))
+    const mention = text.match(new RegExp(`\\s@${escapeRegExp(client.name)}\\b`, 'i'))
     if (mention) {
       orgId = client.id
       text = text.replace(mention[0], ' ')
       break
     }
-    if (new RegExp(`\\b${name}\\b`, 'i').test(text)) {
-      orgId = client.id
-      break
+  }
+  if (!orgId) {
+    for (const client of clients) {
+      if (new RegExp(`\\b${escapeRegExp(client.name)}\\b`, 'i').test(text)) {
+        orgId = client.id
+        break
+      }
     }
   }
 

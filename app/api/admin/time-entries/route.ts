@@ -15,6 +15,10 @@
  *
  * Exactly one of requestId or taskId required. Admin only.
  *
+ * A task with no client is still loggable. time_entries.org_id is NOT NULL,
+ * so a studio (tahi_internal) task resolves its org the same way a stopped
+ * timer does, through resolveTimerOrgId, rather than being refused.
+ *
  * PATCH / DELETE on individual entries will live in `[id]/route.ts` later
  * (per the existing /requests/[id]/time-entries pattern - not duplicated here).
  */
@@ -25,6 +29,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { resolveTimerOrgId } from '@/lib/timer-helpers'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -161,7 +166,14 @@ export async function POST(req: NextRequest) {
       .where(eq(schema.tasks.id, targetTaskId))
       .limit(1)
     if (!t) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+    // A studio task carries no client, and time_entries.org_id is NOT NULL,
+    // so a plain read of the task's org used to 400 every tahi_internal row
+    // out of this route while the live timer happily logged the same hours.
+    // Resolve it exactly the way a stopped timer does (the request it hangs
+    // off, else the hidden internal studio org) so manual and timed hours on
+    // one task never land on two different clients.
     entryOrgId = t.orgId
+      ?? await resolveTimerOrgId(drizzle, { requestId: null, taskId: targetTaskId, orgId: null })
   }
   if (!entryOrgId) {
     return NextResponse.json({ error: 'Cannot log time on this target (no org attached)' }, { status: 400 })

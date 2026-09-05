@@ -195,6 +195,13 @@ export function TaskTick({ done, blocked = false, size = 'md', disabled = false,
   const diameter = TICK_SIZE[size]
   const hint = blocked && !done ? 'Blocked. Complete anyway' : done ? 'Reopen' : 'Mark done'
 
+  // Hover is React state rather than a direct style write because the circle
+  // is a child of the hit box, so there is no `currentTarget` to paint. The
+  // reset on leave is unconditional and the paint is derived, so a click that
+  // flips `done` under a stationary cursor cannot strand the hover colour.
+  const [hovered, setHovered] = React.useState(false)
+  const previewing = hovered && !done && !disabled
+
   return (
     <button
       type="button"
@@ -203,12 +210,14 @@ export function TaskTick({ done, blocked = false, size = 'md', disabled = false,
       aria-label={done ? `Reopen ${title}` : `Complete ${title}`}
       aria-disabled={disabled || undefined}
       title={hint}
-      className={`tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 ${TICK_HIT[size]}`}
+      className={`tahi-focus-ring group inline-flex items-center justify-center flex-shrink-0 ${TICK_HIT[size]}`}
       onClick={e => {
         e.stopPropagation()
         if (disabled) return
         onToggle()
       }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         padding: 0,
         border: 'none',
@@ -218,9 +227,11 @@ export function TaskTick({ done, blocked = false, size = 'md', disabled = false,
         opacity: disabled ? 0.5 : 1,
       }}
     >
+      {/* group-active rather than active, so a press anywhere in the hit box
+          scales the circle, not only a press that lands on the circle. */}
       <span
         aria-hidden="true"
-        className="inline-flex items-center justify-center"
+        className="inline-flex items-center justify-center group-active:scale-90"
         style={{
           width: diameter,
           height: diameter,
@@ -228,10 +239,15 @@ export function TaskTick({ done, blocked = false, size = 'md', disabled = false,
           border: done
             ? '1.5px solid var(--color-brand)'
             : blocked
-              ? '1.5px dashed var(--color-danger)'
-              : '1.5px solid var(--color-border)',
+              // Hover keeps the dash, which is what says blocked, and only
+              // moves its colour, so the signal survives the feedback.
+              ? `1.5px dashed ${previewing ? 'var(--color-brand)' : 'var(--color-danger)'}`
+              : `1.5px solid ${previewing ? 'var(--color-brand)' : 'var(--color-border)'}`,
           background: done ? 'var(--color-brand)' : 'var(--color-bg)',
-          color: done ? 'var(--color-text-on-dark)' : 'transparent',
+          color: done
+            ? 'var(--color-text-on-dark)'
+            // A ghosted tick under the cursor says what the click will do.
+            : previewing ? 'color-mix(in srgb, var(--color-brand) 45%, transparent)' : 'transparent',
           transition: 'background-color var(--motion-quick) var(--ease-out), border-color var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out), transform var(--motion-quick) var(--ease-out)',
         }}
       >

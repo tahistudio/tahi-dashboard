@@ -17,7 +17,7 @@
  * the state, including the one case the numerals cannot ("Running on ...",
  * where 00:00:00 is the truth for THIS request but looks like a fault).
  *
- * All mutations are optimistic — we mutate local state immediately, fire
+ * All mutations are optimistic: we mutate local state immediately, fire
  * the server call, roll back + toast on error.
  *
  * Admin-only. Server enforces this too.
@@ -149,7 +149,7 @@ export function TimeCard({ target }: Props) {
   useEffect(() => { void fetchTimer() }, [fetchTimer])
   useEffect(() => { void fetchEntries() }, [fetchEntries])
 
-  // Cross-component sync — if the nav stops the timer, our local display
+  // Cross-component sync. If the nav stops the timer, our local display
   // should reset immediately instead of waiting for the next poll.
   useEffect(() => subscribeToTimerChanges(() => {
     void fetchTimer()
@@ -195,7 +195,7 @@ export function TimeCard({ target }: Props) {
         showToast(j.error ?? `Couldn't start timer (${res.status})`)
       }
     } catch {
-      showToast('Network error — timer not started')
+      showToast('Network error. Timer not started')
     } finally {
       setActing(false)
     }
@@ -219,7 +219,7 @@ export function TimeCard({ target }: Props) {
         showToast(j.error ?? 'Timer action failed')
       }
     } catch {
-      showToast('Network error — try again')
+      showToast('Network error. Try again')
     } finally {
       setActing(false)
     }
@@ -253,7 +253,7 @@ export function TimeCard({ target }: Props) {
         showToast(j.error ?? 'Couldn\'t stop timer')
       }
     } catch {
-      showToast('Network error — try again')
+      showToast('Network error. Try again')
     } finally {
       setActing(false)
     }
@@ -261,7 +261,7 @@ export function TimeCard({ target }: Props) {
 
   // --- manual log ---------------------------------------------------------
 
-  // Pretty-print decimal hours — uses minutes for sub-hour values so a
+  // Pretty-print decimal hours. Uses minutes for sub-hour values so a
   // 12-minute entry shows "12m" instead of the misleading "0.2h".
   function prettyHours(h: number): string {
     if (!h || h <= 0) return '0m'
@@ -336,7 +336,7 @@ export function TimeCard({ target }: Props) {
         showToast(j.error ?? 'Failed to log time')
       }
     } catch {
-      showToast('Network error — try again')
+      showToast('Network error. Try again')
     } finally {
       setSaving(false)
     }
@@ -538,7 +538,7 @@ export function TimeCard({ target }: Props) {
                 >
                   {entry.teamMemberName ?? 'Unknown'}
                   {entry.notes && (
-                    <span style={{ color: 'var(--color-text-subtle)' }}> — {entry.notes}</span>
+                    <span style={{ color: 'var(--color-text-subtle)' }}>: {entry.notes}</span>
                   )}
                 </span>
                 <span
@@ -557,8 +557,8 @@ export function TimeCard({ target }: Props) {
           </div>
         )}
 
-        {/* Manual log form — collapsed behind a small button. Two modes:
-            duration (hours + minutes) or range (from–to clock times). */}
+        {/* Manual log form, collapsed behind a small button. Two modes:
+            duration (hours + minutes) or range (from and to clock times). */}
         {logOpen ? (
           <form onSubmit={handleLogSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.375rem' }}>
             {/* Mode tabs */}

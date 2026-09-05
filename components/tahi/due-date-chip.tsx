@@ -18,18 +18,19 @@
 
 import * as React from 'react'
 import { AlertTriangle, Calendar } from 'lucide-react'
+import { REQUEST_CLOSED_STATUSES, TASK_CLOSED_STATUSES } from '@/lib/status-config'
 
 /** How a due date reads right now. */
 export type DueDateState = 'overdue' | 'due-soon' | 'on-track'
 
-/** Statuses where a due date stops meaning anything, for a REQUEST. Mirrors
- *  CLOSED_STATUSES in lib/requests-views.ts. Stays the default so every
- *  existing caller keeps its behaviour with no edit. */
-export const REQUEST_CLOSED_STATUSES: readonly string[] = ['delivered', 'cancelled', 'archived']
-
-/** The same idea for a TASK, whose only finished status is `done`. Without
- *  this a done task with a past due date renders in the danger tone. */
-export const TASK_CLOSED_STATUSES: readonly string[] = ['done']
+/**
+ * The two closed-status vocabularies, re-exported from lib/status-config.ts
+ * so this module stays the one import a chip caller needs, without owning a
+ * second copy of either list. REQUEST_CLOSED_STATUSES stays the default
+ * below, so every existing caller keeps its behaviour with no edit; a task
+ * surface passes TASK_CLOSED_STATUSES, whose only finished status is `done`.
+ */
+export { REQUEST_CLOSED_STATUSES, TASK_CLOSED_STATUSES }
 
 /** How many days ahead still counts as "due soon". */
 export const DUE_SOON_DAYS = 3

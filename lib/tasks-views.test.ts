@@ -101,6 +101,19 @@ describe('saved views', () => {
     expect(matchesTasksSavedView(row(), 'blocked', ctx)).toBe(false)
   })
 
+  it('the blocked count matches what the blocked view keeps', () => {
+    // The rail prints one number and the click produces one list, so the two
+    // readings of Blocked have to be the same reading.
+    const ctx = { now: NOW }
+    const rows = [
+      row({ id: 'a', status: 'blocked' }),
+      row({ id: 'b', blockedByCount: 2 }),
+      row({ id: 'c' }),
+    ]
+    expect(countTasksSavedViews(rows, ctx).blocked)
+      .toBe(rows.filter(r => matchesTasksSavedView(r, 'blocked', ctx)).length)
+  })
+
   it('client-linked and internal split on the client link and the level', () => {
     const ctx = { now: NOW }
     expect(matchesTasksSavedView(row({ orgId: 'o1' }), 'client_linked', ctx)).toBe(true)
@@ -152,6 +165,22 @@ describe('filters', () => {
     expect(matchesTaskFilters(row({ dueDate: '2026-09-11' }), { ...base, due: 'week' }, NOW)).toBe(true)
     expect(matchesTaskFilters(row({ dueDate: '2026-09-30' }), { ...base, due: 'later' }, NOW)).toBe(true)
     expect(matchesTaskFilters(row(), { ...base, due: 'none' }, NOW)).toBe(true)
+  })
+
+  it('keeps done work out of every dated due bucket, the way the saved views do', () => {
+    const done = (dueDate: string) => row({ status: 'done', dueDate })
+    expect(matchesTaskFilters(done('2026-09-04'), { ...base, due: 'overdue' }, NOW)).toBe(false)
+    expect(matchesTaskFilters(done('2026-09-05'), { ...base, due: 'today' }, NOW)).toBe(false)
+    expect(matchesTaskFilters(done('2026-09-11'), { ...base, due: 'week' }, NOW)).toBe(false)
+    expect(matchesTaskFilters(done('2026-09-30'), { ...base, due: 'later' }, NOW)).toBe(false)
+    // "No date" is true whatever the status, so it keeps no guard.
+    expect(matchesTaskFilters(row({ status: 'done' }), { ...base, due: 'none' }, NOW)).toBe(true)
+  })
+
+  it('agrees with the Overdue saved view on the same row', () => {
+    const r = row({ status: 'done', dueDate: '2026-09-04' })
+    expect(matchesTaskFilters(r, { ...base, due: 'overdue' }, NOW))
+      .toBe(matchesTasksSavedView(r, 'overdue', { now: NOW }))
   })
 })
 

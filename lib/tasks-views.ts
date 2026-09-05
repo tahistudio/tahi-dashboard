@@ -16,7 +16,7 @@
  * nothing in this file branches on one.
  */
 
-import { TASK_STATUSES } from '@/lib/status-config'
+import { TASK_CLOSED_STATUSES, TASK_STATUSES } from '@/lib/status-config'
 
 // -- Row shape ---------------------------------------------------------------
 
@@ -91,8 +91,11 @@ export function normaliseTasksViewKey(value: unknown): TasksViewKey {
 
 // -- Statuses that sink ------------------------------------------------------
 
-/** A finished task has no deadline worth toning, and always sorts last. */
-export const TASK_CLOSED_STATUSES: readonly string[] = ['done']
+/** A finished task has no deadline worth toning, and always sorts last. Owned
+ *  by lib/status-config.ts next to the vocabulary it belongs to, and
+ *  re-exported here so a caller of this module never needs a second import to
+ *  read one rule. */
+export { TASK_CLOSED_STATUSES }
 
 // -- Day-key helpers ---------------------------------------------------------
 
@@ -125,9 +128,12 @@ export function isTaskDueWithin(row: TaskRow, days: number, now: Date): boolean 
   return d >= taskDayKey(now) && d <= taskShiftedDayKey(now, days)
 }
 
-/** Blocked in the sense the rail counts it: the status, or an open blocker.
- *  The board column and the `blocked` saved view read the status alone; this
- *  is the wider reading the count and the Tick's dashed ring use. */
+/** Blocked in the sense the rail reads it: the status, or an open blocker.
+ *  The `blocked` saved view, the rail's Blocked count and the Tick's dashed
+ *  ring all use this one wider reading, so clicking a count of seven cannot
+ *  produce a list of three. The BOARD's Blocked column is the one place that
+ *  stays narrow (`status === 'blocked'`), because dropping a card into it
+ *  writes that status and a column has to mean the value it writes. */
 export function isTaskBlocked(row: TaskRow): boolean {
   return row.status === 'blocked' || (row.blockedByCount ?? 0) > 0
 }
@@ -277,12 +283,18 @@ export function matchesTaskFilters(
   if (filters.due !== 'any') {
     const d = dueOf(row)
     const today = taskDayKey(now)
+    // Every dated bucket reads through the same closed-status guard the
+    // Overdue and Due this week SAVED VIEWS use, so the rail cannot answer
+    // one question two ways: a done task with a past date is not overdue on
+    // the chip either. `none` is the exception, because "no date" is true
+    // whatever the status.
+    const open = !TASK_CLOSED_STATUSES.includes(row.status)
     switch (filters.due) {
       case 'none':    return d === null
-      case 'overdue': return d !== null && d < today
-      case 'today':   return d === today
-      case 'week':    return d !== null && d >= today && d <= taskShiftedDayKey(now, 7)
-      case 'later':   return d !== null && d > taskShiftedDayKey(now, 7)
+      case 'overdue': return isTaskOverdue(row, now)
+      case 'today':   return open && d === today
+      case 'week':    return isTaskDueWithin(row, 7, now)
+      case 'later':   return open && d !== null && d > taskShiftedDayKey(now, 7)
       default:        return true
     }
   }

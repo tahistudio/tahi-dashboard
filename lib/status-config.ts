@@ -173,3 +173,18 @@ export const REQUEST_STATUS_LABELS: Record<string, string> = Object.fromEntries(
 export const TASK_STATUS_LABELS: Record<string, string> = Object.fromEntries(
   TASK_STATUSES.map((s) => [s.value, s.label] as [string, string]),
 )
+
+/**
+ * The statuses where work is finished, per vocabulary. A closed row has no
+ * deadline worth toning, never counts as overdue, and always sorts below
+ * open work.
+ *
+ * Both live here, next to the vocabularies they belong to, because they are
+ * read from three kinds of module: a pure node-tested lib (lib/tasks-views.ts),
+ * a 'use client' component (components/tahi/due-date-chip.tsx) and route
+ * code. Two copies of a status list is exactly the drift this file exists to
+ * end, so the copies re-export these rather than declaring their own.
+ */
+export const REQUEST_CLOSED_STATUSES: readonly string[] = ['delivered', 'cancelled', 'archived']
+
+export const TASK_CLOSED_STATUSES: readonly string[] = ['done']

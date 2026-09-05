@@ -57,8 +57,9 @@ function sumEstimate(rows: readonly TaskRow[]): number {
  *  zeros, always suffixed. */
 export function formatHours(hours: number): string {
   if (!hours) return '0h'
-  const rounded = Math.round(hours * 4) / 4
-  return `${String(rounded).replace(/\.0+$/, '')}h`
+  // A quarter-hour round can never leave a trailing zero of its own: 2 is
+  // "2", not "2.0", so there is nothing left to strip.
+  return `${Math.round(hours * 4) / 4}h`
 }
 
 /**

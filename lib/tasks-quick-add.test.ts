@@ -84,6 +84,18 @@ describe('client', () => {
   it('leaves the client null when no name appears', () => {
     expect(parseQuickAdd('Tidy the drive', CLIENTS, NOW).orgId).toBeNull()
   })
+
+  it('lets an explicit mention beat an earlier client named bare', () => {
+    // Array order must not beat explicitness: Design comes first and appears
+    // bare in the title, but Kowtow is the one the user actually pointed at.
+    const clients: QuickAddClient[] = [
+      { id: 'o3', name: 'Design' },
+      { id: 'o1', name: 'Kowtow' },
+    ]
+    const out = parseQuickAdd('Design review @Kowtow', clients, NOW)
+    expect(out.orgId).toBe('o1')
+    expect(out.title).toBe('Design review')
+  })
 })
 
 describe('level', () => {
