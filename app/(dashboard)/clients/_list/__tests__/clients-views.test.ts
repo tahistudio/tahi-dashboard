@@ -3,18 +3,22 @@ import {
   ARCHIVED_VIEW_KEY,
   DEFAULT_CLIENTS_SORT,
   DEFAULT_CLIENT_FILTERS,
+  ENGAGEMENT_LABEL,
   UNASSIGNED_OWNER,
   applyClientViews,
   clientTagValues,
   clientsSnapshotsEqual,
   countClientsSavedViews,
+  engagementStatLabel,
   healthReasons,
   isClientsSnapshot,
   matchesClientFilters,
+  mrrFallbackLabel,
   showsArchived,
   sortClients,
   statusFromUrl,
   toClientRow,
+  tracksLine,
   type ClientApiRow,
   type ClientRow,
 } from '../clients-views'
@@ -252,5 +256,57 @@ describe('statusFromUrl', () => {
     expect(statusFromUrl('active,paused')).toBe('all')
     expect(statusFromUrl('prospect')).toBe('all')
     expect(statusFromUrl(null)).toBe('all')
+  })
+})
+
+// From the live list: a client with no plan read "No plan, No plan, No plan"
+// straight across the row, because the tracks cell and the money cell both
+// fell back to the engagement word, which is the sentence the plan chip has
+// already said. These three helpers are the rule that the plan is stated
+// once and every other cell talks about its own subject.
+describe('saying the plan once', () => {
+  describe('tracksLine', () => {
+    it('counts the configured tracks, singular and plural', () => {
+      expect(tracksLine(toClientRow(api({ id: 'a', name: 'One', planType: 'maintain' })))).toBe('1 track')
+      expect(tracksLine(toClientRow(api({ id: 'b', name: 'Two', planType: 'scale' })))).toBe('2 tracks')
+    })
+
+    it('says nothing at all when there is no plan, because the chip said it', () => {
+      expect(tracksLine(toClientRow(api({ id: 'c', name: 'Bare', planType: null })))).toBeNull()
+    })
+
+    it('talks about tracks, not about the engagement, on a one-off plan', () => {
+      expect(tracksLine(toClientRow(api({ id: 'd', name: 'Launch', planType: 'launch' })))).toBe('No tracks')
+    })
+
+    it('keeps saying Tracks off, which is a setting and not a plan', () => {
+      expect(tracksLine(toClientRow(api({ id: 'e', name: 'Off', planType: 'scale', tracksMode: 'off' })))).toBe('Tracks off')
+      expect(tracksLine(toClientRow(api({ id: 'f', name: 'Off too', planType: null, tracksMode: 'off' })))).toBe('Tracks off')
+    })
+  })
+
+  describe('mrrFallbackLabel', () => {
+    it('separates a retainer with no figure from a client with no retainer', () => {
+      expect(mrrFallbackLabel('retainer')).toBe('Not set')
+      expect(mrrFallbackLabel('none')).toBe('No retainer')
+    })
+
+    it('names the engagement when the money is not monthly', () => {
+      expect(mrrFallbackLabel('project')).toBe('Project')
+      expect(mrrFallbackLabel('hourly')).toBe('Hourly')
+    })
+  })
+
+  describe('engagementStatLabel', () => {
+    it('reads as Not set under its own label rather than repeating the chip', () => {
+      expect(engagementStatLabel('none')).toBe('Not set')
+      expect(engagementStatLabel('retainer')).toBe('Retainer')
+    })
+  })
+
+  it('leaves a plan-less row with no second No plan anywhere on it', () => {
+    const row = toClientRow(api({ id: 'g', name: 'Bare', planType: null }))
+    const printed = [tracksLine(row), mrrFallbackLabel(row.engagement), engagementStatLabel(row.engagement)]
+    expect(printed.filter(label => label === ENGAGEMENT_LABEL.none)).toEqual([])
   })
 })

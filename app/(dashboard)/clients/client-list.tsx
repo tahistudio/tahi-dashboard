@@ -83,6 +83,7 @@ import {
   EMPTY_CLIENT_DRAFT,
   NewClientPanel,
   canSubmitDraft,
+  draftContactName,
   type NewClientDraft,
 } from './_list/new-client-panel'
 import {
@@ -535,7 +536,10 @@ export function ClientList() {
           website: draft.website,
           industry: draft.industry,
           planType: draft.planType,
-          primaryContactName: draft.primaryContactName,
+          // The endpoint and the contacts table both hold one name, so the
+          // panel's two fields are joined here. Empty stays empty, which is
+          // what leaves the route free to fall back to the address.
+          primaryContactName: draftContactName(draft),
           primaryContactEmail: draft.primaryContactEmail,
           sendInvite: draft.sendInvite,
         }),

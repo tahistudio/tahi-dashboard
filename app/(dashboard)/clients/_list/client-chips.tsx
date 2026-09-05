@@ -19,9 +19,10 @@ import { Tooltip } from '@/components/tahi/tooltip'
 import {
   CLIENT_HEALTH_LABELS,
   CLIENT_STATUS_LABELS,
-  ENGAGEMENT_LABEL,
   healthKeyOf,
   healthReasons,
+  mrrFallbackLabel,
+  tracksLine,
   type ClientRow,
   type ClientTracks,
 } from './clients-views'
@@ -114,12 +115,32 @@ export function ClientHealthBadge({ row }: { row: ClientRow }) {
  * the clients list endpoint carries tracks_mode and the custom counts, and
  * nothing about what is sitting on a track right now. Saying "2 tracks" and
  * meaning it beats filling segments from a number that does not exist.
+ *
+ * With no tracks it says so in the tracks' own words, and on a client with no
+ * plan it renders nothing at all, because the chip beside it has already said
+ * "No plan". See tracksLine(): this cell is never allowed to be the plan chip
+ * a second time.
+ *
+ * `emptyLabel` is for a caller that has put this under a label of its own,
+ * where a blank space is a hole in a grid rather than one less repetition.
+ * The portfolio card's "Tracks" stat passes it; the row and the phone card,
+ * which read as a sentence of chips, do not.
  */
-export function TrackMeterCell({ tracks, engagement }: { tracks: ClientTracks; engagement: ClientRow['engagement'] }) {
+export function TrackMeterCell({
+  tracks,
+  engagement,
+  emptyLabel,
+}: {
+  tracks: ClientTracks
+  engagement: ClientRow['engagement']
+  emptyLabel?: string
+}) {
+  const line = tracksLine({ tracks, engagement }) ?? emptyLabel ?? null
+  if (line === null) return null
   if (tracks.total === 0) {
     return (
       <span style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
-        {tracks.mode === 'off' ? 'Tracks off' : ENGAGEMENT_LABEL[engagement]}
+        {line}
       </span>
     )
   }
@@ -130,7 +151,6 @@ export function TrackMeterCell({ tracks, engagement }: { tracks: ClientTracks; e
   for (let i = 0; i < tracks.small; i += 1) {
     segments.push(<Segment key={`s${i}`} />)
   }
-  const label = `${tracks.total} ${tracks.total === 1 ? 'track' : 'tracks'}`
   return (
     <span
       style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}
@@ -138,7 +158,7 @@ export function TrackMeterCell({ tracks, engagement }: { tracks: ClientTracks; e
     >
       <span style={{ display: 'inline-flex', gap: '0.1875rem' }} aria-hidden="true">{segments}</span>
       <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', fontVariantNumeric: 'tabular-nums' }}>
-        {label}
+        {line}
       </span>
     </span>
   )
@@ -243,9 +263,11 @@ export function OpenWorkCell({ row }: { row: ClientRow }) {
 // -- Money -------------------------------------------------------------------
 
 /**
- * MRR, or the engagement word when there is none to show. Never a dash: a
- * project client has no monthly figure, and saying so is more use than an
- * empty cell. `sensitive` puts data-private on the figure.
+ * MRR, or what stands in for it when there is no monthly figure (see
+ * mrrFallbackLabel: a word about the money, never the plan chip's own words
+ * a second time). Never a dash: a project client has no monthly figure, and
+ * saying so is more use than an empty cell. `sensitive` puts data-private on
+ * the figure.
  *
  * `unknownLabel` is what the caller passes when the figures could not be read
  * at all (the retainer-health report is behind its own feature gate, so an
@@ -263,8 +285,7 @@ export function ClientMoneyCell({ row, unknownLabel }: { row: ClientRow; unknown
       />
     )
   }
-  const fallback = unknownLabel
-    ?? (row.engagement === 'retainer' ? 'Not set' : ENGAGEMENT_LABEL[row.engagement])
+  const fallback = unknownLabel ?? mrrFallbackLabel(row.engagement)
   return (
     <span style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
       {fallback}
