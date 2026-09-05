@@ -71,10 +71,23 @@ async function gotoRequests(page: Page): Promise<void> {
 /** Wait for the list to settle into rows or an empty state. */
 async function listSettled(page: Page): Promise<void> {
   // The shell keeps a notification stream open, so networkidle never fires.
-  await page.locator('table, [data-mobile-cards], a[href^="/requests/"]').first().waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {})
+  // The table frame is in the DOM before the fetch resolves, so waiting on it
+  // handed back an empty tbody and every row-dependent case skipped itself on
+  // a populated database. Wait for a row link or the empty state instead.
+  await page
+    .locator('a[href^="/requests/"]')
+    .or(page.getByText('No requests match'))
+    .or(page.getByText('No requests found'))
+    .first()
+    .waitFor({ state: 'attached', timeout: 20_000 })
+    .catch(() => {})
 }
 
 test.describe('Requests list', () => {
+  // A cold dev server can spend most of the 30s default compiling /requests
+  // before the first assertion runs, and the rows arrive after that.
+  test.describe.configure({ timeout: 90_000 })
+
   // A fresh context looks like a first visit, so the product tour spotlight
   // would sit over the page and swallow every click and Tab press below.
   test.beforeEach(async ({ page }) => { await primePage(page) })
@@ -155,7 +168,11 @@ test.describe('Requests list', () => {
     test.skip(await isNarrow(page), 'Row checkboxes are a table affordance.')
     await listSettled(page)
 
-    const boxes = page.getByRole('checkbox', { name: /^Select row$/ })
+    // Both names, because a checkbox is renamed the moment it is ticked. A
+    // locator that matched "Select row" alone renumbered itself after the
+    // first click, so nth(2) walked one row further down and the range came
+    // back one row too long.
+    const boxes = page.getByRole('checkbox', { name: /^(?:De)?select row$/i })
     const count = await boxes.count()
     test.skip(count < 3, 'Needs at least three requests to span a range.')
 
