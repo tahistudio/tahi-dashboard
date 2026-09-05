@@ -435,8 +435,13 @@ export function TaskDetailPanel(props: TaskDetailPanelProps): React.ReactElement
         onCancel={() => setConfirm(null)}
         onConfirm={async () => {
           if (!task) return
-          await onDelete(task.id)
-          setConfirm(null)
+          try {
+            await onDelete(task.id)
+            setConfirm(null)
+          } catch {
+            // The shell reports the failure. Leaving the confirm open keeps
+            // the action one click away rather than pretending it happened.
+          }
         }}
       />
 
@@ -446,8 +451,13 @@ export function TaskDetailPanel(props: TaskDetailPanelProps): React.ReactElement
         onCancel={() => setConfirm(null)}
         onConfirm={async input => {
           if (!task) return
-          await onPromote(task.id, input)
-          setConfirm(null)
+          try {
+            await onPromote(task.id, input)
+            setConfirm(null)
+          } catch {
+            // Same rule as the delete confirm: the shell owns the message,
+            // and the dialog keeps the choices the user already made.
+          }
         }}
       />
     </>
