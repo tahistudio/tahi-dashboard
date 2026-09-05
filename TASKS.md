@@ -102,6 +102,12 @@ Source: `docs/superpowers/audits/2026-09-06-next-surfaces-assessment.json` (five
 
 Not yet (from the same sweep): the standalone /messages surface (8d), the T3 sales artifacts, the testimonial pipeline, automated health scoring (scorer exists, zero callers), the /notifications page and Slack and digests, request steps and client checklists (documented, not built), file-level proofing (ManyRequests has none either), ratings and NPS, a persisted per-request activity log.
 
+## Client library and catalogue (Liam, 2026-09-06)
+
+- [ ] CL.1 - [Design first, then FE/BE] **Files as a small Google Drive with threads.** Folders per client (Deliverables, Brand, References, Uploads), drag-and-drop uploads from the client, a comment thread per file (reuse the request thread composer and the messages table with a file target), versions optional. Liam: "i'd like to give them a small version of like google drive but with threads so they can upload docs for us there." Design in Claude Design alongside the Clients pages; the current /files page (list, upload, download) stays until then.
+- [x] CL.2 - [FE] Client preview of /services showed the admin catalogue editor (New service, coupons, visibility toggles) because the page branched on the Clerk org alone. Fixed the same way as Files: the impersonation cookie selects the portal catalogue. Real client logins were never affected.
+- [ ] CL.3 - [Design first, then FE/BE] **Services page as a showcase that upsells.** Tahi's services presented to the client (what it is, who it is for, from price, what you get), an "Ask about this" CTA that opens a pre-filled request or enquiry, plan-aware suggestions (a Maintain client sees the Scale upgrade; a project client sees a retainer), never a form to create a service. Depends on CT.11 (scope the catalogue per org before importing ManyRequests services). Liam: "we'll get to the upselling idea in a minute."
+
 ## Sprint T2 - The request platform (Tier 2, ~1.5 weeks)
 
 - [x] T2.1 (C2.3/B3) - [BE/FE] **Portal invoice detail + real Pay.** Shipped 2026-09-05 in the Tier 1 cutover (billing slice, plan `docs/superpowers/plans/2026-09-05-cutover-tier1.md`): portal list and detail routes, hosted pay URL persisted at creation and on send, Pay now on the client page; verified live as an impersonated client. Original scope: GET /api/portal/invoices/[id]; detail page branches SWR on isAdmin (always 403s clients today); hosted_invoice_url column persisted from stripe-create + webhook; real Pay link with billing-portal session fallback.
