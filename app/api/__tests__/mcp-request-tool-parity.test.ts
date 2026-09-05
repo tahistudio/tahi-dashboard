@@ -165,6 +165,44 @@ describe('AI on one request', () => {
   })
 })
 
+describe('predict_entry_fields', () => {
+  it('posts the arguments straight to the prediction route', () => {
+    const mapped = call('predict_entry_fields', {
+      subject: 'request',
+      title: 'Rebuild the pricing page hero for the launch',
+      orgId: 'org_1',
+      empty: ['dueDate', 'priority'],
+      todayIso: '2026-09-05',
+    })
+    expect(mapped.path).toBe('/api/admin/ai/predict-fields')
+    expect(mapped.method).toBe('POST')
+    expect(mapped.body).toEqual({
+      subject: 'request',
+      title: 'Rebuild the pricing page hero for the launch',
+      orgId: 'org_1',
+      empty: ['dueDate', 'priority'],
+      todayIso: '2026-09-05',
+    })
+  })
+
+  it('takes a task with a level and no client', () => {
+    expect(call('predict_entry_fields', {
+      subject: 'task',
+      title: 'Write the quarterly capacity review',
+      level: 'tahi_internal',
+    }).body).toMatchObject({ subject: 'task', level: 'tahi_internal' })
+  })
+
+  it('refuses a subject outside the two the route accepts', () => {
+    expect(() => requestToolCall('predict_entry_fields', { subject: 'invoice', title: 'x y z abcd' }))
+      .toThrow(/subject/)
+  })
+
+  it('refuses a call with no title, rather than 400ing at the route', () => {
+    expect(() => requestToolCall('predict_entry_fields', { subject: 'request' })).toThrow(/title/)
+  })
+})
+
 describe('tools held back', () => {
   it('exposes no bulk request tool while /api/admin/requests/bulk is unscoped', () => {
     // The bulk route gates on isTahiAdmin alone, loops arbitrary ids with no
@@ -178,5 +216,12 @@ describe('tools held back', () => {
     expect(requestToolCall('list_tasks', {})).toBeNull()
     expect(requestToolCall('list_clients', {})).toBeNull()
     expect(requestToolCall('ai_request_wizard', {})).toBeNull()
+  })
+
+  it('exposes no tool for the deleted ai/suggest route', () => {
+    // app/api/admin/ai/suggest was admin-authed keyword heuristics with zero
+    // callers that emitted an `urgent` priority a request cannot store. Its
+    // replacement is predict_entry_fields; the old name must never resolve.
+    expect(requestToolCall('ai_suggest', {})).toBeNull()
   })
 })

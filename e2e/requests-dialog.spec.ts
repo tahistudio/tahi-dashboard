@@ -1,5 +1,16 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { primePage } from './helpers'
+
+/** One day, for the "the floor is not yesterday" assertion. */
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Predictive autofill fires off typing and can legitimately answer with
+ * nothing, so every wait on it is generous and every absence is a skip rather
+ * than a failure. The panel's own fields are the 30 second class the QA recipe
+ * calls for.
+ */
+const PANEL_TIMEOUT = 30_000
 
 /**
  * New request dialog (Slice DIALOG of the Requests alignment pass).
@@ -73,6 +84,36 @@ async function focusIsInsideDialog(page: Page): Promise<boolean> {
   })
 }
 
+/** Opens a SearchableSelect by its placeholder and picks the first option. */
+async function pickFirstOption(dialog: Locator, placeholder: string): Promise<string | null> {
+  const trigger = dialog.getByRole('button', { name: placeholder })
+  if (await trigger.count() === 0) return null
+  await trigger.first().click()
+  const options = dialog.getByRole('option')
+  await options.first().waitFor({ state: 'visible', timeout: PANEL_TIMEOUT }).catch(() => {})
+  if (await options.count() === 0) return null
+  const label = (await options.first().textContent())?.trim() ?? null
+  await options.first().click()
+  return label
+}
+
+/** The text an element's aria-describedby actually resolves to on the page. */
+async function describedByText(field: Locator): Promise<string> {
+  return field.evaluate((el) => {
+    const ids = (el.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)
+    return ids
+      .map(id => document.getElementById(id)?.textContent?.trim() ?? '')
+      .join(' ')
+      .trim()
+  })
+}
+
+/** Soft cleanup: a leaked request is noise on the board, not a failed run. */
+async function deleteRequest(request: APIRequestContext, id: string): Promise<void> {
+  const res = await request.delete(`/api/admin/requests/${id}`)
+  expect.soft(res.ok(), `the request fixture ${id} was not cleaned up`).toBeTruthy()
+}
+
 test.describe('New request dialog', () => {
   test.beforeEach(async ({ page }) => { await primePage(page) })
 
@@ -134,7 +175,7 @@ test.describe('New request dialog', () => {
     await expect(design).toHaveAttribute('aria-checked', 'false')
   })
 
-  test('the ideal due date defaults a week out and floors at tomorrow', async ({ page }) => {
+  test('the ideal due date opens empty and floors at tomorrow', async ({ page }) => {
     await gotoRequests(page)
     await openDialog(page)
     test.skip(!(await rebuiltDialogIsOn(page)), 'The rebuilt dialog is super-admin gated.')
@@ -146,9 +187,13 @@ test.describe('New request dialog', () => {
       value: (el as HTMLInputElement).value,
       min: (el as HTMLInputElement).min,
     }))
-    expect(value).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    // It used to open at today plus seven: a blind constant painted as an
+    // ordinary filled field, so nobody could tell a date the studio had
+    // thought about from one nobody had. Empty is the honest state, and it
+    // leaves somewhere for a grounded suggestion to land.
+    expect(value).toBe('')
     expect(min).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    expect(new Date(`${value}T00:00:00`).getTime()).toBeGreaterThan(new Date(`${min}T00:00:00`).getTime())
+    expect(new Date(`${min}T00:00:00`).getTime()).toBeGreaterThan(Date.now() - DAY_MS)
   })
 
   test('submit stays off until the form is fileable', async ({ page }) => {
@@ -174,6 +219,86 @@ test.describe('New request dialog', () => {
 
     await back.click()
     await expect(page.getByRole('radiogroup', { name: 'What kind of work?' })).toBeVisible()
+  })
+
+  /**
+   * TP.5: the empty fields fill themselves, visibly, and give way to a person.
+   *
+   * The one flow the founder asked for, end to end: pick a client, write a
+   * real title, watch the due date and the priority fill with a Suggested chip
+   * and a caption that says why, correct one of them, clear the rest, and file
+   * what is left.
+   *
+   * It skips rather than fails when nothing is suggested. That is a legitimate
+   * answer from the route (a studio with no delivered work, a deploy with no
+   * ANTHROPIC_API_KEY, a client whose cohort is under five rows), and a red
+   * suite on a correct abstention would teach everyone to ignore this file.
+   */
+  test('an empty due date and priority fill themselves, and a person can take them back', async ({ page, request }) => {
+    await gotoRequests(page)
+    const dialog = await openDialog(page)
+    test.skip(!(await rebuiltDialogIsOn(page)), 'The rebuilt dialog is super-admin gated.')
+
+    const client = await pickFirstOption(dialog, 'Select a client...')
+    test.skip(!client, 'The dataset has no active client to file against.')
+
+    // Twelve words, which is comfortably past the four word / sixteen
+    // character gate the dialog and the route both run.
+    const title = 'Rebuild the pricing page hero and refresh the plan comparison table copy'
+    await page.locator('#req-title').fill(title)
+
+    const due = page.locator('#req-due-date')
+    const dueChip = dialog.getByRole('button', { name: 'Clear the suggested due date' })
+
+    // 700ms of debounce, a model call, and a Worker cold start.
+    await dueChip.waitFor({ state: 'visible', timeout: PANEL_TIMEOUT }).catch(() => {})
+    test.skip(await dueChip.count() === 0, 'The studio had nothing to suggest for this client, which is a valid answer.')
+
+    // The value is real: it is in the control, so it submits with the form and
+    // needs no separate accept step.
+    await expect(due).not.toHaveValue('')
+    // And the reason is wired to the field rather than floating beside it.
+    expect(await describedByText(due)).not.toBe('')
+
+    // No confidence number anywhere on the panel.
+    await expect(dialog.getByText(/\d{1,3}\s?% confiden/i)).toHaveCount(0)
+
+    // Correcting a field takes it back from the predictor: the chip goes if
+    // there was one, and the value the person chose is the one that stands.
+    const priorityChip = dialog.getByRole('button', { name: 'Clear the suggested priority' })
+    const priorityWasSuggested = await priorityChip.count() > 0
+    await page.locator('#req-priority').selectOption('high')
+    if (priorityWasSuggested) await expect(priorityChip).toHaveCount(0)
+    await expect(page.locator('#req-priority')).toHaveValue('high')
+
+    // One link empties everything still suggested.
+    const clearAll = dialog.getByRole('button', { name: 'Clear suggestions' })
+    await expect(clearAll).toBeVisible()
+    await clearAll.click()
+    await expect(due).toHaveValue('')
+    await expect(clearAll).toHaveCount(0)
+
+    // What the person left stands, and the request files.
+    const created = page.waitForResponse(r =>
+      r.url().includes('/api/admin/requests') && r.request().method() === 'POST')
+    await dialog.getByRole('button', { name: 'Create request' }).click()
+    const res = await created
+    expect(res.ok()).toBeTruthy()
+    const { id } = await res.json() as { id: string }
+
+    try {
+      const row = await request.get(`/api/admin/requests/${id}`)
+      expect(row.ok()).toBeTruthy()
+      const { request: saved } = await row.json() as {
+        request: { title: string; dueDate: string | null; priority: string }
+      }
+      expect(saved.title).toBe(title)
+      // Cleared means cleared: the suggestion does not come back on submit.
+      expect(saved.dueDate).toBeNull()
+      expect(saved.priority).toBe('high')
+    } finally {
+      await deleteRequest(request, id)
+    }
   })
 
   test('the footer keeps its primary action inside the panel at 375px', async ({ page }) => {

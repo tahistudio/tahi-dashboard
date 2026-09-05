@@ -43,6 +43,14 @@ import { TASK_LEVELS, TASK_LEVEL_HINTS, isTaskLevel, type TaskLevel } from '@/li
 import { checklistCountLabel, LEVEL_ICON } from '@/components/tahi/tasks/task-chips'
 import type { TaskTemplateOption } from '@/components/tahi/tasks/task-types'
 import type { TaskFields } from '@/lib/task-wizard-drafts'
+import {
+  SuggestedField,
+  SuggestedLabel,
+  SuggestionLink,
+  suggestionReasonId,
+} from '@/components/tahi/forms/suggested-field'
+import { useFieldPredictions } from '@/components/tahi/forms/use-field-predictions'
+import type { PredictableField } from '@/lib/predict/types'
 
 /** Lazy, so the tasks page keeps deferring the wizard the way its own header
  *  menu already does. The panel is the drawer's body with no shell. */
@@ -92,6 +100,16 @@ const TEMPLATE_PRIORITY_ALIASES: Record<string, string> = {
   none: 'standard', low: 'standard', medium: 'standard',
   standard: 'standard', high: 'high', urgent: 'urgent',
 }
+
+/** The fields this dialog will accept a suggestion for. A task has no
+ *  category and no size, and its level, client and request are the operator's
+ *  to choose: those three decide what the task IS. */
+const PREDICTED_TASK_FIELDS: readonly PredictableField[] = [
+  'dueDate', 'priority', 'estimatedHours', 'assigneeId',
+]
+
+/** The priority a task opens on, which reads as unanswered until someone picks. */
+const DEFAULT_PRIORITY = 'standard'
 
 /** The repo's reference for a request, everywhere: #042, never TR-0042. */
 function requestRef(requestNumber: number | null): string {
@@ -177,6 +195,7 @@ function FieldGroup({
   required,
   htmlFor,
   hint,
+  after,
   children,
 }: {
   label: string
@@ -184,6 +203,10 @@ function FieldGroup({
   htmlFor?: string
   /** One quiet line under the field: what the choice above means. */
   hint?: string
+  /** Sits beside the label, the way the request dialog's FieldGroup does: the
+   *  Suggested chip and its Clear link. Beside rather than inside, because a
+   *  focusable element in a <label> steals the click meant for the field. */
+  after?: React.ReactNode
   children: React.ReactNode
 }) {
   // Half these fields are a SearchableSelect or a SegmentedControl, and
@@ -205,9 +228,12 @@ function FieldGroup({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-      {htmlFor
-        ? <label htmlFor={htmlFor} style={captionStyle}>{captionInner}</label>
-        : <span style={captionStyle}>{captionInner}</span>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexWrap: 'wrap' }}>
+        {htmlFor
+          ? <label htmlFor={htmlFor} style={captionStyle}>{captionInner}</label>
+          : <span style={captionStyle}>{captionInner}</span>}
+        {after}
+      </div>
       {children}
       {hint && (
         <p style={{ margin: 0, fontSize: '0.71875rem', fontWeight: 500, lineHeight: 1.45, color: 'var(--color-text-subtle)' }}>
@@ -252,6 +278,53 @@ export function NewTaskDialog({
   const [subtaskDraft, setSubtaskDraft] = React.useState('')
   const [submitting, setSubmitting] = React.useState(false)
 
+  // ── Predictive autofill ──────────────────────────────────────────────────
+  //
+  // /tasks is an admin surface end to end, so the audience gate the request
+  // dialog needs does not apply here. Everything else is the same shape: the
+  // predictor fills only what nobody has answered, and a template or a draft
+  // outranks it because both say what they wrote.
+  const applyPrediction = React.useCallback((field: PredictableField, value: string | number) => {
+    switch (field) {
+      case 'dueDate': setDueDate(String(value)); break
+      case 'priority': setPriority(String(value)); break
+      case 'estimatedHours': setEstimate(String(value)); break
+      case 'assigneeId': setAssigneeId(String(value)); break
+      default: break
+    }
+  }, [])
+
+  const clearPrediction = React.useCallback((field: PredictableField) => {
+    switch (field) {
+      case 'dueDate': setDueDate(''); break
+      case 'priority': setPriority(DEFAULT_PRIORITY); break
+      case 'estimatedHours': setEstimate(''); break
+      case 'assigneeId': setAssigneeId(null); break
+      default: break
+    }
+  }, [])
+
+  const predictions = useFieldPredictions({
+    open,
+    isAdmin: true,
+    paused: view !== 'form',
+    subject: 'task',
+    title,
+    description,
+    orgId: links.orgId,
+    level: links.level,
+    fields: PREDICTED_TASK_FIELDS,
+    values: {
+      dueDate: dueDate || null,
+      priority: priority === DEFAULT_PRIORITY ? null : priority,
+      estimatedHours: estimate || null,
+      assigneeId,
+    },
+    apply: applyPrediction,
+    clear: clearPrediction,
+  })
+  const { markTouched, markWritten } = predictions
+
   /**
    * Fill the form from a template. Called on open when the header menu chose
    * one, and again whenever the picker changes, so the two doors behave the
@@ -260,7 +333,7 @@ export function NewTaskDialog({
   const applyTemplate = React.useCallback((template: TaskTemplateOption) => {
     setTitle(template.name)
     setDescription(template.description ?? '')
-    setPriority(TEMPLATE_PRIORITY_ALIASES[template.defaultPriority] ?? 'standard')
+    setPriority(TEMPLATE_PRIORITY_ALIASES[template.defaultPriority] ?? DEFAULT_PRIORITY)
     setEstimate(template.estimatedHours != null ? String(template.estimatedHours) : '')
     setSubtasks(template.subtasks.slice())
     setLinks(current => {
@@ -268,7 +341,9 @@ export function NewTaskDialog({
       const orgId = template.orgId ?? current.orgId
       return coerceTaskLinks({ level, orgId, requestId: orgId === current.orgId ? current.requestId : null })
     })
-  }, [])
+    // A template beats a prediction on the two fields it actually writes.
+    markWritten(['priority', 'estimatedHours'])
+  }, [markWritten])
 
   // Opening resets the form to whatever the caller asked for. Closing leaves
   // it alone: a rejected create keeps the draft on screen.
@@ -291,6 +366,7 @@ export function NewTaskDialog({
     setSubtasks([])
     setSubtaskDraft('')
     setSubmitting(false)
+    predictions.reset()
     if (initialTemplateId) {
       const template = templates.find(t => t.id === initialTemplateId)
       if (template) applyTemplate(template)
@@ -337,6 +413,8 @@ export function NewTaskDialog({
     setAssigneeId(fields.assigneeId)
     setEstimate(fields.estimatedHours != null ? String(fields.estimatedHours) : '')
     setSubtasks(fields.subtasks)
+    // The draft writes every predictable field, so all four are spoken for.
+    markWritten(['priority', 'dueDate', 'assigneeId', 'estimatedHours'])
     setView('form')
     showToast('Draft ready. Review it below.')
   }
@@ -526,53 +604,101 @@ export function NewTaskDialog({
             />
           </FieldGroup>
 
-          <FieldGroup label="Priority">
-            <SegmentedControl
-              value={priority}
-              onChange={setPriority}
-              role="radiogroup"
-              size="sm"
-              fill
-              ariaLabel="Priority"
-              options={TASK_PRIORITIES.map(p => ({ value: p, label: taskPriorityLabel(p) }))}
-            />
+          <FieldGroup
+            label="Priority"
+            after={predictions.isSuggested('priority')
+              ? <SuggestedLabel label="priority" onClear={() => predictions.clearField('priority')} />
+              : null}
+          >
+            <SuggestedField
+              suggested={predictions.isSuggested('priority')}
+              reason={predictions.reasonFor('priority')}
+              fieldId="new-task-priority"
+            >
+              <SegmentedControl
+                value={priority}
+                onChange={next => { markTouched('priority'); setPriority(next) }}
+                role="radiogroup"
+                size="sm"
+                fill
+                ariaLabel="Priority"
+                options={TASK_PRIORITIES.map(p => ({ value: p, label: taskPriorityLabel(p) }))}
+              />
+            </SuggestedField>
           </FieldGroup>
 
           <div className="tskn-grid">
-            <FieldGroup label="Due" htmlFor="new-task-due">
-              <input
-                id="new-task-due"
-                type="date"
-                className="tskn-input"
-                value={dueDate}
-                onChange={e => setDueDate(e.target.value)}
-              />
+            <FieldGroup
+              label="Due"
+              htmlFor="new-task-due"
+              after={predictions.isSuggested('dueDate')
+                ? <SuggestedLabel label="due date" onClear={() => predictions.clearField('dueDate')} />
+                : null}
+            >
+              <SuggestedField
+                suggested={predictions.isSuggested('dueDate')}
+                reason={predictions.reasonFor('dueDate')}
+                fieldId="new-task-due"
+              >
+                <input
+                  id="new-task-due"
+                  type="date"
+                  className="tskn-input"
+                  value={dueDate}
+                  aria-describedby={predictions.isSuggested('dueDate') ? suggestionReasonId('new-task-due') : undefined}
+                  onChange={e => { markTouched('dueDate'); setDueDate(e.target.value) }}
+                />
+              </SuggestedField>
             </FieldGroup>
 
-            <FieldGroup label="Estimate" htmlFor="new-task-estimate">
-              <input
-                id="new-task-estimate"
-                type="number"
-                inputMode="decimal"
-                min={0}
-                step={0.25}
-                className="tskn-input"
-                value={estimate}
-                placeholder="Hours"
-                onChange={e => setEstimate(e.target.value)}
-              />
+            <FieldGroup
+              label="Estimate"
+              htmlFor="new-task-estimate"
+              after={predictions.isSuggested('estimatedHours')
+                ? <SuggestedLabel label="estimate" onClear={() => predictions.clearField('estimatedHours')} />
+                : null}
+            >
+              <SuggestedField
+                suggested={predictions.isSuggested('estimatedHours')}
+                reason={predictions.reasonFor('estimatedHours')}
+                fieldId="new-task-estimate"
+              >
+                <input
+                  id="new-task-estimate"
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step={0.25}
+                  className="tskn-input"
+                  value={estimate}
+                  placeholder="Hours"
+                  aria-describedby={predictions.isSuggested('estimatedHours') ? suggestionReasonId('new-task-estimate') : undefined}
+                  onChange={e => { markTouched('estimatedHours'); setEstimate(e.target.value) }}
+                />
+              </SuggestedField>
             </FieldGroup>
           </div>
 
-          <FieldGroup label="Assignee">
-            <SearchableSelect
-              options={peopleList.map(p => ({ value: p.id, label: p.name }))}
-              value={assigneeId}
-              allowClear
-              placeholder="Unassigned"
-              searchPlaceholder="Search people..."
-              onChange={setAssigneeId}
-            />
+          <FieldGroup
+            label="Assignee"
+            after={predictions.isSuggested('assigneeId')
+              ? <SuggestedLabel label="assignee" onClear={() => predictions.clearField('assigneeId')} />
+              : null}
+          >
+            <SuggestedField
+              suggested={predictions.isSuggested('assigneeId')}
+              reason={predictions.reasonFor('assigneeId')}
+              fieldId="new-task-assignee"
+            >
+              <SearchableSelect
+                options={peopleList.map(p => ({ value: p.id, label: p.name }))}
+                value={assigneeId}
+                allowClear
+                placeholder="Unassigned"
+                searchPlaceholder="Search people..."
+                onChange={next => { markTouched('assigneeId'); setAssigneeId(next) }}
+              />
+            </SuggestedField>
           </FieldGroup>
 
           <FieldGroup label="Checklist" htmlFor="new-task-subtask">
@@ -637,6 +763,11 @@ export function NewTaskDialog({
               </div>
             </div>
           </FieldGroup>
+          {predictions.hasAny && (
+            <div>
+              <SuggestionLink onClick={predictions.clearAll}>Clear suggestions</SuggestionLink>
+            </div>
+          )}
         </form>
       </SlideOver.Body>
       )}

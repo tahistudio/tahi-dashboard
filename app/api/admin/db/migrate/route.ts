@@ -2047,6 +2047,14 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE organisations ADD COLUMN invoice_channel text`,
     ],
   },
+  {
+    name: '0090',
+    description: 'The two indexes predictive autofill reads on. POST /api/admin/ai/predict-fields grounds every guess in a cohort of recently delivered work, and neither table had an index that fits: requests was indexed on org_id alone so the client cohort walked every request they have ever filed, and tasks had idx_tasks_type but nothing on completed_at (0087 added assignee and due_date only) so the level cohort scanned the open tasks too. Both CREATEs are IF NOT EXISTS and nothing is backfilled, so this is additive and re-running is safe.',
+    statements: [
+      `CREATE INDEX IF NOT EXISTS idx_requests_org_delivered ON requests(org_id, delivered_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_tasks_type_completed ON tasks(type, completed_at)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

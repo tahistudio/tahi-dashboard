@@ -1,0 +1,32 @@
+-- Migration 0090: the two indexes predictive autofill reads on
+--
+-- POST /api/admin/ai/predict-fields grounds every guess in a cohort of
+-- recently delivered work: for a request, "this client's last 180 days of
+-- delivered items"; for a task, "this level's last 180 days of completed
+-- ones". Neither had an index that fits.
+--
+--   idx_requests_org_delivered (org_id, delivered_at)
+--     requests was indexed on org_id alone, so the cohort read walked every
+--     request the client has ever filed and then filtered on delivered_at in
+--     memory. The composite lets the same read stop at the 180-day boundary.
+--
+--   idx_tasks_type_completed (type, completed_at)
+--     tasks had idx_tasks_type but nothing on completed_at (0087 added
+--     assignee and due_date only), so the level cohort scanned every task at
+--     that level including the open ones, which are the majority.
+--
+-- Both are IF NOT EXISTS, so re-running is safe. Additive only: no column is
+-- added, nothing is backfilled, and no existing query changes shape, so this
+-- can be applied in any order relative to the deploy. Applying it FIRST is
+-- still the right habit, since the code that reads these paths ships with it.
+--
+--   1. wrangler d1 execute tahi-db-staging --remote --file=drizzle/migrations/0090_predict_indexes.sql
+--   2. deploy, then open the New Request dialog on staging and watch a
+--      suggestion land on due date
+--   3. wrangler d1 execute tahi-db --remote --file=drizzle/migrations/0090_predict_indexes.sql
+--   4. approve the production deploy and smoke the same dialog
+--
+-- POST /api/admin/db/migrate {"name":"0090"} is the equivalent once the deploy
+-- carrying the entry is live.
+CREATE INDEX IF NOT EXISTS idx_requests_org_delivered ON requests(org_id, delivered_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_type_completed ON tasks(type, completed_at);

@@ -1494,6 +1494,16 @@ const TOOLS: ToolDef[] = [
   tool('ai_draft_request_reply', 'Draft a reply for a request thread, grounded in the request, the client and the recent thread. Returns draft text only and posts nothing; post it with post_request_message once a human has read it.', {
     requestId: prop('string', 'Request ID to draft a reply for'),
   }, ['requestId']),
+  tool('predict_entry_fields', "Suggest values for the fields left empty on a request or task that does not exist yet: due date, priority, estimated hours, and for a request its category and size. Grounded in this client's own delivered work, their billed hours and their intake form SLA. Returns suggestions only and creates nothing; a thin title answers an empty suggestions object rather than a guess. Pass the values to create_request or create_task once a human has read them.", {
+    subject: prop('string', 'What is being filed: "request" or "task"'),
+    title: prop('string', 'The title as typed. Needs four words and sixteen characters or the answer is empty by design.'),
+    description: prop('string', 'The brief, as plain text'),
+    orgId: prop('string', 'Client organisation ID. Required for a request; a task may instead be tahi_internal.'),
+    level: prop('string', 'Tasks only: client_task | internal_client_task | tahi_internal'),
+    category: prop('string', 'Requests only, when one is already chosen: design | development | content | strategy | admin | bug'),
+    empty: { type: 'array', items: { type: 'string' }, description: 'Fields to fill: dueDate, priority, estimatedHours, category, size, assigneeId. Max 6.' },
+    todayIso: prop('string', "Today's calendar date as YYYY-MM-DD"),
+  }, ['subject', 'title']),
 
   // ── Finance reporting (Phase 10) ──────────────────────────────────
   tool('get_invoice_aging', 'Outstanding invoices grouped by aging bucket (current/30/60/90+ days), in NZD'),

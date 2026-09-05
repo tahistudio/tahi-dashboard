@@ -198,6 +198,21 @@ export function requestToolCall(
     case 'ai_draft_request_reply':
       return { path: `/api/admin/requests/${s('requestId')}/draft-reply`, method: 'POST', body: {} }
 
+    // ── AI before a record exists ─────────────────────────────────────
+    // The only tool here that names no requestId, because the thing it
+    // predicts for has not been created yet. The route answers 200 with an
+    // empty object rather than an error when there is too little to go on, so
+    // the mapping passes the arguments through unchanged and lets the route's
+    // own gate decide.
+    case 'predict_entry_fields': {
+      const subject = s('subject')
+      if (subject !== 'request' && subject !== 'task') {
+        throw new Error('subject must be "request" or "task"')
+      }
+      if (!s('title')) throw new Error('title is required')
+      return { path: '/api/admin/ai/predict-fields', method: 'POST', body: { ...args, subject } }
+    }
+
     default:
       return null
   }

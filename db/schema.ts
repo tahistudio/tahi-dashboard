@@ -485,6 +485,10 @@ export const requests = sqliteTable('requests', {
   index('idx_requests_number').on(table.requestNumber),
   index('idx_requests_parent').on(table.parentRequestId),
   index('idx_requests_schedule_row').on(table.scheduleRowId),
+  // Predictive autofill reads "this client's delivered work, last 180 days"
+  // on every prediction. org_id alone walked everything they ever filed
+  // (migration 0090).
+  index('idx_requests_org_delivered').on(table.orgId, table.deliveredAt),
 ])
 
 // ============================================================
@@ -881,6 +885,9 @@ export const tasks = sqliteTable('tasks', {
   // teammate Overview home, and the planner sorts on the due date.
   index('idx_tasks_assignee').on(table.assigneeId),
   index('idx_tasks_due').on(table.dueDate),
+  // Predictive autofill reads "this level's completed work, last 180 days".
+  // idx_tasks_type alone swept the open tasks too (migration 0090).
+  index('idx_tasks_type_completed').on(table.type, table.completedAt),
 ])
 
 // ============================================================

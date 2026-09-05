@@ -46,6 +46,14 @@ import {
   sizeToRequestType,
   type SizeSuggestion,
 } from '@/lib/request-size-suggestion'
+import {
+  SuggestedField,
+  SuggestedLabel,
+  SuggestionLink,
+  suggestionReasonId,
+} from '@/components/tahi/forms/suggested-field'
+import { useFieldPredictions } from '@/components/tahi/forms/use-field-predictions'
+import type { PredictableField } from '@/lib/predict/types'
 
 // ── Rollout gate ───────────────────────────────────────────────────────────────
 
@@ -189,17 +197,34 @@ function pad2(n: number): string {
 
 /**
  * An ISO date `days` from `from`, in the person's own calendar rather than
- * UTC, so "tomorrow" is tomorrow wherever they are. The dialog defaults the
- * ideal due date to seven days out and floors the picker at one.
+ * UTC, so "tomorrow" is tomorrow wherever they are. The picker floors at one
+ * day out.
  */
 export function isoDatePlusDays(days: number, from: Date = new Date()): string {
   const d = new Date(from.getFullYear(), from.getMonth(), from.getDate() + days)
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 }
 
-/** Days the ideal due date defaults to, and the floor under the picker. */
-export const DUE_DATE_DEFAULT_DAYS = 7
+/**
+ * The floor under the picker.
+ *
+ * There is deliberately no default any more. The ideal due date used to open
+ * at today plus seven, a blind constant rendered as an ordinary filled field,
+ * so nobody could tell a date the studio had thought about from one nobody
+ * had. It now opens empty, which is honest on its own and leaves somewhere for
+ * a grounded suggestion to land.
+ */
 export const DUE_DATE_MIN_DAYS = 1
+
+/** The fields the team's request dialog will accept a suggestion for. */
+const PREDICTED_REQUEST_FIELDS: readonly PredictableField[] = [
+  'dueDate', 'priority', 'estimatedHours', 'category', 'size',
+]
+
+/** The defaults a control opens on, which read as empty until someone chooses. */
+const DEFAULT_CATEGORY = 'development'
+const DEFAULT_PRIORITY = 'standard'
+const DEFAULT_SIZE: RequestSize = 'small_task'
 
 /**
  * A brief handed in from outside the editor, in the shape RichBrief stores.
@@ -374,12 +399,13 @@ function AlignedRequestDialog({
 
   // Form fields
   const [title, setTitle] = useState('')
-  const [type, setType] = useState<RequestSize>('small_task')
-  const [category, setCategory] = useState('development')
+  const [type, setType] = useState<RequestSize>(DEFAULT_SIZE)
+  const [category, setCategory] = useState(DEFAULT_CATEGORY)
   const [description, setDescription] = useState('')
-  const [priority, setPriority] = useState('standard')
+  const [priority, setPriority] = useState(DEFAULT_PRIORITY)
   const [placement, setPlacement] = useState<Placement>('queue')
-  const [dueDate, setDueDate] = useState(() => isoDatePlusDays(DUE_DATE_DEFAULT_DAYS))
+  // Empty on purpose. See DUE_DATE_MIN_DAYS.
+  const [dueDate, setDueDate] = useState('')
   const [startDate, setStartDate] = useState('')
   const [estimatedHours, setEstimatedHours] = useState('')
   const [moreOpen, setMoreOpen] = useState(false)
@@ -448,15 +474,15 @@ function AlignedRequestDialog({
     if (!open) return
     setView('form')
     setTitle('')
-    setType('small_task')
-    setCategory('development')
+    setType(DEFAULT_SIZE)
+    setCategory(DEFAULT_CATEGORY)
     setDescription('')
-    setPriority('standard')
+    setPriority(DEFAULT_PRIORITY)
     setPlacement('queue')
     setFormResponses({})
     setIntakeQuestions([])
     setStartDate('')
-    setDueDate(isoDatePlusDays(DUE_DATE_DEFAULT_DAYS))
+    setDueDate('')
     setEstimatedHours('')
     setMoreOpen(false)
     setClientOrgId(forceOrgId ?? defaultOrgId ?? '')
@@ -494,14 +520,90 @@ function AlignedRequestDialog({
     setType(prev => (prev === next ? prev : next))
   }, [suggestionShowing, suggestion.size])
 
-  // An AI-authored draft handed in by the caller pre-fills the form.
+  // ── Predictive autofill, team only ───────────────────────────────────────
+  //
+  // This dialog is one component serving both audiences, so the gate is the
+  // hook itself rather than the fields it fills: with isAdmin false there is
+  // no timer, no fetch and no state. A due date derived from the studio's own
+  // medians and shown to a client reads as an SLA nobody agreed to, and a
+  // client never sees priority or hours at all.
+  //
+  // A sub-request is out too: it inherits its parent's category and dates
+  // locally, which is a better answer than a model's and costs nothing.
+  const applyPrediction = useCallback((field: PredictableField, value: string | number) => {
+    switch (field) {
+      case 'dueDate':
+        setDueDate(String(value))
+        break
+      case 'priority':
+        setPriority(String(value))
+        break
+      case 'estimatedHours':
+        setEstimatedHours(String(value))
+        // A suggestion inside a collapsed disclosure is a suggestion nobody
+        // sees, and one that lands on submit unread is worse than none.
+        setMoreOpen(true)
+        break
+      case 'category':
+        setCategory(String(value))
+        break
+      case 'size':
+        setType(sizeToRequestType(value === 'large' ? 'large' : 'small'))
+        break
+      default:
+        break
+    }
+  }, [])
+
+  const clearPrediction = useCallback((field: PredictableField) => {
+    switch (field) {
+      case 'dueDate': setDueDate(''); break
+      case 'priority': setPriority(DEFAULT_PRIORITY); break
+      case 'estimatedHours': setEstimatedHours(''); break
+      case 'category': setCategory(DEFAULT_CATEGORY); break
+      case 'size': setType(DEFAULT_SIZE); break
+      default: break
+    }
+  }, [])
+
+  const predictions = useFieldPredictions({
+    open: open && !isSubRequest,
+    isAdmin,
+    paused: view !== 'form',
+    subject: 'request',
+    title,
+    description,
+    orgId: clientOrgId || null,
+    category: category === DEFAULT_CATEGORY ? null : category,
+    fields: PREDICTED_REQUEST_FIELDS,
+    // A control sitting on the value it opened with has not been answered, so
+    // it reads as empty here. Anything the operator actually chose is in the
+    // touched set already and never reaches this map.
+    values: {
+      dueDate: dueDate || null,
+      priority: priority === DEFAULT_PRIORITY ? null : priority,
+      estimatedHours: estimatedHours || null,
+      category: category === DEFAULT_CATEGORY ? null : category,
+      size: type === DEFAULT_SIZE ? null : type,
+    },
+    apply: applyPrediction,
+    clear: clearPrediction,
+  })
+  const { markTouched, markWritten } = predictions
+
+  // An AI-authored draft handed in by the caller pre-fills the form. It writes
+  // the category, so the predictor is told: a draft outranks a guess, and the
+  // two must not both land on the same field.
   useEffect(() => {
     if (!open || !aiDraft) return
     if (aiDraft.title) setTitle(aiDraft.title)
     if (aiDraft.description) setDescription(toBriefHtml(aiDraft.description))
-    if (aiDraft.category) setCategory(aiDraft.category)
+    if (aiDraft.category) {
+      setCategory(aiDraft.category)
+      markWritten(['category'])
+    }
     setAiDrafted(true)
-  }, [open, aiDraft])
+  }, [open, aiDraft, markWritten])
 
   const gateInput: SubmitGateInput = {
     title,
@@ -524,9 +626,13 @@ function AlignedRequestDialog({
     setType(draft.type === 'large_task' || draft.type === 'new_feature' ? 'large_task' : 'small_task')
     setAiDrafted(true)
     setSizeChangeOpen(false)
+    // A draft beats a prediction. Both fields it wrote are now spoken for, and
+    // the predictor stands off for a moment rather than answering a title that
+    // changed under it.
+    markWritten(['category', 'size'])
     setView('form')
     showToast('Draft ready. Review it below.')
-  }, [showToast])
+  }, [showToast, markWritten])
 
   async function handleSubmit(e: React.FormEvent, saveAndCreateAnother = false) {
     e.preventDefault()
@@ -595,11 +701,13 @@ function AlignedRequestDialog({
       if (saveAndCreateAnother) {
         setTitle('')
         setDescription('')
-        setPriority('standard')
+        setPriority(DEFAULT_PRIORITY)
         setStartDate('')
-        setDueDate(isoDatePlusDays(DUE_DATE_DEFAULT_DAYS))
+        setDueDate('')
         setEstimatedHours('')
         setAiDrafted(false)
+        // A second item is a second item's worth of decisions.
+        predictions.reset()
         setSuccessMessage('Request created. Create another one below.')
         // onCreated is a refresh signal, not a close signal: the callers that
         // close do that themselves, and the sub-request panels do their
@@ -755,8 +863,23 @@ function AlignedRequestDialog({
               )}
 
               {/* Category tiles */}
-              <FieldGroup label="What kind of work?">
-                <CategoryGrid value={category} onChange={setCategory} />
+              <FieldGroup
+                label="What kind of work?"
+                after={predictions.isSuggested('category')
+                  ? <SuggestedLabel label="category" onClear={() => predictions.clearField('category')} />
+                  : null}
+              >
+                <SuggestedField
+                  suggested={predictions.isSuggested('category')}
+                  reason={predictions.reasonFor('category')}
+                  fieldId="req-category"
+                >
+                  <CategoryGrid
+                    value={category}
+                    describedBy={predictions.isSuggested('category') ? suggestionReasonId('req-category') : undefined}
+                    onChange={(v) => { markTouched('category'); setCategory(v) }}
+                  />
+                </SuggestedField>
               </FieldGroup>
 
               {/* Title */}
@@ -802,7 +925,12 @@ function AlignedRequestDialog({
 
               {/* Size */}
               {showSize && (
-                <FieldGroup label="Size">
+                <FieldGroup
+                  label="Size"
+                  after={isAdmin && predictions.isSuggested('size')
+                    ? <SuggestedLabel label="size" onClear={() => predictions.clearField('size')} />
+                    : null}
+                >
                   {suggestionShowing ? (
                     <SizeSuggestionChip
                       suggestion={suggestion}
@@ -811,21 +939,30 @@ function AlignedRequestDialog({
                     />
                   ) : (
                     <>
-                      <SegmentedControl
-                        role="radiogroup"
-                        ariaLabel="Request size"
-                        value={type}
-                        onChange={setType}
-                        options={sizeOptions}
-                        fill
-                      />
+                      <SuggestedField
+                        suggested={isAdmin && predictions.isSuggested('size')}
+                        reason={predictions.reasonFor('size')}
+                        fieldId="req-size"
+                      >
+                        <SegmentedControl
+                          role="radiogroup"
+                          ariaLabel="Request size"
+                          value={type}
+                          onChange={(next) => { markTouched('size'); setType(next) }}
+                          options={sizeOptions}
+                          fill
+                        />
+                      </SuggestedField>
                       {isClient && (
                         <QuietLink onClick={() => setSizeChangeOpen(false)}>Use suggestion</QuietLink>
                       )}
                       {/* Only while there are two sizes to choose between:
                           on a single-track plan the hint and the Info note
                           below would say the same sentence twice. */}
-                      {isAdmin && largeAllowed && (
+                      {/* The deterministic hint steps aside while a grounded
+                          suggestion is on screen, or the field carries two
+                          sentences about the same choice. */}
+                      {isAdmin && largeAllowed && !predictions.isSuggested('size') && (
                         <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: '0.375rem 0 0', lineHeight: 1.45 }}>
                           {suggestion.hint}
                         </p>
@@ -848,20 +985,55 @@ function AlignedRequestDialog({
               {/* Team: priority beside the date. Client: placement, then date. */}
               {isAdmin ? (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '0.75rem' }}>
-                  <FieldGroup label="Priority" htmlFor="req-priority">
-                    <StyledSelect id="req-priority" value={priority} onChange={setPriority}>
-                      <option value="standard">Standard</option>
-                      <option value="high">High</option>
-                    </StyledSelect>
+                  <FieldGroup
+                    label="Priority"
+                    htmlFor="req-priority"
+                    after={predictions.isSuggested('priority')
+                      ? <SuggestedLabel label="priority" onClear={() => predictions.clearField('priority')} />
+                      : null}
+                  >
+                    <SuggestedField
+                      suggested={predictions.isSuggested('priority')}
+                      reason={predictions.reasonFor('priority')}
+                      fieldId="req-priority"
+                    >
+                      <StyledSelect
+                        id="req-priority"
+                        value={priority}
+                        describedBy={predictions.isSuggested('priority') ? suggestionReasonId('req-priority') : undefined}
+                        onChange={(v) => { markTouched('priority'); setPriority(v) }}
+                      >
+                        <option value="standard">Standard</option>
+                        <option value="high">High</option>
+                      </StyledSelect>
+                    </SuggestedField>
                   </FieldGroup>
-                  <FieldGroup label="Ideal due date" htmlFor="req-due-date" after={<DueDateInfo />}>
-                    <StyledInput
-                      id="req-due-date"
-                      type="date"
-                      value={dueDate}
-                      min={isoDatePlusDays(DUE_DATE_MIN_DAYS)}
-                      onChange={e => setDueDate(e.target.value)}
-                    />
+                  <FieldGroup
+                    label="Ideal due date"
+                    htmlFor="req-due-date"
+                    after={(
+                      <>
+                        <DueDateInfo />
+                        {predictions.isSuggested('dueDate') && (
+                          <SuggestedLabel label="due date" onClear={() => predictions.clearField('dueDate')} />
+                        )}
+                      </>
+                    )}
+                  >
+                    <SuggestedField
+                      suggested={predictions.isSuggested('dueDate')}
+                      reason={predictions.reasonFor('dueDate')}
+                      fieldId="req-due-date"
+                    >
+                      <StyledInput
+                        id="req-due-date"
+                        type="date"
+                        value={dueDate}
+                        min={isoDatePlusDays(DUE_DATE_MIN_DAYS)}
+                        aria-describedby={predictions.isSuggested('dueDate') ? suggestionReasonId('req-due-date') : undefined}
+                        onChange={e => { markTouched('dueDate'); setDueDate(e.target.value) }}
+                      />
+                    </SuggestedField>
                   </FieldGroup>
                 </div>
               ) : (
@@ -925,17 +1097,38 @@ function AlignedRequestDialog({
                           onChange={e => setStartDate(e.target.value)}
                         />
                       </FieldGroup>
-                      <FieldGroup label="Est. hours" htmlFor="req-est-hours">
-                        <StyledInput
-                          id="req-est-hours"
-                          type="number" min="0.5" max="999" step="0.5"
-                          value={estimatedHours}
-                          onChange={e => setEstimatedHours(e.target.value)}
-                          placeholder="e.g. 4"
-                        />
+                      <FieldGroup
+                        label="Est. hours"
+                        htmlFor="req-est-hours"
+                        after={predictions.isSuggested('estimatedHours')
+                          ? <SuggestedLabel label="estimated hours" onClear={() => predictions.clearField('estimatedHours')} />
+                          : null}
+                      >
+                        <SuggestedField
+                          suggested={predictions.isSuggested('estimatedHours')}
+                          reason={predictions.reasonFor('estimatedHours')}
+                          fieldId="req-est-hours"
+                        >
+                          <StyledInput
+                            id="req-est-hours"
+                            type="number" min="0.5" max="999" step="0.5"
+                            value={estimatedHours}
+                            aria-describedby={predictions.isSuggested('estimatedHours') ? suggestionReasonId('req-est-hours') : undefined}
+                            onChange={e => { markTouched('estimatedHours'); setEstimatedHours(e.target.value) }}
+                            placeholder="e.g. 4"
+                          />
+                        </SuggestedField>
                       </FieldGroup>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* One link that empties every still-suggested field at once,
+                  above the footer so it reads as "before you file this". */}
+              {predictions.hasAny && (
+                <div>
+                  <SuggestionLink onClick={predictions.clearAll}>Clear suggestions</SuggestionLink>
                 </div>
               )}
 
@@ -1194,10 +1387,22 @@ function AiDraftChip() {
 
 // ── Category tiles ─────────────────────────────────────────────────────────────
 
-function CategoryGrid({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function CategoryGrid({
+  value, onChange, describedBy,
+}: {
+  value: string
+  onChange: (v: string) => void
+  /** The id of a caption under the grid, e.g. a suggestion's reason. */
+  describedBy?: string
+}) {
   const activeIndex = Math.max(0, CATEGORY_TILES.findIndex(c => c.value === value))
   return (
-    <div className="tahi-reqd-catgrid" role="radiogroup" aria-label="What kind of work?">
+    <div
+      className="tahi-reqd-catgrid"
+      role="radiogroup"
+      aria-label="What kind of work?"
+      aria-describedby={describedBy}
+    >
       {CATEGORY_TILES.map((tile, index) => {
         const Icon = tile.icon
         const active = tile.value === value
@@ -2597,12 +2802,14 @@ function StyledTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>
 }
 
 function StyledSelect({
-  id, value, onChange, required, children,
+  id, value, onChange, required, describedBy, children,
 }: {
   id?: string
   value: string
   onChange: (v: string) => void
   required?: boolean
+  /** The id of a caption under the field, e.g. a suggestion's reason. */
+  describedBy?: string
   children: React.ReactNode
 }) {
   return (
@@ -2611,6 +2818,7 @@ function StyledSelect({
         id={id}
         value={value}
         required={required}
+        aria-describedby={describedBy}
         onChange={e => onChange(e.target.value)}
         className="tahi-focus-ring"
         style={{

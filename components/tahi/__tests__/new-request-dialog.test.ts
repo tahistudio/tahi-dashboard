@@ -6,7 +6,6 @@ import {
   nextCategoryIndex,
   parseIntakeQuestions,
   toBriefHtml,
-  DUE_DATE_DEFAULT_DAYS,
   DUE_DATE_MIN_DAYS,
   type SubmitGateInput,
 } from '@/components/tahi/new-request-dialog'
@@ -25,11 +24,10 @@ import { aiWizardProgress, openerForCategory, AI_MIN_STEPS } from '@/components/
 // e2e/requests-dialog.spec.ts.
 
 describe('isoDatePlusDays', () => {
-  it('defaults the ideal due date to a week out', () => {
-    const from = new Date(2026, 8, 3) // 3 September 2026, local
-    expect(isoDatePlusDays(DUE_DATE_DEFAULT_DAYS, from)).toBe('2026-09-10')
-  })
-
+  // There is no DUE_DATE_DEFAULT_DAYS any more: the ideal due date opened at
+  // today plus seven, which was a blind constant rendered as an ordinary
+  // filled field. It opens empty now so a grounded suggestion has somewhere to
+  // land, and the helper's only remaining caller is the picker's floor.
   it('floors the picker at tomorrow', () => {
     const from = new Date(2026, 8, 3)
     expect(isoDatePlusDays(DUE_DATE_MIN_DAYS, from)).toBe('2026-09-04')
