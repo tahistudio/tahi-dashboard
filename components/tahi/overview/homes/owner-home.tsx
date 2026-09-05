@@ -12,7 +12,8 @@
  *
  * Honest empties per the owner audit: Social omits the unbacked "reach" stat;
  * Cash runway uses a horizon strip (no monthly cash series exists); Pipeline
- * omits the fabricated forecast sparkline; every trend chip with no real
+ * drops the design's fabricated forecast sparkline and charts the real
+ * per-stage weighted pipeline instead; every trend chip with no real
  * prior-period source is dropped rather than invented. Every money figure
  * formats through useOvFormat (never a hardcoded FX rate).
  */
@@ -21,6 +22,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useResource } from '@/lib/use-resource'
 import { apiPath } from '@/lib/api'
+import { stageColour } from '@/lib/chart-colors'
+import {
+  buildPipelineStageChart,
+  RECURRING_MONTHS,
+  type PipelineStageChart,
+} from '@/lib/pipeline-stage-chart'
 import type { OverviewCtx } from '@/components/tahi/overview/ctx'
 import {
   Icon,
@@ -863,13 +870,58 @@ function Receivables({ arAging, loading }: { arAging: ArAging | null; loading: b
 
 interface DealRow {
   id: string
+  stageId: string | null
+  stageName: string | null
+  stageProbability: number | null
   stageIsClosedWon: number | null
   stageIsClosedLost: number | null
+  upfrontValueNzd: number | null
+  monthlyValueNzd: number | null
   expectedCloseDate: string | null
 }
 interface PipelineForecast {
   weightedUpfrontNzd: number
   weightedMonthlyNzd: number
+  /** Pipeline order, straight off the forecast route. The deal rows carry the
+   *  stage name and probability but not its position, so the chart takes the
+   *  board's ordering from here. */
+  byStage?: { stageId: string; position: number }[]
+}
+
+/** The stage chart under the Pipeline ahead stats: one row per open stage
+ *  holding deals, bar length by weighted value (deal count when the whole
+ *  pipeline is unvalued). Hand-rolled on the kit's own `.ov-meter` track, the
+ *  same primitive Studio capacity uses, so it inherits dark mode and needs no
+ *  chart library. Stage inks come from the shared chart palette, so a stage is
+ *  the same colour here as on the pipeline board. */
+function PipelineStages({
+  chart,
+  moneyCompact,
+}: {
+  chart: PipelineStageChart
+  moneyCompact: (nzd: number) => string
+}) {
+  return (
+    <div className="ov-subrows">
+      {chart.bars.map((bar, i) => (
+        <div className="ov-subrow" key={bar.stageId}>
+          <span
+            title={bar.name}
+            style={{ flex: '0 0 5rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          >
+            {bar.name}
+          </span>
+          <span className="ov-meter" style={{ flex: 1 }} aria-hidden="true">
+            <i style={{ width: `${bar.pct}%`, background: stageColour(bar.name, i) }} />
+          </span>
+          <span style={{ flex: '0 0 auto', color: 'var(--text-faint)' }}>
+            {bar.dealCount} {bar.dealCount === 1 ? 'deal' : 'deals'}
+          </span>
+          <b style={{ flex: '0 0 auto' }}>{moneyCompact(bar.weightedNzd)}</b>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function PipelineAhead({ go }: { go: (id: string) => void }) {
@@ -877,7 +929,7 @@ function PipelineAhead({ go }: { go: (id: string) => void }) {
   const { data: dealsData } = useResource<{ items: DealRow[] }>('/api/admin/deals?limit=100')
   const { data: forecast } = useResource<PipelineForecast>('/api/admin/reports/pipeline-forecast')
   const loading = !dealsData || !forecast
-  const deals = dealsData?.items ?? []
+  const deals = useMemo(() => dealsData?.items ?? [], [dealsData])
   const open = deals.filter(d => !d.stageIsClosedWon && !d.stageIsClosedLost)
 
   const now = new Date()
@@ -886,30 +938,47 @@ function PipelineAhead({ go }: { go: (id: string) => void }) {
     const c = new Date(d.expectedCloseDate)
     return c.getMonth() === now.getMonth() && c.getFullYear() === now.getFullYear()
   }).length
-  const weighted = forecast ? forecast.weightedUpfrontNzd + forecast.weightedMonthlyNzd * 12 : 0
+  const weighted = forecast
+    ? forecast.weightedUpfrontNzd + forecast.weightedMonthlyNzd * RECURRING_MONTHS
+    : 0
+
+  // Same deals the stats above count, weighted by the same rule the forecast
+  // route applies, so the bars read as a breakdown of the headline.
+  const chart = useMemo(
+    () => buildPipelineStageChart(deals, forecast?.byStage),
+    [deals, forecast],
+  )
 
   return (
     <Card span={7}>
       <CardH ic="funnel" title="Pipeline ahead" link="View pipeline" onLink={() => go('deals')} />
       {loading ? (
-        <Shim h={70} />
+        <>
+          <Shim h={70} />
+          <div className="ov-subrows">
+            <Shim h={92} />
+          </div>
+        </>
       ) : open.length === 0 && weighted <= 0 ? (
         <EmptyLine>No deals in the pipeline yet.</EmptyLine>
       ) : (
-        <div className="ov-statrow">
-          <div className="ov-stat">
-            <div className="st-num">{moneyCompact(weighted)}</div>
-            <div className="st-lbl">weighted</div>
+        <>
+          <div className="ov-statrow">
+            <div className="ov-stat">
+              <div className="st-num">{moneyCompact(weighted)}</div>
+              <div className="st-lbl">weighted</div>
+            </div>
+            <div className="ov-stat">
+              <div className="st-num">{open.length}</div>
+              <div className="st-lbl">open deals</div>
+            </div>
+            <div className="ov-stat">
+              <div className="st-num">{closing}</div>
+              <div className="st-lbl">closing this month</div>
+            </div>
           </div>
-          <div className="ov-stat">
-            <div className="st-num">{open.length}</div>
-            <div className="st-lbl">open deals</div>
-          </div>
-          <div className="ov-stat">
-            <div className="st-num">{closing}</div>
-            <div className="st-lbl">closing this month</div>
-          </div>
-        </div>
+          {chart.bars.length > 0 && <PipelineStages chart={chart} moneyCompact={moneyCompact} />}
+        </>
       )}
     </Card>
   )
