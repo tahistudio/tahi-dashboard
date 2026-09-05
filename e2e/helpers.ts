@@ -1,4 +1,41 @@
-import type { Page } from '@playwright/test'
+import { expect, type Page } from '@playwright/test'
+
+/**
+ * The dev-only Ship Studio auth bypass, as a storageState. Six specs had
+ * this block copy-pasted verbatim; it resolves to the Tahi admin org, which
+ * is what every admin-surface spec needs.
+ */
+export const shipStudioStorageState = {
+  cookies: [
+    {
+      name: 'tahi-ship-studio',
+      value: '1',
+      domain: 'localhost',
+      path: '/',
+      expires: -1,
+      httpOnly: false,
+      secure: false,
+      sameSite: 'Lax' as const,
+    },
+  ],
+  origins: [],
+}
+
+/**
+ * Definition-of-Done check: nothing may scroll the page sideways. Run it at
+ * 375px on every surface that ships.
+ */
+export async function expectNoHorizontalScroll(page: Page): Promise<void> {
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  )
+  expect(overflow, 'the page scrolls horizontally').toBeLessThanOrEqual(1)
+}
+
+/** True on the mobile-safari project, where tables become card lists. */
+export async function isNarrow(page: Page): Promise<boolean> {
+  return (await page.evaluate(() => window.innerWidth)) < 768
+}
 
 /**
  * Shared e2e page priming.
