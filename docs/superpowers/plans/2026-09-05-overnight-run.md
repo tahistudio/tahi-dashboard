@@ -77,6 +77,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 07:52 NZST portal prototype fixer done (namespace collision, one data spine, nav dead ends, per-page fixes); re-critique running. Sales design critics all done (all FIX, no REDO). Liam is up and reviewing.
 
+- 08:20 NZST portal prototype re-critique done: structural fixes verified, per-page polish notes saved. All overnight background work complete.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - [x] More sheet Track time row left-aligned (17a490b2).
