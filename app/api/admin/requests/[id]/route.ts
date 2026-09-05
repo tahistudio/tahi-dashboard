@@ -276,6 +276,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         title: schema.requests.title,
         orgId: schema.requests.orgId,
         assigneeId: schema.requests.assigneeId,
+        isInternal: schema.requests.isInternal,
       })
       .from(schema.requests)
       .where(eq(schema.requests.id, id))
@@ -287,6 +288,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         title: updatedReq.title,
         orgId: updatedReq.orgId,
         assigneeId: updatedReq.assigneeId ?? null,
+        isInternal: updatedReq.isInternal === true,
       }, body.status)
     }
   }

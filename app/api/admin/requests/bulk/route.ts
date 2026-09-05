@@ -76,7 +76,8 @@ async function loadRequestRows(drizzle: Drizzle, ids: readonly string[]): Promis
         orgId: schema.requests.orgId,
         title: schema.requests.title,
         assigneeId: schema.requests.assigneeId,
-      })
+      isInternal: schema.requests.isInternal,
+    })
       .from(schema.requests)
       .where(inArray(schema.requests.id, chunk))
     rows.push(...part)
@@ -315,6 +316,7 @@ export async function PATCH(req: NextRequest) {
         title: row.title,
         orgId: row.orgId,
         assigneeId: row.assigneeId ?? null,
+        isInternal: row.isInternal === 1,
       }, nextStatus)
     }
   }

@@ -28,6 +28,10 @@ export interface RequestStatusSubject {
   title: string
   orgId: string
   assigneeId: string | null
+  /** A Tahi-internal request is never announced to the client's contacts:
+   *  the portal hides the row, so the bell entry would carry an internal
+   *  title and deep-link to a 404. */
+  isInternal: boolean
 }
 
 /**
@@ -72,8 +76,9 @@ export async function emitRequestStatusChanged(
   }
 
   // Notify contacts at the client org (skips those without a linked login),
-  // unless the move is housekeeping the client has no stake in.
-  if (!CLIENT_SILENT_STATUSES.includes(status)) {
+  // unless the request is Tahi-internal or the move is housekeeping the
+  // client has no stake in.
+  if (!request.isInternal && !CLIENT_SILENT_STATUSES.includes(status)) {
     await notifyOrgContacts(database, request.orgId, payload)
   }
 
