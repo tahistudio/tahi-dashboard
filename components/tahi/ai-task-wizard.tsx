@@ -33,7 +33,12 @@ import { apiPath } from '@/lib/api'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { DEGRADED_PREFIX, aiWizardProgress } from '@/components/tahi/ai-request-wizard'
 import { TASK_PRIORITIES, taskPriorityLabel } from '@/lib/task-priorities'
-import { DOCUMENT_MAX_BYTES, classifyDocument } from '@/lib/ai-documents'
+import {
+  DOCUMENT_MAX_BYTES,
+  DOCUMENT_PDF_MAX_PAGES,
+  DOCUMENT_TOO_LARGE_MESSAGE,
+  classifyDocument,
+} from '@/lib/ai-documents'
 import {
   buildCreateTaskBody,
   draftToTaskFields,
@@ -161,6 +166,9 @@ const WIZARD_CSS = `
 .tskw-field{
   width: 100%;
   box-sizing: border-box;
+  /* The review editor is nine controls deep, and every one of them is a touch
+     target first. Dense is the desktop exception, not the base. */
+  min-height: 2.75rem;
   padding: 0.4375rem 0.5rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-input);
@@ -173,6 +181,10 @@ const WIZARD_CSS = `
 }
 .tskw-field:hover{ border-color: var(--color-brand-light); }
 .tskw-field:focus{ border-color: var(--focus-ring-color); box-shadow: var(--focus-ring); }
+@media (min-width: 48rem){
+  /* Matches the h-11 md:h-8 the buttons beside these fields already use. */
+  .tskw-field{ min-height: 2rem; }
+}
 @media (prefers-reduced-motion: reduce){
   .tahi-ai-typing i{ animation: none; opacity: 0.55; }
   .tahi-ai-progress-fill{ transition: none; }
@@ -287,7 +299,7 @@ export function AiTaskWizardPanel({
   const acceptFile = useCallback(async (file: File) => {
     setBriefError(null)
     if (file.size > DOCUMENT_MAX_BYTES) {
-      setBriefError('That file is larger than 5 MB. Send a smaller export, or paste the text.')
+      setBriefError(DOCUMENT_TOO_LARGE_MESSAGE)
       return
     }
     // The same judgement the route makes, made here first, so an unreadable
@@ -349,7 +361,14 @@ export function AiTaskWizardPanel({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: updated.map(m => ({ role: m.role, content: m.content })),
+          // Notices are the transport talking, not the model: a rate limit
+          // sentence sent back as an assistant turn is the wizard quoting its
+          // own error at itself, and with a twelve message window a couple of
+          // retries would push the real conversation out. The transcript still
+          // shows them to the person.
+          messages: updated
+            .filter(m => !m.notice)
+            .map(m => ({ role: m.role, content: m.content })),
           context: wizardContext,
           ...(sentBrief
             ? {
@@ -623,7 +642,7 @@ export function AiTaskWizardPanel({
               fontWeight: 600,
             }}
           >
-            Drop a brief here. Text, Markdown, CSV or PDF.
+            {`Drop a brief here. Text, Markdown, CSV, or a PDF of up to ${DOCUMENT_PDF_MAX_PAGES} pages.`}
           </div>
         )}
 
@@ -900,7 +919,7 @@ export function AiTaskWizardPanel({
             type="button"
             onClick={() => fileInputRef.current?.click()}
             aria-label="Attach a brief"
-            title="Attach a brief"
+            title={`Attach a brief. Text, Markdown, CSV, or a PDF of up to ${DOCUMENT_PDF_MAX_PAGES} pages.`}
             disabled={sending || creating}
             className="tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 h-11 w-11 md:h-9 md:w-9"
             style={{
