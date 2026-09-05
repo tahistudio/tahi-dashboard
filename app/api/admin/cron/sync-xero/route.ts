@@ -24,6 +24,7 @@ import { db } from '@/lib/db'
 import { getValidXeroToken } from '@/lib/xero'
 import { logCronRun } from '@/lib/cron-runs'
 import { syncXeroBalances, syncXeroPayments, syncXeroPnl, importXeroInvoices } from '@/lib/xero-sync'
+import type { SyncOutcome } from '@/lib/xero-sync'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,6 +35,17 @@ interface StepResult {
   ok: boolean
   error?: string
   count?: number
+}
+
+/**
+ * A sub-sync that finished but did not see everything (a Xero page lost to a
+ * 429 or a 5xx mid-walk, or the page ceiling) is NOT a success: every invoice
+ * past the gap silently went unreconciled. Report it not-ok with the warning as
+ * the error so cron_runs shows the condition instead of a clean 'success'.
+ */
+function toStep(name: string, outcome: SyncOutcome): StepResult {
+  const ok = outcome.ok && !outcome.warning
+  return { name, ok, error: ok ? undefined : (outcome.error ?? outcome.warning), count: outcome.count }
 }
 
 export async function POST(req: NextRequest) {
@@ -72,17 +84,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ steps })
   }
 
-  const balances = await syncXeroBalances(database)
-  steps.push({ name: 'balances', ok: balances.ok, error: balances.ok ? undefined : balances.error, count: balances.count })
-
-  const payments = await syncXeroPayments(database)
-  steps.push({ name: 'payments', ok: payments.ok, error: payments.ok ? undefined : payments.error, count: payments.count })
-
-  const pnl = await syncXeroPnl(database, pnlMonths)
-  steps.push({ name: 'pnl', ok: pnl.ok, error: pnl.ok ? undefined : pnl.error, count: pnl.count })
-
-  const invoices = await importXeroInvoices(database, 1)
-  steps.push({ name: 'import-invoices', ok: invoices.ok, error: invoices.ok ? undefined : invoices.error, count: invoices.count })
+  steps.push(toStep('balances', await syncXeroBalances(database)))
+  steps.push(toStep('payments', await syncXeroPayments(database)))
+  steps.push(toStep('pnl', await syncXeroPnl(database, pnlMonths)))
+  steps.push(toStep('import-invoices', await importXeroInvoices(database, 1)))
 
   // Any successful step => the run did useful work. Only when every step
   // failed do we log 'error' (which pings the operator via cron-runs).

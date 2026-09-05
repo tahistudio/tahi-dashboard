@@ -1458,8 +1458,8 @@ const TOOLS: ToolDef[] = [
   // ── AI ────────────────────────────────────────────────────────────────
   // ── Financial / Xero ───────────────────────────────────────────────
   tool('get_financial_health', 'Get financial health: invoice totals, pipeline projections, MRR, Xero P&L, bank balances'),
-  tool('import_xero_invoices', 'Import all ACCREC invoices from Xero into dashboard with auto-match to clients'),
-  tool('sync_xero_payments', 'Sync invoice payment statuses from Xero'),
+  tool('import_xero_invoices', 'Import a page of ACCREC invoices from Xero into the dashboard with auto-match to clients. Invoices already imported are now UPDATED in place (status, subtotal, total, currency, due date, sent date, paid date) instead of skipped, so a status change made in Xero lands here. The update is a diff, so an unchanged invoice is reported as no_change and not rewritten. Status only ever moves forward: Xero cannot demote a sent or paid invoice back to draft, because a dashboard-raised invoice stays DRAFT in Xero until the push-back slice lands. Rows billed on another rail (source not xero) are never touched.'),
+  tool('sync_xero_payments', 'Sync invoice payment statuses from Xero back to the dashboard. Pages through every Xero ACCREC invoice (100 per page, 50 page ceiling) rather than only the first page, updates every known row it has seen, and stamps the paid date from Xero FullyPaidOnDate. Status only ever moves forward, so a stale Xero DRAFT cannot walk a sent or paid invoice backwards. Returns pagesRead, truncated and partial: a truncated or partial read means invoices past the gap were not reconciled.'),
   tool('get_xero_profit_loss', 'Get Xero Profit and Loss report', {
     fromDate: prop('string', 'Start date YYYY-MM-DD'),
     toDate: prop('string', 'End date YYYY-MM-DD'),
