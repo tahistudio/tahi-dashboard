@@ -30,6 +30,7 @@ import { schema } from '@/db/d1'
 import { eq, desc } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { resolveTimerOrgId } from '@/lib/timer-helpers'
+import { INTERNAL_ORG_ID } from '@/lib/internal-org'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -76,7 +77,9 @@ export async function GET(req: NextRequest) {
     targetOrgId = r.orgId
   }
 
-  // Tahi-internal tasks may have no org; only unrestricted users may read them.
+  // A Tahi-internal task has no client to gate against, and it is the
+  // studio's own work, so every team member on this surface may read its
+  // hours. Same rule as guardTask in lib/task-access.ts.
   if (targetOrgId) {
     const denied = await requireAccessToOrg(drizzle, userId, targetOrgId)
     if (denied) return denied
@@ -179,8 +182,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Cannot log time on this target (no org attached)' }, { status: 400 })
   }
 
-  const denied = await requireAccessToOrg(drizzle, userId, entryOrgId)
-  if (denied) return denied
+  // Gate on the target's OWN client, which is what the caller is reaching
+  // into. The hidden internal studio org is not a client: nobody is ever
+  // scoped to it, so gating there 403'd every scoped team member out of
+  // logging time on a Tahi task, which contradicts the rule the tasks routes
+  // now hold (a task with no client is the studio's own and every team
+  // member may reach it). An org inherited from a linked request is still a
+  // real client and is still checked.
+  if (entryOrgId !== INTERNAL_ORG_ID) {
+    const denied = await requireAccessToOrg(drizzle, userId, entryOrgId)
+    if (denied) return denied
+  }
 
   const newId = crypto.randomUUID()
   await drizzle.insert(schema.timeEntries).values({

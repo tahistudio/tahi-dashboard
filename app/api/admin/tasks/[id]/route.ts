@@ -4,29 +4,11 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { createNotification } from '@/lib/notifications'
-import { requireAccessToOrg } from '@/lib/require-access'
 import { TASK_PRIORITIES } from '@/lib/task-priorities'
 import { TASK_STATUSES } from '@/lib/status-config'
+import { guardTask } from '@/lib/task-access'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
-
-/**
- * A task with a client is guarded by that client. A task with no client is
- * the studio's own housekeeping, and every team member on this surface is in
- * the studio, so it is allowed. The list route applies exactly the same rule
- * (see the isNull clause in ../route.ts); before the port the two disagreed
- * about how they hid the same rows, one by filtering and one by 403ing.
- *
- * Returns a NextResponse to short circuit on denial, or null to proceed.
- */
-async function guardTaskAccess(
-  drizzle: Drizzle,
-  userId: string | null,
-  taskOrgId: string | null,
-): Promise<NextResponse | null> {
-  if (!taskOrgId) return null
-  return requireAccessToOrg(drizzle, userId, taskOrgId)
-}
 
 // ── GET /api/admin/tasks/[id] ─────────────────────────────────────────────
 export async function GET(
@@ -42,6 +24,9 @@ export async function GET(
 
   const database = await db()
   const drizzle = database as Drizzle
+
+  const denied = await guardTask(drizzle, userId, id)
+  if (denied) return denied
 
   const [task] = await drizzle
     .select({
@@ -62,6 +47,7 @@ export async function GET(
       position: schema.tasks.position,
       requestId: schema.tasks.requestId,
       scheduleRowId: schema.tasks.scheduleRowId,
+      estimatedHours: schema.tasks.estimatedHours,
       createdAt: schema.tasks.createdAt,
       updatedAt: schema.tasks.updatedAt,
       orgName: schema.organisations.name,
@@ -74,9 +60,6 @@ export async function GET(
   if (!task) {
     return NextResponse.json({ error: 'Task not found' }, { status: 404 })
   }
-
-  const denied = await guardTaskAccess(drizzle, userId, task.orgId)
-  if (denied) return denied
 
   return NextResponse.json({ task })
 }
@@ -113,18 +96,7 @@ export async function PATCH(
   const database = await db()
   const drizzle = database as Drizzle
 
-  // Verify task exists + scope check
-  const [existing] = await drizzle
-    .select({ id: schema.tasks.id, orgId: schema.tasks.orgId })
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, id))
-    .limit(1)
-
-  if (!existing) {
-    return NextResponse.json({ error: 'Task not found' }, { status: 404 })
-  }
-
-  const denied = await guardTaskAccess(drizzle, userId, existing.orgId)
+  const denied = await guardTask(drizzle, userId, id)
   if (denied) return denied
 
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
@@ -216,17 +188,7 @@ export async function DELETE(
   const database = await db()
   const drizzle = database as Drizzle
 
-  const [existing] = await drizzle
-    .select({ id: schema.tasks.id, orgId: schema.tasks.orgId })
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, id))
-    .limit(1)
-
-  if (!existing) {
-    return NextResponse.json({ error: 'Task not found' }, { status: 404 })
-  }
-
-  const denied = await guardTaskAccess(drizzle, userId, existing.orgId)
+  const denied = await guardTask(drizzle, userId, id)
   if (denied) return denied
 
   // Subtasks and dependency rows cascade via their FK onDelete rules.

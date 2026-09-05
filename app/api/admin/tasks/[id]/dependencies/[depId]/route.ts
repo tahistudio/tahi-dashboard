@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
+import { guardTask } from '@/lib/task-access'
 
 // ── DELETE /api/admin/tasks/[id]/dependencies/[depId] ──────────────────────
 // Remove a task dependency
@@ -10,7 +11,7 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string; depId: string }> }
 ) {
-  const { orgId } = await getRequestAuth(_req)
+  const { orgId, userId } = await getRequestAuth(_req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -19,6 +20,9 @@ export async function DELETE(
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const denied = await guardTask(drizzle, userId, taskId)
+  if (denied) return denied
 
   // Verify the dependency exists and belongs to this task
   const [dep] = await drizzle

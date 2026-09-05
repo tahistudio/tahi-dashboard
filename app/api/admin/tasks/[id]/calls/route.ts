@@ -2,26 +2,30 @@
  * GET + POST /api/admin/tasks/[id]/calls
  *
  * Calls attached to an internal task (planning sync, review, etc).
- * Shared logic in lib/calls.ts. Activity hook is skipped — tasks have
+ * Shared logic in lib/calls.ts. Activity hook is skipped: tasks have
  * their own comment stream.
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
 import { createCallForParent, listCallsForParent } from '@/lib/calls'
+import { guardTask } from '@/lib/task-access'
 
 type Params = { params: Promise<{ id: string }> }
+type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 export async function GET(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   const { id } = await params
   const database = await db()
+
+  const denied = await guardTask(database as Drizzle, userId, id)
+  if (denied) return denied
+
   const calls = await listCallsForParent(database, 'task', id)
   return NextResponse.json({ calls })
 }
@@ -52,14 +56,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   const database = await db()
-  const exists = await database
-    .select({ id: schema.tasks.id })
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, id))
-    .limit(1)
-  if (exists.length === 0) {
-    return NextResponse.json({ error: 'Task not found' }, { status: 404 })
-  }
+
+  const denied = await guardTask(database as Drizzle, userId, id)
+  if (denied) return denied
 
   try {
     const { id: callId } = await createCallForParent(database, 'task', id, {

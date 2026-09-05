@@ -3,13 +3,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
+import { guardTask } from '@/lib/task-access'
 
 // ── PATCH /api/admin/tasks/[id]/subtasks/[subId] ──────────────────────────
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; subId: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -24,6 +25,9 @@ export async function PATCH(
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const denied = await guardTask(drizzle, userId, taskId)
+  if (denied) return denied
 
   // Verify subtask exists and belongs to this task
   const [existing] = await drizzle
@@ -54,7 +58,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; subId: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -63,6 +67,9 @@ export async function DELETE(
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const denied = await guardTask(drizzle, userId, taskId)
+  if (denied) return denied
 
   // Verify subtask exists and belongs to this task
   const [existing] = await drizzle

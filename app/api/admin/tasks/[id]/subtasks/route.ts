@@ -3,13 +3,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, asc } from 'drizzle-orm'
+import { guardTask } from '@/lib/task-access'
 
 // ── GET /api/admin/tasks/[id]/subtasks ────────────────────────────────────
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -19,16 +20,8 @@ export async function GET(
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // Verify task exists
-  const [task] = await drizzle
-    .select({ id: schema.tasks.id })
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, taskId))
-    .limit(1)
-
-  if (!task) {
-    return NextResponse.json({ error: 'Task not found' }, { status: 404 })
-  }
+  const denied = await guardTask(drizzle, userId, taskId)
+  if (denied) return denied
 
   // Key is `subtasks` (not `items`): every client reader expects
   // `data.subtasks`. Returning `items` silently produced an always-empty list.
@@ -52,7 +45,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -68,16 +61,8 @@ export async function POST(
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // Verify task exists
-  const [task] = await drizzle
-    .select({ id: schema.tasks.id })
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, taskId))
-    .limit(1)
-
-  if (!task) {
-    return NextResponse.json({ error: 'Task not found' }, { status: 404 })
-  }
+  const denied = await guardTask(drizzle, userId, taskId)
+  if (denied) return denied
 
   const id = crypto.randomUUID()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
