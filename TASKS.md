@@ -74,6 +74,32 @@ Prod check before starting: Liam + Staci both hold super_admin role rows, so den
 - [ ] V1-QA.1 - [QA] Live-verify the client request DETAIL as a client: scope-flag pill absent, own messages show the client's name, Approve/Request-change banner on a client_review request. Needs a client-visible (non-internal) request in an impersonated org; set one to client_review first. Row-filtering confirmed unchanged in code; this is the last unverified client-facing piece.
 - [ ] V1-QA.2 - [QA] e2e specs (mobile.spec.ts, portal-flow.spec.ts) assert a Messages tab and will fail - update them for the V1 hide.
 
+## Sprint T2.5 - Client truth and delivery (from the 2026-09-06 next-surfaces sweep)
+
+Source: `docs/superpowers/audits/2026-09-06-next-surfaces-assessment.json` (five readers plus a ranker, verified against 2b1a05b5). Ranked by what a migrated client hits in week one, then what Liam and Staci touch daily, then effort. The standalone /messages page stays hidden: the request thread is the client channel and its gap is delivery, not UI.
+
+- [x] CT.1 - [BE] Internal request titles leaked into client bells: `emitRequestStatusChanged` now carries `isInternal` and skips the client fan-out (a9e44f43, f7e5de41). Four tests.
+- [ ] CT.2 (0.5d) - [BE] A client-submitted request notifies nobody at Tahi (`app/api/portal/requests/route.ts` POST ends at dispatchDomainEvent). notifyAllAdmins with `request_created` and the per-org number. Fold in: single assign, bulk assign and participants routes notify nobody; POST /api/admin/tasks does not notify.
+- [ ] CT.3 (0.5d) - [FE] Client home truth pass: `REVIEW_SET` includes `delivered` so approving makes "ready for your review" go up (client-home.tsx:223); the Pay button ignores `payUrl`; Recent requests and Recent files rows link to lists; the queue controls are 22px hover-only (overview.css:99-101).
+- [ ] CT.4 (2.5d) - [BE/FE] Notification email dispatcher for exactly three events: studio reply to the client on a non-internal message, `client_review` and `delivered` to the client, `request_created` to the studio; `[REQ-n]` subject prefix; real call-to-action copy. Depends on RESEND_FROM_EMAIL and the sending domain on the prod worker, migration 0081 applied, one Clerk-linked client contact. Zero email leaves the platform today for any message or status change; four finished templates have no importers.
+- [ ] CT.5 (0.5d) - [FE] Dead pointers at the hidden /messages: owner-home "Unread messages" card, client-detail Start DM and Messages tab, the team map in lib/notification-links.ts:90.
+- [ ] CT.6 (0.5d) - [FE] Non-admin client seats dead-end on Invoices with "Failed to load invoices": portalRole-aware nav plus an honest empty state.
+- [ ] CT.7 (0.25d) - [BE] Portal project card reads draft schedules (`app/api/portal/project/route.ts:90-101`, no status filter): the old T2.4.
+- [ ] CT.8 (1.5d) - [BE/FE] Finish the request thread: portal per-message attachments, soft-deleted messages filtered on both sides, the duplicate shadow conversation minted on every admin page load (request-detail.tsx:557), client mentions.
+- [ ] CT.9 (0.75d) - [BE/FE] Client read state (a portal reads route) and a bell that clears when the request is opened; unread count over more than the first 20 rows.
+- [ ] CT.10 (0.75d) - [QA] One full live client lap on production at 375px and dark: submit, reply both ways with email, approve, pay link, files.
+- [ ] CT.11 (3d) - [BE/FE] /services: the portal catalogue is unscoped (every client sees every client's custom retainer names and prices once ManyRequests' services are imported); scope per org, then an order path. Liam decides whether ordering mints a request or a Stripe checkout.
+- [ ] CT.12 (1d) - [BE/FE] /time silently discards the hourly rate you type (`app/api/admin/time/route.ts` never reads hourlyRate; the time-entries route does); unify the two routes, show a Rate column.
+- [ ] CT.13 (1.5d) - [BE] Guard the hourly-to-invoice Xero export: idempotency, billingModel filter, no silent zero-rate skip.
+- [ ] CT.14 (2.5d) - [BE/FE] Invoice numbering (real `invoices.number`, prefix from settings) then the /invoices/[id] v3 lap.
+- [ ] CT.15 (1d) - [FE] /reviews: the Send button sends nothing, Copy review link 404s (`/review?token=` vs `/review/[token]`); delete or fix, and the orphaned outreach routes.
+- [ ] CT.16 (1d) - [Liam decision + FE] /billing in or out of the client nav; its Manage Billing popup fails silently.
+- [ ] CT.17 (0.5d) - [BE] The MCP `send_message` and `create_conversation` tools post the wrong body shape and always fail; fix or delete.
+- [ ] CT.18 (0.25d) - [Liam decision] Delete /tracks (linked from nowhere, HTML5-drag only; the client home's TrackBoard tells the same story with buttons).
+- [ ] CT.19 (4d) - [FE] /reports triage by deletion: six sections duplicate /sales-analytics, five duplicate /financial-reports, a second commitments editor has already diverged.
+
+Not yet (from the same sweep): the standalone /messages surface (8d), the T3 sales artifacts, the testimonial pipeline, automated health scoring (scorer exists, zero callers), the /notifications page and Slack and digests, request steps and client checklists (documented, not built), file-level proofing (ManyRequests has none either), ratings and NPS, a persisted per-request activity log.
+
 ## Sprint T2 - The request platform (Tier 2, ~1.5 weeks)
 
 - [x] T2.1 (C2.3/B3) - [BE/FE] **Portal invoice detail + real Pay.** Shipped 2026-09-05 in the Tier 1 cutover (billing slice, plan `docs/superpowers/plans/2026-09-05-cutover-tier1.md`): portal list and detail routes, hosted pay URL persisted at creation and on send, Pay now on the client page; verified live as an impersonated client. Original scope: GET /api/portal/invoices/[id]; detail page branches SWR on isAdmin (always 403s clients today); hosted_invoice_url column persisted from stripe-create + webhook; real Pay link with billing-portal session fallback.
