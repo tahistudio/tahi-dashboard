@@ -48,6 +48,9 @@ The core client loop (overview, requests list, board, timeline, request detail, 
 
 ## Decisions for you
 
+- Re-checked on production as Client view of Tahi Test Client at 05:50: the portal invoice detail answers 200 with howToPay (the QA server's 500 was local snapshot drift, not a product bug), so that client-walk blocker does not apply to production.
+- Operator step: Settings, Studio details, Getting paid is empty, so How to pay currently shows only the amount, due date and reference. Fill bank name, account name, account number and the Xero payment account code and every Xero-rail client gets the full block.
+
 - Services upsell brief (CL.3): the showcase is designed without pricing pressure; tell me how hard to sell.
 - Files as Drive (CL.1) and client Messages need schema (folders, versions, file threads, conversation participants): design is done, build is a day each.
 - Notifications page: the API needed pagination and mark-all-read; see the port notes.
