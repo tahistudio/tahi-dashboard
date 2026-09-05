@@ -41,6 +41,7 @@ import {
 import { SubRequestRows } from '@/components/tahi/requests/sub-request-rows'
 import { dropNestedDuplicates } from '@/components/tahi/requests/nesting'
 import { canCreateAtStatus, EDITABLE_STATUSES, REQUEST_STATUSES } from '@/lib/status-config'
+import { portalStatusLabel, portalStatusTitle } from '@/lib/portal-status'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
 import { subtaskRollup } from '@/components/tahi/kanban-board'
 import { DueDateChip, dueDateState } from '@/components/tahi/due-date-chip'
@@ -291,12 +292,30 @@ function sortRequests(requests: Request[], sortKey: SortKey): Request[] {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-// Read-only status badge for the client (non-admin) status column.
-function StatusBadgeCell({ status }: { status: string }) {
-  const c = STATUS_CFG[status] ?? STATUS_CFG.submitted
+// Read-only status badge for the non-editing status column.
+//
+// A client reads the ONE portal vocabulary (lib/portal-status): the same house
+// words, sentence cased, with the plain-English gloss on the title so the chip
+// on this row and the chip on the request they open one click later cannot say
+// two different things about the same request. A studio audience keeps the
+// studio label. The mapping lives here, at the badge, rather than anywhere in
+// the list's logic.
+function StatusBadgeCell({ status, audience }: { status: string; audience: 'team' | 'client' }) {
+  const label =
+    audience === 'client' ? portalStatusLabel(status) : (STATUS_CFG[status] ?? STATUS_CFG.submitted).label
   return (
-    <Badge tone={statusTone(status)} variant="soft" size="sm" leader="dot">
-      {c.label}
+    <Badge
+      tone={statusTone(status)}
+      variant="soft"
+      size="sm"
+      leader="dot"
+      // title is hover-only for a pointer, absent on touch and not reliably
+      // announced on a non-interactive span, so the gloss also rides an
+      // aria-label, which assistive tech reads deterministically.
+      title={audience === 'client' ? portalStatusTitle(status) : undefined}
+      aria-label={audience === 'client' ? portalStatusTitle(status) : undefined}
+    >
+      {label}
     </Badge>
   )
 }
@@ -428,7 +447,7 @@ function RequestMobileCard({
           </span>
         )}
         <span style={{ marginLeft: 'auto' }}>
-          <StatusBadgeCell status={request.status} />
+          <StatusBadgeCell status={request.status} audience={audience} />
         </span>
       </div>
 
@@ -589,6 +608,22 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   const [tagFilter, setTagFilter] = useState('all')
   const [dialogOpen, setDialogOpen] = useState(() => searchParams.get('new') === '1')
   const defaultClientId = searchParams.get('client') ?? undefined
+  // ?new=1 is the door seven affordances on the client home use. Reading it in
+  // a state initialiser alone made it mount-only, so pushing it while already
+  // on /requests did nothing; leaving it in the URL after a close re-opened the
+  // dialog on a reload or a back/forward.
+  const newParam = searchParams.get('new')
+  useEffect(() => {
+    if (newParam === '1') setDialogOpen(true)
+  }, [newParam])
+  const closeNewRequestDialog = useCallback(() => {
+    setDialogOpen(false)
+    if (searchParams.get('new') === null) return
+    const next = new URLSearchParams(searchParams.toString())
+    next.delete('new')
+    const query = next.toString()
+    router.replace(query ? `/requests?${query}` : '/requests', { scroll: false })
+  }, [router, searchParams])
   const [bulkCreateOpen, setBulkCreateOpen] = useState(false)
   const [aiWizardOpen, setAiWizardOpen] = useState(false)
 
@@ -1455,7 +1490,9 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
             },
           }
         : {
-            render: (r: Request) => <StatusBadgeCell status={r.status} />,
+            render: (r: Request) => (
+              <StatusBadgeCell status={r.status} audience={audience === 'client' ? 'client' : 'team'} />
+            ),
           }),
     })
 
@@ -1494,7 +1531,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     })
 
     return cols
-  }, [isAdmin, canWriteRequests, handleRowStatusChange])
+  }, [isAdmin, audience, canWriteRequests, handleRowStatusChange])
 
   // -- Shared handlers -------------------------------------------------------
   const exportRequestsCsv = useCallback(() => {
@@ -1772,7 +1809,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     <>
       <NewRequestDialog
         open={dialogOpen}
-        onClose={() => { setDialogOpen(false); mutateRequests() }}
+        onClose={() => { closeNewRequestDialog(); mutateRequests() }}
         isAdmin={isAdmin}
         defaultOrgId={defaultClientId}
       />
