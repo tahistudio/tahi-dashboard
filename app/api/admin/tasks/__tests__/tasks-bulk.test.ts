@@ -3,7 +3,9 @@
  *
  * Before the Tasks port this route had no access scoping at all (CLAUDE.md
  * rule 11), issued one UPDATE per id, and returned `taskIds.length` as
- * `updatedCount` whether or not any row existed.
+ * `updatedCount` whether or not any row existed. It also moved a whole
+ * selection onto somebody without telling them, which the per-task door has
+ * always done.
  *
  * The drizzle condition builders are replaced with plain recorders so the
  * scope clause the route hands the reachable-id query can be read and asserted
@@ -16,8 +18,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const calls: { where: unknown; set: Record<string, unknown> }[] = []
 const selectWheres: unknown[] = []
+const notified: Record<string, unknown>[] = []
 let scopedOrgIds: string[] | null = null
 let existingIds: string[] = []
+let callerTeamMemberId: string | null = null
 
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: async () => ({ orgId: 'tahi-org', userId: 'user_1' }),
@@ -28,7 +32,19 @@ vi.mock('@/lib/access-scoping', () => ({
   resolveAccessScoping: async () => scopedOrgIds,
 }))
 
-vi.mock('@/db/d1', () => ({ schema: { tasks: { id: 'id', orgId: 'org_id' } } }))
+vi.mock('@/lib/team-identity', () => ({
+  resolveTeamMember: async () =>
+    callerTeamMemberId ? { id: callerTeamMemberId, role: 'admin' } : null,
+}))
+
+vi.mock('@/lib/notifications', () => ({
+  createNotification: async (_drizzle: unknown, params: Record<string, unknown>) => {
+    notified.push(params)
+    return { delivered: 1, skipped: 0 }
+  },
+}))
+
+vi.mock('@/db/d1', () => ({ schema: { tasks: { id: 'id', orgId: 'org_id', title: 'title' } } }))
 
 vi.mock('drizzle-orm', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>()
@@ -47,7 +63,7 @@ vi.mock('@/lib/db', () => ({
       from: () => ({
         where: async (where: unknown) => {
           selectWheres.push(where)
-          return existingIds.map(id => ({ id }))
+          return existingIds.map(id => ({ id, title: `Task ${id}` }))
         },
       }),
     }),
@@ -75,8 +91,10 @@ describe('PATCH /api/admin/tasks/bulk', () => {
   beforeEach(() => {
     calls.length = 0
     selectWheres.length = 0
+    notified.length = 0
     scopedOrgIds = null
     existingIds = ['a', 'b']
+    callerTeamMemberId = 'tm_me'
   })
 
   it('asks only for the rows the caller access rule reaches', async () => {
@@ -138,5 +156,36 @@ describe('PATCH /api/admin/tasks/bulk', () => {
   it('rejects an invalid priority', async () => {
     const res = await PATCH(patch({ taskIds: ['a'], updates: { priority: 'medium' } }) as never)
     expect(res.status).toBe(400)
+  })
+
+  it('tells the new assignee once per task it actually moved', async () => {
+    await PATCH(patch({ taskIds: ['a', 'b'], updates: { assigneeId: 'tm_staci' } }) as never)
+    expect(notified).toHaveLength(2)
+    expect(notified.map(n => n.entityId)).toEqual(['a', 'b'])
+    expect(notified[0]).toMatchObject({
+      recipient: { teamMemberId: 'tm_staci' },
+      type: 'task_assigned',
+      entityType: 'task',
+    })
+    expect(notified[0].title).toContain('Task a')
+  })
+
+  it('never notifies the caller about a selection they took on themselves', async () => {
+    await PATCH(patch({ taskIds: ['a', 'b'], updates: { assigneeId: 'tm_me' } }) as never)
+    expect(calls).toHaveLength(1)
+    expect(notified).toHaveLength(0)
+  })
+
+  it('notifies nobody when the selection is unassigned or untouched', async () => {
+    await PATCH(patch({ taskIds: ['a', 'b'], updates: { assigneeId: null } }) as never)
+    await PATCH(patch({ taskIds: ['a', 'b'], updates: { status: 'done' } }) as never)
+    expect(notified).toHaveLength(0)
+  })
+
+  it('does not notify about tasks the caller could not reach', async () => {
+    scopedOrgIds = []
+    existingIds = []
+    await PATCH(patch({ taskIds: ['a'], updates: { assigneeId: 'tm_staci' } }) as never)
+    expect(notified).toHaveLength(0)
   })
 })

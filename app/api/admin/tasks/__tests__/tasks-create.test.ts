@@ -1,13 +1,14 @@
 /**
  * POST /api/admin/tasks.
  *
- * Five things this route got wrong before the Tasks port and must not get
+ * Six things this route got wrong before the Tasks port and must not get
  * wrong again: it collapsed internal_client_task into client_task, it did not
  * validate the priority (so a template could write a value PATCH then
  * refused), it accepted a `subtasks` array from the new-task dialog and
  * silently threw it away, it dropped a `requestId` sent without an `orgId`
- * instead of adopting the request's client, and it filed a task under any
- * client the caller named without checking the caller could see it.
+ * instead of adopting the request's client, it filed a task under any
+ * client the caller named without checking the caller could see it, and it
+ * created a task already assigned to somebody without telling them.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -15,8 +16,11 @@ import { NextResponse } from 'next/server'
 
 const inserted: { table: string; values: Record<string, unknown> }[] = []
 const accessChecked: (string | null | undefined)[] = []
+const notified: Record<string, unknown>[] = []
 let requestOrgs: Record<string, string> = {}
 let deniedOrgIds: string[] = []
+let assigneeTypes: Record<string, 'team_member' | 'contact'> = {}
+let callerTeamMemberId: string | null = null
 
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: async () => ({ orgId: 'tahi-org', userId: 'user_1' }),
@@ -29,6 +33,20 @@ vi.mock('@/db/d1', () => ({
 
 vi.mock('@/lib/task-access', () => ({
   requestOrgId: async (_drizzle: unknown, requestId: string) => requestOrgs[requestId] ?? null,
+  resolveAssigneeType: async (_drizzle: unknown, assigneeId: string) =>
+    assigneeTypes[assigneeId] ?? null,
+}))
+
+vi.mock('@/lib/team-identity', () => ({
+  resolveTeamMember: async () =>
+    callerTeamMemberId ? { id: callerTeamMemberId, role: 'admin' } : null,
+}))
+
+vi.mock('@/lib/notifications', () => ({
+  createNotification: async (_drizzle: unknown, params: Record<string, unknown>) => {
+    notified.push(params)
+    return { delivered: 1, skipped: 0 }
+  },
 }))
 
 vi.mock('@/lib/require-access', () => ({
@@ -65,8 +83,11 @@ describe('POST /api/admin/tasks', () => {
   beforeEach(() => {
     inserted.length = 0
     accessChecked.length = 0
+    notified.length = 0
     requestOrgs = { r1: 'o1' }
     deniedOrgIds = []
+    assigneeTypes = { tm_staci: 'team_member', ct_dana: 'contact', tm_me: 'team_member' }
+    callerTeamMemberId = 'tm_me'
   })
 
   it('keeps internal_client_task rather than collapsing it', async () => {
@@ -162,5 +183,41 @@ describe('POST /api/admin/tasks', () => {
   it('stores the estimate', async () => {
     await POST(post({ title: 'x', estimatedHours: 2.5 }) as never)
     expect(inserted[0].values.estimatedHours).toBe(2.5)
+  })
+
+  it('tells an assignee the task was created on them', async () => {
+    const res = await POST(post({ title: 'Cut the hero video', assigneeId: 'tm_staci' }) as never)
+    expect(res.status).toBe(201)
+    expect(notified).toHaveLength(1)
+    expect(notified[0]).toMatchObject({
+      recipient: { teamMemberId: 'tm_staci' },
+      type: 'task_assigned',
+      entityType: 'task',
+      entityId: inserted[0].values.id,
+    })
+    expect(notified[0].title).toContain('Cut the hero video')
+  })
+
+  it('addresses a contact assignee as a contact, the way PATCH does', async () => {
+    await POST(post({ title: 'Send the brand files', orgId: 'o1', assigneeId: 'ct_dana' }) as never)
+    expect(notified).toHaveLength(1)
+    expect(notified[0].recipient).toEqual({ contactId: 'ct_dana' })
+  })
+
+  it('never notifies the creator about their own task', async () => {
+    const res = await POST(post({ title: 'Read the brief', assigneeId: 'tm_me' }) as never)
+    expect(res.status).toBe(201)
+    expect(notified).toHaveLength(0)
+  })
+
+  it('notifies nobody when the task lands unassigned', async () => {
+    await POST(post({ title: 'Unassigned for now' }) as never)
+    expect(notified).toHaveLength(0)
+  })
+
+  it('still creates the task when the assignee id matches no row', async () => {
+    const res = await POST(post({ title: 'x', assigneeId: 'ghost' }) as never)
+    expect(res.status).toBe(201)
+    expect(notified).toHaveLength(0)
   })
 })

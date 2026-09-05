@@ -8,9 +8,11 @@ import { isTaskPriority } from '@/lib/task-priorities'
 import { TASK_STATUSES } from '@/lib/status-config'
 import { isTaskLevel, type TaskLevel } from '@/lib/tasks-views'
 import { coerceTaskLinks, setTaskLevel } from '@/lib/task-consistency'
-import { requestOrgId } from '@/lib/task-access'
+import { requestOrgId, resolveAssigneeType } from '@/lib/task-access'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { openBlockerCounts } from '@/lib/blockers-server'
+import { createNotification } from '@/lib/notifications'
+import { resolveTeamMember } from '@/lib/team-identity'
 
 // ── GET /api/admin/tasks ───────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -303,6 +305,44 @@ export async function POST(req: NextRequest) {
       completed: false,
       createdAt: now,
     })
+  }
+
+  // A task created already assigned IS an assignment, and PATCH has always
+  // told the person carrying it. This door never did, so the quickest way to
+  // hand somebody work (the new-task dialog, the template picker, the AI
+  // wizard, the MCP tool) was also the only way they were never told: the
+  // task simply appeared on the board and waited to be noticed.
+  //
+  // Assigning yourself something is not news, so the creator is never
+  // notified. The assignee id names a teamMembers or contacts row while the
+  // caller is a Clerk user, so the two are compared through the team member
+  // the caller IS. A service caller (the worker MCP) is nobody's team member,
+  // resolves to null, and correctly never matches the assignee.
+  if (body.assigneeId) {
+    const assigneeId = body.assigneeId
+    const me = await resolveTeamMember(drizzle, userId)
+    if (me?.id !== assigneeId) {
+      // Same resolution PATCH uses: the caller may state the type, and when
+      // they do not (the dialog never does) the server settles it from the
+      // id, so the row reaches the right person's bell. An id matching
+      // neither table has nobody to tell, and the task still stands.
+      const assigneeType = body.assigneeType === 'contact' || body.assigneeType === 'team_member'
+        ? body.assigneeType
+        : await resolveAssigneeType(drizzle, assigneeId)
+
+      if (assigneeType) {
+        await createNotification(drizzle, {
+          recipient: assigneeType === 'contact'
+            ? { contactId: assigneeId }
+            : { teamMemberId: assigneeId },
+          type: 'task_assigned',
+          title: `Task assigned to you: "${title}"`,
+          body: null,
+          entityType: 'task',
+          entityId: id,
+        })
+      }
+    }
   }
 
   return NextResponse.json({ id }, { status: 201 })

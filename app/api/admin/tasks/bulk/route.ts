@@ -6,6 +6,8 @@ import { and, inArray, isNull, or } from 'drizzle-orm'
 import { isTaskPriority } from '@/lib/task-priorities'
 import { TASK_STATUSES } from '@/lib/status-config'
 import { resolveAccessScoping } from '@/lib/access-scoping'
+import { createNotification } from '@/lib/notifications'
+import { resolveTeamMember } from '@/lib/team-identity'
 
 // ── PATCH /api/admin/tasks/bulk ───────────────────────────────────────────
 /**
@@ -77,9 +79,11 @@ export async function PATCH(req: NextRequest) {
 
   // Resolve first so the response can say what actually changed. A bogus id
   // used to come back as a success, which made every bulk failure silent.
+  // The title comes back with the id because the assignment notification
+  // below names each task, exactly as the per-task door does.
   const idClause = inArray(schema.tasks.id, taskIds)
   const reachable = await drizzle
-    .select({ id: schema.tasks.id })
+    .select({ id: schema.tasks.id, title: schema.tasks.title })
     .from(schema.tasks)
     .where(scopeClause ? and(idClause, scopeClause) : idClause)
 
@@ -92,6 +96,32 @@ export async function PATCH(req: NextRequest) {
     .update(schema.tasks)
     .set(setFields)
     .where(inArray(schema.tasks.id, reachableIds))
+
+  // Moving a whole selection onto somebody is still an assignment, and until
+  // now this was the one door that did it silently: PATCH /tasks/[id] tells
+  // the assignee, POST /tasks now tells them, and the board's bulk bar handed
+  // over ten tasks without a word.
+  //
+  // One row per task rather than one for the batch, because each notification
+  // deep-links to the task it is about. The recipient is a team member because
+  // that is what the write above stores: this door assigns from the team
+  // picker only. And never the caller: taking work on yourself is not news.
+  const newAssigneeId = updates.assigneeId
+  if (newAssigneeId) {
+    const me = await resolveTeamMember(drizzle, userId)
+    if (me?.id !== newAssigneeId) {
+      for (const task of reachable) {
+        await createNotification(drizzle, {
+          recipient: { teamMemberId: newAssigneeId },
+          type: 'task_assigned',
+          title: `Task assigned to you: "${task.title ?? 'Untitled'}"`,
+          body: null,
+          entityType: 'task',
+          entityId: task.id,
+        })
+      }
+    }
+  }
 
   return NextResponse.json({ success: true, updatedCount: reachableIds.length })
 }
