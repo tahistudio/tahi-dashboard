@@ -48,6 +48,11 @@ import { ClientReviewBar } from '@/components/tahi/requests/client-review-bar'
 import {
   InlineDateField, InlineMenuField, InlineNone, InlineNumberField,
 } from '@/components/tahi/inline-field'
+import {
+  SidebarCard,
+  RAIL_ACTION_CLASS,
+  RAIL_ACTION_STYLE,
+} from '@/components/tahi/rail/sidebar-card'
 import type { ReviewDecision } from '@/lib/request-review'
 
 // ---- Constants ---------------------------------------------------------------
@@ -3430,123 +3435,6 @@ function RevisionChip({
       </Popover>
     </>
   )
-}
-
-// ---- Sidebar Card ------------------------------------------------------------
-
-// Each request-detail sidebar block renders as its own standalone card
-// (kept separate rather than the deal-detail "one card, many sections"
-// pattern). Composed from the shared <Card> primitive with bordered header.
-//
-// One head shape for every card in the rail, ported from the prototype's
-// `.req-rail-head`: an icon tile, an 11px uppercase title, an optional count
-// on the right, and an optional action slot after it. The tile uses the leaf
-// radius, which is what the design system reserves for icon backgrounds.
-//
-// Overflow stays hidden on every card, with no escape hatch: each rail menu
-// leaves through the shared portalled <Popover> rather than out of the card
-// box, so nothing inside needs to spill past the rounded corners.
-
-/** The icon tile in a rail card head. Decorative: the title carries meaning. */
-function RailHeadIcon({ children }: { children: React.ReactNode }) {
-  return (
-    <span
-      aria-hidden="true"
-      className="inline-flex items-center justify-center flex-shrink-0"
-      style={{
-        width: '1.5rem',
-        height: '1.5rem',
-        borderRadius: 'var(--radius-leaf-sm)',
-        background: 'var(--color-bg-secondary)',
-        color: 'var(--color-text-muted)',
-      }}
-    >
-      {children}
-    </span>
-  )
-}
-
-/** The head's tabular count, e.g. how many calls or checklists a card holds. */
-function RailHeadCount({ value }: { value: number }) {
-  return (
-    <span
-      className="tabular-nums"
-      style={{ fontSize: '0.71875rem', fontWeight: 600, color: 'var(--color-text-subtle)' }}
-    >
-      {value}
-    </span>
-  )
-}
-
-function SidebarCard({
-  title,
-  icon,
-  count,
-  action,
-  bodyPadding = '0.8125rem 0.875rem',
-  children,
-}: {
-  title: string
-  icon?: React.ReactNode
-  count?: number
-  /** Sits hard right in the head: an add button, a toggle. */
-  action?: React.ReactNode
-  /** Prototype default. Details passes a tighter vertical pad, because its
-   *  rows carry their own rhythm and dividers. */
-  bodyPadding?: string
-  children: React.ReactNode
-}) {
-  return (
-    <Card padding="none" style={{ overflow: 'hidden' }}>
-      <div
-        className="flex items-center"
-        style={{
-          gap: '0.5rem',
-          padding: '0.6875rem 0.875rem',
-          borderBottom: '1px solid var(--color-border-subtle)',
-        }}
-      >
-        {icon && <RailHeadIcon>{icon}</RailHeadIcon>}
-        <h3
-          className="uppercase"
-          style={{
-            margin: 0,
-            fontSize: '0.6875rem',
-            fontWeight: 700,
-            letterSpacing: '0.05em',
-            color: 'var(--color-text-subtle)',
-          }}
-        >
-          {title}
-        </h3>
-        {count != null && <RailHeadCount value={count} />}
-        {action && <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>{action}</span>}
-      </div>
-      <div style={{ padding: bodyPadding }}>
-        {children}
-      </div>
-    </Card>
-  )
-}
-
-// ---- Actions card controls ---------------------------------------------------
-
-/**
- * Every command in the Actions card wears the rail's one button shape, ported
- * from the prototype's `.req-timer-btn`: full width, 2.25rem tall from md up
- * and 2.75rem below it, a 12.5px/600 label with the icon on the left. Each
- * caller supplies only what differs (border, fill, text, hover), so the four
- * of them cannot drift apart again.
- */
-const RAIL_ACTION_CLASS = 'tahi-focus-ring flex items-center w-full min-h-11 md:min-h-9'
-const RAIL_ACTION_STYLE: React.CSSProperties = {
-  gap: '0.4375rem',
-  padding: '0 0.6875rem',
-  fontSize: '0.78125rem',
-  fontWeight: 600,
-  borderRadius: 'var(--radius-md)',
-  justifyContent: 'flex-start',
-  transition: 'background-color 140ms ease, border-color 140ms ease, color 140ms ease',
 }
 
 // ---- Internal switch ---------------------------------------------------------
