@@ -20,6 +20,79 @@ interface Phase {
   note: string | null
 }
 
+// A gantt row reduced to what the phase roadmap needs. Live rows and rows out
+// of a published snapshot both land in this shape.
+interface PhaseRow {
+  rowType: string
+  label: string
+  startWeek: number | null
+  endWeek: number | null
+}
+
+interface PublishedCover {
+  title: string | null
+  effectiveDate: string | null
+  targetLaunchDate: string | null
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+// `projectSchedules.publishedSnapshot` is the JSON the publish action writes:
+// { schedule: {...}, sections: [...], rows: [...] }. Parsed defensively because
+// it is stored as free text. Returns null when there is no usable snapshot, and
+// a null `rows` when the snapshot carries no rows array, so callers can fall
+// back to the live tables exactly like the public share viewer does.
+function parsePublishedSnapshot(
+  json: string | null,
+): { cover: PublishedCover; rows: PhaseRow[] | null } | null {
+  if (!json) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(json)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object') return null
+
+  const root = parsed as { schedule?: unknown; rows?: unknown }
+  const cover: PublishedCover = { title: null, effectiveDate: null, targetLaunchDate: null }
+  if (root.schedule && typeof root.schedule === 'object') {
+    const s = root.schedule as Record<string, unknown>
+    cover.title = readString(s.title)
+    cover.effectiveDate = readString(s.effectiveDate)
+    cover.targetLaunchDate = readString(s.targetLaunchDate)
+  }
+
+  let rows: PhaseRow[] | null = null
+  if (Array.isArray(root.rows)) {
+    const ordered: Array<PhaseRow & { position: number }> = []
+    for (const entry of root.rows) {
+      if (!entry || typeof entry !== 'object') continue
+      const r = entry as Record<string, unknown>
+      const rowType = readString(r.rowType)
+      const label = readString(r.label)
+      if (!rowType || !label) continue
+      ordered.push({
+        rowType,
+        label,
+        startWeek: readNumber(r.startWeek),
+        endWeek: readNumber(r.endWeek),
+        position: readNumber(r.position) ?? 0,
+      })
+    }
+    ordered.sort((a, b) => a.position - b.position)
+    rows = ordered.map(({ rowType, label, startWeek, endWeek }) => ({ rowType, label, startWeek, endWeek }))
+  }
+
+  return { cover, rows }
+}
+
 // ── GET /api/portal/project ──────────────────────────────────────────────────
 // For project-type clients, the real phase breakdown for the ProjectBoard +
 // "Your project" card, derived from the org's published project schedule (Gantt
@@ -82,9 +155,19 @@ export async function GET(req: NextRequest) {
     project = null
   }
 
-  // The most recent project schedule for the org anchors the phase roadmap.
-  let schedule:
-    | { id: string; title: string; effectiveDate: string | null; targetLaunchDate: string | null }
+  // The org's PUBLISHED project schedule anchors the phase roadmap. `status`
+  // flips to 'shared' when an admin shares a schedule and back to 'draft' when
+  // they revoke it, so it marks exactly the schedules a client is meant to see:
+  // an in-progress draft (even a newer one) never reaches this card. Ordered by
+  // publishedAt so the most recently published schedule wins.
+  let scheduleRow:
+    | {
+        id: string
+        title: string
+        effectiveDate: string | null
+        targetLaunchDate: string | null
+        publishedSnapshot: string | null
+      }
     | null = null
   try {
     const [row] = await drizzle
@@ -93,40 +176,61 @@ export async function GET(req: NextRequest) {
         title: schema.projectSchedules.title,
         effectiveDate: schema.projectSchedules.effectiveDate,
         targetLaunchDate: schema.projectSchedules.targetLaunchDate,
+        publishedSnapshot: schema.projectSchedules.publishedSnapshot,
       })
       .from(schema.projectSchedules)
-      .where(eq(schema.projectSchedules.orgId, orgId))
-      .orderBy(desc(schema.projectSchedules.createdAt))
+      .where(and(
+        eq(schema.projectSchedules.orgId, orgId),
+        eq(schema.projectSchedules.status, 'shared'),
+      ))
+      .orderBy(
+        desc(schema.projectSchedules.publishedAt),
+        desc(schema.projectSchedules.createdAt),
+      )
       .limit(1)
-    schedule = row ?? null
+    scheduleRow = row ?? null
   } catch {
-    schedule = null
+    scheduleRow = null
   }
+
+  // Published values beat the live columns: the snapshot is what the client
+  // already reads on the shared link, so unpublished edits to the title or the
+  // phase names stay internal. Schedules shared before the snapshot column
+  // existed carry none and keep their live values, which is the same fallback
+  // the public share viewer makes.
+  const published = scheduleRow ? parsePublishedSnapshot(scheduleRow.publishedSnapshot) : null
+  const schedule = scheduleRow
+    ? {
+        id: scheduleRow.id,
+        title: published?.cover.title ?? scheduleRow.title,
+        effectiveDate: published?.cover.effectiveDate ?? scheduleRow.effectiveDate,
+        targetLaunchDate: published?.cover.targetLaunchDate ?? scheduleRow.targetLaunchDate,
+      }
+    : null
 
   let phases: Phase[] = []
   let progressKnown = false
   let nextMilestone: { name: string; dateISO: string | null } | null = null
 
   if (schedule) {
-    let rows: Array<{
-      rowType: string
-      label: string
-      startWeek: number | null
-      endWeek: number | null
-    }> = []
-    try {
-      rows = await drizzle
-        .select({
-          rowType: schema.scheduleRows.rowType,
-          label: schema.scheduleRows.label,
-          startWeek: schema.scheduleRows.startWeek,
-          endWeek: schema.scheduleRows.endWeek,
-        })
-        .from(schema.scheduleRows)
-        .where(eq(schema.scheduleRows.scheduleId, schedule.id))
-        .orderBy(asc(schema.scheduleRows.position))
-    } catch {
-      rows = []
+    // Phase names come from the published snapshot. Only a schedule that was
+    // shared before the snapshot column existed reads the live rows.
+    let rows: PhaseRow[] = published?.rows ?? []
+    if (!published?.rows) {
+      try {
+        rows = await drizzle
+          .select({
+            rowType: schema.scheduleRows.rowType,
+            label: schema.scheduleRows.label,
+            startWeek: schema.scheduleRows.startWeek,
+            endWeek: schema.scheduleRows.endWeek,
+          })
+          .from(schema.scheduleRows)
+          .where(eq(schema.scheduleRows.scheduleId, schedule.id))
+          .orderBy(asc(schema.scheduleRows.position))
+      } catch {
+        rows = []
+      }
     }
 
     // Anchor "current week" to the schedule's effective date. Without it we
@@ -187,32 +291,23 @@ export async function GET(req: NextRequest) {
       return { name: b.name, state: 'active', pct, note: activeTask?.label ?? null }
     })
 
-    // Next milestone: the earliest gate that has not yet passed.
+    // Next milestone: the earliest gate that has not yet passed. Read off the
+    // same rows the phases came from so it cannot describe an unpublished gate.
     if (currentWeek != null) {
-      try {
-        const gates = await drizzle
-          .select({
-            label: schema.scheduleRows.label,
-            startWeek: schema.scheduleRows.startWeek,
-          })
-          .from(schema.scheduleRows)
-          .where(and(
-            eq(schema.scheduleRows.scheduleId, schedule.id),
-            inArray(schema.scheduleRows.rowType, ['gate', 'critical_gate']),
-          ))
-          .orderBy(asc(schema.scheduleRows.startWeek))
-        const upcoming = gates.find((g) => g.startWeek != null && g.startWeek >= currentWeek)
-        if (upcoming?.startWeek != null) {
-          const dateMs = Number.isFinite(effMs)
-            ? effMs + (upcoming.startWeek - 1) * WEEK_MS
-            : NaN
-          nextMilestone = {
-            name: upcoming.label,
-            dateISO: Number.isFinite(dateMs) ? new Date(dateMs).toISOString() : null,
-          }
+      const week = currentWeek
+      const gates = rows
+        .filter((r) => r.rowType === 'gate' || r.rowType === 'critical_gate')
+        .filter((r): r is PhaseRow & { startWeek: number } => r.startWeek != null && r.startWeek >= week)
+        .sort((a, b) => a.startWeek - b.startWeek)
+      const upcoming = gates[0]
+      if (upcoming) {
+        const dateMs = Number.isFinite(effMs)
+          ? effMs + (upcoming.startWeek - 1) * WEEK_MS
+          : NaN
+        nextMilestone = {
+          name: upcoming.label,
+          dateISO: Number.isFinite(dateMs) ? new Date(dateMs).toISOString() : null,
         }
-      } catch {
-        nextMilestone = null
       }
     }
   }
