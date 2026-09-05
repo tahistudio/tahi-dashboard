@@ -60,6 +60,7 @@ vi.mock('@/db/d1', () => ({
     // number for the title, the org name, the submitter's name.
     requests: { id: 'id', orgId: 'org_id', requestNumber: 'request_number', isInternal: 'is_internal', status: 'status', createdAt: 'created_at', queueOrder: 'queue_order' },
     contacts: { id: 'id', name: 'name', clerkUserId: 'clerk_user_id' },
+    brandContacts: { contactId: 'contact_id', brandId: 'brand_id' },
   },
 }))
 

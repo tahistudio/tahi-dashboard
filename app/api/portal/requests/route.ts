@@ -202,6 +202,37 @@ function largeTaskAllowed(
   return config.largeTracks > 0
 }
 
+/**
+ * The one brand this submitter can be filing under, or null when it is not
+ * knowable.
+ *
+ * Read at most two links because the answer is only ever "exactly one" or
+ * "cannot tell", and never throws: a brand lookup failure must cost the brand,
+ * not the request.
+ */
+async function resolveSubmitterBrandId(
+  drizzle: ReturnType<typeof import('drizzle-orm/d1').drizzle>,
+  userId: string,
+): Promise<string | null> {
+  try {
+    const [contact] = await drizzle
+      .select({ id: schema.contacts.id })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.clerkUserId, userId))
+      .limit(1)
+    if (!contact?.id) return null
+
+    const links = await drizzle
+      .select({ brandId: schema.brandContacts.brandId })
+      .from(schema.brandContacts)
+      .where(eq(schema.brandContacts.contactId, contact.id))
+      .limit(2)
+    return links.length === 1 ? links[0].brandId ?? null : null
+  } catch {
+    return null
+  }
+}
+
 // ── POST /api/portal/requests ────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   // getPortalAuth resolves the caller's Clerk org -> the D1 organisations.id, so
@@ -310,6 +341,18 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Which brand the client is filing under.
+  //
+  // The portal list is brand scoped: a contact linked to brands only sees
+  // requests whose brand is one of theirs. A request filed with no brand was
+  // therefore invisible to the person who filed it, and (now that the client
+  // email audience matches the portal exactly) so were the replies on it.
+  //
+  // One linked brand is unambiguous and is written. Nothing, or more than one,
+  // needs the client to say which, and the dialog does not ask yet: those stay
+  // null, which is the org-wide row every contact can see.
+  const brandId = await resolveSubmitterBrandId(drizzle2, userId)
+
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 
@@ -354,12 +397,13 @@ export async function POST(req: NextRequest) {
   // learns the studio's total cross-client request volume (T-privacy).
   await drizzle2.run(sql`
     INSERT INTO requests (
-      id, org_id, title, type, category, description, due_date, form_responses,
+      id, org_id, brand_id, title, type, category, description, due_date, form_responses,
       status, priority, queue_order, submitted_by_id, is_internal,
       revision_count, max_revisions, request_number, created_at, updated_at
     ) VALUES (
       ${id},
       ${orgId},
+      ${brandId},
       ${title.trim()},
       ${type ?? 'small_task'},
       ${category ?? 'development'},
