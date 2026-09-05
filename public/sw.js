@@ -1,4 +1,8 @@
-const CACHE_NAME = 'tahi-v3'
+// Bump this whenever a precached page changes. `install` only re-runs when the
+// bytes of this file change, so an existing installation would otherwise keep
+// serving the version of /offline it cached the first time, forever.
+//   v4: the rebuilt offline page (retry, back-online state, reassurance list).
+const CACHE_NAME = 'tahi-v4'
 const OFFLINE_URL = '/offline'
 
 const PRECACHE_URLS = [
@@ -7,7 +11,13 @@ const PRECACHE_URLS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS))
+    // Non-fatal: addAll rejects the whole batch if any single URL fails (a
+    // redirect, an outage mid-install), which used to abort the install and
+    // leave the people most likely to need a fallback without one. A worker
+    // with a warm fetch handler and a cold cache still beats no worker.
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(PRECACHE_URLS))
+      .catch(() => undefined)
   )
   self.skipWaiting()
 })
