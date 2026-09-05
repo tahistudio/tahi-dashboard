@@ -68,6 +68,9 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 06:15 NZST portal port LIVE on production (e3b3a4a2). Smoke as Client view of Tahi Test Client: masthead with plan, Waiting on you tile (2 items), vitals, New request CTA, first-run welcome, bottom tabs; /api/notifications paginated (items, unreadCount, nextCursor, hasMore); invoice rows carry howToPay.
 
+- 06:20 NZST usage limit hit again (reset 06:20); the prototype fixer and the sales artifacts designer plus critics died and were resumed.
+- 06:25 NZST INCIDENT: the client-walk fix deploy (c14169bc) broke production: every signed-in page 500 (server-side exception), unauthenticated pages 404. All checks had passed. Reverted (4f905464, c96c8c2d) and redeployed within 12 minutes; production back on the portal-port tree. Diagnosis agent running; PP.5 stays open. Lesson recorded: a post-deploy health probe joins every deploy chain.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - [x] More sheet Track time row left-aligned (17a490b2).
