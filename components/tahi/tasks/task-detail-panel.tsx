@@ -17,7 +17,14 @@
  *
  * The three link rows (level, client, request) never write a raw value: they
  * run through lib/task-consistency.ts, which is the one place the invariants
- * between them live.
+ * between them live. One of those invariants (a task with no client can only
+ * be Tahi) means the Level control is sometimes pressed for a move the API
+ * would refuse. It answers that the way the create dialog does, by holding
+ * the level and asking for the client rather than writing a doomed patch:
+ * see pendingLevel below.
+ *
+ * The checklist card is backed by task_subtasks rows. The table, the props
+ * and the API paths keep the word subtask; nothing a person reads does.
  */
 
 import * as React from 'react'
@@ -68,6 +75,7 @@ import {
 import {
   TASK_LEVELS,
   TASK_LEVEL_HINTS,
+  TASK_LEVEL_LABELS,
   levelOf,
   type TaskLevel,
   type TaskRow,
@@ -285,7 +293,7 @@ const PANEL_CSS = `
 }
 .tskd-desc:read-only:hover{ border-color: var(--color-border-subtle); }
 
-/* The quiet head action every card shares: add a subtask, open the menu. */
+/* The quiet head action every card shares: add a checklist item, open the menu. */
 .tskd-head-action{
   border: none;
   background: none;
@@ -466,7 +474,7 @@ export function TaskDetailPanel(props: TaskDetailPanelProps): React.ReactElement
       <ConfirmDialog
         open={confirm === 'delete' && !!task && !readOnly}
         title="Delete this task?"
-        description="It goes for good, along with its subtasks and its logged time."
+        description="It goes for good, along with its checklist and its logged time."
         confirmLabel="Delete"
         variant="danger"
         onCancel={() => setConfirm(null)}
@@ -613,12 +621,117 @@ function TaskDetailBody({
 
   const linkState: TaskLinkState = { level, orgId: task.orgId, requestId: task.requestId }
 
+  /**
+   * The level the user has pressed but the model cannot hold yet.
+   *
+   * A task with no client can only be Tahi. coerceTaskLinks in
+   * lib/task-consistency.ts states it, and PATCH /api/admin/tasks/[id]
+   * enforces it with a 400 ("Client is required for a client task").
+   * setTaskLevel, by design, only drops links on the way to Tahi: moving the
+   * other way it keeps orgId as it found it, so on a clientless task it hands
+   * back a triple the server will refuse.
+   *
+   * Sending it anyway is what made this control look like it had no
+   * animation. The optimistic patch moved the value, the pill set off on its
+   * 360ms slide, the 400 came back inside about 40ms and the shell rolled the
+   * row back, so the pill reversed into its own start before the eye read it
+   * as movement.
+   *
+   * Disabling those two options would fix the write and leave the press dead,
+   * which on a touch screen reads as the same failure: on a clientless task
+   * the only pressable option would be the value the control already holds.
+   * So the panel answers the rule the way new-task-dialog.tsx already answers
+   * it, offer the level and then ask for the client. The press holds the
+   * level here rather than sending it, so the pill slides once and stays; the
+   * line under the control says what it is waiting for; the Client picker
+   * opens under a pointer; and choosing a client (or a request, which brings
+   * one) sends ONE patch carrying both halves of the move.
+   */
+  const [pendingLevel, setPendingLevel] = React.useState<TaskLevel | null>(null)
+
+  /** What the control shows: the level being asked for, else the task's own. */
+  const shownLevel = pendingLevel ?? level
+
+  // The ask is spent once the row itself moves, whether that was this panel
+  // or a refetch underneath it. A press that only sets pendingLevel touches
+  // neither dependency, so a level waiting on a client survives every
+  // unrelated re-render.
+  React.useEffect(() => {
+    setPendingLevel(null)
+  }, [level, task.orgId])
+
+  const clientFieldRef = React.useRef<HTMLSpanElement | null>(null)
+
+  /**
+   * Whether the press about to change the level came from a pointer.
+   *
+   * Only a pointer press gets the client menu opened for it. A radiogroup's
+   * Arrow keys also call onChange, once per option they walk past, and
+   * opening a searchable Popover on that would pull focus out of the strip
+   * mid-walk and leave the keyboard inside a menu the user never asked for.
+   */
+  const levelPressFromPointer = React.useRef(false)
+
+  /**
+   * Open the Client picker. Pressing Client or Internal on a clientless task
+   * is a request for the client, not a level write, so the press goes to the
+   * one row that can answer it. <Popover> arms its close-on-mousedown a tick
+   * after it opens, and the mousedown behind this click is already over, so
+   * the menu opens and stays.
+   */
+  function openClientPicker() {
+    clientFieldRef.current?.querySelector('button')?.click()
+  }
+
+  /**
+   * The Level control's press. Client and Internal stay pressable on a
+   * clientless task: the press is held rather than sent, so the pill makes
+   * its one slide and stays, and the Client row is asked for the half the
+   * move is missing.
+   */
+  function chooseLevel(next: TaskLevel) {
+    // Pressing the option already under the pill is not a move. Without this
+    // the second press on a held level would toggle the picker shut again.
+    if (next === shownLevel) return
+    if (next !== 'tahi_internal' && !task.orgId) {
+      setPendingLevel(next)
+      if (levelPressFromPointer.current) openClientPicker()
+      return
+    }
+    setPendingLevel(null)
+    applyLinks(setTaskLevel(linkState, next))
+  }
+
   function applyLinks(next: TaskLinkState) {
     if (next.level === level && next.orgId === task.orgId && next.requestId === task.requestId) return
     const orgName = next.orgId
       ? (clients.find(c => c.id === next.orgId)?.name ?? (next.orgId === task.orgId ? task.orgName : null))
       : null
     patch({ type: next.level, orgId: next.orgId, requestId: next.requestId, orgName })
+  }
+
+  /**
+   * Send a move from the Client or Request row, which may also be carrying a
+   * level the user pressed before it.
+   *
+   * A move that supplies a client folds the held level in, so both halves
+   * travel in one PATCH and the pill never moves twice. A move that supplies
+   * none (No client, unlinking the request) cannot carry it, and Client or
+   * Internal without a client is exactly the triple the server refuses, so
+   * the ask is dropped there instead.
+   *
+   * On the folding path the ask is deliberately NOT cleared here. The effect
+   * above spends it when the row lands, because clearing it in this handler
+   * would render a frame at the old level first and send the pill back to its
+   * start, which is the flicker this control was reported for.
+   */
+  function commitLinks(next: TaskLinkState) {
+    if (!next.orgId) {
+      setPendingLevel(null)
+      applyLinks(next)
+      return
+    }
+    applyLinks(pendingLevel ? { ...next, level: pendingLevel } : next)
   }
 
   const clientOptions: InlineMenuOption[] = [
@@ -679,7 +792,7 @@ function TaskDetailBody({
     }
   }
 
-  // ---- Subtasks --------------------------------------------------------------
+  // ---- Checklist (task_subtasks rows; the table and the API keep the old name) ---
 
   const subtaskRows = subtasks ?? []
   const subtaskTotal = subtaskRows.length
@@ -938,51 +1051,88 @@ function TaskDetailBody({
             {readOnly ? (
               <LevelChip level={level} clientName={clientName} />
             ) : (
-              <SegmentedControl
-                value={level}
-                onChange={next => applyLinks(setTaskLevel(linkState, next))}
-                role="radiogroup"
-                size="sm"
-                fill
-                ariaLabel="Level"
-                options={TASK_LEVELS.map(l => {
-                  const Glyph = LEVEL_ICON[l.value]
-                  return {
-                    value: l.value,
-                    label: l.label,
-                    title: l.hint,
-                    icon: <Glyph size={12} aria-hidden />,
-                  }
-                })}
-              />
+              // The wrapper carries no box and no role. It exists to tell a
+              // pointer press from an Arrow key before the control reports
+              // either as one onChange. Capture, so it lands before the
+              // button's own key handler has called back.
+              <span
+                style={{ display: 'contents' }}
+                onPointerDownCapture={() => { levelPressFromPointer.current = true }}
+                onKeyDownCapture={() => { levelPressFromPointer.current = false }}
+              >
+                <SegmentedControl
+                  value={shownLevel}
+                  onChange={chooseLevel}
+                  role="radiogroup"
+                  size="sm"
+                  fill
+                  ariaLabel="Level"
+                  options={TASK_LEVELS.map(l => {
+                    const Glyph = LEVEL_ICON[l.value]
+                    return {
+                      value: l.value,
+                      label: l.label,
+                      title: l.hint,
+                      icon: <Glyph size={12} aria-hidden />,
+                    }
+                  })}
+                />
+              </span>
             )}
           </DetailRow>
 
+          {/* What the level means, or what it is still waiting for, under the
+              control that took the press rather than three rows below it. The
+              line is always mounted so the live region exists before the text
+              lands: a region that appears together with its own first text is
+              the one shape screen readers routinely miss. A native title
+              would not have reached a touch user at all. */}
+          <p
+            aria-live="polite"
+            style={{
+              margin: '0 0 0.3125rem',
+              fontSize: '0.71875rem',
+              fontWeight: pendingLevel ? 600 : 500,
+              lineHeight: 1.45,
+              color: pendingLevel ? 'var(--color-link)' : 'var(--color-text-subtle)',
+            }}
+          >
+            {pendingLevel
+              ? `${TASK_LEVEL_LABELS[pendingLevel]} work needs a client. Pick one below and it lands.`
+              : TASK_LEVEL_HINTS[shownLevel]}
+          </p>
+
           <DetailRow label="Client">
-            <InlineMenuField
-              value={task.orgId ?? 'none'}
-              options={clientOptions}
-              readOnly={readOnly}
-              searchable
-              searchPlaceholder="Search clients…"
-              ariaLabel="Link a client"
-              onChange={next => {
-                const orgId = next === 'none' ? null : next
-                applyLinks(setTaskClient(linkState, orgId, linkedRequest?.orgId ?? null))
-              }}
-              renderValue={value => {
-                const client = clients.find(c => c.id === value)
-                if (!client) return <InlineNone>No client</InlineNone>
-                return (
-                  <span className="inline-flex items-center" style={{ gap: '0.375rem', minWidth: 0 }}>
-                    <Avatar name={client.name} size={18} noRing tooltip={false} />
-                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {client.name}
+            {/* A wrapper with no box of its own, purely so the Level control
+                above can reach this field's trigger. display: contents leaves
+                the button a direct child of the row, so the row's width, its
+                right alignment and the trigger's ellipsis are untouched. */}
+            <span ref={clientFieldRef} style={{ display: 'contents' }}>
+              <InlineMenuField
+                value={task.orgId ?? 'none'}
+                options={clientOptions}
+                readOnly={readOnly}
+                searchable
+                searchPlaceholder="Search clients…"
+                ariaLabel="Link a client"
+                onChange={next => {
+                  const orgId = next === 'none' ? null : next
+                  commitLinks(setTaskClient(linkState, orgId, linkedRequest?.orgId ?? null))
+                }}
+                renderValue={value => {
+                  const client = clients.find(c => c.id === value)
+                  if (!client) return <InlineNone>No client</InlineNone>
+                  return (
+                    <span className="inline-flex items-center" style={{ gap: '0.375rem', minWidth: 0 }}>
+                      <Avatar name={client.name} size={18} noRing tooltip={false} />
+                      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {client.name}
+                      </span>
                     </span>
-                  </span>
-                )
-              }}
-            />
+                  )
+                }}
+              />
+            </span>
           </DetailRow>
 
           <DetailRow label="Request">
@@ -996,7 +1146,10 @@ function TaskDetailBody({
               width="20rem"
               onChange={next => {
                 const picked = next === 'none' ? null : requests.find(r => r.id === next) ?? null
-                applyLinks(setTaskRequest(linkState, picked))
+                // A request brings its own client, so this row answers a held
+                // level too. The press wins over setTaskRequest's Client,
+                // which is only the default for a link made from nowhere.
+                commitLinks(setTaskRequest(linkState, picked))
               }}
               renderValue={value => {
                 const request = requests.find(r => r.id === value)
@@ -1005,18 +1158,6 @@ function TaskDetailBody({
               }}
             />
           </DetailRow>
-
-          <p
-            style={{
-              margin: '0.5rem 0 0',
-              fontSize: '0.71875rem',
-              fontWeight: 500,
-              lineHeight: 1.45,
-              color: 'var(--color-text-subtle)',
-            }}
-          >
-            {TASK_LEVEL_HINTS[level]}
-          </p>
         </SidebarCard>
 
         {/* 3. Details. */}
@@ -1096,16 +1237,16 @@ function TaskDetailBody({
           </DetailRow>
         </SidebarCard>
 
-        {/* 4. Subtasks. */}
+        {/* 4. Checklist. */}
         <SidebarCard
-          title="Subtasks"
+          title="Checklist"
           icon={<ListChecks size={14} />}
           action={!readOnly && !addingSubtask ? (
             <button
               type="button"
               onClick={() => setAddingSubtask(true)}
-              aria-label="Add subtask"
-              title="Add subtask"
+              aria-label="Add checklist item"
+              title="Add checklist item"
               className="tskd-head-action tahi-focus-ring inline-flex items-center justify-center h-11 w-11 md:h-6 md:w-6"
             >
               <Plus size={15} aria-hidden="true" />
@@ -1119,7 +1260,7 @@ function TaskDetailBody({
                 aria-valuenow={subtaskProgress}
                 aria-valuemin={0}
                 aria-valuemax={100}
-                aria-label="Subtask progress"
+                aria-label="Checklist progress"
                 style={{
                   flex: 1,
                   height: '0.375rem',
@@ -1150,7 +1291,7 @@ function TaskDetailBody({
 
           {subtaskTotal === 0 && !addingSubtask ? (
             <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 500, lineHeight: 1.55, color: 'var(--color-text-subtle)' }}>
-              Break it down if it helps. Subtasks show as progress on the row.
+              Break it down if it helps. Checklist items show as progress on the row.
             </p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
@@ -1187,7 +1328,7 @@ function TaskDetailBody({
                       type="button"
                       className="tskd-x tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 h-11 w-11 md:h-6 md:w-6"
                       aria-label={`Remove ${s.title}`}
-                      title="Remove subtask"
+                      title="Remove checklist item"
                       style={{ marginLeft: 'auto' }}
                       onClick={e => {
                         e.stopPropagation()
@@ -1208,8 +1349,8 @@ function TaskDetailBody({
               className="tskd-input"
               autoFocus
               value={subtaskDraft}
-              aria-label="New subtask"
-              placeholder="Name the subtask, press Enter"
+              aria-label="New checklist item"
+              placeholder="Name the checklist item, press Enter"
               style={{ marginTop: subtaskTotal > 0 ? '0.375rem' : '0.5rem' }}
               onChange={e => setSubtaskDraft(e.target.value)}
               onBlur={() => { setAddingSubtask(false); setSubtaskDraft('') }}
