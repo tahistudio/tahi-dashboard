@@ -1,16 +1,30 @@
 'use client'
 
 import type * as React from 'react'
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  Plus, FileText, RefreshCw, Download, X as XIcon, Lock,
+  Plus, FileText, RefreshCw, Download, X as XIcon, Lock, AlertTriangle,
 } from 'lucide-react'
 import { type DateRange } from '@/components/tahi/date-range-picker'
 import { apiPath } from '@/lib/api'
 import { ApiError } from '@/lib/swr-fetcher'
+// The client's rail, terms and currency decide what a new invoice opens on.
+import {
+  INVOICE_CHANNEL_SETTING_KEY,
+  invoiceChannelLabel,
+} from '@/lib/invoice-channel'
+import { paymentTermsLabel } from '@/lib/invoice-billing'
+import {
+  DEFAULT_INVOICE_CURRENCY,
+  defaultCurrency,
+  defaultDestination,
+  defaultDueDate,
+  localCalendarDay,
+  resolveChannelDefaults,
+} from '@/lib/invoice-defaults'
 import {
   portalAdminLabel,
   portalMoneyDenial,
@@ -32,6 +46,7 @@ import { SourceBadge } from './source-badge'
 import { Card } from '@/components/tahi/card'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { SlideOver } from '@/components/tahi/slide-over'
+import { SegmentedControl, type SegmentedControlOption } from '@/components/tahi/segmented-control'
 import { Input, Select, Textarea } from '@/components/tahi/input'
 import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
@@ -198,6 +213,23 @@ function InvoiceMobileCard({
 
 // ─── Create Invoice Slide-over ────────────────────────────────────────────────
 
+/**
+ * A row from GET /api/admin/clients, narrowed to what the create form reads.
+ * The three billing columns are nullable in the schema and free text in the
+ * currency's case, so they stay `string | null` here and are normalised by the
+ * lib/invoice-defaults helpers rather than trusted.
+ */
+interface ClientOption {
+  id: string
+  name: string
+  /** organisations.invoiceChannel. null = fall back to the studio default. */
+  invoiceChannel?: string | null
+  /** organisations.paymentTerms. null = no net terms, so due today. */
+  paymentTerms?: string | null
+  /** organisations.preferredCurrency. */
+  preferredCurrency?: string | null
+}
+
 function CreateInvoiceSlideOver({
   open,
   onClose,
@@ -216,11 +248,20 @@ function CreateInvoiceSlideOver({
   const [lineItems, setLineItems] = useState([{ description: '', quantity: '1', unitAmount: '' }])
 
   // Fetch the client list when the slide-over is open; SWR caches it globally
-  // so re-opening is instant and no spinner flash occurs.
-  const { data: clientsData } = useSWR<{ organisations?: Array<{ id: string; name: string }> }>(
+  // so re-opening is instant and no spinner flash occurs. The list route does a
+  // bare select over organisations, so the billing columns this form defaults
+  // from are already on the wire: no second per-client request.
+  const { data: clientsData } = useSWR<{ organisations?: ClientOption[] }>(
     open ? '/api/admin/clients' : null
   )
-  const orgOptions = clientsData?.organisations ?? []
+  const orgOptions = useMemo(() => clientsData?.organisations ?? [], [clientsData])
+
+  // The studio-wide rail, read once when the slide-over opens. A client with no
+  // channel of its own bills on this one, so it is half of the resolution.
+  const { data: settingsData, isLoading: settingsLoading, error: settingsError } = useSWR<{
+    settings?: Record<string, string | null>
+  }>(open ? '/api/admin/settings' : null, { revalidateOnFocus: false })
+  const studioDefaultChannel = settingsData?.settings?.[INVOICE_CHANNEL_SETTING_KEY]
 
   // Check if the selected org has at least one contact with an email.
   // Stripe rejects customer creation without one. keepPreviousData:false so
@@ -234,11 +275,89 @@ function CreateInvoiceSlideOver({
     ? null
     : contactsData?.contacts?.some(c => !!c.email) ?? false
 
-  const [currency, setCurrency] = useState('NZD')
+  const [currency, setCurrency] = useState<string>(DEFAULT_INVOICE_CURRENCY)
   const [dueDate, setDueDate] = useState('')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  // ── Defaults from the client ───────────────────────────────────────────────
+  // Picking a client used to change nothing: the form stayed on Dashboard only,
+  // NZD and an empty due date whoever it was for. These three memos read the
+  // client row instead, and the effect below lands them on the form ONCE per
+  // pick, so the operator keeps every field afterwards.
+
+  const selectedOrg = useMemo(
+    () => orgOptions.find(o => o.id === orgId) ?? null,
+    [orgOptions, orgId],
+  )
+
+  /**
+   * Which rail this client is on, and whether that is a fact or a guess.
+   *
+   * The client's own column is kept apart from the resolved rail because the
+   * two support different sentences: a client that names a channel has a
+   * billing history the operator can contradict, a client that inherits the
+   * studio default has none, and a studio default that could not be read is
+   * not an answer at all. See lib/invoice-defaults.ts.
+   */
+  const {
+    clientChannel,
+    effectiveChannel,
+    pending: studioDefaultPending,
+    known: channelKnown,
+  } = useMemo(
+    () => resolveChannelDefaults(selectedOrg?.invoiceChannel, studioDefaultChannel, {
+      loading: settingsLoading,
+      failed: !!settingsError,
+    }),
+    [selectedOrg, studioDefaultChannel, settingsLoading, settingsError],
+  )
+
+  /**
+   * What the note under the destination picker reports, for this client.
+   *
+   * Null while the studio default is still in flight, so the note cannot state
+   * one rail and then flip to the other on a cold SWR cache. `channelLabel` is
+   * null when the settings read failed outright and this client has no rail of
+   * its own: the note then says nothing about the rail rather than presenting
+   * the fallback as an answer nobody gave.
+   */
+  const clientDefaults = useMemo(() => {
+    if (!selectedOrg) return null
+    if (studioDefaultPending) return null
+    return {
+      channelLabel: channelKnown ? invoiceChannelLabel(effectiveChannel) : null,
+      termsLabel: paymentTermsLabel(selectedOrg.paymentTerms),
+      currency: defaultCurrency(selectedOrg.preferredCurrency, DEFAULT_INVOICE_CURRENCY, SUPPORTED_CURRENCIES),
+    }
+  }, [selectedOrg, effectiveChannel, channelKnown, studioDefaultPending])
+
+  // Guards the apply-once rule. Holding the org id (not a boolean) means
+  // switching client re-applies, while typing in the form never does.
+  const defaultsAppliedFor = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    if (!orgId) { defaultsAppliedFor.current = null; return }
+    if (!selectedOrg) return
+    // Wait for the studio default, or an unset client would flash onto Stripe
+    // and then be left there once the real answer arrived.
+    if (studioDefaultPending) return
+    if (defaultsAppliedFor.current === orgId) return
+    defaultsAppliedFor.current = orgId
+    // Currency and terms are read straight off the client row, so they land
+    // either way. The rail only lands when it is known: if the settings read
+    // failed, the form stays on "Dashboard only", which pushes nowhere and so
+    // asserts nothing about a studio default nobody could read.
+    if (channelKnown) setDestination(defaultDestination(effectiveChannel))
+    setCurrency(defaultCurrency(selectedOrg.preferredCurrency, DEFAULT_INVOICE_CURRENCY, SUPPORTED_CURRENCIES))
+    setDueDate(defaultDueDate(selectedOrg.paymentTerms, localCalendarDay(new Date())))
+  }, [open, orgId, selectedOrg, studioDefaultPending, channelKnown, effectiveChannel])
+
+  /** True when the operator has moved to the rail this client does NOT bill on. */
+  const destinationOverridesClient =
+    !!selectedOrg && channelKnown && destination !== 'manual' && destination !== effectiveChannel
 
   // Reset form when the slide-over closes
   useEffect(() => {
@@ -248,11 +367,12 @@ function CreateInvoiceSlideOver({
     setSelectedOrgName('')
     setDestination('manual')
     setLineItems([{ description: '', quantity: '1', unitAmount: '' }])
-    setCurrency('NZD')
+    setCurrency(DEFAULT_INVOICE_CURRENCY)
     setDueDate('')
     setNotes('')
     setSaving(false)
     setError('')
+    defaultsAppliedFor.current = null
   }, [open])
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
@@ -348,10 +468,10 @@ function CreateInvoiceSlideOver({
 
   const filteredOrgOptions = orgOptions.filter(o => !orgSearch || o.name.toLowerCase().includes(orgSearch.toLowerCase()))
 
-  const destOptions: { value: 'manual' | 'xero' | 'stripe'; label: string; tone: BadgeTone }[] = [
-    { value: 'manual', label: 'Dashboard only', tone: 'brand'  },
-    { value: 'xero',   label: 'Xero draft',     tone: 'teal'   },
-    { value: 'stripe', label: 'Stripe link',    tone: 'purple' },
+  const destOptions: SegmentedControlOption<'manual' | 'xero' | 'stripe'>[] = [
+    { value: 'manual', label: 'Dashboard only' },
+    { value: 'xero',   label: 'Xero draft'     },
+    { value: 'stripe', label: 'Stripe link'    },
   ]
 
   return (
@@ -380,17 +500,22 @@ function CreateInvoiceSlideOver({
             {error}
           </div>
         )}
-        {/* Pre-flight warning: Stripe rejects customer creation without an email */}
+        {/* Pre-flight warning: Stripe rejects customer creation without an email.
+            On the --badge-warning-* trio, not --color-warning-bg /
+            --color-warning: globals.css deliberately leaves that pair
+            unresolved for dark, and this warning can now render directly above
+            the destination override one, so the two would have been a proper
+            amber chip and a near-white tint side by side. */}
         {destination === 'stripe' && orgId && orgHasEmailContact === false && (
           <div
             aria-live="polite"
             style={{
-              background: 'var(--color-warning-bg)',
-              border: '1px solid var(--color-warning)',
+              background: 'var(--badge-warning-bg)',
+              border: '1px solid var(--badge-warning-border)',
               borderRadius: '0.5rem',
               padding: '0.625rem 0.875rem',
               marginBottom: '1rem',
-              color: 'var(--color-warning)',
+              color: 'var(--badge-warning-text)',
               fontSize: '0.8125rem',
             }}
           >
@@ -400,19 +525,86 @@ function CreateInvoiceSlideOver({
         <form id="create-invoice-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           {/* Destination toggle */}
           <div>
-            <Label>Destination</Label>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-              {destOptions.map(opt => (
-                <Badge
-                  key={opt.value}
-                  tone={opt.tone}
-                  variant={destination === opt.value ? 'soft' : 'outline'}
-                  selected={destination === opt.value}
-                  onClick={() => setDestination(opt.value)}
-                  size="md"
+            {/* A span, not a label: the control below owns its own accessible
+                name through ariaLabel, and a bare <label> pointing at nothing
+                is not one. */}
+            <Label as="span">Destination</Label>
+            {/* The shared segmented control rather than three chips. Badge
+                paints its selected state as an INLINE box-shadow, which
+                outranks .tahi-focus-ring:focus-visible, so the selected chip
+                (the one the operator most often tabs onto) showed no focus
+                indicator at all. .tahi-seg-b deliberately paints no box-shadow
+                so the ring resolves on every option, and every .tahi-seg-b is
+                a 2.75rem target below md, which also retires the min-h-11
+                override the chips needed. This picker decides where real money
+                goes: it cannot be the control without a focus state.
+
+                size="sm" keeps the 0.75rem label the chips had, so three
+                nowrap labels still sit on one line inside the 375px
+                slide-over; the touch target below md is the same 2.75rem at
+                either size. */}
+            <SegmentedControl<'manual' | 'xero' | 'stripe'>
+              role="radiogroup"
+              ariaLabel="Destination"
+              value={destination}
+              onChange={setDestination}
+              options={destOptions}
+              size="sm"
+            />
+            {/* Where the defaults came from, and a nudge when the operator
+                leaves the client's own rail. Dashboard only never warns: it
+                pushes nowhere, so it contradicts nothing.
+
+                The live region is mounted unconditionally. A region has to be
+                in the accessibility tree BEFORE its content changes to be
+                announced, so inserting the wrapper together with its first
+                sentence (what picking a client used to do) announced nothing
+                at all. */}
+            <div aria-live="polite" style={{ marginTop: clientDefaults ? '0.5rem' : undefined }}>
+              {clientDefaults && (destinationOverridesClient ? (
+                // --badge-warning-* rather than --color-warning-bg /
+                // --color-warning: globals.css only re-resolves the badge
+                // pair for dark, so the colour pair would have worn a
+                // near-white tint on the dark slide-over.
+                <p
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.375rem',
+                    margin: 0,
+                    padding: '0.375rem 0.5rem',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--badge-warning-bg)',
+                    color: 'var(--badge-warning-text)',
+                    fontSize: '0.75rem',
+                    lineHeight: 1.4,
+                  }}
                 >
-                  {opt.label}
-                </Badge>
+                  <AlertTriangle size={13} aria-hidden="true" style={{ flexShrink: 0, marginTop: '0.0625rem' }} />
+                  {/* Two sentences, because the resolver answers two
+                      different questions. A client that names a rail has a
+                      billing history to contradict; a client with a NULL
+                      column (almost every row today) has none, and telling
+                      the operator it "usually bills through Stripe" would
+                      invent one. */}
+                  {clientChannel ? (
+                    <span>
+                      <strong data-private style={{ fontWeight: 600 }}>{selectedOrgName}</strong>
+                      {' '}usually bills through {invoiceChannelLabel(clientChannel)}.
+                    </span>
+                  ) : (
+                    <span>
+                      No channel set for <strong data-private style={{ fontWeight: 600 }}>{selectedOrgName}</strong>.
+                      {' '}The studio default is {invoiceChannelLabel(effectiveChannel)}.
+                    </span>
+                  )}
+                </p>
+              ) : (
+                <p style={{ margin: 0, fontSize: '0.75rem', lineHeight: 1.4, color: 'var(--color-text-muted)' }}>
+                  Defaults from <span data-private>{selectedOrgName}</span>:{' '}
+                  {clientDefaults.channelLabel ? `${clientDefaults.channelLabel}, ` : ''}
+                  {clientDefaults.termsLabel}, {clientDefaults.currency}.
+                </p>
               ))}
             </div>
           </div>
