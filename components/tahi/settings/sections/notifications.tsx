@@ -44,6 +44,8 @@ interface EventDef {
   event: string
   label: string
   desc: string
+  /** Channels this event really sends on. Defaults to the audience's full set. */
+  only?: Channel[]
 }
 
 const NTF_TEAM: EventDef[] = [
@@ -66,6 +68,11 @@ const NTF_TEAM: EventDef[] = [
  * was added: lib/announcement-emails.ts genuinely reads it, and there was no
  * way to mute a broadcast from any screen.
  *
+ * Studio notes carry an EMAIL switch only. The announcement send path fans out
+ * email and writes no notification row (nothing in the repo inserts one with
+ * entityType 'announcement'), so an in-app switch there would control nothing.
+ * It gets its second half back the day the send path writes bell rows.
+ *
  * Mentions are deliberately not a row: notifyMentionedPerson writes
  * type 'new_message', so muting Replies already mutes them.
  */
@@ -73,7 +80,7 @@ const NTF_CLIENT: EventDef[] = [
   { event: 'request_status_changed', label: 'Request updates', desc: 'When a request moves, is delivered, or is waiting on you' },
   { event: 'new_message', label: 'Replies', desc: 'When someone at the studio replies on one of your requests' },
   { event: 'invoice_created', label: 'Invoices', desc: 'When an invoice is ready to pay, is paid, or falls overdue' },
-  { event: 'announcement_posted', label: 'Studio notes', desc: 'The occasional notice from Tahi. A few a year, never a newsletter' },
+  { event: 'announcement_posted', label: 'Studio notes', desc: 'The occasional notice from Tahi. A few a year, never a newsletter', only: ['email'] },
 ]
 
 const TEAM_CHANNELS: { key: Channel; label: string }[] = [
@@ -91,6 +98,15 @@ const CLIENT_CHANNELS: { key: Channel; label: string }[] = [
 
 function keyOf(event: string, channel: string): string {
   return event + '|' + channel
+}
+
+/** The channels an event actually sends on, so no row draws a dead switch. */
+function channelsFor(
+  e: EventDef,
+  all: { key: Channel; label: string }[],
+): { key: Channel; label: string }[] {
+  const only = e.only
+  return only ? all.filter((c) => only.includes(c.key)) : all
 }
 
 export function NotificationsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
@@ -174,7 +190,7 @@ export function NotificationsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
                 <div style={{ height: 11, width: '55%', borderRadius: 6, marginTop: 6, background: 'var(--bg-tertiary)' }} />
               </div>
               <div className="ntf-chs">
-                {channels.map((c) => (
+                {channelsFor(e, channels).map((c) => (
                   <div key={c.key} style={{ width: 76, height: 31, borderRadius: 999, background: 'var(--bg-tertiary)' }} />
                 ))}
               </div>
@@ -195,7 +211,7 @@ export function NotificationsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               <small>{e.desc}</small>
             </div>
             <div className="ntf-chs">
-              {channels.map((c) => {
+              {channelsFor(e, channels).map((c) => {
                 const on = resolved(e.event, c.key)
                 return (
                   <button
@@ -235,7 +251,9 @@ export function NotificationsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
         contracts always sends.
       </p>
       <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>
-        <Link href="/notifications" className="tahi-focus-ring" style={{ color: 'var(--color-brand-dark)', fontWeight: 600 }}>
+        {/* --color-link, not --color-brand-dark: brand-dark has no .dark
+            override, so it reads at roughly 1.6:1 once the panel goes dark. */}
+        <Link href="/notifications" className="tahi-focus-ring" style={{ color: 'var(--color-link)', fontWeight: 600 }}>
           See everything that has reached you
         </Link>
       </p>

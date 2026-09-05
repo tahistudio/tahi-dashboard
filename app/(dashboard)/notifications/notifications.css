@@ -3,7 +3,12 @@
    its `pa-` prefix (unique across the app: app-shell.css defines no .pa rules)
    and every colour is a globals.css token, so dark mode falls out for free.
    Written 375 first: every control is a 2.75rem target by default and only
-   tightens at 48rem. Borders are all sides or absent, spacing is rem. */
+   tightens at 48rem. Borders are all sides or absent, spacing is rem.
+
+   Brand ink on text and icons is --color-link, never --color-brand-dark:
+   brand-dark has no .dark override, so it reads at roughly 2.4:1 on the dark
+   card surface. --color-link is the same #425F39 in light and lifts to #93C98A
+   in dark. brand-dark is still correct as a BACKGROUND under white text. */
 
 .pa {
   --pa-ease: var(--ease-out, cubic-bezier(.22, 1, .36, 1));
@@ -27,8 +32,13 @@
 
 /* ---------- page frame ----------
    The dashboard <main> is the scroller, so this page does not own one; the
-   sticky day headers stick to that scroller. */
-.pa-pad { max-width: 56rem; margin: 0 auto; padding: 1.125rem 1rem 3.5rem; }
+   sticky day headers stick to that scroller.
+
+   No horizontal or top padding: .dashboard-main owns the page gutters and
+   .dashboard-page-inner owns the top offset for every page in the shell, so
+   adding our own put this page ~2rem narrower and ~2.4rem lower than /requests
+   sitting beside it. Only the max-width, the centring and the tail are ours. */
+.pa-pad { max-width: 56rem; margin: 0 auto; padding: 0 0 3.5rem; }
 
 .pa-head { display: flex; align-items: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .pa-h1 { margin: 0; font: 700 1.5rem/1.15 var(--font-manrope, 'Manrope'), sans-serif; letter-spacing: -0.02em; color: var(--color-text); }
@@ -45,7 +55,7 @@
   font-size: .8125rem; font-weight: 600; cursor: pointer; white-space: nowrap;
   transition: background .15s var(--pa-ease), border-color .15s var(--pa-ease), color .15s var(--pa-ease);
 }
-.pa-btn:hover { border-color: var(--color-brand); color: var(--color-brand-dark); }
+.pa-btn:hover { border-color: var(--color-brand); color: var(--color-link); }
 .pa-btn:disabled { cursor: not-allowed; }
 .pa-btn:disabled:hover { border-color: var(--color-border); color: var(--color-text); }
 .pa-btn.leaf { border-radius: var(--pa-leaf); }
@@ -109,7 +119,7 @@
 .pa-chip-ic { display: flex; opacity: .75; }
 .pa-chip-n { font-variant-numeric: tabular-nums; opacity: .6; }
 .pa-clear {
-  flex-shrink: 0; border: none; background: none; color: var(--color-brand-dark);
+  flex-shrink: 0; border: none; background: none; color: var(--color-link);
   font-size: .75rem; font-weight: 600; cursor: pointer; padding: .5rem .375rem;
   border-radius: .375rem; min-height: 2.75rem;
 }
@@ -171,7 +181,7 @@ button.pa-nrow-main { cursor: pointer; }
 .pa-nrow-kind { font-size: .6875rem; font-weight: 600; color: var(--color-text-subtle); }
 /* The separator lives inside the destination so a wrap can never leave a dot
    dangling at the end of a line. */
-.pa-nrow-dest { display: inline-flex; align-items: center; gap: .3125rem; font-size: .6875rem; font-weight: 600; color: var(--color-brand-dark); }
+.pa-nrow-dest { display: inline-flex; align-items: center; gap: .3125rem; font-size: .6875rem; font-weight: 600; color: var(--color-link); }
 .pa-nrow-dest svg { transition: transform .16s var(--pa-ease); }
 button.pa-nrow-main:hover .pa-nrow-dest svg { transform: translateX(.1875rem); }
 .pa-nrow-nodest { display: inline-flex; align-items: center; gap: .3125rem; font-size: .6875rem; font-weight: 500; color: var(--color-text-subtle); font-style: italic; }
@@ -184,7 +194,7 @@ button.pa-nrow-main:hover .pa-nrow-dest svg { transform: translateX(.1875rem); }
   background: var(--color-bg); color: var(--color-text-subtle); cursor: pointer;
   transition: border-color .14s var(--pa-ease), color .14s var(--pa-ease), background .14s var(--pa-ease);
 }
-.pa-nrow-read:hover { border-color: var(--color-brand); color: var(--color-brand-dark); background: var(--color-bg); }
+.pa-nrow-read:hover { border-color: var(--color-brand); color: var(--color-link); background: var(--color-bg); }
 .pa-nrow-read:disabled { opacity: .4; cursor: not-allowed; }
 
 .pa-foot { display: flex; justify-content: center; padding: 1.125rem 0 .25rem; }
@@ -197,7 +207,7 @@ button.pa-nrow-main:hover .pa-nrow-dest svg { transform: translateX(.1875rem); }
 }
 .pa-empty-ic {
   display: flex; align-items: center; justify-content: center; width: 3rem; height: 3rem; margin-bottom: .25rem;
-  border-radius: var(--pa-leaf); background: var(--color-brand-100); color: var(--color-brand-dark);
+  border-radius: var(--pa-leaf); background: var(--color-brand-100); color: var(--color-link);
 }
 .pa-empty h2 { margin: 0; font-size: .9375rem; font-weight: 700; color: var(--color-text); }
 .pa-empty p { margin: 0; max-width: 26rem; font-size: .8125rem; font-weight: 500; line-height: 1.5; color: var(--color-text-muted); }
@@ -238,7 +248,7 @@ button.pa-nrow-main:hover .pa-nrow-dest svg { transform: translateX(.1875rem); }
 
 /* ---------- 48rem and up ---------- */
 @media (min-width: 48rem) {
-  .pa-pad { padding: 1.375rem 1.625rem 3rem; }
+  .pa-pad { padding: 0 0 3rem; }
   .pa-h1 { font-size: 1.5625rem; }
   .pa-btn { min-height: 2.25rem; padding: 0 .8125rem; }
   .pa-seg-b { min-height: 2.125rem; }

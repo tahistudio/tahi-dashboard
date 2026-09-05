@@ -44,11 +44,22 @@ describe('notification kinds', () => {
     expect(notificationKind('request')).toBe('request')
   })
 
-  it('gives a client the plain five and never the internal ones', () => {
+  it('gives a client the plain four and never the internal ones', () => {
     const labels = notificationKindsFor('client').map(k => k.label)
-    expect(labels).toEqual(['Requests', 'Replies', 'Invoices', 'Studio notes', 'Documents'])
+    expect(labels).toEqual(['Requests', 'Replies', 'Invoices', 'Studio notes'])
     expect(labels).not.toContain('System')
     expect(labels).not.toContain('Sales')
+  })
+
+  // A chip whose every entity resolves to null for a client is a filter that
+  // can only ever answer "nothing matches", so it does not ship until there is
+  // a client-visible document surface behind it.
+  it('offers a client no chip whose kind has no client destination', () => {
+    for (const kind of notificationKindsFor('client')) {
+      const reachable = ENTITY_TYPES_FOR_KIND[kind.key]
+        .some(entity => notificationDestination(entity, 'x1', 'client') !== null)
+      expect({ kind: kind.key, reachable }).toEqual({ kind: kind.key, reachable: true })
+    }
   })
 
   it('gives the studio its seven', () => {

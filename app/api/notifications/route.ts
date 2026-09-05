@@ -4,6 +4,9 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, or, count, lt, gte, inArray } from 'drizzle-orm'
 import { entityTypesForKinds } from '@/lib/notification-links'
+// One definition of the service identity, shared with every other gate that
+// special-cases it (lib/access-scope, lib/permissions).
+import { SERVICE_USER_ID } from '@/lib/team-identity'
 
 // What the bell popover renders when nothing asks for more. The /notifications
 // page asks for more; the unread COUNT is deliberately not derived from either
@@ -12,9 +15,6 @@ const PAGE_SIZE = 20
 // A page can ask for more, but not for the whole table: D1 reads are billed by
 // rows scanned and a client on a phone has no use for 5,000 rows.
 const MAX_PAGE_SIZE = 100
-
-/** The identity `getRequestAuth` hands back for a valid TAHI_API_TOKEN call. */
-const SERVICE_USER_ID = 'api-service'
 
 /**
  * Cursor is `${createdAt}|${id}`, not a bare timestamp.

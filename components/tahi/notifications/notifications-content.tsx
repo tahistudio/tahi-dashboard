@@ -228,6 +228,11 @@ export function NotificationsContent({
   const [kinds, setKinds] = useState<NotificationKind[]>([])
   const [unreadOnly, setUnreadOnly] = useState(false)
   const [markingAll, setMarkingAll] = useState(false)
+  // True once any read has landed. The filter surface is gated on this rather
+  // than on `state === 'ready'`, because every filter change puts the page back
+  // into 'loading': unmounting the chips mid-read dropped the focus of whoever
+  // had just pressed one, and reset the chip row's scroll on a 375 screen.
+  const [everLoaded, setEverLoaded] = useState(false)
 
   // One "now" per read, stamped when the rows land, so every relative
   // timestamp on the page agrees with every other one instead of each row
@@ -264,6 +269,7 @@ export function NotificationsContent({
       setUnreadCount(json.unreadCount ?? 0)
       setCursor(json.nextCursor ?? null)
       setHasMore(!!json.hasMore)
+      setEverLoaded(true)
       setState('ready')
     } catch {
       setRows([])
@@ -325,25 +331,45 @@ export function NotificationsContent({
 
   const markAll = useCallback(async () => {
     if (readOnly) return
+    // Narrowed to the lens the reader is actually looking through, so "Mark all
+    // as read" never silently empties rows they cannot see: by kind, and on the
+    // Past tab by the same `before` boundary the list itself is paging under.
+    const before = tab === 'past' ? windowStart.current : undefined
+    const narrowed = kinds.length > 0 || tab === 'past'
+    const clearing = rows.reduce((n, r) => (r.read ? n : n + 1), 0)
     setMarkingAll(true)
     try {
       await fetch(apiPath('/api/notifications'), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        // Narrowed to the lens the reader is actually looking through, so
-        // "Mark all as read" never silently empties rows they cannot see.
-        body: JSON.stringify({ all: true, kinds: kinds.length ? kinds : undefined }),
+        body: JSON.stringify({ all: true, kinds: kinds.length ? kinds : undefined, before }),
       })
       setRows(prev => prev.map(r => ({ ...r, read: true })))
-      setUnreadCount(0)
+      // A narrowed pass leaves unread rows of other kinds, or newer than the
+      // Past window, standing. Claiming zero there would put this page and the
+      // bell (which counts the same table) at odds until a reload.
+      setUnreadCount(prev => (narrowed ? Math.max(0, prev - clearing) : 0))
       notifyNotificationsChanged()
-      showToast('All caught up', 'success')
+      showToast(narrowed ? 'Marked those as read' : 'All caught up', 'success')
+      if (narrowed) {
+        // The server may have cleared rows this page never loaded, so take the
+        // true count rather than trusting the subtraction above.
+        try {
+          const res = await fetch(apiPath('/api/notifications?limit=1'))
+          if (res.ok) {
+            const json = await res.json() as { unreadCount?: number }
+            setUnreadCount(json.unreadCount ?? 0)
+          }
+        } catch {
+          // The optimistic figure stands until the next read.
+        }
+      }
     } catch {
       showToast('Could not mark those as read', 'error')
     } finally {
       setMarkingAll(false)
     }
-  }, [readOnly, kinds, showToast])
+  }, [readOnly, kinds, tab, rows, showToast])
 
   const switchTab = useCallback((next: Tab) => {
     if (next === tab) return
@@ -396,8 +422,11 @@ export function NotificationsContent({
   }, [rows, tab, now])
 
   const anyFilter = kinds.length > 0 || unreadOnly
+  // Counts are still withheld until real rows land (a chip that reads
+  // "Requests 5" before the read returns is guessing), but the CHIPS themselves
+  // survive the re-read: pressing one used to unmount the whole row mid-fetch.
   const countsKnown = state === 'ready'
-  const showFilters = countsKnown && (rows.length > 0 || anyFilter)
+  const showFilters = state !== 'error' && everLoaded && (rows.length > 0 || anyFilter)
   const sub = audience === 'client'
     ? 'Everything the studio has told you, newest first. The bell only holds the last few.'
     : 'Everything the studio has flagged for you, newest first. The bell only holds the last few.'
@@ -569,7 +598,7 @@ export function NotificationsContent({
               ? 'Loading'
               : state === 'error'
                 ? 'Could not load'
-                : `${rows.length}${hasMore ? '+' : ''} ${rows.length === 1 && !hasMore ? 'notification' : 'notifications'}${unreadCount ? ` · ${unreadCount} unread` : ''}`}
+                : `${rows.length}${hasMore ? '+' : ''} ${rows.length === 1 && !hasMore ? 'notification' : 'notifications'}${unreadCount ? ` · ${unreadCount} unread in total` : ''}`}
           </span>
 
           {showFilters && (
@@ -623,7 +652,7 @@ export function NotificationsContent({
               >
                 <span className="pa-chip-ic"><ShellIcon n={k.icon} s={13} /></span>
                 {k.label}
-                {counts[k.key] ? <span className="pa-chip-n">{counts[k.key]}</span> : null}
+                {countsKnown && counts[k.key] ? <span className="pa-chip-n">{counts[k.key]}</span> : null}
               </button>
             ))}
           </div>

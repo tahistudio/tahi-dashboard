@@ -225,9 +225,18 @@ export const NOTIFICATION_KINDS: Record<NotificationKind, NotificationKindDef> =
   system:       { key: 'system',       label: 'System',       icon: 'settings',      tone: 'muted' },
 }
 
-/** Which kinds get a filter chip, per audience. */
+/**
+ * Which kinds get a filter chip, per audience.
+ *
+ * 'document' is deliberately absent from the client list: every entity it
+ * covers (contract, proposal, schedule) resolves to null for a client, so the
+ * chip could only ever return rows with nothing to open, and usually nothing at
+ * all. The /notifications page adds a chip for any kind actually present in the
+ * rows it loaded, so the day a client-visible document surface exists the chip
+ * comes back on its own, with real rows behind it.
+ */
 export const CLIENT_NOTIFICATION_KINDS: readonly NotificationKind[] =
-  ['request', 'message', 'invoice', 'announcement', 'document']
+  ['request', 'message', 'invoice', 'announcement']
 export const TEAM_NOTIFICATION_KINDS: readonly NotificationKind[] =
   ['request', 'task', 'message', 'invoice', 'call', 'deal', 'system']
 
