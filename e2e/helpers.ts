@@ -296,18 +296,34 @@ export function requestRef(requestNumber: number | null): string | null {
  * `skip` is how two spec FILES avoid each other. The suite runs fully in
  * parallel, so a case that blocks the first candidate and asserts "Blocked by
  * 1" reads 2 the moment another file blocks the same row: that is exactly how
- * this helper's first version failed. Each file that writes a blocker onto a
- * seeded request takes a different index and the counts stay its own.
+ * this helper's first version failed.
+ *
+ * The invariant is per DIRECTION, not per file. Two files may share an index
+ * only while one writes `blockedBy` on the row and the other writes `blocks`:
+ * a request that is a task's blocker gains no `blockedByCount` of its own, so
+ * the count the other file asserts is untouched. Any case that blocks a
+ * seeded request needs an index nobody else blocks, and every call site says
+ * its index out loud. There is no default on purpose: a default one file
+ * leans on is a default the next case inherits by accident, and the collision
+ * that follows is silent.
+ *
+ * The candidates are sorted by id before they are indexed. The list route
+ * orders by `updatedAt desc`, so without this the partition is a snapshot of
+ * a sort order that any concurrent write reshuffles, and file A's index 0
+ * resolves to file B's index 1: the shared-subject flake this helper exists
+ * to kill, wearing a different hat.
  */
 export function pickPipelineRequest(
   rows: readonly RequestSummary[],
-  skip = 0,
+  skip: number,
 ): RequestSummary | null {
   const pipeline = ['submitted', 'in_review', 'in_progress', 'client_review']
   const titles = rows.map(r => r.title)
-  const candidates = rows.filter(r =>
-    r.requestNumber != null &&
-    pipeline.includes(r.status) &&
-    titles.filter(t => t === r.title).length === 1)
+  const candidates = rows
+    .filter(r =>
+      r.requestNumber != null &&
+      pipeline.includes(r.status) &&
+      titles.filter(t => t === r.title).length === 1)
+    .sort((a, b) => a.id.localeCompare(b.id))
   return candidates[skip] ?? null
 }

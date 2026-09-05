@@ -76,6 +76,41 @@ async function gotoRequests(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Requests', { timeout: 20_000 })
 }
 
+/** DataTable turns pagination on above this many rows and draws one page. */
+const PAGE_SIZE = 20
+
+/** The toolbar's count line, the one aria-live number beside the search. It
+ *  counts the whole narrowed set; the table below it only draws a page. */
+function countLine(page: Page) {
+  return page.getByText(/^\d+ requests?$/).first()
+}
+
+async function countValue(page: Page): Promise<number> {
+  return Number(((await countLine(page).textContent()) ?? '').replace(/\D/g, ''))
+}
+
+/**
+ * Put one particular request on screen, whatever else is in the database.
+ *
+ * request-list.tsx hands DataTable no `paginate`, so pagination auto-enables
+ * above 20 rows at a page size of 20 (components/tahi/data-table.tsx), while
+ * the browser fetches `status=all&limit=500`. Delivered and archived requests
+ * updated more recently than the fixture then sit ahead of it and push it onto
+ * page two, where `toHaveCount(1)` times out and reports a missing glyph
+ * rather than a missing row. The rail's search narrows the whole set rather
+ * than the page; where it is not mounted the page size select is the fallback,
+ * and where neither exists the list is short enough not to paginate at all.
+ */
+async function narrowToRequest(page: Page, title: string): Promise<void> {
+  const search = page.getByRole('textbox', { name: /Search requests/ })
+  if (await search.count()) {
+    await search.fill(title)
+    return
+  }
+  const pageSize = page.locator('#pgnsize')
+  if (await pageSize.count()) await pageSize.selectOption('all')
+}
+
 /** Wait for the list to settle into rows or an empty state. */
 async function listSettled(page: Page): Promise<void> {
   // The shell keeps a notification stream open, so networkidle never fires.
@@ -320,6 +355,8 @@ test.describe('Requests list', () => {
 
         await gotoRequests(page)
         await listSettled(page)
+        // Narrow first. Nothing below can see a row on page two.
+        await narrowToRequest(page, target.title)
 
         const link = page.locator(`a[href="/requests/${target.id}"]`).filter({ visible: true })
         await expect(link).toHaveCount(1, { timeout: 20_000 })
@@ -331,18 +368,41 @@ test.describe('Requests list', () => {
         //
         // Read off the row rather than off the page, because another spec is
         // blocking another request in a parallel worker while this runs. The
-        // row is the outermost ancestor that still holds exactly one request
-        // link, which is a <tr> in the table and a plain <div> in the card
-        // list, so there is no single element to name.
-        const found = await link.first().evaluate(el => {
-          let row: Element = el
-          for (let node = el.parentElement; node; node = node.parentElement) {
-            if (node.querySelectorAll('a[href^="/requests/"]').length !== 1) break
-            row = node
+        // table gives the row a role and that is what is used above md; the
+        // card list is a plain <div> with none, so the DOM walk is kept as the
+        // fallback for it. The walk climbs past ancestors that only repeat
+        // THIS request's href (a sub-request chip pointing back at its parent
+        // is a link too) and stops at the first one holding a link to another
+        // request, which is the row boundary in either layout.
+        const glyphLabel = async (): Promise<string | null> => {
+          const tableRow = page.getByRole('row').filter({ has: link })
+          if ((await tableRow.count()) === 1) {
+            const glyph = tableRow.locator('[aria-label^="Blocked by "]')
+            return (await glyph.count()) > 0
+              ? await glyph.first().getAttribute('aria-label')
+              : null
           }
-          return row.querySelector('[aria-label^="Blocked by "]')?.getAttribute('aria-label') ?? null
-        })
-        expect(found, 'the blocked row carries no pause glyph').toBe(expected)
+          return await link.first().evaluate(el => {
+            const own = el.getAttribute('href')
+            let row: Element = el
+            for (let node = el.parentElement; node; node = node.parentElement) {
+              const others = Array.from(node.querySelectorAll('a[href^="/requests/"]'))
+                .filter(a => a.getAttribute('href') !== own)
+              if (others.length > 0) break
+              row = node
+            }
+            return row.querySelector('[aria-label^="Blocked by "]')?.getAttribute('aria-label') ?? null
+          })
+        }
+
+        // Polled rather than read once: a re-render between the link settling
+        // and the read would otherwise make a correct glyph look missing.
+        await expect
+          .poll(glyphLabel, {
+            message: 'the blocked row carries no pause glyph',
+            timeout: 20_000,
+          })
+          .toBe(expected)
       } finally {
         if (linkId) await removeBlocker(request, { type: 'request', id: target.id }, linkId)
         await deleteTask(request, taskId)
@@ -366,8 +426,13 @@ test.describe('Requests list', () => {
         test.skip((await rail.count()) === 0, 'The rail is inside the Filters sheet at this width.')
 
         const rows = page.locator('a[href^="/requests/"]').filter({ visible: true })
-        const before = await rows.count()
-        expect(before, 'the list rendered no rows').toBeGreaterThan(0)
+        // The toolbar's number, not the rendered row count. Both the rail's
+        // Blocked count and this one are computed over the whole fetched set,
+        // while the table draws at most one page of 20, so comparing the rail
+        // against rendered rows would only ever assert that fewer than a page
+        // of requests are blocked.
+        const before = await countValue(page)
+        expect(before, 'the toolbar printed no count').toBeGreaterThan(0)
 
         const blocked = rail.getByRole('button', { name: /^Blocked/ })
         await blocked.click()
@@ -381,7 +446,16 @@ test.describe('Requests list', () => {
         const counted = Number(((await blocked.textContent()) ?? '').replace(/\D/g, ''))
         expect(counted, 'the rail printed no Blocked count').toBeGreaterThan(0)
         expect(counted, 'every request in this dataset is blocked').toBeLessThan(before)
-        await expect(rows).toHaveCount(counted)
+        // The narrowed set, counted twice by two different pieces of code:
+        // the rail's own tally and the toolbar's.
+        await expect
+          .poll(() => countValue(page), {
+            message: 'the rail count and the list disagree',
+            timeout: 20_000,
+          })
+          .toBe(counted)
+        // And what is actually drawn is that set, or its first page of it.
+        await expect(rows).toHaveCount(Math.min(counted, PAGE_SIZE))
       } finally {
         if (linkId) await removeBlocker(request, { type: 'request', id: target.id }, linkId)
         await deleteTask(request, taskId)

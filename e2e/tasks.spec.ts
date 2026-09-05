@@ -782,8 +782,18 @@ test.describe('Tasks', () => {
 
   // ── Blockers ───────────────────────────────────────────────────────────────
 
-  test('the waiting on card carries a request, the picker adds a task, and removing one drops the count', async ({ page, request }) => {
-    const target = pickPipelineRequest(await listRequests(request))
+  test('the waiting on card carries a request, the picker adds a task, removing one drops the count, and Open lands on the request', async ({ page, request }) => {
+    // The last step opens /requests/[id], which on a dev server that has not
+    // served it yet costs a compile on top of everything above.
+    test.slow()
+
+    // Index 0 said out loud rather than left to the default, and it is the
+    // same row e2e/requests-detail.spec.ts takes. That is safe only because
+    // the two write opposite ends of the edge: this case makes the request a
+    // BLOCKER of a task, which leaves the request's own blockedByCount alone,
+    // and that count is what the other file asserts. Any case added here that
+    // blocks a request needs an index nobody else touches.
+    const target = pickPipelineRequest(await listRequests(request), 0)
     test.skip(!target, 'No open, numbered, uniquely titled request in this dataset to wait on.')
     if (!target) return
 
@@ -832,6 +842,15 @@ test.describe('Tasks', () => {
         async () => (await listBlockers(request, { type: 'task', id: subjectId })).blockedBy.length,
         { message: 'the removal did not reach the server', timeout: 20_000 },
       ).toBe(1)
+
+      // Open is pressed, not merely counted. This one is the weaker of the
+      // two doors: the request side is a <Link> the browser would follow on
+      // its own, while this is a button calling onOpenRequest, so a router
+      // push that stopped working would be invisible to an existence check.
+      await body.getByRole('button', { name: 'Open', exact: true }).click()
+      await expect(page).toHaveURL(new RegExp(`/requests/${target.id}$`), { timeout: 45_000 })
+      await expect(page.getByRole('heading', { level: 1 }))
+        .toHaveText(target.title, { timeout: 45_000 })
     } finally {
       await deleteTask(request, secondId)
       await deleteTask(request, subjectId)
@@ -917,8 +936,12 @@ test.describe('Tasks', () => {
       await expect(row).toBeVisible({ timeout: 20_000 })
       await html5DragTo(page, row, stripCells(page).nth(targetIndex))
 
-      // The toast names the day it wrote, capital and all.
-      await expect(page.getByRole('status').filter({ hasText: `Planned for ${target.name}` }))
+      // The toast names the day it wrote, capital and all. A RegExp without
+      // the i flag, because `hasText` with a plain string is case-insensitive
+      // and tasks-week.tsx picks day.name over day.label precisely because
+      // "the toast this feeds is lowercased upstream": a toast reading
+      // "planned for thursday" is the one failure this line exists to catch.
+      await expect(page.getByRole('status').filter({ hasText: new RegExp(`Planned for ${target.name}`) }))
         .toBeVisible({ timeout: 20_000 })
       await expect.poll(
         async () => (await getTask(request, id)).dueDate,
@@ -1023,14 +1046,36 @@ test.describe('Tasks', () => {
       ).toBeFocused()
 
       // And the planner finally has a keyboard path to a due date at all:
-      // Alt plus an arrow on a focused row, the drag's equivalent.
-      const row = viewPanel(page).getByRole('button', { name: `Open ${title}` })
-      await row.focus()
+      // Alt plus an arrow on a focused row, the drag's equivalent. All three
+      // branches of nudgeDueDate, because clearing a date is the one a drag
+      // cannot express at all and so has no other cover.
+      const row = () => viewPanel(page).getByRole('button', { name: `Open ${title}` })
+      await row().focus()
       await page.keyboard.press('Alt+ArrowRight')
       await expect.poll(
         async () => (await getTask(request, id)).dueDate,
         { message: 'Alt+ArrowRight did not move the due date', timeout: 20_000 },
       ).toBe(dayKey(1))
+
+      // Back a day. The row has moved to another day card under the write, so
+      // it is located again rather than held.
+      await row().focus()
+      await page.keyboard.press('Alt+ArrowLeft')
+      await expect.poll(
+        async () => (await getTask(request, id)).dueDate,
+        { message: 'Alt+ArrowLeft did not move the due date back', timeout: 20_000 },
+      ).toBe(dayKey(0))
+
+      // And up clears it, which the toast says in its own words rather than
+      // naming a day.
+      await row().focus()
+      await page.keyboard.press('Alt+ArrowUp')
+      await expect(page.getByRole('status').filter({ hasText: 'Date cleared' }))
+        .toBeVisible({ timeout: 20_000 })
+      await expect.poll(
+        async () => (await getTask(request, id)).dueDate,
+        { message: 'Alt+ArrowUp did not clear the due date', timeout: 20_000 },
+      ).toBeNull()
     } finally {
       await deleteTask(request, id)
     }
@@ -1101,85 +1146,104 @@ test.describe('Tasks', () => {
   // locally. There is no way to tell the two apart from a spec without paying
   // for a turn, so that check stays a live one on a preview deploy.
 
-  test('the create dialog hands over to the AI panel and back', async ({ page }) => {
-    await gotoTasks(page)
-    await listSettled(page)
-
-    await page.getByRole('button', { name: /^New( task)?$/ }).first().click()
-    const dialog = page.getByRole('dialog', { name: 'New task' })
-    await expect(dialog).toBeVisible({ timeout: 20_000 })
-
-    await dialog.getByRole('button', { name: /Draft with AI/ }).click()
-
-    // The panel is a lazy chunk, so the first mount compiles and downloads.
-    const aiDialog = page.getByRole('dialog', { name: 'Draft tasks with AI' })
-    await expect(aiDialog).toBeVisible({ timeout: 30_000 })
-    await expect(aiDialog.getByRole('progressbar', { name: 'Interview progress' })).toBeVisible()
-    await expect(aiDialog.getByRole('textbox', { name: 'Your answer' })).toBeVisible()
-    await expect(aiDialog.getByRole('button', { name: 'Attach a brief' })).toBeVisible()
-
-    // The escape hatch, and the form it lands back on.
-    await aiDialog.getByRole('button', { name: 'I will write it myself' }).click()
-    await expect(page.getByRole('dialog', { name: 'New task' })).toBeVisible()
-    await expect(page.getByRole('button', { name: /Draft with AI/ })).toBeVisible()
-  })
-
-  test('the paperclip refuses what it cannot read, before any round trip', async ({ page, request }) => {
-    // Aborted rather than merely counted: if a regression ever did post a
-    // document from here, this route stops it from being paid for.
+  test.describe('AI task creation', () => {
+    // The guard belongs to every case that mounts the panel, not just to the
+    // one that hands it a file. Nothing requests the route on mount today
+    // (sendMessage is user-driven), and this is what keeps that true: a
+    // mount-time greeting or an auto-send would otherwise cost a real turn on
+    // every run of every branch, which is precisely what this file's docstring
+    // promises it will not do. Aborted rather than merely counted, so a
+    // regression cannot be paid for even once.
     let wizardPosts = 0
-    await page.route('**/api/admin/ai/task-wizard', route => {
-      if (route.request().method() === 'POST') wizardPosts += 1
-      return route.abort()
+    test.beforeEach(async ({ page }) => {
+      wizardPosts = 0
+      await page.route('**/api/admin/ai/task-wizard', route => {
+        if (route.request().method() === 'POST') wizardPosts += 1
+        return route.abort()
+      })
     })
 
-    await gotoTasks(page)
-    await listSettled(page)
-    await page.getByRole('button', { name: /^New( task)?$/ }).first().click()
-    await page.getByRole('dialog', { name: 'New task' })
-      .getByRole('button', { name: /Draft with AI/ }).click()
+    test('the create dialog hands over to the AI panel and back', async ({ page }) => {
+      await gotoTasks(page)
+      await listSettled(page)
 
-    const aiDialog = page.getByRole('dialog', { name: 'Draft tasks with AI' })
-    await expect(aiDialog).toBeVisible({ timeout: 30_000 })
-    const fileInput = aiDialog.locator('input[type="file"]')
+      await page.getByRole('button', { name: /^New( task)?$/ }).first().click()
+      const dialog = page.getByRole('dialog', { name: 'New task' })
+      await expect(dialog).toBeVisible({ timeout: 20_000 })
 
-    // Over the ceiling: refused on size, in the browser, with the number in
-    // the sentence. Six megabytes never leaves the tab.
-    await fileInput.setInputFiles({
-      name: 'oversized-brief.txt',
-      mimeType: 'text/plain',
-      buffer: Buffer.alloc(6 * 1024 * 1024, 'a'),
+      await dialog.getByRole('button', { name: /Draft with AI/ }).click()
+
+      // The panel is a lazy chunk, so the first mount compiles and downloads.
+      const aiDialog = page.getByRole('dialog', { name: 'Draft tasks with AI' })
+      await expect(aiDialog).toBeVisible({ timeout: 30_000 })
+      await expect(aiDialog.getByRole('progressbar', { name: 'Interview progress' })).toBeVisible()
+      await expect(aiDialog.getByRole('textbox', { name: 'Your answer' })).toBeVisible()
+      await expect(aiDialog.getByRole('button', { name: 'Attach a brief' })).toBeVisible()
+
+      // The escape hatch, and the form it lands back on.
+      await aiDialog.getByRole('button', { name: 'I will write it myself' }).click()
+      await expect(page.getByRole('dialog', { name: 'New task' })).toBeVisible()
+      await expect(page.getByRole('button', { name: /Draft with AI/ })).toBeVisible()
+
+      // Mounting the panel and walking back out costs nothing.
+      expect(wizardPosts, 'opening the panel spent a turn').toBe(0)
     })
-    await expect(aiDialog.getByRole('alert')).toContainText('larger than 5 MB', { timeout: 15_000 })
 
-    // Unreadable rather than oversized, and the sentence has to name the way
-    // out. There is no zip reader in a Worker, so PDF is the answer.
-    await fileInput.setInputFiles({
-      name: 'brief.docx',
-      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      buffer: Buffer.from('PK'),
-    })
-    await expect(aiDialog.getByRole('alert')).toContainText('PDF', { timeout: 15_000 })
-    await expect(aiDialog.getByRole('alert')).toContainText('Word files cannot be read here yet')
+    test('the paperclip refuses what it cannot read, before any round trip', async ({ page, request }) => {
+      await gotoTasks(page)
+      await listSettled(page)
+      await page.getByRole('button', { name: /^New( task)?$/ }).first().click()
+      await page.getByRole('dialog', { name: 'New task' })
+        .getByRole('button', { name: /Draft with AI/ }).click()
 
-    expect(wizardPosts, 'a refused document was sent to the model anyway').toBe(0)
+      const aiDialog = page.getByRole('dialog', { name: 'Draft tasks with AI' })
+      await expect(aiDialog).toBeVisible({ timeout: 30_000 })
+      const fileInput = aiDialog.locator('input[type="file"]')
 
-    // The same judgement at the far end, and it is made before the key is
-    // consulted, so this costs nothing either. Both ends refusing in the same
-    // words is the point: a browser that stopped saying it would not silently
-    // start billing for Word files.
-    const res = await request.post('/api/admin/ai/task-wizard', {
-      data: {
-        messages: [{ role: 'user', content: 'Break this brief into tasks.' }],
-        document: {
-          filename: 'brief.docx',
-          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          dataBase64: 'UEs=',
+      // Over the ceiling: refused on size, in the browser, with the number in
+      // the sentence. Six megabytes never leaves the tab.
+      await fileInput.setInputFiles({
+        name: 'oversized-brief.txt',
+        mimeType: 'text/plain',
+        buffer: Buffer.alloc(6 * 1024 * 1024, 'a'),
+      })
+      await expect(aiDialog.getByRole('alert')).toContainText('larger than 5 MB', { timeout: 15_000 })
+
+      // Unreadable rather than oversized, and the sentence has to name the way
+      // out. There is no zip reader in a Worker, so PDF is the answer.
+      await fileInput.setInputFiles({
+        name: 'brief.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        buffer: Buffer.from('PK'),
+      })
+      // The Word sentence first, because it is the only half unique to this
+      // refusal. The oversize message names PDF too ("A PDF also has to be N
+      // pages or fewer") and the alert element is reused, so asserting the
+      // escape route first would pass against the message the file before it
+      // left on screen.
+      await expect(aiDialog.getByRole('alert'))
+        .toContainText('Word files cannot be read here yet', { timeout: 15_000 })
+      await expect(aiDialog.getByRole('alert')).toContainText('PDF')
+
+      expect(wizardPosts, 'a refused document was sent to the model anyway').toBe(0)
+
+      // The same judgement at the far end, and it is made before the key is
+      // consulted, so this costs nothing either. Both ends refusing in the same
+      // words is the point: a browser that stopped saying it would not silently
+      // start billing for Word files.
+      const res = await request.post('/api/admin/ai/task-wizard', {
+        data: {
+          messages: [{ role: 'user', content: 'Break this brief into tasks.' }],
+          document: {
+            filename: 'brief.docx',
+            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            dataBase64: 'UEs=',
+          },
         },
-      },
+      })
+      expect(res.status(), 'the route accepted a Word file').toBe(415)
+      const body = await res.json() as { error?: string }
+      expect(body.error ?? '').toContain('PDF')
     })
-    expect(res.status(), 'the route accepted a Word file').toBe(415)
-    const body = await res.json() as { error?: string }
-    expect(body.error ?? '').toContain('PDF')
   })
 })

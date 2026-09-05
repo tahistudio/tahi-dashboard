@@ -6,6 +6,7 @@ import {
   deleteTask,
   addBlocker,
   removeBlocker,
+  listBlockers,
   listRequests,
   pickPipelineRequest,
   railCardHead,
@@ -129,6 +130,29 @@ async function gotoRequest(page: Page, id: string): Promise<void> {
  *  Cookie header replaces the stored one rather than adding to it. */
 function portalCookie(orgId: string): string {
   return `tahi-ship-studio=1; tahi-impersonate-org=${orgId}`
+}
+
+/**
+ * Every object key in a JSON payload, however deep.
+ *
+ * The leak check reads keys rather than raw text on purpose. A substring scan
+ * for "block" over the whole body scans arbitrary client-authored copy: the
+ * portal returns the title, the description and every client-visible message,
+ * and this dataset already holds "FAQ blocks", "hreflang-block" and "Block
+ * Scholes". It is also incomplete in the other direction, because a leak
+ * shaped as `{"waitingOn": 3}` carries the idea without carrying the word.
+ * Keys are the payload's own vocabulary and nobody's prose.
+ */
+function jsonKeys(value: unknown, into: string[] = []): string[] {
+  if (Array.isArray(value)) {
+    for (const item of value) jsonKeys(item, into)
+  } else if (value !== null && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      into.push(key)
+      jsonKeys(child, into)
+    }
+  }
+  return into
 }
 
 /**
@@ -339,26 +363,38 @@ test.describe('Request detail', () => {
 
   // ── Blockers ───────────────────────────────────────────────────────────────
 
-  test('the Blocked by card lists a task, the spine grows a chip, and Open lands on the task', async ({ page, request }) => {
+  test('the Blocked by card lists a task, removing one drops the count, and Open lands on the task', async ({ page, request }) => {
     // Two cold routes in one case, /requests/[id] and then /tasks, which on a
     // dev server that has served neither is more than the file's 90s.
     test.slow()
 
-    const target = pickPipelineRequest(await listRequests(request))
+    // Index 0 said out loud. This case writes `blockedBy` on the row, so no
+    // other file may block the same index (see pickPipelineRequest).
+    const target = pickPipelineRequest(await listRequests(request), 0)
     test.skip(!target, 'No open, numbered, uniquely titled request in this dataset to block.')
     if (!target) return
 
-    // One more than whatever the row already carries, rather than a flat 1.
-    // A crashed run leaves an orphan link behind (its cleanup never got to
-    // run), and the next run then reads 2 and blames the feature. The count
-    // the list reports is the same open-blocker count the card prints.
-    const expected = (target.blockedByCount ?? 0) + 1
+    // Two more than whatever the row already carries, rather than a flat 2. A
+    // crashed run leaves an orphan link behind (its cleanup never got to run),
+    // and the next run then reads one too many and blames the feature. The
+    // count the list reports is the same open-blocker count the card prints.
+    //
+    // Two blockers rather than one, because the removal is half the card: the
+    // count has to follow it down on screen and the link has to leave the
+    // server, and a card with nothing left in it proves neither.
+    const base = target.blockedByCount ?? 0
+    const expected = base + 2
 
-    const title = `Playwright request blocker ${Date.now()}`
+    const stamp = Date.now()
+    const title = `Playwright request blocker ${stamp}`
+    const spareTitle = `Playwright spare blocker ${stamp}`
     const taskId = await createTask(request, { title })
+    const spareId = await createTask(request, { title: spareTitle })
     let linkId: string | null = null
+    let spareLinkId: string | null = null
     try {
       linkId = await addBlocker(request, { type: 'request', id: target.id }, { type: 'task', id: taskId })
+      spareLinkId = await addBlocker(request, { type: 'request', id: target.id }, { type: 'task', id: spareId })
 
       await gotoRequest(page, target.id)
 
@@ -371,6 +407,7 @@ test.describe('Request detail', () => {
       const body = railCardBody(page, 'Blocked by')
       await expect(body).toContainText('To Do')
       await expect(body).toContainText(title)
+      await expect(body).toContainText(spareTitle)
 
       // The spine takes an amber chip and does NOT grow a sixth node. Both
       // halves, because the chip exists precisely so the pipeline does not
@@ -380,6 +417,18 @@ test.describe('Request detail', () => {
       await expect(delivery.getByRole('list', { name: 'Delivery steps' }).getByRole('listitem'))
         .toHaveCount(5)
 
+      // The inverse of the picker, from the request's side. The task side has
+      // its own removal case; this one is the other door on the same table.
+      await body.getByRole('button', { name: `Stop waiting on ${spareTitle}` }).click()
+      await expectCardCount(head, 'Blocked by', expected - 1)
+      await expect(body).not.toContainText(spareTitle)
+      await expect.poll(
+        async () => (await listBlockers(request, { type: 'request', id: target.id }))
+          .blockedBy.some(b => b.otherId === spareId),
+        { message: 'the removal did not reach the server', timeout: 20_000 },
+      ).toBe(false)
+      spareLinkId = null
+
       // The way in is the same deep link a notification uses, and it has to
       // land on the panel rather than on a bare list.
       await body.getByRole('link', { name: `Open ${title}` }).click()
@@ -388,7 +437,9 @@ test.describe('Request detail', () => {
       await expect(page.getByRole('dialog').getByRole('textbox', { name: 'Task title' }))
         .toHaveValue(title, { timeout: 30_000 })
     } finally {
+      if (spareLinkId) await removeBlocker(request, { type: 'request', id: target.id }, spareLinkId)
       if (linkId) await removeBlocker(request, { type: 'request', id: target.id }, linkId)
+      await deleteTask(request, spareId)
       await deleteTask(request, taskId)
     }
   })
@@ -420,9 +471,16 @@ test.describe('Request detail', () => {
       expect(res.ok(), 'the portal detail could not be read as the client').toBeTruthy()
       const payload = await res.text()
 
-      // Not "no blockedByCount": no mention of the idea at all, in any key or
-      // value, including the blocking task's own title.
-      expect(payload.toLowerCase(), 'the portal payload mentions blockers').not.toContain('block')
+      // Not "no blockedByCount": no key that carries the idea under any name,
+      // which covers the `waitingOn` and `holdCount` shapes a redesign would
+      // reach for as well as the one the route has today.
+      const leaked = jsonKeys(JSON.parse(payload) as unknown)
+        .filter(key => /block|waiting|holdup|depend/i.test(key))
+      expect(leaked, 'the portal payload carries a blocker-shaped key').toEqual([])
+
+      // And the blocking task's own title is absent from the body, which is
+      // the exact string a client must never read. Raw text here rather than
+      // keys, because a leak would arrive as a value.
       expect(payload, 'the portal payload carries a blocking task title').not.toContain(title)
 
       // And there is no portal door to ask through either. 404, not 403: the
