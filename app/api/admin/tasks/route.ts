@@ -129,19 +129,26 @@ export async function GET(req: NextRequest) {
   if (taskIds.length > 0) {
     // Subtask progress: total count AND completed count in one grouped pass, so
     // rows can render "2/5" instead of a permanently-0 progress bar.
-    const subtaskRows = await drizzle
-      .select({
-        taskId: schema.taskSubtasks.taskId,
-        count: sql<number>`count(*)`.as('count'),
-        done: sql<number>`sum(case when ${schema.taskSubtasks.completed} = 1 then 1 else 0 end)`.as('done'),
-      })
-      .from(schema.taskSubtasks)
-      .where(inArray(schema.taskSubtasks.taskId, taskIds))
-      .groupBy(schema.taskSubtasks.taskId)
+    //
+    // Chunked, because the query above carries no limit: one id is one bound
+    // parameter and D1 caps a statement at 100, so a hundred-and-first task
+    // used to 500 the whole page. Same chunk size openBlockerCounts uses below.
+    const SUBTASK_ID_CHUNK = 90
+    for (let i = 0; i < taskIds.length; i += SUBTASK_ID_CHUNK) {
+      const subtaskRows = await drizzle
+        .select({
+          taskId: schema.taskSubtasks.taskId,
+          count: sql<number>`count(*)`.as('count'),
+          done: sql<number>`sum(case when ${schema.taskSubtasks.completed} = 1 then 1 else 0 end)`.as('done'),
+        })
+        .from(schema.taskSubtasks)
+        .where(inArray(schema.taskSubtasks.taskId, taskIds.slice(i, i + SUBTASK_ID_CHUNK)))
+        .groupBy(schema.taskSubtasks.taskId)
 
-    for (const row of subtaskRows) {
-      subtaskCounts[row.taskId] = Number(row.count) || 0
-      subtaskDoneCounts[row.taskId] = Number(row.done) || 0
+      for (const row of subtaskRows) {
+        subtaskCounts[row.taskId] = Number(row.count) || 0
+        subtaskDoneCounts[row.taskId] = Number(row.done) || 0
+      }
     }
 
     // Open blockers, which since 0088 can be a task OR a request. The closed
