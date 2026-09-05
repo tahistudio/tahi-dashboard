@@ -37,6 +37,7 @@
  */
 
 import { createElement, type ReactElement } from 'react'
+import { render } from '@react-email/render'
 import { and, eq, inArray } from 'drizzle-orm'
 import { schema } from '@/db/d1'
 import { sendEmail } from '@/lib/email'
@@ -485,19 +486,41 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * The text/plain half of a multipart message, rendered from the same element
+ * the HTML half comes from so the two can never say different things.
+ *
+ * Best effort: a template that cannot be rendered to text still sends as HTML,
+ * because losing a delivery notice is worse than losing an alternative part.
+ */
+async function plainTextAlternative(el: ReactElement): Promise<string | undefined> {
+  try {
+    const text = await render(el, { plainText: true })
+    return text.trim() ? text : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * One address, with a retry on the one failure that is worth retrying. Every
  * other refusal (bad address, unverified domain) is permanent and retrying it
  * just spends the next recipient's budget.
+ *
+ * The element and its text alternative are rendered ONCE, above the loop: a
+ * rate limited retry used to re-render the template, which is the expensive
+ * half of a send and the half that cannot change between attempts.
  */
 async function sendWithBackoff(
   target: EmailTarget,
   plan: NotificationEmailPlan,
 ): Promise<{ success: boolean; error?: string }> {
-  let last = await sendEmail(target.email, plan.subject, plan.render(target))
+  const el = plan.render(target)
+  const text = await plainTextAlternative(el)
+  let last = await sendEmail(target.email, plan.subject, el, text)
   for (let attempt = 0; attempt < RATE_LIMIT_RETRIES; attempt += 1) {
     if (last.success || !isRateLimited(last.error)) return last
     await sleep(RATE_LIMIT_BACKOFF_MS[attempt])
-    last = await sendEmail(target.email, plan.subject, plan.render(target))
+    last = await sendEmail(target.email, plan.subject, el, text)
   }
   return last
 }

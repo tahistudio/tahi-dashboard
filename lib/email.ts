@@ -20,6 +20,16 @@ export async function sendEmail(
   to: string | string[],
   subject: string,
   react: ReactElement,
+  /**
+   * The plain text alternative for the same message.
+   *
+   * An HTML-only email is scored as one by every spam filter worth naming, and
+   * it is unreadable in a text-only client or a screen reader that refuses the
+   * HTML part. Optional rather than required because a caller that has no text
+   * form should still send: a missing alternative costs deliverability, an
+   * exception costs the whole message.
+   */
+  text?: string,
 ): Promise<{ success: boolean; error?: string }> {
   const resend = getResend()
   if (!resend) {
@@ -34,6 +44,7 @@ export async function sendEmail(
       to: Array.isArray(to) ? to : [to],
       subject,
       react,
+      ...(text && text.trim() ? { text } : {}),
     })
 
     if (error) {
