@@ -20,6 +20,7 @@ import Link from 'next/link'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
+import { useToast } from '@/components/tahi/toast'
 import { apiPath } from '@/lib/api'
 import { TAHI_CONTACT_EMAIL } from '@/lib/blog-schema-shared'
 
@@ -87,12 +88,20 @@ export function PortalSkeleton({
 
 // ── Copy row ──────────────────────────────────────────────────────────────────
 
+/** The one sentence both copy paths use when the clipboard refuses. */
+export const CLIPBOARD_REFUSED = 'Your browser blocked the clipboard. Copy each line instead.'
+
 /**
  * One line of a payment instruction, with its own Copy.
  *
  * Per field rather than one blob, because a person paying by internet banking
  * fills four separate inputs and copying the lot into each of them is how a
  * reference gets typed wrong.
+ *
+ * The confirmation is only ever shown for a write that actually happened. An
+ * insecure context, a denied permission or an unfocused document all leave the
+ * clipboard holding whatever was there before, and telling a client their
+ * account number is on it is how the wrong number reaches a banking form.
  */
 export function PortalCopyRow({
   label,
@@ -107,16 +116,21 @@ export function PortalCopyRow({
 }) {
   const [done, setDone] = React.useState(false)
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { showToast } = useToast()
 
   React.useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
 
-  const copy = React.useCallback(() => {
-    void copyText(value)
+  const copy = React.useCallback(async () => {
+    const ok = await copyText(value)
+    if (!ok) {
+      showToast(CLIPBOARD_REFUSED, 'warning')
+      return
+    }
     setDone(true)
     if (timer.current) clearTimeout(timer.current)
     timer.current = setTimeout(() => setDone(false), 1600)
     onCopied?.(label)
-  }, [value, label, onCopied])
+  }, [value, label, onCopied, showToast])
 
   return (
     <div
@@ -147,7 +161,7 @@ export function PortalCopyRow({
       </span>
       <button
         type="button"
-        onClick={copy}
+        onClick={() => { void copy() }}
         className="tahi-focus-ring min-h-11 md:min-h-8 inline-flex items-center gap-1.5 shrink-0"
         aria-label={`Copy ${label.toLowerCase()}`}
         style={{
@@ -165,6 +179,10 @@ export function PortalCopyRow({
         {done ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
         {done ? 'Copied' : 'Copy'}
       </button>
+      {/* The confirmation reaches a screen reader too, not only the eye. */}
+      <span className="sr-only" role="status" aria-live="polite">
+        {done ? `${label} copied` : ''}
+      </span>
     </div>
   )
 }
@@ -182,6 +200,74 @@ export async function copyText(value: string): Promise<boolean> {
   return false
 }
 
+// ── Pay link ──────────────────────────────────────────────────────────────────
+
+/**
+ * The lime the house primary lifts to on hover. A literal because the design
+ * system has no token for it and TahiButton states it the same way: the lime
+ * pair is deliberately theme-independent, so there is nothing for dark mode to
+ * resolve. Declared once as a named const rather than inlined, per the
+ * styling rules.
+ */
+const ACCENT_HOVER = '#8ACE6F'
+
+/**
+ * Pay now, as an anchor.
+ *
+ * The hosted payment page is a real navigation to another origin, so it has to
+ * be an <a> and cannot be a TahiButton. It is still the primary action on the
+ * client's money surface, so it wears the primary button exactly: the lime
+ * accent with near-black ink, which clears AA in both themes, rather than the
+ * brand green with page-background ink, which clears it in neither. The studio
+ * preview renders the same control as a disabled primary TahiButton, so the two
+ * halves of the same state now read as one colour.
+ */
+export function PortalPayLink({
+  href,
+  size = 'md',
+  className,
+  children,
+}: {
+  href: string
+  size?: 'md' | 'lg'
+  className?: string
+  children: React.ReactNode
+}) {
+  const [hover, setHover] = React.useState(false)
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={e => e.stopPropagation()}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className={['tahi-focus-ring', size === 'lg' ? 'tahi-btn-lg' : 'tahi-btn-md', className]
+        .filter(Boolean)
+        .join(' ')}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: size === 'lg' ? '0.5rem' : '0.375rem',
+        padding: size === 'lg' ? '0.625rem 1.125rem' : '0.5rem 0.875rem',
+        borderRadius: 'var(--radius-md)',
+        // The house primary pair. Hover lifts the lime, same as TahiButton.
+        background: hover ? ACCENT_HOVER : 'var(--color-accent)',
+        color: 'var(--color-accent-text)',
+        fontSize: size === 'lg' ? '0.875rem' : '0.8125rem',
+        fontWeight: 500,
+        lineHeight: 1,
+        textDecoration: 'none',
+        whiteSpace: 'nowrap',
+        transition: 'background-color var(--motion-quick) var(--ease-out)',
+      }}
+    >
+      {children}
+    </a>
+  )
+}
+
 // ── Leaf empty tile ───────────────────────────────────────────────────────────
 
 /** The leaf icon the house empty state expects. */
@@ -193,6 +279,10 @@ export function PortalLeafIcon() {
 
 /** Where an ask goes. */
 export type AskMode = 'request' | 'email'
+
+/** Reading order of the two destinations, for the roving tab stop. */
+const ASK_MODES: readonly AskMode[] = ['request', 'email']
+const ROVING_KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
 
 export interface PortalAskSheetProps {
   open: boolean
@@ -290,6 +380,31 @@ export function PortalAskSheet({
 
   const sent = sentMode !== null
 
+  // A radiogroup owes the keyboard a single tab stop and arrow keys between
+  // the options. Without it the two destinations are two tab stops and the
+  // arrows do nothing, which is not what "radiogroup" promises a reader.
+  const modeRefs = React.useRef<Record<AskMode, HTMLButtonElement | null>>({
+    request: null,
+    email: null,
+  })
+  const onModeKeys = React.useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const { key } = event
+    if (!ROVING_KEYS.includes(key)) return
+    const enabled = ASK_MODES.filter(option => !(option === 'request' && readOnly))
+    if (enabled.length === 0) return
+    event.preventDefault()
+    let next: AskMode
+    if (key === 'Home') next = enabled[0]
+    else if (key === 'End') next = enabled[enabled.length - 1]
+    else {
+      const step = key === 'ArrowRight' || key === 'ArrowDown' ? 1 : -1
+      const from = Math.max(0, enabled.indexOf(mode))
+      next = enabled[(from + step + enabled.length) % enabled.length]
+    }
+    setMode(next)
+    modeRefs.current[next]?.focus()
+  }, [mode, readOnly])
+
   return (
     <SlideOver
       open={open}
@@ -332,9 +447,16 @@ export function PortalAskSheet({
       ) : (
         <div style={{ padding: 'var(--space-5)', display: 'grid', gap: 'var(--space-4)' }}>
           {allowRequest && (
-            <div role="radiogroup" aria-label="What would you like to happen" style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <div
+              role="radiogroup"
+              aria-label="What would you like to happen"
+              onKeyDown={onModeKeys}
+              style={{ display: 'grid', gap: 'var(--space-2)' }}
+            >
               <AskModeOption
                 selected={mode === 'request'}
+                tabStop={mode === 'request'}
+                buttonRef={node => { modeRefs.current.request = node }}
                 onSelect={() => setMode('request')}
                 disabled={readOnly}
                 disabledReason={readOnlyReason}
@@ -344,6 +466,8 @@ export function PortalAskSheet({
               />
               <AskModeOption
                 selected={mode === 'email'}
+                tabStop={mode === 'email'}
+                buttonRef={node => { modeRefs.current.email = node }}
                 onSelect={() => setMode('email')}
                 icon={<Mail size={16} aria-hidden="true" />}
                 title="Just a question"
@@ -425,6 +549,8 @@ export function PortalAskSheet({
 
 function AskModeOption({
   selected,
+  tabStop,
+  buttonRef,
   onSelect,
   disabled,
   disabledReason,
@@ -433,6 +559,9 @@ function AskModeOption({
   body,
 }: {
   selected: boolean
+  /** The group's single tab stop. Arrow keys move it; Tab never lands twice. */
+  tabStop: boolean
+  buttonRef: (node: HTMLButtonElement | null) => void
   onSelect: () => void
   disabled?: boolean
   disabledReason?: string
@@ -444,7 +573,9 @@ function AskModeOption({
     <button
       type="button"
       role="radio"
+      ref={buttonRef}
       aria-checked={selected}
+      tabIndex={tabStop ? 0 : -1}
       disabled={disabled}
       title={disabled ? disabledReason : undefined}
       onClick={onSelect}

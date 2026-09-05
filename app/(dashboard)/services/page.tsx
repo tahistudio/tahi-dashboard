@@ -23,5 +23,5 @@ export default async function ServicesPage() {
   // makes the portal routes answer for that org) sees what the client sees:
   // the read-only catalogue, never the admin editor.
   const previewing = isAdmin && Boolean((await cookies()).get('tahi-impersonate-org')?.value)
-  return isAdmin && !previewing ? <AdminServicesContent /> : <PortalServices />
+  return isAdmin && !previewing ? <AdminServicesContent /> : <PortalServices preview={previewing} />
 }

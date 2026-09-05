@@ -24,6 +24,7 @@
 
 import * as React from 'react'
 import useSWR from 'swr'
+import useSWRInfinite from 'swr/infinite'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -59,7 +60,7 @@ import { EmptyState } from '@/components/tahi/empty-state'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { SegmentedControl } from '@/components/tahi/segmented-control'
 import {
-  PortalAskSheet, PortalLeafIcon, PortalMoney, PortalSkeleton, PortalStatusPill,
+  PortalAskSheet, PortalLeafIcon, PortalMoney, PortalPayLink, PortalSkeleton, PortalStatusPill,
 } from '@/components/tahi/portal/portal-money-kit'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -84,36 +85,46 @@ type Tab = 'all' | 'open' | 'paid'
 
 const READ_ONLY_REASON = 'Read only while viewing as a client'
 
-const PAY_LINK_STYLE: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: '0.375rem',
-  padding: '0.375rem 0.875rem',
-  borderRadius: 'var(--radius-leaf-sm)',
-  background: 'var(--color-brand)',
-  color: 'var(--color-bg)',
-  fontSize: '0.8125rem',
-  fontWeight: 600,
-  textDecoration: 'none',
-  whiteSpace: 'nowrap',
-}
+/** What GET /api/portal/invoices returns per page. Fixed in the route. */
+const PAGE_SIZE = 50
+/**
+ * A thousand bills. Past that the footer says out loud that it is showing the
+ * most recent, rather than letting a truncated page pass for the whole book.
+ */
+const MAX_PAGES = 20
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export function PortalInvoiceList() {
+export function PortalInvoiceList({ preview = false }: { preview?: boolean }) {
   const router = useRouter()
   const { isImpersonatingClient } = useImpersonation()
-  const readOnly = isImpersonatingClient
+  // Two sources, because they answer different questions and disagree in a
+  // second tab: the server chose this surface from the tahi-impersonate-org
+  // COOKIE (browser wide), while useImpersonation reads sessionStorage (per
+  // tab). Trusting only the store let an admin who opened /invoices in a fresh
+  // tab reach the client's live hosted payment page.
+  const readOnly = preview || isImpersonatingClient
 
   const [tab, setTab] = React.useState<Tab>('all')
   const [year, setYear] = React.useState('all')
   const [search, setSearch] = React.useState('')
   const [askOpen, setAskOpen] = React.useState(false)
 
-  const { data, isLoading, error: fetchError, mutate } = useSWR<{ items?: PortalInvoiceRow[] }>(
-    '/api/portal/invoices',
-  )
+  // Every figure on this page (still to pay, the overdue amount, paid this
+  // year, all three tab counts) is a sum over the whole book, so the fetch
+  // walks the route's pages until one comes back short. A client with one
+  // page, which is nearly all of them, pays for exactly one request.
+  const {
+    data: pages,
+    isLoading,
+    error: fetchError,
+    mutate,
+    setSize,
+  } = useSWRInfinite<{ items?: PortalInvoiceRow[] }>((index, previous) => {
+    if (index >= MAX_PAGES) return null
+    if (previous && (previous.items?.length ?? 0) < PAGE_SIZE) return null
+    return `/api/portal/invoices?page=${index + 1}`
+  })
 
   // A 403 on this route has three meanings and only one of them is "ask your
   // admin", so the body is classified rather than assumed.
@@ -126,16 +137,34 @@ export function PortalInvoiceList() {
     denial === 'member_seat' ? '/api/portal/people' : null,
   )
 
-  // No figure survives a state the data did not: on a failed load and while
-  // loading, the tiles, the counts and the filters all stand down.
+  const loadedPages = pages?.length ?? 0
+  const lastPage = loadedPages > 0 ? pages?.[loadedPages - 1] : undefined
+  const lastPageFull = (lastPage?.items?.length ?? 0) === PAGE_SIZE
+  const moreToLoad = !fetchError && lastPageFull && loadedPages < MAX_PAGES
+  /** The book is longer than this surface will walk. Said out loud, below. */
+  const capped = lastPageFull && loadedPages >= MAX_PAGES
+
+  React.useEffect(() => {
+    if (moreToLoad) void setSize(loadedPages + 1)
+  }, [moreToLoad, loadedPages, setSize])
+
+  // No figure survives a state the data did not: on a failed load, while
+  // loading and while the remaining pages are still in flight, the tiles, the
+  // counts and the filters all stand down.
   const blocked = denial !== null || failed
+  const settling = (isLoading && loadedPages === 0) || moreToLoad
   const invoices = React.useMemo(
-    () => (blocked ? [] : (data?.items ?? [])),
-    [blocked, data],
+    () => (blocked ? [] : (pages ?? []).flatMap(page => page?.items ?? [])),
+    [blocked, pages],
   )
   const open = invoices.filter(isPortalInvoiceOpen)
   const paid = invoices.filter(inv => !isPortalInvoiceOpen(inv))
-  const overdue = invoices.filter(inv => portalInvoiceState(inv) === 'overdue')
+  // Oldest first, so the callout names and opens the same bill the "Waiting
+  // longest" tile above it is talking about.
+  const overdue = invoices
+    .filter(inv => portalInvoiceState(inv) === 'overdue')
+    .slice()
+    .sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''))
 
   const thisYear = String(new Date().getFullYear())
   const paidThisYear = paid.filter(inv => yearOf(inv.paidAt) === thisYear)
@@ -204,7 +233,7 @@ export function PortalInvoiceList() {
 
       {/* Summary. Withheld entirely while loading and after a failure, so no
           figure is ever on screen that the data did not put there. */}
-      {isLoading && !data ? (
+      {settling ? (
         <div className="grid gap-3 sm:grid-cols-3">
           {[0, 1, 2].map(i => (
             <Card key={i} padding="md">
@@ -243,15 +272,22 @@ export function PortalInvoiceList() {
         </div>
       ) : null}
 
-      {/* Overdue callout. Never a figure without the rows behind it. */}
-      {overdue.length > 0 && (
-        <Card padding="md" style={{ borderColor: 'var(--color-danger)', background: 'var(--color-danger-bg)' }}>
+      {/* Overdue callout. Never a figure without the rows behind it.
+          The badge family, not --color-danger-bg: that fill is deliberately
+          left un-overridden for dark mode (app/globals.css), so the amount a
+          client owes would render near-white on near-white. --badge-danger-*
+          resolves in both themes and needs no override. */}
+      {!settling && overdue.length > 0 && (
+        <Card
+          padding="md"
+          style={{ borderColor: 'var(--badge-danger-border)', background: 'var(--badge-danger-bg)' }}
+        >
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-            <span className="shrink-0" style={{ color: 'var(--color-danger)' }}>
+            <span className="shrink-0" style={{ color: 'var(--badge-danger-text)' }}>
               <AlertTriangle size={18} aria-hidden="true" />
             </span>
             <div style={{ flex: 1 }}>
-              <b style={{ display: 'block', fontSize: '0.875rem', color: 'var(--color-text)' }}>
+              <b style={{ display: 'block', fontSize: '0.875rem', color: 'var(--badge-danger-text)' }}>
                 <span data-private="">{formatCurrencyTotals(sumByCurrency(overdue))}</span> is past its due date.
               </b>
               <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
@@ -272,7 +308,7 @@ export function PortalInvoiceList() {
       )}
 
       {/* Filters */}
-      {invoices.length > 0 && (
+      {!settling && invoices.length > 0 && (
         <div className="flex flex-col md:flex-row md:items-center gap-3">
           <SegmentedControl
             value={tab}
@@ -342,8 +378,8 @@ export function PortalInvoiceList() {
         {/* The column ruler stands down whenever this card is holding an
             empty, filtered or failed state instead of rows, so a ruler never
             floats over nothing. */}
-        {rows.length > 0 && (
-          <div className="hidden md:grid" style={HEAD_STYLE} aria-hidden="true">
+        {!settling && rows.length > 0 && (
+          <div className="hidden xl:grid" style={HEAD_STYLE} aria-hidden="true">
             <span>Invoice</span>
             <span>Status</span>
             <span>Issued</span>
@@ -353,7 +389,7 @@ export function PortalInvoiceList() {
           </div>
         )}
 
-        {isLoading && !data ? (
+        {settling ? (
           <div>{[0, 1, 2, 3].map(i => <SkeletonRow key={i} />)}</div>
         ) : failed ? (
           <EmptyState
@@ -416,10 +452,12 @@ export function PortalInvoiceList() {
         )}
       </Card>
 
-      {rows.length > 0 && (
+      {!settling && rows.length > 0 && (
         <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: 0 }}>
           Showing {rows.length} of {invoices.length} {invoices.length === 1 ? 'invoice' : 'invoices'}.
-          Anything older is here too, we do not hide it.
+          {capped
+            ? ' These are your most recent. Ask us for anything older and we will send it over.'
+            : ' Anything older is here too, we do not hide it.'}
         </p>
       )}
 
@@ -440,7 +478,20 @@ export function PortalInvoiceList() {
 
 // ── Pieces ────────────────────────────────────────────────────────────────────
 
-const GRID_COLUMNS = 'minmax(9rem, 2fr) 9rem 7rem 9rem minmax(6rem, 1fr) 8.5rem'
+/**
+ * The six-column row, and the width it needs.
+ *
+ * The tracks add up to 45rem of minimums, plus 3.75rem of gaps and 2rem of row
+ * padding: 50.75rem, or 812px, before the row will render without spilling.
+ * The dashboard content column is the viewport less the 240px sidebar and the
+ * 3rem-a-side main padding, so it clears that only from 1280px up. Hence xl
+ * rather than md: at md the content column is 448px, and the old md rule put a
+ * horizontal scrollbar under the client's invoices from 768px to about 1200px,
+ * with the Amount and the Pay now action parked off-screen behind it.
+ *
+ * Below xl the card underneath carries the same content in the same order.
+ */
+const GRID_COLUMNS = 'minmax(9rem, 2fr) 8.5rem 6rem 7.5rem minmax(6rem, 1fr) 8rem'
 
 const HEAD_STYLE: React.CSSProperties = {
   gridTemplateColumns: GRID_COLUMNS,
@@ -491,9 +542,10 @@ function SkeletonRow() {
 /**
  * One invoice.
  *
- * A row from md up and a card below it, with the same content in the same
+ * A row from xl up and a card below it, with the same content in the same
  * order. The action is a full-width 2.75rem target on a phone, because paying
- * a bill is the one thing this page exists for.
+ * a bill is the one thing this page exists for, and settles to its own width
+ * from sm so the card does not stretch one button across a tablet.
  */
 function InvoiceRow({
   invoice,
@@ -543,9 +595,9 @@ function InvoiceRow({
 
   return (
     <>
-      {/* Row, from md up. Columns match the header exactly. */}
+      {/* Row, from xl up. Columns match the header exactly. */}
       <div
-        className="hidden md:grid"
+        className="hidden xl:grid"
         style={{
           ...divider,
           gridTemplateColumns: GRID_COLUMNS,
@@ -555,11 +607,13 @@ function InvoiceRow({
         }}
       >
         {title}
-        <span><PortalStatusPill label={copy.label} tone={copy.tone} /></span>
+        <span style={{ minWidth: 0 }}>
+          <PortalStatusPill label={copy.label} tone={copy.tone} />
+        </span>
         <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
           {formatPortalDate(invoice.sentAt ?? invoice.createdAt)}
         </span>
-        <span style={{ display: 'grid', gap: '0.0625rem' }}>
+        <span style={{ display: 'grid', gap: '0.0625rem', minWidth: 0 }}>
           <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: dueTone }}>
             {formatPortalDate(invoice.dueDate)}
           </span>
@@ -567,15 +621,16 @@ function InvoiceRow({
             <span style={{ fontSize: '0.6875rem', color: dueTone }}>{relative}</span>
           )}
         </span>
-        <span style={{ textAlign: 'right' }}>
+        <span style={{ textAlign: 'right', minWidth: 0 }}>
           <PortalMoney>{formatPortalMoney(invoice.totalAmount, invoice.currency)}</PortalMoney>
         </span>
-        <RowAction invoice={invoice} readOnly={readOnly} onOpen={onOpen} />
+        <RowAction invoice={invoice} readOnly={readOnly} onOpen={onOpen} layout="row" />
       </div>
 
-      {/* Card, below md. Same content, same order, one full-width action. */}
+      {/* Card, below xl. Same content, same order, one action that is full
+          width on a phone and its own width from sm. */}
       <div
-        className="md:hidden"
+        className="xl:hidden"
         style={{ ...divider, display: 'grid', gap: 'var(--space-3)', padding: 'var(--space-4)' }}
       >
         <div className="flex items-start justify-between gap-3">
@@ -586,31 +641,41 @@ function InvoiceRow({
           <PortalStatusPill label={copy.label} tone={copy.tone} />
           <span style={{ fontSize: '0.75rem', color: dueTone }}>{portalDueLabel(invoice)}</span>
         </div>
-        <RowAction invoice={invoice} readOnly={readOnly} onOpen={onOpen} />
+        <RowAction invoice={invoice} readOnly={readOnly} onOpen={onOpen} layout="card" />
       </div>
     </>
   )
 }
 
-/** The one thing this row wants the client to do. */
+/**
+ * The one thing this row wants the client to do.
+ *
+ * `row` is the xl grid cell, where the control is already in its own column.
+ * `card` is everything below it: full width on a phone, its own width from sm
+ * so a tablet does not get one button stretched across the card.
+ */
 function RowAction({
   invoice,
   readOnly,
   onOpen,
+  layout,
 }: {
   invoice: PortalInvoiceRow
   readOnly: boolean
   onOpen: () => void
+  layout: 'row' | 'card'
 }) {
   const settled = !isPortalInvoiceOpen(invoice)
+  const wrap = layout === 'row' ? 'flex justify-end' : 'flex sm:justify-end'
+  const width = layout === 'row' ? undefined : 'w-full sm:w-auto'
 
   if (settled) {
     return (
-      <div className="flex md:justify-end">
+      <div className={wrap}>
         <TahiButton
           variant="ghost"
           size="md"
-          className="w-full md:w-auto"
+          className={width}
           iconLeft={<Receipt size={15} aria-hidden="true" />}
           onClick={onOpen}
         >
@@ -623,11 +688,11 @@ function RowAction({
   if (invoice.payUrl) {
     if (readOnly) {
       return (
-        <div className="flex md:justify-end">
+        <div className={wrap}>
           <TahiButton
             variant="primary"
             size="md"
-            className="w-full md:w-auto"
+            className={width}
             disabled
             title={READ_ONLY_REASON}
             iconLeft={<CreditCard size={15} aria-hidden="true" />}
@@ -638,29 +703,22 @@ function RowAction({
       )
     }
     return (
-      <div className="flex md:justify-end">
-        <a
-          href={invoice.payUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={e => e.stopPropagation()}
-          className="tahi-focus-ring min-h-11 md:min-h-9 w-full md:w-auto"
-          style={PAY_LINK_STYLE}
-        >
+      <div className={wrap}>
+        <PortalPayLink href={invoice.payUrl} className={width}>
           <CreditCard size={15} aria-hidden="true" />
           Pay now
-        </a>
+        </PortalPayLink>
       </div>
     )
   }
 
   if (invoice.howToPay) {
     return (
-      <div className="flex md:justify-end">
+      <div className={wrap}>
         <TahiButton
           variant="secondary"
           size="md"
-          className="w-full md:w-auto"
+          className={width}
           iconLeft={<Landmark size={15} aria-hidden="true" />}
           onClick={onOpen}
         >
@@ -671,11 +729,11 @@ function RowAction({
   }
 
   return (
-    <div className="flex md:justify-end">
+    <div className={wrap}>
       <TahiButton
         variant="ghost"
         size="md"
-        className="w-full md:w-auto"
+        className={width}
         icon={<ArrowRight size={15} aria-hidden="true" />}
         onClick={onOpen}
       >

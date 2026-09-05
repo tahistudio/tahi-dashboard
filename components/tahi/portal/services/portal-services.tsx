@@ -35,7 +35,8 @@ import {
   type ServiceDelivery,
   type ServiceRow,
 } from '@/lib/portal-service-view'
-import { formatPortalDateLong, formatPortalMoney } from '@/lib/portal-invoice-view'
+import { formatPortalDateLong } from '@/lib/portal-invoice-view'
+import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
 import { Badge } from '@/components/tahi/badge'
@@ -80,11 +81,18 @@ const READ_ONLY_REASON = 'Read only while viewing as a client'
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export function PortalServices() {
+export function PortalServices({ preview = false }: { preview?: boolean }) {
   const { isImpersonatingClient } = useImpersonation()
-  const readOnly = isImpersonatingClient
+  // The server chose this surface from the browser-wide impersonation cookie,
+  // while useImpersonation reads a per-tab store. A second tab has the cookie
+  // and an empty store, so the prop is what keeps the two from disagreeing.
+  const readOnly = preview || isImpersonatingClient
   const [filter, setFilter] = React.useState<ServiceDelivery | 'all'>('all')
   const [ask, setAsk] = React.useState<AskState | null>(null)
+  // Held open separately so the last ask survives SlideOver's exit animation:
+  // the panel stays mounted while it slides away and draws its header only
+  // while title is truthy, so clearing ask on close dropped the header early.
+  const [askOpen, setAskOpen] = React.useState(false)
 
   const { data, isLoading, error: fetchError, mutate } = useSWR<{ items?: ServiceRow[] }>(
     '/api/portal/services',
@@ -109,7 +117,7 @@ export function PortalServices() {
   const filters = React.useMemo(() => deliveryFilters(cards), [cards])
   const shown = filter === 'all' ? cards : cards.filter(card => card.delivery === filter)
 
-  const askAbout = (partial: AskState) => setAsk(partial)
+  const askAbout = (partial: AskState) => { setAsk(partial); setAskOpen(true) }
 
   return (
     <div style={{ display: 'grid', gap: 'var(--space-5)' }}>
@@ -277,8 +285,8 @@ export function PortalServices() {
       )}
 
       <PortalAskSheet
-        open={ask !== null}
-        onClose={() => setAsk(null)}
+        open={askOpen}
+        onClose={() => setAskOpen(false)}
         title={ask?.title ?? ''}
         subtitle={ask?.subtitle}
         seed={ask?.seed}
@@ -343,6 +351,10 @@ function PlanPanel({
   onAsk: () => void
 }) {
   const tracks = subscription.trackCount
+  // The plan rate is not an invoice, so it follows the reader's currency
+  // switcher the way the same field does on their home. An invoice stays in
+  // its own currency because it is a legal record; a monthly rate is not.
+  const { format: displayMoney } = useDisplayCurrency()
   return (
     <Card padding="lg">
       <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
@@ -378,7 +390,7 @@ function PlanPanel({
           <div className="grid gap-3 sm:grid-cols-2" style={{ marginTop: 'var(--space-4)' }}>
             <PlanFact
               label="Rate"
-              value={<PortalMoney>{`${formatPortalMoney(subscription.monthlyRate, 'NZD')} per month`}</PortalMoney>}
+              value={<PortalMoney>{`${displayMoney(subscription.monthlyRate)} per month`}</PortalMoney>}
             />
             <PlanFact
               label="Tracks running"
@@ -418,7 +430,7 @@ function PlanPanel({
                   </span>
                   {addon.monthlyValue > 0 && (
                     <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }} data-private="">
-                      {formatPortalMoney(addon.monthlyValue, 'NZD')} per month
+                      {displayMoney(addon.monthlyValue)} per month
                     </span>
                   )}
                 </li>

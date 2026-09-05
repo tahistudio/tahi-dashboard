@@ -53,7 +53,9 @@ import { EmptyState } from '@/components/tahi/empty-state'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { useToast } from '@/components/tahi/toast'
 import {
-  PortalAskSheet, PortalCopyRow, PortalMoney, PortalSkeleton, PortalStatusPill, copyText,
+  CLIPBOARD_REFUSED,
+  PortalAskSheet, PortalCopyRow, PortalMoney, PortalPayLink, PortalSkeleton, PortalStatusPill,
+  copyText,
 } from '@/components/tahi/portal/portal-money-kit'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -88,17 +90,20 @@ interface PortalInvoiceItem {
 
 const READ_ONLY_REASON = 'Read only while viewing as a client'
 
-const PAY_LINK_STYLE: React.CSSProperties = {
+/** The jump link to the bank block. A secondary control, so secondary tokens. */
+const ANCHOR_LINK_STYLE: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
   gap: '0.5rem',
-  padding: '0.5rem 1.125rem',
-  borderRadius: 'var(--radius-leaf-sm)',
-  background: 'var(--color-brand)',
-  color: 'var(--color-bg)',
+  padding: '0.625rem 1.125rem',
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--color-bg)',
+  color: 'var(--color-text)',
+  border: '1px solid var(--color-border-strong)',
   fontSize: '0.875rem',
-  fontWeight: 600,
+  fontWeight: 500,
+  lineHeight: 1,
   textDecoration: 'none',
   whiteSpace: 'nowrap',
 }
@@ -113,11 +118,24 @@ interface AskState {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export function PortalInvoiceDetail({ invoiceId }: { invoiceId: string }) {
+export function PortalInvoiceDetail({
+  invoiceId,
+  preview = false,
+}: {
+  invoiceId: string
+  preview?: boolean
+}) {
   const { isImpersonatingClient } = useImpersonation()
-  const readOnly = isImpersonatingClient
+  // The server picked this surface from the browser-wide impersonation cookie;
+  // useImpersonation reads a per-tab store. A second tab has the cookie and an
+  // empty store, so the pay link has to be refused by the prop as well.
+  const readOnly = preview || isImpersonatingClient
   const { showToast } = useToast()
   const [ask, setAsk] = React.useState<AskState | null>(null)
+  // The sheet keeps the last ask through its exit animation. SlideOver stays
+  // mounted while it slides away and only draws its header when title is
+  // truthy, so clearing ask on close dropped the header a frame early.
+  const [askOpen, setAskOpen] = React.useState(false)
 
   const { data, isLoading, error: fetchError, mutate } = useSWR<{
     invoice?: PortalInvoice
@@ -133,7 +151,13 @@ export function PortalInvoiceDetail({ invoiceId }: { invoiceId: string }) {
 
   const invoice = data?.invoice ?? null
   const items = data?.items ?? []
-  const failed = !denial && (!!fetchError || (!isLoading && !invoice))
+  // A withdrawn invoice, and one belonging to another org, both come back as a
+  // 404, which the fetcher throws. Without this the friendlier copy below was
+  // unreachable and every 404 wore a Try again button that could never work.
+  const missing = !denial
+    && ((fetchError instanceof ApiError && fetchError.status === 404)
+      || (!fetchError && !isLoading && !invoice))
+  const failed = !denial && !missing && !!fetchError
 
   const back = (
     <Link
@@ -184,18 +208,18 @@ export function PortalInvoiceDetail({ invoiceId }: { invoiceId: string }) {
     )
   }
 
-  if (failed || !invoice) {
+  if (failed || missing || !invoice) {
     return (
       <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
         {back}
         <Card padding="none">
           <EmptyState
             icon={<AlertTriangle className="w-8 h-8" aria-hidden="true" />}
-            title={fetchError ? 'We could not load this invoice' : 'Invoice not found'}
-            description={fetchError
+            title={failed ? 'We could not load this invoice' : 'Invoice not found'}
+            description={failed
               ? 'This one is on us. Nothing has changed on your account, and nothing here is out of date, because nothing here loaded.'
               : 'It may have been withdrawn. Your other invoices are unaffected.'}
-            action={fetchError
+            action={failed
               ? (
                 <TahiButton
                   variant="primary"
@@ -237,6 +261,7 @@ export function PortalInvoiceDetail({ invoiceId }: { invoiceId: string }) {
       emailSubject: `Question about invoice ${reference}`,
       ...partial,
     })
+    setAskOpen(true)
   }
 
   const copyAll = async () => {
@@ -251,10 +276,7 @@ export function PortalInvoiceDetail({ invoiceId }: { invoiceId: string }) {
       block.dueDate ? `Due: ${formatPortalDateLong(block.dueDate)}` : null,
     ].filter((line): line is string => line !== null)
     const ok = await copyText(lines.join('\n'))
-    showToast(
-      ok ? 'Payment details copied' : 'Your browser blocked the clipboard. Copy each line instead.',
-      ok ? 'success' : 'warning',
-    )
+    showToast(ok ? 'Payment details copied' : CLIPBOARD_REFUSED, ok ? 'success' : 'warning')
   }
 
   return (
@@ -305,24 +327,18 @@ export function PortalInvoiceDetail({ invoiceId }: { invoiceId: string }) {
                   Pay {formatPortalMoney(invoice.totalUsd, currency)}
                 </TahiButton>
               ) : (
-                <a
-                  href={invoice.payUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="tahi-focus-ring min-h-11"
-                  style={PAY_LINK_STYLE}
-                >
+                <PortalPayLink href={invoice.payUrl} size="lg">
                   <CreditCard size={16} aria-hidden="true" />
                   Pay {formatPortalMoney(invoice.totalUsd, currency)}
                   <ExternalLink size={14} aria-hidden="true" />
-                </a>
+                </PortalPayLink>
               )
             )}
             {!settled && !invoice.payUrl && invoice.howToPay && (
               <a
                 href="#how-to-pay"
-                className="tahi-focus-ring min-h-11"
-                style={{ ...PAY_LINK_STYLE, background: 'var(--color-bg)', color: 'var(--color-text)', border: '1px solid var(--color-border-strong)' }}
+                className="tahi-focus-ring tahi-btn-lg"
+                style={ANCHOR_LINK_STYLE}
               >
                 <Landmark size={16} aria-hidden="true" />
                 How to pay
@@ -357,7 +373,9 @@ export function PortalInvoiceDetail({ invoiceId }: { invoiceId: string }) {
         {invoice.paidAt && <Fact label="Paid" value={formatPortalDateLong(invoice.paidAt)} />}
       </div>
 
-      {/* Paid */}
+      {/* Paid. The badge pair, not --color-success-bg: that fill is left
+          un-overridden for dark mode (app/globals.css), so the chip painted a
+          near-white tile on a near-black card. */}
       {settled && (
         <Card padding="md">
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
@@ -367,8 +385,8 @@ export function PortalInvoiceDetail({ invoiceId }: { invoiceId: string }) {
                 width: '2.25rem',
                 height: '2.25rem',
                 borderRadius: 'var(--radius-leaf-sm)',
-                background: 'var(--color-success-bg)',
-                color: 'var(--color-success)',
+                background: 'var(--badge-positive-bg)',
+                color: 'var(--badge-positive-text)',
               }}
             >
               <Check size={18} aria-hidden="true" />
@@ -486,7 +504,7 @@ export function PortalInvoiceDetail({ invoiceId }: { invoiceId: string }) {
           </p>
         ) : (
           <>
-            <div className="hidden md:grid" style={LINE_HEAD_STYLE} aria-hidden="true">
+            <div className="hidden lg:grid" style={LINE_HEAD_STYLE} aria-hidden="true">
               <span>Description</span>
               <span style={{ textAlign: 'right' }}>Qty</span>
               <span style={{ textAlign: 'right' }}>Unit</span>
@@ -562,8 +580,8 @@ export function PortalInvoiceDetail({ invoiceId }: { invoiceId: string }) {
       </p>
 
       <PortalAskSheet
-        open={ask !== null}
-        onClose={() => setAsk(null)}
+        open={askOpen}
+        onClose={() => setAskOpen(false)}
         title={ask?.title ?? ''}
         subtitle={ask?.subtitle}
         seed={ask?.seed}
@@ -579,7 +597,17 @@ export function PortalInvoiceDetail({ invoiceId }: { invoiceId: string }) {
 
 // ── Pieces ────────────────────────────────────────────────────────────────────
 
-const LINE_COLUMNS = 'minmax(10rem, 3fr) 5rem 8rem 8rem 5.5rem'
+/**
+ * The line-item row, and the width it needs.
+ *
+ * 29.5rem of track minimums plus 3rem of gaps plus 2rem of row padding is
+ * 34.5rem, or 552px. The dashboard content column is the viewport less the
+ * 240px sidebar and the 3rem-a-side main padding, so it clears that from lg
+ * (688px) but not at md (448px), where the old rule spilled the Amount and the
+ * Ask off the right edge of a client's invoice. Below lg the card under it
+ * carries the same four facts.
+ */
+const LINE_COLUMNS = 'minmax(8rem, 3fr) 4rem 6rem 6.5rem 5rem'
 
 const LINE_HEAD_STYLE: React.CSSProperties = {
   gridTemplateColumns: LINE_COLUMNS,
@@ -665,7 +693,7 @@ function LineItem({
     <TahiButton
       variant="ghost"
       size="sm"
-      className="w-full md:w-auto"
+      className="w-full sm:w-auto"
       iconLeft={<MessageSquare size={13} aria-hidden="true" />}
       onClick={onAsk}
     >
@@ -676,7 +704,7 @@ function LineItem({
   return (
     <>
       <div
-        className="hidden md:grid"
+        className="hidden lg:grid"
         style={{
           ...divider,
           gridTemplateColumns: LINE_COLUMNS,
@@ -697,7 +725,7 @@ function LineItem({
       </div>
 
       <div
-        className="md:hidden"
+        className="lg:hidden"
         style={{ ...divider, display: 'grid', gap: 'var(--space-2)', padding: 'var(--space-4)' }}
       >
         <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>{item.description}</span>

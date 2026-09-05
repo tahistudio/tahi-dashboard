@@ -75,7 +75,9 @@ export async function GET(req: NextRequest, { params }: Params) {
       orgName: schema.organisations.name,
       projectId: schema.invoices.projectId,
       subscriptionId: schema.invoices.subscriptionId,
-      source: schema.invoices.source,
+      // `source` is deliberately absent: which rail raised the bill is a
+      // studio fact, and shipping it in the JSON left it one Network tab away
+      // from a client even though nothing on the surface renders it.
       status: schema.invoices.status,
       amountUsd: schema.invoices.amountUsd,
       taxAmountUsd: schema.invoices.taxAmountUsd,
