@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronDown, Check } from 'lucide-react'
 import { ShellIcon } from '@/components/tahi/shell-icons'
@@ -158,6 +158,26 @@ export function ImpersonationBanner() {
     router.push(isTeamMember ? '/team' : '/clients')
   }, [router, impersonation])
 
+  // Entering or leaving Client view changes what the SERVER should render:
+  // the shell layout reads the tahi-impersonate-org cookie to pin the client's
+  // billing currency, and every studio-only page reads it to redirect the
+  // preview the way it redirects a real client (lib/view-audience.ts). Setting
+  // impersonation is a client-side state change, so the router cache would go
+  // on serving segments rendered for the previous audience until a hard reload.
+  // Refresh once per transition, never on mount (the first pass only records
+  // where we started).
+  const previewedOrgId = impersonation?.type === 'client' ? impersonation.orgId : null
+  const lastPreviewedOrgId = useRef<string | null | undefined>(undefined)
+  useEffect(() => {
+    if (lastPreviewedOrgId.current === undefined) {
+      lastPreviewedOrgId.current = previewedOrgId
+      return
+    }
+    if (lastPreviewedOrgId.current === previewedOrgId) return
+    lastPreviewedOrgId.current = previewedOrgId
+    router.refresh()
+  }, [previewedOrgId, router])
+
   if (!impersonation) return null
 
   const isTeamMember = impersonation.type === 'team_member'
@@ -186,7 +206,7 @@ export function ImpersonationBanner() {
         </span>
       ) : (
         <span>
-          Viewing <ClientSwitcher currentOrgId={impersonation.orgId} label={displayName} color="#ffffff" /> . Read-only client view.
+          Viewing <ClientSwitcher currentOrgId={impersonation.orgId} label={displayName} color="#ffffff" />. Read-only client view.
         </span>
       )}
       <button className="imp-exit" onClick={handleExit}>Exit preview</button>

@@ -29,6 +29,14 @@
      AA (>=4.5:1) on light surfaces where plain --color-brand (4.47:1) does not.
      Overridden brighter in .dark. */
   --color-link: #425F39;
+  /* Brand as INK rather than fill. --color-brand-ink is the brand on a page
+     surface (icons, active glyphs); --color-brand-on-tint is the brand on a
+     brand-50 / brand-100 wash (selected rows, chips). Both flip lighter in
+     .dark, where the forest greens sit at ~2:1 on the near-black canvas and
+     become the least readable thing on the screen. Use these anywhere the
+     brand carries meaning a user has to READ. */
+  --color-brand-ink: #5A824E;
+  --color-brand-on-tint: #425F39;
   --color-brand-50: #f0f7ee;
   --color-brand-100: #dcefd8;
   --color-brand-200: #b9deb1;
@@ -1321,6 +1329,13 @@ html.tahi-private [data-private] button {
   --tahi-mark-leaf-start: var(--color-brand-light);
   --tahi-mark-leaf-end: var(--color-brand);
 
+  /* Brand ink, lifted. brand (#5A824E) reads ~2.1:1 on the dark canvas and
+     brand-dark is worse, so the active segmented-control icon and the selected
+     saved view in the requests rail were the least readable items on the page.
+     brand-light clears 6.5:1 on the canvas, brand-lighter 6.8:1 on the tint. */
+  --color-brand-ink: var(--color-brand-light);
+  --color-brand-on-tint: var(--color-brand-lighter);
+
   /* Brand chip tints. Translucent so they sit over any dark surface. */
   --color-brand-50: rgba(122, 171, 107, 0.10);
   --color-brand-100: rgba(122, 171, 107, 0.18);
@@ -2571,15 +2586,19 @@ html.reduce-motion *::after {
   color: var(--color-text);
   opacity: 1;
 }
+/* Below the icon-only breakpoint the icon IS the control, so it carries the
+   whole meaning at the width where the label is gone. 0.7 put the inactive
+   icons under 4:1 on the dark track; 0.85 clears 5:1 in both modes and is
+   still visibly recessive next to the active one. */
 .tahi-seg-ic {
   display: inline-flex;
   flex-shrink: 0;
-  opacity: 0.7;
+  opacity: 0.85;
   transition: opacity var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
 }
 .tahi-seg-b[data-active="true"] .tahi-seg-ic {
   opacity: 1;
-  color: var(--color-brand);
+  color: var(--color-brand-ink);
 }
 @media (min-width: 48rem) {
   .tahi-seg-b {
@@ -2621,6 +2640,19 @@ html.reduce-motion *::after {
   .tahi-seg-pill[data-state="ready"] {
     transition: none;
   }
+}
+
+/* ============================================================
+   NOT FOUND
+   ============================================================
+   The 404 panel (components/tahi/not-found-panel.tsx) is a server component
+   styled inline, and an inline style cannot carry a hover. Its one
+   interactive element states it here; focus comes from .tahi-focus-ring. */
+.not-found-cta {
+  transition: background-color var(--dur-2) var(--ease-out);
+}
+.not-found-cta:hover {
+  background: var(--color-brand-dark);
 }
 
 /* ============================================================
