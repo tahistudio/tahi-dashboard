@@ -79,6 +79,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 08:20 NZST portal prototype re-critique done: structural fixes verified, per-page polish notes saved. All overnight background work complete.
 
+- 09:20 NZST morning review fixes on the Clients list live (0e0a99dd) through the new gate: checks, QA render probe (no duplicate plan text, no errors), deploy, health probe 200.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - [x] More sheet Track time row left-aligned (17a490b2).

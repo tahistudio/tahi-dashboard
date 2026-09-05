@@ -155,8 +155,8 @@ Decisions only Liam can make: ANSWERED.
 - [ ] MR.1 - [Design] Wire sales-pipeline, sales-artifacts and ops modules into the app shell (Sales and Operations groups) and archive the *-preview.html scratch files; Liam wants every module reachable in the shell like requests and tasks.
 - [ ] MR.2 - [Design] Account page: separate sections with the segmented slider (the Level control pattern) and reuse the settings page look.
 - [ ] MR.3 - [Design] Notifications page: filters move into a side rail like the rest of the site; place the Email preferences action better.
-- [ ] MR.4 - [FE] Clients list: the Plan and tracks cell repeats itself (No plan / No plan / No plan); one plan chip, one tracks line.
-- [ ] MR.5 - [FE] New client panel: Industry and Plan side by side; the primary contact takes first name and last name (not one full name) so emails personalise properly; API keeps working.
+- [x] MR.4 - [FE] Clients list: one plan chip per row; the tracks line and the MRR cell no longer repeat the plan (tracksLine, mrrFallbackLabel, engagementStatLabel in _list/clients-views.ts; hourly and project rows covered too). 0e0a99dd, render-checked on QA, deployed 2026-09-06 09:20 NZST.
+- [x] MR.5 - [FE] New client panel: Industry beside Plan (stacks under 40rem), primary contact as First name and Last name joined for the API (contacts has one name column; the email greeting reads the first word), matching icons and autocomplete off for third-party fields. 0e0a99dd.
 - [ ] MR.6 - [Design then FE] Studio invoices list and detail redesigned in Claude Design ('meh' today), then ported.
 - [ ] MR.7 - [Design then FE] Services showcase redesigned to be brand-forward like onboarding, home and sign-in: the client's plan, how they are using it, what else Tahi does; then ported over the current showcase.
 
