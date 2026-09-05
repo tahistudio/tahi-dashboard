@@ -105,7 +105,10 @@ export function TasksHeaderActions({
             ))}
           </>
         )}
-        <Menu.Divider />
+        {/* Gated with the two items above it: under a viewer-scoped
+            impersonation Export CSV is the whole menu, and a rule above the
+            only item is just a rule. */}
+        {!readOnly && <Menu.Divider />}
         <Menu.Item icon={<FileDown size={15} aria-hidden="true" />} onClick={onExportCsv}>
           Export CSV
         </Menu.Item>

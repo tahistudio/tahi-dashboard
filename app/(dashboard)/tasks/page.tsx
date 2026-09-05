@@ -1,6 +1,8 @@
+import { Suspense } from 'react'
 import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { requirePageFeature } from '@/lib/page-guard'
+import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { TasksContent } from './tasks-content'
 
 export const metadata = { title: 'Tasks - Tahi Dashboard' }
@@ -17,5 +19,12 @@ export default async function TasksPage() {
   if (!userId) redirect('/sign-in')
   if (orgId !== process.env.NEXT_PUBLIC_TAHI_ORG_ID) redirect('/overview')
   await requirePageFeature('tasks')
-  return <TasksContent />
+  // TasksContent reads `?task=` through useSearchParams, which Next requires
+  // to sit under a Suspense boundary. The Requests page mounts its shell the
+  // same way for the same reason.
+  return (
+    <Suspense fallback={<LoadingSkeleton rows={5} />}>
+      <TasksContent />
+    </Suspense>
+  )
 }

@@ -23,9 +23,20 @@
  * Tasks are the studio's own list and are never client-visible: the page
  * redirects a client org before this component mounts, so there is no
  * audience switch here.
+ *
+ * One legacy control is deliberately not carried over, stated here rather
+ * than left as a silent gap: the Delivery phase selector, which linked a task
+ * to a schedule gantt row through `tasks.scheduleRowId`. The column is alive
+ * and still written, from the Linked work section of a schedule row on
+ * /schedules/[id] and from the `update_task` MCP tool, and still read by the
+ * schedule delivery-status and linked-work routes. What is gone is the
+ * tasks-side control, which is why `scheduleRowId` is absent from
+ * PATCHABLE_KEYS below. Putting it back is a Links card row on the detail
+ * panel plus the field on `TaskRow` and the list select, not a one-line
+ * change here.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import useSWR, { useSWRConfig } from 'swr'
 import dynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -35,7 +46,11 @@ import { PageHeader } from '@/components/tahi/page-header'
 import { useToast } from '@/components/tahi/toast'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { RailLayout } from '@/components/tahi/rail/rail-layout'
-import { SaveDefaultControl, type RailOption } from '@/components/tahi/rail/rail-controls'
+import {
+  SaveDefaultControl,
+  type RailFilterChip,
+  type RailOption,
+} from '@/components/tahi/rail/rail-controls'
 import { TASK_STATUS_LABELS } from '@/lib/status-config'
 import { taskPriorityLabel } from '@/lib/task-priorities'
 import type { QuickAddParse } from '@/lib/tasks-quick-add'
@@ -155,6 +170,65 @@ function csvCell(value: string | number | null | undefined): string {
  *  edit. */
 const CSV_BOM = String.fromCharCode(0xFEFF)
 
+/** One frozen identity, so suppressing the chip strip does not hand RailLayout
+ *  a fresh array on every render. */
+const NO_CHIPS: readonly RailFilterChip[] = []
+
+// -- Boot skeleton ------------------------------------------------------------
+
+const SKELETON_PANE: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.5rem',
+  padding: '0.75rem',
+  border: '1px solid var(--color-border-subtle)',
+  borderRadius: 'var(--radius-card)',
+  background: 'var(--color-bg-secondary)',
+}
+
+const SKELETON_HEAD: CSSProperties = {
+  height: '0.75rem',
+  width: '45%',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--color-bg-tertiary)',
+}
+
+const SKELETON_CARD: CSSProperties = {
+  height: '3.25rem',
+  border: '1px solid var(--color-border-subtle)',
+  borderRadius: 'var(--radius-card)',
+  background: 'var(--color-bg)',
+}
+
+/**
+ * Held in place of the board and the week planner while the first fetch and
+ * the viewer's own team member id are still landing. The list leaf owns its
+ * own row skeleton and keeps it; without this the board drew four empty
+ * columns and My week drew "A clear week" before anything had been asked,
+ * which is the normal first paint for anyone whose saved default is not List.
+ */
+function TasksViewSkeleton({ variant }: { variant: 'board' | 'week' }) {
+  const panes = variant === 'board' ? 4 : 3
+  return (
+    <div
+      role="status"
+      aria-label={variant === 'board' ? 'Loading the board' : 'Loading your week'}
+      className={variant === 'board'
+        ? 'animate-pulse grid grid-cols-2 md:grid-cols-4'
+        : 'animate-pulse flex flex-col'}
+      style={{ gap: '0.75rem' }}
+    >
+      {Array.from({ length: panes }, (_, i) => (
+        <div key={i} style={SKELETON_PANE}>
+          <div style={SKELETON_HEAD} />
+          <div style={SKELETON_CARD} />
+          <div style={SKELETON_CARD} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // -- The shell ----------------------------------------------------------------
 
 export function TasksContent() {
@@ -187,10 +261,17 @@ export function TasksContent() {
   // Impersonation is the only place the browser already knows which teammate
   // this is; otherwise the caller's own team member row is the answer, and
   // /api/admin/profile is the one route that resolves it from the Clerk id.
-  const { data: profileData } = useSWR<ProfilePayload>(PROFILE_KEY)
+  const { data: profileData, isLoading: profileLoading } = useSWR<ProfilePayload>(PROFILE_KEY)
 
   const tasks = useMemo(() => tasksData?.tasks ?? [], [tasksData])
   const meId = impersonatedTeamMemberId ?? profileData?.member?.id ?? null
+
+  // The first paint waits on two fetches, not one. "Assigned to me", every
+  // rail count and the whole My week plate are answers about `meId`, so
+  // drawing them while /api/admin/profile is still in flight prints a
+  // confident zero and an empty week. An impersonated teammate id is known
+  // synchronously, so that lens skips the second wait.
+  const booting = loading || (!impersonatedTeamMemberId && profileLoading)
 
   const peopleList = useMemo<TaskPerson[]>(
     () => (teamData?.items ?? []).map(m => ({ id: m.id, name: m.name, avatarUrl: m.avatarUrl })),
@@ -298,7 +379,7 @@ export function TasksContent() {
   const loadSubtasks = useCallback(async (taskId: string) => {
     try {
       const res = await fetch(apiPath(`/api/admin/tasks/${taskId}/subtasks`))
-      if (!res.ok) return
+      if (!res.ok) throw new Error(await readError(res))
       const data = await res.json() as SubtasksPayload
       const rows: TaskSubtask[] = (data.subtasks ?? []).map(s => ({
         id: s.id,
@@ -308,9 +389,13 @@ export function TasksContent() {
       setSubtasksByTask(current => ({ ...current, [taskId]: rows }))
     } catch {
       // Leaving the entry unset holds the skeleton rather than claiming the
-      // task has no subtasks.
+      // task has no subtasks, so the failure has to be said out loud. The
+      // list asks once per row per mount and will not ask again on its own;
+      // opening the task is what refires this, because the panel's effect
+      // keys off the selected id.
+      showToast('Could not load that checklist. Open the task to try again.', 'error')
     }
-  }, [])
+  }, [showToast])
 
   // The open panel always needs its list; the list view asks per expanded row.
   // Refetched on every open rather than only when the entry is missing: the
@@ -367,10 +452,20 @@ export function TasksContent() {
 
   // My week ignores the rail on purpose, so its count has to say what the
   // planner is actually drawing rather than what the filters would leave.
-  const weekCount = useMemo(
-    () => (meId ? tasks.filter(t => t.assigneeId === meId && t.status !== 'done').length : 0),
+  // Same predicate as TasksWeek's own `mine`, held as the set rather than
+  // the number because Export CSV writes it while that view is on screen.
+  const weekRows = useMemo(
+    () => (meId ? tasks.filter(t => t.assigneeId === meId && t.status !== 'done') : []),
     [tasks, meId],
   )
+  const weekCount = weekRows.length
+
+  // The planner reads its own plate and never reads the rail, so while it is
+  // the view on screen the search box, the saved views, the filter selects
+  // and the chip strip all answer nothing. The rail says so in a note; the
+  // chips are suppressed rather than left printing a filter that changes
+  // nothing next to a count that ignores it.
+  const railInert = rail.view === 'week'
 
   // Both option lists are built from the loaded rows, so a filter can only
   // ever pick a value that exists in the data in front of the user.
@@ -768,11 +863,16 @@ export function TasksContent() {
   }, [])
 
   // Exports what is on screen, not everything loaded: the menu sits above a
-  // filtered list, and exporting something else is the wrong answer. The BOM
-  // is what makes Excel open a UTF-8 CSV without mangling a client name.
+  // filtered list, and exporting something else is the wrong answer. In My
+  // week that is the planner's own plate, not the rail-filtered set, because
+  // the planner ignores the rail and the toolbar count already says so.
+  const exportRows = railInert ? weekRows : visible
+
+  // The BOM is what makes Excel open a UTF-8 CSV without mangling a client
+  // name.
   const exportCsv = useCallback(() => {
     const header = ['Title', 'Level', 'Client', 'Status', 'Priority', 'Assignee', 'Due', 'Estimate']
-    const lines = visible.map(t => [
+    const lines = exportRows.map(t => [
       t.title,
       TASK_LEVEL_LABELS[levelOf(t)] ?? '',
       t.orgName ?? '',
@@ -789,8 +889,8 @@ export function TasksContent() {
     link.download = `tahi-tasks-${new Date().toISOString().slice(0, 10)}.csv`
     link.click()
     URL.revokeObjectURL(url)
-    showToast(`Exported ${visible.length} ${visible.length === 1 ? 'task' : 'tasks'}`)
-  }, [visible, people, showToast])
+    showToast(`Exported ${exportRows.length} ${exportRows.length === 1 ? 'task' : 'tasks'}`)
+  }, [exportRows, people, showToast])
 
   // ── Views ──────────────────────────────────────────────────────────────────
 
@@ -808,9 +908,17 @@ export function TasksContent() {
     assigneeOptions: railAssigneeOptions,
     isDefault: rail.isDefault,
     onSaveDefault: rail.saveDefault,
+    note: railInert
+      ? 'My week always shows your own open plate. The search, the views and the filters do not change it.'
+      : undefined,
   }
 
-  const body = rail.view === 'board' ? (
+  // The board and the week planner have no loading prop of their own, so the
+  // shell holds a skeleton for them. The list takes `booting` instead: its
+  // own row skeleton is the better one and it already knew how to draw it.
+  const boardBody = booting ? (
+    <TasksViewSkeleton variant="board" />
+  ) : (
     <TasksBoard
       rows={visible}
       people={people}
@@ -820,7 +928,11 @@ export function TasksContent() {
       onQuickAdd={handleColumnAdd}
       onOpenTask={selectTask}
     />
-  ) : rail.view === 'week' ? (
+  )
+
+  const weekBody = booting ? (
+    <TasksViewSkeleton variant="week" />
+  ) : (
     <TasksWeek
       allRows={tasks}
       meId={meId}
@@ -833,10 +945,12 @@ export function TasksContent() {
       onOpenTask={selectTask}
       onOpenRequest={openRequest}
     />
-  ) : (
+  )
+
+  const listBody = (
     <TasksList
       rows={visible}
-      loading={loading}
+      loading={booting}
       people={people}
       peopleList={peopleList}
       clients={clients}
@@ -860,6 +974,8 @@ export function TasksContent() {
       onNewTask={openNewTask}
     />
   )
+
+  const body = rail.view === 'board' ? boardBody : rail.view === 'week' ? weekBody : listBody
 
   return (
     <>
@@ -932,7 +1048,7 @@ export function TasksContent() {
           rail={<TasksRail {...railProps} />}
           railTouch={<TasksRail {...railProps} touch />}
           switcher={<TasksViewSwitcher value={rail.view} onChange={rail.setView} />}
-          chips={chips}
+          chips={railInert ? NO_CHIPS : chips}
           onClearChip={chip => rail.setFilters({
             ...rail.filters,
             [chip.key]: DEFAULT_TASK_FILTERS[chip.key as TaskFilterKey],
@@ -944,10 +1060,10 @@ export function TasksContent() {
           query={rail.query}
           onQueryChange={rail.setQuery}
           searchPlaceholder="Search tasks or clients"
-          total={rail.view === 'week' ? weekCount : visible.length}
+          total={railInert ? weekCount : visible.length}
           itemNoun="task"
-          loading={loading}
-          extraActiveCount={rail.savedView ? 1 : 0}
+          loading={booting}
+          extraActiveCount={railInert || !rail.savedView ? 0 : 1}
           saveDefaultTouch={
             <SaveDefaultControl isDefault={rail.isDefault} onSave={rail.saveDefault} touch />
           }

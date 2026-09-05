@@ -66,6 +66,10 @@ export interface TasksRailProps {
   assigneeOptions: readonly RailOption[]
   isDefault: boolean
   onSaveDefault: () => void
+  /** Set when the view on screen does not read the rail, so a control that
+   *  cannot answer says why instead of sitting inert. My week is the one that
+   *  does this: it draws the viewer's own open plate and nothing else. */
+  note?: string
   /** 44px targets. Set inside the mobile sheet. */
   touch?: boolean
 }
@@ -107,6 +111,7 @@ export function TasksRail({
   assigneeOptions,
   isDefault,
   onSaveDefault,
+  note,
   touch = false,
 }: TasksRailProps): React.ReactElement {
   // One open menu at a time, the rail included, so a second click elsewhere
@@ -138,6 +143,23 @@ export function TasksRail({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.125rem' }}>
+      {note && (
+        <p
+          style={{
+            margin: 0,
+            padding: '0.5rem 0.625rem',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--color-bg-secondary)',
+            fontSize: '0.6875rem',
+            lineHeight: 1.5,
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          {note}
+        </p>
+      )}
+
       <div>
         <RailGroupLabel>Views</RailGroupLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>

@@ -10,8 +10,9 @@ interface Props {
 
 /**
  * There is exactly one canonical task detail: the slide-over on /tasks. This
- * former full-page detail dead-ended (its API had no GET), so the route now
- * redirects to /tasks?task=<id>, which deep-opens the slide-over on load.
+ * route stays as the deep link every notification and bookmark points at
+ * (lib/notification-links.ts routes `task` here), redirecting to
+ * /tasks?task=<id>, which deep-opens the panel on load.
  */
 export default async function TaskDetailPage({ params }: Props) {
   const { userId } = await getServerAuth()
