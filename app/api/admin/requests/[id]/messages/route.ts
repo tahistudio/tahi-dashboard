@@ -2,11 +2,12 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, asc, inArray } from 'drizzle-orm'
+import { eq, and, asc, inArray, isNull } from 'drizzle-orm'
 import { notifyMentionedPerson, notifyOrgContacts, notifyTeamMember } from '@/lib/notifications'
 import { messageSummary, threadReplyEmailPlan, toPlainText, truncate } from '@/lib/notification-email'
 import { parseMentions } from '@/lib/parse-mentions'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { chunkThreadIds, pickThreadConversationId } from '@/lib/request-thread'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -55,24 +56,46 @@ export async function GET(req: NextRequest, { params }: Params) {
         eq(schema.messages.authorType, 'team_member')
       )
     )
-    .where(eq(schema.messages.requestId, id))
+    // A deleted message is deleted for the studio too. Without this filter a
+    // soft-deleted row kept rendering in the thread, so "delete" only ever
+    // meant "stamp a column".
+    .where(and(
+      eq(schema.messages.requestId, id),
+      isNull(schema.messages.deletedAt),
+    ))
     .orderBy(asc(schema.messages.createdAt))
 
-  // Attached files (files.message_id in the message ids we just loaded).
-  // One query, then bucket per message_id.
+  // Attached files (files.message_id in the message ids we just loaded),
+  // bucketed per message_id.
+  //
+  // Sliced, because a thread is unbounded and D1 caps a statement at 100 bound
+  // parameters: one IN over every message in the thread threw at roughly the
+  // 99th and took the whole thread payload with it.
   const msgIds = msgs.map(m => m.id)
-  const fileRows = msgIds.length > 0 ? await drizzle
-    .select({
-      id: schema.files.id,
-      messageId: schema.files.messageId,
-      filename: schema.files.filename,
-      mimeType: schema.files.mimeType,
-      sizeBytes: schema.files.sizeBytes,
-      storageKey: schema.files.storageKey,
-    })
-    .from(schema.files)
-    .where(inArray(schema.files.messageId, msgIds)) : []
-  const filesByMessage = new Map<string, typeof fileRows>()
+  type MessageFileRow = {
+    id: string
+    messageId: string | null
+    filename: string
+    mimeType: string | null
+    sizeBytes: number | null
+    storageKey: string
+  }
+  const fileRows: MessageFileRow[] = []
+  for (const idSlice of chunkThreadIds(msgIds)) {
+    const rows = await drizzle
+      .select({
+        id: schema.files.id,
+        messageId: schema.files.messageId,
+        filename: schema.files.filename,
+        mimeType: schema.files.mimeType,
+        sizeBytes: schema.files.sizeBytes,
+        storageKey: schema.files.storageKey,
+      })
+      .from(schema.files)
+      .where(inArray(schema.files.messageId, idSlice))
+    fileRows.push(...rows)
+  }
+  const filesByMessage = new Map<string, MessageFileRow[]>()
   for (const f of fileRows) {
     if (!f.messageId) continue
     const arr = filesByMessage.get(f.messageId) ?? []
@@ -81,7 +104,22 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
   const items = msgs.map(m => ({ ...m, files: filesByMessage.get(m.id) ?? [] }))
 
-  return NextResponse.json({ items, page: 1, limit: items.length })
+  // The request's thread conversation, so the detail page can REUSE it instead
+  // of minting a fresh one on the first message after every page load. Null
+  // when the request has never had one; the page creates it once, then reads
+  // it back from here on the next load.
+  const convRows = await drizzle
+    .select({
+      id: schema.conversations.id,
+      type: schema.conversations.type,
+      visibility: schema.conversations.visibility,
+      createdAt: schema.conversations.createdAt,
+    })
+    .from(schema.conversations)
+    .where(eq(schema.conversations.requestId, id))
+  const conversationId = pickThreadConversationId(convRows)
+
+  return NextResponse.json({ items, conversationId, page: 1, limit: items.length })
 }
 
 // ── POST /api/admin/requests/[id]/messages ───────────────────────────────────

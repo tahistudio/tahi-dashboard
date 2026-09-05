@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import { apiPath } from '@/lib/api'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
-/** One file stamped with a message id, as the admin thread route returns it. */
+/** One file stamped with a message id. Both thread routes return these. */
 interface MessageFile {
   id: string
   filename: string
@@ -23,8 +23,10 @@ interface Message {
   isInternal: boolean
   editedAt: string | null
   createdAt: string
-  /** Attachments posted with this message. Absent on the portal thread,
-   *  which does not return them yet. */
+  /** Attachments posted with this message. Both threads return them; the
+   *  portal only ever resolves them for messages the client can already see,
+   *  so a file stamped onto an internal note stays out of reach. Optional
+   *  because older payloads (and the activity feed) omit the key. */
   files?: MessageFile[]
   teamMemberName?: string | null
   teamMemberAvatar?: string | null

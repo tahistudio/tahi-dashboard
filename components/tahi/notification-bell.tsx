@@ -10,6 +10,7 @@ import {
   type NotificationAudience,
   type NotificationEntityType,
 } from '@/lib/notification-links'
+import { NOTIFICATIONS_CHANGED_EVENT } from '@/lib/notification-events'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -185,6 +186,13 @@ export function NotificationBell({ audience = 'team' }: { audience?: Notificatio
       eventSource?.close()
       eventSource = null
     }
+  }, [fetchNotifications])
+
+  // Re-read the count when another surface clears rows for the user.
+  useEffect(() => {
+    const onChanged = () => { fetchNotifications().catch(() => {}) }
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onChanged)
+    return () => window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onChanged)
   }, [fetchNotifications])
 
   const markAllRead = useCallback(async () => {

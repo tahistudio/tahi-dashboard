@@ -37,6 +37,13 @@ import { TimeCard } from '@/components/tahi/time-card'
 import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
 import { fetchSchedulePhaseOptions } from '@/lib/schedule-phases'
 import {
+  buildRequestThreadConversationPayload,
+  formatClientSeenBy,
+  latestClientReadAt,
+  type ThreadReadReceipt,
+} from '@/lib/request-thread'
+import { NOTIFICATIONS_CHANGED_EVENT } from '@/lib/notification-events'
+import {
   CATEGORY_CONFIG,
   EDITABLE_STATUSES,
   REQUEST_STATUS_CONFIG,
@@ -402,9 +409,9 @@ interface Message {
   // server-computed own-message flag (portal stores authorId = contact.id).
   authorName?: string | null
   isOwn?: boolean
-  /** Files stamped with this message id. The admin thread route returns them
-   *  per message; the portal thread has none yet, so the bubble only shows
-   *  the row when they are there. */
+  /** Files stamped with this message id. Both threads return them per message
+   *  now, so the client sees the attachment under the sentence that explains
+   *  it, not only in the Files panel. */
   files?: Array<{
     id: string
     filename: string
@@ -619,12 +626,13 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   } = useSWR(
     `request-detail:${isAdmin ? 'admin' : 'portal'}:${requestId}`,
     async () => {
+      // The portal serves the request AND its thread from one endpoint, so the
+      // client audience makes one call rather than the same call twice.
       const [reqRes, msgRes] = await Promise.all([
         fetch(`${apiBase}/requests/${requestId}`),
-        fetch(isAdmin
-          ? apiPath(`/api/admin/requests/${requestId}/messages`)
-          : `${apiBase}/requests/${requestId}`
-        ),
+        isAdmin
+          ? fetch(apiPath(`/api/admin/requests/${requestId}/messages`))
+          : null,
       ])
       let req: Request | null = null
       let subs: SubRequestRow[] = []
@@ -632,6 +640,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       let unread = 0
       let people: Participant[] = []
       let msgs: Message[] = []
+      let convId: string | null = null
       if (reqRes.ok) {
         const data = await reqRes.json() as {
           request: Request
@@ -639,24 +648,29 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           parent?: ParentRequestRef | null
           unreadCount?: number
           participants?: Participant[]
+          messages?: Message[]
         }
         req = data.request
         subs = data.subRequests ?? []
         parent = data.parent ?? null
         unread = data.unreadCount ?? 0
         people = data.participants ?? []
+        if (!isAdmin) msgs = data.messages ?? []
       }
-      if (msgRes.ok) {
-        if (isAdmin) {
-          const data = await msgRes.json() as { items: Message[] }
-          msgs = data.items ?? []
-        } else {
-          const data = await msgRes.json() as { request: Request; messages: Message[] }
-          req = data.request
-          msgs = data.messages ?? []
-        }
+      if (msgRes?.ok) {
+        const data = await msgRes.json() as { items: Message[]; conversationId?: string | null }
+        msgs = data.items ?? []
+        convId = data.conversationId ?? null
       }
-      return { request: req, subRequests: subs, parent, unreadCount: unread, participants: people, messages: msgs }
+      return {
+        request: req,
+        subRequests: subs,
+        parent,
+        unreadCount: unread,
+        participants: people,
+        messages: msgs,
+        conversationId: convId,
+      }
     },
   )
   const fetchError = !!requestError
@@ -697,6 +711,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     }
   }, [mutateRequest, mutateRequestLists])
 
+  // A dynamic route keeps this component mounted when the id changes, so the
+  // thread's conversation has to be forgotten explicitly. Declared BEFORE the
+  // mirror below so the hydrate that follows starts from null rather than
+  // carrying the previous request's conversation onto this one.
+  useEffect(() => {
+    setConversationId(null)
+  }, [requestId])
+
   // Mirror fetched data into local state. Local state is the source of truth for
   // optimistic edits (patchRequest, checklists, participants, unlink), so each
   // refresh (mutateRequest) re-syncs everything exactly as loadRequest used to.
@@ -711,6 +733,11 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     setUnreadCount(requestData.unreadCount)
     setParticipants(requestData.participants)
     setMessages(requestData.messages)
+    // Hydrate the thread's conversation from the server. This state used to
+    // start at null and stay there, so the first message after EVERY page load
+    // minted another request_thread row. Never downgrade an id this page just
+    // created to the null a racing read would carry.
+    setConversationId(prev => requestData.conversationId ?? prev)
     try {
       setChecklists(JSON.parse(requestData.request?.checklists || '[]') as Checklist[])
     } catch {
@@ -741,6 +768,36 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   )
   const teamMembers = teamMembersData?.items ?? []
 
+  // Read receipts (admin only). The studio's question is "did the client
+  // actually open this", so the sentence only ever names contacts; the
+  // helper drops the studio's own receipts before it says anything.
+  //
+  // Polled, because the global SWR config turns revalidateOnFocus off and this
+  // is the one number on the page that changes while nobody touches it: the
+  // client opening the request is exactly the event the studio is waiting for.
+  const { data: readsData } = useSWR<{ items: ThreadReadReceipt[] }>(
+    isAdmin ? `/api/admin/requests/${requestId}/reads` : null,
+    { refreshInterval: 60_000 },
+  )
+  const clientReadAt = useMemo(
+    () => latestClientReadAt(readsData?.items ?? []),
+    [readsData],
+  )
+  // The sentence is relative ("about 2 hours ago"), so it needs its own clock:
+  // SWR hands back the SAME data reference when a refetch changes nothing, so
+  // polling alone would leave the phrasing frozen on a tab left open. One tick
+  // a minute, and only while there is a receipt to age.
+  const [receiptNow, setReceiptNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!clientReadAt) return
+    const t = setInterval(() => setReceiptNow(Date.now()), 60_000)
+    return () => clearInterval(t)
+  }, [clientReadAt])
+  const seenBy = useMemo(
+    () => formatClientSeenBy(readsData?.items ?? [], new Date(receiptNow)),
+    [readsData, receiptNow],
+  )
+
   // Delivery-phase options for the spine selector. Conditional key skips the
   // fetch for clients or before the org is known; non-fatal on failure.
   const requestOrgId = request?.orgId ?? null
@@ -756,15 +813,54 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
 
   // Mark the request as read 2s after load. A quick glance shouldn't count -
   // if the user leaves sooner, we preserve the unread badge for next time.
+  // Both audiences write a receipt now (the portal route stamps userType
+  // 'contact'), so the studio can see that the client opened the thread. A
+  // super admin looking through the client lens writes nothing: the receipt
+  // would be a lie in the client's name.
+  const hasRequest = !!request
   useEffect(() => {
-    if (!isAdmin || loading || !request) return
+    if (loading || !hasRequest || isImpersonatingClient) return
+    const url = isAdmin
+      ? apiPath(`/api/admin/requests/${requestId}/reads`)
+      : apiPath(`/api/portal/requests/${requestId}/reads`)
     const t = setTimeout(() => {
-      fetch(apiPath(`/api/admin/requests/${requestId}/reads`), { method: 'POST' })
+      fetch(url, { method: 'POST' })
         .then(() => setUnreadCount(0))
         .catch(() => { /* non-fatal */ })
     }, 2000)
     return () => clearTimeout(t)
-  }, [isAdmin, loading, request, requestId])
+  }, [isAdmin, loading, hasRequest, isImpersonatingClient, requestId])
+
+  // Opening the request clears its bell rows for whoever is looking. Clicking
+  // the row inside the popover used to be the ONLY way a notification about a
+  // request went away, so arriving from the list, a link or a deep link left
+  // the badge counting work already dealt with. Once per request per visit,
+  // and never through the client lens: looking at somebody else's portal is
+  // not the same as reading your own notification.
+  const bellClearedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (loading || !hasRequest || isImpersonatingClient) return
+    if (bellClearedFor.current === requestId) return
+    // Claim the id before the call so a re-render mid-flight cannot fire a
+    // second PATCH, and release it again on anything but a success: a dropped
+    // connection on a mobile portal session used to leave the badge counting a
+    // request the reader had already dealt with, for the rest of the mount.
+    bellClearedFor.current = requestId
+    const release = () => {
+      if (bellClearedFor.current === requestId) bellClearedFor.current = null
+    }
+    fetch(apiPath('/api/notifications'), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entityType: 'request', entityId: requestId }),
+    })
+      .then(res => {
+        // The bell owns its own state and only refetches on open, so tell it.
+        if (res.ok) window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT))
+        else release()
+      })
+      .catch(release)
+  }, [loading, hasRequest, isImpersonatingClient, requestId])
 
   async function handleSendMessage(
     html: string,
@@ -795,21 +891,22 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       changeRequestPendingRef.current = false
     }
 
-    // Create a request_thread conversation on first message if none exists
+    // Create a request_thread conversation on first message if none exists.
+    // conversationId is hydrated from the thread payload above, so this runs
+    // once per request rather than once per page load, and the row it writes
+    // is external whether or not this first message is an internal note (what
+    // hides a note from a client is the message's own isInternal flag).
     let convId = conversationId
     if (!convId && isAdmin && request) {
       try {
         const convRes = await fetch(apiPath('/api/admin/conversations'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'request_thread',
-            name: request.title,
-            orgId: request.orgId,
+          body: JSON.stringify(buildRequestThreadConversationPayload({
             requestId,
-            visibility: messageIsInternal ? 'internal' : 'external',
-            participantIds: [],
-          }),
+            orgId: request.orgId,
+            title: request.title,
+          })),
         })
         if (convRes.ok) {
           const convData = await convRes.json() as { id: string }
@@ -2292,7 +2389,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           <Card padding="none" style={{ overflow: 'hidden' }}>
             <Card.Header
               bordered
-              style={{ margin: 0, padding: '0.875rem 1.25rem' }}
+              style={{ margin: 0, padding: '0.875rem 1.25rem', flexWrap: 'wrap' }}
             >
               <Card.Title as="h2" className="flex items-center gap-2">
                 Thread
@@ -2322,6 +2419,22 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                   </span>
                 )}
               </Card.Title>
+
+              {/* Did the client actually open this? The receipt is written by
+                  the portal detail page, so an empty line here means nobody at
+                  the client has opened the request since read state shipped.
+                  The sentence is relative; the title carries the exact time so
+                  it stays recoverable however long the tab has been open. */}
+              {isAdmin && seenBy && (
+                <span
+                  className="inline-flex items-center gap-1 text-xs"
+                  style={{ color: 'var(--color-text-subtle)' }}
+                  title={clientReadAt ? formatDateTime(clientReadAt) : undefined}
+                >
+                  <Eye size={12} aria-hidden="true" />
+                  <span data-private>{seenBy}</span>
+                </span>
+              )}
             </Card.Header>
 
             <div style={{ padding: '1.25rem' }}>
@@ -4725,6 +4838,17 @@ function FileActions({ file, onDeleted, canDelete = true }: {
 function formatDate(iso: string) {
   try {
     return new Date(iso).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
+  } catch {
+    return iso
+  }
+}
+
+/** Date AND time, for the title behind a relative phrase that goes stale. */
+function formatDateTime(iso: string) {
+  try {
+    return new Date(iso).toLocaleString('en-NZ', {
+      day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit',
+    })
   } catch {
     return iso
   }
