@@ -25,7 +25,7 @@ import { apiPath } from '@/lib/api'
 import { stageColour } from '@/lib/chart-colors'
 import {
   buildPipelineStageChart,
-  RECURRING_MONTHS,
+  type PipelineChartStage,
   type PipelineStageChart,
 } from '@/lib/pipeline-stage-chart'
 import type { OverviewCtx } from '@/components/tahi/overview/ctx'
@@ -868,32 +868,28 @@ function Receivables({ arAging, loading }: { arAging: ArAging | null; loading: b
 
 /* ============================================================ Ahead zone */
 
+/** A deal row, narrowed to the expected close date the card counts. Everything
+ *  else on the card comes off the forecast. */
 interface DealRow {
   id: string
-  stageId: string | null
-  stageName: string | null
-  stageProbability: number | null
   stageIsClosedWon: number | null
   stageIsClosedLost: number | null
-  upfrontValueNzd: number | null
-  monthlyValueNzd: number | null
   expectedCloseDate: string | null
 }
 interface PipelineForecast {
-  weightedUpfrontNzd: number
-  weightedMonthlyNzd: number
-  /** Pipeline order, straight off the forecast route. The deal rows carry the
-   *  stage name and probability but not its position, so the chart takes the
-   *  board's ordering from here. */
-  byStage?: { stageId: string; position: number }[]
+  /** The forecast's own per-stage breakdown, already weighted by stage
+   *  probability. The headline, the bars and the open-deal count are all read
+   *  off this one payload, so the card cannot contradict itself. */
+  byStage?: PipelineChartStage[]
 }
 
 /** The stage chart under the Pipeline ahead stats: one row per open stage
  *  holding deals, bar length by weighted value (deal count when the whole
  *  pipeline is unvalued). Hand-rolled on the kit's own `.ov-meter` track, the
  *  same primitive Studio capacity uses, so it inherits dark mode and needs no
- *  chart library. Stage inks come from the shared chart palette, so a stage is
- *  the same colour here as on the pipeline board. */
+ *  chart library. A stage is inked with its own colour from pipeline settings,
+ *  falling back to the shared stage palette at the stage's index in the full
+ *  board order, which is the call the pipeline board itself makes. */
 function PipelineStages({
   chart,
   moneyCompact,
@@ -903,21 +899,39 @@ function PipelineStages({
 }) {
   return (
     <div className="ov-subrows">
-      {chart.bars.map((bar, i) => (
+      {chart.bars.map(bar => (
         <div className="ov-subrow" key={bar.stageId}>
           <span
             title={bar.name}
-            style={{ flex: '0 0 5rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            style={{
+              flex: '0 1 auto',
+              minWidth: 0,
+              maxWidth: '9rem',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
           >
             {bar.name}
           </span>
           <span className="ov-meter" style={{ flex: 1 }} aria-hidden="true">
-            <i style={{ width: `${bar.pct}%`, background: stageColour(bar.name, i) }} />
+            <i
+              style={{
+                width: `${bar.pct}%`,
+                // Bar length encodes money, so a stage carrying none yet is
+                // drawn muted at the minimum length rather than in its own ink.
+                background: bar.unvalued
+                  ? 'var(--border-strong)'
+                  : bar.colour ?? stageColour(bar.name, bar.stageIndex),
+              }}
+            />
           </span>
           <span style={{ flex: '0 0 auto', color: 'var(--text-faint)' }}>
             {bar.dealCount} {bar.dealCount === 1 ? 'deal' : 'deals'}
           </span>
-          <b style={{ flex: '0 0 auto' }}>{moneyCompact(bar.weightedNzd)}</b>
+          {/* On a count chart the length means deals, so a money figure beside
+              it would read as a contradiction: every row would show NZ$0. */}
+          {chart.basis === 'value' && <b style={{ flex: '0 0 auto' }}>{moneyCompact(bar.weightedNzd)}</b>}
         </div>
       ))}
     </div>
@@ -929,25 +943,22 @@ function PipelineAhead({ go }: { go: (id: string) => void }) {
   const { data: dealsData } = useResource<{ items: DealRow[] }>('/api/admin/deals?limit=100')
   const { data: forecast } = useResource<PipelineForecast>('/api/admin/reports/pipeline-forecast')
   const loading = !dealsData || !forecast
-  const deals = useMemo(() => dealsData?.items ?? [], [dealsData])
-  const open = deals.filter(d => !d.stageIsClosedWon && !d.stageIsClosedLost)
+
+  // Headline, bars and open-deal count all come off the forecast's own
+  // per-stage rows, so the money above the bars is the sum of the bars by
+  // construction. GET /api/admin/deals is access scoped, hides archived deals
+  // and pages at 100 rows, so it cannot answer for the whole pipeline. It is
+  // read here only for expected close dates, which the forecast does not carry.
+  const chart = useMemo(() => buildPipelineStageChart(forecast?.byStage), [forecast])
+  const weighted = chart.totalWeightedNzd
 
   const now = new Date()
-  const closing = open.filter(d => {
+  const closing = (dealsData?.items ?? []).filter(d => {
+    if (d.stageIsClosedWon || d.stageIsClosedLost) return false
     if (!d.expectedCloseDate) return false
     const c = new Date(d.expectedCloseDate)
     return c.getMonth() === now.getMonth() && c.getFullYear() === now.getFullYear()
   }).length
-  const weighted = forecast
-    ? forecast.weightedUpfrontNzd + forecast.weightedMonthlyNzd * RECURRING_MONTHS
-    : 0
-
-  // Same deals the stats above count, weighted by the same rule the forecast
-  // route applies, so the bars read as a breakdown of the headline.
-  const chart = useMemo(
-    () => buildPipelineStageChart(deals, forecast?.byStage),
-    [deals, forecast],
-  )
 
   return (
     <Card span={7}>
@@ -959,7 +970,7 @@ function PipelineAhead({ go }: { go: (id: string) => void }) {
             <Shim h={92} />
           </div>
         </>
-      ) : open.length === 0 && weighted <= 0 ? (
+      ) : chart.totalDeals === 0 ? (
         <EmptyLine>No deals in the pipeline yet.</EmptyLine>
       ) : (
         <>
@@ -969,7 +980,7 @@ function PipelineAhead({ go }: { go: (id: string) => void }) {
               <div className="st-lbl">weighted</div>
             </div>
             <div className="ov-stat">
-              <div className="st-num">{open.length}</div>
+              <div className="st-num">{chart.totalDeals}</div>
               <div className="st-lbl">open deals</div>
             </div>
             <div className="ov-stat">
@@ -977,7 +988,7 @@ function PipelineAhead({ go }: { go: (id: string) => void }) {
               <div className="st-lbl">closing this month</div>
             </div>
           </div>
-          {chart.bars.length > 0 && <PipelineStages chart={chart} moneyCompact={moneyCompact} />}
+          <PipelineStages chart={chart} moneyCompact={moneyCompact} />
         </>
       )}
     </Card>

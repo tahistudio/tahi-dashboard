@@ -1,61 +1,73 @@
 /**
- * lib/pipeline-stage-chart.ts - the grouping and ordering maths behind the
+ * lib/pipeline-stage-chart.ts - the ordering and scaling maths behind the
  * stage chart on the owner overview's "Pipeline ahead" card.
  *
- * Kept out of the component so it can be unit tested, and kept deliberately
- * in step with the forecast route (app/api/admin/reports/pipeline-forecast),
- * which applies exactly this rule:
+ * Kept out of the component so it can be unit tested.
+ *
+ * The rows this takes are `byStage` from GET /api/admin/reports/pipeline-forecast,
+ * which is the same payload the card's weighted headline comes from. That route
+ * has already done the weighting, per stage:
  *
  *   weighted upfront = ROUND(SUM(upfrontValueNzd) * stage.probability / 100)
  *   weighted monthly = ROUND(SUM(monthlyValueNzd) * stage.probability / 100)
- *   weighted total   = weighted upfront + weighted monthly * RECURRING_MONTHS
  *
- * with closed-won and closed-lost stages excluded (realised, not forecast).
- * Reproducing the same formula here means the bars add up to the weighted
- * headline the card already shows above them, deal for deal.
+ * so this file only rolls the monthly portion up over RECURRING_MONTHS, orders
+ * the stages, and scales the bars. Reading the bars off the same response as
+ * the headline (rather than re-deriving them from GET /api/admin/deals, which
+ * is access scoped, drops archived deals and pages at 100 rows) is what lets
+ * the card render its headline as `totalWeightedNzd`: the number above the bars
+ * is the sum of the bars by construction, not by two populations agreeing.
  *
- * Money is read from the *Nzd columns ONLY. A deal is stored in its own
- * currency with an NZD conversion alongside, so summing the raw `value`
- * columns across a mixed-currency pipeline would add dollars to pounds.
+ * Money is NZD throughout. The forecast route sums the *Nzd columns only, so a
+ * mixed-currency pipeline converts before it adds rather than adding dollars to
+ * pounds.
  *
- * Stage ORDER is not on the deal rows (GET /api/admin/deals joins the stage
- * name and probability but not its position), so the caller passes the
- * ordered stage list the forecast route already returns as `byStage`.
+ * Closed-won and closed-lost stages are dropped (realised, not ahead of us), as
+ * are stages holding no deals.
  */
 
-/** A deal as GET /api/admin/deals returns it, narrowed to what the chart reads. */
-export interface PipelineChartDeal {
-  id: string
-  stageId: string | null
-  stageName: string | null
-  /** 0 to 100, joined from the deal's pipeline stage. */
-  stageProbability: number | null
-  stageIsClosedWon: number | null
-  stageIsClosedLost: number | null
-  upfrontValueNzd: number | null
-  monthlyValueNzd: number | null
-}
-
-/** Pipeline order, as the forecast route returns it in `byStage`. */
-export interface PipelineChartStageOrder {
+/** A stage as the pipeline-forecast route returns it in `byStage`, narrowed to
+ *  what the chart reads. The route sends more fields (slug, probability, the
+ *  unweighted sums); they are none of the chart's business. */
+export interface PipelineChartStage {
   stageId: string
+  name: string
+  /** Board position. Ties fall back to the order the rows arrived in. */
   position: number
+  /** The stage's own colour from pipeline settings, when one is set. */
+  colour: string | null
+  isClosedWon: boolean
+  isClosedLost: boolean
+  dealCount: number
+  weightedUpfrontNzd: number
+  weightedMonthlyNzd: number
 }
 
 export interface PipelineStageBar {
   stageId: string
   /** Stage name as shown on the pipeline board. */
   name: string
+  /** The stage's own colour, or null to let the caller pick one. */
+  colour: string | null
+  /** The stage's index in the FULL ordered stage list, closed stages included.
+   *  That is the index the pipeline board hands stageColour(), so a caller
+   *  falling back to the shared palette lands on the board's colour. */
+  stageIndex: number
   dealCount: number
   /** Weighted value of the stage in NZD (upfront + monthly * RECURRING_MONTHS). */
   weightedNzd: number
   /** 0 to 100, the bar's length against the longest bar in the chart. */
   pct: number
+  /** The stage holds deals but carries no weighted value, so its bar is drawn
+   *  at the minimum length and should be inked muted rather than coloured:
+   *  bar length encodes money, and this stage has none yet. */
+  unvalued: boolean
 }
 
 export interface PipelineStageChart {
   /** Open stages holding at least one deal, in pipeline order. */
   bars: PipelineStageBar[]
+  /** Sum of the bars, which is the card's weighted headline. */
   totalWeightedNzd: number
   totalDeals: number
   /** What the bar lengths encode. Falls back to deal count when the whole
@@ -63,120 +75,97 @@ export interface PipelineStageChart {
   basis: 'value' | 'count'
 }
 
-/** Months of retainer counted into a deal's weighted value. Matches the
+/** Months of retainer counted into a stage's weighted value. Matches the
  *  12-month rollup the Pipeline ahead headline uses. */
 export const RECURRING_MONTHS = 12
 
-/** Shortest bar drawn for a stage that holds pipeline, so a small stage is
- *  still visible next to a dominant one. */
+/** Shortest bar drawn for a stage that holds pipeline, so a small stage stays
+ *  visible next to a dominant one, and an unvalued stage still reads as a bar
+ *  rather than as a track that failed to draw. */
 const MIN_VISIBLE_PCT = 6
 
-/** Bucket for deals whose stage did not come back on the row (deleted stage,
- *  or a join that produced no name). Sorted last, never silently dropped. */
-const UNKNOWN_STAGE_ID = '__unknown_stage__'
-const UNKNOWN_STAGE_NAME = 'Unassigned stage'
+/** Shown when a stage row arrives with no usable name. */
+const UNNAMED_STAGE = 'Unnamed stage'
 
 function finite(value: number | null | undefined): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
-interface StageAccumulator {
+interface OpenStage {
   stageId: string
   name: string
-  dealCount: number
-  upfrontNzd: number
-  monthlyNzd: number
-  probability: number
+  colour: string | null
+  stageIndex: number
   position: number
-  firstSeen: number
+  dealCount: number
+  weightedNzd: number
 }
 
 /**
- * Groups open deals into one bar per pipeline stage, in pipeline order.
+ * Turns the forecast's per-stage rows into one bar per open stage that holds
+ * deals, in pipeline order.
  *
- * @param deals       rows from GET /api/admin/deals (closed stages ignored)
- * @param stageOrder  `byStage` from the pipeline-forecast route; supplies the
- *                    board's stage order. Stages missing from it sort last.
- * @param recurringMonths months of retainer counted into weighted value.
+ * @param stages          `byStage` from GET /api/admin/reports/pipeline-forecast
+ * @param recurringMonths months of retainer counted into weighted value
  */
 export function buildPipelineStageChart(
-  deals: readonly PipelineChartDeal[] | null | undefined,
-  stageOrder: readonly PipelineChartStageOrder[] | null | undefined,
+  stages: readonly PipelineChartStage[] | null | undefined,
   recurringMonths: number = RECURRING_MONTHS,
 ): PipelineStageChart {
-  const positions = new Map<string, number>()
-  for (const stage of stageOrder ?? []) {
-    if (!stage || typeof stage.stageId !== 'string') continue
-    if (!Number.isFinite(stage.position)) continue
-    positions.set(stage.stageId, stage.position)
-  }
-
-  const groups = new Map<string, StageAccumulator>()
-  let seen = 0
-
-  for (const deal of deals ?? []) {
-    if (!deal) continue
-    // Closed-won and closed-lost are realised, not ahead of us.
-    if (deal.stageIsClosedWon || deal.stageIsClosedLost) continue
-
-    const name = deal.stageName?.trim()
-    const key = deal.stageId ?? (name ? `name:${name}` : UNKNOWN_STAGE_ID)
-    let group = groups.get(key)
-    if (!group) {
-      group = {
-        stageId: key,
-        name: name || UNKNOWN_STAGE_NAME,
-        dealCount: 0,
-        upfrontNzd: 0,
-        monthlyNzd: 0,
-        probability: 0,
-        // A stage the order list does not know about sorts after every known
-        // stage, keeping the pipeline reading top to bottom as on the board.
-        position: (deal.stageId != null ? positions.get(deal.stageId) : undefined) ?? Number.MAX_SAFE_INTEGER,
-        firstSeen: seen++,
-      }
-      groups.set(key, group)
-    }
-    group.dealCount += 1
-    group.upfrontNzd += finite(deal.upfrontValueNzd)
-    group.monthlyNzd += finite(deal.monthlyValueNzd)
-    // Every deal in a stage carries the same joined probability; take the
-    // first one that is usable and clamp it to the 0 to 100 the column holds.
-    if (group.probability === 0) {
-      group.probability = Math.min(100, Math.max(0, finite(deal.stageProbability)))
-    }
-  }
-
   const months = Number.isFinite(recurringMonths) ? Math.max(0, recurringMonths) : RECURRING_MONTHS
 
-  const ordered = [...groups.values()].sort((a, b) =>
-    a.position !== b.position ? a.position - b.position : a.firstSeen - b.firstSeen,
-  )
-
-  const weighted = ordered.map(group => {
-    const upfront = Math.round(group.upfrontNzd * (group.probability / 100))
-    const monthly = Math.round(group.monthlyNzd * (group.probability / 100))
-    return Math.max(0, upfront + monthly * months)
+  const open: OpenStage[] = []
+  ;(stages ?? []).forEach((stage, stageIndex) => {
+    if (!stage || typeof stage.stageId !== 'string') return
+    // Closed-won and closed-lost are realised, not ahead of us.
+    if (stage.isClosedWon || stage.isClosedLost) return
+    const dealCount = Math.max(0, Math.round(finite(stage.dealCount)))
+    if (dealCount === 0) return
+    const name = typeof stage.name === 'string' && stage.name.trim() ? stage.name.trim() : UNNAMED_STAGE
+    open.push({
+      stageId: stage.stageId,
+      name,
+      colour: typeof stage.colour === 'string' && stage.colour.trim() ? stage.colour.trim() : null,
+      stageIndex,
+      // A row with no usable position sorts after every positioned stage
+      // rather than jumping to the top of the board's order.
+      position: Number.isFinite(stage.position) ? stage.position : Number.MAX_SAFE_INTEGER,
+      dealCount,
+      weightedNzd: Math.max(
+        0,
+        finite(stage.weightedUpfrontNzd) + finite(stage.weightedMonthlyNzd) * months,
+      ),
+    })
   })
 
-  const basis: 'value' | 'count' = weighted.some(value => value > 0) ? 'value' : 'count'
-  const metrics = ordered.map((group, i) => (basis === 'value' ? weighted[i] : group.dealCount))
+  const ordered = open.sort((a, b) =>
+    a.position !== b.position ? a.position - b.position : a.stageIndex - b.stageIndex,
+  )
+
+  const basis: 'value' | 'count' = ordered.some(stage => stage.weightedNzd > 0) ? 'value' : 'count'
+  const metrics = ordered.map(stage => (basis === 'value' ? stage.weightedNzd : stage.dealCount))
   const peak = metrics.reduce((max, value) => Math.max(max, value), 0)
 
-  const bars: PipelineStageBar[] = ordered.map((group, i) => ({
-    stageId: group.stageId,
-    name: group.name,
-    dealCount: group.dealCount,
-    weightedNzd: weighted[i],
+  const bars: PipelineStageBar[] = ordered.map((stage, i) => ({
+    stageId: stage.stageId,
+    name: stage.name,
+    colour: stage.colour,
+    stageIndex: stage.stageIndex,
+    dealCount: stage.dealCount,
+    weightedNzd: stage.weightedNzd,
+    // Every stage in the chart holds deals, so every stage gets a bar. One
+    // with nothing weighted yet is floored at the minimum and flagged, for
+    // the caller to ink muted.
     pct:
       peak <= 0 || metrics[i] <= 0
-        ? 0
+        ? MIN_VISIBLE_PCT
         : Math.max(MIN_VISIBLE_PCT, Math.round((metrics[i] / peak) * 100)),
+    unvalued: basis === 'value' && stage.weightedNzd <= 0,
   }))
 
   return {
     bars,
-    totalWeightedNzd: weighted.reduce((sum, value) => sum + value, 0),
+    totalWeightedNzd: bars.reduce((sum, bar) => sum + bar.weightedNzd, 0),
     totalDeals: bars.reduce((sum, bar) => sum + bar.dealCount, 0),
     basis,
   }
