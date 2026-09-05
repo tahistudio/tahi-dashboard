@@ -90,7 +90,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       .where(eq(schema.projectSchedules.id, id))
   }
 
-  return NextResponse.json({ token, status: 'shared', published: !!firstSnapshot })
+  // publishedAt, not only the boolean. The caller keeps a local copy of the
+  // schedule and its header button reads "Publish" or "Republish" off that
+  // field, so returning only "yes a snapshot happened" left an admin who
+  // shared a skeleton and carried on building with no sign anywhere that the
+  // client is pinned to the version they shared until they press Republish.
+  return NextResponse.json({
+    token,
+    status: 'shared',
+    published: !!firstSnapshot,
+    publishedAt: firstSnapshot ? now : null,
+  })
 }
 
 /**
@@ -162,11 +172,20 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
   const denied = await requireScheduleAccess(database, { userId, orgId }, id)
   if (denied) return denied
 
+  // The published state goes with the link. POST only ever takes a snapshot
+  // when there is none, so leaving one behind meant a revoke, a fortnight of
+  // rewriting and a re-share served the client the version from the FIRST
+  // share, with nothing in the UI saying so. Nothing reads publishedSnapshot
+  // once the token is gone (the public viewer 404s without one and the portal
+  // card only follows a shared schedule), so clearing it costs nothing and a
+  // re-share publishes what the studio actually has.
   await database
     .update(schema.projectSchedules)
     .set({
       publicShareToken: null,
       publicSharedAt: null,
+      publishedSnapshot: null,
+      publishedAt: null,
       status: 'draft',
       updatedAt: new Date().toISOString(),
     })

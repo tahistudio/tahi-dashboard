@@ -1,5 +1,5 @@
 /**
- * POST /api/admin/schedules/[id]/share.
+ * POST and DELETE /api/admin/schedules/[id]/share.
  *
  * Sharing used to mint a token and set status 'shared' without ever writing a
  * publishedSnapshot. Both readers of a shared schedule (the public share link
@@ -9,6 +9,14 @@
  * launch date, a half-written row. Sharing now publishes a first snapshot, and
  * never overwrites one that already exists, because that would silently
  * publish edits nobody pressed Republish on.
+ *
+ * Two consequences of that, both covered here. The response carries the
+ * publishedAt it wrote, not only a boolean, because the caller keeps a local
+ * copy of the schedule and its header button reads "Publish" or "Republish"
+ * off that field. And revoking the link clears the published state with it:
+ * POST only snapshots when there is none, so a revoke, a fortnight of
+ * rewriting and a re-share used to serve the client the version from the first
+ * share.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -52,7 +60,7 @@ vi.mock('@/lib/db', () => ({
   }),
 }))
 
-const { POST } = await import('../admin/schedules/[id]/share/route')
+const { POST, DELETE } = await import('../admin/schedules/[id]/share/route')
 
 const params = { params: Promise.resolve({ id: 's1' }) }
 const post = (url = 'http://localhost/api/admin/schedules/s1/share') =>
@@ -82,7 +90,12 @@ describe('POST /api/admin/schedules/[id]/share', () => {
     )
     const res = await POST(post() as never, params)
     expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toMatchObject({ status: 'shared', published: true })
+    const body = await res.json() as { status: string; published: boolean; publishedAt: string | null }
+    expect(body).toMatchObject({ status: 'shared', published: true })
+    // The timestamp, not only the flag: the caller flips its header button to
+    // "Republish" off this field, and it had no way to learn it without a
+    // full page reload.
+    expect(body.publishedAt).toBe(updates[0].publishedAt)
 
     expect(updates).toHaveLength(1)
     expect(updates[0].publicShareToken).toBeTypeOf('string')
@@ -98,9 +111,26 @@ describe('POST /api/admin/schedules/[id]/share', () => {
   it('never clobbers a published state on a re-share', async () => {
     script({ token: 'tok', publishedSnapshot: '{"schedule":{"title":"As published"}}' })
     const res = await POST(post() as never, params)
-    await expect(res.json()).resolves.toMatchObject({ token: 'tok', published: false })
+    await expect(res.json()).resolves.toMatchObject({
+      token: 'tok', published: false, publishedAt: null,
+    })
     expect(updates[0]).not.toHaveProperty('publishedSnapshot')
     expect(updates[0].status).toBe('shared')
+  })
+
+  it('clears the published state when the link is revoked', async () => {
+    // Otherwise a revoke, a heavy edit and a re-share serve the snapshot from
+    // the FIRST share: POST only takes one when there is none.
+    const res = await DELETE(post() as never, params)
+    expect(res.status).toBe(200)
+    expect(updates).toHaveLength(1)
+    expect(updates[0]).toMatchObject({
+      publicShareToken: null,
+      publicSharedAt: null,
+      publishedSnapshot: null,
+      publishedAt: null,
+      status: 'draft',
+    })
   })
 
   it('keeps the published state when the token is rotated', async () => {

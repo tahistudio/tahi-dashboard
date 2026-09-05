@@ -284,9 +284,10 @@ export function TeammateHome({ ctx }: { ctx: OverviewCtx }) {
   const todaysCalls = (callsRes.data?.calls ?? []).filter(c => ymdLocal(new Date(c.scheduledAt)) === today).slice(0, 4)
 
   /* ---- recent client replies ---- */
-  // Request rows only. The feed also carries conversation rows, and while the
-  // standalone Messages page is hidden there is no page to open for one, so a
-  // row here would be a card that answers a click with nothing.
+  // Request rows only. The feed stopped emitting anything else once the
+  // standalone Messages page was hidden (there is no page to open for a bare
+  // conversation, so such a row would answer a click with nothing), and the
+  // filter stays as a guard on the wire shape rather than as live work.
   const threads = (repliesRes.data?.threads ?? []).filter(t => t.kind === 'request')
 
   /* ---- Hero ---- */
@@ -364,9 +365,11 @@ export function TeammateHome({ ctx }: { ctx: OverviewCtx }) {
       tone: 'work',
       ic: 'msg',
       title: firstReply.clientName ?? firstReply.threadTitle,
-      // What the feed can prove is that the client wrote last on a request
-      // this member is on. It cannot prove nobody has answered since, so the
-      // sub names the thread rather than asserting the ball is here.
+      // The feed does now settle the question: it reads every message on the
+      // request, ignores studio-only notes and soft-deleted rows, and lists
+      // the request only when the newest thing the client can see is theirs.
+      // The sub still names the thread rather than repeating "waiting on you",
+      // because which request it is, is the part the reader does not know.
       sub: firstReply.threadTitle,
       verb: 'Open',
       onAct: () => go(firstReply.to),

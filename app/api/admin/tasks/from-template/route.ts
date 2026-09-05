@@ -29,6 +29,9 @@ export async function POST(req: NextRequest) {
     orgId?: string | null
     assigneeId?: string | null
     trackId?: string | null
+    /** The team member the caller is acting AS, when the login cannot say.
+     *  See the notify block at the bottom of this handler. */
+    actorTeamMemberId?: string | null
   }
 
   const { templateId } = body
@@ -122,9 +125,19 @@ export async function POST(req: NextRequest) {
   //
   // It writes assigneeType 'team_member' itself, so there is nothing to
   // resolve. Never the caller: applying a template to yourself is not news.
+  //
+  // "The caller" is a Clerk login, and the worker MCP authenticates as the
+  // service user, which is nobody's login: resolveTeamMember answers null for
+  // it, so an MCP run that applied a template to the asker rang their own
+  // bell. `actorTeamMemberId` is the caller naming themselves, and is
+  // preferred over the lookup exactly as POST /api/admin/tasks does it, so the
+  // two doors cannot drift apart again.
   if (body.assigneeId) {
-    const me = await resolveTeamMember(drizzle, userId)
-    if (me?.id !== body.assigneeId) {
+    const statedActor = typeof body.actorTeamMemberId === 'string' && body.actorTeamMemberId.trim()
+      ? body.actorTeamMemberId.trim()
+      : null
+    const actorId = statedActor ?? (await resolveTeamMember(drizzle, userId))?.id ?? null
+    if (actorId !== body.assigneeId) {
       await createNotification(drizzle, {
         recipient: { teamMemberId: body.assigneeId },
         type: 'task_assigned',

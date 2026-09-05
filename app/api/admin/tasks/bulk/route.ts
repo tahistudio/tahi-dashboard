@@ -12,13 +12,22 @@ import { resolveTeamMember } from '@/lib/team-identity'
 /**
  * How many tasks a bulk assign will name one by one before it summarises.
  *
- * The cost argument that first set this cap is gone: the named rows now go in
- * through createNotificationsForRecipient, which resolves the recipient once,
- * reads their in-app preference once and inserts every row in a single call,
- * so the whole fan-out is three D1 round trips whatever the size. The BELL
- * argument stands, and is why the cap stays: the popover shows the 20 newest
- * rows and counts unread from that page, so a hundred rows would bury
- * everything else the assignee had and still report 20.
+ * Two arguments hold this cap up, and only one of them is a comfort.
+ *
+ * The BELL argument is the one that would keep it even if the writes were
+ * free: the popover shows the 20 newest rows and counts unread from that page,
+ * so a hundred rows would bury everything else the assignee had and still
+ * report 20.
+ *
+ * The COST argument is smaller than it was but NOT gone, so do not lift this
+ * cap on the strength of the batching alone. The named rows go in through
+ * createNotificationsForRecipient, which resolves the recipient once and
+ * inserts every row in one call, but it still reads the in-app preference
+ * inside its per-payload loop, so N named tasks cost 1 resolve + N preference
+ * SELECTs + 1 insert. At five that is seven sequential D1 round trips; at two
+ * hundred it is the O(N) fan-out this cap exists to prevent. Hoist that read
+ * out of the loop in lib/notifications.ts first (memoise by event type), then
+ * the only question left is the bell one.
  *
  * Five is where a list stops being a list: up to five, each task gets its own
  * row and its own deep link, which is the useful shape. Above it, one row that

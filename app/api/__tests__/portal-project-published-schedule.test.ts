@@ -386,9 +386,12 @@ describe('GET /api/portal/project reads the published schedule only', () => {
   })
 
   it('reads live values for a shared schedule that was never published', async () => {
-    // Sharing does not write a snapshot, so this is the ordinary state of a
-    // freshly shared plan, not a pre-migration relic. Live is what the client's
-    // own share link serves for it, so the card matches the link.
+    // Back-compat only. Sharing now writes a first snapshot (POST
+    // /api/admin/schedules/[id]/share), so a schedule shared from here on
+    // always has one and this branch cannot be reached by new data. It stays
+    // for the rows shared BEFORE that change, which still carry a null
+    // snapshot. Live is what the client's own share link serves for those, so
+    // the card matches the link.
     state.tables.projectSchedules = [{ ...SHARED_SCHEDULE, publishedSnapshot: null, publishedAt: null }]
     state.tables.scheduleRows = [
       { scheduleId: 'sch_shared', rowType: 'section_header', label: 'Discovery', startWeek: null, endWeek: null, position: 0 },

@@ -11,16 +11,19 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 // How far back an inbound (client-authored) last message can be and still count
 // as "waiting on you". Older than this is treated as stale, not a live reply.
 const LOOKBACK_DAYS = 60
-// Max rows the card ever needs, PER KIND. A single shared cap let a run of
-// newer conversation rows spend the whole budget, so the card could render its
-// empty line while request replies were in fact waiting. Each kind now gets
-// its own budget and the consumer filters on kind, so one can never starve the
-// other.
-const CAP_PER_KIND = 12
+// Max rows the card ever needs. Every row is a request now, so a single cap can
+// no longer be spent by one kind on behalf of another.
+const CAP = 12
+// Newest messages read per request in the window. Only the newest VISIBLE row
+// per request decides the answer, so the read is bounded rather than pulling
+// the whole 60 day history (bodies are Tiptap JSON, and D1's result size is the
+// failure mode on a migrated org). Twenty apiece leaves room for a burst of
+// internal notes on top of the reply that settles it.
+const MESSAGE_BUDGET_PER_REQUEST = 20
 
 interface ReplyThread {
   id: string
-  kind: 'conversation' | 'request'
+  kind: 'request'
   threadTitle: string
   clientName: string | null
   lastSnippet: string
@@ -30,9 +33,9 @@ interface ReplyThread {
 }
 
 // ── GET /api/admin/overview/replies-waiting?scope=me ────────────────────────
-// Threads (conversations + request threads) the signed-in team member is on
-// where the LAST non-deleted message was authored by a client contact - i.e.
-// the ball is in the member's court. Newest inbound first, capped.
+// Request threads the signed-in team member is on where the LAST message the
+// client can see was authored by a client contact - i.e. the ball is in the
+// member's court. Newest inbound first, capped.
 //
 // Honest empty: returns { threads: [] } when nothing is waiting (or the caller
 // has no team_members row). Only scope=me is supported today; any other scope
@@ -40,11 +43,20 @@ interface ReplyThread {
 //
 // Every row opens the REQUEST the reply was written on. The standalone
 // Messages page is hidden (app/(dashboard)/messages/page.tsx redirects an
-// admin to /overview and there is no [id] route at all), so the conversation
-// rows this feed used to hand out as `/messages/{id}` were a hard 404. A
-// conversation that is attached to a request is emitted against that request
-// instead; one that is attached to nothing has nowhere to land and is skipped
-// until the surface comes back.
+// admin to /overview and there is no [id] route at all), so this feed no
+// longer reads conversations at all: it used to hand rows out as
+// `/messages/{id}` (a hard 404), then as the request its conversation was
+// attached to, which resolved the client name off conversations.org_id and the
+// title off a left join that a deleted request answers with nulls. Every
+// message on a request carries requests.id whether or not it also carries a
+// conversation id, so the request branch alone already sees the whole thread,
+// and dropping the second pass saves two D1 reads on every overview load.
+// Restore it in the same change that re-renders the Messages surface.
+//
+// "The last message the client can see": internal notes are excluded, so
+// reading a client's question and writing a studio-only note beside it does
+// not clear the request off this card. An answer the client never receives is
+// not an answer.
 export async function GET(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
@@ -73,11 +85,6 @@ export async function GET(req: NextRequest) {
   const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString()
   const now = Date.now()
   const threads: ReplyThread[] = []
-  // Requests already listed, so a reply that reaches this member through BOTH
-  // the request and its conversation is one row, not two. The request branch
-  // runs first because it sees every message on the request (with or without a
-  // conversation id) and so settles the "last message" question properly.
-  const listedRequestIds = new Set<string>()
 
   // ── Request threads the member owns or participates on ────────────────────
   try {
@@ -115,17 +122,22 @@ export async function GET(req: NextRequest) {
         .leftJoin(schema.organisations, eq(schema.requests.orgId, schema.organisations.id))
         .where(and(
           inArray(schema.messages.requestId, reqIdList),
+          // Studio-only notes are not an answer to the client, so they must not
+          // win the per-request "last message" race. Without this, reading a
+          // client's question and writing an internal note beside it cleared
+          // the request off the card while the client was still waiting.
+          eq(schema.messages.isInternal, false),
           isNull(schema.messages.deletedAt),
           gte(schema.messages.createdAt, cutoff),
         ))
         .orderBy(desc(schema.messages.createdAt))
+        .limit(reqIdList.length * MESSAGE_BUDGET_PER_REQUEST)
 
       const seen = new Set<string>()
       for (const r of rows) {
         const key = r.requestId
         if (!key || seen.has(key)) continue
         seen.add(key)
-        listedRequestIds.add(key)
         if (r.authorType !== 'contact') continue
         threads.push({
           id: key,
@@ -143,88 +155,9 @@ export async function GET(req: NextRequest) {
     // requests / messages tables missing - skip request threads.
   }
 
-  // ── Conversations the member participates in ──────────────────────────────
-  try {
-    const convRows = await drizzle
-      .select({ conversationId: schema.conversationParticipants.conversationId })
-      .from(schema.conversationParticipants)
-      .where(and(
-        eq(schema.conversationParticipants.participantId, memberId),
-        eq(schema.conversationParticipants.participantType, 'team_member'),
-      ))
-    const convIds = [...new Set(convRows.map(c => c.conversationId))]
-
-    if (convIds.length > 0) {
-      const rows = await drizzle
-        .select({
-          messageId: schema.messages.id,
-          conversationId: schema.messages.conversationId,
-          body: schema.messages.body,
-          authorType: schema.messages.authorType,
-          createdAt: schema.messages.createdAt,
-          convName: schema.conversations.name,
-          convOrgId: schema.conversations.orgId,
-          convRequestId: schema.conversations.requestId,
-          reqTitle: schema.requests.title,
-          orgName: schema.organisations.name,
-        })
-        .from(schema.messages)
-        .innerJoin(schema.conversations, eq(schema.messages.conversationId, schema.conversations.id))
-        .leftJoin(schema.requests, eq(schema.conversations.requestId, schema.requests.id))
-        .leftJoin(schema.organisations, eq(schema.conversations.orgId, schema.organisations.id))
-        .where(and(
-          inArray(schema.messages.conversationId, convIds),
-          isNull(schema.messages.deletedAt),
-          gte(schema.messages.createdAt, cutoff),
-        ))
-        .orderBy(desc(schema.messages.createdAt))
-
-      const seen = new Set<string>()
-      for (const r of rows) {
-        const key = r.conversationId
-        if (!key || seen.has(key)) continue
-        seen.add(key)
-        if (r.authorType !== 'contact') continue
-        // Only a conversation attached to a request has a page to open, and
-        // the request branch above already carries every request this member
-        // is ON. What survives here is the reply that arrived on a request
-        // somebody else owns while this member sits in its thread.
-        const target = r.convRequestId
-        if (!target || listedRequestIds.has(target)) continue
-        listedRequestIds.add(target)
-        threads.push({
-          id: target,
-          kind: 'request',
-          threadTitle: r.reqTitle?.trim() || r.convName?.trim() || 'Request',
-          clientName: r.orgName?.trim() || null,
-          lastSnippet: snippet(r.body),
-          ago: relativeAgo(r.createdAt, now),
-          at: r.createdAt,
-          to: `/requests/${target}`,
-        })
-      }
-    }
-  } catch {
-    // conversations / messages tables missing - skip conversation threads.
-  }
-
   threads.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
 
-  return NextResponse.json({ threads: capPerKind(threads, CAP_PER_KIND) })
-}
-
-/** Keep at most `cap` rows of each kind, newest first, order preserved. Local
- *  by rule: a route module may only export HTTP methods and route config. */
-function capPerKind(threads: ReplyThread[], cap: number): ReplyThread[] {
-  const used = new Map<ReplyThread['kind'], number>()
-  const kept: ReplyThread[] = []
-  for (const t of threads) {
-    const n = used.get(t.kind) ?? 0
-    if (n >= cap) continue
-    used.set(t.kind, n + 1)
-    kept.push(t)
-  }
-  return kept
+  return NextResponse.json({ threads: threads.slice(0, CAP) })
 }
 
 // Plain-text preview of a Tiptap-JSON (or raw) message body, whitespace

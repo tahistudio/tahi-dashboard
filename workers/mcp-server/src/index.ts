@@ -555,6 +555,7 @@ const TOOLS: ToolDef[] = [
     templateId: prop('string', 'Task template ID'),
     orgId: prop('string', 'Client organisation ID'),
     assigneeId: prop('string', 'Team member ID to assign'),
+    actorTeamMemberId: prop('string', "The team member YOU are acting as. Pass it when the assignee is that same person, so they are not sent a bell row about work they gave themselves. This server authenticates as the service user, which is not any team member's login, so the route cannot work it out on its own."),
   }, ['templateId']),
   tool('delete_task', 'Delete a task. Its checklist items cascade and its blocker links are swept.', {
     taskId: prop('string', 'Task ID'),

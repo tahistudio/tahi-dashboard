@@ -7,6 +7,11 @@
  * appeared on the board and waited to be noticed. POST /api/admin/tasks and
  * PATCH /api/admin/tasks/[id] both tell the assignee, so this one now does
  * too, on the same two rules: never a contact, and never the caller.
+ *
+ * "Never the caller" needs help from the caller on this door, because the MCP
+ * server authenticates as the service user rather than as a team member's
+ * login. It may name itself with actorTeamMemberId, which the route prefers
+ * over the login lookup, exactly as POST /api/admin/tasks does.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -104,6 +109,27 @@ describe('POST /api/admin/tasks/from-template', () => {
     callerTeamMemberId = 'tm_staci'
     await POST(post({ templateId: 'tpl1', assigneeId: 'tm_staci' }) as never)
     expect(notified).toHaveLength(0)
+  })
+
+  it('says nothing when a service caller names itself as the actor', async () => {
+    // The worker MCP authenticates as the service user, which is nobody's
+    // login, so resolveTeamMember answers null and the self-check had nothing
+    // to compare against: an MCP run that applied a template to the asker rang
+    // the asker's own bell.
+    callerTeamMemberId = null
+    await POST(post({
+      templateId: 'tpl1', assigneeId: 'tm_staci', actorTeamMemberId: 'tm_staci',
+    }) as never)
+    expect(notified).toHaveLength(0)
+  })
+
+  it('still tells the assignee when the stated actor is somebody else', async () => {
+    callerTeamMemberId = null
+    await POST(post({
+      templateId: 'tpl1', assigneeId: 'tm_staci', actorTeamMemberId: 'tm_liam',
+    }) as never)
+    expect(notified).toHaveLength(1)
+    expect(notified[0]).toMatchObject({ recipient: { teamMemberId: 'tm_staci' } })
   })
 
   it('says nothing when the template is applied unassigned', async () => {

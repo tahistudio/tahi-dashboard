@@ -705,6 +705,14 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
     '/api/portal/invoices?status=all',
   )
   const invoicesDenied = invoicesError instanceof ApiError && invoicesError.status === 403
+  // Nothing is said about the org's money until the read answers one way or
+  // the other. The denial takes a round trip to arrive, and for that round trip
+  // the card said "No invoices yet." and the strip said "Invoices due 0 / all
+  // settled" to a seat whose org has plenty, which is the exact claim this pass
+  // set out to remove. The card holds its place with a shimmer rather than
+  // vanishing, so the plan card beside it does not change width under the
+  // reader on the ordinary path.
+  const invoicesSettled = !!invoicesData || !!invoicesError
   const { data: subData } = useResource<SubscriptionResp>('/api/portal/subscription')
 
   // Retainer (TrackBoard) vs project (ProjectBoard): derived from the real
@@ -829,12 +837,12 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         nearestUnpaid.dueDate,
       )}`,
       verb: 'Pay',
-      // Guarded in JS as well as visually. NeedsYou declares a `ro` prop but
-      // does not read it, so the only thing standing between an impersonating
-      // admin and the client's live Stripe page was the CSS pointer-events
-      // rule on .nr-verb, which a keyboard walks straight past. The Invoices
-      // card disables its own Pay under `ro`; the same verb answers the same
-      // way here.
+      // Belt and braces. NeedsYou now disables its own verb under `ro`
+      // (ov-kit.tsx), so an impersonating admin cannot reach the client's live
+      // Stripe page by keyboard the way the CSS pointer-events rule on
+      // .nr-verb alone allowed. Withholding the handler as well means this row
+      // does not depend on the kit remembering: the Invoices card guards its
+      // Pay the same way, and the two verbs answer the same way.
       onAct: ro ? undefined : () => openDestination(invoicePayDestination(nearestUnpaid)),
     })
   }
@@ -882,8 +890,10 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   ]
   // "Invoices due 0 / all settled" is a claim about money this seat is not
   // allowed to see, so the tile goes rather than reassuring somebody wrongly.
-  // The strip is flex, so three tiles simply share the width.
-  if (!invoicesDenied) {
+  // The strip is flex, so three tiles simply share the width. It stays away
+  // until the read has answered, too: a reassurance nobody has checked yet is
+  // the same lie one round trip earlier.
+  if (invoicesSettled && !invoicesDenied) {
     vitals.push({
       lbl: 'Invoices due',
       num: invDueDisplay,
@@ -1114,8 +1124,20 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         {/* A seat that may not read the org's invoices gets no invoices card at
             all. Rendering it empty told them "No invoices yet." about bills
             that exist, beside a Pay button for a list they were never served.
-            The plan card takes the full row in its place. */}
-        {!invoicesDenied && (
+            The plan card takes the full row in its place.
+            While the read is still in flight the card is a shimmer in the same
+            span, so the answer arrives without the plan card jumping from 5 to
+            12 and back under the reader. */}
+        {!invoicesSettled && (
+          <Card span={7} edge="warn">
+            <CardH ic="receipt" title="Invoices" />
+            <div
+              className="tahi-shimmer"
+              style={{ height: '5.5rem', borderRadius: '0.625rem', background: 'var(--bg-secondary)' }}
+            />
+          </Card>
+        )}
+        {invoicesSettled && !invoicesDenied && (
         <Card span={7} edge="warn">
           {/* The link goes to /invoices, so it says so. "Billing" pointed at a
               different page in the client's head (and at a real /billing route
