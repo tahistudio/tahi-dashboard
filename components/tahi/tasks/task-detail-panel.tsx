@@ -63,7 +63,14 @@ import { Avatar } from '@/components/tahi/avatar'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { DueDateChip } from '@/components/tahi/due-date-chip'
 import { useToast } from '@/components/tahi/toast'
-import { CATEGORY_CONFIG, TASK_CLOSED_STATUSES, TASK_STATUSES } from '@/lib/status-config'
+import {
+  CATEGORY_CONFIG,
+  REQUEST_STATUS_LABELS,
+  REQUEST_STATUS_TONE,
+  TASK_CLOSED_STATUSES,
+  TASK_STATUSES,
+} from '@/lib/status-config'
+import { parseSubjectKey, subjectKey } from '@/lib/blockers'
 import { TASK_PRIORITIES, taskPriorityLabel } from '@/lib/task-priorities'
 import { formatHours } from '@/lib/tasks-planner'
 import {
@@ -76,6 +83,7 @@ import {
   TASK_LEVELS,
   TASK_LEVEL_HINTS,
   TASK_LEVEL_LABELS,
+  isTaskBlocked,
   levelOf,
   type TaskLevel,
   type TaskRow,
@@ -93,8 +101,9 @@ import type {
   TaskPerson,
   TaskClientOption,
   TaskRequestOption,
-  TaskDependencyRow,
+  BlockerRow,
 } from '@/components/tahi/tasks/task-types'
+import type { BlockerCandidate, BlockerSubjectType } from '@/lib/blockers'
 
 export interface TaskDetailPanelProps {
   open: boolean
@@ -112,9 +121,12 @@ export interface TaskDetailPanelProps {
   requests: readonly TaskRequestOption[]
 
   subtasks: readonly TaskSubtask[] | undefined
-  blockedBy: readonly TaskDependencyRow[] | undefined
-  /** Candidates for the add-dependency picker: every other open task. */
-  blockerCandidates: readonly { id: string; title: string }[]
+  /** What this task waits on. A blocker is a task OR a request. */
+  blockedBy: readonly BlockerRow[] | undefined
+  /** The picker searches the server, not a list the page already holds, so it
+   *  can see a paginated request or a task outside the current lens. Scoped
+   *  the same way the tasks and requests lists are. */
+  onSearchBlockers: (query: string) => Promise<BlockerCandidate[]>
 
   /**
    * One patch per edit. The shell makes it optimistic.
@@ -140,8 +152,8 @@ export interface TaskDetailPanelProps {
   onToggleSubtask: (taskId: string, subtaskId: string, completed: boolean) => Promise<void>
   onDeleteSubtask: (taskId: string, subtaskId: string) => Promise<void>
 
-  onAddBlocker: (taskId: string, blockerTaskId: string) => Promise<void>
-  onRemoveBlocker: (taskId: string, depId: string) => Promise<void>
+  onAddBlocker: (taskId: string, blocker: { type: BlockerSubjectType; id: string }) => Promise<void>
+  onRemoveBlocker: (taskId: string, linkId: string) => Promise<void>
 
   /** Follow a blocker without closing: the shell just changes the selection. */
   onOpenTask: (taskId: string) => void
@@ -539,7 +551,7 @@ function TaskDetailBody({
   requests,
   subtasks,
   blockedBy,
-  blockerCandidates,
+  onSearchBlockers,
   onPatch,
   onDuplicate,
   onAddSubtask,
@@ -564,6 +576,45 @@ function TaskDetailBody({
   const clientName = task.orgId
     ? (clients.find(c => c.id === task.orgId)?.name ?? task.orgName ?? null)
     : null
+
+  // ---- The blocker picker's server search ------------------------------------
+  //
+  // Debounced at 250ms, and every response carries the query it answered so a
+  // slow early request cannot land on top of a fast later one and repopulate
+  // the list with results for text nobody is looking at any more.
+  const [blockerQuery, setBlockerQuery] = React.useState('')
+  const [blockerResults, setBlockerResults] = React.useState<readonly BlockerCandidate[]>([])
+  const [blockerSearching, setBlockerSearching] = React.useState(false)
+  const blockerSearchSeq = React.useRef(0)
+
+  React.useEffect(() => {
+    const query = blockerQuery.trim()
+    if (!query) {
+      blockerSearchSeq.current += 1
+      setBlockerResults([])
+      setBlockerSearching(false)
+      return
+    }
+
+    const seq = ++blockerSearchSeq.current
+    setBlockerSearching(true)
+    const timer = window.setTimeout(() => {
+      void onSearchBlockers(query)
+        .then(found => {
+          if (seq !== blockerSearchSeq.current) return
+          setBlockerResults(found)
+        })
+        .catch(() => {
+          if (seq !== blockerSearchSeq.current) return
+          setBlockerResults([])
+        })
+        .finally(() => {
+          if (seq === blockerSearchSeq.current) setBlockerSearching(false)
+        })
+    }, 250)
+
+    return () => window.clearTimeout(timer)
+  }, [blockerQuery, onSearchBlockers])
 
   /**
    * Every write goes through here. The shell owns the optimistic update, the
@@ -773,22 +824,58 @@ function TaskDetailBody({
   // ---- Blockers --------------------------------------------------------------
 
   const blockers = blockedBy ?? []
-  const blockedIds = new Set(blockers.map(b => b.taskId))
-  const blockerOptions: InlineMenuOption[] = blockerCandidates
-    .filter(c => c.id !== task.id && !blockedIds.has(c.id))
-    .map(c => ({ value: c.id, label: c.title, keywords: c.title }))
+  const linkedKeys = new Set(blockers.map(b => subjectKey(b.otherType, b.otherId)))
 
-  async function addBlocker(blockerTaskId: string) {
+  const blockerOptions: InlineMenuOption[] = blockerResults
+    .filter(c => !(c.type === 'task' && c.id === task.id) && !linkedKeys.has(subjectKey(c.type, c.id)))
+    .map(c => ({
+      value: subjectKey(c.type, c.id),
+      // The server matched on a title or a request number, so the local pass
+      // is off (serverFiltered) and `keywords` is only here so the picker
+      // still degrades sensibly if that is ever turned back on.
+      keywords: [c.label, c.ref, c.orgName].filter(Boolean).join(' '),
+      node: (
+        <span className="inline-flex items-center" style={{ gap: '0.375rem', minWidth: 0 }}>
+          {c.type === 'request'
+            ? <Inbox size={11} aria-hidden style={{ flexShrink: 0, color: 'var(--color-text-subtle)' }} />
+            : <ListChecks size={11} aria-hidden style={{ flexShrink: 0, color: 'var(--color-text-subtle)' }} />}
+          {c.ref && (
+            <span style={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-subtle)' }}>
+              {c.ref}
+            </span>
+          )}
+          <span className="truncate" style={{ minWidth: 0 }}>{c.label}</span>
+          {c.orgName && (
+            <span className="truncate" style={{ minWidth: 0, color: 'var(--color-text-subtle)' }}>
+              {c.orgName}
+            </span>
+          )}
+        </span>
+      ),
+    }))
+
+  /**
+   * The picker's empty line does three jobs, and saying the wrong one is
+   * worse than saying nothing: before a keystroke there is nothing to report,
+   * during a fetch the list is stale rather than empty, and after one an
+   * empty result is a real answer.
+   */
+  const blockerEmptyMessage = blockerQuery.trim() === ''
+    ? 'Type to search tasks and requests'
+    : blockerSearching
+      ? 'Searching...'
+      : 'Nothing open matches that'
+
+  async function addBlocker(optionValue: string) {
+    const parsed = parseSubjectKey(optionValue)
+    if (!parsed) return
     try {
-      await onAddBlocker(task.id, blockerTaskId)
+      await onAddBlocker(task.id, { type: parsed.type, id: parsed.id })
     } catch (err) {
-      const message = err instanceof Error ? err.message.toLowerCase() : ''
-      showToast(
-        message.includes('circular') || message.includes('loop') || message.includes('cycle')
-          ? 'That would make a loop'
-          : 'Could not add that blocker',
-        'error',
-      )
+      // The route now returns the exact sentence a human should read ("That
+      // would make a loop", "That link already exists", the family-pair one),
+      // so this surfaces it rather than guessing from a substring match.
+      showToast(err instanceof Error && err.message ? err.message : 'Could not add that blocker', 'error')
     }
   }
 
@@ -865,7 +952,7 @@ function TaskDetailBody({
           <span style={{ marginTop: '0.375rem', display: 'inline-flex' }}>
             <TaskTick
               done={done}
-              blocked={task.status === 'blocked' || (task.blockedByCount ?? 0) > 0}
+              blocked={isTaskBlocked(task)}
               size="lg"
               disabled={readOnly}
               title={task.title}
@@ -984,22 +1071,61 @@ function TaskDetailBody({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
                 {blockers.map(b => (
                   <div
-                    key={b.depId}
+                    key={b.linkId}
                     className="flex items-center"
                     style={{ gap: '0.5rem', padding: '0.25rem 0', fontSize: '0.78125rem' }}
                   >
-                    <TaskStatusBadge status={b.taskStatus} />
+                    {/* A request status is not a task status. TaskStatusBadge
+                        falls back to a neutral pill printing the raw value, so
+                        a request blocker would have read a grey `client_review`. */}
+                    {b.otherType === 'request' ? (
+                      <Badge
+                        tone={REQUEST_STATUS_TONE[b.otherStatus] ?? 'neutral'}
+                        variant="soft"
+                        size="sm"
+                        leader="dot"
+                      >
+                        {REQUEST_STATUS_LABELS[b.otherStatus] ?? b.otherStatus.replace(/_/g, ' ')}
+                      </Badge>
+                    ) : (
+                      <TaskStatusBadge status={b.otherStatus} />
+                    )}
+                    {/* The kind is legible without a legend: the same Inbox
+                        glyph the Links card spends on a request. */}
+                    {b.otherType === 'request' && (
+                      <Inbox
+                        size={11}
+                        aria-hidden="true"
+                        style={{ flexShrink: 0, color: 'var(--color-text-subtle)' }}
+                      />
+                    )}
+                    {b.otherRef && (
+                      <span
+                        style={{
+                          flexShrink: 0,
+                          fontSize: '0.71875rem',
+                          fontWeight: 600,
+                          fontVariantNumeric: 'tabular-nums',
+                          color: 'var(--color-text-subtle)',
+                        }}
+                      >
+                        {b.otherRef}
+                      </span>
+                    )}
                     <span
                       className="truncate"
                       style={{ flex: 1, minWidth: 0, fontWeight: 600, color: 'var(--color-text)' }}
-                      title={b.taskTitle}
+                      title={b.otherOrgName ? `${b.otherTitle} (${b.otherOrgName})` : b.otherTitle}
                     >
-                      {b.taskTitle}
+                      {b.otherTitle}
                     </span>
                     <button
                       type="button"
                       className="tskd-open tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 min-h-11 md:min-h-6"
-                      onClick={() => onOpenTask(b.taskId)}
+                      onClick={() => {
+                        if (b.otherType === 'request') onOpenRequest(b.otherId)
+                        else onOpenTask(b.otherId)
+                      }}
                     >
                       Open
                     </button>
@@ -1007,9 +1133,9 @@ function TaskDetailBody({
                       <button
                         type="button"
                         className="tskd-x tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 h-11 w-11 md:h-6 md:w-6"
-                        aria-label={`Stop waiting on ${b.taskTitle}`}
+                        aria-label={`Stop waiting on ${b.otherTitle}`}
                         title="Remove blocker"
-                        onClick={() => { void onRemoveBlocker(task.id, b.depId).catch(() => undefined) }}
+                        onClick={() => { void onRemoveBlocker(task.id, b.linkId).catch(() => undefined) }}
                       >
                         <X size={13} aria-hidden="true" />
                       </button>
@@ -1019,7 +1145,10 @@ function TaskDetailBody({
               </div>
             )}
 
-            {!readOnly && blockerOptions.length > 0 && (
+            {/* No `blockerOptions.length > 0` guard. The list is empty until
+                someone types, so guarding on it would hide the picker forever;
+                the empty state is carried by emptyMessage instead. */}
+            {!readOnly && (
               <div className="flex items-center" style={{ marginTop: blockers.length > 0 ? '0.375rem' : '0.5rem' }}>
                 <InlineMenuField
                   value="none"
@@ -1036,8 +1165,10 @@ function TaskDetailBody({
                   )}
                   ariaLabel="Add a blocker"
                   searchable
-                  searchPlaceholder="Search tasks…"
-                  emptyMessage="No other open task to wait on"
+                  serverFiltered
+                  onQueryChange={setBlockerQuery}
+                  searchPlaceholder="Search tasks and requests"
+                  emptyMessage={blockerEmptyMessage}
                   width="18rem"
                 />
               </div>

@@ -44,6 +44,26 @@ export interface BlockerRow {
   otherOrgName: string | null
 }
 
+/**
+ * One option in the blocker picker, as GET /api/admin/blockers/search returns
+ * it.
+ *
+ * Declared here rather than beside the query that builds it because the
+ * picker lives in a 'use client' component, and lib/blockers-server.ts pulls
+ * in next/server, drizzle and the schema. A type-only import would be erased,
+ * but the honest split is that a wire shape both ends read belongs in the
+ * module neither end has to be careful about.
+ */
+export interface BlockerCandidate {
+  type: BlockerSubjectType
+  id: string
+  label: string
+  /** '#042' for a request, null for a task. */
+  ref: string | null
+  status: string
+  orgName: string | null
+}
+
 export function isBlockerSubjectType(value: unknown): value is BlockerSubjectType {
   return value === 'task' || value === 'request'
 }

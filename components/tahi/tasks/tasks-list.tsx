@@ -43,7 +43,7 @@ import { TaskQuickAdd } from '@/components/tahi/tasks/task-quick-add'
 import { useToast } from '@/components/tahi/toast'
 import { TASK_STATUSES } from '@/lib/status-config'
 import { taskPriorityLabel } from '@/lib/task-priorities'
-import { levelOf, taskDayKey, taskShiftedDayKey, type TaskRow } from '@/lib/tasks-views'
+import { isTaskBlocked, levelOf, taskDayKey, taskShiftedDayKey, type TaskRow } from '@/lib/tasks-views'
 import type { QuickAddParse } from '@/lib/tasks-quick-add'
 // Shared shapes from Slice 1. Do NOT redeclare them here: Slice 5 imports the
 // same two and cannot see this file until Wave B merges.
@@ -144,12 +144,6 @@ function isDone(row: TaskRow): boolean {
   return TASK_CLOSED_STATUSES.includes(row.status)
 }
 
-/** Decision 12: the tick's dashed ring reads either kind of stall, so it
- *  agrees with the Blocked saved view and the rail's count. */
-function isStalled(row: TaskRow): boolean {
-  return row.status === 'blocked' || (row.blockedByCount ?? 0) > 0
-}
-
 function subtaskTotal(row: TaskRow): number {
   return row.subtaskCount ?? 0
 }
@@ -204,7 +198,7 @@ function TitleCell({
     >
       <TaskTick
         done={done}
-        blocked={isStalled(row)}
+        blocked={isTaskBlocked(row)}
         disabled={readOnly}
         title={row.title}
         onToggle={() => onToggleDone(row.id, !done)}
@@ -626,7 +620,7 @@ function TaskMobileCard({
       >
         <TaskTick
           done={done}
-          blocked={isStalled(row)}
+          blocked={isTaskBlocked(row)}
           disabled={readOnly}
           title={row.title}
           onToggle={() => onToggleDone(row.id, !done)}

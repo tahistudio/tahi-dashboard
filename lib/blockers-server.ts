@@ -30,6 +30,7 @@ import {
   requestRef,
   subjectKey,
   wouldCycle,
+  type BlockerCandidate,
   type BlockerRow,
   type BlockerSubject,
   type BlockerSubjectType,
@@ -378,14 +379,9 @@ export async function sweepBlockers(drizzle: Drizzle, subject: BlockerSubject): 
 
 // ── Picker search ────────────────────────────────────────────────────────────
 
-export interface BlockerCandidate {
-  type: BlockerSubjectType
-  id: string
-  label: string
-  ref: string | null
-  status: string
-  orgName: string | null
-}
+// The candidate shape itself lives in lib/blockers.ts, so the picker (a
+// 'use client' component) can read it without reaching into this module.
+export type { BlockerCandidate } from '@/lib/blockers'
 
 /**
  * Open tasks and requests the caller may actually reach.

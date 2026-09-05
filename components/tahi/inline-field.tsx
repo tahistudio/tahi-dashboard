@@ -144,6 +144,40 @@ export interface InlineMenuOption {
   keywords?: string
 }
 
+/**
+ * What a keystroke in the menu's search box does: update the box, and tell
+ * the caller so a server-backed picker can fetch.
+ *
+ * A function rather than two inline statements so the contract is pinned by a
+ * test in a repo with no render tests: every keystroke is reported, including
+ * the one that empties the box, and an absent callback is fine (which is the
+ * four call sites that do not search a server).
+ */
+export function menuQueryChange(next: string, notify?: (query: string) => void): string {
+  notify?.(next)
+  return next
+}
+
+/**
+ * The local search pass over the options.
+ *
+ * `serverFiltered` turns it off, and that is not an optimisation. A
+ * server-searched option carries a rich `node` and no `label`, so running
+ * this over it would drop every row the server matched on a title or a
+ * request number, and the picker would look permanently empty.
+ */
+export function filterMenuOptions(
+  options: readonly InlineMenuOption[],
+  query: string,
+  serverFiltered = false,
+): InlineMenuOption[] {
+  const q = query.trim().toLowerCase()
+  if (serverFiltered || !q) return [...options]
+  return options.filter(o =>
+    (o.label ?? '').toLowerCase().includes(q) ||
+    (o.keywords ?? '').toLowerCase().includes(q))
+}
+
 export function InlineMenuField({
   value,
   options,
@@ -155,6 +189,8 @@ export function InlineMenuField({
   searchPlaceholder = 'Search…',
   emptyMessage = 'Nothing to pick',
   width = '14rem',
+  onQueryChange,
+  serverFiltered = false,
 }: {
   value: string
   options: InlineMenuOption[]
@@ -166,21 +202,24 @@ export function InlineMenuField({
   searchPlaceholder?: string
   emptyMessage?: string
   width?: string
+  /** Called on every keystroke in the search box, so a caller can fetch. */
+  onQueryChange?: (query: string) => void
+  /** Set when the caller has already filtered (server search). The local
+   *  label/keywords pass is then skipped, because it would drop rows the
+   *  server matched on a field that is not on the option. */
+  serverFiltered?: boolean
 }) {
   const ref = useRef<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
 
+  // Closing clears the box. A server-backed caller hears about it through
+  // onQueryChange on the next open, which is when it matters.
   useEffect(() => { if (!open) setQuery('') }, [open])
 
   if (readOnly) return <>{renderValue(value)}</>
 
-  const q = query.trim().toLowerCase()
-  const filtered = q
-    ? options.filter(o =>
-        (o.label ?? '').toLowerCase().includes(q) ||
-        (o.keywords ?? '').toLowerCase().includes(q))
-    : options
+  const filtered = filterMenuOptions(options, query, serverFiltered)
 
   return (
     <>
@@ -210,7 +249,7 @@ export function InlineMenuField({
             <input
               type="text"
               value={query}
-              onChange={e => setQuery(e.target.value)}
+              onChange={e => setQuery(menuQueryChange(e.target.value, onQueryChange))}
               placeholder={searchPlaceholder}
               aria-label={searchPlaceholder}
               autoFocus
