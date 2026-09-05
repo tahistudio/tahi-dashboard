@@ -873,7 +873,10 @@ function DataRow<Row>({
           <td
             data-row-control
             style={{
-              padding: `${paddingY} 0 ${paddingY} 1rem`,
+              // No padding of its own: the control carries it instead, so the
+              // whole cell is the target rather than an 18px dot floating in
+              // the middle of one. Same ink, a hit area a hand can find.
+              padding: 0,
               borderBottom: isLast && !isExpanded ? 'none' : '1px solid var(--color-border-subtle)',
               verticalAlign: 'middle',
               width: '2.75rem',
@@ -888,6 +891,7 @@ function DataRow<Row>({
               checked={isSelected}
               onChange={e => toggleRow(rowId, rowIndex, e)}
               ariaLabel={isSelected ? 'Deselect row' : 'Select row'}
+              fillCell={`${paddingY} 0 ${paddingY} 1rem`}
             />
           </td>
         )}
@@ -1235,11 +1239,16 @@ function SelectCheckbox({
   indeterminate = false,
   onChange,
   ariaLabel,
+  fillCell,
 }: {
   checked: boolean
   indeterminate?: boolean
   onChange: (e: React.MouseEvent) => void
   ariaLabel: string
+  /** The row cell's padding, moved onto this control so the button IS the
+   *  cell: clicking the space beside the box selects the row. Set by the body
+   *  cells; the header leaves it unset and keeps the inline sizing. */
+  fillCell?: string
 }) {
   const showCheck = checked || indeterminate
   const [hover, setHover] = React.useState(false)
@@ -1252,10 +1261,12 @@ function SelectCheckbox({
       onClick={(e) => { e.stopPropagation(); onChange(e) }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className="tahi-focus-ring inline-flex items-center justify-center h-11 w-11 mx-[-0.8125rem] md:h-[1.125rem] md:w-[1.125rem] md:mx-0"
+      className={fillCell
+        ? 'tahi-focus-ring flex items-center justify-start h-full w-full min-h-[2.75rem] md:min-h-0'
+        : 'tahi-focus-ring inline-flex items-center justify-center h-11 w-11 mx-[-0.8125rem] md:h-[1.125rem] md:w-[1.125rem] md:mx-0'}
       style={{
         flex: 'none',
-        padding: 0,
+        padding: fillCell ?? 0,
         border: 'none',
         borderRadius: 'var(--radius-sm)',
         background: 'transparent',
