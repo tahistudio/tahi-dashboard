@@ -18,12 +18,78 @@
 import {
   DEFAULT_INVOICE_CHANNEL,
   isInvoiceChannel,
+  resolveInvoiceChannel,
   type InvoiceChannel,
 } from '@/lib/invoice-channel'
 import { isInvoicedTerms, paymentTermDays } from '@/lib/invoice-billing'
 
 /** What the studio bills in when a client has said nothing. */
 export const DEFAULT_INVOICE_CURRENCY = 'NZD'
+
+/** How the studio-default read is going, from the caller's data layer. */
+export interface StudioDefaultFetch {
+  /** The request has not answered yet. */
+  loading: boolean
+  /** The request answered with an error. Terminal, not a longer wait. */
+  failed: boolean
+}
+
+/** Everything the form needs to know about which rail a client is on. */
+export interface ChannelDefaults {
+  /**
+   * The rail the client names for itself, or null when
+   * organisations.invoiceChannel has never been set.
+   */
+  clientChannel: InvoiceChannel | null
+  /**
+   * The rail an invoice would actually go out on. Only meaningful when
+   * `known` is true: otherwise it is the hardcoded fallback standing in for an
+   * answer nobody gave.
+   */
+  effectiveChannel: InvoiceChannel
+  /** The studio default has not answered yet, and this client needs it. */
+  pending: boolean
+  /**
+   * The rail is a fact rather than a guess. False only when this client has no
+   * rail of its own AND the studio default could not be read.
+   */
+  known: boolean
+}
+
+/**
+ * Which rail a client is on, and whether that is actually known.
+ *
+ * Three states, not two, because the UI has three sentences to choose between
+ * and the difference is money:
+ *
+ * - The client names a rail. Nothing else is needed, whatever the settings
+ *   request is doing, and the operator can be told the client "usually bills
+ *   through" it.
+ * - The client names nothing and the studio default has arrived. The rail is
+ *   the studio's, so the sentence has to say so rather than attribute a
+ *   history to a client that has never been assigned one. Almost every
+ *   organisation row is this case today.
+ * - The client names nothing and the studio default cannot be read. A failed
+ *   read is NOT a longer wait: the app's SWR config does not retry or
+ *   revalidate on focus, so one failure sticks for the session. Answering
+ *   'stripe' here would open every unset client on a rail nobody chose and
+ *   print it as fact, which is why `known` goes false and the caller is
+ *   expected to stay silent and leave the destination alone.
+ */
+export function resolveChannelDefaults(
+  orgChannel: unknown,
+  studioDefault: unknown,
+  fetchState: StudioDefaultFetch,
+): ChannelDefaults {
+  const clientChannel = isInvoiceChannel(orgChannel) ? orgChannel : null
+  const needsStudioDefault = clientChannel === null
+  return {
+    clientChannel,
+    effectiveChannel: resolveInvoiceChannel(clientChannel, studioDefault),
+    pending: needsStudioDefault && fetchState.loading,
+    known: !needsStudioDefault || (!fetchState.loading && !fetchState.failed),
+  }
+}
 
 /**
  * The destination chip a new invoice opens on for this client.

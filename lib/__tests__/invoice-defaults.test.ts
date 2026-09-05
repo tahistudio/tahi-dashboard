@@ -10,6 +10,7 @@ import {
   defaultDestination,
   defaultDueDate,
   localCalendarDay,
+  resolveChannelDefaults,
 } from '@/lib/invoice-defaults'
 
 describe('defaultDestination', () => {
@@ -156,5 +157,68 @@ describe('defaultCurrency', () => {
     const allowed = ['NZD', 'USD', 'AUD', 'GBP', 'EUR'] as const
     expect(defaultCurrency('CAD', 'NZD', allowed)).toBe('NZD')
     expect(defaultCurrency('eur', 'NZD', allowed)).toBe('EUR')
+  })
+})
+
+describe('resolveChannelDefaults', () => {
+  const answered = { loading: false, failed: false }
+  const loading = { loading: true, failed: false }
+  const failed = { loading: false, failed: true }
+
+  it('uses the client rail and waits for nothing, even mid-flight', () => {
+    const state = resolveChannelDefaults('xero', 'stripe', loading)
+    expect(state.clientChannel).toBe('xero')
+    expect(state.effectiveChannel).toBe('xero')
+    expect(state.pending).toBe(false)
+    expect(state.known).toBe(true)
+  })
+
+  it('keeps the client rail even when the studio read failed', () => {
+    const state = resolveChannelDefaults('stripe', undefined, failed)
+    expect(state.effectiveChannel).toBe('stripe')
+    expect(state.known).toBe(true)
+  })
+
+  it('falls to the studio default for a client that names nothing', () => {
+    const state = resolveChannelDefaults(null, 'xero', answered)
+    expect(state.clientChannel).toBeNull()
+    expect(state.effectiveChannel).toBe('xero')
+    expect(state.pending).toBe(false)
+    expect(state.known).toBe(true)
+  })
+
+  it('waits rather than guessing while the studio default is in flight', () => {
+    const state = resolveChannelDefaults(null, undefined, loading)
+    expect(state.pending).toBe(true)
+    expect(state.known).toBe(false)
+  })
+
+  it('treats a failed studio read as unknown, not as Stripe', () => {
+    const state = resolveChannelDefaults(null, undefined, failed)
+    // It still has to name one of the two rails, so the caller is told not to
+    // trust this one rather than being handed a null it has to re-handle.
+    expect(state.effectiveChannel).toBe('stripe')
+    expect(state.pending).toBe(false)
+    expect(state.known).toBe(false)
+  })
+
+  it('reads an unrecognised client column as no channel at all', () => {
+    // The three-rail draft of this feature wrote values like this one.
+    const state = resolveChannelDefaults('xero_bank', 'xero', answered)
+    expect(state.clientChannel).toBeNull()
+    expect(state.effectiveChannel).toBe('xero')
+    expect(state.known).toBe(true)
+  })
+
+  it('reads an empty or non-string client column as no channel at all', () => {
+    expect(resolveChannelDefaults('', 'xero', answered).clientChannel).toBeNull()
+    expect(resolveChannelDefaults(undefined, 'xero', answered).clientChannel).toBeNull()
+    expect(resolveChannelDefaults(7, 'xero', answered).clientChannel).toBeNull()
+  })
+
+  it('lands on the studio-wide default when neither side says anything', () => {
+    const state = resolveChannelDefaults(null, null, answered)
+    expect(state.effectiveChannel).toBe('stripe')
+    expect(state.known).toBe(true)
   })
 })
