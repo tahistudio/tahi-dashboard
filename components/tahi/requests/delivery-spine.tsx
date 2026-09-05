@@ -32,7 +32,7 @@
  * way <CapacityStrip> keeps CAPACITY_CSS, so nothing lands in globals.css.
  */
 
-import { Check } from 'lucide-react'
+import { AlertTriangle, Check } from 'lucide-react'
 import { REQUEST_STATUS_LABELS } from '@/lib/status-config'
 
 /**
@@ -130,6 +130,13 @@ interface DeliverySpineProps {
   busy?: boolean
   /** Short line on the right of the header, e.g. "Due 12 Sep". */
   eta?: string | null
+  /** Open blockers on this request. Above zero, the header carries an amber
+   *  chip. Deliberately NOT a sixth node: every entry in PIPELINE_STATUSES is
+   *  a status setter, and a blocked request is usually still in progress. The
+   *  count is derived and coexists with any pipeline status, where `on_hold`
+   *  stays the manual human stop. Admin only, and the studio is the only
+   *  audience that ever receives it. */
+  blockedByCount?: number
 }
 
 /**
@@ -151,6 +158,7 @@ export function DeliverySpine({
   onPick,
   busy = false,
   eta,
+  blockedByCount = 0,
 }: DeliverySpineProps) {
   const currentIndex = PIPELINE_STATUSES.indexOf(status as PipelineStatus)
 
@@ -182,6 +190,28 @@ export function DeliverySpine({
         >
           Delivery
         </h2>
+        {blockedByCount > 0 && (
+          <span
+            className="inline-flex items-center"
+            style={{
+              // Not --color-warning-bg / --color-warning-text: the second does
+              // not exist and the first is deliberately not overridden in
+              // .dark. The badge family resolves for both themes.
+              gap: '0.25rem',
+              padding: '0.0625rem 0.375rem',
+              borderRadius: 'var(--radius-badge)',
+              border: '1px solid var(--badge-warning-border)',
+              background: 'var(--badge-warning-bg)',
+              color: 'var(--badge-warning-text)',
+              fontSize: '0.6875rem',
+              fontWeight: 600,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <AlertTriangle size={11} aria-hidden="true" />
+            Blocked by {blockedByCount}
+          </span>
+        )}
         {eta && (
           <span
             style={{
