@@ -27,7 +27,7 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, asc } from 'drizzle-orm'
+import { eq, asc, sql } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,7 +54,11 @@ export async function GET(req: NextRequest) {
         upfrontValueNzd: schema.deals.upfrontValueNzd,
         monthlyValueNzd: schema.deals.monthlyValueNzd,
       })
-      .from(schema.deals),
+      .from(schema.deals)
+      // Archived (soft-deleted) deals are hidden from the pipeline list; the
+      // forecast must not count them either, or the weighted headline and the
+      // stage bars carry money the board no longer shows.
+      .where(sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`),
   ])
 
   // Aggregate deals per stage.
