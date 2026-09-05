@@ -17,7 +17,7 @@ vi.mock('resend', () => ({
   },
 }))
 
-import { sendEmail } from '@/lib/email'
+import { emailFromAddress, sendEmail } from '@/lib/email'
 
 type SentPayload = {
   from: string
@@ -58,6 +58,37 @@ describe('sendEmail, the plain text alternative', () => {
   it('treats a blank text part as no text part', async () => {
     await sendEmail('jo@acme.com', 'Delivered', body, '   \n  ')
     expect('text' in lastPayload()).toBe(false)
+  })
+})
+
+describe('emailFromAddress', () => {
+  it('falls back to a branded lockup, not a bare mailbox', () => {
+    vi.stubEnv('RESEND_FROM_EMAIL', '')
+    expect(emailFromAddress()).toBe('Tahi Studio <business@tahi.studio>')
+  })
+
+  it('lets the operator override it', () => {
+    vi.stubEnv('RESEND_FROM_EMAIL', 'Tahi Studio <notifications@tahi.studio>')
+    expect(emailFromAddress()).toBe('Tahi Studio <notifications@tahi.studio>')
+  })
+
+  it('re-labels the same mailbox for an email written in one voice', () => {
+    vi.stubEnv('RESEND_FROM_EMAIL', 'Tahi Studio <notifications@tahi.studio>')
+    // Not "Liam <Tahi Studio <notifications@tahi.studio>>", which is what
+    // concatenating the configured value produced.
+    expect(emailFromAddress('Liam from Tahi Studio'))
+      .toBe('Liam from Tahi Studio <notifications@tahi.studio>')
+  })
+
+  it('re-labels a bare configured address too', () => {
+    vi.stubEnv('RESEND_FROM_EMAIL', 'hello@tahi.studio')
+    expect(emailFromAddress('Liam')).toBe('Liam <hello@tahi.studio>')
+  })
+
+  it('is what every send inherits', async () => {
+    vi.stubEnv('RESEND_FROM_EMAIL', 'Tahi Studio <notifications@tahi.studio>')
+    await sendEmail('jo@acme.com', 'Delivered', body)
+    expect(lastPayload().from).toBe('Tahi Studio <notifications@tahi.studio>')
   })
 })
 

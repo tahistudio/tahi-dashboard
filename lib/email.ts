@@ -6,6 +6,37 @@
 import { Resend } from 'resend'
 import type { ReactElement } from 'react'
 
+/**
+ * The lockup every Tahi email is sent from when the Worker has no
+ * RESEND_FROM_EMAIL set.
+ *
+ * Branded rather than bare on purpose: five routes hardcoded two different
+ * addresses between them and this module fell back to a third, unnamed one, so
+ * a client's inbox threaded the studio as three separate senders and the
+ * "[REQ-n]" subject prefix could not group anything.
+ */
+const DEFAULT_FROM = 'Tahi Studio <business@tahi.studio>'
+
+/**
+ * The from address for any send, from one place.
+ *
+ * The operator overrides it with RESEND_FROM_EMAIL, which should hold a
+ * verified lockup such as 'Tahi Studio <notifications@tahi.studio>'.
+ *
+ * `displayName` re-labels the same mailbox for the handful of emails written in
+ * one person's voice (a sales nudge is signed by a human, not by a studio).
+ * The mailbox is taken out of the configured value rather than concatenated
+ * with it, so an operator who sets a full lockup does not end up sending from
+ * "Someone <Tahi Studio <notifications@tahi.studio>>".
+ */
+export function emailFromAddress(displayName?: string): string {
+  const configured = process.env.RESEND_FROM_EMAIL?.trim()
+  const from = configured && configured.length > 0 ? configured : DEFAULT_FROM
+  if (!displayName?.trim()) return from
+  const mailbox = from.match(/<([^>]+)>/)?.[1]?.trim() ?? from
+  return `${displayName.trim()} <${mailbox}>`
+}
+
 let _resend: Resend | null = null
 
 function getResend(): Resend | null {
@@ -36,7 +67,7 @@ export async function sendEmail(
     return { success: false, error: 'RESEND_API_KEY not configured' }
   }
 
-  const from = process.env.RESEND_FROM_EMAIL ?? 'business@tahi.studio'
+  const from = emailFromAddress()
 
   try {
     const { error } = await resend.emails.send({

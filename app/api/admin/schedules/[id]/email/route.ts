@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm'
 import { render } from '@react-email/render'
 import { ScheduleShareEmail } from '@/emails/schedule-share'
 import { publicUrl } from '@/lib/app-url'
+import { emailFromAddress } from '@/lib/email'
 import { requireScheduleAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -84,7 +85,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         targetLaunchDate: schedule.targetLaunchDate,
       }))
       await resend.emails.send({
-        from: 'Tahi Studio <business@tahi.studio>',
+        from: emailFromAddress(),
         to: r.email,
         cc: ccList.length ? ccList : undefined,
         bcc: bccList.length ? bccList : undefined,

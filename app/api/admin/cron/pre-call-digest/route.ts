@@ -30,6 +30,7 @@ import { render } from '@react-email/render'
 import { Resend } from 'resend'
 import { PreCallDigestEmail, type PreCallDigestEmailProps } from '@/emails/pre-call-digest'
 import { publicUrl } from '@/lib/app-url'
+import { emailFromAddress } from '@/lib/email'
 import { logCronRun } from '@/lib/cron-runs'
 
 export const dynamic = 'force-dynamic'
@@ -253,7 +254,7 @@ export async function POST(req: NextRequest) {
       const subject = `Pre-call: ${withName} in ~30 min`
 
       await resend.emails.send({
-        from: 'Tahi Studio <notifications@tahi.studio>',
+        from: emailFromAddress(),
         to: [recipient],
         subject,
         html,
