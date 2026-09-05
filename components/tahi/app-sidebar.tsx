@@ -164,7 +164,10 @@ export function AppSidebar({
     isViewerRole,
     userEmail,
     canManagePermissions,
-    features,
+    // The feature map is resolved for the signed-in team member, so every
+    // client-only page reads as denied in it. While previewing the portal as a
+    // client, show the client nav unfiltered instead of hiding Files and Services.
+    features: isImpersonatingClient ? undefined : features,
   })
 
   const isItemActive = (href: string) => isRouteActive(pathname, href)

@@ -89,7 +89,10 @@ export function MobileBottomNav({ isAdmin = false, features }: MobileBottomNavPr
     isViewerRole,
     userEmail,
     canManagePermissions,
-    features,
+    // The feature map is resolved for the signed-in team member, so every
+    // client-only page reads as denied in it. While previewing the portal as a
+    // client, show the client nav unfiltered instead of hiding Files and Services.
+    features: isImpersonatingClient ? undefined : features,
   })
 
   // Flat lookup: href -> NavItem. Lets primary tabs pull label + icon from the
