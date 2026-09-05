@@ -39,7 +39,7 @@ describe('filterNav - client seat gating (CT.6)', () => {
     expect(navHrefs(filtered)).not.toContain('/invoices')
     expect(filtered.map(g => g.group)).not.toContain('Billing')
     // Everything the member IS allowed survives.
-    expect(navHrefs(filtered)).toEqual(['/overview', '/requests', '/files', '/services'])
+    expect(navHrefs(filtered)).toEqual(['/overview', '/requests', '/notifications', '/files', '/services'])
   })
 
   it('keeps Invoices for an admin seat', () => {
