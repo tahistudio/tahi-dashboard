@@ -4,6 +4,8 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { createNotification } from '@/lib/notifications'
+import { resolveTeamMember } from '@/lib/team-identity'
 
 /** Task templates carry their own six-value priority enum (none, low,
  *  medium, standard, high, urgent) while a task takes three. Mapping here is
@@ -109,6 +111,27 @@ export async function POST(req: NextRequest) {
         title: subtaskTitle.trim(),
         completed: false,
         createdAt: now,
+      })
+    }
+  }
+
+  // The third create door. POST /api/admin/tasks tells the assignee and PATCH
+  // /api/admin/tasks/[id] tells them, and this one, which the dashboard's
+  // template picker and the MCP create_task_from_template tool both reach,
+  // handed somebody work in silence.
+  //
+  // It writes assigneeType 'team_member' itself, so there is nothing to
+  // resolve. Never the caller: applying a template to yourself is not news.
+  if (body.assigneeId) {
+    const me = await resolveTeamMember(drizzle, userId)
+    if (me?.id !== body.assigneeId) {
+      await createNotification(drizzle, {
+        recipient: { teamMemberId: body.assigneeId },
+        type: 'task_assigned',
+        title: `Task assigned to you: "${template.name}"`,
+        body: null,
+        entityType: 'task',
+        entityId: taskId,
       })
     }
   }

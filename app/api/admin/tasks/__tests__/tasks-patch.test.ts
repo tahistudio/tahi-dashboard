@@ -38,9 +38,15 @@ vi.mock('@/db/d1', () => ({
 
 const notified: Record<string, unknown>[] = []
 let assigneeKinds: Record<string, 'team_member' | 'contact'> = {}
+let callerTeamMemberId: string | null = null
 
 vi.mock('@/lib/notifications', () => ({
   createNotification: async (_drizzle: unknown, input: Record<string, unknown>) => { notified.push(input) },
+}))
+
+vi.mock('@/lib/team-identity', () => ({
+  resolveTeamMember: async () =>
+    callerTeamMemberId ? { id: callerTeamMemberId, role: 'admin' } : null,
 }))
 
 vi.mock('@/lib/task-access', () => ({
@@ -192,6 +198,7 @@ describe('PATCH /api/admin/tasks/[id] assignee type', () => {
     deniedOrgIds = []
     current = { type: 'tahi_internal', orgId: null, requestId: null }
     assigneeKinds = { tm1: 'team_member', c1: 'contact' }
+    callerTeamMemberId = 'tm_me'
   })
 
   it('derives team_member from the id when the caller sends the id alone', async () => {
@@ -202,11 +209,31 @@ describe('PATCH /api/admin/tasks/[id] assignee type', () => {
     expect(notified[0]?.recipient).toEqual({ teamMemberId: 'tm1' })
   })
 
-  it('derives contact and addresses the notification to the contact', async () => {
+  it('never tells a client contact about a task, whoever the id names', async () => {
+    // Matches the create door. Tasks are not a client surface, so a contact
+    // addressed here would be handed a Tahi-internal task TITLE in their bell,
+    // on a row with no page to open. The task still holds them.
     const res = await PATCH(patch({ assigneeId: 'c1' }) as never, params)
     expect(res.status).toBe(200)
+    expect(updates[0].assigneeId).toBe('c1')
     expect(updates[0].assigneeType).toBe('contact')
-    expect(notified[0]?.recipient).toEqual({ contactId: 'c1' })
+    expect(notified).toHaveLength(0)
+  })
+
+  it('says nothing when the caller assigns the task to themselves', async () => {
+    // Parity with POST /api/admin/tasks and the bulk bar, which both skip the
+    // caller. Doing it from the detail panel used to ring your own bell.
+    callerTeamMemberId = 'tm1'
+    const res = await PATCH(patch({ assigneeId: 'tm1' }) as never, params)
+    expect(res.status).toBe(200)
+    expect(updates[0].assigneeId).toBe('tm1')
+    expect(notified).toHaveLength(0)
+  })
+
+  it('still tells a stated contact assignee nothing when the type is explicit', async () => {
+    const res = await PATCH(patch({ assigneeId: 'c1', assigneeType: 'contact' }) as never, params)
+    expect(res.status).toBe(200)
+    expect(notified).toHaveLength(0)
   })
 
   it('clears the type with the assignee', async () => {

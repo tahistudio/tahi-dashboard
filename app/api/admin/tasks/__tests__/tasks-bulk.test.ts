@@ -40,10 +40,27 @@ vi.mock('@/lib/team-identity', () => ({
     callerTeamMemberId ? { id: callerTeamMemberId, role: 'admin' } : null,
 }))
 
+// Two doors into the bell: one summary row goes through createNotification,
+// and the named rows go through createNotificationsForRecipient, which takes
+// the recipient once and every payload in one insert. Both are flattened into
+// the same `notified` list here, shaped like the single-row call, so the
+// assertions stay about WHAT the assignee is told rather than how it is
+// batched. `batchCalls` counts the round trips the batched door actually made.
+const batchCalls: number[] = []
+
 vi.mock('@/lib/notifications', () => ({
   createNotification: async (_drizzle: unknown, params: Record<string, unknown>) => {
     notified.push(params)
     return { delivered: 1, skipped: 0 }
+  },
+  createNotificationsForRecipient: async (
+    _drizzle: unknown,
+    recipient: Record<string, unknown>,
+    payloads: Record<string, unknown>[],
+  ) => {
+    batchCalls.push(payloads.length)
+    for (const payload of payloads) notified.push({ recipient, ...payload })
+    return { delivered: payloads.length, skipped: 0 }
   },
 }))
 
@@ -101,6 +118,7 @@ describe('PATCH /api/admin/tasks/bulk', () => {
     calls.length = 0
     selectWheres.length = 0
     notified.length = 0
+    batchCalls.length = 0
     scopedOrgIds = null
     existingIds = ['a', 'b']
     existingAssignees = {}
@@ -215,11 +233,14 @@ describe('PATCH /api/admin/tasks/bulk', () => {
     await expect(res.json()).resolves.toEqual({ success: true, updatedCount: 2 })
   })
 
-  it('names every task right up to the limit', async () => {
+  it('names every task right up to the limit, in one batched write', async () => {
     existingIds = ['a', 'b', 'c', 'd', 'e']
     await PATCH(patch({ taskIds: existingIds, updates: { assigneeId: 'tm_staci' } }) as never)
     expect(notified).toHaveLength(5)
     expect(notified.map(n => n.entityId)).toEqual(['a', 'b', 'c', 'd', 'e'])
+    // One call carrying all five, not five calls: the recipient and their
+    // in-app preference are resolved once and the rows go in together.
+    expect(batchCalls).toEqual([5])
   })
 
   it('summarises one row past it rather than filling the bell', async () => {

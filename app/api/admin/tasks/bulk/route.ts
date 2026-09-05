@@ -6,19 +6,19 @@ import { and, inArray, isNull, or } from 'drizzle-orm'
 import { isTaskPriority } from '@/lib/task-priorities'
 import { TASK_STATUSES } from '@/lib/status-config'
 import { resolveAccessScoping } from '@/lib/access-scoping'
-import { createNotification } from '@/lib/notifications'
+import { createNotification, createNotificationsForRecipient } from '@/lib/notifications'
 import { resolveTeamMember } from '@/lib/team-identity'
 
 /**
  * How many tasks a bulk assign will name one by one before it summarises.
  *
- * Every createNotification is three sequential D1 round trips (resolve the
- * recipient, read their in-app preference, insert), and the board's select-all
- * checkbox selects every FILTERED row rather than every visible one, so an
- * uncapped loop turned one click into hundreds of subrequests inside a single
- * Worker invocation. The bell also only shows the 20 newest rows and counts
- * unread from that page, so a hundred rows would bury everything else the
- * assignee had and still report 20.
+ * The cost argument that first set this cap is gone: the named rows now go in
+ * through createNotificationsForRecipient, which resolves the recipient once,
+ * reads their in-app preference once and inserts every row in a single call,
+ * so the whole fan-out is three D1 round trips whatever the size. The BELL
+ * argument stands, and is why the cap stays: the popover shows the 20 newest
+ * rows and counts unread from that page, so a hundred rows would bury
+ * everything else the assignee had and still report 20.
  *
  * Five is where a list stops being a list: up to five, each task gets its own
  * row and its own deep link, which is the useful shape. Above it, one row that
@@ -146,16 +146,19 @@ export async function PATCH(req: NextRequest) {
           entityId: null,
         })
       } else {
-        for (const task of moved) {
-          await createNotification(drizzle, {
-            recipient: { teamMemberId: newAssigneeId },
-            type: 'task_assigned',
+        // One row per task, each naming its own task and deep-linking to it,
+        // in one insert rather than one round trip per row.
+        await createNotificationsForRecipient(
+          drizzle,
+          { teamMemberId: newAssigneeId },
+          moved.map(task => ({
+            type: 'task_assigned' as const,
             title: `Task assigned to you: "${task.title ?? 'Untitled'}"`,
             body: null,
-            entityType: 'task',
+            entityType: 'task' as const,
             entityId: task.id,
-          })
-        }
+          })),
+        )
       }
     }
   }
