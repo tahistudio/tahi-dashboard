@@ -8,6 +8,7 @@ import {
   PORTAL_PIPELINE,
   PORTAL_OPEN_STATUSES,
 } from '@/lib/portal-status'
+import { CLIENT_OPEN_STATUSES } from '@/lib/client-home-signals'
 import { REQUEST_STATUS_CONFIG, REQUEST_STATUSES } from '@/lib/status-config'
 
 describe('portal-status: one client vocabulary', () => {
@@ -73,8 +74,14 @@ describe('portal-status: one client vocabulary', () => {
     ])
   })
 
-  it('counts on_hold as open work, matching the client home vital', () => {
+  it('is the same list the client home vital counts, not a second one', () => {
+    // Identity, not equality: the module re-exports CLIENT_OPEN_STATUSES rather
+    // than keeping its own copy, so the two cannot drift.
+    expect(PORTAL_OPEN_STATUSES).toBe(CLIENT_OPEN_STATUSES)
     expect(PORTAL_OPEN_STATUSES).toContain('on_hold')
+    // client_review is waiting on the CLIENT, and the home counts it in its own
+    // "To approve" vital. Counting it here too would double-count it.
+    expect(PORTAL_OPEN_STATUSES).not.toContain('client_review')
     expect(PORTAL_OPEN_STATUSES).not.toContain('delivered')
     expect(PORTAL_OPEN_STATUSES).not.toContain('cancelled')
   })

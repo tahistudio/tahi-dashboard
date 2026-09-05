@@ -16,9 +16,14 @@
  * a review opens the request on its approve view, an invoice opens the payment
  * page, a call opens the meeting. Nothing here is a count with no door.
  *
- * States, all four of them:
- *   loading   the tile holds its shape with shimmer rows (TASKS CT.3b - never
- *             "nothing waiting on you" while the fetch is still in flight)
+ * States, all five of them:
+ *   loading   the tile holds its shape with pulsing rows (TASKS CT.3b - never
+ *             "nothing waiting on you" while the fetch is still in flight).
+ *             NOT .tahi-shimmer: that class is unlayered in globals.css and
+ *             its gradient is opaque --color-bg-tertiary, so on this forest
+ *             tile it painted a pale mint slab. See portal-home.css.
+ *   error     the reads behind the tile failed, so it says so and offers a
+ *             Try again rather than falling through to "All quiet"
  *   populated the ranked rows plus a real "+N more waiting" expander
  *   empty     a calm LIGHT card, "All quiet in the studio."
  *   read-only every write control disabled, with the lens note saying why
@@ -63,6 +68,11 @@ export interface WaitingOnYouProps {
   onStart?: () => void
   /** True for a client with no requests at all, which gets the warmer copy. */
   isFirstRun?: boolean
+  /** True when a read behind this tile failed (403 / 500 / offline). Beats
+   *  every other state: a failed read must never read as "all quiet". */
+  failed?: boolean
+  /** Revalidates the failed reads. */
+  onRetry?: () => void
 }
 
 const VISIBLE = 3
@@ -74,6 +84,8 @@ export function WaitingOnYou({
   previewName,
   onStart,
   isFirstRun,
+  failed,
+  onRetry,
 }: WaitingOnYouProps) {
   const [expanded, setExpanded] = useState(false)
 
@@ -90,12 +102,32 @@ export function WaitingOnYou({
         <div className="pfh-head">
           <h2>Waiting on you</h2>
         </div>
-        <div className="pfh-skel-block tahi-shimmer" style={{ marginTop: '0.875rem' }}>
+        <div className="pfh-skel-block" style={{ marginTop: '0.875rem' }}>
           <span className="pfh-skel-row" style={{ width: '78%' }} />
           <span className="pfh-skel-row" style={{ width: '54%' }} />
           <span className="pfh-skel-row" style={{ width: '66%' }} />
         </div>
         <span className="sr-only">Loading what needs you</span>
+      </section>
+    )
+  }
+
+  // A failed read outranks the empty state. "All quiet in the studio." to a
+  // client whose requests route just 403'd is the same lie as saying it while
+  // the fetch is still in flight, one round trip later.
+  if (failed && items.length === 0) {
+    return (
+      <section className="pfh-err" aria-label="Waiting on you">
+        <b>Your overview did not load.</b>
+        <p>
+          That is on us, not you. Nothing here is a reading of your account yet, so try again in a
+          moment.
+        </p>
+        {onRetry && (
+          <button type="button" className="pfh-err-cta tahi-focus-ring" onClick={onRetry}>
+            Try again
+          </button>
+        )}
       </section>
     )
   }

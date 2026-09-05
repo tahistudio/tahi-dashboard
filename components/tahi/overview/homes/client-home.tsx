@@ -43,6 +43,7 @@ import { ApiError } from '@/lib/swr-fetcher'
 import { apiPath } from '@/lib/api'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import {
+  externalLinkDestination,
   fileOpenDestination,
   invoicePayDestination,
   partitionClientRequests,
@@ -237,11 +238,10 @@ function SkelRows({ rows = 3, height = '2.375rem' }: { rows?: number; height?: s
       style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.25rem' }}
     >
       {Array.from({ length: rows }, (_, i) => (
-        <span
-          key={i}
-          className="tahi-shimmer"
-          style={{ height, borderRadius: '0.5rem', background: 'var(--bg-secondary)', display: 'block' }}
-        />
+        // No inline `background`: an inline style beats the unlayered
+        // .tahi-shimmer rule in globals.css, which left every placeholder on
+        // this page a static bar running a sweep with nothing to sweep.
+        <span key={i} className="tahi-shimmer" style={{ height, borderRadius: '0.5rem', display: 'block' }} />
       ))}
       <span className="sr-only">Loading</span>
     </div>
@@ -258,10 +258,64 @@ function SkelFigure({ width = '3rem' }: { width?: string }) {
         width,
         height: '1.25rem',
         borderRadius: '0.25rem',
-        background: 'var(--bg-secondary)',
         verticalAlign: 'middle',
       }}
     />
+  )
+}
+
+/**
+ * The one way OFF this page.
+ *
+ * Module level rather than a closure inside ClientHome so the first-run panel
+ * shares it: its "Watch your welcome" step was the single window.open on this
+ * surface that skipped the destination resolvers and handed an admin-set URL
+ * straight to the browser.
+ *
+ * In-app paths need the basePath prefix that next/navigation applies for us and
+ * window.open does not; a hosted pay link is already absolute.
+ *
+ * 'noopener' in the feature string makes window.open return null even when the
+ * tab did open (that is what the spec says it returns), so a blocked-popup
+ * check would fire on every success. The handle is taken plainly instead and
+ * the opener reference severed on the way out, which is the same protection. A
+ * null handle then genuinely means the tab was suppressed: a popup blocker, or
+ * the embedded browser an email client opens a link in. Pay is the
+ * highest-value action on this page and must never be a button that does
+ * nothing, so it navigates in place instead.
+ */
+function openHomeDestination(dest: HomeDestination, go: (routeId: string) => void): void {
+  if (dest.kind === 'route') {
+    go(dest.routeId)
+    return
+  }
+  const url = dest.url.startsWith('/') ? apiPath(dest.url) : dest.url
+  const opened = window.open(url, '_blank')
+  if (opened) {
+    opened.opener = null
+    return
+  }
+  window.location.href = url
+}
+
+/**
+ * A read that FAILED, said plainly, with the door back.
+ *
+ * Deliberately not an empty state: "you have nothing" and "we could not look"
+ * are different sentences and only one of them is true when
+ * requirePortalFeature 403s or a route 500s. Before this, every card except
+ * invoices rendered a failed read as its empty copy, so a client with plenty
+ * read "No requests yet" and was offered a first-run CTA.
+ */
+function CardError({ what, onRetry }: { what: string; onRetry: () => void }) {
+  return (
+    <div className="pfh-err inline" role="status">
+      <b>{what} did not load.</b>
+      <p>That is on us, not you. Give it another go in a moment.</p>
+      <button type="button" className="pfh-err-cta tahi-focus-ring" onClick={onRetry}>
+        Try again
+      </button>
+    </div>
   )
 }
 
@@ -441,7 +495,9 @@ function ClientFirstRun({ ctx }: { ctx: OverviewCtx }) {
     <div className="ov-welcome">
       <div className="ov-welcome-head">
         <div>
-          <h2>Kia ora, {org}. Welcome to your studio.</h2>
+          {/* No second "Kia ora": the masthead directly above already greeted
+              them by name. */}
+          <h2>Welcome to your studio, {org}.</h2>
           <p>
             Everything Tahi makes for you lives here. Four small steps and you are fully set up, about seven minutes,
             and you can stop anytime.
@@ -467,7 +523,11 @@ function ClientFirstRun({ ctx }: { ctx: OverviewCtx }) {
           // so the step could only be ticked, never watched. When the workspace
           // has a Loom the step plays it; when it has not, the CTA says what it
           // actually does instead of promising a start.
-          const stepVideo = s.key === 'welcomeVideoWatched' ? data.onboardingLoomUrl : null
+          // Through the same http/https gate as every other outbound link on
+          // this page. An admin-set field is still a field, and this was the
+          // one window.open on the client home that skipped the check.
+          const stepVideo =
+            s.key === 'welcomeVideoWatched' ? externalLinkDestination(data.onboardingLoomUrl) : null
           return (
             <div key={s.key} className={'ov-wstep' + (isDone ? ' done' : '') + (isNext ? ' next' : '')}>
               <button
@@ -493,9 +553,7 @@ function ClientFirstRun({ ctx }: { ctx: OverviewCtx }) {
                     if (ro) return
                     toggle(s.key, true)
                     if (stepVideo) {
-                      const opened = window.open(stepVideo, '_blank')
-                      if (opened) opened.opener = null
-                      else window.location.href = stepVideo
+                      openHomeDestination(stepVideo, ctx.go)
                       return
                     }
                     if (s.dest) ctx.go(s.dest)
@@ -536,6 +594,8 @@ function TrackBoard({
   planLabel,
   ro,
   loading,
+  failed,
+  onRetry,
   onStart,
   onReorder,
 }: {
@@ -544,6 +604,9 @@ function TrackBoard({
   ro: boolean
   /** True until /api/portal/tracks has answered. */
   loading: boolean
+  /** True when the read failed with nothing to fall back on. */
+  failed: boolean
+  onRetry: () => void
   /** Opens the New request dialog. Every "new request" affordance on this
    *  board used to route to the /requests LIST, where the reader had to find
    *  and press New a second time. */
@@ -594,6 +657,21 @@ function TrackBoard({
           </div>
         </div>
         <SkelRows rows={2} height="5.5rem" />
+      </div>
+    )
+  }
+
+  // "No active tracks yet." on a failed read told a client with two tracks
+  // running that they have none. The board says what actually happened.
+  if (failed) {
+    return (
+      <div className="ov-trackboard">
+        <div className="ov-tb-head">
+          <div>
+            <h3>Your work in motion</h3>
+          </div>
+        </div>
+        <CardError what="Your tracks" onRetry={onRetry} />
       </div>
     )
   }
@@ -724,12 +802,17 @@ function ProjectBoard({
   project,
   ro,
   loading,
+  failed,
+  onRetry,
   onStart,
 }: {
   project: ProjectResp | undefined
   ro: boolean
   /** True until /api/portal/project has answered. */
   loading: boolean
+  /** True when the read failed with nothing to fall back on. */
+  failed: boolean
+  onRetry: () => void
   onStart: () => void
 }) {
   const phases = project?.phases ?? []
@@ -749,6 +832,21 @@ function ProjectBoard({
           </div>
         </div>
         <SkelRows rows={3} height="3.25rem" />
+      </div>
+    )
+  }
+
+  // "Your project plan is being set up." on a failed read is a claim about the
+  // studio's work, not about the request that did not come back.
+  if (failed) {
+    return (
+      <div className="ov-trackboard">
+        <div className="ov-tb-head">
+          <div>
+            <h3>Your project, phase by phase</h3>
+          </div>
+        </div>
+        <CardError what="Your project plan" onRetry={onRetry} />
       </div>
     )
   }
@@ -817,17 +915,23 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // by updatedAt desc and caps at 500, so a migrated client with years of
   // history would have had "Open requests" and "Next delivery" computed from
   // the 50 most recently touched rows. 200 covers the real books with room.
-  const { data: requestsData, isLoading: requestsLoading } = useResource<RequestsResp>(
-    '/api/portal/requests?status=active&limit=200',
-  )
+  const {
+    data: requestsData,
+    isLoading: requestsLoading,
+    error: requestsError,
+    mutate: mutateRequests,
+  } = useResource<RequestsResp>('/api/portal/requests?status=active&limit=200')
   // The review signal gets its OWN query rather than a slice of the one above.
   // A request sitting in client_review is by definition not being touched, so
   // its updatedAt goes stale and it is the first row to fall off a page of the
   // active list. Reading it back by exact status means "nothing waiting on you"
   // can never be an artefact of pagination.
-  const { data: reviewData, isLoading: reviewLoading } = useResource<RequestsResp>(
-    '/api/portal/requests?status=client_review&limit=200',
-  )
+  const {
+    data: reviewData,
+    isLoading: reviewLoading,
+    error: reviewError,
+    mutate: mutateReview,
+  } = useResource<RequestsResp>('/api/portal/requests?status=client_review&limit=200')
   // The money routes turn a plain member seat away by design (only a workspace
   // admin of the org may read invoices), and a feature-disabled workspace and
   // an unlinked login 403 here too. Without this the card said "No invoices
@@ -851,15 +955,57 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // subscription signal; ctx.clientType is a preview-only override. Defaults to
   // retainer until the subscription loads (the common case).
   const isProject = (ctx.clientType ?? subData?.clientType) === 'project'
-  const { data: callsData, isLoading: callsLoading } = useResource<CallsResp>('/api/portal/calls')
-  const { data: filesData, isLoading: filesLoading } = useResource<FilesResp>('/api/portal/files')
-  const { data: teamData, isLoading: teamLoading } = useResource<TeamResp>('/api/portal/team')
-  const { data: tracksData, isLoading: tracksLoading, mutate: mutateTracks } = useResource<TracksResp>(
-    isProject ? null : '/api/portal/tracks',
-  )
-  const { data: projectData, isLoading: projectLoading } = useResource<ProjectResp>(
-    isProject ? '/api/portal/project' : null,
-  )
+  const {
+    data: callsData,
+    isLoading: callsLoading,
+    error: callsError,
+    mutate: mutateCalls,
+  } = useResource<CallsResp>('/api/portal/calls')
+  const {
+    data: filesData,
+    isLoading: filesLoading,
+    error: filesError,
+    mutate: mutateFiles,
+  } = useResource<FilesResp>('/api/portal/files')
+  const {
+    data: teamData,
+    isLoading: teamLoading,
+    error: teamError,
+    mutate: mutateTeam,
+  } = useResource<TeamResp>('/api/portal/team')
+  const {
+    data: tracksData,
+    isLoading: tracksLoading,
+    error: tracksError,
+    mutate: mutateTracks,
+  } = useResource<TracksResp>(isProject ? null : '/api/portal/tracks')
+  const {
+    data: projectData,
+    isLoading: projectLoading,
+    error: projectError,
+    mutate: mutateProject,
+  } = useResource<ProjectResp>(isProject ? '/api/portal/project' : null)
+
+  // A read that FAILED, distinguished from a read that came back empty. SWR
+  // keeps the last good payload through a failed revalidation, so a card only
+  // switches to the error state when it has nothing to show at all: a 403 from
+  // requirePortalFeature, a 500, or an offline first load. Before this only the
+  // invoices read branched on `error`, so every other card printed its empty
+  // copy at a client whose account is full.
+  const requestsFailed = !requestsData && !!requestsError
+  const reviewFailed = !reviewData && !!reviewError
+  // The dedicated client_review read is a nicety; the active list carries the
+  // same rows. Only when BOTH are gone is the review signal genuinely unknown.
+  const reviewSignalFailed = requestsFailed && reviewFailed
+  const callsFailed = !callsData && !!callsError
+  const filesFailed = !filesData && !!filesError
+  const teamFailed = !teamData && !!teamError
+  const tracksFailed = !tracksData && !!tracksError
+  const projectFailed = !projectData && !!projectError
+  const retryRequests = useCallback(() => {
+    void mutateRequests()
+    void mutateReview()
+  }, [mutateRequests, mutateReview])
 
   const requests = useMemo(() => requestsData?.requests ?? [], [requestsData])
   const invoices = useMemo(() => invoicesData?.items ?? [], [invoicesData])
@@ -905,32 +1051,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // Every row on this home used to route to the list it came from. These land
   // on the item instead: a hosted pay page or a served file opens in a new tab,
   // anything in-app goes through the switcher's go().
-  const openDestination = useCallback(
-    (dest: HomeDestination) => {
-      if (dest.kind === 'route') {
-        go(dest.routeId)
-        return
-      }
-      // In-app paths need the basePath prefix that next/navigation applies for
-      // us and window.open does not; a hosted pay link is already absolute.
-      const url = dest.url.startsWith('/') ? apiPath(dest.url) : dest.url
-      // 'noopener' in the feature string makes window.open return null even
-      // when the tab did open (that is what the spec says it returns), so a
-      // blocked-popup check would fire on every success. The handle is taken
-      // plainly instead and the opener reference severed on the way out, which
-      // is the same protection. A null handle then genuinely means the tab was
-      // suppressed: a popup blocker, or the embedded browser an email client
-      // opens a link in. Pay is the highest-value action on this page and must
-      // never be a button that does nothing, so it navigates in place instead.
-      const opened = window.open(url, '_blank')
-      if (opened) {
-        opened.opener = null
-        return
-      }
-      window.location.href = url
-    },
-    [go],
-  )
+  const openDestination = useCallback((dest: HomeDestination) => openHomeDestination(dest, go), [go])
 
   // ── wire ────────────────────────────────────────────────────────────────────
   const wire: WireEvent[] = (activityData?.items ?? []).map(e => ({
@@ -1005,33 +1126,47 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   const reviewUnknown = requestsLoading && reviewLoading
   const waitingUnsettled = reviewUnknown || !invoicesSettled || callsLoading
   const waitingLoading = waiting.length === 0 ? waitingUnsettled : reviewUnknown
-  const noRequestsAtAll = !requestsLoading && requests.length === 0
+  // A failed requests read must never become "Nothing here yet. Send us the
+  // first thing", which is what an established client saw the moment
+  // /api/portal/requests 403'd or 500'd. First run is a claim about what came
+  // back, so it needs something to have come back.
+  const noRequestsAtAll = !requestsLoading && !requestsFailed && requests.length === 0
 
   // -- vitals ------------------------------------------------------------------
-  const vitals: VitalItem[] = [
-    {
+  // A vital whose read failed is LEFT OUT rather than printed as a 0. "Open
+  // requests 0 / in progress" is a claim, and a 403 is not evidence for it.
+  // The strip is flex, so the rest simply share the width, exactly as the
+  // invoices vital already does when that read is denied.
+  const vitals: VitalItem[] = []
+  if (!requestsFailed) {
+    vitals.push({
       lbl: 'Open requests',
       num: requestsLoading ? <SkelFigure width="2.5rem" /> : openReqs.length,
       sub: requestsLoading ? <SkelFigure width="4.5rem" /> : 'in progress',
-    },
-    // Not "In review": the status vocabulary already uses those two words for
-    // the in_review status, which is the STUDIO reviewing, and those rows are
-    // counted in "Open requests" beside this one. This vital counts
-    // client_review only, so it takes the label the client already sees for
-    // exactly that cut on /requests.
-    {
-      lbl: 'Waiting on you',
+    })
+  }
+  // "To approve", NOT "Waiting on you". The tile directly above it is headed
+  // "Waiting on you" and counts reviews plus an invoice plus a call, so two
+  // adjacent elements carried the same words over different numbers: a client
+  // with one delivery, one bill and one call read "Waiting on you 3" sitting on
+  // top of "Waiting on you / 1". The tile owns the phrase; this vital says the
+  // narrower thing it actually counts.
+  if (!reviewSignalFailed) {
+    vitals.push({
+      lbl: 'To approve',
       num: reviewUnknown ? <SkelFigure width="2.5rem" /> : inReview.length,
       muted: !reviewUnknown && inReview.length === 0,
       sub: reviewUnknown ? (
         <SkelFigure width="6rem" />
       ) : inReview.length === 0 ? (
-        'nothing to approve'
+        'nothing right now'
       ) : (
-        `${inReview.length === 1 ? 'delivery' : 'deliveries'} to approve`
+        `${inReview.length === 1 ? 'delivery' : 'deliveries'} ready for you`
       ),
-    },
-    {
+    })
+  }
+  if (!requestsFailed) {
+    vitals.push({
       lbl: 'Next delivery',
       num: requestsLoading ? (
         <SkelFigure width="4rem" />
@@ -1048,12 +1183,12 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       ) : (
         'nothing scheduled'
       ),
-    },
-  ]
+    })
+  }
   // A project client used to read their overall percentage off the hero. The
   // hero is now the "Waiting on you" tile, so the figure moves here rather than
   // being dropped.
-  if (isProject) {
+  if (isProject && !projectFailed) {
     const projectPhases = projectData?.phases ?? []
     const activePhase = projectPhases.find(ph => ph.state === 'active') ?? null
     const doneCount = projectPhases.filter(ph => ph.state === 'done').length
@@ -1136,11 +1271,12 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
 
   return (
     <div className="ov" data-ro={ro ? '1' : '0'}>
-      <ClientFirstRun ctx={ctx} />
-
       {/* A header, at last. This page had no greeting, no date and no top-level
           way to start a request: the only primary CTA was a menu tucked inside
-          the hero that routed to the requests LIST. */}
+          the hero that routed to the requests LIST.
+          It sits ABOVE the first-run panel so the page opens on its h1 rather
+          than on the panel's h2, and so a brand new client is not greeted
+          twice in adjacent blocks. */}
       <div className="pfh-mast">
         <div className="pfh-mast-t">
           <h1>Kia ora{firstName ? `, ${firstName}` : ''}.</h1>
@@ -1170,6 +1306,8 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         </button>
       </div>
 
+      <ClientFirstRun ctx={ctx} />
+
       <div className="ov-mast">
         <TheWire events={wire} />
         {/* The hero IS the thing that needs them. The old page led with a green
@@ -1179,12 +1317,17 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         <WaitingOnYou
           items={waiting}
           loading={waitingLoading}
+          failed={reviewSignalFailed}
+          onRetry={retryRequests}
           ro={ro}
           previewName={ctx.previewName}
           onStart={startRequest}
           isFirstRun={noRequestsAtAll}
         />
-        <Vitals items={vitals} />
+        {/* Every reading behind the strip can now be withheld (a denied
+            invoices read, a failed requests read), and an empty .ov-vitals is
+            a bordered hairline with nothing in it. */}
+        {vitals.length > 0 && <Vitals items={vitals} />}
       </div>
 
       <Zone label="Your work">
@@ -1194,6 +1337,8 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
               project={projectData}
               ro={ro}
               loading={subLoading || projectLoading}
+              failed={projectFailed}
+              onRetry={() => { void mutateProject() }}
               onStart={startRequest}
             />
           ) : (
@@ -1202,6 +1347,8 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
               planLabel={planLabel}
               ro={ro}
               loading={subLoading || tracksLoading}
+              failed={tracksFailed}
+              onRetry={() => { void mutateTracks() }}
               onStart={startRequest}
               onReorder={onReorder}
             />
@@ -1212,7 +1359,9 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       <Zone label="Activity">
         <Card span={7}>
           <CardH ic="tasks" title="Recent requests" link="All requests" onLink={() => go('requests')} />
-          {requestsLoading ? (
+          {requestsFailed ? (
+            <CardError what="Your requests" onRetry={retryRequests} />
+          ) : requestsLoading ? (
             <SkelRows rows={4} />
           ) : recent.length > 0 ? (
             <div className="ov-rows">
@@ -1246,7 +1395,9 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         </Card>
         <Card span={5}>
           <CardH ic="phone" title="Next call" />
-          {callsLoading ? (
+          {callsFailed ? (
+            <CardError what="Your calls" onRetry={() => { void mutateCalls() }} />
+          ) : callsLoading ? (
             <SkelRows rows={2} height="2.75rem" />
           ) : nextCall ? (
             <>
@@ -1292,7 +1443,9 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       <Zone label="Library">
         <Card span={6}>
           <CardH ic="file" title="Recent files" link="All files" onLink={() => go('files')} />
-          {filesLoading ? (
+          {filesFailed ? (
+            <CardError what="Your files" onRetry={() => { void mutateFiles() }} />
+          ) : filesLoading ? (
             <SkelRows rows={4} />
           ) : files.length > 0 ? (
             <div className="ov-rows">
@@ -1312,7 +1465,9 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         </Card>
         <Card span={6}>
           <CardH ic="users" title="Your team" />
-          {teamLoading ? (
+          {teamFailed ? (
+            <CardError what="Your team" onRetry={() => { void mutateTeam() }} />
+          ) : teamLoading ? (
             <SkelRows rows={2} height="2.75rem" />
           ) : team.length > 0 ? (
             <>
@@ -1331,7 +1486,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
                   on its first row, an affordance for a Messages surface that
                   redirects a client away. A question lives on the request it is
                   about, so the card says where to ask instead. */}
-              <div className="ov-mini" style={{ marginTop: 'auto', paddingTop: 12 }}>
+              <div className="ov-mini" style={{ marginTop: 'auto', paddingTop: '0.75rem' }}>
                 Questions live on the request they are about, so the answer stays next to the work.
               </div>
             </>
@@ -1352,10 +1507,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         {!invoicesSettled && (
           <Card span={7} edge="warn">
             <CardH ic="receipt" title="Invoices" />
-            <div
-              className="tahi-shimmer"
-              style={{ height: '5.5rem', borderRadius: '0.625rem', background: 'var(--bg-secondary)' }}
-            />
+            <div className="tahi-shimmer" style={{ height: '5.5rem', borderRadius: '0.625rem' }} />
           </Card>
         )}
         {invoicesSettled && !invoicesDenied && (

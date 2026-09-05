@@ -135,7 +135,7 @@
   height: 1.375rem;
   padding: 0 0.4375rem;
   border-radius: 0.6875rem;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.26);
   font: 700 0.75rem 'Manrope', sans-serif;
   font-variant-numeric: tabular-nums;
   color: #ffffff;
@@ -165,8 +165,14 @@
   gap: 0.75rem;
   padding: 0.75rem 0.875rem;
   border-radius: 0.875rem;
-  background: rgba(255, 255, 255, 0.08);
-  border: 0.0625rem solid rgba(255, 255, 255, 0.14);
+  /* A DARK plate, not a lightened one. The row's sub-line is the most
+     actionable sentence on the client's home ("Ready for your review...",
+     "3 days overdue"), and over a lightened plate on the brand-green end of
+     the gradient it computed to about 3.5:1. Darkening the plate and taking
+     the sub-line to 0.94 alpha puts it at about 5.1:1, clear of the 4.5:1 AA
+     floor for body text. */
+  background: rgba(0, 0, 0, 0.18);
+  border: 0.0625rem solid rgba(255, 255, 255, 0.16);
 }
 .pfh-row-ic {
   flex-shrink: 0;
@@ -193,7 +199,7 @@
 }
 .pfh-row-t small {
   font: 500 0.75rem/1.45 'Manrope', sans-serif;
-  color: rgba(238, 246, 233, 0.76);
+  color: rgba(238, 246, 233, 0.94);
   text-wrap: pretty;
 }
 .pfh-open {
@@ -209,12 +215,12 @@
   background: none;
   cursor: pointer;
   font: 600 0.75rem 'Manrope', sans-serif;
-  color: rgba(238, 246, 233, 0.92);
+  color: rgba(238, 246, 233, 0.94);
   text-decoration: underline;
   text-underline-offset: 0.1875rem;
   transition: background 0.15s, color 0.15s;
 }
-.pfh-open:hover { background: rgba(255, 255, 255, 0.14); color: #ffffff; }
+.pfh-open:hover { background: rgba(0, 0, 0, 0.24); color: #ffffff; }
 .pfh-open:focus-visible { outline: 0.125rem solid #ffffff; outline-offset: 0.125rem; }
 .pfh-open svg { transition: transform 0.18s var(--ease, ease); }
 .pfh-open:hover svg { transform: translateX(0.125rem); }
@@ -248,11 +254,13 @@
 }
 .pfh-btn.primary:hover:not(:disabled) { background: #f0f7ee; }
 .pfh-btn.ghost {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.26);
-  color: #eef6e9;
+  /* Dark glass rather than light glass: a lightened ghost put its own label at
+     about 4.4:1 at rest and 3.9:1 on hover. */
+  background: rgba(0, 0, 0, 0.22);
+  border-color: rgba(255, 255, 255, 0.32);
+  color: #ffffff;
 }
-.pfh-btn.ghost:hover:not(:disabled) { background: rgba(255, 255, 255, 0.2); }
+.pfh-btn.ghost:hover:not(:disabled) { background: rgba(0, 0, 0, 0.36); }
 .pfh-btn:active:not(:disabled) { transform: translateY(0.0625rem); }
 .pfh-btn:focus-visible { outline: 0.125rem solid #ffffff; outline-offset: 0.125rem; }
 .pfh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -265,16 +273,17 @@
   gap: 0.375rem;
   margin-top: 0.75rem;
   padding: 0.375rem 0.625rem;
-  margin-left: -0.625rem;
   border: none;
   border-radius: 0.5rem;
-  background: none;
+  /* On the bare gradient rather than on a row, so it carries its own dark
+     plate: white on the brand-green end of the gradient is only 4.4:1. */
+  background: rgba(0, 0, 0, 0.18);
   cursor: pointer;
   font: 600 0.8125rem 'Manrope', sans-serif;
-  color: rgba(238, 246, 233, 0.9);
+  color: #ffffff;
   transition: background 0.15s, color 0.15s;
 }
-.pfh-more:hover { background: rgba(255, 255, 255, 0.14); color: #ffffff; }
+.pfh-more:hover { background: rgba(0, 0, 0, 0.32); }
 .pfh-more:focus-visible { outline: 0.125rem solid #ffffff; outline-offset: 0.125rem; }
 
 .pfh-ro {
@@ -284,8 +293,11 @@
   align-items: center;
   gap: 0.375rem;
   margin: 0.75rem 0 0;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.625rem;
+  background: rgba(0, 0, 0, 0.2);
   font: 500 0.75rem 'Manrope', sans-serif;
-  color: rgba(238, 246, 233, 0.78);
+  color: #ffffff;
 }
 
 /* ---------- the calm empty card (light, token-driven) ---------- */
@@ -343,6 +355,60 @@
 .pfh-quiet-cta:focus-visible { outline: 0.125rem solid var(--brand); outline-offset: 0.125rem; }
 .pfh-quiet-cta:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* ---------- a read that failed ----------
+   The design's portal-home state list has four live states and an error one:
+   "Your overview did not load, with Try again". Without it a 403 from
+   requirePortalFeature, a 500 or an offline read all render as "you have
+   nothing", which is the same lie as the loading states this pass removed,
+   one round trip later. Token-driven so dark mode is free. */
+
+.pfh-err {
+  padding: 1.375rem 1.5rem;
+  background: var(--bg);
+  border: 0.0625rem solid var(--border);
+  border-radius: 0.875rem;
+  box-shadow: var(--shadow);
+}
+/* Inside a card that already has its own chrome: no second border or shadow. */
+.pfh-err.inline {
+  padding: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
+}
+.pfh-err b {
+  display: block;
+  font: 700 0.9375rem 'Manrope', sans-serif;
+  color: var(--text);
+  text-wrap: pretty;
+}
+.pfh-err.inline b { font-size: 0.8125rem; }
+.pfh-err p {
+  margin: 0.25rem 0 0;
+  font: 500 0.8125rem/1.5 'Manrope', sans-serif;
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+.pfh-err.inline p { font-size: 0.75rem; }
+.pfh-err-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  height: 2.125rem;
+  margin-top: 0.625rem;
+  padding: 0 0.875rem;
+  border: 0.0625rem solid var(--border-strong);
+  border-radius: 0 0.625rem 0 0.625rem;
+  background: var(--bg-secondary);
+  color: var(--text);
+  font: 600 0.8125rem 'Manrope', sans-serif;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.12s;
+}
+.pfh-err-cta:hover { background: var(--brand-100); border-color: var(--brand); }
+.pfh-err-cta:active { transform: translateY(0.0625rem); }
+.pfh-err-cta:focus-visible { outline: 0.125rem solid var(--brand); outline-offset: 0.125rem; }
+
 /* ---------- an empty card that offers the way out of being empty ---------- */
 
 .pfh-empty-cta {
@@ -361,21 +427,35 @@
   .pfh-empty-cta .ov-cta { min-height: 2.75rem; }
 }
 
-/* ---------- loading ---------- */
+/* ---------- loading ----------
+   Deliberately NOT .tahi-shimmer. That class is unlayered in globals.css, so
+   it beats anything in here, and its gradient is opaque --color-bg-tertiary:
+   on this tile it painted a pale mint slab over the forest with the bars
+   nearly invisible on top of it. The tile pulses its own white-alpha bars
+   instead, which is the same signal in the tile's own palette. */
 
 .pfh-skel-row {
   display: block;
   height: 0.75rem;
   border-radius: 0.375rem;
   background: rgba(255, 255, 255, 0.16);
+  animation: pfh-skel-pulse 1.4s ease-in-out infinite;
 }
-.pfh-skel-row + .pfh-skel-row { margin-top: 0.625rem; }
+/* No margin between rows: .pfh-skel-block is a flex column with its own gap,
+   and both together double-spaced them. */
+.pfh-skel-row:nth-child(2) { animation-delay: 0.16s; }
+.pfh-skel-row:nth-child(3) { animation-delay: 0.32s; }
 .pfh-tile.is-loading .pfh-skel-block {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 0.625rem;
+}
+
+@keyframes pfh-skel-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
 }
 
 /* ---------- the studio team card (request detail rail, client audience) ---- */
@@ -428,6 +508,7 @@
   .pfh-open { min-height: 2.75rem; }
   .pfh-quiet { flex-direction: column; }
   .pfh-quiet-cta { height: 2.75rem; width: 100%; justify-content: center; }
+  .pfh-err-cta { min-height: 2.75rem; }
 }
 
 @media (pointer: coarse) {
@@ -435,13 +516,16 @@
   .pfh-more { min-height: 2.75rem; }
   .pfh-open { min-height: 2.75rem; }
   .pfh-quiet-cta { min-height: 2.75rem; }
+  .pfh-err-cta { min-height: 2.75rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .pfh-open svg,
   .pfh-btn,
-  .pfh-quiet-cta { transition: none; }
+  .pfh-quiet-cta,
+  .pfh-err-cta { transition: none; }
   .pfh-open:hover svg { transform: none; }
+  .pfh-skel-row { animation: none; opacity: 0.8; }
 }
 
 }

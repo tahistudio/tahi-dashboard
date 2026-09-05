@@ -24,6 +24,7 @@ const AiTaskWizard = dynamic(() => import('@/components/tahi/ai-task-wizard').th
 const RichBriefProse = dynamic(() => import('@/components/tahi/rich-brief').then(m => ({ default: m.RichBriefProse })), { ssr: false })
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { PortalStatusBadge } from '@/components/tahi/portal/portal-status-badge'
+import { portalStatusGloss } from '@/lib/portal-status'
 import { PortalStudioTeamCard } from '@/components/tahi/portal/portal-studio-team-card'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
@@ -1854,9 +1855,23 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
               {isAdmin ? (
                 <StatusBadge status={request.status} />
               ) : (
-                <PortalStatusBadge status={request.status} />
+                // titled={false}: the Link above already carries a title saying
+                // where it goes, and the inner one would win on hover and hide
+                // it. The badge keeps its aria-label, and the gloss is rendered
+                // as visible text beside it, which is where it actually reaches
+                // a client on a phone.
+                <PortalStatusBadge status={request.status} titled={false} />
               )}
             </Link>
+            {/* The plain-English half of the client vocabulary, said out loud.
+                It lived only in a title attribute, which is hover-only for a
+                pointer and simply absent on touch, so most clients never saw
+                the half that does the explaining. */}
+            {!isAdmin && portalStatusGloss(request.status) && (
+              <span style={{ color: 'var(--color-text-muted)' }}>
+                {portalStatusGloss(request.status)}
+              </span>
+            )}
             {request.priority === 'high' && (
               <Link
                 href={requestsListHref({ priority: 'high' })}

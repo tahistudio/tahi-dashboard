@@ -70,14 +70,17 @@ export const PORTAL_PIPELINE: readonly string[] = [
   'delivered',
 ]
 
-/** Statuses that are still live work from the client's point of view. */
-export const PORTAL_OPEN_STATUSES: readonly string[] = [
-  'submitted',
-  'in_review',
-  'in_progress',
-  'client_review',
-  'on_hold',
-]
+/**
+ * Statuses that are still live work from the client's point of view.
+ *
+ * RE-EXPORTED, not redeclared. lib/client-home-signals owns this reading: it is
+ * the list partitionClientRequests uses, which is what the home's "Open
+ * requests" vital actually counts. A second copy here drifted from it the
+ * moment it was written (it also counted client_review, which the home counts
+ * separately as "To approve"), which is exactly the two-vocabularies problem
+ * this module exists to end.
+ */
+export { CLIENT_OPEN_STATUSES as PORTAL_OPEN_STATUSES } from '@/lib/client-home-signals'
 
 const FALLBACK_STYLE: StatusStyle = REQUEST_STATUS_CONFIG.submitted
 

@@ -181,6 +181,18 @@ export function fileOpenDestination(file: FileOpenLike): HomeDestination {
   return { kind: 'route', routeId: 'files' }
 }
 
+/**
+ * An admin-set outbound link (today: organisations.onboardingLoomUrl, the
+ * welcome video on the first-run panel), resolved through the same http/https
+ * gate as every other outbound URL on the client home. Returns null when the
+ * value is missing or is not a plain absolute web link, so the caller can hide
+ * the affordance rather than open something it has not checked.
+ */
+export function externalLinkDestination(url: string | null | undefined): HomeDestination | null {
+  const clean = trimmed(url)
+  return clean && isSafeExternalUrl(clean) ? { kind: 'new_tab', url: clean } : null
+}
+
 /** Route id for a single request, so a Recent requests row opens that request. */
 export function requestRouteId(requestId: string | null | undefined): string {
   return itemRouteId('requests', requestId)

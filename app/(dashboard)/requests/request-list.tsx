@@ -309,7 +309,11 @@ function StatusBadgeCell({ status, audience }: { status: string; audience: 'team
       variant="soft"
       size="sm"
       leader="dot"
+      // title is hover-only for a pointer, absent on touch and not reliably
+      // announced on a non-interactive span, so the gloss also rides an
+      // aria-label, which assistive tech reads deterministically.
       title={audience === 'client' ? portalStatusTitle(status) : undefined}
+      aria-label={audience === 'client' ? portalStatusTitle(status) : undefined}
     >
       {label}
     </Badge>
@@ -604,6 +608,22 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
   const [tagFilter, setTagFilter] = useState('all')
   const [dialogOpen, setDialogOpen] = useState(() => searchParams.get('new') === '1')
   const defaultClientId = searchParams.get('client') ?? undefined
+  // ?new=1 is the door seven affordances on the client home use. Reading it in
+  // a state initialiser alone made it mount-only, so pushing it while already
+  // on /requests did nothing; leaving it in the URL after a close re-opened the
+  // dialog on a reload or a back/forward.
+  const newParam = searchParams.get('new')
+  useEffect(() => {
+    if (newParam === '1') setDialogOpen(true)
+  }, [newParam])
+  const closeNewRequestDialog = useCallback(() => {
+    setDialogOpen(false)
+    if (searchParams.get('new') === null) return
+    const next = new URLSearchParams(searchParams.toString())
+    next.delete('new')
+    const query = next.toString()
+    router.replace(query ? `/requests?${query}` : '/requests', { scroll: false })
+  }, [router, searchParams])
   const [bulkCreateOpen, setBulkCreateOpen] = useState(false)
   const [aiWizardOpen, setAiWizardOpen] = useState(false)
 
@@ -1511,7 +1531,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     })
 
     return cols
-  }, [isAdmin, canWriteRequests, handleRowStatusChange])
+  }, [isAdmin, audience, canWriteRequests, handleRowStatusChange])
 
   // -- Shared handlers -------------------------------------------------------
   const exportRequestsCsv = useCallback(() => {
@@ -1789,7 +1809,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     <>
       <NewRequestDialog
         open={dialogOpen}
-        onClose={() => { setDialogOpen(false); mutateRequests() }}
+        onClose={() => { closeNewRequestDialog(); mutateRequests() }}
         isAdmin={isAdmin}
         defaultOrgId={defaultClientId}
       />
