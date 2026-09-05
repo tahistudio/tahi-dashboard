@@ -37,6 +37,7 @@ import {
   hasAnyActiveRoleAssignment,
   resolveTeamMember,
 } from '@/lib/team-identity'
+import { isPortalAdminContact } from '@/lib/portal-access'
 import {
   FEATURE_TREE,
   getFeatureNode,
@@ -108,6 +109,24 @@ export interface ResolvedAccess {
   viewableResources: Set<string> | null
   /** Precedence-resolved feature_visibility overrides (most-specific subject wins). */
   overrides: Map<string, Effect>
+  /**
+   * CLIENT AUDIENCE ONLY: which seat this person holds at their own org, read
+   * from their `contacts` row with the same predicate the portal routes use
+   * (`isPortalAdminContact`, lib/portal-access.ts). It is the nav's half of the
+   * financial gate: /api/portal/invoices 403s a member seat, so the client rail
+   * must not offer them the item.
+   *
+   * null means UNKNOWN, never "member": a team session, a Tahi admin previewing
+   * a client portal (no contact row in that org, and the portal routes let
+   * impersonation read), or a client whose contact row has not been linked yet.
+   * Callers must therefore hide a financial item on `=== 'member'` only, so an
+   * unknown seat fails open exactly like the rest of this resolver.
+   *
+   * Optional on the type (absent reads the same as null) so the many hand-built
+   * ResolvedAccess fixtures across the suite keep compiling; `resolvePermissions`
+   * always sets it explicitly on both branches.
+   */
+  portalRole?: 'admin' | 'member' | null
 }
 
 function topAncestor(featureKey: string): string {
@@ -291,6 +310,10 @@ export async function resolvePermissions(
   // ── Client ──
   if (!isTeam) {
     const overrides = new Map<string, Effect>()
+    // Stays null unless we actually read this person's contact row below, so an
+    // unresolvable org / an unlinked seat / an impersonating admin reads as
+    // UNKNOWN rather than as a member. See ResolvedAccess.portalRole.
+    let portalRole: 'admin' | 'member' | null = null
     // The caller's org arrives in one of TWO shapes and both must land on the
     // same rows: portal API routes pass the resolved D1 `organisations.id`
     // (getPortalAuth already looked it up), while the dashboard layout and the
@@ -317,9 +340,16 @@ export async function resolvePermissions(
       // Resolved by the caller's Clerk user id within their org. An admin
       // previewing a client (impersonation) has no contact row here, so they
       // see the org baseline, never a specific person's refinements.
+      //
+      // The same row also carries the seat (portalRole / isPrimary), so the
+      // financial gate the portal routes apply costs no extra read here.
       if (auth.userId && auth.userId !== SERVICE_USER_ID) {
         const [contact] = await drizzle
-          .select({ id: schema.contacts.id })
+          .select({
+            id: schema.contacts.id,
+            portalRole: schema.contacts.portalRole,
+            isPrimary: schema.contacts.isPrimary,
+          })
           .from(schema.contacts)
           .where(and(
             eq(schema.contacts.orgId, orgId),
@@ -327,6 +357,7 @@ export async function resolvePermissions(
           ))
           .limit(1)
         if (contact) {
+          portalRole = isPortalAdminContact(contact) ? 'admin' : 'member'
           const contactRows = await drizzle
             .select({ featureKey: schema.featureVisibility.featureKey, effect: schema.featureVisibility.effect })
             .from(schema.featureVisibility)
@@ -341,7 +372,7 @@ export async function resolvePermissions(
     return {
       userId: auth.userId, orgId: auth.orgId, level: 'client', audience,
       isSuperAdmin: false, isAdmin: false, canManagePermissions: false,
-      viewableResources: null, overrides,
+      viewableResources: null, overrides, portalRole,
     }
   }
 
@@ -438,7 +469,9 @@ export async function resolvePermissions(
   return {
     userId: auth.userId, orgId: auth.orgId, level, audience,
     isSuperAdmin, isAdmin, canManagePermissions: isAdmin,
-    viewableResources, overrides,
+    // A team identity holds no portal seat: the client rail never renders for
+    // them except while previewing, where UNKNOWN is the correct answer.
+    viewableResources, overrides, portalRole: null,
   }
 }
 

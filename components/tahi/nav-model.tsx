@@ -22,6 +22,13 @@ export type NavItem = {
   emailAllowlist?: Set<string>
   /** Hidden unless the user can manage permissions (admin / super admin). */
   requiresManage?: boolean
+  /**
+   * Client audience only: hidden from a plain member seat at a client org.
+   * Money surfaces (/invoices, /billing) are gated server-side to workspace
+   * admins of the org (lib/portal-access.ts, enforced by /api/portal/invoices),
+   * so offering a member the nav item only buys them a 403.
+   */
+  requiresOrgAdmin?: boolean
   count?: number
 }
 
@@ -131,7 +138,9 @@ export const CLIENT_NAV: NavGroup[] = [
   {
     group: 'Billing',
     items: [
-      { label: 'Invoices', href: '/invoices', icon: 'invoices', clientVisible: true },
+      // Workspace admins of the client org only: /api/portal/invoices 403s a
+      // member seat, so the whole Billing group drops for them.
+      { label: 'Invoices', href: '/invoices', icon: 'invoices', clientVisible: true, requiresOrgAdmin: true },
     ],
   },
 ]
@@ -146,11 +155,22 @@ export interface FilterNavOpts {
   userEmail: string | null
   canManagePermissions: boolean
   features?: Record<string, boolean>
+  /**
+   * The client seat, resolved server-side from the caller's contacts row
+   * (ResolvedAccess.portalRole). Gates `requiresOrgAdmin` items.
+   *
+   * 'member' is the ONLY value that hides anything. null / undefined means the
+   * seat is unknown (a team session, an admin previewing a client portal, a
+   * contact row that has not been linked yet) and must fail OPEN, because the
+   * portal routes let impersonation read and a wrongly hidden item is a second
+   * dead end rather than a fix.
+   */
+  clientPortalRole?: 'admin' | 'member' | null
 }
 
 /** Apply audience + permission visibility to a nav model. Empty groups drop. */
 export function filterNav(nav: NavGroup[], opts: FilterNavOpts): NavGroup[] {
-  const { showAsAdmin, isEffectiveAdmin, isViewerRole, userEmail, canManagePermissions, features } = opts
+  const { showAsAdmin, isEffectiveAdmin, isViewerRole, userEmail, canManagePermissions, features, clientPortalRole } = opts
   return nav
     .map(group => ({
       ...group,
@@ -168,6 +188,7 @@ export function filterNav(nav: NavGroup[], opts: FilterNavOpts): NavGroup[] {
           return true
         }
         if (!item.clientVisible) return false
+        if (item.requiresOrgAdmin && clientPortalRole === 'member') return false
         return true
       }),
     }))

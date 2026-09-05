@@ -55,9 +55,12 @@ const CLIENT_FALLBACK_ICONS: Record<string, ShellIconName> = {
 interface MobileBottomNavProps {
   isAdmin?: boolean
   features?: Record<string, boolean>
+  /** Client seat, resolved server-side by the layout. Mirrors the rail so the
+   *  More sheet never offers a member seat an item the portal API refuses. */
+  clientPortalRole?: 'admin' | 'member' | null
 }
 
-export function MobileBottomNav({ isAdmin = false, features }: MobileBottomNavProps) {
+export function MobileBottomNav({ isAdmin = false, features, clientPortalRole }: MobileBottomNavProps) {
   const pathname  = usePathname()
   const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -93,6 +96,7 @@ export function MobileBottomNav({ isAdmin = false, features }: MobileBottomNavPr
     // client-only page reads as denied in it. While previewing the portal as a
     // client, show the client nav unfiltered instead of hiding Files and Services.
     features: isImpersonatingClient ? undefined : features,
+    clientPortalRole,
   })
 
   // Flat lookup: href -> NavItem. Lets primary tabs pull label + icon from the
