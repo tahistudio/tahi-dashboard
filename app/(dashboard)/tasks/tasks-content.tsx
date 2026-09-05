@@ -920,9 +920,9 @@ export function TasksContent() {
     assigneeOptions: railAssigneeOptions,
     isDefault: rail.isDefault,
     onSaveDefault: rail.saveDefault,
-    note: railInert
-      ? 'My week always shows your own open plate. The search, the views and the filters do not change it.'
-      : undefined,
+    // My week deliberately ignores the rail; the note that used to explain this
+    // was removed at Liam's request (2026-09-06), the inert controls say it.
+    note: undefined,
   }
 
   // The board and the week planner have no loading prop of their own, so the
