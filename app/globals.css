@@ -2610,3 +2610,32 @@ html.reduce-motion *::after {
     transition: none;
   }
 }
+
+/* ============================================================
+   TASKS LIST
+   ============================================================
+   The two rules the Tasks list cannot state inline.
+
+   1. A row's chips thin themselves before the title is ever asked to give
+      up width. The Task cell declares container-name: tsk-task, so this is
+      measured against the CELL, not the viewport: a wide window with a
+      narrow Task column thins the chips too, which a media query could not
+      do. The level chip is deliberately absent, because it carries the
+      client avatar and is the one chip that never thins.
+   2. The mobile card list draws one hairline between cards and none under
+      the last. An inline border would outrank the :last-child rule, so
+      both halves of that pair live here. */
+@layer components {
+  @container tsk-task (max-width: 21rem) {
+    .tsk-chip-thin-icon svg {
+      display: none;
+    }
+  }
+
+  .tsk-mc {
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+  .tsk-mc:last-child {
+    border-bottom: none;
+  }
+}
