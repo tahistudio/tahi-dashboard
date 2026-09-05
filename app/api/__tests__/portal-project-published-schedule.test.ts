@@ -5,7 +5,14 @@
  * status filter and read its phase names off the live schedule_rows table, so
  * an in-progress draft (or unpublished edits to a shared schedule) rendered on
  * a paying client's home. It now reads the newest schedule with status
- * 'shared' and takes the title plus the phase rows from publishedSnapshot.
+ * 'shared' and takes the whole cover plus the phase rows from
+ * publishedSnapshot, choosing the source once per snapshot so a field the
+ * snapshot published as null cannot fall back to the live column.
+ *
+ * A shared schedule with no usable snapshot (never published, or a snapshot
+ * that will not parse) deliberately keeps reading live, because that is what
+ * the client's own share link serves for it. Those two cases are pinned below
+ * so the parity is a decision and not an accident.
  *
  * The db mock is a small in-memory D1: it evaluates the eq / and / inArray
  * conditions, applies orderBy with SQLite null ordering and limit, and then
@@ -135,6 +142,17 @@ const EFFECTIVE = new Date(Date.now() - 15 * DAY_MS).toISOString()
 
 // The published plan the client is allowed to read. Deliberately out of
 // position order so the route has to sort by `position` itself.
+const PUBLISHED_ROWS = [
+  { id: 'r5', sectionId: 'sec1', rowType: 'gate', label: 'Design sign off', startWeek: 5, endWeek: 5, position: 5 },
+  { id: 'r0', sectionId: 'sec1', rowType: 'section_header', label: 'Discovery', startWeek: null, endWeek: null, position: 0 },
+  { id: 'r1', sectionId: 'sec1', rowType: 'task', label: 'Kickoff workshop', startWeek: 1, endWeek: 2, position: 1 },
+  { id: 'r2', sectionId: 'sec1', rowType: 'gate', label: 'Discovery sign off', startWeek: 2, endWeek: 2, position: 2 },
+  { id: 'r3', sectionId: 'sec1', rowType: 'section_header', label: 'Design', startWeek: null, endWeek: null, position: 3 },
+  { id: 'r4', sectionId: 'sec1', rowType: 'task', label: 'Homepage concepts', startWeek: 3, endWeek: 5, position: 4 },
+  { id: 'r6', sectionId: 'sec1', rowType: 'section_header', label: 'Build', startWeek: null, endWeek: null, position: 6 },
+  { id: 'r7', sectionId: 'sec1', rowType: 'task', label: 'Build and QA', startWeek: 6, endWeek: 9, position: 7 },
+]
+
 const PUBLISHED_SNAPSHOT = JSON.stringify({
   schedule: {
     title: 'Acme website build',
@@ -143,16 +161,20 @@ const PUBLISHED_SNAPSHOT = JSON.stringify({
     numberOfWeeks: 12,
   },
   sections: [{ id: 'sec1', type: 'gantt', position: 0 }],
-  rows: [
-    { id: 'r5', sectionId: 'sec1', rowType: 'gate', label: 'Design sign off', startWeek: 5, endWeek: 5, position: 5 },
-    { id: 'r0', sectionId: 'sec1', rowType: 'section_header', label: 'Discovery', startWeek: null, endWeek: null, position: 0 },
-    { id: 'r1', sectionId: 'sec1', rowType: 'task', label: 'Kickoff workshop', startWeek: 1, endWeek: 2, position: 1 },
-    { id: 'r2', sectionId: 'sec1', rowType: 'gate', label: 'Discovery sign off', startWeek: 2, endWeek: 2, position: 2 },
-    { id: 'r3', sectionId: 'sec1', rowType: 'section_header', label: 'Design', startWeek: null, endWeek: null, position: 3 },
-    { id: 'r4', sectionId: 'sec1', rowType: 'task', label: 'Homepage concepts', startWeek: 3, endWeek: 5, position: 4 },
-    { id: 'r6', sectionId: 'sec1', rowType: 'section_header', label: 'Build', startWeek: null, endWeek: null, position: 6 },
-    { id: 'r7', sectionId: 'sec1', rowType: 'task', label: 'Build and QA', startWeek: 6, endWeek: 9, position: 7 },
-  ],
+  rows: PUBLISHED_ROWS,
+})
+
+// The same plan published at kickoff, before anyone filled the dates in. Both
+// columns are nullable, so this is an ordinary state and not a corrupt write.
+const PUBLISHED_SNAPSHOT_NO_DATES = JSON.stringify({
+  schedule: {
+    title: 'Acme website build',
+    effectiveDate: null,
+    targetLaunchDate: null,
+    numberOfWeeks: 12,
+  },
+  sections: [{ id: 'sec1', type: 'gantt', position: 0 }],
+  rows: PUBLISHED_ROWS,
 })
 
 const SHARED_SCHEDULE: Row = {
@@ -191,6 +213,43 @@ const DRAFT_ROWS: Row[] = [
   { scheduleId: 'sch_draft', rowType: 'section_header', label: 'Damage control', startWeek: null, endWeek: null, position: 0 },
   { scheduleId: 'sch_draft', rowType: 'task', label: 'Rebuild the estimate internally', startWeek: 1, endWeek: 4, position: 1 },
 ]
+
+// Published with no dates, then both dates typed into the live row and never
+// published again. The live values are unpublished edits like any other.
+const SHARED_PUBLISHED_WITHOUT_DATES: Row = {
+  ...SHARED_SCHEDULE,
+  title: 'Acme website build',
+  publishedSnapshot: PUBLISHED_SNAPSHOT_NO_DATES,
+  effectiveDate: EFFECTIVE,
+  targetLaunchDate: '2027-06-01',
+}
+
+// An older plan the admin reopened and republished today. Still 'shared',
+// because sharing a new schedule does not unshare the previous one.
+const OLDER_REPUBLISHED: Row = {
+  id: 'sch_old',
+  orgId: 'org_client',
+  status: 'shared',
+  title: 'Acme discovery sprint',
+  effectiveDate: EFFECTIVE,
+  targetLaunchDate: '2026-04-01',
+  publishedSnapshot: JSON.stringify({
+    schedule: {
+      title: 'Acme discovery sprint',
+      effectiveDate: EFFECTIVE,
+      targetLaunchDate: '2026-04-01',
+      numberOfWeeks: 4,
+    },
+    sections: [{ id: 'secA', type: 'gantt', position: 0 }],
+    rows: [
+      { id: 'a0', sectionId: 'secA', rowType: 'section_header', label: 'Sprint zero', startWeek: null, endWeek: null, position: 0 },
+      { id: 'a1', sectionId: 'secA', rowType: 'task', label: 'Stakeholder interviews', startWeek: 1, endWeek: 2, position: 1 },
+    ],
+  }),
+  // Republished after the current plan was published, but created long before.
+  publishedAt: '2026-09-02T00:00:00.000Z',
+  createdAt: '2026-01-05T00:00:00.000Z',
+}
 
 const PROJECT_ROW: Row = {
   name: 'Acme website',
@@ -289,7 +348,47 @@ describe('GET /api/portal/project reads the published schedule only', () => {
     })
   })
 
-  it('falls back to live rows for a schedule shared before snapshots existed', async () => {
+  it('keeps a date the snapshot published as null instead of reading the live column', async () => {
+    state.tables.projectSchedules = [SHARED_PUBLISHED_WITHOUT_DATES]
+
+    const res = await GET(makeGet())
+    const body = await res.json() as ProjectResponse
+
+    // The live targetLaunchDate was never published, so the card falls to the
+    // project record rather than promising the client a date off an edit.
+    expect(body.targetLaunchDate).toBe('2026-11-15')
+    expect(JSON.stringify(body)).not.toContain('2027-06-01')
+
+    // With no published effective date there is no anchor, so no percentages
+    // and no milestone date are asserted: the phases render as a plain roadmap.
+    expect(body.progressKnown).toBe(false)
+    expect(body.nextMilestone).toBeNull()
+    expect(body.phases).toEqual([
+      { name: 'Discovery', state: 'upcoming', pct: 0, note: null },
+      { name: 'Design', state: 'upcoming', pct: 0, note: null },
+      { name: 'Build', state: 'upcoming', pct: 0, note: null },
+    ])
+  })
+
+  it('prefers the newest shared schedule over an older one republished later', async () => {
+    state.tables.projectSchedules = [OLDER_REPUBLISHED, SHARED_SCHEDULE]
+
+    const res = await GET(makeGet())
+    const body = await res.json() as ProjectResponse
+
+    expect(body.scheduleTitle).toBe('Acme website build')
+    expect(body.phases.map(p => p.name)).toEqual(['Discovery', 'Design', 'Build'])
+
+    const raw = JSON.stringify(body)
+    expect(raw).not.toContain('discovery sprint')
+    expect(raw).not.toContain('Sprint zero')
+    expect(raw).not.toContain('Stakeholder interviews')
+  })
+
+  it('reads live values for a shared schedule that was never published', async () => {
+    // Sharing does not write a snapshot, so this is the ordinary state of a
+    // freshly shared plan, not a pre-migration relic. Live is what the client's
+    // own share link serves for it, so the card matches the link.
     state.tables.projectSchedules = [{ ...SHARED_SCHEDULE, publishedSnapshot: null, publishedAt: null }]
     state.tables.scheduleRows = [
       { scheduleId: 'sch_shared', rowType: 'section_header', label: 'Discovery', startWeek: null, endWeek: null, position: 0 },
@@ -301,6 +400,19 @@ describe('GET /api/portal/project reads the published schedule only', () => {
 
     expect(body.phases.map(p => p.name)).toEqual(['Discovery'])
     expect(body.scheduleTitle).toBe('Acme website build (renegotiating scope)')
+    expect(body.targetLaunchDate).toBe('2027-03-01')
+  })
+
+  it('reads live values when the snapshot will not parse, like the public viewer', async () => {
+    state.tables.projectSchedules = [{ ...SHARED_SCHEDULE, publishedSnapshot: '{not json' }]
+    state.tables.scheduleRows = [...LIVE_ROWS_FOR_SHARED]
+
+    const res = await GET(makeGet())
+    const body = await res.json() as ProjectResponse
+
+    expect(body.scheduleTitle).toBe('Acme website build (renegotiating scope)')
+    expect(body.phases.map(p => p.name)).toEqual(['Discovery (unbilled rework)'])
+    expect(body.targetLaunchDate).toBe('2027-03-01')
   })
 
   it('still returns the retainer shape for a client with an active subscription', async () => {

@@ -45,9 +45,15 @@ function readNumber(value: unknown): number | null {
 
 // `projectSchedules.publishedSnapshot` is the JSON the publish action writes:
 // { schedule: {...}, sections: [...], rows: [...] }. Parsed defensively because
-// it is stored as free text. Returns null when there is no usable snapshot, and
-// a null `rows` when the snapshot carries no rows array, so callers can fall
-// back to the live tables exactly like the public share viewer does.
+// it is stored as free text. Returns null when the column is empty AND when the
+// JSON is unparseable, and a null `rows` when a parsed snapshot carries no rows
+// array. In every one of those cases the caller reads the live tables, which is
+// exactly what the public share viewer does with the same input, so the card and
+// the link the client already holds never disagree.
+//
+// A parsed snapshot is otherwise authoritative: a field it published as null
+// stays null rather than falling through to the live column, because "published
+// with no target launch date" is a real state, not a missing snapshot.
 function parsePublishedSnapshot(
   json: string | null,
 ): { cover: PublishedCover; rows: PhaseRow[] | null } | null {
@@ -95,9 +101,10 @@ function parsePublishedSnapshot(
 
 // ── GET /api/portal/project ──────────────────────────────────────────────────
 // For project-type clients, the real phase breakdown for the ProjectBoard +
-// "Your project" card, derived from the org's published project schedule (Gantt
-// section headers + week spans). Retainer clients (an active subscription) get
-// { isProject: false } so the home renders the TrackBoard instead.
+// "Your project" card, derived from the org's shared project schedule (Gantt
+// section headers + week spans), read through its published snapshot wherever
+// one exists. Retainer clients (an active subscription) get { isProject: false }
+// so the home renders the TrackBoard instead.
 //
 // Progress is only asserted when the schedule carries an effective date to
 // anchor "current week"; otherwise progressKnown=false and phases render as a
@@ -155,11 +162,16 @@ export async function GET(req: NextRequest) {
     project = null
   }
 
-  // The org's PUBLISHED project schedule anchors the phase roadmap. `status`
-  // flips to 'shared' when an admin shares a schedule and back to 'draft' when
-  // they revoke it, so it marks exactly the schedules a client is meant to see:
-  // an in-progress draft (even a newer one) never reaches this card. Ordered by
-  // publishedAt so the most recently published schedule wins.
+  // The org's SHARED project schedule anchors the phase roadmap. `status` flips
+  // to 'shared' when an admin shares a schedule and back to 'draft' when they
+  // revoke it, so it marks exactly the schedules a client is meant to see: an
+  // in-progress draft (even a newer one) never reaches this card.
+  //
+  // Schedules are not exclusive per org (a pre-sale gantt attached to the deal
+  // stays 'shared' alongside the delivery plan), so the newest one the admin
+  // created wins, which is the plan they are working to now. publishedAt is only
+  // a tiebreak: republishing an old schedule must not hijack the card away from
+  // the current one.
   let scheduleRow:
     | {
         id: string
@@ -184,8 +196,8 @@ export async function GET(req: NextRequest) {
         eq(schema.projectSchedules.status, 'shared'),
       ))
       .orderBy(
-        desc(schema.projectSchedules.publishedAt),
         desc(schema.projectSchedules.createdAt),
+        desc(schema.projectSchedules.publishedAt),
       )
       .limit(1)
     scheduleRow = row ?? null
@@ -193,18 +205,27 @@ export async function GET(req: NextRequest) {
     scheduleRow = null
   }
 
-  // Published values beat the live columns: the snapshot is what the client
-  // already reads on the shared link, so unpublished edits to the title or the
-  // phase names stay internal. Schedules shared before the snapshot column
-  // existed carry none and keep their live values, which is the same fallback
-  // the public share viewer makes.
+  // The whole cover comes from one source, chosen per snapshot and not per
+  // field. Once a snapshot exists it is what the client reads on the shared
+  // link, so its dates are taken verbatim: a date it published as null stays
+  // null. Reading each field with `??` would send a schedule published before
+  // its dates were filled in straight back to the live column, which is the
+  // unpublished value, and would silently anchor progress to it.
+  //
+  // `title` is the exception. The column is notNull, so a snapshot without one
+  // is corruption rather than intent, and the card needs a name to render.
+  //
+  // A schedule with no usable snapshot (shared but never published, or a
+  // snapshot that will not parse) keeps its live values. That is the same
+  // fallback /api/public/schedules/[token] makes, so the card shows the client
+  // what their own link shows them. See the rows comment below.
   const published = scheduleRow ? parsePublishedSnapshot(scheduleRow.publishedSnapshot) : null
   const schedule = scheduleRow
     ? {
         id: scheduleRow.id,
-        title: published?.cover.title ?? scheduleRow.title,
-        effectiveDate: published?.cover.effectiveDate ?? scheduleRow.effectiveDate,
-        targetLaunchDate: published?.cover.targetLaunchDate ?? scheduleRow.targetLaunchDate,
+        title: published ? (published.cover.title ?? scheduleRow.title) : scheduleRow.title,
+        effectiveDate: published ? published.cover.effectiveDate : scheduleRow.effectiveDate,
+        targetLaunchDate: published ? published.cover.targetLaunchDate : scheduleRow.targetLaunchDate,
       }
     : null
 
@@ -213,8 +234,18 @@ export async function GET(req: NextRequest) {
   let nextMilestone: { name: string; dateISO: string | null } | null = null
 
   if (schedule) {
-    // Phase names come from the published snapshot. Only a schedule that was
-    // shared before the snapshot column existed reads the live rows.
+    // Phase names come from the published snapshot whenever there is one, so
+    // renaming a phase after publishing stays internal until the next publish.
+    //
+    // The live read below is NOT a pre-migration relic. Sharing does not write a
+    // snapshot (POST /api/admin/schedules/[id]/share only sets status and the
+    // token) and the Publish button only appears after a schedule has been
+    // shared, so "shared, never published" is an ordinary state and this branch
+    // runs for it. Those schedules serve their live rows on the client's own
+    // share link too, so reading live here keeps the card and the link in step
+    // rather than telling the client their plan is still being set up. Closing
+    // this properly means making share write the first snapshot; until then a
+    // never-published schedule shows live edits in both places.
     let rows: PhaseRow[] = published?.rows ?? []
     if (!published?.rows) {
       try {
