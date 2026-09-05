@@ -2699,3 +2699,34 @@ html.reduce-motion *::after {
     gap: 0.125rem;
   }
 }
+
+/* ============================================================
+   TAHI BUTTON: SIZE HEIGHTS
+   ============================================================
+   <TahiButton> paints everything else inline, but its height has to change
+   with the viewport and an inline style cannot hold a media query. So the
+   three sizes state their height here instead, and the primitive attaches
+   .tahi-btn-sm / -md / -lg.
+
+   Below md every size clears 2.75rem (WCAG 2.5.8 Target Size, and the house
+   rule): sm sat at 1.75rem and md at 2.25rem, which is what left the Clients
+   pages full of 28px and 36px targets on a phone. From 48rem up each size
+   returns to its design-pack height, so desktop density is untouched. Only
+   the height moved; padding, type and gap are still inline on the primitive.
+
+   Layered as components on purpose: a caller's own min-h-* utility sits in
+   Tailwind's later utilities layer and still wins, and a caller's own inline
+   minHeight outranks any stylesheet rule, so both escape hatches survive. */
+@layer components {
+  .tahi-btn-sm { min-height: 1.75rem; }
+  .tahi-btn-md { min-height: 2.25rem; }
+  .tahi-btn-lg { min-height: 2.5rem; }
+
+  @media (max-width: 47.9375rem) {
+    .tahi-btn-sm,
+    .tahi-btn-md,
+    .tahi-btn-lg {
+      min-height: 2.75rem;
+    }
+  }
+}

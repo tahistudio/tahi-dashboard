@@ -608,8 +608,20 @@
    component, same actions: the pill becomes a full-width row and the panel
    drops inline instead of floating, so nothing is clipped on a phone. */
 .tt-sheet { width: 100%; }
-.tt-sheet .tt-pill { width: 100%; min-height: 2.75rem; height: auto; padding: 0 0.75rem; border-color: transparent; background: none; gap: 0.75rem; font-size: 0.9375rem; }
+/* text-align: left is load-bearing. .tt-pill is a <button>, so the UA hands it
+   text-align: center, which nothing overrides. In the bar that is invisible
+   because .tt-lbl is only as wide as its words; in the sheet .tt-lbl takes
+   flex: 1 and the label floats to the middle of it while Theme, Private mode,
+   Client view, Settings and Sign out all start hard against their icon. The
+   running state was never affected (.tt-live is a flex box, so its children
+   pack left) and is not changed by this. */
+.tt-sheet .tt-pill { width: 100%; min-height: 2.75rem; height: auto; padding: 0 0.75rem; border-color: transparent; background: none; gap: 0.75rem; font-size: 0.9375rem; text-align: left; }
 .tt-sheet .tt-pill:hover { background: var(--bg-secondary); border-color: transparent; }
+/* Every other row in the sheet leads with an 18px .tbs-ic, so the timer's
+   glyph box is held to the same width. Its clock is 16px and its running dot
+   is 9px, and without this the label started 2px in from Theme when idle and
+   7px in from it while a timer ran. */
+.tt-sheet .tt-ic { width: 1.125rem; flex-shrink: 0; justify-content: center; }
 .tt-sheet .tt-lbl, .tt-sheet .tt-live { flex: 1; min-width: 0; }
 .tt-sheet .tt-chev { margin-left: auto; }
 .tt-sheet .tt-panel { position: static; width: auto; margin-top: 0.5rem; box-shadow: none; animation: none; }

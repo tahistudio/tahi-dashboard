@@ -259,29 +259,44 @@ export function ClientHero({
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center flex-wrap lg:justify-end" style={{ gap: '0.5rem' }}>
+        {/* Actions.
+            Three controls, one row. On a phone the two labelled buttons and
+            the overflow came to about 328px against 311px of hero, so the
+            overflow wrapped and sat alone on a third line, orphaned from the
+            actions it belongs to. Below md the row cannot wrap at all: the
+            labelled pair shares the slack (flex-auto on the button and min-w-0
+            on both the button and its label, since a flex item defaults to
+            min-width: auto and will not give ground without it), the overflow
+            stays a fixed 2.75rem square, and a label a hair too long ends in
+            an ellipsis instead of pushing anything off the row and off the
+            page. The icons drop their mr-1.5, which
+            was doubling the button's own 0.375rem gap and costing 12px of the
+            width this row does not have. From md up nothing changes: natural
+            widths, wrapping allowed, right-aligned beside the name at lg. */}
+        <div className="flex items-center flex-nowrap md:flex-wrap lg:justify-end" style={{ gap: '0.5rem' }}>
           <TahiButton
             variant="secondary"
             size="sm"
+            className="flex-auto min-w-0 md:flex-none"
             disabled={inviting || contacts.length === 0}
             title={inviteLabel}
             aria-label={inviteLabel}
             onClick={onInvite}
           >
             {inviting
-              ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" aria-hidden="true" />
-              : <Mail className="w-3.5 h-3.5 mr-1.5" aria-hidden="true" />}
-            {inviting ? 'Sending...' : 'Invite to portal'}
+              ? <Loader2 className="w-3.5 h-3.5 flex-shrink-0 animate-spin" aria-hidden="true" />
+              : <Mail className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />}
+            <span className="truncate min-w-0">{inviting ? 'Sending...' : 'Invite to portal'}</span>
           </TahiButton>
           <TahiButton
             variant="secondary"
             size="sm"
+            className="flex-auto min-w-0 md:flex-none"
             onClick={onViewAs}
             title={`Open the portal exactly as ${org.name} sees it`}
           >
-            <Eye className="w-3.5 h-3.5 mr-1.5" aria-hidden="true" />
-            View as client
+            <Eye className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+            <span className="truncate min-w-0">View as client</span>
           </TahiButton>
           <Menu
             align="end"
@@ -295,6 +310,7 @@ export function ClientHero({
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  flexShrink: 0,
                   minHeight: '2.75rem',
                   minWidth: '2.75rem',
                   borderRadius: 'var(--radius-button)',
