@@ -283,8 +283,11 @@ export function TeammateHome({ ctx }: { ctx: OverviewCtx }) {
   /* ---- today's calls (route filters to the member's org access scope) ---- */
   const todaysCalls = (callsRes.data?.calls ?? []).filter(c => ymdLocal(new Date(c.scheduledAt)) === today).slice(0, 4)
 
-  /* ---- replies waiting ---- */
-  const threads = repliesRes.data?.threads ?? []
+  /* ---- recent client replies ---- */
+  // Request rows only. The feed also carries conversation rows, and while the
+  // standalone Messages page is hidden there is no page to open for one, so a
+  // row here would be a card that answers a click with nothing.
+  const threads = (repliesRes.data?.threads ?? []).filter(t => t.kind === 'request')
 
   /* ---- Hero ---- */
   const heroValue = meLoading ? <Skel w="1.6ch" h="0.75em" /> : (meData?.openWork ?? 0)
@@ -361,9 +364,12 @@ export function TeammateHome({ ctx }: { ctx: OverviewCtx }) {
       tone: 'work',
       ic: 'msg',
       title: firstReply.clientName ?? firstReply.threadTitle,
-      sub: 'Waiting on your reply',
-      verb: 'Reply',
-      onAct: () => go('messages'),
+      // What the feed can prove is that the client wrote last on a request
+      // this member is on. It cannot prove nobody has answered since, so the
+      // sub names the thread rather than asserting the ball is here.
+      sub: firstReply.threadTitle,
+      verb: 'Open',
+      onAct: () => go(firstReply.to),
     })
   }
 
@@ -469,11 +475,11 @@ export function TeammateHome({ ctx }: { ctx: OverviewCtx }) {
       {/* ---- Waiting ---- */}
       <Zone label="Waiting">
         <Card span={12}>
-          <CardH ic="msg" title="Replies waiting on you" link="All messages" onLink={() => go('messages')} />
+          <CardH ic="msg" title="Recent client replies" link="All requests" onLink={() => go('requests')} />
           {repliesRes.isLoading && !repliesRes.data ? (
             <RowsSkeleton n={3} />
           ) : threads.length === 0 ? (
-            <EmptyLine text="You're all caught up. No replies are waiting on you." />
+            <EmptyLine text="No client replies on your requests recently." />
           ) : (
             <div className="ov-rows">
               {threads.map(t => (
@@ -486,9 +492,9 @@ export function TeammateHome({ ctx }: { ctx: OverviewCtx }) {
                     <button
                       className="ov-cta ghost"
                       style={{ height: 30, fontSize: 12, padding: '0 12px' }}
-                      onClick={() => go('messages')}
+                      onClick={() => go(t.to)}
                     >
-                      Reply
+                      Open
                     </button>
                   }
                 />

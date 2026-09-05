@@ -714,13 +714,20 @@ export interface NeedItem {
 export interface NeedsYouProps {
   items: NeedItem[]
   quiet?: { title?: ReactNode; sub?: ReactNode }
+  /** Read-only lens (an admin previewing a client / a team member). Disables
+   *  every verb: these are write actions taken in somebody else's name. */
   ro?: boolean
   onMore?: () => void
 }
 
 /** Attention queue: max 3 rows each with one verb, a live border-trace when
- *  populated, a `+N more` overflow, and an honest "all quiet" empty state. */
-export function NeedsYou({ items, quiet, onMore }: NeedsYouProps) {
+ *  populated, a `+N more` overflow, and an honest "all quiet" empty state.
+ *
+ *  `ro` is honoured in the markup, not only in CSS. This component declared the
+ *  prop and never read it, so the only thing stopping an impersonating admin
+ *  from pressing Pay on a client's invoice was the pointer-events rule on
+ *  .nr-verb in overview.css, which a keyboard walks straight past. */
+export function NeedsYou({ items, quiet, ro, onMore }: NeedsYouProps) {
   const live = items && items.length > 0
   const extra = live ? items.length - 3 : 0
   return (
@@ -739,7 +746,7 @@ export function NeedsYou({ items, quiet, onMore }: NeedsYouProps) {
               <b>{it.title}</b>
               <small>{it.sub}</small>
             </div>
-            <button className="nr-verb" onClick={it.onAct}>
+            <button className="nr-verb" disabled={ro} onClick={it.onAct}>
               {it.verb}
             </button>
           </div>
