@@ -264,6 +264,30 @@ export async function POST(req: NextRequest) {
     if (denied) return denied
   }
 
+  // Who the assignee IS, settled once, before the write.
+  //
+  // Before the write for two reasons. The column: PATCH persists what it
+  // resolves, this door stored `body.assigneeType ?? null` and the dialog
+  // never sends the type, so every task created assigned carried an id with
+  // no kind and /api/admin/overview/me had to OR isNull into its filter.
+  // And the answer: reading it after the insert meant a D1 failure here
+  // answered 500 for a request whose task row already existed, so the
+  // operator re-submitted the dialog and got a duplicate. Failing here costs
+  // a 500 on a request that wrote nothing, which is safe to retry.
+  //
+  // `me` is the team member the caller IS, read before the write for the same
+  // reason and only when it can change the answer: the assignee id names a
+  // teamMembers row while the caller is a Clerk user, so the self-check below
+  // compares through it.
+  const assigneeId = body.assigneeId ?? null
+  const statedType = body.assigneeType === 'contact' || body.assigneeType === 'team_member'
+    ? body.assigneeType
+    : null
+  const assigneeType = assigneeId
+    ? statedType ?? await resolveAssigneeType(drizzle, assigneeId)
+    : null
+  const me = assigneeType === 'team_member' ? await resolveTeamMember(drizzle, userId) : null
+
   const id = crypto.randomUUID()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
 
@@ -275,8 +299,8 @@ export async function POST(req: NextRequest) {
     description: body.description ?? null,
     status,
     priority,
-    assigneeId: body.assigneeId ?? null,
-    assigneeType: body.assigneeType ?? null,
+    assigneeId,
+    assigneeType,
     dueDate: body.dueDate ?? null,
     estimatedHours: body.estimatedHours ?? null,
     completedAt: status === 'done' ? now : null,
@@ -309,40 +333,41 @@ export async function POST(req: NextRequest) {
 
   // A task created already assigned IS an assignment, and PATCH has always
   // told the person carrying it. This door never did, so the quickest way to
-  // hand somebody work (the new-task dialog, the template picker, the AI
-  // wizard, the MCP tool) was also the only way they were never told: the
-  // task simply appeared on the board and waited to be noticed.
+  // hand somebody work (the new-task dialog, the dashboard template picker
+  // which prefills that dialog, the AI wizard, the MCP create_task tool) was
+  // also the only way they were never told: the task simply appeared on the
+  // board and waited to be noticed.
+  //
+  // Not every create door, though: POST /api/admin/tasks/from-template writes
+  // its own row and is reachable on its own through the MCP
+  // create_task_from_template tool, so that one still assigns in silence.
+  //
+  // Team members only, never a contact. Tasks are not a client surface
+  // (DECISIONS.md, and lib/notification-links clientHref returns null for
+  // 'task'), so a contact addressed here would be handed a Tahi-internal task
+  // TITLE in their bell, on a row that cannot be clicked because there is no
+  // client page to open. The tasks board assigns team members, but the MCP
+  // create_task tool forwards `assigneeId` unvalidated, so an id lifted from
+  // a contacts list would otherwise put internal work in a client's bell.
+  // A contact assignee therefore still stores its type and still holds the
+  // task; nobody outside the studio is told about it.
   //
   // Assigning yourself something is not news, so the creator is never
-  // notified. The assignee id names a teamMembers or contacts row while the
-  // caller is a Clerk user, so the two are compared through the team member
-  // the caller IS. A service caller (the worker MCP) is nobody's team member,
-  // resolves to null, and correctly never matches the assignee.
-  if (body.assigneeId) {
-    const assigneeId = body.assigneeId
-    const me = await resolveTeamMember(drizzle, userId)
-    if (me?.id !== assigneeId) {
-      // Same resolution PATCH uses: the caller may state the type, and when
-      // they do not (the dialog never does) the server settles it from the
-      // id, so the row reaches the right person's bell. An id matching
-      // neither table has nobody to tell, and the task still stands.
-      const assigneeType = body.assigneeType === 'contact' || body.assigneeType === 'team_member'
-        ? body.assigneeType
-        : await resolveAssigneeType(drizzle, assigneeId)
-
-      if (assigneeType) {
-        await createNotification(drizzle, {
-          recipient: assigneeType === 'contact'
-            ? { contactId: assigneeId }
-            : { teamMemberId: assigneeId },
-          type: 'task_assigned',
-          title: `Task assigned to you: "${title}"`,
-          body: null,
-          entityType: 'task',
-          entityId: id,
-        })
-      }
-    }
+  // notified. KNOWN GAP, accepted rather than half-closed: a worker MCP call
+  // authenticates as the service user, which by design IS nobody's team
+  // member (lib/team-identity SERVICE_USER_ID), so `me` is null and "create
+  // a task for me" through create_task still writes the asker a row. Closing
+  // it needs the MCP to forward the acting team member id, which is a change
+  // in workers/mcp-server, not here.
+  if (assigneeId && assigneeType === 'team_member' && me?.id !== assigneeId) {
+    await createNotification(drizzle, {
+      recipient: { teamMemberId: assigneeId },
+      type: 'task_assigned',
+      title: `Task assigned to you: "${title}"`,
+      body: null,
+      entityType: 'task',
+      entityId: id,
+    })
   }
 
   return NextResponse.json({ id }, { status: 201 })
