@@ -18,6 +18,7 @@
 import { schema } from '@/db/d1'
 import { eq, sql, gte, isNotNull } from 'drizzle-orm'
 import { callXeroAPI, callXeroAPIOrThrow, XeroAPIError } from '@/lib/xero'
+import { mapXeroInvoiceStatus, reconcileXeroStatus, normaliseXeroDate } from '@/lib/xero-status'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -214,6 +215,68 @@ export async function syncXeroBalances(drizzle: D1): Promise<SyncOutcome> {
 }
 
 // ---------------------------------------------------------------------------
+// Paging
+// ---------------------------------------------------------------------------
+
+/** Xero returns at most 100 invoices per page on the /Invoices list endpoint. */
+export const XERO_PAGE_SIZE = 100
+
+/**
+ * Hard ceiling on how many pages one sync will walk. 50 pages is 5,000
+ * invoices, well past anything Tahi's ledger will hold for years, and it stops
+ * a Xero-side paging bug from turning a nightly cron into an unbounded loop.
+ */
+export const XERO_MAX_PAGES = 50
+
+export interface XeroPageWalk<T> {
+  /** Every row read, in page order. */
+  rows: T[]
+  /** How many pages were actually fetched (the log the summary reports). */
+  pagesRead: number
+  /** True when the ceiling was hit before a short page: there is more in Xero. */
+  truncated: boolean
+  /** True when a page came back empty-handed (Xero error), so rows are partial. */
+  failed: boolean
+}
+
+/**
+ * Walk Xero's `page` parameter until a short page, a failure, or the ceiling.
+ *
+ * `readPage` returns the rows for a 1-based page, or null when the call
+ * failed. A page shorter than `pageSize` is Xero's end-of-list signal, so the
+ * walk stops there; a full page means there is probably another one.
+ *
+ * The reader is injected rather than called inline so the walk itself is unit
+ * testable against a fake client, with no fetch and no token.
+ */
+export async function walkXeroPages<T>(
+  readPage: (page: number) => Promise<T[] | null>,
+  opts: { pageSize?: number; maxPages?: number } = {},
+): Promise<XeroPageWalk<T>> {
+  const pageSize = opts.pageSize ?? XERO_PAGE_SIZE
+  const maxPages = opts.maxPages ?? XERO_MAX_PAGES
+
+  const rows: T[] = []
+  let pagesRead = 0
+  let truncated = false
+  let failed = false
+
+  for (let page = 1; page <= maxPages; page++) {
+    const batch = await readPage(page)
+    if (batch === null) {
+      failed = true
+      break
+    }
+    pagesRead++
+    rows.push(...batch)
+    if (batch.length < pageSize) return { rows, pagesRead, truncated, failed }
+    if (page === maxPages) truncated = true
+  }
+
+  return { rows, pagesRead, truncated, failed }
+}
+
+// ---------------------------------------------------------------------------
 // Payment status sync
 // ---------------------------------------------------------------------------
 
@@ -223,6 +286,8 @@ interface XeroPaymentInvoice {
   Status: string
   Type: string
   Total: number
+  AmountDue?: number
+  FullyPaidOnDate?: string
   UpdatedDateUTC: string
   HasAttachments: boolean
 }
@@ -232,8 +297,18 @@ interface XeroPaymentInvoicesResponse {
 }
 
 /**
- * Sync payment statuses from Xero back to local invoices that were synced
- * to Xero (matched by xeroInvoiceId).
+ * Sync payment statuses from Xero back to local invoices that were pushed to
+ * or imported from Xero (matched by xeroInvoiceId).
+ *
+ * Reads EVERY page of Xero's ACCREC list, not just the first: before IC.5 the
+ * call carried no `page` parameter at all, so every local invoice past Xero's
+ * first 100 reported 'not_found_in_xero' forever. Status comes from the one
+ * shared mapper in lib/xero-status.ts, and paidAt comes from Xero's
+ * FullyPaidOnDate rather than "now", so a payment that landed last month stops
+ * reporting as this month's revenue.
+ *
+ * Only touches rows whose `source` is 'xero'. A Stripe-billed invoice that
+ * happens to carry a xeroInvoiceId belongs to the Stripe rail.
  */
 export async function syncXeroPayments(database: D1): Promise<SyncOutcome> {
   try {
@@ -242,25 +317,29 @@ export async function syncXeroPayments(database: D1): Promise<SyncOutcome> {
         id: schema.invoices.id,
         xeroInvoiceId: schema.invoices.xeroInvoiceId,
         status: schema.invoices.status,
+        source: schema.invoices.source,
       })
       .from(schema.invoices)
       .where(isNotNull(schema.invoices.xeroInvoiceId))
 
     if (syncedInvoices.length === 0) {
-      return { ok: true, status: 200, body: { success: true, synced: 0, updated: 0, results: [] }, count: 0 }
+      return { ok: true, status: 200, body: { success: true, synced: 0, updated: 0, pagesRead: 0, truncated: false, partial: false, results: [] }, count: 0 }
     }
 
-    const xeroRes = await callXeroAPI<XeroPaymentInvoicesResponse>(
-      'GET',
-      '/Invoices?ApiKey=',
-    )
+    const walk = await walkXeroPages<XeroPaymentInvoice>(async (page) => {
+      const res = await callXeroAPI<XeroPaymentInvoicesResponse>(
+        'GET',
+        `/Invoices?where=Type%3D%3D%22ACCREC%22&page=${page}`,
+      )
+      return res?.Invoices ?? null
+    })
 
-    if (!xeroRes?.Invoices) {
+    if (walk.pagesRead === 0) {
       return { ok: false, status: 500, body: { error: 'Failed to fetch invoices from Xero' }, error: 'Failed to fetch invoices from Xero' }
     }
 
     const xeroInvoiceMap = new Map(
-      xeroRes.Invoices.map((inv) => [inv.InvoiceID, inv]),
+      walk.rows.map((inv) => [inv.InvoiceID, inv]),
     )
 
     const results: Array<Record<string, unknown>> = []
@@ -268,6 +347,11 @@ export async function syncXeroPayments(database: D1): Promise<SyncOutcome> {
     const now = new Date().toISOString()
 
     for (const localInvoice of syncedInvoices) {
+      if (localInvoice.source !== 'xero') {
+        results.push({ invoiceId: localInvoice.id, status: 'skipped_not_xero_source', source: localInvoice.source })
+        continue
+      }
+
       const xeroInvoice = xeroInvoiceMap.get(localInvoice.xeroInvoiceId ?? '')
 
       if (!xeroInvoice) {
@@ -275,52 +359,57 @@ export async function syncXeroPayments(database: D1): Promise<SyncOutcome> {
         continue
       }
 
-      let newStatus = localInvoice.status
-      let paidAt: string | null = null
+      const mapped = mapXeroInvoiceStatus(xeroInvoice.Status, xeroInvoice.AmountDue, xeroInvoice.FullyPaidOnDate)
+      const newStatus = reconcileXeroStatus(localInvoice.status, mapped)
 
-      if (xeroInvoice.Status === 'AUTHORISED') {
-        newStatus = 'sent'
-      } else if (xeroInvoice.Status === 'SUBMITTED') {
-        newStatus = 'viewed'
-      } else if (xeroInvoice.Status === 'PAID') {
-        newStatus = 'paid'
-        paidAt = now
-      }
-
-      if (newStatus !== localInvoice.status) {
-        const updates: Record<string, unknown> = {
-          status: newStatus,
-          updatedAt: now,
-        }
-
-        if (paidAt) {
-          updates.paidAt = paidAt
-        }
-
-        await database
-          .update(schema.invoices)
-          .set(updates)
-          .where(eq(schema.invoices.id, localInvoice.id))
-
-        updated++
-
-        results.push({
-          invoiceId: localInvoice.id,
-          xeroInvoiceId: localInvoice.xeroInvoiceId,
-          previousStatus: localInvoice.status,
-          newStatus,
-        })
-      } else {
+      if (!newStatus) {
         results.push({
           invoiceId: localInvoice.id,
           xeroInvoiceId: localInvoice.xeroInvoiceId,
           status: 'no_change',
           xeroStatus: xeroInvoice.Status,
         })
+        continue
       }
+
+      const updates: Record<string, unknown> = {
+        status: newStatus,
+        updatedAt: now,
+      }
+
+      if (newStatus === 'paid') {
+        updates.paidAt = normaliseXeroDate(xeroInvoice.FullyPaidOnDate) ?? now
+      } else if (localInvoice.status === 'paid') {
+        // Payment unwound in Xero, so the stored paid date is no longer true
+        // and /financial-reports must stop counting it (IC.1).
+        updates.paidAt = null
+      }
+
+      await database
+        .update(schema.invoices)
+        .set(updates)
+        .where(eq(schema.invoices.id, localInvoice.id))
+
+      updated++
+
+      results.push({
+        invoiceId: localInvoice.id,
+        xeroInvoiceId: localInvoice.xeroInvoiceId,
+        previousStatus: localInvoice.status,
+        newStatus,
+      })
     }
 
-    return { ok: true, status: 200, body: { success: true, synced: syncedInvoices.length, updated, results }, count: updated }
+    const body = {
+      success: true,
+      synced: syncedInvoices.length,
+      updated,
+      pagesRead: walk.pagesRead,
+      truncated: walk.truncated,
+      partial: walk.failed,
+      results,
+    }
+    return { ok: true, status: 200, body, count: updated }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { ok: false, status: 500, body: { error: msg }, error: msg }
@@ -607,22 +696,18 @@ interface XeroImportInvoicesResponse {
   Invoices: XeroImportInvoice[]
 }
 
-function mapXeroStatus(xeroStatus: string): string {
-  switch (xeroStatus) {
-    case 'DRAFT': return 'draft'
-    case 'SUBMITTED':
-    case 'AUTHORISED': return 'sent'
-    case 'PAID': return 'paid'
-    case 'VOIDED':
-    case 'DELETED': return 'written_off'
-    default: return 'draft'
-  }
-}
-
 /**
  * Import a page of ACCREC invoices from Xero, matching or auto-creating the
- * owning org, and creating local invoice + line-item rows. Idempotent:
- * invoices already present (by xeroInvoiceId) are skipped.
+ * owning org, and creating local invoice + line-item rows.
+ *
+ * A row already known by xeroInvoiceId is UPDATED rather than skipped (that
+ * skip is why a Xero invoice imported while it was a DRAFT stayed local
+ * 'draft' forever, and the portal hides drafts from the client): status,
+ * subtotal, total, currency, due date and paid date are all re-read from Xero.
+ * Rows whose `source` is not 'xero' are never touched, whatever id they carry.
+ *
+ * AmountDue has no column of its own, so it only feeds the status decision
+ * (a zero balance on an AUTHORISED invoice with a paid date reads as paid).
  */
 export async function importXeroInvoices(database: D1, page: number): Promise<SyncOutcome> {
   try {
@@ -636,11 +721,18 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
     }
 
     const existing = await database
-      .select({ xeroInvoiceId: schema.invoices.xeroInvoiceId })
+      .select({
+        id: schema.invoices.id,
+        xeroInvoiceId: schema.invoices.xeroInvoiceId,
+        status: schema.invoices.status,
+        source: schema.invoices.source,
+      })
       .from(schema.invoices)
       .where(sql`${schema.invoices.xeroInvoiceId} IS NOT NULL`)
 
-    const existingIds = new Set(existing.map(e => e.xeroInvoiceId))
+    const existingByXeroId = new Map(
+      existing.filter(e => e.xeroInvoiceId).map(e => [e.xeroInvoiceId as string, e]),
+    )
 
     const allOrgs = await database
       .select({ id: schema.organisations.id, name: schema.organisations.name, xeroContactId: schema.organisations.xeroContactId })
@@ -648,13 +740,64 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
 
     const now = new Date().toISOString()
     let imported = 0
+    let updated = 0
     let skipped = 0
     const results: Array<{ invoiceNumber: string; status: string; orgMatch?: string }> = []
 
     for (const inv of data.Invoices) {
-      if (existingIds.has(inv.InvoiceID)) {
+      const localStatus = mapXeroInvoiceStatus(inv.Status, inv.AmountDue, inv.FullyPaidOnDate)
+
+      // DELETED (and anything unrecognised) has no dashboard status. There is
+      // nothing honest to create, and nothing to rewrite on a row we hold.
+      if (!localStatus) {
         skipped++
-        results.push({ invoiceNumber: inv.InvoiceNumber, status: 'already_exists' })
+        results.push({ invoiceNumber: inv.InvoiceNumber, status: 'skipped_no_local_status' })
+        continue
+      }
+
+      const known = existingByXeroId.get(inv.InvoiceID)
+
+      if (known) {
+        // Never reach into another rail's row, whatever id it is carrying.
+        if (known.source !== 'xero') {
+          skipped++
+          results.push({ invoiceNumber: inv.InvoiceNumber, status: 'skipped_not_xero_source' })
+          continue
+        }
+
+        const nextStatus = reconcileXeroStatus(known.status, localStatus)
+        const updates: Record<string, unknown> = {
+          amountUsd: inv.SubTotal,
+          totalUsd: inv.Total,
+          currency: inv.CurrencyCode ?? 'NZD',
+          dueDate: inv.DueDateString?.split('T')[0] ?? null,
+          updatedAt: now,
+        }
+        if (nextStatus) updates.status = nextStatus
+        if (localStatus === 'paid') {
+          // Xero's settlement date, not "now". Only stamp over an existing
+          // paid date when Xero actually has one to give.
+          const paidAt = normaliseXeroDate(inv.FullyPaidOnDate)
+          if (paidAt || known.status !== 'paid') updates.paidAt = paidAt ?? now
+        } else if (known.status === 'paid') {
+          // Payment unwound in Xero: the stored paid date is no longer true.
+          updates.paidAt = null
+        }
+
+        try {
+          await database
+            .update(schema.invoices)
+            .set(updates)
+            .where(eq(schema.invoices.id, known.id))
+          updated++
+          results.push({ invoiceNumber: inv.InvoiceNumber, status: 'updated' })
+        } catch (updateErr) {
+          results.push({
+            invoiceNumber: inv.InvoiceNumber,
+            status: 'error',
+            orgMatch: updateErr instanceof Error ? updateErr.message : 'Update failed',
+          })
+        }
         continue
       }
 
@@ -715,7 +858,6 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
         continue
       }
 
-      const localStatus = mapXeroStatus(inv.Status)
       const invoiceId = crypto.randomUUID()
 
       try {
@@ -729,7 +871,7 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
           totalUsd: inv.Total,
           currency: inv.CurrencyCode ?? 'NZD',
           dueDate: inv.DueDateString?.split('T')[0] ?? null,
-          paidAt: inv.FullyPaidOnDate ?? null,
+          paidAt: localStatus === 'paid' ? (normaliseXeroDate(inv.FullyPaidOnDate) ?? now) : null,
           notes: `Imported from Xero: ${inv.InvoiceNumber}`,
           createdAt: inv.DateString ?? now,
           updatedAt: now,
@@ -766,13 +908,14 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
     const body = {
       success: true,
       imported,
+      updated,
       skipped,
       total: data.Invoices.length,
       page,
-      hasMore: data.Invoices.length >= 100,
+      hasMore: data.Invoices.length >= XERO_PAGE_SIZE,
       results,
     }
-    return { ok: true, status: 200, body, count: imported }
+    return { ok: true, status: 200, body, count: imported + updated }
   } catch (err) {
     console.error('Xero import error:', err)
     return { ok: false, status: 500, body: { error: 'Import failed', message: err instanceof Error ? err.message : 'Unknown error' }, error: err instanceof Error ? err.message : 'Unknown error' }

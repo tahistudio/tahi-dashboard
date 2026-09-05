@@ -1458,8 +1458,8 @@ const TOOLS: ToolDef[] = [
   // ── AI ────────────────────────────────────────────────────────────────
   // ── Financial / Xero ───────────────────────────────────────────────
   tool('get_financial_health', 'Get financial health: invoice totals, pipeline projections, MRR, Xero P&L, bank balances'),
-  tool('import_xero_invoices', 'Import all ACCREC invoices from Xero into dashboard with auto-match to clients'),
-  tool('sync_xero_payments', 'Sync invoice payment statuses from Xero'),
+  tool('import_xero_invoices', 'Import a page of ACCREC invoices from Xero into the dashboard with auto-match to clients. Invoices already imported are now UPDATED in place (status, subtotal, total, currency, due date, paid date) instead of skipped, so a status change made in Xero lands here. Rows billed on another rail (source not xero) are never touched.'),
+  tool('sync_xero_payments', 'Sync invoice payment statuses from Xero back to the dashboard. Pages through every Xero ACCREC invoice (100 per page, 50 page ceiling) rather than only the first page, updates every known row it has seen, and stamps the paid date from Xero FullyPaidOnDate. Returns pagesRead and truncated.'),
   tool('get_xero_profit_loss', 'Get Xero Profit and Loss report', {
     fromDate: prop('string', 'Start date YYYY-MM-DD'),
     toDate: prop('string', 'End date YYYY-MM-DD'),

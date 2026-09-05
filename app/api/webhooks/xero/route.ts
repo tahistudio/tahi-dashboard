@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { callXeroAPI } from '@/lib/xero'
+import { mapXeroInvoiceStatus, reconcileXeroStatus, normaliseXeroDate } from '@/lib/xero-status'
 import { emitDomainEvent } from '@/lib/events'
 import { notifyAllAdmins } from '@/lib/notifications'
 
@@ -117,32 +118,6 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 /**
- * Map a Xero invoice status/amounts to a local invoices.status value.
- * Local enum: draft | sent | viewed | paid | overdue | written_off (no
- * dedicated "partially paid" value, so a partial payment stays "sent" while
- * its amounts are still reconciled to the Xero figures).
- */
-function mapStatus(inv: XeroInvoice): string {
-  switch (inv.Status) {
-    case 'PAID':
-      return 'paid'
-    case 'AUTHORISED':
-    case 'SUBMITTED':
-      // Fully settled invoices sometimes report AmountDue 0 while lagging on
-      // the PAID flag; treat a zero balance on a positive total as paid.
-      if ((inv.Total ?? 0) > 0 && (inv.AmountDue ?? inv.Total ?? 0) <= 0) return 'paid'
-      return 'sent'
-    case 'VOIDED':
-    case 'DELETED':
-      return 'written_off'
-    case 'DRAFT':
-      return 'draft'
-    default:
-      return 'sent'
-  }
-}
-
-/**
  * Reconcile every INVOICE/UPDATE event in a payload against local invoices.
  * Runs after the HTTP response is flushed (via ctx.waitUntil). Best-effort:
  * never throws.
@@ -191,19 +166,29 @@ async function reconcilePayload(payload: XeroWebhookPayload): Promise<void> {
       // separate, admin-triggered flow; we never auto-create here.)
       if (!local) continue
 
-      const newStatus = mapStatus(inv)
+      // One shared mapper (lib/xero-status.ts): this route, the importer and
+      // the payment sync all read the same table, so the same Xero invoice can
+      // no longer say two different things depending on who touched it last.
+      const mapped = mapXeroInvoiceStatus(inv.Status, inv.AmountDue, inv.FullyPaidOnDate)
+      const newStatus = reconcileXeroStatus(local.status, mapped)
       const flippedToPaid = newStatus === 'paid' && local.status !== 'paid'
 
       const updates: Record<string, unknown> = {
-        status: newStatus,
         lastReconciledAt: now,
         updatedAt: now,
       }
+      if (newStatus) updates.status = newStatus
       if (typeof inv.SubTotal === 'number') updates.amountUsd = inv.SubTotal
       if (typeof inv.Total === 'number') updates.totalUsd = inv.Total
       if (inv.CurrencyCode) updates.currency = inv.CurrencyCode
-      if (newStatus === 'paid') {
-        updates.paidAt = inv.FullyPaidOnDate ?? now
+      if (mapped === 'paid') {
+        // Xero's own settlement date, not "now": /financial-reports is keyed
+        // on paid_at, so a payment that landed last month belongs to last month.
+        const paidAt = normaliseXeroDate(inv.FullyPaidOnDate)
+        if (paidAt || local.status !== 'paid') updates.paidAt = paidAt ?? now
+      } else if (newStatus && local.status === 'paid') {
+        // Payment unwound in Xero: the stored paid date is no longer true.
+        updates.paidAt = null
       }
 
       await database
