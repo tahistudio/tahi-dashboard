@@ -4,12 +4,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
-import { notifyRequestTeam, resolveRequestTeamMemberIds } from '@/lib/notify-request-team'
+import { notifyRequestTeam } from '@/lib/notify-request-team'
 import {
-  allStudioEmailTargets,
-  deferNotificationEmails,
   messageSummary,
-  resolveEmailTargets,
   threadReplyEmailPlan,
   toPlainText,
   truncate,
@@ -103,51 +100,39 @@ export async function POST(req: NextRequest, { params }: Params) {
       .set({ updatedAt: new Date().toISOString() })
       .where(eq(schema.requests.id, id))
 
-    // Tell the studio. Fan out to the assignee, every team participant and the
-    // client's PM, falling back to the whole team when the request has not been
-    // triaged yet (which is exactly when a first message tends to arrive).
-    const target = { requestId: id, orgId, assigneeId: request.assigneeId ?? null }
-
-    await notifyRequestTeam(drizzle, target, {
-      type: 'new_message',
-      title: `New client message on "${request.title}"`,
-      body: messageSummary(safeBody),
-      entityType: 'request',
-      entityId: id,
-    })
-
-    // And put it in their inbox. A two person studio works out of email, so a
-    // client question that only lit a bell nobody had open is a question that
-    // waits a day.
+    // Tell the studio, in the bell and in the inbox, off one resolved audience.
+    // Fan out to the assignee, every team participant and the client's PM,
+    // falling back to the whole team when the request has not been triaged yet
+    // (which is exactly when a first message tends to arrive).
     //
-    // The audience comes from the same resolver notifyRequestTeam uses, so the
-    // two channels cannot drift. It is dispatched separately only because
-    // RequestTeamPayload has no email slot; the studio-wide fallback is the
-    // same one, for the same reason (an untriaged request still has to reach a
-    // human).
+    // A two person studio works out of email, so a client question that only
+    // lit a bell nobody had open is a question that waits a day. The email is
+    // the same event, so it rides the same payload: this route used to resolve
+    // the studio a second time for itself, on a second fallback rule, and the
+    // two channels could disagree about who the studio side of a request is.
+    // The send still happens off the response path, so the client's composer
+    // does not wait on Resend to clear.
     //
     // The quote is the client's own message, which is external by construction
     // on this route: an internal note can never be reached from here.
-    const memberIds = await resolveRequestTeamMemberIds(drizzle, target)
-    const specific = memberIds.length > 0
-      ? await resolveEmailTargets(drizzle, memberIds.map((teamMemberId) => ({ teamMemberId })))
-      : []
-    const studio = specific.length > 0 ? specific : await allStudioEmailTargets(drizzle)
-
-    // Deferred, like every other send: the client's message is already stored,
-    // and their composer should not wait on Resend to clear.
-    await deferNotificationEmails(
+    await notifyRequestTeam(
       drizzle,
-      studio,
-      'new_message',
-      threadReplyEmailPlan({
-        audience: 'studio',
-        requestId: id,
-        requestTitle: request.title,
-        requestNumber: request.requestNumber,
-        fromName: contact?.name?.trim() || 'A client',
-        message: truncate(toPlainText(safeBody), 900),
-      }),
+      { requestId: id, orgId, assigneeId: request.assigneeId ?? null },
+      {
+        type: 'new_message',
+        title: `New client message on "${request.title}"`,
+        body: messageSummary(safeBody),
+        entityType: 'request',
+        entityId: id,
+        email: threadReplyEmailPlan({
+          audience: 'studio',
+          requestId: id,
+          requestTitle: request.title,
+          requestNumber: request.requestNumber,
+          fromName: contact?.name?.trim() || 'A client',
+          message: truncate(toPlainText(safeBody), 900),
+        }),
+      },
     )
 
     return NextResponse.json({ id: msgId }, { status: 201 })

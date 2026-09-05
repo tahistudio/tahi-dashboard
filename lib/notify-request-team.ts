@@ -29,6 +29,7 @@ import {
   type NotificationEntityType,
   type NotificationEventType,
 } from '@/lib/notifications'
+import type { NotificationEmailPlan } from '@/lib/notification-email'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -38,6 +39,14 @@ export interface RequestTeamPayload {
   body?: string | null
   entityType?: NotificationEntityType | null
   entityId?: string | null
+  /**
+   * Optional inbox twin, handed straight to createNotifications. Callers used
+   * to resolve this audience a second time for themselves and dispatch the
+   * email separately, which meant the two channels ran on two different
+   * fallback rules and could disagree about who the studio side of a request
+   * even is. One audience, resolved once, two channels.
+   */
+  email?: NotificationEmailPlan
 }
 
 export interface RequestTeamTarget {
@@ -109,6 +118,10 @@ export async function resolveRequestTeamMemberIds(
  * A recipient who muted this event's in-app channel is NOT a fallback trigger:
  * that is a deliberate preference, and blasting the whole studio would override
  * it. Only unresolvable identity (skipped === everyone) escalates.
+ *
+ * When the payload carries an email plan, both channels ride this one audience
+ * (createNotifications sends it off the response path). The escalation is the
+ * one place they part company, and deliberately: see below.
  */
 export async function notifyRequestTeam(
   database: DrizzleDB,
@@ -124,6 +137,17 @@ export async function notifyRequestTeam(
         payload,
       )
       if (result.skipped < memberIds.length) return
+
+      // Nobody named could be reached in the bell, so the studio-wide fallback
+      // fires for the bell only. The call above has already put this in the
+      // named people's inboxes, because an address needs no Clerk login and
+      // that is exactly the person who counts as "skipped" here. Passing the
+      // plan on would mail them the same message twice.
+      const { email, ...bellOnly } = payload
+      if (email) {
+        await notifyAllAdmins(database, bellOnly)
+        return
+      }
     }
     await notifyAllAdmins(database, payload)
   } catch (err) {
