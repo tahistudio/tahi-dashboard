@@ -1,61 +1,46 @@
-# Morning report, Sunday 6 September 2026 (draft, finalised at 07:30 NZST)
+# Morning report, Sunday 6 September 2026 (written 06:45 to 07:30 NZST)
 
-Kia ora Liam. This is what happened between 22:50 last night and 07:30 this morning. Everything below marked LIVE is on portal.tahi.studio, passed type-check, lint, the full test suite and a build, and was smoke-tested in a browser after the deploy. Everything marked DESIGNED is in the Claude Design project "Tahi dashboard" for you to comment on.
+Kia ora Liam. This is what happened between 22:50 last night and 07:30 this morning. LIVE means on portal.tahi.studio, past type-check, lint, the full test suite and a build, deployed, and smoke-tested in a browser afterwards. DESIGNED means in the Claude Design project "Tahi dashboard" for you to comment on.
 
-## Live on production (in order)
+## One incident, resolved
 
-- Invoicing channel per client (IC.2), New Invoice defaults from the client (IC.3), Xero status truth and paginated payment sync (IC.5), Xero pay rail: online pay link capture, mark-paid pushback to Xero or Stripe (IC.4a), the studio side of the pay path: Getting paid settings, pay link and pushback outcome on the invoice detail, How to pay in emails and the portal projection, Xero email mode (IC.4b). Migrations 0089, 0090, 0091 applied to both D1s ahead of each deploy.
-- Money-path bug fixes (IC.1): the invoice detail reads its real Source, a hand mark-paid keeps its date (financial reports were under-reporting).
-- Predictive autofill on New Request and New Task (TP.5): grounded Haiku suggestions for due date, priority, size, estimate and category, marked Suggested with reasons, clearable, never over a field you touched.
-- Mobile top bar (TP.6): five slots plus a More sheet with Track time, Daily brief, currency, theme, private mode, Client view, Settings and Sign out (sign out was unreachable on phones before).
-- Clients list and client detail redesign (CR.1 to CR.4): saved views rail, filters, cards view, bulk actions, server paging, Archived view and Restore; detail hero, Needs you, tracks, nine tabs including Money, every previous capability kept; 2.75rem touch targets on every button below md app-wide.
-- Playwright coverage for blockers, the week strip and the AI create view; the email preview set (22 emails) sent to business@tahi.studio; the My week note removed.
+At 06:25 the client-walk fix deploy broke every signed-in page (server-side exception). I rolled back within twelve minutes and production is back on the portal-port tree, verified in the browser at 06:50. Cause, found by a read-only diagnosis (docs/superpowers/audits/2026-09-06-prod-500-diagnosis.json): the dashboard layout called a helper exported from a use-client module on the server; Next replaces such exports with a stub that throws at runtime, and nothing in type-check, tests or the build catches it. The fix is a three-function move into a server-safe file. I did not re-land it in the last hour of the run; it is the first thing to do today, with a render check on the QA server and a post-deploy health probe (both now written into the deploy recipe).
 
-## Designed in Claude Design (comment there)
+## Live on production, in order
+
+1. Invoicing: channel per client (Stripe or Xero, studio default in Settings), New Invoice defaults its rail, currency and due date from the client with a warning on override, one Xero status mapper with forward-only reconcile and paginated payment sync, the Xero pay link captured once you approve an invoice in Xero, a dashboard mark-paid pushes back to Xero or Stripe, Getting paid settings (bank details, Xero payment account code, Xero email mode), How to pay in the invoice emails and the portal projection, Xero email mode honoured on send. Migrations 0089, 0090 and 0091 applied to both D1s before each deploy. Two money bugs fixed on the way: the invoice detail read Source Manual for every invoice, and a hand mark-paid lost its date so financial reports under-reported.
+2. Predictive autofill on New Request and New Task: grounded Haiku suggestions for due date, priority, size, estimate and category, marked Suggested with a reason, clearable, never over a field you touched. Smoke-tested live with a real title.
+3. Mobile top bar: brand mark, page name, search, bell and a More sheet with Track time, Daily brief, currency, theme, private mode, Client view, Settings and Sign out. Sign out was unreachable on phones before.
+4. Clients list and client detail redesign, ported from the Claude Design: saved views rail with true counts, filters that go to the endpoint, cards view, bulk actions, server paging, Archived view and Restore; detail hero, Needs you, tracks, nine tabs including Money, every previous capability kept. Then a touch-target pass: every button clears 2.75rem below md, app-wide.
+5. Client portal port from the Claude Design: one client status vocabulary, the Waiting on you tile as an actionable hero, masthead with greeting and plan, skeletons on every card (no more empty-state lies while loading), every New request affordance opens the dialog, the request detail stops claiming nobody is assigned; client invoices with Pay now for real links and a How to pay block with copy buttons, per-currency figures, no rail or Source label; the Services showcase with an Ask about this path and no create-a-service; the Notifications page for both audiences with a paginated API, kind filters and honest deep links; a standalone Offline page.
+6. Playwright coverage for blockers, the week strip and the AI create view; the email preview set sent to your inbox; the My week note removed.
+
+## Designed in Claude Design (comment there; switch the audience to client for the portal)
 
 - Clients list and detail (ported).
-- Client portal: home, requests list and detail, new request, files as a mini Drive with threads, messages, invoices list and detail, services showcase, notifications, account, welcome, offline. A fixer ran on the prototype after the critic (CSS namespace collision, one client identity, no studio pages in the client nav).
-- Sales stack: leads, calls, deals; proposals, contracts, schedules and their public viewers; time, team, capacity, tracks. (Status filled in below.)
+- Client portal: home, requests list and detail, new request, Files as a mini Drive with threads, Messages, invoices, services, notifications, account, welcome, offline. The critic found a CSS prefix collision between the home and files modules and inconsistent sample identities in the prototype; a fixer was running on it at 07:30 (see the run log for its final status).
+- Sales stack: leads, calls and deals (pipeline); time, team, capacity and tracks (ops); proposals, contracts and schedules with their public viewers (the third designer and the critics were still running at 07:30; see the run log).
 
-## In flight or left for the next pass
+## Not done tonight, and why
 
-(filled in at 07:30)
+- Client-walk fixes (PP.5 in TASKS.md): reverted after the incident; re-land today after a QA render check. Contents: Client view resolves the audience server-side on every studio page (today a preview still shows the studio's own billing, settings, calls and tasks pages inside the client shell), client money pinned to the client's currency with no switcher, a branded not-found page, the TRIAGE badge hidden from clients, dark-mode rail contrast, banner copy.
+- Files as a mini Drive with threads and client Messages: designed, not built. Both need schema (folders, versions, file threads, conversation participants). About a day each.
+- The portal-only requests component tree: the client list and detail still share the studio components with isAdmin branches; only the status badge adopted the client vocabulary. This is the follow-up that removes a whole class of client-visible leaks the reader map lists.
+- Sales stack and ops ports: designs only. Tier 3 (reports, calculator, announcements, reviews, affiliates, content studio, sitemap, social, docs) was not reached.
+- Two usage-limit pauses (23:30 to 01:20, and 06:10 to 06:20) cost about two hours of agent time; three designers hung and were restarted from cache.
 
-## Client walk findings (headless, QA server, as Acme Corp and Stride; full report docs/superpowers/audits/2026-09-06-client-walk.json)
+## Client walk findings (as Acme Corp and Stride on the QA server; full list in docs/superpowers/audits/2026-09-06-client-walk.json)
 
-The core client loop (overview, requests list, board, timeline, request detail, New request with AI assist) rendered honestly at both widths with no overflow and no dashes. Problems cluster in money and preview fidelity. Fixes for the first, second, and the not-found, TRIAGE, contrast and banner items launched at 05:40; the participants lie, Pay now and How to pay on the list, and the notifications 404 are inside the portal port slices.
+The core client loop rendered honestly at both widths, no overflow, no dashes. Fixed tonight: the participants lie on the request detail, Pay now and How to pay on the invoice list and detail, the notifications 404. Open: Client view preview fidelity and client currency pinning (in the reverted branch), the not-found page, the TRIAGE badge on the client board, dark-mode contrast of the selected saved view, the banner's stray space, invoice rows not keyboard-focusable, three endpoints disagreeing on track count, an established client greeted as brand new, the news-feed line truncating mid-sentence.
 
-- [blocker] /billing, /settings, /calls, /tasks (Client view): Client view (the impersonation preview) renders the studio's admin surfaces inside the client shell, so a screen labelled "Read-only client view" shows every other client by name, plan and money.
-- [blocker] /overview, /requests, /invoices (all client pages): Money is shown in a display currency that defaults to NZD regardless of the client's own currency, and the top-bar chip silently re-converts it.
-- [blocker] /invoices/8d76f113-46c8-4340-bcf9-46077d52254a (Stride): Clicking an invoice row lands a client on "Failed to load invoice." with a 19px Retry button and no other way forward: no amount, no reference, no line items, no way to pay.
-- [blocker] /invoices (Stride): The only payment action a client has is a dead link.
-- [important] /requests/bed1cf18-52cc-46dd-848f-8096f94f005c: The request detail tells the client nobody is working on their request, while the list, board and track strip on the same site all name the person who is.
-- [important] /overview vs /requests: The portal contradicts itself about what the client is paying for and what is being built.
-- [important] /overview (Stride): An established client with five months of invoices and a 131-day-overdue bill is greeted as brand new, and the same page contradicts itself two cards later.
-- [important] /invoices: Invoice rows are non-focusable <tr> elements with a click handler, so the only way into an invoice is a mouse click.
-- [important] /notifications (and any mistyped URL): There is no app-level not-found page, so a client who lands on a bad URL gets the raw Next.js 404 with no navigation, no branding and no link back - a hard dead end inside a signed-in session.
-- [important] /requests (Kanban tab): Internal studio vocabulary is printed on the client's board: the Submitted column carries a "TRIAGE" badge.
-- [important] /invoices (Stride): React hydration mismatch on a client-facing money page, which throws away the server render and re-renders the whole tree on the client.
-- [important] /requests: In dark mode the SELECTED saved view is the least readable item in the rail - darker than the unselected ones.
-- [minor] /overview, /files, /invoices, /requests, /settings: Many client controls are under the 2.75rem (44px) minimum at 375px.
-- [minor] /overview, /requests: Counts are labelled with the wrong verb, so the numbers read as claims the data does not support.
-- [minor] Impersonation banner (every page): Stray space before the full stop in the banner copy: "Viewing Acme Corp .
-- [minor] /overview (Stride): A disabled "Messaging soon" pill and "TBC" placeholders ship roadmap scaffolding to the client.
-- [minor] /services: Services is a permanently empty nav item: the catalogue query can never return anything today, so every client sees a dead page in their sidebar and More sheet.
-- [minor] /requests: The List / Kanban / Timeline switcher collapses to unlabelled icons at 375px and the icons are near-invisible in dark mode.
-- [minor] /overview: The news-feed line truncates mid-sentence with an unclosed quotation mark.
-- [minor] /overview (client): The client home logs a 500 to the console on every load and issues about 24 admin API calls the client half never uses.
+## Decisions and operator steps for you
 
-## Decisions for you
-
-- Re-checked on production as Client view of Tahi Test Client at 05:50: the portal invoice detail answers 200 with howToPay (the QA server's 500 was local snapshot drift, not a product bug), so that client-walk blocker does not apply to production.
-- Operator step: Settings, Studio details, Getting paid is empty, so How to pay currently shows only the amount, due date and reference. Fill bank name, account name, account number and the Xero payment account code and every Xero-rail client gets the full block.
-
-- Services upsell brief (CL.3): the showcase is designed without pricing pressure; tell me how hard to sell.
-- Files as Drive (CL.1) and client Messages need schema (folders, versions, file threads, conversation participants): design is done, build is a day each.
-- Notifications page: the API needed pagination and mark-all-read; see the port notes.
+- Settings, Studio details, Getting paid is empty: fill bank name, account name, account number and the Xero payment account code, and every Xero-rail client gets the full How to pay block (today it shows only amount, due date and reference).
+- Services upsell brief (CL.3): the showcase is live without pricing pressure; tell me how hard to sell.
+- Two new email variants (invoice sent and overdue with How to pay) exist in the preview set; say the word and I send them to your inbox.
+- The invoice number: Tahi owns the sequence (your call from last night) but the column does not exist yet (CT.14); clients see the short id as their reference until it does.
 
 ## How to review
 
-- Production: portal.tahi.studio as yourself; View as client on Tahi Test Client (business+client@tahi.studio invite is in your inbox for a real client session).
-- Claude Design: open the Tahi dashboard project, switch the audience to client, pin comments; hit Send to Claude on anything you want actioned.
+- Production: portal.tahi.studio as yourself; Clients, Tahi Test Client, View as client. For a real client session use the invite in your inbox for business+client@tahi.studio in an incognito window.
+- Claude Design: open Tahi dashboard, switch the audience to client for the portal pages, pin comments, and hit Send to Claude on anything you want actioned.
