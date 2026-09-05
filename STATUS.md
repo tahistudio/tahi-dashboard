@@ -64,6 +64,8 @@ Liam's call: ship every surface a client touches first (proposals, contracts, sc
 
 ### Broken or missing for clients (sprint C2 - the five blockers, all re-verified 2026-08-18)
 
+**Update 2026-09-05:** B3, B4 and B5 shipped in the Tier 1 cutover (`docs/superpowers/plans/2026-09-05-cutover-tier1.md`) and were verified on production: portal invoice detail with a persisted pay link, the client Files page and honest nav, invites minted and emailed from the client detail with the portal admin role on the first contact, the second seat linked on sign-in, "invoice me" completing onboarding. The cron workflows also needed the Clerk public matcher opened (b8b3f366) after the URL fix. B1 and B2 were not in the 2026-09-04 ship readiness audit's blocker list; treat them as fixed earlier and re-check on the first real client. The entries below are kept as the historical record.
+
 1. **B1 uploads identity** - clients 403 on every team-uploaded file; /api/uploads/confirm is a cross-tenant write hole (any authed user can write files rows into another org); Clerk-vs-D1 org-id split also hides client self-uploads from the portal list. (~2.5d)
 2. **B2 notification identity** - inserts use domain row ids, queries use Clerk ids: clients never see team replies, team never sees client comments. Correct resolver helpers exist unused. (~1.5d)
 3. **B3 portal invoice dead end** - detail page always hits the admin API (403 for clients); no pay link is ever stored; "Pay" buttons just navigate to the list. (~2.5d)
