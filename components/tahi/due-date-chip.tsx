@@ -22,9 +22,14 @@ import { AlertTriangle, Calendar } from 'lucide-react'
 /** How a due date reads right now. */
 export type DueDateState = 'overdue' | 'due-soon' | 'on-track'
 
-/** Statuses where a due date stops meaning anything. Mirrors
- *  CLOSED_STATUSES in lib/requests-views.ts. */
-const CLOSED_STATUSES: readonly string[] = ['delivered', 'cancelled', 'archived']
+/** Statuses where a due date stops meaning anything, for a REQUEST. Mirrors
+ *  CLOSED_STATUSES in lib/requests-views.ts. Stays the default so every
+ *  existing caller keeps its behaviour with no edit. */
+export const REQUEST_CLOSED_STATUSES: readonly string[] = ['delivered', 'cancelled', 'archived']
+
+/** The same idea for a TASK, whose only finished status is `done`. Without
+ *  this a done task with a past due date renders in the danger tone. */
+export const TASK_CLOSED_STATUSES: readonly string[] = ['done']
 
 /** How many days ahead still counts as "due soon". */
 export const DUE_SOON_DAYS = 3
@@ -43,8 +48,9 @@ export function dueDateState(
   dueDate: string | null | undefined,
   status: string,
   now: Date = new Date(),
+  closedStatuses: readonly string[] = REQUEST_CLOSED_STATUSES,
 ): DueDateState | null {
-  if (!dueDate || CLOSED_STATUSES.includes(status)) return null
+  if (!dueDate || closedStatuses.includes(status)) return null
   const due = new Date(`${dueDate.slice(0, 10)}T23:59:59`)
   const ms = due.getTime()
   if (Number.isNaN(ms)) return null
@@ -75,6 +81,7 @@ export function DueDateChip({
   status,
   size = 'md',
   overdue = false,
+  closedStatuses,
 }: {
   dueDate: string | null | undefined
   status: string
@@ -86,9 +93,15 @@ export function DueDateChip({
    * cannot be measured here.
    */
   overdue?: boolean
+  /**
+   * Which statuses count as finished for this surface. Defaults to the
+   * request vocabulary; a task surface passes TASK_CLOSED_STATUSES so a done
+   * task with a past date stops reading as overdue.
+   */
+  closedStatuses?: readonly string[]
 }) {
   if (!dueDate) return null
-  const state = overdue ? 'overdue' : dueDateState(dueDate, status)
+  const state = overdue ? 'overdue' : dueDateState(dueDate, status, undefined, closedStatuses)
   const label = formatDueDateLabel(dueDate) ?? dueDate
   const tone = TONE[state ?? 'on-track']
   const tinted = state === 'overdue' || state === 'due-soon'

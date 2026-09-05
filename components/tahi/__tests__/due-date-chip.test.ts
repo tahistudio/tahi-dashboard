@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { dueDateState, formatDueDateLabel, DUE_SOON_DAYS } from '../due-date-chip'
+import { dueDateState, formatDueDateLabel, DUE_SOON_DAYS, TASK_CLOSED_STATUSES } from '../due-date-chip'
 
 // A fixed "now" so the boundaries are exact rather than clock-dependent.
 const NOW = new Date('2026-09-03T09:00:00')
@@ -56,5 +56,22 @@ describe('formatDueDateLabel', () => {
     expect(formatDueDateLabel(null)).toBeNull()
     expect(formatDueDateLabel('')).toBeNull()
     expect(formatDueDateLabel('soon')).toBeNull()
+  })
+})
+
+describe('closedStatuses', () => {
+  const past = '2020-01-01'
+  const now = new Date('2026-09-05T09:00:00')
+
+  it('still tones a done TASK as overdue with the default request statuses', () => {
+    expect(dueDateState(past, 'done', now)).toBe('overdue')
+  })
+
+  it('drops the tone once the caller names the task closed statuses', () => {
+    expect(dueDateState(past, 'done', now, TASK_CLOSED_STATUSES)).toBeNull()
+  })
+
+  it('keeps toning an open task under the same statuses', () => {
+    expect(dueDateState(past, 'todo', now, TASK_CLOSED_STATUSES)).toBe('overdue')
   })
 })
