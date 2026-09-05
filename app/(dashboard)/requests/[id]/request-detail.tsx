@@ -47,7 +47,7 @@ import { RequestActionsMenu } from '@/components/tahi/requests/request-actions-m
 import { ClientReviewBar } from '@/components/tahi/requests/client-review-bar'
 import {
   InlineDateField, InlineMenuField, InlineNone, InlineNumberField,
-} from '@/components/tahi/requests/inline-field'
+} from '@/components/tahi/inline-field'
 import type { ReviewDecision } from '@/lib/request-review'
 
 // ---- Constants ---------------------------------------------------------------

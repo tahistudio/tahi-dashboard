@@ -1,7 +1,9 @@
 'use client'
 
 /**
- * Inline rail editors for the request detail Details card.
+ * Inline editors for a detail rail row: a menu field, a date field and a
+ * number field. Built for the Requests detail and reused by the Tasks detail,
+ * which is why they live here rather than under requests/.
  *
  * Each field reads as plain text with a quiet chevron on the right, and
  * turns into its editor on click. Three shapes cover every editable row:
