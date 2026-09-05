@@ -57,6 +57,29 @@ const HEALTH_META: Record<string, { label: string; tone: BadgeTone }> = {
   red: { label: 'At risk', tone: 'danger' },
 }
 
+/**
+ * The clip box for a hero action label that has to be able to truncate.
+ *
+ * `truncate` brings `overflow: hidden`, and the label sits inside a TahiButton,
+ * which sets `line-height: 1`. At the sm font size that makes the span's box
+ * exactly 12px tall while Manrope's glyph area wants about 15.5px, so the
+ * half-leading goes negative and the clip shaves the bottom off every
+ * descender: the p in "Invite to portal", the y in "View as client", the g in
+ * "Sending...". Nothing gates that on the text actually being too long, so it
+ * happened at every width, including the sizes where the label fits easily.
+ *
+ * The padding grows the clip box past the glyphs; the equal negative margin
+ * hands the space straight back to the layout, so the span still measures 12px
+ * to its parent and the button's height is untouched at every breakpoint. That
+ * matters: a sm button is 1.75rem from md up, which is its 0.75rem of padding
+ * and 1px borders around a content box exactly as tall as the 14px icon, so
+ * anything that made the label taller than the icon would have grown it.
+ */
+const LABEL_CLIP: React.CSSProperties = {
+  paddingBlock: '0.1875rem',
+  marginBlock: '-0.1875rem',
+}
+
 export interface HeroCall {
   id: string
   title: string
@@ -264,20 +287,23 @@ export function ClientHero({
             the overflow came to about 328px against 311px of hero, so the
             overflow wrapped and sat alone on a third line, orphaned from the
             actions it belongs to. Below md the row cannot wrap at all: the
-            labelled pair shares the slack (flex-auto on the button and min-w-0
-            on both the button and its label, since a flex item defaults to
-            min-width: auto and will not give ground without it), the overflow
-            stays a fixed 2.75rem square, and a label a hair too long ends in
-            an ellipsis instead of pushing anything off the row and off the
-            page. The icons drop their mr-1.5, which
-            was doubling the button's own 0.375rem gap and costing 12px of the
-            width this row does not have. From md up nothing changes: natural
-            widths, wrapping allowed, right-aligned beside the name at lg. */}
+            labelled pair gives up the overshoot instead (min-w-0 on both the
+            button and its label, since a flex item defaults to min-width: auto
+            and will not shrink without it), the overflow stays a fixed 2.75rem
+            square, and a label a hair too long ends in an ellipsis instead of
+            pushing anything off the row and off the page. Shrink only: a
+            flex item's default flex: 0 1 auto already does this, and adding
+            grow would have stretched the pair to fill the hero's full width
+            everywhere there is slack, which is the whole 480px to 767px band.
+            The icons drop their mr-1.5, which was doubling the button's own
+            0.375rem gap and costing 12px of the width this row does not have.
+            From md up nothing changes: natural widths, wrapping allowed,
+            right-aligned beside the name at lg. */}
         <div className="flex items-center flex-nowrap md:flex-wrap lg:justify-end" style={{ gap: '0.5rem' }}>
           <TahiButton
             variant="secondary"
             size="sm"
-            className="flex-auto min-w-0 md:flex-none"
+            className="min-w-0 md:flex-none"
             disabled={inviting || contacts.length === 0}
             title={inviteLabel}
             aria-label={inviteLabel}
@@ -286,17 +312,17 @@ export function ClientHero({
             {inviting
               ? <Loader2 className="w-3.5 h-3.5 flex-shrink-0 animate-spin" aria-hidden="true" />
               : <Mail className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />}
-            <span className="truncate min-w-0">{inviting ? 'Sending...' : 'Invite to portal'}</span>
+            <span className="truncate min-w-0" style={LABEL_CLIP}>{inviting ? 'Sending...' : 'Invite to portal'}</span>
           </TahiButton>
           <TahiButton
             variant="secondary"
             size="sm"
-            className="flex-auto min-w-0 md:flex-none"
+            className="min-w-0 md:flex-none"
             onClick={onViewAs}
             title={`Open the portal exactly as ${org.name} sees it`}
           >
             <Eye className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-            <span className="truncate min-w-0">View as client</span>
+            <span className="truncate min-w-0" style={LABEL_CLIP}>View as client</span>
           </TahiButton>
           <Menu
             align="end"
