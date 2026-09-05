@@ -3,7 +3,11 @@
  *
  * Before the Tasks port this route had no access scoping at all (CLAUDE.md
  * rule 11), issued one UPDATE per id, and returned `taskIds.length` as
- * `updatedCount` whether or not any row existed.
+ * `updatedCount` whether or not any row existed. It also moved a whole
+ * selection onto somebody without telling them, which the per-task door has
+ * always done. Telling them then has to stay proportionate: the board's
+ * select-all reaches every filtered row, so the fan-out is capped and the
+ * rows that were already that person's are left alone.
  *
  * The drizzle condition builders are replaced with plain recorders so the
  * scope clause the route hands the reachable-id query can be read and asserted
@@ -16,8 +20,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const calls: { where: unknown; set: Record<string, unknown> }[] = []
 const selectWheres: unknown[] = []
+const notified: Record<string, unknown>[] = []
 let scopedOrgIds: string[] | null = null
 let existingIds: string[] = []
+let existingAssignees: Record<string, string | null> = {}
+let callerTeamMemberId: string | null = null
 
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: async () => ({ orgId: 'tahi-org', userId: 'user_1' }),
@@ -28,7 +35,21 @@ vi.mock('@/lib/access-scoping', () => ({
   resolveAccessScoping: async () => scopedOrgIds,
 }))
 
-vi.mock('@/db/d1', () => ({ schema: { tasks: { id: 'id', orgId: 'org_id' } } }))
+vi.mock('@/lib/team-identity', () => ({
+  resolveTeamMember: async () =>
+    callerTeamMemberId ? { id: callerTeamMemberId, role: 'admin' } : null,
+}))
+
+vi.mock('@/lib/notifications', () => ({
+  createNotification: async (_drizzle: unknown, params: Record<string, unknown>) => {
+    notified.push(params)
+    return { delivered: 1, skipped: 0 }
+  },
+}))
+
+vi.mock('@/db/d1', () => ({
+  schema: { tasks: { id: 'id', orgId: 'org_id', title: 'title', assigneeId: 'assignee_id' } },
+}))
 
 vi.mock('drizzle-orm', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>()
@@ -47,7 +68,11 @@ vi.mock('@/lib/db', () => ({
       from: () => ({
         where: async (where: unknown) => {
           selectWheres.push(where)
-          return existingIds.map(id => ({ id }))
+          return existingIds.map(id => ({
+            id,
+            title: `Task ${id}`,
+            assigneeId: existingAssignees[id] ?? null,
+          }))
         },
       }),
     }),
@@ -75,8 +100,11 @@ describe('PATCH /api/admin/tasks/bulk', () => {
   beforeEach(() => {
     calls.length = 0
     selectWheres.length = 0
+    notified.length = 0
     scopedOrgIds = null
     existingIds = ['a', 'b']
+    existingAssignees = {}
+    callerTeamMemberId = 'tm_me'
   })
 
   it('asks only for the rows the caller access rule reaches', async () => {
@@ -138,5 +166,81 @@ describe('PATCH /api/admin/tasks/bulk', () => {
   it('rejects an invalid priority', async () => {
     const res = await PATCH(patch({ taskIds: ['a'], updates: { priority: 'medium' } }) as never)
     expect(res.status).toBe(400)
+  })
+
+  it('tells the new assignee once per task it actually moved', async () => {
+    await PATCH(patch({ taskIds: ['a', 'b'], updates: { assigneeId: 'tm_staci' } }) as never)
+    expect(notified).toHaveLength(2)
+    expect(notified.map(n => n.entityId)).toEqual(['a', 'b'])
+    expect(notified[0]).toMatchObject({
+      recipient: { teamMemberId: 'tm_staci' },
+      type: 'task_assigned',
+      entityType: 'task',
+    })
+    expect(notified[0].title).toContain('Task a')
+  })
+
+  it('never notifies the caller about a selection they took on themselves', async () => {
+    await PATCH(patch({ taskIds: ['a', 'b'], updates: { assigneeId: 'tm_me' } }) as never)
+    expect(calls).toHaveLength(1)
+    expect(notified).toHaveLength(0)
+  })
+
+  it('notifies nobody when the selection is unassigned or untouched', async () => {
+    await PATCH(patch({ taskIds: ['a', 'b'], updates: { assigneeId: null } }) as never)
+    await PATCH(patch({ taskIds: ['a', 'b'], updates: { status: 'done' } }) as never)
+    expect(notified).toHaveLength(0)
+  })
+
+  it('does not notify about tasks the caller could not reach', async () => {
+    scopedOrgIds = []
+    existingIds = []
+    await PATCH(patch({ taskIds: ['a'], updates: { assigneeId: 'tm_staci' } }) as never)
+    expect(notified).toHaveLength(0)
+  })
+
+  it('stays quiet about the rows already assigned to that person', async () => {
+    existingAssignees = { a: 'tm_staci' }
+    await PATCH(patch({ taskIds: ['a', 'b'], updates: { assigneeId: 'tm_staci' } }) as never)
+    expect(notified).toHaveLength(1)
+    expect(notified[0].entityId).toBe('b')
+  })
+
+  it('says nothing at all when the whole selection is already theirs', async () => {
+    existingAssignees = { a: 'tm_staci', b: 'tm_staci' }
+    const res = await PATCH(patch({ taskIds: ['a', 'b'], updates: { assigneeId: 'tm_staci' } }) as never)
+    // The write still runs (updatedAt moves); only the bell stays quiet.
+    expect(calls).toHaveLength(1)
+    expect(notified).toHaveLength(0)
+    await expect(res.json()).resolves.toEqual({ success: true, updatedCount: 2 })
+  })
+
+  it('names every task right up to the limit', async () => {
+    existingIds = ['a', 'b', 'c', 'd', 'e']
+    await PATCH(patch({ taskIds: existingIds, updates: { assigneeId: 'tm_staci' } }) as never)
+    expect(notified).toHaveLength(5)
+    expect(notified.map(n => n.entityId)).toEqual(['a', 'b', 'c', 'd', 'e'])
+  })
+
+  it('summarises one row past it rather than filling the bell', async () => {
+    existingIds = ['a', 'b', 'c', 'd', 'e', 'f']
+    await PATCH(patch({ taskIds: existingIds, updates: { assigneeId: 'tm_staci' } }) as never)
+    expect(notified).toHaveLength(1)
+    expect(notified[0]).toMatchObject({
+      recipient: { teamMemberId: 'tm_staci' },
+      type: 'task_assigned',
+      title: '6 tasks assigned to you',
+      entityType: 'task',
+      // No id, so the bell lands on the board rather than one arbitrary task.
+      entityId: null,
+    })
+  })
+
+  it('counts only the tasks that moved when it summarises', async () => {
+    existingIds = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+    existingAssignees = { a: 'tm_staci' }
+    await PATCH(patch({ taskIds: existingIds, updates: { assigneeId: 'tm_staci' } }) as never)
+    expect(notified).toHaveLength(1)
+    expect(notified[0].title).toBe('6 tasks assigned to you')
   })
 })
