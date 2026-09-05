@@ -119,6 +119,60 @@ export const ENGAGEMENT_LABEL: Record<ClientEngagement, string> = {
   none: 'No plan',
 }
 
+/**
+ * Say a thing once.
+ *
+ * A row states its plan in exactly one place, the plan chip, and every other
+ * cell has to talk about its own subject. These three helpers are what keeps
+ * that true across the list row, the phone card and the portfolio card, which
+ * all render the same chips: the tracks cell and the money cell used to fall
+ * back to the engagement word, so a client with no plan read "No plan, No
+ * plan, No plan" straight across.
+ */
+
+/** The one tracks line, or null when tracks have nothing to add that the plan
+ *  chip has not already said. Tracks are a retainer mechanic, so the line only
+ *  ever talks about tracks. */
+export function tracksLine(row: Pick<ClientRow, 'tracks' | 'engagement'>): string | null {
+  if (row.tracks.total > 0) {
+    return `${row.tracks.total} ${row.tracks.total === 1 ? 'track' : 'tracks'}`
+  }
+  if (row.tracks.mode === 'off') return 'Tracks off'
+  if (row.engagement === 'none') return null
+  return 'No tracks'
+}
+
+/**
+ * What the MRR cell says when there is no monthly figure. Never a dash, and
+ * never a word the plan chip beside it can print too.
+ *
+ * The money cell has its own vocabulary for EVERY engagement, not just the
+ * plan-less one. It used to hand the engagement word back for the other two,
+ * and ENGAGEMENT_LABEL.hourly is the exact string PlanBadge prints for an
+ * hourly plan: the table read "Hourly" under Plan and "Hourly" under MRR, and
+ * the phone card, whose chip row carries no headers at all, said it twice in
+ * one sentence. Under an MRR heading the answer is about the money, so an
+ * hourly client is billed on time and a project client is billed once.
+ */
+const MRR_FALLBACK: Record<ClientEngagement, string> = {
+  retainer: 'Not set',
+  project: 'One-off',
+  hourly: 'Time billed',
+  none: 'No retainer',
+}
+
+export function mrrFallbackLabel(engagement: ClientEngagement): string {
+  return MRR_FALLBACK[engagement]
+}
+
+/** The engagement word under a labelled stat, which the portfolio card shows
+ *  in place of MRR to a viewer who may not see money. The label already says
+ *  Engagement and the chip above already says No plan, so an unset engagement
+ *  reads as "Not set" rather than repeating either. */
+export function engagementStatLabel(engagement: ClientEngagement): string {
+  return engagement === 'none' ? 'Not set' : ENGAGEMENT_LABEL[engagement]
+}
+
 /** A JSON text column that should hold an array of strings. Anything else in
  *  it is treated as empty rather than thrown, because one bad row must not
  *  take the list down. */

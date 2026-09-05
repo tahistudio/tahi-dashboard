@@ -25,7 +25,7 @@ import {
   ClientTagChips,
   TrackMeterCell,
 } from './client-chips'
-import { ENGAGEMENT_LABEL, healthReasons, type ClientRow } from './clients-views'
+import { engagementStatLabel, healthReasons, type ClientRow } from './clients-views'
 
 export function ClientsCardsView({
   rows,
@@ -149,7 +149,7 @@ function ClientCard({
         <Stat label={canSeeMoney ? 'MRR' : 'Engagement'}>
           {canSeeMoney
             ? <ClientMoneyCell row={row} unknownLabel={mrrUnknown ? 'Unknown' : undefined} />
-            : <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{ENGAGEMENT_LABEL[row.engagement]}</span>}
+            : <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{engagementStatLabel(row.engagement)}</span>}
         </Stat>
         <Stat label="Open">
           <span style={{ fontSize: '0.8125rem', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
@@ -157,7 +157,7 @@ function ClientCard({
           </span>
         </Stat>
         <Stat label="Tracks">
-          <TrackMeterCell tracks={row.tracks} engagement={row.engagement} />
+          <TrackMeterCell tracks={row.tracks} engagement={row.engagement} emptyLabel="None" />
         </Stat>
       </div>
 

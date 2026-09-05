@@ -1,23 +1,44 @@
 import { describe, it, expect } from 'vitest'
+import type { ReactElement } from 'react'
+import { PlanBadge } from '@/components/tahi/status-badge'
 import {
   ARCHIVED_VIEW_KEY,
   DEFAULT_CLIENTS_SORT,
   DEFAULT_CLIENT_FILTERS,
+  ENGAGEMENT_LABEL,
   UNASSIGNED_OWNER,
   applyClientViews,
   clientTagValues,
   clientsSnapshotsEqual,
   countClientsSavedViews,
+  engagementOf,
+  engagementStatLabel,
   healthReasons,
   isClientsSnapshot,
   matchesClientFilters,
+  mrrFallbackLabel,
   showsArchived,
   sortClients,
   statusFromUrl,
   toClientRow,
+  tracksLine,
   type ClientApiRow,
   type ClientRow,
 } from '../clients-views'
+
+/** Every plan slug the chip has a label for (PLAN_MAP in
+ *  components/tahi/status-badge.tsx), which is also the set the New client
+ *  panel offers. `null` is the row with no plan at all. */
+const PLAN_TYPES = ['maintain', 'scale', 'tune', 'launch', 'hourly', 'custom'] as const
+
+/** What the chip actually prints, read off the element PlanBadge returns
+ *  rather than copied out of its table, so a label edited over there is
+ *  compared against the real thing here. It renders a single span whose only
+ *  child is the label, and nothing in it touches the DOM. */
+function planBadgeLabel(plan: string | null): string {
+  const el = PlanBadge({ plan }) as ReactElement<{ children: string }>
+  return el.props.children
+}
 
 function api(over: Partial<ClientApiRow> & { id: string; name: string }): ClientApiRow {
   return {
@@ -252,5 +273,91 @@ describe('statusFromUrl', () => {
     expect(statusFromUrl('active,paused')).toBe('all')
     expect(statusFromUrl('prospect')).toBe('all')
     expect(statusFromUrl(null)).toBe('all')
+  })
+})
+
+// From the live list: a client with no plan read "No plan, No plan, No plan"
+// straight across the row, because the tracks cell and the money cell both
+// fell back to the engagement word, which is the sentence the plan chip has
+// already said. These three helpers are the rule that the plan is stated
+// once and every other cell talks about its own subject.
+describe('saying the plan once', () => {
+  describe('tracksLine', () => {
+    it('counts the configured tracks, singular and plural', () => {
+      expect(tracksLine(toClientRow(api({ id: 'a', name: 'One', planType: 'maintain' })))).toBe('1 track')
+      expect(tracksLine(toClientRow(api({ id: 'b', name: 'Two', planType: 'scale' })))).toBe('2 tracks')
+    })
+
+    it('says nothing at all when there is no plan, because the chip said it', () => {
+      expect(tracksLine(toClientRow(api({ id: 'c', name: 'Bare', planType: null })))).toBeNull()
+    })
+
+    it('talks about tracks, not about the engagement, on a one-off plan', () => {
+      expect(tracksLine(toClientRow(api({ id: 'd', name: 'Launch', planType: 'launch' })))).toBe('No tracks')
+    })
+
+    it('keeps saying Tracks off, which is a setting and not a plan', () => {
+      expect(tracksLine(toClientRow(api({ id: 'e', name: 'Off', planType: 'scale', tracksMode: 'off' })))).toBe('Tracks off')
+      expect(tracksLine(toClientRow(api({ id: 'f', name: 'Off too', planType: null, tracksMode: 'off' })))).toBe('Tracks off')
+    })
+  })
+
+  describe('mrrFallbackLabel', () => {
+    it('separates a retainer with no figure from a client with no retainer', () => {
+      expect(mrrFallbackLabel('retainer')).toBe('Not set')
+      expect(mrrFallbackLabel('none')).toBe('No retainer')
+    })
+
+    it('says how the money arrives when it is not monthly, not what the plan is', () => {
+      expect(mrrFallbackLabel('project')).toBe('One-off')
+      expect(mrrFallbackLabel('hourly')).toBe('Time billed')
+    })
+
+    // The one that got away the first time: the money cell handed the
+    // engagement word back for hourly, and ENGAGEMENT_LABEL.hourly is
+    // character for character what PlanBadge prints on an hourly plan. This
+    // holds the rule for every plan the badge knows, not just the one that
+    // collided, so a later label change on either side fails here rather than
+    // on the Clients page.
+    it('never prints a word the plan chip beside it can print', () => {
+      // Pin the reading first: an assertion against an undefined label would
+      // pass for the wrong reason.
+      expect(planBadgeLabel('hourly')).toBe('Hourly')
+      expect(planBadgeLabel(null)).toBe('No plan')
+
+      for (const plan of [...PLAN_TYPES, null]) {
+        const label = mrrFallbackLabel(engagementOf(plan))
+        expect(
+          label,
+          `mrrFallbackLabel for plan ${plan ?? 'none'} repeats the plan chip`,
+        ).not.toBe(planBadgeLabel(plan))
+      }
+    })
+  })
+
+  describe('engagementStatLabel', () => {
+    it('reads as Not set under its own label rather than repeating the chip', () => {
+      expect(engagementStatLabel('none')).toBe('Not set')
+      expect(engagementStatLabel('retainer')).toBe('Retainer')
+    })
+  })
+
+  it('leaves a plan-less row with no second No plan anywhere on it', () => {
+    const row = toClientRow(api({ id: 'g', name: 'Bare', planType: null }))
+    const printed = [tracksLine(row), mrrFallbackLabel(row.engagement), engagementStatLabel(row.engagement)]
+    expect(printed.filter(label => label === ENGAGEMENT_LABEL.none)).toEqual([])
+  })
+
+  // The phone card's chip row has no column headers, so every chip on it is
+  // read as one sentence. Nothing on it is allowed to say the same word twice.
+  it('leaves an hourly row saying Hourly exactly once across the phone chips', () => {
+    const row = toClientRow(api({ id: 'h', name: 'By the hour', planType: 'hourly' }))
+    const chips = [
+      planBadgeLabel(row.planType),
+      tracksLine(row),
+      mrrFallbackLabel(row.engagement),
+    ].filter((chip): chip is string => chip !== null)
+    expect(new Set(chips).size).toBe(chips.length)
+    expect(chips.filter(chip => chip === 'Hourly')).toEqual(['Hourly'])
   })
 })

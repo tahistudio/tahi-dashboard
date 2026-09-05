@@ -10,6 +10,10 @@
  * The invite outcome is the caller's business: this panel only collects, and
  * <ClientList> reports what really happened to the email.
  *
+ * The contact is collected as First name and Last name and sent as one
+ * joined string, because that is all the endpoint and the contacts table
+ * hold, and because every client email greets on the first word of it.
+ *
  * The panel deliberately stops at the organisation. The prototype also
  * offered custom pricing, add-ons, a billing channel and an account owner;
  * the create endpoint accepts none of those, and a control that quietly drops
@@ -27,7 +31,9 @@ export interface NewClientDraft {
   website: string
   industry: string
   planType: string
-  primaryContactName: string
+  /** Collected apart, sent joined. See draftContactName(). */
+  primaryContactFirstName: string
+  primaryContactLastName: string
   primaryContactEmail: string
   sendInvite: boolean
 }
@@ -37,7 +43,8 @@ export const EMPTY_CLIENT_DRAFT: NewClientDraft = {
   website: '',
   industry: '',
   planType: '',
-  primaryContactName: '',
+  primaryContactFirstName: '',
+  primaryContactLastName: '',
   primaryContactEmail: '',
   sendInvite: true,
 }
@@ -78,11 +85,46 @@ const INDUSTRY_OPTIONS = [
   { value: 'Other', label: 'Other' },
 ] as const
 
+/**
+ * Every field in this panel is 44px on a phone and the app's own 2.25rem from
+ * md up.
+ *
+ * <Input> and <Select> both fix their height inline at inputSize md, which is
+ * 2.25rem, and this panel stacks to one column on a 375px screen, so all of it
+ * is thumbed. min-height clamps a fixed height, which is why a class beats the
+ * primitive's inline style without touching the primitive. The same pair of
+ * classes is on the contact form in clients/[id]/tabs/people.tsx.
+ */
+const FIELD_HEIGHT = 'min-h-[2.75rem] md:min-h-[2.25rem]'
+
+/** <Select> hands its className to the positioning wrapper and not to the
+ *  native control inside it, so the target has to be named through the child.
+ *  The wrapper grows with it. */
+const SELECT_HEIGHT = '[&>select]:min-h-[2.75rem] md:[&>select]:min-h-[2.25rem]'
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export function isDraftEmailValid(draft: NewClientDraft): boolean {
   const email = draft.primaryContactEmail.trim()
   return email.length === 0 || EMAIL_RE.test(email)
+}
+
+/**
+ * The one name POST /api/admin/clients takes, built from the two fields the
+ * panel asks for.
+ *
+ * The contacts table holds a single `name` column, so the split lives in the
+ * form and not in D1. It is worth having there anyway: every client email
+ * greets on the first word of that name (emails/client-invite.tsx does
+ * `contactName.split(' ')[0]`), and one "Full name" box is where "Smith,
+ * Jane" and "Dr Jane Smith" came from. Empty on both sides returns an empty
+ * string, which is what makes the endpoint fall back to the address.
+ */
+export function draftContactName(draft: NewClientDraft): string {
+  return [draft.primaryContactFirstName, draft.primaryContactLastName]
+    .map(part => part.trim())
+    .filter(part => part.length > 0)
+    .join(' ')
 }
 
 /** The endpoint asks for a non-empty name and nothing more, so this asks for
@@ -148,43 +190,52 @@ export function NewClientPanel({
               onChange={e => onUpdate('name', e.target.value)}
               placeholder="Kowtow Clothing"
               inputSize="md"
+              className={FIELD_HEIGHT}
               leadingIcon={<Building2 size={13} aria-hidden="true" />}
               autoFocus
               onKeyDown={e => { if (e.key === 'Enter' && canSubmit) onSubmit() }}
             />
           </Field>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: '0.75rem' }}>
-            <Field label="Website">
-              <Input
-                value={draft.website}
-                onChange={e => onUpdate('website', e.target.value)}
-                placeholder="kowtowclothing.com"
-                inputSize="md"
-                type="url"
-                leadingIcon={<Globe size={13} aria-hidden="true" />}
-              />
-            </Field>
+          <Field label="Website">
+            <Input
+              value={draft.website}
+              onChange={e => onUpdate('website', e.target.value)}
+              placeholder="kowtowclothing.com"
+              inputSize="md"
+              type="url"
+              className={FIELD_HEIGHT}
+              leadingIcon={<Globe size={13} aria-hidden="true" />}
+            />
+          </Field>
+
+          {/* The two selects sit on one line, and stack under 40rem: the
+              breakpoint is Tailwind's own sm, so the class is static and the
+              gap stays on the token scale. The plan hint lives inside the
+              plan's own cell, which is why the row is aligned to the top and
+              not stretched. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 items-start" style={{ gap: '0.75rem' }}>
             <Field label="Industry">
               <Select
                 value={draft.industry}
                 onChange={e => onUpdate('industry', e.target.value)}
                 options={INDUSTRY_OPTIONS}
                 selectSize="md"
+                className={SELECT_HEIGHT}
+                style={{ width: '100%' }}
+              />
+            </Field>
+            <Field label="Plan" hint={PLAN_HINTS[draft.planType] ?? PLAN_HINTS['']}>
+              <Select
+                value={draft.planType}
+                onChange={e => onUpdate('planType', e.target.value)}
+                options={PLAN_OPTIONS}
+                selectSize="md"
+                className={SELECT_HEIGHT}
                 style={{ width: '100%' }}
               />
             </Field>
           </div>
-
-          <Field label="Plan" hint={PLAN_HINTS[draft.planType] ?? PLAN_HINTS['']}>
-            <Select
-              value={draft.planType}
-              onChange={e => onUpdate('planType', e.target.value)}
-              options={PLAN_OPTIONS}
-              selectSize="md"
-              style={{ width: '100%' }}
-            />
-          </Field>
 
           {/* A rule, not a one-sided border: the house rule is borders on
               every side or none, and this is a separator between two halves
@@ -209,34 +260,66 @@ export function NewClientPanel({
               </p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.5fr)', gap: '0.75rem' }}>
+            {/* First and last, not one "Full name" box. Every client email
+                greets on the first word of the stored name, and this is the
+                only place that word is ever typed.
+
+                Both halves carry the icon. <Input> renders a different box
+                depending: with a leading icon it is a padded flex group whose
+                text starts past the glyph, without one it is a bare input
+                whose text starts at its own padding. One of each side by side
+                puts the two placeholders on different left edges, and the
+                email below would not line up with either.
+
+                autoComplete is off on all three. These fields describe the
+                client's person, not the operator filling the form, and Chrome
+                reads given-name / family-name / email as one section: a single
+                tap on its suggestion would drop the operator's own name and
+                address in, and the invite switch below defaults to on. Same
+                call as the invite box in components/tahi/onboarding-content. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: '0.75rem' }}>
               <Input
-                value={draft.primaryContactName}
-                onChange={e => onUpdate('primaryContactName', e.target.value)}
-                placeholder="Full name"
+                value={draft.primaryContactFirstName}
+                onChange={e => onUpdate('primaryContactFirstName', e.target.value)}
+                placeholder="First name"
                 inputSize="md"
-                aria-label="Primary contact name"
+                className={FIELD_HEIGHT}
+                autoComplete="off"
+                aria-label="Primary contact first name"
                 leadingIcon={<UserIcon size={13} aria-hidden="true" />}
               />
-              <div>
-                <Input
-                  value={draft.primaryContactEmail}
-                  onChange={e => onUpdate('primaryContactEmail', e.target.value)}
-                  placeholder="email@company.com"
-                  inputSize="md"
-                  type="email"
-                  aria-label="Primary contact email"
-                  aria-invalid={!emailOk}
-                  aria-describedby={emailOk ? undefined : emailErrorId}
-                  leadingIcon={<Mail size={13} aria-hidden="true" />}
-                />
-                <div aria-live="polite">
-                  {!emailOk && (
-                    <p id={emailErrorId} style={{ margin: '0.25rem 0 0', fontSize: '0.6875rem', color: 'var(--color-danger)' }}>
-                      That does not look like an email address.
-                    </p>
-                  )}
-                </div>
+              <Input
+                value={draft.primaryContactLastName}
+                onChange={e => onUpdate('primaryContactLastName', e.target.value)}
+                placeholder="Last name"
+                inputSize="md"
+                className={FIELD_HEIGHT}
+                autoComplete="off"
+                aria-label="Primary contact last name"
+                leadingIcon={<UserIcon size={13} aria-hidden="true" />}
+              />
+            </div>
+
+            <div>
+              <Input
+                value={draft.primaryContactEmail}
+                onChange={e => onUpdate('primaryContactEmail', e.target.value)}
+                placeholder="email@company.com"
+                inputSize="md"
+                type="email"
+                className={FIELD_HEIGHT}
+                autoComplete="off"
+                aria-label="Primary contact email"
+                aria-invalid={!emailOk}
+                aria-describedby={emailOk ? undefined : emailErrorId}
+                leadingIcon={<Mail size={13} aria-hidden="true" />}
+              />
+              <div aria-live="polite">
+                {!emailOk && (
+                  <p id={emailErrorId} style={{ margin: '0.25rem 0 0', fontSize: '0.6875rem', color: 'var(--color-danger)' }}>
+                    That does not look like an email address.
+                  </p>
+                )}
               </div>
             </div>
 
