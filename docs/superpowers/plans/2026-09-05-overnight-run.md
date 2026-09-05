@@ -52,6 +52,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 03:50 NZST Clients port merged on main (list 0b9cd35a, detail 05b44b0c; 2621 tests, build green). Render check on the QA server running before the push. Sales design resumed in Claude Design.
 
+- 04:00 NZST Clients list and detail LIVE on production (2f270013). Touch polish fixer running.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - More sheet: the Track time row label is centred (the timer pill's sheet variant keeps its centred label) while every other row is left-aligned with its icon. Left-align it.
