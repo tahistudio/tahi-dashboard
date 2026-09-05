@@ -12,7 +12,7 @@
  * the registry below and mails every one to the caller with a `[PREVIEW]`
  * subject prefix.
  *
- * THE TWO RULES THAT MAKE A PREVIEW WORTH READING:
+ * THE THREE RULES THAT MAKE A PREVIEW WORTH READING:
  *
  *   1. The subject must be the REAL subject. Where the send path already builds
  *      one (the four wired notification events), the plan builder in
@@ -21,23 +21,44 @@
  *      its route and the route is named in a comment above it, so the next
  *      person can check it in one grep.
  *
- *   2. EVERY optional prop is filled. A preview whose optional fields are
- *      undefined renders the same as a template whose optional fields are
- *      broken, which is exactly the bug this is meant to catch. So the samples
- *      pass `customMessage`, `paymentUrl`, `expiresAt`, `meetingUrl` and the
- *      rest even where the live call site does not. An empty slot in a preview
- *      is a bug in the template, never a gap in the sample.
+ *   2. A PREVIEW IS PER VARIANT, NOT PER FILE. Several templates render two
+ *      different emails off one prop: `new-message` writes to the client or to
+ *      the studio, `contract-sign` greets a client signer or an internal one,
+ *      `contract-fully-signed` speaks to a signer or to an observer,
+ *      `announcement` changes eyebrow colour and button variant with its tone.
+ *      Previewing the file once checks one of those and leaves the other
+ *      unread, including copy the studio itself receives every time a client
+ *      replies from the portal. So a registry key is a VARIANT: it carries the
+ *      template file name in `template`, and several keys may share one file.
+ *
+ *   3. Every optional prop is filled, unless production never fills it. A
+ *      preview whose optional fields are undefined renders the same as a
+ *      template whose optional fields are broken, which is the bug this is
+ *      meant to catch, so the samples pass `customMessage`, `paymentUrl`,
+ *      `expiresAt` and the rest even where the live call site does not. The
+ *      exception is a field production always leaves empty (kickoff's
+ *      `meetingUrl`): filling it would preview a layout no client has ever
+ *      received, so both states get their own key instead.
  *
  * THE SAMPLE WORLD. One client, one request, one thread, so the set reads as a
- * single story rather than seventeen disconnected fixtures: Mahana Orchards (a
+ * single story rather than a pile of disconnected fixtures: Mahana Orchards (a
  * Nelson grower), their ops manager Ngaire Hutchins, request REQ-42 "Spring
  * campaign landing page refresh", invoice INV-1042 in NZD, dates a few days
  * either side of today. The recipient's own first name is used for every
  * greeting, so "Hi there" in a preview means the greeting fell through.
  *
- * ADDING A TEMPLATE. Add the file under `emails/`, then add one entry here.
- * lib/email-previews.test.ts fails on any template file that has no entry, so
- * a new template cannot be shipped unpreviewable.
+ * TEMPLATES WITH NO SENDER. Two templates are written and wired to nothing:
+ * `invoice-overdue` (waiting on the overdue chaser) and `review-request`
+ * (waiting on the testimonial pipeline). They are previewed anyway, because a
+ * design that is checked before it ships is the cheap version, but they carry
+ * `liveSender: false` and the endpoint reports it, so a reviewer is never left
+ * to assume every email in the run is one a client can receive today.
+ *
+ * ADDING A TEMPLATE. Add the file under `emails/`, then add one entry to
+ * `EMAIL_PREVIEW_ENTRIES` and one sample keyed by it. lib/email-previews.test.ts
+ * fails on any template file no entry names, so a new template cannot be
+ * shipped unpreviewable, and the sample map is typed by the key union, so an
+ * entry with no sample is a compile error rather than a runtime hole.
  */
 
 import { createElement, type ReactElement } from 'react'
@@ -65,10 +86,67 @@ import {
   type EmailTarget,
 } from '@/lib/notification-email'
 
+// ─── The registry index ──────────────────────────────────────────────────────
+
+/**
+ * Every preview this module can build: its key, the `emails/*.tsx` file it
+ * renders, and whether anything in the tree sends that template today.
+ *
+ * Keys are variants, not files (rule 2 above), so `template` is what the disk
+ * check in the test compares against and several keys may name the same file.
+ * The order here is the order the reviewer's inbox fills, so it is alphabetical
+ * by key: two runs can then be compared side by side.
+ */
+export const EMAIL_PREVIEW_ENTRIES = [
+  { key: 'announcement', template: 'announcement', liveSender: true },
+  { key: 'announcement-info', template: 'announcement', liveSender: true },
+  { key: 'client-invite', template: 'client-invite', liveSender: true },
+  { key: 'contract-fully-signed', template: 'contract-fully-signed', liveSender: true },
+  { key: 'contract-fully-signed-observer', template: 'contract-fully-signed', liveSender: true },
+  { key: 'contract-sign', template: 'contract-sign', liveSender: true },
+  { key: 'contract-sign-tahi', template: 'contract-sign', liveSender: true },
+  { key: 'invoice-overdue', template: 'invoice-overdue', liveSender: false },
+  { key: 'invoice-sent', template: 'invoice-sent', liveSender: true },
+  { key: 'kickoff-booked', template: 'kickoff-booked', liveSender: true },
+  { key: 'kickoff-booked-no-link', template: 'kickoff-booked', liveSender: true },
+  { key: 'new-message', template: 'new-message', liveSender: true },
+  { key: 'new-message-studio', template: 'new-message', liveSender: true },
+  { key: 'new-request', template: 'new-request', liveSender: true },
+  { key: 'pre-call-digest', template: 'pre-call-digest', liveSender: true },
+  { key: 'project-enquiry', template: 'project-enquiry', liveSender: true },
+  { key: 'proposal-share', template: 'proposal-share', liveSender: true },
+  { key: 'request-client-review', template: 'request-client-review', liveSender: true },
+  { key: 'request-delivered', template: 'request-delivered', liveSender: true },
+  { key: 'review-request', template: 'review-request', liveSender: false },
+  { key: 'schedule-share', template: 'schedule-share', liveSender: true },
+  { key: 'welcome', template: 'welcome', liveSender: true },
+] as const
+
+/** A registry key: one variant of one template. */
+export type EmailPreviewKey = (typeof EMAIL_PREVIEW_ENTRIES)[number]['key']
+
+/** A file name under `emails/`, without the extension. */
+export type EmailTemplateName = (typeof EMAIL_PREVIEW_ENTRIES)[number]['template']
+
+/** Every key, in send order. */
+export const EMAIL_PREVIEW_KEYS: readonly EmailPreviewKey[] = EMAIL_PREVIEW_ENTRIES.map(
+  (entry) => entry.key,
+)
+
+/** Every template file the registry names, deduped. */
+export const EMAIL_PREVIEW_TEMPLATES: readonly EmailTemplateName[] = [
+  ...new Set(EMAIL_PREVIEW_ENTRIES.map((entry) => entry.template)),
+]
+
+/** True when `value` names a variant this module can preview. */
+export function isEmailPreviewKey(value: string): value is EmailPreviewKey {
+  return (EMAIL_PREVIEW_KEYS as readonly string[]).includes(value)
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 /**
- * One template, rendered with sample data and ready to hand to `sendEmail`.
+ * One variant, rendered with sample data and ready to hand to `sendEmail`.
  *
  * `personalisation` is the point of the whole exercise: the fields a human is
  * being asked to check, named the way they read in the body, so the reviewer
@@ -76,8 +154,12 @@ import {
  * been filled in.
  */
 export interface EmailPreview {
-  /** The template's file name under `emails/`, without the extension. */
+  /** The registry key: a variant, which may share a template with another key. */
   key: EmailPreviewKey
+  /** The template file under `emails/`, without the extension. */
+  template: EmailTemplateName
+  /** False when nothing in the tree sends this template yet. */
+  liveSender: boolean
   /** The subject the live send path uses, unprefixed. */
   subject: string
   /** The rendered element, ready for `sendEmail`. */
@@ -89,6 +171,8 @@ export interface EmailPreview {
 /** What a caller gets back about a preview once it has been sent. */
 export interface EmailPreviewSummary {
   key: EmailPreviewKey
+  template: EmailTemplateName
+  liveSender: boolean
   subject: string
 }
 
@@ -97,6 +181,13 @@ export interface BuildSamplePreviewsInput {
   to: string
   /** The recipient's first name, used for every greeting. */
   firstName: string
+}
+
+/** A built sample, before the registry entry is merged onto it. */
+interface PreviewSample {
+  subject: string
+  react: ReactElement
+  personalisation: Readonly<Record<string, string>>
 }
 
 // ─── The sample world ────────────────────────────────────────────────────────
@@ -136,6 +227,22 @@ function nzDate(iso: string): string {
 }
 
 /**
+ * The long date the invoice routes format their due dates with, e.g.
+ * "12 September 2026".
+ *
+ * Deliberately not `nzDate`: app/api/admin/invoices/[id]/send-email/route.ts
+ * builds its due date with `month: 'long'`, and a design check run against the
+ * shorter string is exactly where a wrapped DetailRow would hide.
+ */
+function nzLongDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-NZ', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+}
+
+/**
  * The recipient, in the shape the notification plan builders greet. The plans
  * take an `EmailTarget` because in production they render per person; here
  * there is exactly one person, and it is whoever asked for the previews.
@@ -144,49 +251,17 @@ function previewTarget(to: string, firstName: string): EmailTarget {
   return { email: to, name: firstName, userType: 'team_member', clerkUserId: null }
 }
 
-// ─── The registry ────────────────────────────────────────────────────────────
+// ─── The samples ─────────────────────────────────────────────────────────────
 
 /**
- * Every template under `emails/` except `_components.tsx` (shared primitives,
- * not a sendable email). Keys are the file names, so the test can compare this
- * list against the directory listing and fail on anything unpreviewable.
+ * One sample per registry key, typed by the key union: an entry with no sample
+ * and a sample with no entry are both compile errors, so the two lists cannot
+ * drift.
  */
-export const EMAIL_PREVIEW_KEYS = [
-  'announcement',
-  'client-invite',
-  'contract-fully-signed',
-  'contract-sign',
-  'invoice-overdue',
-  'invoice-sent',
-  'kickoff-booked',
-  'new-message',
-  'new-request',
-  'pre-call-digest',
-  'project-enquiry',
-  'proposal-share',
-  'request-client-review',
-  'request-delivered',
-  'review-request',
-  'schedule-share',
-  'welcome',
-] as const
-
-export type EmailPreviewKey = (typeof EMAIL_PREVIEW_KEYS)[number]
-
-/** True when `value` names a template this module can preview. */
-export function isEmailPreviewKey(value: string): value is EmailPreviewKey {
-  return (EMAIL_PREVIEW_KEYS as readonly string[]).includes(value)
-}
-
-/**
- * Build one sample of every template, addressed to `to` and greeting
- * `firstName`.
- *
- * Returns them in `EMAIL_PREVIEW_KEYS` order, which is alphabetical, so a
- * reviewer's inbox arrives in a stable order every time and two runs can be
- * compared side by side.
- */
-export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput): EmailPreview[] {
+function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
+  EmailPreviewKey,
+  PreviewSample
+> {
   const target = previewTarget(to, firstName)
   const origin = appOrigin()
 
@@ -211,6 +286,20 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
       'Morning. The new hero is in with the orchard photography you sent through, and I have ' +
       'shortened the sign-up form to name, email and region. Two things to look at: the seasonal ' +
       'banner now sits above the fold on mobile, and I have swapped the CTA to "Book a pick-up".',
+  })
+
+  // The other half of the same template, and a live send: every client reply
+  // from the portal builds this one (app/api/portal/requests/[id]/messages).
+  const studioThreadReply = threadReplyEmailPlan({
+    audience: 'studio',
+    requestId: REQUEST_ID,
+    requestTitle: REQUEST_TITLE,
+    requestNumber: REQUEST_NUMBER,
+    fromName: CLIENT_CONTACT,
+    message:
+      'Thanks, that reads much better. Two notes from our side: the pick-up window should say ' +
+      '"from 9am", not "9am to 5pm", because the late slots sell out. And can the region field ' +
+      'default to Nelson? That is where most of our orders come from.',
   })
 
   const clientReview = clientStatusEmailPlan({
@@ -240,10 +329,14 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
     submittedBy: CLIENT_CONTACT,
   })
 
-  const previews: EmailPreview[] = [
+  const contractName = `${CLIENT_ORG} Master Services Agreement`
+
+  return {
     // lib/announcement-emails.ts: subject is the announcement title verbatim.
-    {
-      key: 'announcement',
+    // The amber half of the tone map: `maintenance` and `warning` share the
+    // warning palette and the amber button, and differ only in the eyebrow
+    // label, so one of the two covers both.
+    announcement: {
       subject: 'Portal maintenance this Sunday, 9pm to 11pm NZST',
       react: createElement(AnnouncementEmail, {
         title: 'Portal maintenance this Sunday, 9pm to 11pm NZST',
@@ -258,14 +351,38 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
       }),
       personalisation: {
         Title: 'Portal maintenance this Sunday, 9pm to 11pm NZST',
-        Type: 'maintenance (amber banner)',
+        Type: 'maintenance (amber eyebrow, amber button)',
         'CTA label': 'Open your portal',
       },
     },
 
+    // The other half of the tone map. `info` is the default type, and with
+    // `success` it takes the brand button rather than the amber one, so the
+    // maintenance sample above cannot show it.
+    'announcement-info': {
+      subject: 'Request templates are live in your portal',
+      react: createElement(AnnouncementEmail, {
+        title: 'Request templates are live in your portal',
+        body:
+          'The work you send us most often now has a starting point. Pick a template when you ' +
+          'open a request and the brief arrives with the questions we would have asked you ' +
+          'anyway, which usually saves a round trip.\n\n' +
+          'Nothing changes for requests you have already sent, and the blank form is still there ' +
+          'if you would rather write it yourself.',
+        type: 'info',
+        ctaLabel: 'See what changed',
+        ctaUrl: publicUrl('/requests'),
+      }),
+      personalisation: {
+        Title: 'Request templates are live in your portal',
+        Type: 'info (blue eyebrow, brand button)',
+        Body: 'two paragraphs, split on the blank line',
+        'CTA label': 'See what changed',
+      },
+    },
+
     // app/api/admin/clients/route.ts + app/api/admin/onboarding-invites/route.ts.
-    {
-      key: 'client-invite',
+    'client-invite': {
       subject: `Your ${CLIENT_ORG} portal is ready`,
       react: createElement(ClientInviteEmail, {
         contactName: firstName,
@@ -285,13 +402,42 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
     },
 
     // lib/contract-fully-signed-emails.ts: `Fully signed: ${contract.name}`.
-    {
-      key: 'contract-fully-signed',
-      subject: `Fully signed: ${CLIENT_ORG} Master Services Agreement`,
+    // Sent with `pdfAttached: false`, which is both a state the live sender
+    // produces (the PDF render failed) and the only honest state for a preview:
+    // sendEmail has no attachments parameter, so a preview can never carry one.
+    'contract-fully-signed': {
+      subject: `Fully signed: ${contractName}`,
       react: createElement(ContractFullySignedEmail, {
         recipientName: firstName,
         recipientWasSigner: true,
-        contractName: `${CLIENT_ORG} Master Services Agreement`,
+        contractName,
+        contractType: 'msa',
+        signedAt: signedIso,
+        publicViewerUrl: publicUrl('/p/contract/prv_c41d90ab7e26'),
+        signerNames: [LIAM, CLIENT_CONTACT],
+        pdfAttached: false,
+      }),
+      personalisation: {
+        Greeting: firstName,
+        Heading: 'signer wording ("Thanks for your signature")',
+        Contract: contractName,
+        Type: 'Master services agreement',
+        Signed: signedIso,
+        Signers: `${LIAM}, ${CLIENT_CONTACT}`,
+        'PDF attached': 'no, so the copy should push the viewer link instead',
+      },
+    },
+
+    // The same template written to someone who did not sign it (a cc'd contact
+    // on the client side), which is a live branch: the sender greets every
+    // recipient, signer or not. Carries the attached-PDF copy so both halves of
+    // the `pdfAttached` fork get read across the two samples.
+    'contract-fully-signed-observer': {
+      subject: `Fully signed: ${contractName}`,
+      react: createElement(ContractFullySignedEmail, {
+        recipientName: firstName,
+        recipientWasSigner: false,
+        contractName,
         contractType: 'msa',
         signedAt: signedIso,
         publicViewerUrl: publicUrl('/p/contract/prv_c41d90ab7e26'),
@@ -300,17 +446,15 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
       }),
       personalisation: {
         Greeting: firstName,
-        Contract: `${CLIENT_ORG} Master Services Agreement`,
-        Type: 'Master services agreement',
-        Signed: signedIso,
+        Heading: 'observer wording ("Your contract is fully signed")',
+        Contract: contractName,
         Signers: `${LIAM}, ${CLIENT_CONTACT}`,
-        'PDF attached': 'yes (copy should say the PDF is attached)',
+        'PDF attached': 'copy only, the preview send carries no attachment by design',
       },
     },
 
     // app/api/admin/contracts/[id]/email/route.ts: `Please sign: ${contract.name}`.
-    {
-      key: 'contract-sign',
+    'contract-sign': {
       subject: `Please sign: ${CLIENT_ORG} Statement of Work`,
       react: createElement(ContractSignEmail, {
         signerName: firstName,
@@ -325,25 +469,51 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
       }),
       personalisation: {
         Signer: firstName,
-        Role: 'client',
+        Role: 'client (heading reads "Ready for your signature")',
         Contract: `${CLIENT_ORG} Statement of Work`,
         Type: 'Statement of work',
         From: LIAM,
-        'Custom message': 'present (three lines from Liam)',
+        'Custom message': 'present (two lines from Liam)',
+      },
+    },
+
+    // The same route, same loop, different signer: it emails every pending
+    // signer including the Tahi-side one, and `signerRole: 'tahi'` swaps the
+    // heading and the opening paragraph.
+    'contract-sign-tahi': {
+      subject: `Please sign: ${contractName}`,
+      react: createElement(ContractSignEmail, {
+        signerName: firstName,
+        signerRole: 'tahi',
+        contractName,
+        contractType: 'msa',
+        signUrl: publicUrl('/p/contract/prv_c41d90ab7e26/sign/sgn_9d20f4'),
+        fromName: LIAM,
+        customMessage:
+          'Counter-signature on the Mahana MSA. Ngaire signed hers this morning, so this is the ' +
+          'last one before it is fully executed.',
+      }),
+      personalisation: {
+        Signer: firstName,
+        Role: 'tahi (heading reads "Your signature is needed")',
+        Contract: contractName,
+        Type: 'Master services agreement',
+        From: LIAM,
+        'Custom message': 'present (two lines from Liam)',
       },
     },
 
     // No live sender yet: the template is written and waiting on the overdue
-    // chaser. Subject mirrors the invoice-sent route's shape.
-    {
-      key: 'invoice-overdue',
+    // chaser. Subject mirrors the invoice-sent route's shape, and the due date
+    // is formatted the way that route formats one.
+    'invoice-overdue': {
       subject: `Invoice ${invoiceRef} from Tahi Studio is overdue`,
       react: createElement(InvoiceOverdueEmail, {
         clientName: firstName,
         invoiceId: INVOICE_ID,
         amountFormatted: INVOICE_AMOUNT,
         currency: INVOICE_CURRENCY,
-        dueDate: nzDate(overdueDueIso),
+        dueDate: nzLongDate(overdueDueIso),
         daysOverdue: 12,
         dashboardUrl: origin,
         paymentUrl: publicUrl(`/invoices/${INVOICE_ID}/pay`),
@@ -352,22 +522,21 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
         Greeting: firstName,
         Reference: invoiceRef,
         Amount: `${INVOICE_AMOUNT} ${INVOICE_CURRENCY}`,
-        'Original due date': nzDate(overdueDueIso),
+        'Original due date': nzLongDate(overdueDueIso),
         'Days overdue': '12',
         'Pay button': 'present (warning variant)',
       },
     },
 
     // app/api/admin/invoices/[id]/send-email/route.ts.
-    {
-      key: 'invoice-sent',
+    'invoice-sent': {
       subject: `Invoice ${invoiceRef} from Tahi Studio`,
       react: createElement(InvoiceSentEmail, {
         clientName: firstName,
         invoiceId: INVOICE_ID,
         amountFormatted: INVOICE_AMOUNT,
         currency: INVOICE_CURRENCY,
-        dueDate: nzDate(invoiceDueIso),
+        dueDate: nzLongDate(invoiceDueIso),
         notes: 'Covers the spring campaign landing page and the two follow-up email templates.',
         invoiceUrl: publicUrl(`/invoices/${INVOICE_ID}`),
         paymentUrl: publicUrl(`/invoices/${INVOICE_ID}/pay`),
@@ -376,15 +545,16 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
         Greeting: firstName,
         Reference: invoiceRef,
         Amount: `${INVOICE_AMOUNT} ${INVOICE_CURRENCY}`,
-        'Due date': nzDate(invoiceDueIso),
+        'Due date': nzLongDate(invoiceDueIso),
         Notes: 'present',
         'Pay button': 'present (plus a portal link underneath)',
       },
     },
 
     // app/api/portal/calls/route.ts: 'Your kickoff call is booked'.
-    {
-      key: 'kickoff-booked',
+    // The link-carrying layout, which nothing sends today (see the sibling
+    // below) but which is one calendar integration away from shipping.
+    'kickoff-booked': {
       subject: 'Your kickoff call is booked',
       react: createElement(KickoffBookedEmail, {
         contactFirstName: firstName,
@@ -402,27 +572,66 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
         When: `${kickoffIso} rendered in Pacific/Auckland`,
         Duration: '45 minutes',
         Host: LIAM,
-        'Meeting link': 'present',
+        'Meeting link': 'present, so the CTA reads "Join the call"',
+      },
+    },
+
+    // The shape production actually sends: app/api/portal/calls/route.ts passes
+    // `meetingUrl: null`, so every real client sees the portal CTA and no join
+    // link. That is the layout that has to be right today.
+    'kickoff-booked-no-link': {
+      subject: 'Your kickoff call is booked',
+      react: createElement(KickoffBookedEmail, {
+        contactFirstName: firstName,
+        companyName: CLIENT_ORG,
+        scheduledAt: kickoffIso,
+        timeZone: 'Pacific/Auckland',
+        durationMinutes: 45,
+        hostName: LIAM,
+        meetingUrl: null,
+        portalUrl: publicUrl('/overview'),
+      }),
+      personalisation: {
+        Greeting: firstName,
+        Company: CLIENT_ORG,
+        When: `${kickoffIso} rendered in Pacific/Auckland`,
+        Host: LIAM,
+        'Meeting link': 'absent, so the CTA falls back to "Open your studio"',
       },
     },
 
     // lib/notification-email.ts threadReplyEmailPlan (client audience).
-    {
-      key: 'new-message',
+    'new-message': {
       subject: threadReply.subject,
       react: threadReply.render(target),
       personalisation: {
         Greeting: firstName,
+        Eyebrow: 'A reply on your request / Request thread',
         Request: `REQ-${REQUEST_NUMBER} ${REQUEST_TITLE}`,
         From: STACI,
         Quote: 'three sentences of the reply, plain text',
-        'Open button': requestUrl,
+        'Open button': `"Open the thread", ${requestUrl}`,
+      },
+    },
+
+    // The studio-facing half of the same template, and the one the studio sees
+    // every time a client replies from the portal. Different subject, eyebrow,
+    // opening line, CTA label and footnote from the client half above.
+    'new-message-studio': {
+      subject: studioThreadReply.subject,
+      react: studioThreadReply.render(target),
+      personalisation: {
+        Greeting: firstName,
+        Eyebrow: 'A client replied / Inbox',
+        Request: `REQ-${REQUEST_NUMBER} ${REQUEST_TITLE}`,
+        From: CLIENT_CONTACT,
+        Quote: 'three sentences of the client reply, plain text',
+        'Open button': '"Open the request", the admin route not the portal one',
       },
     },
 
     // lib/notification-email.ts studioNewRequestEmailPlan (studio audience).
-    {
-      key: 'new-request',
+    'new-request': {
       subject: newRequest.subject,
       react: newRequest.render(target),
       personalisation: {
@@ -435,8 +644,7 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
     },
 
     // app/api/admin/cron/pre-call-digest/route.ts: `Pre-call: ${withName} in ~30 min`.
-    {
-      key: 'pre-call-digest',
+    'pre-call-digest': {
       subject: `Pre-call: ${CLIENT_CONTACT} in ~30 min`,
       react: createElement(PreCallDigestEmail, {
         callTitle: 'Discovery call',
@@ -490,8 +698,7 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
     },
 
     // app/api/portal/enquiry/route.ts.
-    {
-      key: 'project-enquiry',
+    'project-enquiry': {
       subject: `New project enquiry from ${CLIENT_CONTACT} at ${CLIENT_ORG}`,
       react: createElement(ProjectEnquiryEmail, {
         contactName: CLIENT_CONTACT,
@@ -516,8 +723,7 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
     },
 
     // app/api/admin/proposals/[id]/email/route.ts.
-    {
-      key: 'proposal-share',
+    'proposal-share': {
       subject: `Proposal from Tahi Studio: ${CLIENT_ORG} spring campaign`,
       react: createElement(ProposalShareEmail, {
         recipientName: firstName,
@@ -541,8 +747,7 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
     },
 
     // lib/notification-email.ts clientStatusEmailPlan('client_review').
-    {
-      key: 'request-client-review',
+    'request-client-review': {
       subject: clientReview.subject,
       react: clientReview.render(target),
       personalisation: {
@@ -553,8 +758,7 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
     },
 
     // lib/notification-email.ts clientStatusEmailPlan('delivered').
-    {
-      key: 'request-delivered',
+    'request-delivered': {
       subject: delivered.subject,
       react: delivered.render(target),
       personalisation: {
@@ -567,8 +771,7 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
 
     // No live sender yet: the review outreach pipeline is queued. Subject is
     // the template's own Preview line, which is what it was written to.
-    {
-      key: 'review-request',
+    'review-request': {
       subject: `We would love your feedback, ${firstName}`,
       react: createElement(ReviewRequestEmail, {
         clientName: firstName,
@@ -584,8 +787,7 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
     },
 
     // app/api/admin/schedules/[id]/email/route.ts.
-    {
-      key: 'schedule-share',
+    'schedule-share': {
       subject: `Project schedule from Tahi Studio: ${CLIENT_ORG} spring campaign`,
       react: createElement(ScheduleShareEmail, {
         recipientName: firstName,
@@ -609,8 +811,7 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
     },
 
     // app/api/admin/clients/[id]/welcome-email/route.ts.
-    {
-      key: 'welcome',
+    welcome: {
       subject: `Welcome to Tahi Studio, ${firstName}`,
       react: createElement(WelcomeEmail, {
         contactName: firstName,
@@ -626,12 +827,33 @@ export function buildSamplePreviews({ to, firstName }: BuildSamplePreviewsInput)
         Expires: nzDate(isoFromNow(14)),
       },
     },
-  ]
-
-  return previews
+  }
 }
 
-/** The `{ key, subject }` shape a route reports back, without the element. */
+/**
+ * Build one sample of every registered variant, addressed to `to` and greeting
+ * `firstName`.
+ *
+ * Returns them in `EMAIL_PREVIEW_ENTRIES` order, which is alphabetical by key,
+ * so a reviewer's inbox arrives in a stable order every time and two runs can
+ * be compared side by side.
+ */
+export function buildSamplePreviews(input: BuildSamplePreviewsInput): EmailPreview[] {
+  const samples = buildSamples(input)
+  return EMAIL_PREVIEW_ENTRIES.map((entry) => ({
+    key: entry.key,
+    template: entry.template,
+    liveSender: entry.liveSender,
+    ...samples[entry.key],
+  }))
+}
+
+/** The shape a route reports back, without the element. */
 export function summarisePreviews(previews: readonly EmailPreview[]): EmailPreviewSummary[] {
-  return previews.map(({ key, subject }) => ({ key, subject }))
+  return previews.map(({ key, template, liveSender, subject }) => ({
+    key,
+    template,
+    liveSender,
+    subject,
+  }))
 }

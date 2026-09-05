@@ -14,29 +14,44 @@
  *     body: JSON.stringify({}),
  *   }).then(r => r.json())
  *
- * That sends the whole set to your own address. To re-check one template after
+ * That sends the whole set to your own address. To re-check one variant after
  * a fix, pass `only`:
  *
- *   body: JSON.stringify({ only: ['invoice-sent', 'welcome'] })
+ *   body: JSON.stringify({ only: ['invoice-sent', 'new-message-studio'] })
  *
  * Every subject is prefixed `[PREVIEW]`, so the run is filterable and
  * deletable in one go and can never be mistaken for a real send.
  *
  * BODY
  *   to?:   string     Address to send to. Defaults to the caller's own.
- *   only?: string[]   Template keys (see lib/email-previews.ts). Default: all.
+ *   only?: string[]   Variant keys (see lib/email-previews.ts). Default: all.
  *
  * RESPONSE
- *   { sent: [{ key, subject }], failed: [{ key, error }], from }
+ *   {
+ *     sent:   [{ key, template, liveSender, subject }],
+ *     failed: [{ key, error }],
+ *     from,
+ *   }
+ *
+ * `liveSender: false` marks a template nothing in the tree sends yet, so a
+ * reviewer is not left to assume every email in the run is one a client can
+ * receive today.
+ *
+ * Each preview goes out as multipart: the HTML the template renders plus the
+ * plain text alternative rendered from the same element, which is what the
+ * wired notification sends do. An HTML-only preview would not be the message a
+ * client actually receives, and a broken text part could never show up in the
+ * design check.
  *
  * TWO GUARDS, BOTH DELIBERATE.
  *
  *   1. Super admin only, resolved through lib/permissions the same way
- *      /api/admin/danger/export does. This endpoint can put seventeen emails
- *      into an inbox on one call, which is a small mail cannon; the MCP service
- *      token resolves to `admin` (not `super_admin`) and is intentionally not
- *      allowed to fire it. No separate feature gate is needed because a super
- *      admin passes every feature gate by invariant (lib/require-feature.ts).
+ *      /api/admin/danger/export does. This endpoint can put the whole template
+ *      set into an inbox on one call, which is a small mail cannon; the MCP
+ *      service token resolves to `admin` (not `super_admin`) and is
+ *      intentionally not allowed to fire it. No separate feature gate is needed
+ *      because a super admin passes every feature gate by invariant
+ *      (lib/require-feature.ts).
  *
  *   2. The destination must end `@tahi.studio`. The sample data names a
  *      plausible client and reads like real work, so a typo in `to` would put a
@@ -44,9 +59,9 @@
  *      check makes that impossible rather than unlikely.
  *
  * Sends are sequential with a small gap, because Resend's default limit is two
- * requests a second and the whole set is seventeen. A rate-limited send is
+ * requests a second and the set is twenty-odd variants. A rate-limited send is
  * retried once with backoff; anything else is reported in `failed` and the run
- * carries on, so one broken template never hides the other sixteen.
+ * carries on, so one broken template never hides the rest.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -58,12 +73,13 @@ import { resolvePermissions } from '@/lib/permissions'
 import { SERVICE_USER_ID } from '@/lib/team-identity'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { sendEmail } from '@/lib/email'
+import { emailFromAddress, sendEmail } from '@/lib/email'
+import { plainTextAlternative } from '@/lib/email-plain-text'
 import {
   buildSamplePreviews,
   isEmailPreviewKey,
+  summarisePreviews,
   type EmailPreview,
-  type EmailPreviewSummary,
 } from '@/lib/email-previews'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -75,9 +91,10 @@ const ALLOWED_DOMAIN = '@tahi.studio'
 const SEND_GAP_MS = 600
 const RATE_LIMIT_BACKOFF_MS = 1500
 
+/** Typed loose on purpose: this is parsed JSON, not something we validated. */
 interface PreviewRequestBody {
-  to?: string
-  only?: string[]
+  to?: unknown
+  only?: unknown[]
 }
 
 interface FailedPreview {
@@ -147,18 +164,37 @@ async function resolveCallerIdentity(
   }
 }
 
-/** One send, with a single retry on the one failure worth retrying. */
+/**
+ * One send, with a single retry on the one failure worth retrying.
+ *
+ * The text alternative is rendered once, above the retry: it cannot change
+ * between attempts and rendering is the expensive half of a send.
+ */
 async function sendPreview(
   to: string,
   preview: EmailPreview,
 ): Promise<{ success: boolean; error?: string }> {
   const subject = `[PREVIEW] ${preview.subject}`
-  let result = await sendEmail(to, subject, preview.react)
+  const text = await plainTextAlternative(preview.react)
+  let result = await sendEmail(to, subject, preview.react, text)
   if (!result.success && isRateLimited(result.error)) {
     await sleep(RATE_LIMIT_BACKOFF_MS)
-    result = await sendEmail(to, subject, preview.react)
+    result = await sendEmail(to, subject, preview.react, text)
   }
   return result
+}
+
+/**
+ * A body key, named in the failure report. `only` arrives straight off
+ * JSON.parse, so an entry can be any JSON value; a mistyped console call should
+ * get the report this route already knows how to produce rather than a 500 out
+ * of `.trim()`.
+ */
+function keyLabel(value: unknown): string {
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return 'array'
+  if (typeof value === 'object') return 'object'
+  return String(value)
 }
 
 export async function POST(req: NextRequest) {
@@ -178,7 +214,7 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as PreviewRequestBody
 
   const caller = await resolveCallerIdentity(drizzle, auth.userId)
-  const requested = body.to?.trim() || caller?.email || ''
+  const requested = (typeof body.to === 'string' ? body.to.trim() : '') || caller?.email || ''
   if (!requested) {
     return NextResponse.json(
       { error: 'No address to send to. Pass `to`, or link a team member row to this login.' },
@@ -202,14 +238,28 @@ export async function POST(req: NextRequest) {
 
   const all = buildSamplePreviews({ to, firstName })
 
-  const sent: EmailPreviewSummary[] = []
+  const sent: EmailPreview[] = []
   const failed: FailedPreview[] = []
 
   let selected = all
   if (Array.isArray(body.only) && body.only.length > 0) {
-    const wanted = new Set(body.only.map((k) => k.trim()))
-    for (const key of wanted) {
-      if (!isEmailPreviewKey(key)) failed.push({ key, error: 'Unknown template key' })
+    const wanted = new Set<string>()
+    // Named separately from `wanted` so a key repeated in the body is reported
+    // once, whether it turned out to be valid or not.
+    const seen = new Set<string>()
+    for (const raw of body.only) {
+      if (typeof raw !== 'string') {
+        failed.push({ key: keyLabel(raw), error: 'Template key must be a string' })
+        continue
+      }
+      const key = raw.trim()
+      if (seen.has(key)) continue
+      seen.add(key)
+      if (!isEmailPreviewKey(key)) {
+        failed.push({ key, error: 'Unknown template key' })
+        continue
+      }
+      wanted.add(key)
     }
     selected = all.filter((p) => wanted.has(p.key))
   }
@@ -219,7 +269,7 @@ export async function POST(req: NextRequest) {
     if (i > 0) await sleep(SEND_GAP_MS)
     try {
       const result = await sendPreview(to, preview)
-      if (result.success) sent.push({ key: preview.key, subject: preview.subject })
+      if (result.success) sent.push(preview)
       else failed.push({ key: preview.key, error: result.error ?? 'Unknown error' })
     } catch (err) {
       failed.push({ key: preview.key, error: err instanceof Error ? err.message : 'Send failed' })
@@ -227,10 +277,10 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({
-    sent,
+    sent: summarisePreviews(sent),
     failed,
-    // Mirrors lib/email.ts, so a preview that landed in spam can be traced to
-    // the sending identity without reading the code.
-    from: process.env.RESEND_FROM_EMAIL ?? 'business@tahi.studio',
+    // Asked of lib/email.ts rather than rebuilt here, so a preview that landed
+    // in spam can be traced to the identity that actually sent it.
+    from: emailFromAddress(),
   })
 }

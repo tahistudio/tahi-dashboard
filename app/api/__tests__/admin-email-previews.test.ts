@@ -1,20 +1,23 @@
 /**
  * POST /api/admin/emails/preview - the design-check mail cannon.
  *
- * Three things have to hold or this endpoint is a liability rather than a tool:
+ * Four things have to hold or this endpoint is a liability rather than a tool:
  *
  *   1. SUPER ADMIN ONLY. A Tahi-org login is not enough, and the MCP service
- *      token (which resolves to `admin`) is not enough. Anything that fires
- *      seventeen emails on one call has to be held to the same bar as the data
- *      export it sits next to.
+ *      token (which resolves to `admin`) is not enough. Anything that fires the
+ *      whole template set on one call has to be held to the same bar as the
+ *      data export it sits next to.
  *   2. NEVER A CLIENT'S INBOX. The samples name a plausible client, quote a
  *      plausible invoice and read like real work, so one typo in `to` would put
  *      a fake overdue notice in a real client's mailbox. The `@tahi.studio`
  *      suffix check is what makes that impossible, and it is checked BEFORE
  *      anything is sent.
- *   3. THE FULL SET, PREFIXED. Every registered template goes out, each subject
- *      carries `[PREVIEW]`, and one refused send is reported without stopping
- *      the rest.
+ *   3. THE FULL SET, PREFIXED, AS PRODUCTION SENDS IT. Every registered variant
+ *      goes out, each subject carries `[PREVIEW]`, each message carries the
+ *      text alternative the wired notification sends carry, and one refused
+ *      send is reported without stopping the rest.
+ *   4. THE REPORT IS TRUE. The `from` it names is the one lib/email.ts sends
+ *      as, and a malformed `only` is reported rather than thrown.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -27,7 +30,11 @@ vi.mock('@/lib/permissions', () => ({
   resolvePermissions: vi.fn(),
 }))
 
-vi.mock('@/lib/email', () => ({
+// The real `emailFromAddress` is kept: the route reports the from address so a
+// preview that landed in spam can be traced, and a stub here would let that
+// report drift from what lib/email.ts actually sends as.
+vi.mock('@/lib/email', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/email')>()),
   sendEmail: vi.fn(),
 }))
 
@@ -72,7 +79,7 @@ function access(isSuperAdmin: boolean): ResolvedAccess {
 
 interface PreviewResponse {
   error?: string
-  sent?: { key: string; subject: string }[]
+  sent?: { key: string; template: string; liveSender: boolean; subject: string }[]
   failed?: { key: string; error: string }[]
   from?: string
 }
@@ -248,6 +255,49 @@ describe('POST /api/admin/emails/preview', () => {
 
   // ── Selection and partial failure ─────────────────────────────────────────
 
+  it('reports the from address lib/email.ts actually sends as', async () => {
+    // With nothing configured the send leaves as the branded lockup, so a bare
+    // 'business@tahi.studio' in this field would send a reviewer hunting for a
+    // sender that never appeared in their headers.
+    delete process.env.RESEND_FROM_EMAIL
+
+    const res = await runFast(POST(makeRequest({ only: ['welcome'] })))
+    const json = (await res.json()) as PreviewResponse
+
+    expect(json.from).toBe('Tahi Studio <business@tahi.studio>')
+  })
+
+  it('reports the template and whether anything sends it live', async () => {
+    const res = await runFast(
+      POST(makeRequest({ only: ['new-message-studio', 'review-request'] })),
+    )
+    const json = (await res.json()) as PreviewResponse
+
+    expect(json.sent).toEqual([
+      {
+        key: 'new-message-studio',
+        template: 'new-message',
+        liveSender: true,
+        subject: expect.stringContaining('New client message on'),
+      },
+      {
+        key: 'review-request',
+        template: 'review-request',
+        liveSender: false,
+        subject: expect.any(String),
+      },
+    ])
+  })
+
+  it('sends the plain text alternative alongside the HTML', async () => {
+    await runFast(POST(makeRequest({ only: ['welcome'] })))
+
+    const [, , , text] = vi.mocked(sendEmail).mock.calls[0]
+    expect(typeof text).toBe('string')
+    expect(text).toContain('Mahana Orchards')
+    expect(text).not.toContain('<html')
+  })
+
   it('sends only the requested keys, and names an unknown one', async () => {
     const res = await runFast(
       POST(makeRequest({ only: ['invoice-sent', 'welcome', 'not-a-template'] })),
@@ -258,6 +308,29 @@ describe('POST /api/admin/emails/preview', () => {
     expect(json.sent?.map((s) => s.key)).toEqual(['invoice-sent', 'welcome'])
     expect(json.failed).toEqual([{ key: 'not-a-template', error: 'Unknown template key' }])
     expect(sendEmail).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports a repeated key once and sends it once', async () => {
+    const res = await runFast(POST(makeRequest({ only: ['welcome', 'welcome', 'nope', 'nope'] })))
+    const json = (await res.json()) as PreviewResponse
+
+    expect(json.sent?.map((s) => s.key)).toEqual(['welcome'])
+    expect(json.failed).toEqual([{ key: 'nope', error: 'Unknown template key' }])
+    expect(sendEmail).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports a non-string key rather than throwing out of the handler', async () => {
+    // `only` is parsed JSON, so a mistyped console call can put anything in it.
+    // The report this route already knows how to produce beats an opaque 500.
+    const res = await runFast(POST(makeRequest({ only: [1, null, 'welcome'] })))
+    const json = (await res.json()) as PreviewResponse
+
+    expect(res.status).toBe(200)
+    expect(json.failed).toEqual([
+      { key: '1', error: 'Template key must be a string' },
+      { key: 'null', error: 'Template key must be a string' },
+    ])
+    expect(json.sent?.map((s) => s.key)).toEqual(['welcome'])
   })
 
   it('reports a refused send and keeps going', async () => {
