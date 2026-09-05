@@ -11,6 +11,13 @@ import { dispatchDomainEvent } from '@/lib/events'
 
 type Params = { params: Promise<{ id: string }> }
 
+// Statuses that mean the payment did not happen, or has been undone. A
+// write-off is deliberately not one of them: on a written-off invoice the
+// money may well have landed, and /financial-reports keys YTD revenue,
+// 90-day collected, the tax-year totals and the monthly series off paid_at
+// rather than status, so nulling the date there would erase real revenue.
+const UNWINDS_PAYMENT = new Set(['draft', 'sent', 'viewed', 'overdue'])
+
 // ── GET /api/admin/invoices/[id] ─────────────────────────────────────────────
 export async function GET(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
@@ -109,13 +116,33 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   // must be refused rather than written and silently dropped from the totals.
   // The date part is required as well as parseable: Date.parse alone accepts
   // "42" (year 2042) and other shapes that would land in the wrong year.
+  // Everything that passes the shape check is normalised to a full ISO stamp
+  // before it is written. Every reader compares paid_at as a raw string
+  // against a `new Date(...).toISOString()` boundary (financial-reports
+  // summary, the finance anomaly scan), and "2026-01-01" sorts BELOW
+  // "2026-01-01T00:00:00.000Z", so a date-only or space-separated stamp would
+  // drop out of the very year, quarter or month it belongs to.
   const ISO_PREFIX = /^\d{4}-\d{2}-\d{2}([T ]|$)/
+  const stamps: Partial<Record<'paidAt' | 'sentAt', string | null>> = {}
   for (const field of ['paidAt', 'sentAt'] as const) {
+    if (!(field in body)) continue
     const value = body[field]
-    if (value === undefined || value === null) continue
+    if (value === undefined || value === null) {
+      stamps[field] = null
+      continue
+    }
     if (typeof value !== 'string' || !ISO_PREFIX.test(value) || Number.isNaN(Date.parse(value))) {
       return NextResponse.json({ error: `${field} must be an ISO date string or null` }, { status: 400 })
     }
+    stamps[field] = new Date(value).toISOString()
+  }
+
+  // Paid with no paid date is the exact state this route exists to prevent, so
+  // the self-contradicting pair is refused rather than half-honoured. Clearing
+  // the date on its own is still allowed: that is a correction, not a claim
+  // that the invoice is paid.
+  if (body.status === 'paid' && stamps.paidAt === null) {
+    return NextResponse.json({ error: 'paidAt cannot be null when status is paid' }, { status: 400 })
   }
 
   const now = new Date().toISOString()
@@ -125,8 +152,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if ('dueDate' in body) patch.dueDate = body.dueDate ?? null
   if ('notes' in body) patch.notes = body.notes ?? null
   if (body.orgId !== undefined) patch.orgId = body.orgId
-  if ('paidAt' in body) patch.paidAt = body.paidAt ?? null
-  if ('sentAt' in body) patch.sentAt = body.sentAt ?? null
+  if ('paidAt' in body) patch.paidAt = stamps.paidAt ?? null
+  if ('sentAt' in body) patch.sentAt = stamps.sentAt ?? null
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -157,9 +184,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (body.status !== undefined) {
     if (body.status === 'paid') {
       if (!('paidAt' in body) && !currentOwner?.paidAt) patch.paidAt = now
-    } else if (currentOwner?.status === 'paid' && !('paidAt' in body)) {
-      // Moving off paid (revert to draft, void): the paid date is no longer
-      // true, and leaving it would keep counting the invoice as revenue.
+    } else if (
+      currentOwner?.status === 'paid'
+      && !('paidAt' in body)
+      && UNWINDS_PAYMENT.has(body.status)
+    ) {
+      // Moving back to an unpaid status (revert to draft, back to sent): the
+      // paid date is no longer true, and leaving it would keep counting the
+      // invoice as revenue. A write-off is excluded on purpose, see the set.
       patch.paidAt = null
     }
     if (body.status === 'sent' && !('sentAt' in body) && !currentOwner?.sentAt) {

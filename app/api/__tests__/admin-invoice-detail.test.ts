@@ -284,6 +284,20 @@ describe('PATCH /api/admin/invoices/[id] paid date', () => {
     expect(patch.paidAt).toBeNull()
   })
 
+  it('keeps the paid date on a write-off, because the money really did land', async () => {
+    const { handle, queries } = makeDb([existing({ status: 'paid', paidAt: '2026-06-01T00:00:00.000Z' })])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await patchInvoice(patchReq('inv-1', { status: 'written_off' }), params('inv-1'))
+    expect(res.status).toBe(200)
+
+    const patch = patchOf(queries)
+    expect(patch.status).toBe('written_off')
+    // Nulling it here would drop real collected money out of YTD revenue,
+    // 90-day collected and the tax-year totals.
+    expect(patch).not.toHaveProperty('paidAt')
+  })
+
   it('does not touch paidAt on a status change that never involved paid', async () => {
     const { handle, queries } = makeDb([existing({ status: 'draft' })])
     vi.mocked(db).mockResolvedValue(handle as never)
@@ -311,6 +325,45 @@ describe('PATCH /api/admin/invoices/[id] paid date', () => {
     const res = await patchInvoice(patchReq('inv-1', { paidAt: null }), params('inv-1'))
     expect(res.status).toBe(200)
     expect(patchOf(queries).paidAt).toBeNull()
+  })
+
+  it('refuses paid with an explicit null date, the state the whole route exists to prevent', async () => {
+    const { handle, queries } = makeDb([existing()])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await patchInvoice(patchReq('inv-1', { status: 'paid', paidAt: null }), params('inv-1'))
+    expect(res.status).toBe(400)
+    // Refused before anything was written: no paid row with a NULL paid_at.
+    expect(queries).toHaveLength(0)
+  })
+
+  it('normalises a date-only stamp to full ISO, so it stays inside its own year', async () => {
+    const { handle, queries } = makeDb([existing()])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await patchInvoice(patchReq('inv-1', { status: 'paid', paidAt: '2026-01-01' }), params('inv-1'))
+    expect(res.status).toBe(200)
+
+    const written = patchOf(queries).paidAt as string
+    expect(written).toBe('2026-01-01T00:00:00.000Z')
+    // On the Workers runtime (UTC) the reports build their year boundary as
+    // new Date(y, 0, 1).toISOString(), which is this string, and they compare
+    // paid_at against it as a raw string. The bare "2026-01-01" the caller
+    // sent sorts BELOW it and would leave YTD revenue; the stamp we write
+    // does not. Spelled out rather than computed so the assertion does not
+    // depend on the test machine's timezone.
+    const yearStartUtc = '2026-01-01T00:00:00.000Z'
+    expect('2026-01-01' >= yearStartUtc).toBe(false)
+    expect(written >= yearStartUtc).toBe(true)
+  })
+
+  it('normalises a space-separated stamp too', async () => {
+    const { handle, queries } = makeDb([existing({ status: 'draft', sentAt: null })])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await patchInvoice(patchReq('inv-1', { sentAt: '2026-01-01 09:30:00' }), params('inv-1'))
+    expect(res.status).toBe(200)
+    expect(patchOf(queries).sentAt).toMatch(ISO)
   })
 
   it('accepts paidAt on its own, with no status alongside it', async () => {

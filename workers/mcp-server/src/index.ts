@@ -631,13 +631,13 @@ const TOOLS: ToolDef[] = [
     notes: prop('string', 'Invoice notes'),
     dueDate: prop('string', 'Due date in YYYY-MM-DD format'),
   }, ['orgId', 'amountUsd', 'totalUsd']),
-  tool('update_invoice', 'Update an existing invoice. This does NOT send it: flipping an invoice to the client is send_invoice_email, which is the only door that emails the billing contacts and raises their bell row.', {
+  tool('update_invoice', 'Update an existing invoice: status, notes, due date, owner and the paid / sent dates. Amounts and line items are not editable here, delete the invoice and create a fresh one instead. This does NOT send it: flipping an invoice to the client is send_invoice_email, which is the only door that emails the billing contacts and raises their bell row.', {
     invoiceId: prop('string', 'Invoice ID'),
     status: prop('string', 'Updated status: draft, overdue, paid, written_off. To send an invoice use send_invoice_email instead, which sets sent for you.'),
-    amount: prop('number', 'Updated amount'),
+    notes: prop('string', 'Updated invoice notes'),
     dueDate: prop('string', 'Updated due date in YYYY-MM-DD format'),
     orgId: prop('string', 'Reassign invoice to a different client organisation ID'),
-    paidAt: prop('string', 'When the money actually landed, ISO 8601, or null to clear. Setting status paid stamps this for you if you omit it; pass it to backdate a bank transfer. /financial-reports counts revenue from this, not from status.'),
+    paidAt: prop('string', 'When the money actually landed, full ISO 8601 timestamp, or null to clear (rejected alongside status paid). Setting status paid stamps this for you if you omit it; pass it to backdate a bank transfer. /financial-reports counts revenue from this, not from status.'),
     sentAt: prop('string', 'When the invoice went out, ISO 8601, or null to clear. Setting status sent stamps this for you if you omit it.'),
   }, ['invoiceId']),
   tool('send_invoice_email', 'Send an invoice to the client: emails every billing contact (portal admins + the primary contact) the invoice with a Stripe pay link and a portal deep link, marks the invoice sent, and raises the client bell row. Creating a draft invoice does NOT notify anyone; this is the send.', {
