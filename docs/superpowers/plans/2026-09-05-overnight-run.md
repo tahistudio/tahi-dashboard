@@ -62,6 +62,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 05:18 NZST sales design: two of three designers done (pipeline, artifacts or ops), the third never produced a transcript and the run sat idle 26 minutes; stopped and resumed from cache so only the missing designer and the three critics run.
 
+- 05:40 NZST client walk report in (4 blockers, 8 important, 8 minor; saved). Fixer launched for the preview-fidelity blocker (admin pages inside Client view), client currency pinning, a branded not-found page, the TRIAGE leak, dark-mode rail contrast, banner copy. The rest sits inside the portal port slices or the morning list.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - [x] More sheet Track time row left-aligned (17a490b2).

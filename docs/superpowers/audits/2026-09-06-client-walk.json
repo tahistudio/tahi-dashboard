@@ -1,0 +1,253 @@
+{
+ "findings": [
+  {
+   "severity": "blocker",
+   "page": "/billing, /settings, /calls, /tasks (Client view)",
+   "viewport": "1380x900 light + dark, 375x812",
+   "problem": "Client view (the impersonation preview) renders the studio's admin surfaces inside the client shell, so a screen labelled \"Read-only client view\" shows every other client by name, plan and money. Real clients are redirected server-side (calls/tasks page.tsx redirect a non-Tahi org; billing/settings branch on isAdmin), so this is a preview-fidelity failure, not a tenancy breach - but it means Client view cannot be trusted to show what a client sees, and it is unsafe to open on a shared screen.",
+   "evidence": "/billing rendered \"Active Subscriptions 8 / Total Clients 10 / Outstanding $5,400.00\" plus a table of Beta Labs, Giant Group, ISO Certification Experts, Tevalis, Liam's workspace and 50 invoice rows (US$3,350, GBP1,075 Overdue...). /settings rendered Modules, Studio details, Pipeline stages, Lead automations, Integrations, Webhooks, Scheduled jobs, Client plans, Reserves, Audit log, Danger zone. /tasks rendered \"The studio's own to-do list: emails, chasers, prep, housekeeping\", All tasks 15 / Internal 14, an \"All clients\" filter and a quick-add hint naming a different client: \"Try @Kahu Labs (e2e NZD)\". Cause: getServerAuth keeps orgId = the Tahi org while impersonating, so isAdmin stays true; only components that call useImpersonation (sidebar, top nav, overview, requests, invoices) flip audience - billing-content and calls-content never do. The client overview also fires ~24 /api/admin/* calls (financial-reports/summary, deals, leads, contracts, cash-flow-forecast, proposals, retainer-health, worklog, reviews, docs) all returning 200. Shots: billing-desktop-light.png, long-_settings-desktop-light.png, tasks-desktop-light.png, calls-desktop-light.png.",
+   "fix": "Make the impersonation cookie authoritative for page-level audience, not just for client components: have the dashboard pages derive isAdmin from a helper that returns false when tahi-impersonate-org is set (or run the same redirect the real client gets). Until then, add the useImpersonation branch to billing-content and gate /calls and /tasks on the cookie too."
+  },
+  {
+   "severity": "blocker",
+   "page": "/overview, /requests, /invoices (all client pages)",
+   "viewport": "1380x900 light",
+   "problem": "Money is shown in a display currency that defaults to NZD regardless of the client's own currency, and the top-bar chip silently re-converts it. A client cannot tell what they actually owe.",
+   "evidence": "Acme Corp has preferredCurrency USD; /api/portal/subscription returns monthlyRate 1500 with no currency. The overview plan card renders \"NZ$1,500/mo\". Clicking the NZD chip and picking US Dollar changes the same card to \"US$882/mo\" (probe output beforeCurrency \"NZ$1,500/mo\" -> afterCurrency \"US$882/mo\"). On Stride (USD org, Xero rail) every invoice row renders \"US$1,200\" with \"NZ$2,041\" underneath it. Nothing on any of these surfaces states the billing currency. Shots: currency-chip-desktop-light.png, currency-usd-desktop-light.png, stride-_invoices-desktop-light.png, long-_overview-desktop-light.png.",
+   "fix": "Pin the client portal to the org's billing currency (organisations.preferredCurrency / the invoice's own currency) and drop the display-currency switcher from the client shell, or label converted figures explicitly as \"approx, for reference\" next to the authoritative amount."
+  },
+  {
+   "severity": "blocker",
+   "page": "/invoices/8d76f113-46c8-4340-bcf9-46077d52254a (Stride)",
+   "viewport": "1380x900 light",
+   "problem": "Clicking an invoice row lands a client on \"Failed to load invoice.\" with a 19px Retry button and no other way forward: no amount, no reference, no line items, no way to pay.",
+   "evidence": "Page text after load was exactly \"Back to Invoices / Failed to load invoice. / Retry\". Network: GET /api/portal/invoices/8d76f113-46c8-4340-bcf9-46077d52254a -> 500, then GET /api/admin/invoices/<same id> -> 500. Reproduced by curl for both the overdue invoice and a paid one (f53f472c...). Caveat: the admin route 500s too on this QA snapshot, so the root cause may be local D1 column drift rather than route logic - it needs re-checking against staging. Either way the client-facing failure state is a bare sentence with no support path. Shot: stride-_invoices_8d76f113_46c8_4340_bcf9_46077d5225-desktop-light.png.",
+   "fix": "Confirm the 500 on staging (likely a column selected in the detail route that the snapshot lacks). Separately, give the client error state real content: the amount and due date from the list row it navigated from, a \"contact us\" mailto, and a Retry button at 2.75rem."
+  },
+  {
+   "severity": "blocker",
+   "page": "/invoices (Stride)",
+   "viewport": "1380x900 light",
+   "problem": "The only payment action a client has is a dead link. \"Pay now\" renders whatever string is in payUrl with no validation that it is an absolute URL, and when payUrl is absent the row shows no payment affordance at all - a Xero-rail client with no hosted link has no way to pay from the list.",
+   "evidence": "The overdue row's Pay now anchor: raw href \"stripe_hosted_invoice_url\", resolved \"http://localhost:3179/stripe_hosted_invoice_url\", target _blank. (The seeded value is a literal column name, same as accentColour \"accent_colour\" elsewhere in this snapshot, so the data is placeholder - but the code renders it unchecked.) invoice-list.tsx line 197 gates purely on `isPayable(invoice) && invoice.payUrl`. The howToPay / bank-details fallback is only built in the invoice DETAIL route, which currently 500s, so there is no path to it. Shot: stride-_invoices-desktop-light.png.",
+   "fix": "Validate payUrl starts with https:// before rendering Pay now, and render the How to pay block (bank details + reference + amount) on the invoice LIST row when a still-owed invoice has no link, not only on the detail page."
+  },
+  {
+   "severity": "important",
+   "page": "/requests/bed1cf18-52cc-46dd-848f-8096f94f005c",
+   "viewport": "1380x900 light + dark, 375x812",
+   "problem": "The request detail tells the client nobody is working on their request, while the list, board and track strip on the same site all name the person who is. GET /api/portal/requests/[id] returns no participants.",
+   "evidence": "Detail page shows an \"Unassigned\" badge, \"PROJECT MANAGER: No PM assigned.\", \"ASSIGNEES: No assignees yet.\", \"FOLLOWERS: No followers yet.\" for an In Progress request. The same request on /requests shows \"SC Sarah\" on the track card and \"SC\" on the Kanban card. GET /api/portal/requests?limit=200 returns participants [{Sarah Chen, role pm}, {Staci Orchard, role assignee}, ...]; GET /api/portal/requests/578c21ea... returns only {request:{...}, messages:[]} with no participants key. Shot: detail-_requests_bed1cf18_52cc_46dd_848f_8096f94f00-desktop-light.png.",
+   "fix": "Return the same participants projection from /api/portal/requests/[id] that the list route already builds, and render PM/assignees from it."
+  },
+  {
+   "severity": "important",
+   "page": "/overview vs /requests",
+   "viewport": "1380x900 light",
+   "problem": "The portal contradicts itself about what the client is paying for and what is being built. Three endpoints disagree about track count, and the two pages that render them disagree on screen.",
+   "evidence": "/api/portal/capacity: entitlements {smallTracks:1, largeTracks:0, totalSlots:1}, summary \"1 small track\", tracks array length 1. /api/portal/tracks: 2 tracks (small + large). /api/portal/subscription: trackCount 2. On screen: /requests says \"1 active track. One request builds per track...\" while /overview says \"Maintain plan \u00b7 2 tracks running in parallel\" and the plan card says \"Tracks 2 active\". /requests also puts the large_task \"Redesign landing page hero section\" inside \"TRACK 1 [Small]\" and shows it in build at 50%, while /overview puts it in TRACK 2 and labels both tracks \"Ready for your next request / This track is open\". Shots: long-_overview-desktop-light.png, requests-desktop-light.png.",
+   "fix": "Make /api/portal/capacity the single source for track entitlement and lane assignment, have client-home read it instead of /api/portal/tracks + subscription.trackCount, and stop rendering a large_task inside a lane labelled Small."
+  },
+  {
+   "severity": "important",
+   "page": "/overview (Stride)",
+   "viewport": "1380x900 light",
+   "problem": "An established client with five months of invoices and a 131-day-overdue bill is greeted as brand new, and the same page contradicts itself two cards later.",
+   "evidence": "Hero: \"PROJECT PROGRESS / Getting started / Your plan is being set up\". Work card: \"Your project plan is being set up. Your team will share the phases here shortly.\" Team card: \"Your team is being assigned. They will show up here soon.\" Meanwhile the same page shows \"INVOICES DUE US$1,200 / 1 \u00b7 131 days overdue\", invoices back to 30 Jan 2026, and a plan card reading \"Your project / Active / Fixed scope / Phase In progress / Next invoice 28 Apr\". Shot: stride-overview-desktop-light.png.",
+   "fix": "Suppress the getting-started hero and the \"being set up\" placeholders once the org has any paid invoice or history older than ~30 days (the /api/portal/onboarding firstRunEligible rule already exists for the checklist - apply it to the hero and the phases/team cards too)."
+  },
+  {
+   "severity": "important",
+   "page": "/invoices",
+   "viewport": "1380x900 light + 375x812",
+   "problem": "Invoice rows are non-focusable <tr> elements with a click handler, so the only way into an invoice is a mouse click. Keyboard and screen-reader users cannot open one, and there is no invoice number anywhere in the list to quote on a bank transfer.",
+   "evidence": "DOM probe of the three Stride rows: role null, tabindex null, class \"tahi-row-clickable\", cursor pointer, and the only anchor in the table is the Pay now link. Columns are AMOUNT / STATUS / DUE / CREATED - no reference or invoice number. Clicking a row does navigate (/invoices/f53f472c-...), so the destination exists, it is just unreachable without a pointer. Shot: stride-_invoices-desktop-light.png.",
+   "fix": "Wrap the primary cell in a Link (or give the row role=\"link\" + tabIndex=0 + Enter handling) and add an invoice number / reference column."
+  },
+  {
+   "severity": "important",
+   "page": "/notifications (and any mistyped URL)",
+   "viewport": "1380x900 light + dark, 375x812",
+   "problem": "There is no app-level not-found page, so a client who lands on a bad URL gets the raw Next.js 404 with no navigation, no branding and no link back - a hard dead end inside a signed-in session.",
+   "evidence": "GET /notifications -> 404 in curl and in the browser; page h1 \"404\", h2 \"This page could not be found.\", zero links on the page, no sidebar, no tab bar. Confirmed at 1380x900 light, 1380x900 dark and 375x812. No app/not-found.tsx or app/(dashboard)/not-found.tsx exists. Nothing links to /notifications today (the bell is a popover), so this is reached by URL guessing or a stale bookmark. Shots: notifications-desktop-light.png, notifications-mobile-light.png.",
+   "fix": "Add app/not-found.tsx rendering inside the dashboard shell with \"Take me back to your overview\" and a link to Requests."
+  },
+  {
+   "severity": "important",
+   "page": "/requests (Kanban tab)",
+   "viewport": "1380x900 light",
+   "problem": "Internal studio vocabulary is printed on the client's board: the Submitted column carries a \"TRIAGE\" badge.",
+   "evidence": "Kanban header reads \"Submitted 2 [TRIAGE]\". Request detail also shows internal type names to the client: \"Type: Small Task\" / \"Type: Large Task\", and a \"FOLLOWERS\" section. Shots: requests-kanban-desktop-light.png, detail-_requests_bed1cf18_52cc_46dd_848f_8096f94f00-desktop-light.png.",
+   "fix": "Hide the triage badge when the viewer is a client, and map small_task/large_task to client-facing wording (\"Small piece of work\" / \"Larger build\") on the detail Details panel."
+  },
+  {
+   "severity": "important",
+   "page": "/invoices (Stride)",
+   "viewport": "1380x900 light",
+   "problem": "React hydration mismatch on a client-facing money page, which throws away the server render and re-renders the whole tree on the client.",
+   "evidence": "pageerror captured on load: \"Error: Hydration failed because the server rendered HTML didn't match the client. As a result this tree will be regenerated on the client.\" Only fires on the invoice list (the org with rows), not on Acme's empty list, which points at the currency/date formatting in the row.",
+   "fix": "Move the currency and date formatting in invoice-list rows behind a mounted check or format with a fixed locale/timezone so server and client agree (same class of bug as the public-viewer locale dates noted in the earlier hydration audit)."
+  },
+  {
+   "severity": "important",
+   "page": "/requests",
+   "viewport": "1380x900 dark",
+   "problem": "In dark mode the SELECTED saved view is the least readable item in the rail - darker than the unselected ones. Measured 2.1:1 against WCAG AA 4.5:1.",
+   "evidence": "Computed styles: active row \"All requests 3\" color rgb(66,95,57) (= --color-brand-dark #425F39) on background rgba(122,171,107,0.1) over the dark card, giving ~2.1:1. The inactive rows \"In progress\" / \"Waiting on you\" use rgb(168,166,160) and read normally. Shots: zoom-views-dark.png, requests-desktop-dark.png.",
+   "fix": "Use --color-brand-light (or a dark-mode-specific active token) for the selected saved view label instead of --color-brand-dark; the .dark block in globals.css needs an override for this rule."
+  },
+  {
+   "severity": "minor",
+   "page": "/overview, /files, /invoices, /requests, /settings",
+   "viewport": "375x812 light + dark",
+   "problem": "Many client controls are under the 2.75rem (44px) minimum at 375px.",
+   "evidence": "Measured heights: \"All requests\" 17, \"All files\" 17, \"All invoices\" 17, \"Manage\" 17, \"Retry\" 19, \"Upload files\" 28, \"Pay\" 28 and 32, \"Status Any\" 30, \"+ Queue another\" 33, \"Sort/filter selects\" 36, \"New\" 38, \"New request\" 38, \"Add a track\" 38, \"Save profile\" 38, \"Change\" 39. The bottom tab items are fine at 50. No horizontal overflow anywhere (scrollWidth - clientWidth = 0 on every page and viewport).",
+   "fix": "Give the card \"see all\" links and the inline Pay / Upload / Retry buttons min-height 2.75rem on the client shell (they are already tap targets, just visually small)."
+  },
+  {
+   "severity": "minor",
+   "page": "/overview, /requests",
+   "viewport": "1380x900 light",
+   "problem": "Counts are labelled with the wrong verb, so the numbers read as claims the data does not support.",
+   "evidence": "Overview KPI: \"OPEN REQUESTS 3\" with the sub-label \"in progress\" - only 1 of the 3 is in_progress, the other 2 are submitted. Requests rail: saved view \"In progress 3\" while the table beneath shows one In Progress and two Submitted. Shots: long-_overview-desktop-light.png, requests-desktop-light.png.",
+   "fix": "Change the KPI sub-label to \"open\" (or split the number), and rename the saved view to \"Active\" / \"Not delivered\"."
+  },
+  {
+   "severity": "minor",
+   "page": "Impersonation banner (every page)",
+   "viewport": "all",
+   "problem": "Stray space before the full stop in the banner copy: \"Viewing Acme Corp . Read-only client view.\"",
+   "evidence": "Rendered banner text captured on every page probe. Source: components/tahi/impersonation-banner.tsx renders `<ClientSwitcher ... /> . Read-only client view.` with a literal space before the period.",
+   "fix": "Remove the space so it reads \"Viewing Acme Corp. Read-only client view.\""
+  },
+  {
+   "severity": "minor",
+   "page": "/overview (Stride)",
+   "viewport": "1380x900 light",
+   "problem": "A disabled \"Messaging soon\" pill and \"TBC\" placeholders ship roadmap scaffolding to the client.",
+   "evidence": "Disabled BUTTON with text \"Messaging soon\" (38px) sits in the \"Your project, phase by phase\" card header. Invoice list on the same page reads \"March invoice Paid TBC Paid\" and \"February invoice Paid TBC Paid\" - TBC where the paid date belongs, and the word Paid printed twice per row. Shot: stride-overview-desktop-light.png.",
+   "fix": "Hide the messaging pill until messaging ships, and fall back to the invoice's paidAt (or drop the date line) instead of printing TBC."
+  },
+  {
+   "severity": "minor",
+   "page": "/services",
+   "viewport": "1380x900 light + dark, 375x812",
+   "problem": "Services is a permanently empty nav item: the catalogue query can never return anything today, so every client sees a dead page in their sidebar and More sheet.",
+   "evidence": "Page copy \"No services available / Check back later for available services and add-ons.\" GET /api/portal/services -> {\"items\":[]}; the route selects `where showInCatalog = 1` and GET /api/admin/services returns {\"items\":[]} - zero services exist at all. Shot: services-desktop-light.png.",
+   "fix": "Hide the Services nav entry (client sidebar and More sheet) while the catalogue has no showInCatalog rows, rather than routing clients to an empty page."
+  },
+  {
+   "severity": "minor",
+   "page": "/requests",
+   "viewport": "375x812 dark",
+   "problem": "The List / Kanban / Timeline switcher collapses to unlabelled icons at 375px and the icons are near-invisible in dark mode.",
+   "evidence": "Mobile-dark screenshot shows three icon-only buttons in a dark pill; the active (List) state is barely distinguishable from the inactive two. On desktop the same control carries text labels. Shot: md-_requests-mobile-dark.png.",
+   "fix": "Keep the text labels at 375px (they fit) or raise the icon colour to --color-text-muted with a clearly lighter active background."
+  },
+  {
+   "severity": "minor",
+   "page": "/overview",
+   "viewport": "375x812 light",
+   "problem": "The news-feed line truncates mid-sentence with an unclosed quotation mark.",
+   "evidence": "Rendered as: NEWS FEED \u00b7 \"Redesign landing page hero  - the actor (\"Sarah Chen started work on\") is cut and the closing quote never appears. Desktop shows the full sentence. Shot: overview-mobile-light.png.",
+   "fix": "Truncate on the whole phrase with an ellipsis, or drop the quotes and show \"Sarah started work\" + the title on a second line at mobile widths."
+  },
+  {
+   "severity": "minor",
+   "page": "/overview (client)",
+   "viewport": "1380x900 light",
+   "problem": "The client home logs a 500 to the console on every load and issues about 24 admin API calls the client half never uses.",
+   "evidence": "Console: \"Failed to load resource: 500\" for /api/admin/integrations/buffer/posts?status=sent&count=100, on every /overview load in every viewport. The same load fires /api/admin/financial-reports/summary, /api/admin/deals, /api/admin/leads, /api/admin/contracts, /api/admin/reports/cash-flow-forecast, /api/admin/proposals, /api/admin/reports/retainer-health, /api/admin/reviews, /api/admin/docs, /api/admin/content/drafts and more before the portal data arrives.",
+   "fix": "Same root cause as the Client-view finding: once the page-level audience honours the impersonation cookie, the admin home hooks stop mounting. Independently, make the Buffer posts endpoint fail soft instead of 500."
+  }
+ ],
+ "notes": "ORG USED. Primary: Acme Corp, D1 org d753f180-f484-498d-80cb-7e9e36b2dcbd (Maintain retainer, 6 requests of which 3 are client-visible, 2 tracks, 0 invoices, 0 files, 0 services). The brief suggested Kahu Labs (e2e NZD) but on this QA snapshot every ACTIVE org has openRequestCount 0; the only orgs with requests (Acme Corp, Beta Labs, Gamma Design, Tahi Studio, Pp, Lifecycle Test Co) are all status=archived. Acme Corp was picked as the richest requests dataset. Secondary: Stride, b31a11f5-5fa8-4cdd-924b-609205aed14d (active, USD, Xero rail, 3 invoices, one 131-day-overdue, 0 requests) for the invoice list, invoice detail and project-client overview.\n\nHARNESS. Playwright chromium headless against http://localhost:3179. Cookies tahi-ship-studio=1 + tahi-impersonate-org=<orgId> on localhost; the impersonation record lives in sessionStorage (NOT localStorage) under key tahi-impersonate as {type:'client', orgId, orgName} - set via addInitScript, plus tahi-tour-complete and tahi-theme. domcontentloaded waits, no networkidle. Scripts: .claude/client-walk.mjs (main walk, MODE=dl|dd|ml|md, PATHS/PREFIX/SETTLE env), .claude/client-net.mjs, .claude/client-menus.mjs, .claude/client-usercard.mjs, .claude/client-mobile-probe.mjs, .claude/client-contrast.mjs, .claude/client-crop.mjs, .claude/client-invoice-probe.mjs, .claude/client-interactions.mjs, .claude/client-overflow.mjs. Raw reports: .claude/shots/client-walk/report-*.json. No repo file was modified, no server started or stopped, shared Chrome untouched.\n\nHARNESS LIMITS (things I could NOT verify).\n1. Settle time. The webpack dev server needs ~18-22s per page; at 7s the overview and request detail were still skeletons. Every \"0\" or empty state reported above was re-checked at 20s+ before being called a lie. The first desktop-light pass ran at 7s, so overview-desktop-light.png / request-detail-desktop-light.png show loading states, not bugs - use long-_overview-desktop-light.png and detail-*.png instead.\n2. Client view is admin-authed. Server-side isAdmin stays true (that is finding 1), so /billing, /settings, /calls and /tasks could only be observed in their ADMIN form. The real client halves of /billing and /settings were never rendered and remain unverified.\n3. No Clerk browser session under the Ship Studio bypass, so useUser never resolves and the sidebar account card stays a permanent skeleton. The account menu (Settings link, Sign out, dark-mode toggle) could not be opened at 1380px. On mobile the More sheet does expose Settings, so a client has a route to it there.\n4. Approve / Request changes could not be exercised. No request in the snapshot is in client_review, and I was blocked from PATCHing one there (permission denial - I did not work around it). Code review of request-detail.tsx confirms the ClientReviewBar renders only when !isAdmin && status === 'client_review', and it is passed disabled={isImpersonatingClient}, so it would be inert in preview even with the right data. Same for the thread composer: the client thread showed \"You are reading this as the client. Replies are read-only in client view.\" so the composer exists but could not be typed into.\n5. The invoice-detail 500 hits the ADMIN route too, so it may be local D1 column drift in this snapshot rather than a route bug - flagged inside the finding, needs a staging re-check.\n6. Seeded placeholder data: several columns in this snapshot hold literal column names (payUrl = \"stripe_hosted_invoice_url\", accentColour = \"accent_colour\", paymentTerms = \"payment_terms\"), and paidAt comes back as \"/Date(1773964800000+0000)/\". The Pay now finding is about the missing validation, not about the seed value.\n7. The black circle bottom-left and the red \"1 Issue\" pill in several screenshots are the Next.js dev overlay (elementFromPoint returned NEXTJS-PORTAL), not product UI. Not reported.\n8. No em or en dashes were found in any client-visible copy across all pages and viewports. No horizontal overflow at 375px on any page.",
+ "pagesWalked": [
+  "/overview (Acme Corp, 1380x900 light + dark, 375x812 light + dark)",
+  "/requests list (1380x900 light + dark, 375x812 light + dark)",
+  "/requests Kanban tab (1380x900 light)",
+  "/requests Timeline tab (1380x900 light)",
+  "/requests \"...\" overflow menu (1380x900 light)",
+  "/requests/578c21ea-c38a-4e63-bbfd-81cfb0e13ec2 (submitted, 1380x900 light + dark, 375x812)",
+  "/requests/bed1cf18-52cc-46dd-848f-8096f94f005c (in progress, 1380x900 light)",
+  "/requests?new=1 New request dialog (1380x900 light + dark, 375x812)",
+  "/requests?new=1 -> Build with AI assist step (1380x900 light)",
+  "/files (1380x900 light + dark, 375x812)",
+  "/services (1380x900 light + dark, 375x812)",
+  "/invoices (Acme, empty state; Stride, 3 rows) 1380x900 light + dark, 375x812 light + dark",
+  "/invoices/8d76f113-46c8-4340-bcf9-46077d52254a (Stride, overdue Xero invoice) 1380x900 light",
+  "/invoices/f53f472c-65e6-49d4-bc24-6e16adb97350 (via row click) 1380x900 light",
+  "/billing (1380x900 light + dark, 375x812)",
+  "/settings (1380x900 light + dark, 375x812 light + dark)",
+  "/messages (redirects 307 -> /overview) 1380x900 light + dark, 375x812",
+  "/notifications (404) 1380x900 light + dark, 375x812",
+  "/calls (1380x900 light + dark, 375x812)",
+  "/tasks (1380x900 light + dark, 375x812)",
+  "/overview (Stride, project client with overdue invoice) 1380x900 light",
+  "Bottom tab bar + More sheet at 375x812",
+  "Notification bell popover, display-currency popover, impersonation banner and client switcher"
+ ],
+ "screenshots": [
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/long-_overview-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/overview-desktop-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/overview-mobile-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/md-_overview-mobile-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/requests-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/requests-desktop-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/requests-mobile-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/md-_requests-mobile-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/requests-kanban-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/requests-timeline-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/requests-overflow-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/detail-_requests_bed1cf18_52cc_46dd_848f_8096f94f00-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/detail-_requests_578c21ea_c38a_4e63_bbfd_81cfb0e13e-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/request-detail-desktop-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/request-detail-mobile-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/requests-new-dialog-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/requests-new-dialog-desktop-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/requests-new-dialog-mobile-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/requests-ai-assist-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/files-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/files-desktop-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/files-mobile-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/services-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/services-desktop-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/services-mobile-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/invoices-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/invoices-desktop-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/invoices-mobile-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/md-_invoices-mobile-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/stride-_invoices-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/stride-_invoices_8d76f113_46c8_4340_bcf9_46077d5225-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/stride-row-click-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/stride-overview-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/billing-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/billing-desktop-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/billing-mobile-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/long-_settings-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/settings-desktop-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/settings-mobile-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/md-_settings-mobile-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/tasks-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/tasks-desktop-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/tasks-mobile-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/calls-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/calls-desktop-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/calls-mobile-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/notifications-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/notifications-desktop-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/notifications-mobile-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/messages-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/messages-mobile-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/more-sheet-mobile-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/tabbar-overlap-mobile-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/notification-bell-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/currency-chip-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/currency-usd-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/zoom-views-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/zoom-track-dark.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/account-menu-desktop-light.png",
+  "C:/Users/Work/Projects/tahi-dashboard/.claude/shots/client-walk/user-card-menu-desktop-light.png"
+ ],
+ "summary": "Walked the client portal as Acme Corp (requests-rich) and Stride (invoices + overdue money) at 1380x900 and 375x812, light and dark, via headless Playwright with the ship-studio bypass plus client impersonation. The core client loop is in good shape: the overview, requests list, Kanban, Timeline, request detail, the New request dialog and its AI assist all render honestly, the copy is warm and client-appropriate, there is no horizontal overflow at 375px anywhere, no em or en dashes in any client-visible string, and the bottom tab bar plus More sheet work. The problems cluster in money and in preview fidelity. Four blockers: Client view renders the studio's admin /billing, /settings, /calls and /tasks inside the client shell (every other client's name, plan and invoice totals, plus a quick-add hint naming a different client) because server-side isAdmin ignores the impersonation cookie; the plan price and every invoice are shown in a NZD-by-default display currency that silently re-converts when the client taps a chip (the same Maintain plan reads NZ$1,500/mo or US$882/mo); the invoice detail page dies with a bare \"Failed to load invoice\" on a 500; and the only Pay affordance renders an unvalidated payUrl that resolves to a dead in-app URL, with no How to pay fallback on the list. Then eight importants, led by the request detail telling a client \"Unassigned / No PM assigned\" while the list, board and track strip on the same site all name Sarah Chen (the portal detail endpoint drops participants), a three-way contradiction about how many tracks the client is paying for, an established client being greeted with \"Your plan is being set up\", a \"TRIAGE\" badge on the client Kanban, an unbranded dead-end 404, non-focusable invoice rows, a hydration mismatch on /invoices, and a dark-mode selected-view row at 2.1:1. Eight minors cover sub-44px touch targets, mislabelled counts, a dead Services nav item and roadmap scaffolding (\"Messaging soon\", \"TBC\") shipped to clients."
+}
