@@ -71,6 +71,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 - 06:20 NZST usage limit hit again (reset 06:20); the prototype fixer and the sales artifacts designer plus critics died and were resumed.
 - 06:25 NZST INCIDENT: the client-walk fix deploy (c14169bc) broke production: every signed-in page 500 (server-side exception), unauthenticated pages 404. All checks had passed. Reverted (4f905464, c96c8c2d) and redeployed within 12 minutes; production back on the portal-port tree. Diagnosis agent running; PP.5 stays open. Lesson recorded: a post-deploy health probe joins every deploy chain.
 
+- 06:35 NZST rollback deploy (c96c8c2d) verified in the browser: production back (Clients renders, 28 clients, no application error). Diagnosis saved: the dashboard layout called resolvePinnedCurrency from a use-client module on the server; fix is to move three pure helpers into lib/currency.ts. PP.5 re-lands today after a QA render check plus a post-deploy health probe. Sales design (third designer + critics) and the portal prototype fixer resumed at 06:22 and still running.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - [x] More sheet Track time row left-aligned (17a490b2).
