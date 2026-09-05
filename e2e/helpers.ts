@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test'
+import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
 /**
  * The dev-only Ship Studio auth bypass, as a storageState. Six specs had
@@ -110,4 +110,204 @@ export async function primePage(page: Page): Promise<void> {
       // Storage can be unavailable in some contexts; the tour then shows.
     }
   })
+}
+
+// ── Rail cards ───────────────────────────────────────────────────────────────
+//
+// SidebarCard draws a head (icon, title, count) and a body as its next
+// sibling. Neither carries a role of its own, so both are reached through the
+// one thing that does: the card's h3. Shared, because the Waiting on card on a
+// task and the Blocked by card on a request are the same component.
+
+/** The head row of a rail card: the icon, the title, and the count beside it. */
+export function railCardHead(scope: Page | Locator, title: string): Locator {
+  return scope.getByRole('heading', { name: title, exact: true }).locator('..')
+}
+
+/** The card's body, which SidebarCard renders as the head's next sibling. */
+export function railCardBody(scope: Page | Locator, title: string): Locator {
+  return railCardHead(scope, title).locator('xpath=following-sibling::div[1]')
+}
+
+/** The number in a card's head, asserted as the whole string rather than as a
+ *  substring: `toContainText('1')` is also satisfied by 12. */
+export async function expectCardCount(head: Locator, title: string, count: number): Promise<void> {
+  await expect(head, `the ${title} card should count ${count}`)
+    .toHaveText(new RegExp(`${title}\\s*${count}$`), { timeout: 20_000 })
+}
+
+// ── API fixtures ─────────────────────────────────────────────────────────────
+//
+// Every spec that needs a row builds it through the API and deletes it again,
+// so a fresh database does not turn into a red suite and a run leaves nothing
+// behind. The task pair lived in e2e/tasks.spec.ts until the blocker cases
+// needed the same fixtures from the two Requests specs; one definition rather
+// than three copies that drift on the day a route changes shape.
+
+/** The fields these specs read back off the server. */
+export interface TaskRecord {
+  id: string
+  type: string
+  orgId: string | null
+  title: string
+  status: string
+  priority: string
+  dueDate: string | null
+  assigneeId: string | null
+}
+
+export interface NewTask {
+  title: string
+  type?: string
+  orgId?: string | null
+  status?: string
+  priority?: string
+  dueDate?: string | null
+  estimatedHours?: number
+  assigneeId?: string | null
+  assigneeType?: string | null
+}
+
+/** Create a task. Tahi-internal and undated unless the case says otherwise,
+ *  so the write needs no client. */
+export async function createTask(request: APIRequestContext, task: NewTask): Promise<string> {
+  const res = await request.post('/api/admin/tasks', {
+    data: { type: 'tahi_internal', priority: 'standard', status: 'todo', ...task },
+  })
+  expect(res.status(), 'the task fixture could not be created').toBe(201)
+  const { id } = await res.json() as { id: string }
+  return id
+}
+
+/** Soft, because every call site is inside a `finally` and the failure that
+ *  sent it there is the one worth reporting. It is still said out loud: a
+ *  leaked fixture is exactly what pushes the lens past its first page. */
+export async function deleteTask(request: APIRequestContext, id: string): Promise<void> {
+  const res = await request.delete(`/api/admin/tasks/${id}`)
+  expect.soft(res.ok(), `the task fixture ${id} was not cleaned up`).toBeTruthy()
+}
+
+export async function getTask(request: APIRequestContext, id: string): Promise<TaskRecord> {
+  const res = await request.get(`/api/admin/tasks/${id}`)
+  expect(res.ok(), `the task ${id} could not be read back`).toBeTruthy()
+  const { task } = await res.json() as { task: TaskRecord }
+  return task
+}
+
+// ── Blockers ─────────────────────────────────────────────────────────────────
+
+export type BlockerSubjectType = 'task' | 'request'
+
+export interface BlockerSubject {
+  type: BlockerSubjectType
+  id: string
+}
+
+/** One row of GET /api/admin/<subject>/blockers, in either direction. */
+export interface BlockerRow {
+  linkId: string
+  otherType: BlockerSubjectType
+  otherId: string
+  otherTitle: string
+  otherStatus: string
+  otherRef: string | null
+  otherOrgName: string | null
+}
+
+/** The two blocker routes are siblings under their own subject, which is the
+ *  whole point of the polymorphic table: one shape, two doors. */
+function blockersPath(subject: BlockerSubject): string {
+  return subject.type === 'task'
+    ? `/api/admin/tasks/${subject.id}/blockers`
+    : `/api/admin/requests/${subject.id}/blockers`
+}
+
+/** "subject is blocked by blocker". Returns the link id, which is what a
+ *  removal needs and what a `finally` has to hold on to. */
+export async function addBlocker(
+  request: APIRequestContext,
+  subject: BlockerSubject,
+  blocker: BlockerSubject,
+): Promise<string> {
+  const res = await request.post(blockersPath(subject), {
+    data: { blockerType: blocker.type, blockerId: blocker.id },
+  })
+  expect(res.status(), 'the blocker fixture could not be created').toBe(201)
+  const { id } = await res.json() as { id: string }
+  return id
+}
+
+/** Soft for the reason deleteTask is. Deleting a task fixture sweeps its links
+ *  away with it, so this only carries weight when the near end is a seeded
+ *  request that has to survive the run unchanged. */
+export async function removeBlocker(
+  request: APIRequestContext,
+  subject: BlockerSubject,
+  linkId: string,
+): Promise<void> {
+  const res = await request.delete(`${blockersPath(subject)}/${linkId}`)
+  expect.soft(res.ok(), `the blocker link ${linkId} was not cleaned up`).toBeTruthy()
+}
+
+export async function listBlockers(
+  request: APIRequestContext,
+  subject: BlockerSubject,
+): Promise<{ blockedBy: BlockerRow[]; blocks: BlockerRow[] }> {
+  const res = await request.get(blockersPath(subject))
+  expect(res.ok(), 'the blocker list could not be read').toBeTruthy()
+  return await res.json() as { blockedBy: BlockerRow[]; blocks: BlockerRow[] }
+}
+
+/** The fields a blocker case reads off a request. */
+export interface RequestSummary {
+  id: string
+  orgId: string
+  title: string
+  status: string
+  requestNumber: number | null
+  blockedByCount?: number
+}
+
+export async function listRequests(request: APIRequestContext): Promise<RequestSummary[]> {
+  const res = await request.get('/api/admin/requests')
+  expect(res.ok(), 'the request list could not be read').toBeTruthy()
+  const { requests } = await res.json() as { requests: RequestSummary[] }
+  return requests
+}
+
+/** lib/blockers.ts `requestRef`, restated rather than imported: a spec should
+ *  assert the string a human reads, not re-run the function that produced it. */
+export function requestRef(requestNumber: number | null): string | null {
+  return requestNumber != null ? `#${String(requestNumber).padStart(3, '0')}` : null
+}
+
+/**
+ * A request a blocker case can name on screen.
+ *
+ * Four requirements, and each one is a case that failed without it: open (so
+ * it counts as a blocker and so the picker offers it at all), numbered (so the
+ * row shows a `#042` ref rather than nothing), on the delivery pipeline (so
+ * the spine and therefore its amber chip render instead of the off-pipeline
+ * note), and uniquely titled (the seeded dataset holds three requests called
+ * "retret", and an assertion on that title proves nothing).
+ *
+ * Null when the dataset offers none, which is a skip rather than a failure.
+ *
+ * `skip` is how two spec FILES avoid each other. The suite runs fully in
+ * parallel, so a case that blocks the first candidate and asserts "Blocked by
+ * 1" reads 2 the moment another file blocks the same row: that is exactly how
+ * this helper's first version failed. Each file that writes a blocker onto a
+ * seeded request takes a different index and the counts stay its own.
+ */
+export function pickPipelineRequest(
+  rows: readonly RequestSummary[],
+  skip = 0,
+): RequestSummary | null {
+  const pipeline = ['submitted', 'in_review', 'in_progress', 'client_review']
+  const titles = rows.map(r => r.title)
+  const candidates = rows.filter(r =>
+    r.requestNumber != null &&
+    pipeline.includes(r.status) &&
+    titles.filter(t => t === r.title).length === 1)
+  return candidates[skip] ?? null
 }

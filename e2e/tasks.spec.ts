@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import {
   primePage,
   shipStudioStorageState,
@@ -7,6 +7,17 @@ import {
   railIsOnScreen,
   filterChip,
   html5DragTo,
+  createTask,
+  deleteTask,
+  getTask,
+  addBlocker,
+  listBlockers,
+  listRequests,
+  pickPipelineRequest,
+  requestRef,
+  railCardHead,
+  railCardBody,
+  expectCardCount,
 } from './helpers'
 
 /**
@@ -33,12 +44,21 @@ import {
  *   real client session, which is the portal specs' scaffolding.
  * - **Dark mode.** Nothing in the repo drives the theme class from a spec;
  *   it stays a live check on the Definition of Done list.
+ * - **A real AI turn.** The wizard cases stop at the last thing that happens
+ *   before the model is reached. A conversation costs money on every run of
+ *   every branch, and what it would prove (that Claude answers) is not this
+ *   suite's to assert. The honest 503 is out of reach for the same reason:
+ *   the route only sends it when the key is missing AND NODE_ENV is
+ *   production, and a dev server with no key answers 200 with a keyword draft
+ *   flagged `degraded`, deliberately. Telling those apart costs a turn.
  *
  * There is no super-admin gate on this surface, so unlike the Requests specs
  * there is no test.skip scaffolding here. Do not add any. The only skips are
  * width-gated: the rail is on screen above lg (railIsOnScreen), the Filters
  * sheet stands in for it below, and dragging and row checkboxes are pointer
- * and table affordances that a phone does not offer.
+ * and table affordances that a phone does not offer. The blocker cases, the
+ * strip's keyboard path and both AI cases run at every width, because a
+ * picker, a roving tabindex and a paperclip are all things a phone has.
  */
 
 test.use({ storageState: shipStudioStorageState })
@@ -51,54 +71,9 @@ interface TaskSummary {
   title: string
 }
 
-/** The fields this spec reads back off the server. */
-interface TaskRecord {
-  id: string
-  type: string
-  orgId: string | null
-  title: string
-  status: string
-  priority: string
-  dueDate: string | null
-  assigneeId: string | null
-}
-
-interface NewTask {
-  title: string
-  type?: string
-  orgId?: string | null
-  status?: string
-  priority?: string
-  dueDate?: string | null
-  assigneeId?: string | null
-  assigneeType?: string | null
-}
-
-/** Create a task. Tahi-internal and undated unless the case says otherwise,
- *  so the write needs no client. */
-async function createTask(request: APIRequestContext, task: NewTask): Promise<string> {
-  const res = await request.post('/api/admin/tasks', {
-    data: { type: 'tahi_internal', priority: 'standard', status: 'todo', ...task },
-  })
-  expect(res.status(), 'the task fixture could not be created').toBe(201)
-  const { id } = await res.json() as { id: string }
-  return id
-}
-
-/** Soft, because every call site is inside a `finally` and the failure that
- *  sent it there is the one worth reporting. It is still said out loud: a
- *  leaked fixture is exactly what pushes the lens past its first page. */
-async function deleteTask(request: APIRequestContext, id: string): Promise<void> {
-  const res = await request.delete(`/api/admin/tasks/${id}`)
-  expect.soft(res.ok(), `the task fixture ${id} was not cleaned up`).toBeTruthy()
-}
-
-async function getTask(request: APIRequestContext, id: string): Promise<TaskRecord> {
-  const res = await request.get(`/api/admin/tasks/${id}`)
-  expect(res.ok(), `the task ${id} could not be read back`).toBeTruthy()
-  const { task } = await res.json() as { task: TaskRecord }
-  return task
-}
+// createTask, deleteTask and getTask live in e2e/helpers.ts: the blocker cases
+// in the two Requests specs build the same fixtures, and one definition cannot
+// drift from itself.
 
 /** The id of a task created through the UI, so the spec can clean up after
  *  itself and assert on what was actually written. Polls, because the row
@@ -211,6 +186,122 @@ async function listSettled(page: Page): Promise<void> {
     .first()
     .waitFor({ state: 'attached', timeout: 45_000 })
     .catch(() => {})
+}
+
+/** The team member the Ship Studio bypass resolves to. The planner draws that
+ *  person's own plate, so every My week fixture has to be assigned to them. */
+async function bypassMemberId(request: APIRequestContext): Promise<string | null> {
+  const res = await request.get('/api/admin/profile')
+  expect(res.ok(), 'the profile could not be read').toBeTruthy()
+  const { member } = await res.json() as { member: { id: string } | null }
+  return member?.id ?? null
+}
+
+/**
+ * Add a blocker through the picker.
+ *
+ * Typing is the only way to fill it: the options are server-searched
+ * (Decision 17) and empty until a query has been answered, which is exactly
+ * what lets it reach a task outside the current lens. The fetch behind it is
+ * debounced, so the wait is on the row appearing rather than on a timer, and
+ * the menu is portalled, so it is looked for on the page rather than inside
+ * the card.
+ */
+async function pickBlocker(page: Page, scope: Locator, query: string, name: string): Promise<void> {
+  await scope.getByRole('button', { name: 'Add a blocker' }).click()
+  await page.getByRole('textbox', { name: 'Search tasks and requests' }).fill(query)
+  await page
+    .getByRole('menu', { name: 'Add a blocker' })
+    .getByRole('menuitem')
+    .filter({ hasText: name })
+    .first()
+    .click({ timeout: 20_000 })
+}
+
+/** The request status labels these cases can meet, restated rather than
+ *  imported: a spec that read REQUEST_STATUS_LABELS would agree with the page
+ *  even on the day both were wrong. */
+const REQUEST_STATUS_LABEL: Record<string, string> = {
+  submitted: 'Submitted',
+  in_review: 'In Review',
+  in_progress: 'In Progress',
+  client_review: 'Client Review',
+}
+
+// ── The week strip ───────────────────────────────────────────────────────────
+//
+// lib/tasks-planner.ts builds every cell from the wall clock, so the spec has
+// to build the same day from the same clock rather than asserting a date it
+// hardcoded. These four mirror `weekStart`, `buildWeekStrip` and
+// `stripRangeLabel`; the module's own Vitest file freezes their arithmetic,
+// and this restates the answer a human reads off the screen.
+
+const DAY_NAMES = [
+  'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
+] as const
+const MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+] as const
+
+/** Monday of the week containing today, shifted by whole weeks. Sunday belongs
+ *  to the week that started six days earlier, which is how the studio's week
+ *  ends and how buildWeekStrip counts. */
+function weekStart(weekOffset: number): Date {
+  const now = new Date()
+  const back = now.getDay() === 0 ? 6 : now.getDay() - 1
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - back + weekOffset * 7)
+}
+
+interface StripCell {
+  /** The YYYY-MM-DD the drop writes. */
+  key: string
+  /** The one word the toast says: "Planned for Thursday". */
+  name: string
+  /** The aria-label's first half: "Thursday 11 Sep". */
+  label: string
+  dayOfMonth: number
+  month: string
+}
+
+function stripDay(index: number, weekOffset = 0): StripCell {
+  const start = weekStart(weekOffset)
+  const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + index)
+  const month = MONTHS[d.getMonth()]
+  return {
+    key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+    name: DAY_NAMES[d.getDay()],
+    label: `${DAY_NAMES[d.getDay()]} ${d.getDate()} ${month}`,
+    dayOfMonth: d.getDate(),
+    month,
+  }
+}
+
+/** '31 Aug to 6 Sep', the label between the two chevrons. */
+function stripRange(weekOffset = 0): string {
+  const first = stripDay(0, weekOffset)
+  const last = stripDay(6, weekOffset)
+  return first.month === last.month
+    ? `${first.dayOfMonth} to ${last.dayOfMonth} ${last.month}`
+    : `${first.dayOfMonth} ${first.month} to ${last.dayOfMonth} ${last.month}`
+}
+
+/** Monday is 0 and Sunday is 6, so today's cell is at this index. */
+function todayStripIndex(): number {
+  const dow = new Date().getDay()
+  return dow === 0 ? 6 : dow - 1
+}
+
+function stripCells(page: Page): Locator {
+  return viewPanel(page).getByRole('group', { name: 'Week', exact: true }).getByRole('button')
+}
+
+/** Switch to My week and wait for the strip, not for the plate: the plate is
+ *  drawn from the same rows and lands first. */
+async function openWeek(page: Page): Promise<void> {
+  await viewTabs(page).getByRole('tab', { name: 'My week', exact: true }).click()
+  await expect(
+    viewPanel(page).getByRole('group', { name: 'Week', exact: true }),
+  ).toBeVisible({ timeout: 30_000 })
 }
 
 test.describe('Tasks', () => {
@@ -687,5 +778,408 @@ test.describe('Tasks', () => {
       viewPanel(page).getByText(/Overdue|A clear week/).first(),
     ).toBeVisible({ timeout: 20_000 })
     await expectNoHorizontalScroll(page)
+  })
+
+  // ── Blockers ───────────────────────────────────────────────────────────────
+
+  test('the waiting on card carries a request, the picker adds a task, and removing one drops the count', async ({ page, request }) => {
+    const target = pickPipelineRequest(await listRequests(request))
+    test.skip(!target, 'No open, numbered, uniquely titled request in this dataset to wait on.')
+    if (!target) return
+
+    const stamp = Date.now()
+    const subjectId = await createTask(request, { title: `Playwright waiting ${stamp}` })
+    const secondTitle = `Playwright holdup ${stamp}`
+    const secondId = await createTask(request, { title: secondTitle })
+    try {
+      await addBlocker(request, { type: 'task', id: subjectId }, { type: 'request', id: target.id })
+
+      await gotoPath(page, `/tasks?task=${subjectId}`)
+      const panel = page.getByRole('dialog')
+      await expect(panel).toBeVisible({ timeout: 30_000 })
+
+      const head = railCardHead(panel, 'Waiting on')
+      await expect(head).toBeVisible({ timeout: 30_000 })
+      await expectCardCount(head, 'Waiting on', 1)
+
+      // The four things a row has to say about a request blocker, and the
+      // first is the one the port got wrong twice: a request wears the
+      // request status vocabulary, not a grey pill printing `client_review`.
+      const body = railCardBody(panel, 'Waiting on')
+      await expect(body).toContainText(REQUEST_STATUS_LABEL[target.status])
+      await expect(body).toContainText(requestRef(target.requestNumber) ?? '#')
+      await expect(body).toContainText(target.title)
+      await expect(body.getByRole('button', { name: 'Open', exact: true })).toHaveCount(1)
+
+      // A second blocker, this time a task, through the picker. The fixture is
+      // undated and brand new, so on a real dataset it is nowhere near the
+      // first page of any lens: only a server search can find it.
+      await pickBlocker(page, panel, secondTitle, secondTitle)
+
+      await expectCardCount(head, 'Waiting on', 2)
+      await expect(body).toContainText(secondTitle)
+      await expect.poll(
+        async () => (await listBlockers(request, { type: 'task', id: subjectId })).blockedBy.length,
+        { message: 'the picker did not write the second blocker', timeout: 20_000 },
+      ).toBe(2)
+
+      // And it comes off again. The count is what the row chip and the board
+      // card read, so it has to follow the removal rather than stick.
+      await body.getByRole('button', { name: `Stop waiting on ${secondTitle}` }).click()
+      await expectCardCount(head, 'Waiting on', 1)
+      await expect(body).not.toContainText(secondTitle)
+      await expect.poll(
+        async () => (await listBlockers(request, { type: 'task', id: subjectId })).blockedBy.length,
+        { message: 'the removal did not reach the server', timeout: 20_000 },
+      ).toBe(1)
+    } finally {
+      await deleteTask(request, secondId)
+      await deleteTask(request, subjectId)
+    }
+  })
+
+  test('a blocker loop is refused in a sentence', async ({ page, request }) => {
+    const stamp = Date.now()
+    const upstreamTitle = `Playwright upstream ${stamp}`
+    const downstreamTitle = `Playwright downstream ${stamp}`
+    const upstreamId = await createTask(request, { title: upstreamTitle })
+    const downstreamId = await createTask(request, { title: downstreamTitle })
+    try {
+      // Downstream waits on upstream. Asking upstream to wait on downstream
+      // closes the loop, and the picker offers it: the search excludes the
+      // subject itself and nothing else, so the refusal has to be the route's.
+      await addBlocker(request, { type: 'task', id: downstreamId }, { type: 'task', id: upstreamId })
+
+      await gotoPath(page, `/tasks?task=${upstreamId}`)
+      const panel = page.getByRole('dialog')
+      await expect(panel).toBeVisible({ timeout: 30_000 })
+      await expect(railCardHead(panel, 'Waiting on')).toBeVisible({ timeout: 30_000 })
+
+      await pickBlocker(page, panel, downstreamTitle, downstreamTitle)
+
+      // The exact sentence, not a substring of a stack trace and not a
+      // generic "could not add that blocker".
+      await expect(page.getByRole('status').filter({ hasText: 'That would make a loop' }))
+        .toBeVisible({ timeout: 20_000 })
+      expect(
+        (await listBlockers(request, { type: 'task', id: upstreamId })).blockedBy,
+        'the refused link was written anyway',
+      ).toHaveLength(0)
+    } finally {
+      await deleteTask(request, downstreamId)
+      await deleteTask(request, upstreamId)
+    }
+  })
+
+  // ── The week strip ─────────────────────────────────────────────────────────
+
+  test('the week strip marks today, and a drop two days out writes that date', async ({ page, request }) => {
+    const member = await bypassMemberId(request)
+    test.skip(!member, 'The bypass user has no team member row to plan for.')
+    if (!member) return
+
+    const start = todayStripIndex()
+    // Two days from today, wherever that lands. On a Saturday or a Sunday it
+    // is on next week's page, so the case turns the page rather than skipping
+    // itself for two days out of seven.
+    const overflows = start + 2 > 6
+    const targetIndex = (start + 2) % 7
+    const target = stripDay(targetIndex, overflows ? 1 : 0)
+
+    const title = `Playwright strip ${Date.now()}`
+    const id = await createTask(request, {
+      title,
+      assigneeId: member,
+      assigneeType: 'team_member',
+      estimatedHours: 2,
+    })
+    try {
+      await gotoTasks(page)
+      await listSettled(page)
+      test.skip(await isNarrow(page), 'Dragging is a pointer affordance; a phone plans from the panel.')
+      await openWeek(page)
+
+      const cells = stripCells(page)
+      await expect(cells).toHaveCount(7)
+      // Today is named, counted and filled. The class is the fill: it is what
+      // the "today is marked" reading actually resolves to.
+      const today = cells.nth(start)
+      await expect(today).toHaveAttribute('aria-label', new RegExp(`^${stripDay(start).label}, \\d+ tasks?$`))
+      await expect(today).toHaveClass(/is-today/)
+
+      if (overflows) {
+        await viewPanel(page).getByRole('button', { name: 'Next week', exact: true }).click()
+        await expect(viewPanel(page).getByText(stripRange(1), { exact: true }))
+          .toBeVisible({ timeout: 20_000 })
+      }
+
+      const row = viewPanel(page).getByRole('button', { name: `Open ${title}` })
+      await expect(row).toBeVisible({ timeout: 20_000 })
+      await html5DragTo(page, row, stripCells(page).nth(targetIndex))
+
+      // The toast names the day it wrote, capital and all.
+      await expect(page.getByRole('status').filter({ hasText: `Planned for ${target.name}` }))
+        .toBeVisible({ timeout: 20_000 })
+      await expect.poll(
+        async () => (await getTask(request, id)).dueDate,
+        { message: 'the strip drop did not write the due date', timeout: 20_000 },
+      ).toBe(target.key)
+    } finally {
+      await deleteTask(request, id)
+    }
+  })
+
+  test('paging the strip forward drops onto a named day next week, and paging back returns', async ({ page, request }) => {
+    const member = await bypassMemberId(request)
+    test.skip(!member, 'The bypass user has no team member row to plan for.')
+    if (!member) return
+
+    // Not "next week" in the title: an accessible name is matched as a
+    // substring, and a row called that collides with the paging button.
+    const title = `Playwright paged ${Date.now()}`
+    const id = await createTask(request, { title, assigneeId: member, assigneeType: 'team_member' })
+    try {
+      await gotoTasks(page)
+      await listSettled(page)
+      test.skip(await isNarrow(page), 'Dragging is a pointer affordance; a phone plans from the panel.')
+      await openWeek(page)
+
+      const strip = viewPanel(page)
+      await expect(strip.getByText(stripRange(0), { exact: true })).toBeVisible()
+
+      await strip.getByRole('button', { name: 'Next week', exact: true }).click()
+      await expect(strip.getByText(stripRange(1), { exact: true })).toBeVisible({ timeout: 20_000 })
+
+      // Wednesday next week, and the date written has to be that Wednesday.
+      // The flat Later bucket could only ever write "the day after this week
+      // ends", which is the whole reason the strip pages.
+      const target = stripDay(2, 1)
+      const row = viewPanel(page).getByRole('button', { name: `Open ${title}` })
+      await expect(row).toBeVisible({ timeout: 20_000 })
+      await html5DragTo(page, row, stripCells(page).nth(2))
+
+      await expect.poll(
+        async () => (await getTask(request, id)).dueDate,
+        { message: 'the paged drop did not write next week', timeout: 20_000 },
+      ).toBe(target.key)
+
+      await strip.getByRole('button', { name: 'Previous week', exact: true }).click()
+      await expect(strip.getByText(stripRange(0), { exact: true })).toBeVisible({ timeout: 20_000 })
+    } finally {
+      await deleteTask(request, id)
+    }
+  })
+
+  test('the strip takes one tab stop and moves under the arrows, the page keys and Enter', async ({ page, request }) => {
+    const member = await bypassMemberId(request)
+    test.skip(!member, 'The bypass user has no team member row to plan for.')
+    if (!member) return
+
+    const title = `Playwright keys ${Date.now()}`
+    const id = await createTask(request, { title, assigneeId: member, assigneeType: 'team_member' })
+    try {
+      await gotoTasks(page)
+      await listSettled(page)
+      await openWeek(page)
+
+      const cells = stripCells(page)
+      const start = todayStripIndex()
+
+      // One tab stop for seven buttons: that is what the roving tabindex buys,
+      // and today is where it starts.
+      const tabbable = viewPanel(page)
+        .getByRole('group', { name: 'Week', exact: true })
+        .locator('button[tabindex="0"]')
+      await expect(tabbable).toHaveCount(1)
+      await expect(tabbable).toHaveAttribute('aria-label', new RegExp(`^${stripDay(start).label},`))
+
+      // An explicit focus() rather than a Tab count: the roving handler lives
+      // on the cell, and WebKit does not focus a button on click, so a click
+      // would leave the arrows going to <body>. Home first, so the arrow step
+      // is the same on a Monday and on a Sunday.
+      await cells.nth(start).focus()
+      await expect(cells.nth(start)).toBeFocused()
+      await page.keyboard.press('Home')
+      await expect(cells.nth(0)).toBeFocused()
+      await page.keyboard.press('ArrowRight')
+      await expect(cells.nth(1)).toBeFocused()
+      await page.keyboard.press('End')
+      await expect(cells.nth(6)).toBeFocused()
+
+      // Paging keeps the weekday and moves the range, both ways.
+      await page.keyboard.press('PageDown')
+      await expect(viewPanel(page).getByText(stripRange(1), { exact: true })).toBeVisible({ timeout: 20_000 })
+      await expect(stripCells(page).nth(6)).toBeFocused()
+      await page.keyboard.press('PageUp')
+      await expect(viewPanel(page).getByText(stripRange(0), { exact: true })).toBeVisible({ timeout: 20_000 })
+
+      // Enter hands focus to the day card the cell points at. Sunday is never
+      // a day that has gone, whatever today is, so it always takes the key.
+      const sundayCard = start === 6 ? 'Today' : start === 5 ? 'Tomorrow' : 'Sunday'
+      await stripCells(page).nth(6).focus()
+      await page.keyboard.press('Enter')
+      await expect(
+        viewPanel(page).getByRole('region', { name: sundayCard, exact: true }),
+      ).toBeFocused()
+
+      // And the planner finally has a keyboard path to a due date at all:
+      // Alt plus an arrow on a focused row, the drag's equivalent.
+      const row = viewPanel(page).getByRole('button', { name: `Open ${title}` })
+      await row.focus()
+      await page.keyboard.press('Alt+ArrowRight')
+      await expect.poll(
+        async () => (await getTask(request, id)).dueDate,
+        { message: 'Alt+ArrowRight did not move the due date', timeout: 20_000 },
+      ).toBe(dayKey(1))
+    } finally {
+      await deleteTask(request, id)
+    }
+  })
+
+  test('the rail filters narrow the list and leave my week alone', async ({ page, request }) => {
+    const member = await bypassMemberId(request)
+    test.skip(!member, 'The bypass user has no team member row to plan for.')
+    if (!member) return
+
+    const title = `Playwright unfiltered ${Date.now()}`
+    const id = await createTask(request, { title, assigneeId: member, assigneeType: 'team_member' })
+    try {
+      await gotoTasks(page)
+      await listSettled(page)
+      test.skip(!(await railIsOnScreen(page)), 'The rail is inside the Filters sheet at this width.')
+
+      const before = await countValue(page)
+      expect(before, 'the toolbar printed no count').toBeGreaterThan(0)
+
+      await railAside(page).getByRole('button', { name: /^Status:/ }).click()
+      await page.getByRole('listbox', { name: 'Status' })
+        .getByRole('option', { name: 'Blocked', exact: true })
+        .click()
+      await expect.poll(() => countValue(page), {
+        message: 'the count ignored the status filter',
+        timeout: 15_000,
+      }).toBeLessThan(before)
+      // The fixture is a todo, so the list has genuinely dropped it.
+      await expect(rowTitles(page).filter({ hasText: title })).toHaveCount(0)
+      await expect(filterChip(page, 'status')).toBeVisible()
+
+      // My week is the viewer's own plate and nothing narrows it, which is the
+      // promise the view is built on. The strip is whole and the row the list
+      // just dropped is on the plate.
+      await openWeek(page)
+      await expect(stripCells(page)).toHaveCount(7)
+      await expect(viewPanel(page).getByRole('button', { name: `Open ${title}` }))
+        .toBeVisible({ timeout: 20_000 })
+
+      // The chip strip is suppressed here rather than left printing a filter
+      // that changes nothing, and the rail says so in words instead of sitting
+      // inert. Both halves, because a missing chip alone could just as easily
+      // mean the filter had been silently cleared.
+      await expect(filterChip(page, 'status')).toHaveCount(0)
+      await expect(railAside(page).getByText(/My week always shows your own open plate/))
+        .toBeVisible()
+
+      // And it was not cleared: the list comes back narrowed, chip and all.
+      await viewTabs(page).getByRole('tab', { name: 'List', exact: true }).click()
+      await expect(filterChip(page, 'status')).toBeVisible({ timeout: 20_000 })
+      await expect(rowTitles(page).filter({ hasText: title })).toHaveCount(0)
+    } finally {
+      await deleteTask(request, id)
+    }
+  })
+
+  // ── AI task creation ───────────────────────────────────────────────────────
+  //
+  // No case here sends a prompt. A real turn costs money on every run, and
+  // everything worth asserting at this level happens before the model is
+  // reached: the hand-over, the two refusals, and the hand-back.
+  //
+  // The honest 503 is deliberately not asserted. The route only returns it
+  // when ANTHROPIC_API_KEY is missing AND NODE_ENV is production
+  // (task-wizard/route.ts); a dev server with no key answers 200 with a
+  // keyword draft flagged `degraded`, on purpose, so the wizard stays workable
+  // locally. There is no way to tell the two apart from a spec without paying
+  // for a turn, so that check stays a live one on a preview deploy.
+
+  test('the create dialog hands over to the AI panel and back', async ({ page }) => {
+    await gotoTasks(page)
+    await listSettled(page)
+
+    await page.getByRole('button', { name: /^New( task)?$/ }).first().click()
+    const dialog = page.getByRole('dialog', { name: 'New task' })
+    await expect(dialog).toBeVisible({ timeout: 20_000 })
+
+    await dialog.getByRole('button', { name: /Draft with AI/ }).click()
+
+    // The panel is a lazy chunk, so the first mount compiles and downloads.
+    const aiDialog = page.getByRole('dialog', { name: 'Draft tasks with AI' })
+    await expect(aiDialog).toBeVisible({ timeout: 30_000 })
+    await expect(aiDialog.getByRole('progressbar', { name: 'Interview progress' })).toBeVisible()
+    await expect(aiDialog.getByRole('textbox', { name: 'Your answer' })).toBeVisible()
+    await expect(aiDialog.getByRole('button', { name: 'Attach a brief' })).toBeVisible()
+
+    // The escape hatch, and the form it lands back on.
+    await aiDialog.getByRole('button', { name: 'I will write it myself' }).click()
+    await expect(page.getByRole('dialog', { name: 'New task' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Draft with AI/ })).toBeVisible()
+  })
+
+  test('the paperclip refuses what it cannot read, before any round trip', async ({ page, request }) => {
+    // Aborted rather than merely counted: if a regression ever did post a
+    // document from here, this route stops it from being paid for.
+    let wizardPosts = 0
+    await page.route('**/api/admin/ai/task-wizard', route => {
+      if (route.request().method() === 'POST') wizardPosts += 1
+      return route.abort()
+    })
+
+    await gotoTasks(page)
+    await listSettled(page)
+    await page.getByRole('button', { name: /^New( task)?$/ }).first().click()
+    await page.getByRole('dialog', { name: 'New task' })
+      .getByRole('button', { name: /Draft with AI/ }).click()
+
+    const aiDialog = page.getByRole('dialog', { name: 'Draft tasks with AI' })
+    await expect(aiDialog).toBeVisible({ timeout: 30_000 })
+    const fileInput = aiDialog.locator('input[type="file"]')
+
+    // Over the ceiling: refused on size, in the browser, with the number in
+    // the sentence. Six megabytes never leaves the tab.
+    await fileInput.setInputFiles({
+      name: 'oversized-brief.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.alloc(6 * 1024 * 1024, 'a'),
+    })
+    await expect(aiDialog.getByRole('alert')).toContainText('larger than 5 MB', { timeout: 15_000 })
+
+    // Unreadable rather than oversized, and the sentence has to name the way
+    // out. There is no zip reader in a Worker, so PDF is the answer.
+    await fileInput.setInputFiles({
+      name: 'brief.docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      buffer: Buffer.from('PK'),
+    })
+    await expect(aiDialog.getByRole('alert')).toContainText('PDF', { timeout: 15_000 })
+    await expect(aiDialog.getByRole('alert')).toContainText('Word files cannot be read here yet')
+
+    expect(wizardPosts, 'a refused document was sent to the model anyway').toBe(0)
+
+    // The same judgement at the far end, and it is made before the key is
+    // consulted, so this costs nothing either. Both ends refusing in the same
+    // words is the point: a browser that stopped saying it would not silently
+    // start billing for Word files.
+    const res = await request.post('/api/admin/ai/task-wizard', {
+      data: {
+        messages: [{ role: 'user', content: 'Break this brief into tasks.' }],
+        document: {
+          filename: 'brief.docx',
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          dataBase64: 'UEs=',
+        },
+      },
+    })
+    expect(res.status(), 'the route accepted a Word file').toBe(415)
+    const body = await res.json() as { error?: string }
+    expect(body.error ?? '').toContain('PDF')
   })
 })

@@ -1,5 +1,13 @@
 import { test, expect, type Page } from '@playwright/test'
-import { primePage } from './helpers'
+import {
+  primePage,
+  createTask,
+  deleteTask,
+  addBlocker,
+  removeBlocker,
+  listRequests,
+  pickPipelineRequest,
+} from './helpers'
 
 /**
  * Requests LIST surface (the alignment pass, audit findings A1 to A13).
@@ -283,5 +291,101 @@ test.describe('Requests list', () => {
     await expect(clear).toBeVisible()
     await clear.click()
     await expect(noMatch).toHaveCount(0, { timeout: 10_000 })
+  })
+
+  // ── Blockers ───────────────────────────────────────────────────────────────
+
+  test.describe('blockers', () => {
+    // Serial, because both cases write a blocker onto the same seeded request
+    // and the suite otherwise runs them in two browsers at once: the glyph
+    // then reads "Blocked by 2 items" and the narrowing case sees a row the
+    // other one is about to unblock. Index 1 keeps them off the request
+    // e2e/requests-detail.spec.ts blocks in its own worker at the same time.
+    test.describe.configure({ mode: 'serial' })
+
+    test('a blocked request wears the pause glyph', async ({ page, request }) => {
+      const target = pickPipelineRequest(await listRequests(request), 1)
+      test.skip(!target, 'This dataset has fewer than two blockable requests.')
+      if (!target) return
+
+      // One more than the row already carries. A crashed run leaves an orphan
+      // link behind, and a flat "1" then blames the feature for the harness.
+      const n = (target.blockedByCount ?? 0) + 1
+      const expected = `Blocked by ${n} item${n === 1 ? '' : 's'}`
+
+      const taskId = await createTask(request, { title: `Playwright list blocker ${Date.now()}` })
+      let linkId: string | null = null
+      try {
+        linkId = await addBlocker(request, { type: 'request', id: target.id }, { type: 'task', id: taskId })
+
+        await gotoRequests(page)
+        await listSettled(page)
+
+        const link = page.locator(`a[href="/requests/${target.id}"]`).filter({ visible: true })
+        await expect(link).toHaveCount(1, { timeout: 20_000 })
+
+        // A distinct glyph in a distinct ink, on the row it belongs to. Scope
+        // creep already spends the AlertTriangle in danger red, so a blocker
+        // cannot use it: one icon for "this has grown" and "this cannot move"
+        // would be a lie.
+        //
+        // Read off the row rather than off the page, because another spec is
+        // blocking another request in a parallel worker while this runs. The
+        // row is the outermost ancestor that still holds exactly one request
+        // link, which is a <tr> in the table and a plain <div> in the card
+        // list, so there is no single element to name.
+        const found = await link.first().evaluate(el => {
+          let row: Element = el
+          for (let node = el.parentElement; node; node = node.parentElement) {
+            if (node.querySelectorAll('a[href^="/requests/"]').length !== 1) break
+            row = node
+          }
+          return row.querySelector('[aria-label^="Blocked by "]')?.getAttribute('aria-label') ?? null
+        })
+        expect(found, 'the blocked row carries no pause glyph').toBe(expected)
+      } finally {
+        if (linkId) await removeBlocker(request, { type: 'request', id: target.id }, linkId)
+        await deleteTask(request, taskId)
+      }
+    })
+
+    test('the Blocked saved view narrows, and its count is the list it produces', async ({ page, request }) => {
+      const target = pickPipelineRequest(await listRequests(request), 1)
+      test.skip(!target, 'This dataset has fewer than two blockable requests.')
+      if (!target) return
+
+      const taskId = await createTask(request, { title: `Playwright view blocker ${Date.now()}` })
+      let linkId: string | null = null
+      try {
+        linkId = await addBlocker(request, { type: 'request', id: target.id }, { type: 'task', id: taskId })
+
+        await gotoRequests(page)
+        await listSettled(page)
+        test.skip(!(await railIsOn(page)), 'Rail UI is super-admin gated; the bypass user is not one.')
+        const rail = page.getByRole('complementary', { name: /Saved views/i })
+        test.skip((await rail.count()) === 0, 'The rail is inside the Filters sheet at this width.')
+
+        const rows = page.locator('a[href^="/requests/"]').filter({ visible: true })
+        const before = await rows.count()
+        expect(before, 'the list rendered no rows').toBeGreaterThan(0)
+
+        const blocked = rail.getByRole('button', { name: /^Blocked/ })
+        await blocked.click()
+        await expect(blocked).toHaveAttribute('aria-pressed', 'true')
+
+        // The blocked row survives, the lens is genuinely smaller, and the
+        // number the rail prints is the number of rows it produced. That last
+        // one is what a derived saved view gets wrong without anyone noticing.
+        await expect(page.locator(`a[href="/requests/${target.id}"]`).filter({ visible: true }))
+          .toHaveCount(1, { timeout: 20_000 })
+        const counted = Number(((await blocked.textContent()) ?? '').replace(/\D/g, ''))
+        expect(counted, 'the rail printed no Blocked count').toBeGreaterThan(0)
+        expect(counted, 'every request in this dataset is blocked').toBeLessThan(before)
+        await expect(rows).toHaveCount(counted)
+      } finally {
+        if (linkId) await removeBlocker(request, { type: 'request', id: target.id }, linkId)
+        await deleteTask(request, taskId)
+      }
+    })
   })
 })
