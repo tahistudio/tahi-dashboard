@@ -213,9 +213,12 @@ export function InlineMenuField({
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
 
-  // Closing clears the box. A server-backed caller hears about it through
-  // onQueryChange on the next open, which is when it matters.
-  useEffect(() => { if (!open) setQuery('') }, [open])
+  // Closing clears the box, and it goes through the same helper a keystroke
+  // does so the caller's copy is cleared with it. Setting the local state
+  // alone left a server-backed caller holding the last search: reopening
+  // showed the previous results under an empty box, with an empty-state line
+  // written for a query nobody had typed.
+  useEffect(() => { if (!open) setQuery(menuQueryChange('', onQueryChange)) }, [open, onQueryChange])
 
   if (readOnly) return <>{renderValue(value)}</>
 

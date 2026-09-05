@@ -13,6 +13,13 @@
  * you can see to something you cannot leaks the far end's title straight back
  * through the card.
  *
+ * Reads answer the same question one step further out. A full admin may
+ * legally create a link across two clients, so a scoped teammate can reach a
+ * row whose FAR end is outside their scope. `listBlockers` therefore resolves
+ * the caller's scope once and redacts those rows rather than hiding them: the
+ * link is still removable, but the title, the reference and the client name
+ * are gone.
+ *
  * Lives in lib/ rather than in a route file because Next.js App Router routes
  * may only export HTTP methods and config.
  */
@@ -24,6 +31,7 @@ import { guardTask } from '@/lib/task-access'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import {
+  ORPHAN_STATUS,
   isBlockerOpen,
   isFamilyPair,
   rejectObviousPair,
@@ -37,6 +45,42 @@ import {
 } from '@/lib/blockers'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+/**
+ * How many ids go into one IN clause.
+ *
+ * D1 caps bound parameters at 100 per statement, and every read in this module
+ * is driven by a page size rather than by anything bounded: the requests rail
+ * asks for 500 rows at a time, and the tasks list query carries no limit at
+ * all. lib/delivery-aggregate.ts and lib/request-participants.ts each hold a
+ * private copy of this same number; one shared constant would be better, and
+ * is left to a pass that owns all three files.
+ */
+const ID_CHUNK = 90
+
+function chunkIds(ids: readonly string[]): string[][] {
+  const out: string[][] = []
+  for (let i = 0; i < ids.length; i += ID_CHUNK) out.push(ids.slice(i, i + ID_CHUNK))
+  return out
+}
+
+/** The caller's org scope, or null for unrestricted. */
+type OrgScope = readonly string[] | null
+
+/**
+ * May the caller see the subject that owns this org?
+ *
+ * A null org on a task is the studio's own housekeeping, which every team
+ * member on this surface may reach: the same rule `guardTask` applies, so a
+ * blocker row cannot be stricter than the page it links to. A null org on a
+ * request cannot happen (every request has a client), and treating it as
+ * visible there would be wrong, so the type decides.
+ */
+function withinScope(scope: OrgScope, type: BlockerSubjectType, orgId: string | null): boolean {
+  if (scope === null) return true
+  if (!orgId) return type === 'task'
+  return scope.includes(orgId)
+}
 
 // ── Access ───────────────────────────────────────────────────────────────────
 
@@ -73,67 +117,102 @@ interface SubjectFacts {
   status: string
   ref: string | null
   orgName: string | null
+  orgId: string | null
 }
 
-/** Two queries at most, whatever the mix of types. Order is preserved. */
-async function hydrateSubjects(drizzle: Drizzle, refs: readonly SubjectRef[]): Promise<BlockerRow[]> {
-  const taskIds = refs.filter(r => r.type === 'task').map(r => r.id)
-  const requestIds = refs.filter(r => r.type === 'request').map(r => r.id)
+/** What a row says when the caller may not see the far end. Neutral on
+ *  purpose: it names no client and reveals no work. */
+const REDACTED_TITLE = 'Another client\'s work'
+
+/** Two queries at most per type, whatever the mix. Order is preserved. */
+async function hydrateSubjects(
+  drizzle: Drizzle,
+  refs: readonly SubjectRef[],
+  scope: OrgScope,
+): Promise<BlockerRow[]> {
+  const taskIds = [...new Set(refs.filter(r => r.type === 'task').map(r => r.id))]
+  const requestIds = [...new Set(refs.filter(r => r.type === 'request').map(r => r.id))]
   const facts = new Map<string, SubjectFacts>()
 
-  if (taskIds.length > 0) {
-    const rows = await drizzle
-      .select({
-        id: schema.tasks.id,
-        title: schema.tasks.title,
-        status: schema.tasks.status,
-        orgName: schema.organisations.name,
-      })
-      .from(schema.tasks)
-      .leftJoin(schema.organisations, eq(schema.tasks.orgId, schema.organisations.id))
-      .where(inArray(schema.tasks.id, taskIds))
-    for (const row of rows) {
-      facts.set(subjectKey('task', row.id), {
-        title: row.title,
-        status: row.status,
-        ref: null,
-        orgName: row.orgName ?? null,
-      })
+  const loadTasks = async () => {
+    for (const batch of chunkIds(taskIds)) {
+      const rows = await drizzle
+        .select({
+          id: schema.tasks.id,
+          title: schema.tasks.title,
+          status: schema.tasks.status,
+          orgId: schema.tasks.orgId,
+          orgName: schema.organisations.name,
+        })
+        .from(schema.tasks)
+        .leftJoin(schema.organisations, eq(schema.tasks.orgId, schema.organisations.id))
+        .where(inArray(schema.tasks.id, batch))
+      for (const row of rows) {
+        facts.set(subjectKey('task', row.id), {
+          title: row.title,
+          status: row.status,
+          ref: null,
+          orgName: row.orgName ?? null,
+          orgId: row.orgId ?? null,
+        })
+      }
     }
   }
 
-  if (requestIds.length > 0) {
-    const rows = await drizzle
-      .select({
-        id: schema.requests.id,
-        title: schema.requests.title,
-        status: schema.requests.status,
-        requestNumber: schema.requests.requestNumber,
-        orgName: schema.organisations.name,
-      })
-      .from(schema.requests)
-      .leftJoin(schema.organisations, eq(schema.requests.orgId, schema.organisations.id))
-      .where(inArray(schema.requests.id, requestIds))
-    for (const row of rows) {
-      facts.set(subjectKey('request', row.id), {
-        title: row.title,
-        status: row.status,
-        ref: requestRef(row.requestNumber),
-        orgName: row.orgName ?? null,
-      })
+  const loadRequests = async () => {
+    for (const batch of chunkIds(requestIds)) {
+      const rows = await drizzle
+        .select({
+          id: schema.requests.id,
+          title: schema.requests.title,
+          status: schema.requests.status,
+          requestNumber: schema.requests.requestNumber,
+          orgId: schema.requests.orgId,
+          orgName: schema.organisations.name,
+        })
+        .from(schema.requests)
+        .leftJoin(schema.organisations, eq(schema.requests.orgId, schema.organisations.id))
+        .where(inArray(schema.requests.id, batch))
+      for (const row of rows) {
+        facts.set(subjectKey('request', row.id), {
+          title: row.title,
+          status: row.status,
+          ref: requestRef(row.requestNumber),
+          orgName: row.orgName ?? null,
+          orgId: row.orgId ?? null,
+        })
+      }
     }
   }
+
+  // Both types at once. Half of what this module reads is the `blocks`
+  // direction nothing on screen renders, so the round trips are worth
+  // overlapping even when each one is small.
+  await Promise.all([loadTasks(), loadRequests()])
 
   // An orphan still renders and can still be unlinked. Hiding it would leave
-  // a count nobody can explain and a row nobody can remove.
+  // a count nobody can explain and a row nobody can remove. Its status is the
+  // orphan sentinel, which isBlockerOpen closes on, so it counts the same on
+  // both sides of the wire.
   return refs.map(ref => {
     const found = facts.get(subjectKey(ref.type, ref.id))
+    if (found && !withinScope(scope, ref.type, found.orgId)) {
+      return {
+        linkId: ref.linkId,
+        otherType: ref.type,
+        otherId: ref.id,
+        otherTitle: REDACTED_TITLE,
+        otherStatus: found.status,
+        otherRef: null,
+        otherOrgName: null,
+      }
+    }
     return {
       linkId: ref.linkId,
       otherType: ref.type,
       otherId: ref.id,
       otherTitle: found?.title ?? (ref.type === 'request' ? 'Deleted request' : 'Deleted task'),
-      otherStatus: found?.status ?? 'unknown',
+      otherStatus: found?.status ?? ORPHAN_STATUS,
       otherRef: found?.ref ?? null,
       otherOrgName: found?.orgName ?? null,
     }
@@ -147,40 +226,57 @@ export interface BlockerLists {
   blocks: BlockerRow[]
 }
 
-export async function listBlockers(drizzle: Drizzle, subject: BlockerSubject): Promise<BlockerLists> {
-  const blockedByLinks = await drizzle
-    .select({
-      id: schema.workBlockers.id,
-      type: schema.workBlockers.blockerType,
-      subjectId: schema.workBlockers.blockerId,
-    })
-    .from(schema.workBlockers)
-    .where(and(
-      eq(schema.workBlockers.blockedType, subject.type),
-      eq(schema.workBlockers.blockedId, subject.id),
-    ))
-
-  const blocksLinks = await drizzle
-    .select({
-      id: schema.workBlockers.id,
-      type: schema.workBlockers.blockedType,
-      subjectId: schema.workBlockers.blockedId,
-    })
-    .from(schema.workBlockers)
-    .where(and(
-      eq(schema.workBlockers.blockerType, subject.type),
-      eq(schema.workBlockers.blockerId, subject.id),
-    ))
+/**
+ * Both directions for one subject, with the far end scoped.
+ *
+ * `userId` is not decoration. The caller has already proved it may see the
+ * NEAR end (every route calls `guardSubject` first), but a full admin can
+ * legally link two clients together, so the far end is a second question with
+ * a different answer. Rows outside the caller's scope are kept, so the link
+ * stays removable, and redacted, so no client identity crosses.
+ */
+export async function listBlockers(
+  drizzle: Drizzle,
+  userId: string | null,
+  subject: BlockerSubject,
+): Promise<BlockerLists> {
+  const [blockedByLinks, blocksLinks, scope] = await Promise.all([
+    drizzle
+      .select({
+        id: schema.workBlockers.id,
+        type: schema.workBlockers.blockerType,
+        subjectId: schema.workBlockers.blockerId,
+      })
+      .from(schema.workBlockers)
+      .where(and(
+        eq(schema.workBlockers.blockedType, subject.type),
+        eq(schema.workBlockers.blockedId, subject.id),
+      )),
+    drizzle
+      .select({
+        id: schema.workBlockers.id,
+        type: schema.workBlockers.blockedType,
+        subjectId: schema.workBlockers.blockedId,
+      })
+      .from(schema.workBlockers)
+      .where(and(
+        eq(schema.workBlockers.blockerType, subject.type),
+        eq(schema.workBlockers.blockerId, subject.id),
+      )),
+    resolveAccessScoping(drizzle, userId),
+  ])
 
   const toRefs = (rows: Array<{ id: string; type: string; subjectId: string }>): SubjectRef[] =>
     rows
       .filter(r => r.type === 'task' || r.type === 'request')
       .map(r => ({ linkId: r.id, type: r.type as BlockerSubjectType, id: r.subjectId }))
 
-  return {
-    blockedBy: await hydrateSubjects(drizzle, toRefs(blockedByLinks)),
-    blocks: await hydrateSubjects(drizzle, toRefs(blocksLinks)),
-  }
+  const [blockedBy, blocks] = await Promise.all([
+    hydrateSubjects(drizzle, toRefs(blockedByLinks), scope),
+    hydrateSubjects(drizzle, toRefs(blocksLinks), scope),
+  ])
+
+  return { blockedBy, blocks }
 }
 
 /**
@@ -190,6 +286,11 @@ export async function listBlockers(drizzle: Drizzle, subject: BlockerSubject): P
  * because the closed-status vocabulary differs per type and putting either
  * list into SQL is how the old `dependsOnStatus !== 'done'` literal drifted
  * away from every other reader in the first place.
+ *
+ * Every IN clause here is chunked. The callers pass a whole page (the requests
+ * rail fetches 500 at a time, and the tasks query has no limit), so an
+ * unchunked list would put the page size straight into the bind-variable count
+ * and D1 would reject the statement at 100.
  */
 export async function openBlockerCounts(
   drizzle: Drizzle,
@@ -197,40 +298,53 @@ export async function openBlockerCounts(
   ids: readonly string[],
 ): Promise<Record<string, number>> {
   const counts: Record<string, number> = {}
-  if (ids.length === 0) return counts
+  const subjectIds = [...new Set(ids)]
+  if (subjectIds.length === 0) return counts
 
-  const links = await drizzle
-    .select({
-      blockedId: schema.workBlockers.blockedId,
-      blockerType: schema.workBlockers.blockerType,
-      blockerId: schema.workBlockers.blockerId,
-    })
-    .from(schema.workBlockers)
-    .where(and(
-      eq(schema.workBlockers.blockedType, type),
-      inArray(schema.workBlockers.blockedId, [...ids]),
-    ))
+  const links: Array<{ blockedId: string; blockerType: string; blockerId: string }> = []
+  for (const batch of chunkIds(subjectIds)) {
+    const rows = await drizzle
+      .select({
+        blockedId: schema.workBlockers.blockedId,
+        blockerType: schema.workBlockers.blockerType,
+        blockerId: schema.workBlockers.blockerId,
+      })
+      .from(schema.workBlockers)
+      .where(and(
+        eq(schema.workBlockers.blockedType, type),
+        inArray(schema.workBlockers.blockedId, batch),
+      ))
+    links.push(...rows)
+  }
 
   if (links.length === 0) return counts
 
   const statuses = new Map<string, string>()
-  const blockerTaskIds = links.filter(l => l.blockerType === 'task').map(l => l.blockerId)
-  const blockerRequestIds = links.filter(l => l.blockerType === 'request').map(l => l.blockerId)
+  // Bounded by the number of links rather than by the page, which is smaller
+  // but just as unbounded: one busy client with a hundred blockers would do
+  // it. Chunked for the same reason.
+  const blockerTaskIds = [...new Set(links.filter(l => l.blockerType === 'task').map(l => l.blockerId))]
+  const blockerRequestIds = [...new Set(links.filter(l => l.blockerType === 'request').map(l => l.blockerId))]
 
-  if (blockerTaskIds.length > 0) {
-    const rows = await drizzle
-      .select({ id: schema.tasks.id, status: schema.tasks.status })
-      .from(schema.tasks)
-      .where(inArray(schema.tasks.id, blockerTaskIds))
-    for (const row of rows) statuses.set(subjectKey('task', row.id), row.status)
+  const loadTaskStatuses = async () => {
+    for (const batch of chunkIds(blockerTaskIds)) {
+      const rows = await drizzle
+        .select({ id: schema.tasks.id, status: schema.tasks.status })
+        .from(schema.tasks)
+        .where(inArray(schema.tasks.id, batch))
+      for (const row of rows) statuses.set(subjectKey('task', row.id), row.status)
+    }
   }
-  if (blockerRequestIds.length > 0) {
-    const rows = await drizzle
-      .select({ id: schema.requests.id, status: schema.requests.status })
-      .from(schema.requests)
-      .where(inArray(schema.requests.id, blockerRequestIds))
-    for (const row of rows) statuses.set(subjectKey('request', row.id), row.status)
+  const loadRequestStatuses = async () => {
+    for (const batch of chunkIds(blockerRequestIds)) {
+      const rows = await drizzle
+        .select({ id: schema.requests.id, status: schema.requests.status })
+        .from(schema.requests)
+        .where(inArray(schema.requests.id, batch))
+      for (const row of rows) statuses.set(subjectKey('request', row.id), row.status)
+    }
   }
+  await Promise.all([loadTaskStatuses(), loadRequestStatuses()])
 
   for (const link of links) {
     if (link.blockerType !== 'task' && link.blockerType !== 'request') continue
@@ -283,21 +397,30 @@ export async function addBlocker(
     }
   }
 
+  // One query per level of the walk, and one per 45 nodes within a level:
+  // each subject costs two bound parameters here, so a wide frontier hits the
+  // same D1 cap of 100 that openBlockerCounts chunks for.
+  const CYCLE_LEVEL_CHUNK = 45
   const loadBlockers = async (batch: readonly BlockerSubject[]): Promise<BlockerSubject[]> => {
-    const conditions = batch.map(s => and(
-      eq(schema.workBlockers.blockedType, s.type),
-      eq(schema.workBlockers.blockedId, s.id),
-    ))
-    const rows = await drizzle
-      .select({
-        type: schema.workBlockers.blockerType,
-        id: schema.workBlockers.blockerId,
-      })
-      .from(schema.workBlockers)
-      .where(conditions.length === 1 ? conditions[0] : or(...conditions))
-    return rows
-      .filter(r => r.type === 'task' || r.type === 'request')
-      .map(r => ({ type: r.type as BlockerSubjectType, id: r.id }))
+    const found: BlockerSubject[] = []
+    for (let i = 0; i < batch.length; i += CYCLE_LEVEL_CHUNK) {
+      const conditions = batch.slice(i, i + CYCLE_LEVEL_CHUNK).map(s => and(
+        eq(schema.workBlockers.blockedType, s.type),
+        eq(schema.workBlockers.blockedId, s.id),
+      ))
+      const rows = await drizzle
+        .select({
+          type: schema.workBlockers.blockerType,
+          id: schema.workBlockers.blockerId,
+        })
+        .from(schema.workBlockers)
+        .where(conditions.length === 1 ? conditions[0] : or(...conditions))
+      for (const row of rows) {
+        if (row.type !== 'task' && row.type !== 'request') continue
+        found.push({ type: row.type as BlockerSubjectType, id: row.id })
+      }
+    }
+    return found
   }
 
   if (await wouldCycle(blocked, blocker, loadBlockers)) {

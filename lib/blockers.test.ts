@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   BLOCKER_SUBJECT_TYPES,
+  ORPHAN_STATUS,
   blockedWarningLabel,
   isBlockerOpen,
   isBlockerSubjectType,
@@ -54,6 +55,16 @@ describe('isBlockerOpen', () => {
   it('treats a missing status as closed, because an orphan blocks nothing', () => {
     expect(isBlockerOpen('task', null)).toBe(false)
     expect(isBlockerOpen('request', null)).toBe(false)
+  })
+
+  it('treats the orphan sentinel as closed too, so both readers agree', () => {
+    // The server counts an orphan by looking its status up and getting null.
+    // The card counts the same row by reading the sentinel hydrateSubjects
+    // substitutes. Both have to answer "closed" or the header count and the
+    // list glyph disagree about a row nobody can explain.
+    expect(ORPHAN_STATUS).toBe('unknown')
+    expect(isBlockerOpen('task', ORPHAN_STATUS)).toBe(false)
+    expect(isBlockerOpen('request', ORPHAN_STATUS)).toBe(false)
   })
 })
 

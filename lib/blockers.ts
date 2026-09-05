@@ -85,11 +85,21 @@ export function parseSubjectKey(key: string): BlockerSubject | null {
   return { type, id }
 }
 
+/**
+ * The status a hydrated row carries when its subject is gone.
+ *
+ * There are no foreign keys on a polymorphic edge, so a link can outlive the
+ * thing it points at. The server sees that as a status lookup returning null;
+ * the card sees the string this module substitutes. They are the same fact, so
+ * `isBlockerOpen` closes on both and the two counters cannot disagree.
+ */
+export const ORPHAN_STATUS = 'unknown'
+
 /** Is this blocker still holding anything up? A missing status means the row
  *  is gone (there are no foreign keys on a polymorphic edge), and a subject
  *  that no longer exists blocks nothing. */
 export function isBlockerOpen(type: BlockerSubjectType, status: string | null | undefined): boolean {
-  if (!status) return false
+  if (!status || status === ORPHAN_STATUS) return false
   return type === 'task'
     ? !TASK_CLOSED_STATUSES.includes(status)
     : !REQUEST_CLOSED_STATUSES.includes(status)

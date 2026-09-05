@@ -3819,9 +3819,19 @@ function RequestBlockersCard({ requestId, canWrite }: { requestId: string; canWr
                   {b.otherRef}
                 </span>
               )}
+              {/* Satisfied blockers read quieter, because the header count is
+                  open blockers only and a row list that outnumbers it has to
+                  explain itself. */}
               <span
                 className="truncate"
-                style={{ flex: 1, minWidth: 0, fontWeight: 600, color: 'var(--color-text)' }}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontWeight: 600,
+                  color: isBlockerOpen(b.otherType, b.otherStatus)
+                    ? 'var(--color-text)'
+                    : 'var(--color-text-subtle)',
+                }}
                 title={b.otherOrgName ? `${b.otherTitle} (${b.otherOrgName})` : b.otherTitle}
               >
                 {b.otherTitle}

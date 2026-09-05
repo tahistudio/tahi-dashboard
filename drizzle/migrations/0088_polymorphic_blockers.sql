@@ -14,7 +14,11 @@ CREATE TABLE IF NOT EXISTS work_blockers (
   blocker_type text NOT NULL,
   blocker_id text NOT NULL,
   created_by_id text,
-  created_at text NOT NULL
+  -- The DEFAULT matches db/schema.ts, which declares this column
+  -- .notNull().default(strftime(...)). Drizzle omits a column from the INSERT
+  -- when it believes the database supplies one, so without this a writer that
+  -- trusts the declared default hits NOT NULL constraint failed on D1 only.
+  created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_work_blockers_blocked ON work_blockers(blocked_type, blocked_id);

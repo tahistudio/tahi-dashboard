@@ -1117,9 +1117,20 @@ function TaskDetailBody({
                         {b.otherRef}
                       </span>
                     )}
+                    {/* A satisfied blocker reads quieter than an open one.
+                        The header counts open blockers, so a card listing
+                        three rows under a 2 has to show which one is settled
+                        or the number looks wrong. */}
                     <span
                       className="truncate"
-                      style={{ flex: 1, minWidth: 0, fontWeight: 600, color: 'var(--color-text)' }}
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        fontWeight: 600,
+                        color: isBlockerOpen(b.otherType, b.otherStatus)
+                          ? 'var(--color-text)'
+                          : 'var(--color-text-subtle)',
+                      }}
                       title={b.otherOrgName ? `${b.otherTitle} (${b.otherOrgName})` : b.otherTitle}
                     >
                       {b.otherTitle}

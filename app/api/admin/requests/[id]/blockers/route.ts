@@ -24,7 +24,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const denied = await guardSubject(drizzle, userId, subject)
   if (denied) return denied
 
-  return NextResponse.json(await listBlockers(drizzle, subject))
+  return NextResponse.json(await listBlockers(drizzle, userId, subject))
 }
 
 // ── POST /api/admin/requests/[id]/blockers ─────────────────────────────────

@@ -2022,7 +2022,7 @@ const MIGRATIONS: Migration[] = [
   },
   {
     name: '0088',
-    description: 'Polymorphic blockers. work_blockers replaces task_dependencies with an edge whose two ends are each a task or a request, so a request can be blocked by a task and vice versa. Backfills every existing task-to-task dependency with INSERT OR IGNORE and leaves task_dependencies in place, frozen, for one release. No foreign keys are possible on a polymorphic column, so DELETE /api/admin/tasks/[id] sweeps both directions explicitly; requests are soft-deleted to archived, which is already a closed status. Additive and idempotent; re-running is safe.',
+    description: 'Polymorphic blockers. work_blockers replaces task_dependencies with an edge whose two ends are each a task or a request, so a request can be blocked by a task and vice versa. Backfills every existing task-to-task dependency with INSERT OR IGNORE and leaves task_dependencies in place, frozen, for one release. No foreign keys are possible on a polymorphic column, so DELETE /api/admin/tasks/[id] sweeps both directions explicitly; requests are soft-deleted to archived, which is already a closed status. created_at carries the same DEFAULT db/schema.ts declares, because drizzle omits a defaulted column from the INSERT and the row would otherwise fail its NOT NULL on D1. Additive and idempotent; re-running is safe.',
     statements: [
       `CREATE TABLE IF NOT EXISTS work_blockers (
         id text PRIMARY KEY NOT NULL,
@@ -2031,7 +2031,7 @@ const MIGRATIONS: Migration[] = [
         blocker_type text NOT NULL,
         blocker_id text NOT NULL,
         created_by_id text,
-        created_at text NOT NULL
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
       )`,
       `CREATE INDEX IF NOT EXISTS idx_work_blockers_blocked ON work_blockers(blocked_type, blocked_id)`,
       `CREATE INDEX IF NOT EXISTS idx_work_blockers_blocker ON work_blockers(blocker_type, blocker_id)`,
