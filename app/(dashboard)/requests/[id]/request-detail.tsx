@@ -2826,6 +2826,10 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           onClose={() => setWizardOpen(false)}
           context={{ orgId: request.orgId, trackType: request.size ?? undefined, requestId }}
           seed={taskWizardSeed}
+          // The panel below reads its own key, so without this the drafts the
+          // wizard has just written sit in D1 while the card still says
+          // "No tasks yet" until a manual refresh.
+          mutateKeys={[requestTasksKey(requestId)]}
           onTasksCreated={() => {
             mutateRequest()
             showToast('Tasks created')
@@ -3605,9 +3609,15 @@ interface RequestTaskRow {
 // Lists the tasks spawned from this request (admin only). Fetches the existing
 // tasks filter (?requestId=) and mirrors the sub-requests panel layout. Read
 // from the tasks API only - this surface never mutates tasks.
+/** One expression for this panel's SWR key, so the wizard's revalidation and
+ *  the panel's own fetch cannot drift apart by a query string. */
+function requestTasksKey(requestId: string): string {
+  return `/api/admin/tasks?requestId=${requestId}`
+}
+
 function RequestTasksPanel({ requestId }: { requestId: string }) {
   const { data, isLoading } = useSWR<{ tasks: RequestTaskRow[] }>(
-    `/api/admin/tasks?requestId=${requestId}`,
+    requestTasksKey(requestId),
   )
   const tasks = data?.tasks ?? []
 
@@ -3663,36 +3673,52 @@ function RequestTasksPanel({ requestId }: { requestId: string }) {
             <li
               key={t.id}
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 'var(--space-3)',
-                padding: 'var(--space-3) var(--space-5)',
                 borderBottom: i < tasks.length - 1 ? '1px solid var(--color-border-subtle)' : undefined,
               }}
             >
-              <Badge tone={statusTone(t.status)} size="sm" variant="soft" dot>
-                {t.status.replace(/_/g, ' ')}
-              </Badge>
-              <span
-                data-private
+              {/* The row is a door, not a label: the panel used to be the one
+                  place a task could be seen and not opened. /tasks?task=<id>
+                  is the same address the deep link and every notification
+                  use, so the slide-over is what answers. */}
+              <Link
+                href={`/tasks?task=${t.id}`}
+                className="tahi-focus-ring"
                 style={{
-                  flex: 1,
-                  minWidth: 0,
-                  fontSize: 'var(--text-sm)',
-                  fontWeight: 500,
-                  color: 'var(--color-text)',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-3)',
+                  minHeight: '2.75rem',
+                  padding: 'var(--space-3) var(--space-5)',
+                  textDecoration: 'none',
+                  transition: 'background-color var(--motion-quick) var(--ease-out)',
                 }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-hover-tint)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
               >
-                {t.title}
-              </span>
-              {t.priority && t.priority !== 'standard' && (
-                <Badge tone="neutral" size="sm">
-                  {t.priority}
+                <Badge tone={statusTone(t.status)} size="sm" variant="soft" dot>
+                  {t.status.replace(/_/g, ' ')}
                 </Badge>
-              )}
+                <span
+                  data-private
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    fontSize: 'var(--text-sm)',
+                    fontWeight: 500,
+                    color: 'var(--color-text)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {t.title}
+                </span>
+                {t.priority && t.priority !== 'standard' && (
+                  <Badge tone="neutral" size="sm">
+                    {t.priority}
+                  </Badge>
+                )}
+              </Link>
             </li>
           ))}
         </ul>

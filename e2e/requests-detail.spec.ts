@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { primePage } from './helpers'
+import { primePage, filterChip } from './helpers'
 
 /**
  * Request detail: the alignment pass (audit findings D1 to D13).
@@ -61,10 +61,18 @@ async function openFirstRequest(page: Page): Promise<boolean> {
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Requests', { timeout: 20_000 })
 
   const first = page.locator('a[href^="/requests/"]').first()
+  // The rows are fetched client side, so the heading lands a second or two
+  // before the first link does. Counting straight after the heading read 0 on
+  // a database with seventeen requests in it and skipped this whole file with
+  // "No requests in this dataset", which is why the wait is here rather than
+  // in the caller. The catch keeps a genuinely empty list a skip, not a fail.
+  await first.waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {})
   if ((await first.count()) === 0) return false
 
   await first.click()
-  await expect(page).toHaveURL(/\/requests\/[^/]+$/, { timeout: 20_000 })
+  // A dev server compiling /requests/[id] on the first hit can hold the client
+  // navigation well past 20s, so this waits longer than the list did.
+  await expect(page).toHaveURL(/\/requests\/[^/]+$/, { timeout: 45_000 })
   // The shell keeps a notification stream open, so networkidle never fires;
   // wait for the detail rail instead.
   await page.locator('dt').first().waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {})
@@ -87,6 +95,11 @@ function activityFilter(page: Page) {
 }
 
 test.describe('Request detail', () => {
+  // Every case here pays for two navigations, the second of which compiles
+  // /requests/[id] on a cold dev server. The 30s default was being spent
+  // before the first assertion ran.
+  test.describe.configure({ timeout: 90_000 })
+
   test.beforeEach(async ({ page }) => { await primePage(page) })
 
   test('the delivery spine is its own card above the two columns', async ({ page }) => {
@@ -243,9 +256,10 @@ test.describe('Request detail', () => {
 
     // The param has to land as a real, clearable filter, not just a URL the
     // list ignores: the chips row is what proves it reached the rail state.
-    await expect(
-      page.getByRole('button', { name: 'Clear the status filter' }),
-    ).toBeVisible({ timeout: 20_000 })
+    // The rail select's own clear button carries the same accessible name and
+    // comes first in DOM order, so this scopes to the chip rather than taking
+    // whichever the page offers (see filterChip in e2e/helpers.ts).
+    await expect(filterChip(page, 'status')).toBeVisible({ timeout: 20_000 })
 
     await expectNoHorizontalScroll(page)
   })

@@ -1,7 +1,7 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-08-18** by Claude (client-ready triage: 6-agent code audit of every client-visible surface; TASKS.md reorganised around the ManyRequests cutover)
+> Last updated: **2026-09-05** by Claude (Tasks page port: the surface, its docs and its e2e). Triage snapshot below is still the 2026-08-18 audit.
 
 ## The plan (2026-08-18)
 
@@ -24,6 +24,37 @@ Liam's call: ship every surface a client touches first (proposals, contracts, sc
 - **Overview homes** (owner + client verified live July; teammate home never visually verified)
 - **Settings rebuild** (verified locally + promoted; client-session QA of portal sections still pending)
 
+### Ported, live smoke pending
+
+- **Tasks (ported 2026-09-05).** Not in the trusted block above: the surface
+  shipped and part of it was driven on production, but most of its writes have
+  only been exercised by the e2e suite against a local harness. Three views:
+  List, Board and My week, over the same rail toolbar Requests uses (aside
+  "Saved views, filters and sort": an All tasks reset plus seven saved views,
+  each with a count, six filter selects, sort with a direction toggle, Clear
+  filters, Save as default). The detail is a slide-over; opening a row writes
+  `?task=<id>` and `/tasks/<id>` still redirects to `/tasks?task=<id>`, which
+  is where every task notification lands. Tasks are studio-only: a client org
+  is redirected off the route, so there is no portal audience to check.
+  Two behaviours that surprise a reader otherwise: **My week deliberately
+  ignores the rail** (the chip strip is suppressed, the count does not move,
+  and a note above Views says so), and **the saved default is browser-local**,
+  inherited from the Requests rail, so it does not follow you to another
+  machine. Levels read Client / Internal / Tahi; priorities are standard /
+  high / urgent, with `!medium` and `!low` accepted by quick add as aliases
+  for standard.
+  **Verified live (2026-09-05, production, as Liam):** the page, the rail and
+  the count, quick add with a client mention, a date and a priority, the row
+  to slide-over with `?task=` in the URL, the level change clearing the client
+  on the server, the `/tasks/<id>` redirect, the board's column composers, the
+  header overflow menu.
+  **Not exercised live yet:** bulk complete, promote to a request, the timer
+  in the detail's Time card, an AI wizard run, Save as default across a
+  reload, the CSV download, the board drag, the My week drag, and dark mode on
+  the board and the week planner. The first eight are covered by
+  `e2e/tasks.spec.ts` against the local harness; dark mode is a live check
+  only.
+
 ### Built and impressive, but NOT client-safe yet (sprint C1)
 
 - **Proposals**: public viewer + list are premium; but share serves LIVE rows until a separate Publish click, the Publish button permanently disappears after first use in a session, accepting a proposal notifies NOBODY (no email/notification/deal move; viewer promises "we'll be in touch within one business day"), and at 375px the package tabs clip so a phone client can't select the third package.
@@ -41,7 +72,7 @@ Liam's call: ship every surface a client touches first (proposals, contracts, sc
 
 ### Redesign coverage (sweep 2026-08-18)
 
-**58 routes: 26 v3 / 20 partial / 8 legacy / 4 stub.** Client-facing laggards that matter: `/services` (legacy, zero primitives, client catalogue), `/billing` (legacy), `/invoices/[id]` (legacy detail behind a v3 list), `/files` (stub), `/p/contract` viewer (only public viewer off the deliverable kit). Client-facing partials: /messages, /tasks (+detail), /tracks. Better than assumed: /calls, /team, /invoices list, /affiliates, /announcements, /reviews, /sales-analytics are already v3. Biggest internal partial: /reports (10 hand-rolled tables).
+**58 routes: 26 v3 / 20 partial / 8 legacy / 4 stub.** Client-facing laggards that matter: `/services` (legacy, zero primitives, client catalogue), `/billing` (legacy), `/invoices/[id]` (legacy detail behind a v3 list), `/files` (stub), `/p/contract` viewer (only public viewer off the deliverable kit). Client-facing partials: /messages, /tracks. (/tasks left this list on 2026-09-05: it is v3 and team-only, see "Ported, live smoke pending" above.) Better than assumed: /calls, /team, /invoices list, /affiliates, /announcements, /reviews, /sales-analytics are already v3. Biggest internal partial: /reports (10 hand-rolled tables).
 
 ---
 
@@ -52,7 +83,7 @@ Liam's call: ship every surface a client touches first (proposals, contracts, sc
 3. **P1 - the five portal blockers** (sprint C2 above).
 4. **P1 - proposal/schedule share leaks live rows; proposal accept + contract sign are silent** (sprint C1).
 5. **P2 - migrations 0081/0082 apply state unverified on prod D1** (C0.4).
-6. **P2 - /tasks/[id] full page**: GET handler was missing (June note); verify whether the slide-over is still the only working task detail.
+6. **P3 - board drop targets**: on the Tasks board a card in the SAME column as the dragged card still lights as a drop target. Cosmetic, inside `KanbanBoard`, so it shows on the Requests board too.
 
 ### Corrections to previous STATUS claims
 
