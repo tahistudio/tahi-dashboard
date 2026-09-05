@@ -45,7 +45,7 @@ import {
   TASK_STATUS_LABELS,
   TASK_STATUS_TONE,
 } from '@/lib/status-config'
-import { parseSubjectKey, subjectKey, type BlockerCandidate, type BlockerRow } from '@/lib/blockers'
+import { isBlockerOpen, parseSubjectKey, subjectKey, type BlockerCandidate, type BlockerRow } from '@/lib/blockers'
 import { StatusChipSelect } from '@/components/tahi/status-chip-select'
 import { DeliverySpine, isPipelineStatus } from '@/components/tahi/requests/delivery-spine'
 import { SegmentedControl } from '@/components/tahi/segmented-control'
@@ -733,7 +733,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   const { data: blockersData } = useSWR<RequestBlockersPayload>(
     isAdmin ? requestBlockersKey(requestId) : null,
   )
-  const openBlockerCount = blockersData?.blockedBy?.length ?? 0
+  const openBlockerCount = countOpenBlockers(blockersData?.blockedBy)
 
   // Team members (admin only) for the assignee picker.
   const { data: teamMembersData } = useSWR<{ items: TeamMemberOption[] }>(
@@ -3636,6 +3636,16 @@ interface RequestBlockersPayload {
 }
 
 /**
+ * Open ones only, which is what the list route counts and therefore what the
+ * glyph, the board warning and the Blocked saved view all read. The rows
+ * themselves still show a satisfied blocker so it can be unlinked; counting it
+ * would make this card disagree with the row it sits next to.
+ */
+function countOpenBlockers(rows: readonly BlockerRow[] | undefined): number {
+  return (rows ?? []).filter(r => isBlockerOpen(r.otherType, r.otherStatus)).length
+}
+
+/**
  * The Blocked by card.
  *
  * Admin only, and gated twice on purpose (Decision 13): this render is behind
@@ -3650,6 +3660,7 @@ function RequestBlockersCard({ requestId, canWrite }: { requestId: string; canWr
   const { showToast } = useToast()
   const { data, isLoading, mutate } = useSWR<RequestBlockersPayload>(requestBlockersKey(requestId))
   const blockers = useMemo(() => data?.blockedBy ?? [], [data])
+  const openCount = countOpenBlockers(blockers)
 
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<readonly BlockerCandidate[]>([])
@@ -3756,7 +3767,7 @@ function RequestBlockersCard({ requestId, canWrite }: { requestId: string; canWr
     <SidebarCard
       title="Blocked by"
       icon={<AlertTriangle size={14} />}
-      count={blockers.length > 0 ? blockers.length : undefined}
+      count={openCount > 0 ? openCount : undefined}
     >
       {isLoading && blockers.length === 0 ? (
         <div className="flex flex-col animate-pulse" style={{ gap: '0.375rem' }}>

@@ -70,7 +70,7 @@ import {
   TASK_CLOSED_STATUSES,
   TASK_STATUSES,
 } from '@/lib/status-config'
-import { parseSubjectKey, subjectKey } from '@/lib/blockers'
+import { isBlockerOpen, parseSubjectKey, subjectKey } from '@/lib/blockers'
 import { TASK_PRIORITIES, taskPriorityLabel } from '@/lib/task-priorities'
 import { formatHours } from '@/lib/tasks-planner'
 import {
@@ -824,6 +824,11 @@ function TaskDetailBody({
   // ---- Blockers --------------------------------------------------------------
 
   const blockers = blockedBy ?? []
+  // Open ones only, which is what the list route counts and therefore what the
+  // row's own chip and the board card read. A satisfied blocker still gets a
+  // row, so it can be unlinked; counting it would make the card's number
+  // disagree with the row's.
+  const openBlockerCount = blockers.filter(b => isBlockerOpen(b.otherType, b.otherStatus)).length
   const linkedKeys = new Set(blockers.map(b => subjectKey(b.otherType, b.otherId)))
 
   const blockerOptions: InlineMenuOption[] = blockerResults
@@ -1061,7 +1066,7 @@ function TaskDetailBody({
           <SidebarCard
             title="Waiting on"
             icon={<AlertTriangle size={14} />}
-            count={blockers.length > 0 ? blockers.length : undefined}
+            count={openBlockerCount > 0 ? openBlockerCount : undefined}
           >
             {blockers.length === 0 ? (
               <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
