@@ -34,7 +34,9 @@ interface SidebarUserCardProps {
   onToggleDarkMode: () => void
 }
 
-function initialsOf(name: string): string {
+/** Two-letter fallback for a missing avatar. Shared with the mobile More sheet
+ *  so both account surfaces show the same monogram. */
+export function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   if (parts.length === 0) return '?'
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()

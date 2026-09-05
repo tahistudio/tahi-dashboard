@@ -22,6 +22,7 @@ export type ShellIconName =
   | 'reports' | 'capacity' | 'team' | 'docs' | 'files' | 'services' | 'settings'
   | 'search' | 'bell' | 'currency' | 'private' | 'theme' | 'sun' | 'impersonate'
   | 'chevron' | 'collapse' | 'expand' | 'plus' | 'lock' | 'dots' | 'arrow'
+  | 'back'
   | 'check' | 'checks' | 'more' | 'close' | 'clock' | 'play' | 'pause' | 'square'
 
 const P: Record<ShellIconName, string> = {
@@ -69,6 +70,7 @@ const P: Record<ShellIconName, string> = {
   lock: 'M5 11h14v10H5z M8 11V7a4 4 0 0 1 8 0v4',
   dots: 'M12 6.5v.01 M12 12v.01 M12 17.5v.01',
   arrow: 'M5 12h14 M13 6l6 6-6 6',
+  back: 'M19 12H5 M11 18l-6-6 6-6',
   check: 'M20 6L9 17l-5-5',
   checks: 'M2 12L5.5 15.5L12 8 M9 12L12.5 15.5L19 8',
   more: 'M4 12h16 M4 6h16 M4 18h16',
