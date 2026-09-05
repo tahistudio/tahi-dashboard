@@ -67,8 +67,27 @@ export interface CostInput {
   note?: string
 }
 
-/** Pure-function cost estimator. Returns cents (integer, rounded up). */
-export function estimateCostCents(input: Pick<CostInput, 'provider' | 'model' | 'inputTokens' | 'outputTokens' | 'callUnits'>): number {
+/**
+ * The unrounded USD cost of one call, from its tokens and the rate card.
+ *
+ * `estimateCostCents` is this rounded UP to a whole cent, because the ledger
+ * column is an integer. That rounding is invisible on a $0.30 Opus call and
+ * enormous on a Haiku one: a prediction pass at roughly 900 in / 80 out really
+ * costs about 0.13 cents and is stored as 1. Anything summing many small calls
+ * to compare against a budget must read this instead of the stored column, or
+ * a "$2 a day" ceiling silently becomes "200 calls a day".
+ *
+ * `provider` is a plain string rather than `Provider` so a row read back out of
+ * `ai_cost_log` can be priced without a cast; an unknown provider or model
+ * answers 0, exactly as `estimateCostCents` always has.
+ */
+export function estimateCostUsd(input: {
+  provider: string
+  model: string
+  inputTokens?: number
+  outputTokens?: number
+  callUnits?: number
+}): number {
   const { provider, model, inputTokens = 0, outputTokens = 0, callUnits = 0 } = input
   const card = (RATE_CARD as Record<string, Record<string, unknown>>)[provider]?.[model] as
     | { in?: number; out?: number; perCall?: number; perMillionTokens?: number }
@@ -79,7 +98,12 @@ export function estimateCostCents(input: Pick<CostInput, 'provider' | 'model' | 
   if (card.out != null) usd += (outputTokens / 1_000_000) * card.out
   if (card.perMillionTokens != null) usd += (inputTokens / 1_000_000) * card.perMillionTokens
   if (card.perCall != null) usd += callUnits * card.perCall
-  return Math.ceil(usd * 100)
+  return usd
+}
+
+/** Pure-function cost estimator. Returns cents (integer, rounded up). */
+export function estimateCostCents(input: Pick<CostInput, 'provider' | 'model' | 'inputTokens' | 'outputTokens' | 'callUnits'>): number {
+  return Math.ceil(estimateCostUsd(input) * 100)
 }
 
 /** Persist a cost log row. Use the wrapper functions in `recordedCall`

@@ -194,6 +194,33 @@ export async function getTask(request: APIRequestContext, id: string): Promise<T
   return task
 }
 
+/** The fields the request specs read back off the server. */
+export interface RequestRecord {
+  id: string
+  title: string
+  type: string
+  category: string
+  orgId: string | null
+  status: string
+  priority: string
+  dueDate: string | null
+  estimatedHours: number | null
+}
+
+/** Soft for the same reason deleteTask is: every call site is in a `finally`
+ *  and the failure that sent it there is the one worth reporting. */
+export async function deleteRequest(request: APIRequestContext, id: string): Promise<void> {
+  const res = await request.delete(`/api/admin/requests/${id}`)
+  expect.soft(res.ok(), `the request fixture ${id} was not cleaned up`).toBeTruthy()
+}
+
+export async function getRequest(request: APIRequestContext, id: string): Promise<RequestRecord> {
+  const res = await request.get(`/api/admin/requests/${id}`)
+  expect(res.ok(), `the request ${id} could not be read back`).toBeTruthy()
+  const { request: row } = await res.json() as { request: RequestRecord }
+  return row
+}
+
 // ── Blockers ─────────────────────────────────────────────────────────────────
 
 export type BlockerSubjectType = 'task' | 'request'

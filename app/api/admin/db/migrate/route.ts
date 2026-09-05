@@ -2048,6 +2048,15 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    name: '0090',
+    description: 'The three indexes predictive autofill reads on. POST /api/admin/ai/predict-fields grounds every guess in a cohort of recently delivered work, and neither table had an index that fits: requests was indexed on org_id alone so the client cohort walked every request they have ever filed, and tasks had idx_tasks_type but nothing on completed_at (0087 added assignee and due_date only) so the level cohort scanned the open tasks too. idx_requests_delivered serves the studio-wide fallback cohort, which has no org_id predicate and so cannot use the composite. All three CREATEs are IF NOT EXISTS and nothing is backfilled, so this is additive and re-running is safe.',
+    statements: [
+      `CREATE INDEX IF NOT EXISTS idx_requests_org_delivered ON requests(org_id, delivered_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_tasks_type_completed ON tasks(type, completed_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_requests_delivered ON requests(delivered_at)`,
+    ],
+  },
+  {
     name: '0091',
     description: 'invoices.xero_online_invoice_url: Xero\'s own client-facing pay page for the bill (the OnlineInvoiceUrl). Xero only issues one for an AUTHORISED or PAID ACCREC invoice and errors on a DRAFT, and the push route holds every dashboard invoice at Xero DRAFT on purpose, so the link cannot be captured at push time. The two Xero readers (importXeroInvoices, syncXeroPayments) fetch it once per invoice, capped at 25 fetches per run, store it here, and clear it again when Xero stops serving it (voided, deleted, or demoted back to DRAFT). NULL is the normal state of a draft, never an error. Apply this BEFORE deploying the code that reads it: without the column the hourly sync-xero cron fails in both steps, every push to Xero fails after the Xero invoice has already been created, and the admin data export 500s. Additive only; the duplicate-column error is swallowed upstream so re-runs are idempotent.',
     statements: [
