@@ -811,10 +811,23 @@ export async function POST(req: NextRequest) {
 
     const { reply, tasks } = parseTasksFromResponse(responseText)
 
+    // The brief itself is not kept: files.orgId is NOT NULL and a studio task
+    // has no client, so there is no legal row to attach it to. The note says
+    // where the work came from instead, and the person can edit that line out
+    // in the review step like any other.
+    const drafted = documentName
+      ? tasks.map(t => ({
+          ...t,
+          description: t.description
+            ? `${t.description}\n\nDrafted from ${documentName}`
+            : `Drafted from ${documentName}`,
+        }))
+      : tasks
+
     const response: WizardResponse = {
       reply: reply || 'Could you tell me more about what you need?',
-      done: tasks.length > 0,
-      ...(tasks.length > 0 ? { tasks } : {}),
+      done: drafted.length > 0,
+      ...(drafted.length > 0 ? { tasks: drafted } : {}),
       ...(truncated
         ? { notice: `Only the first 40,000 characters of ${documentName ?? 'that brief'} were read, so check nothing further down was missed.` }
         : {}),

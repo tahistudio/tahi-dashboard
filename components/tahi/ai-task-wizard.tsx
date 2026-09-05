@@ -329,7 +329,8 @@ export function AiTaskWizardPanel({
     if (sending || creating) return
     if (!trimmed && !brief) return
 
-    const spoken = trimmed || (brief ? `${DOCUMENT_ONLY_INSTRUCTION} (${brief.filename})` : '')
+    // The chip on the bubble names the file, so the sentence does not have to.
+    const spoken = trimmed || DOCUMENT_ONLY_INSTRUCTION
     const userMessage: ChatMessage = {
       role: 'user',
       content: spoken,
@@ -375,6 +376,9 @@ export function AiTaskWizardPanel({
       // panel repeats it instead of printing a generic apology, or worse,
       // rendering a keyword draft as if Claude wrote it.
       if (!res.ok) {
+        // Hand the file back with the error. A busy minute should not cost
+        // somebody the upload they just made.
+        if (sentBrief) setBrief(sentBrief)
         setMessages(prev => [
           ...prev,
           {
@@ -398,6 +402,7 @@ export function AiTaskWizardPanel({
       }
       setMessages(prev => [...prev, ...next])
     } catch {
+      if (sentBrief) setBrief(sentBrief)
       setMessages(prev => [
         ...prev,
         { role: 'assistant', notice: true, content: 'Something went wrong drafting that. Could you try again?' },
@@ -770,36 +775,42 @@ export function AiTaskWizardPanel({
                 {latestTasks.tasks.length > 1 ? 'Use the first draft' : 'Use this draft'}
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => void handleCreateTasks()}
-              disabled={creating}
-              className="tahi-focus-ring"
-              style={{
-                flex: onDraftToForm ? '0 0 auto' : 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.375rem',
-                minHeight: '2.75rem',
-                padding: '0.625rem 0.875rem',
-                background: onDraftToForm ? 'var(--color-bg)' : 'var(--color-brand)',
-                color: onDraftToForm
-                  ? (creating ? 'var(--color-text-subtle)' : 'var(--color-link)')
-                  : 'var(--color-text-on-dark)',
-                border: onDraftToForm ? '1px solid var(--color-border)' : 'none',
-                borderRadius: 'var(--radius-button)',
-                fontSize: '0.875rem',
-                fontWeight: onDraftToForm ? 500 : 600,
-                cursor: creating ? 'not-allowed' : 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {creating && <Loader2 size={14} aria-hidden="true" className="animate-spin" />}
-              {creating
-                ? 'Creating...'
-                : latestTasks.tasks.length === 1 ? 'Create task' : `Create ${latestTasks.tasks.length} tasks`}
-            </button>
+            {/* Filing belongs to whoever owns the list. Inside a dialog that
+                is the dialog: it has the Create button, it tells the page, and
+                the page reloads. A second Create here would write a task the
+                list behind could not see, next to a button that would happily
+                write it again. So the panel only files where its own button is
+                the way out. */}
+            {!onDraftToForm && (
+              <button
+                type="button"
+                onClick={() => void handleCreateTasks()}
+                disabled={creating}
+                className="tahi-focus-ring"
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.375rem',
+                  minHeight: '2.75rem',
+                  padding: '0.625rem 0.875rem',
+                  background: creating ? 'var(--color-brand-200)' : 'var(--color-brand)',
+                  color: 'var(--color-text-on-dark)',
+                  border: 'none',
+                  borderRadius: 'var(--radius-button)',
+                  fontSize: '0.875rem',
+                  fontWeight: 600,
+                  cursor: creating ? 'not-allowed' : 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {creating && <Loader2 size={14} aria-hidden="true" className="animate-spin" />}
+                {creating
+                  ? 'Creating...'
+                  : latestTasks.tasks.length === 1 ? 'Create task' : `Create ${latestTasks.tasks.length} tasks`}
+              </button>
+            )}
           </div>
         )}
 
