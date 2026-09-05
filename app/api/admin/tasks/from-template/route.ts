@@ -80,6 +80,10 @@ export async function POST(req: NextRequest) {
     assigneeId: body.assigneeId ?? null,
     assigneeType: body.assigneeId ? 'team_member' : null,
     dueDate: null,
+    // task_templates has carried an estimate all along and tasks gained the
+    // matching column in migration 0087, so the template's number is the one
+    // the detail's Estimate field and the My week total should start from.
+    estimatedHours: template.estimatedHours ?? null,
     createdById: userId,
     tags: '[]',
     trackId: body.trackId ?? null,

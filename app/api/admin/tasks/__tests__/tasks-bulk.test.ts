@@ -4,11 +4,18 @@
  * Before the Tasks port this route had no access scoping at all (CLAUDE.md
  * rule 11), issued one UPDATE per id, and returned `taskIds.length` as
  * `updatedCount` whether or not any row existed.
+ *
+ * The drizzle condition builders are replaced with plain recorders so the
+ * scope clause the route hands the reachable-id query can be read and asserted
+ * directly. Asserting on a hand-set row list instead would leave the scoping
+ * deletable with every test still green, which is the opposite of what a
+ * rule 11 regression test is for.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const calls: { where: unknown; set: Record<string, unknown> }[] = []
+const selectWheres: unknown[] = []
 let scopedOrgIds: string[] | null = null
 let existingIds: string[] = []
 
@@ -23,11 +30,25 @@ vi.mock('@/lib/access-scoping', () => ({
 
 vi.mock('@/db/d1', () => ({ schema: { tasks: { id: 'id', orgId: 'org_id' } } }))
 
+vi.mock('drizzle-orm', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
+  return {
+    ...actual,
+    and: (...parts: unknown[]) => ({ op: 'and', parts }),
+    or: (...parts: unknown[]) => ({ op: 'or', parts }),
+    inArray: (col: unknown, values: unknown[]) => ({ op: 'inArray', col, values }),
+    isNull: (col: unknown) => ({ op: 'isNull', col }),
+  }
+})
+
 vi.mock('@/lib/db', () => ({
   db: async () => ({
     select: () => ({
       from: () => ({
-        where: async () => existingIds.map(id => ({ id })),
+        where: async (where: unknown) => {
+          selectWheres.push(where)
+          return existingIds.map(id => ({ id }))
+        },
       }),
     }),
     update: () => ({
@@ -37,6 +58,9 @@ vi.mock('@/lib/db', () => ({
     }),
   }),
 }))
+
+const ids = (values: string[]) => ({ op: 'inArray', col: 'id', values })
+const noClient = { op: 'isNull', col: 'org_id' }
 
 const { PATCH } = await import('../bulk/route')
 
@@ -50,8 +74,30 @@ function patch(body: unknown): Request {
 describe('PATCH /api/admin/tasks/bulk', () => {
   beforeEach(() => {
     calls.length = 0
+    selectWheres.length = 0
     scopedOrgIds = null
     existingIds = ['a', 'b']
+  })
+
+  it('asks only for the rows the caller access rule reaches', async () => {
+    await PATCH(patch({ taskIds: ['a', 'b'], updates: { status: 'done' } }) as never)
+    // Unrestricted: the ids alone, no scope clause to and together.
+    expect(selectWheres[0]).toEqual(ids(['a', 'b']))
+
+    scopedOrgIds = []
+    await PATCH(patch({ taskIds: ['a', 'b'], updates: { status: 'done' } }) as never)
+    // No client at all: only the studio's own unclientted tasks.
+    expect(selectWheres[1]).toEqual({ op: 'and', parts: [ids(['a', 'b']), noClient] })
+
+    scopedOrgIds = ['o1']
+    await PATCH(patch({ taskIds: ['a', 'b'], updates: { status: 'done' } }) as never)
+    expect(selectWheres[2]).toEqual({
+      op: 'and',
+      parts: [
+        ids(['a', 'b']),
+        { op: 'or', parts: [{ op: 'inArray', col: 'org_id', values: ['o1'] }, noClient] },
+      ],
+    })
   })
 
   it('issues exactly one update for the whole selection', async () => {

@@ -22,6 +22,7 @@ type TaskRow = {
   priority: string
   assigneeId: string | null
   dueDate: string | null
+  estimatedHours: number | null
   requestId: string | null
 }
 
@@ -86,7 +87,8 @@ const params = { params: Promise.resolve({ id: 't1' }) }
 // The bound values, in the order the INSERT interpolates them.
 const V = {
   requestId: 0, orgId: 1, title: 2, legacyType: 3, size: 4, category: 5,
-  description: 6, priority: 7, assigneeId: 8, dueDate: 9, submittedById: 10,
+  description: 6, priority: 7, assigneeId: 8, dueDate: 9, estimatedHours: 10,
+  submittedById: 11,
 } as const
 
 function boundValues(): unknown[] {
@@ -106,6 +108,7 @@ beforeEach(() => {
     priority: 'standard',
     assigneeId: 'tm1',
     dueDate: '2026-09-09',
+    estimatedHours: 3.5,
     requestId: null,
   }
 })
@@ -124,6 +127,24 @@ describe('POST /api/admin/tasks/[id]/promote', () => {
     expect(values[V.assigneeId]).toBe('tm1')
     expect(values[V.dueDate]).toBe('2026-09-09')
     expect(values[V.submittedById]).toBe('user_1')
+  })
+
+  it('carries the estimate across, since promotion is not a reason to lose it', async () => {
+    await POST(promote() as never, params)
+    expect(runs[0].text).toContain('estimated_hours')
+    expect(boundValues()[V.estimatedHours]).toBe(3.5)
+
+    runs.length = 0
+    taskRow = { ...taskRow!, estimatedHours: null }
+    await POST(promote() as never, params)
+    expect(boundValues()[V.estimatedHours]).toBeNull()
+  })
+
+  it('holds the category to the vocabulary the requests surface filters on', async () => {
+    const res = await POST(promote({ category: 'seo' }) as never, params)
+    expect(res.status).toBe(400)
+    await expect(res.json()).resolves.toEqual({ error: 'Invalid category' })
+    expect(runs).toHaveLength(0)
   })
 
   it('writes both the legacy type and the modern size', async () => {

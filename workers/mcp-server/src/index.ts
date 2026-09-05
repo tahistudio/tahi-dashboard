@@ -485,7 +485,7 @@ const TOOLS: ToolDef[] = [
     assigneeId: prop('string', 'Team member ID to assign'),
     dueDate: prop('string', 'Due date in YYYY-MM-DD format'),
     estimatedHours: prop('number', 'Estimate in hours'),
-    requestId: prop('string', 'Request this task delivers against'),
+    requestId: prop('string', "Request this task delivers against. Linking adopts that request's client, so orgId is optional when you pass one."),
     subtasks: { type: 'array', items: { type: 'string' }, description: 'Subtask titles to create alongside the task' },
   }, ['title']),
   tool('update_task', 'Update an existing task', {
@@ -498,8 +498,8 @@ const TOOLS: ToolDef[] = [
     dueDate: prop('string', 'Updated due date in YYYY-MM-DD format'),
     estimatedHours: prop('number', 'Estimate in hours'),
     orgId: prop('string', 'Client organisation ID to move the task to'),
-    requestId: prop('string', 'Request this task delivers against'),
-    type: prop('string', 'Level: client_task, internal_client_task or tahi_internal'),
+    requestId: prop('string', "Request this task delivers against. Linking adopts that request's client."),
+    type: prop('string', 'Level: client_task, internal_client_task or tahi_internal. Moving to tahi_internal clears the client and the request.'),
     scheduleRowId: prop('string', 'Schedule gantt row ID to link this task to (delivery spine). Pass an empty string to unlink.'),
   }, ['taskId']),
   tool('create_task_subtask', 'Create a subtask under a task', {
@@ -568,7 +568,7 @@ const TOOLS: ToolDef[] = [
   }, ['templateId']),
   tool('promote_task_to_request', 'Turn a task into a client-facing request. The task stays, linked to it.', {
     taskId: prop('string', 'Task ID. Must have a client and no request yet.'),
-    category: prop('string', 'Request category, e.g. design or development. Default design.'),
+    category: prop('string', 'Request category: design, development, content, strategy, admin or bug. Default design.'),
     size: prop('string', 'small_task (a day or less) or large_task. Default small_task.'),
   }, ['taskId']),
   tool('list_task_calls', 'List the calls attached to a task', {

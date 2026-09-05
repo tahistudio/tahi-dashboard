@@ -6,7 +6,10 @@ import { eq } from 'drizzle-orm'
 import { createNotification } from '@/lib/notifications'
 import { TASK_PRIORITIES } from '@/lib/task-priorities'
 import { TASK_STATUSES } from '@/lib/status-config'
-import { guardTask } from '@/lib/task-access'
+import { guardTask, loadTaskLinks, requestOrgId } from '@/lib/task-access'
+import { requireAccessToOrg } from '@/lib/require-access'
+import { isTaskLevel, type TaskLevel } from '@/lib/tasks-views'
+import { coerceTaskLinks, setTaskLevel } from '@/lib/task-consistency'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -89,6 +92,7 @@ export async function PATCH(
     position?: number | null
     requestId?: string | null
     orgId?: string | null
+    type?: string
     tags?: string
     scheduleRowId?: string | null
   }
@@ -137,11 +141,90 @@ export async function PATCH(
   }
   if (body.trackId !== undefined) updates.trackId = body.trackId
   if (body.position !== undefined) updates.position = body.position
-  if (body.requestId !== undefined) updates.requestId = body.requestId
-  if (body.orgId !== undefined) updates.orgId = body.orgId
   if (body.tags !== undefined) updates.tags = body.tags
   // '' and null both mean unlink (the MCP tool cannot send null).
   if (body.scheduleRowId !== undefined) updates.scheduleRowId = body.scheduleRowId || null
+
+  if (body.type !== undefined && !isTaskLevel(body.type)) {
+    return NextResponse.json({ error: 'Invalid level' }, { status: 400 })
+  }
+
+  // The level, the client and the request are one state, not three fields.
+  // Writing them independently is how an impossible task gets stored: the
+  // detail panel's Client row answers { level: 'internal_client_task', orgId }
+  // for a Tahi task, and a route that wrote only the orgId kept the old level
+  // beside the new client, which renders as a Tahi chip next to a client name.
+  // So any PATCH that touches one of the three resolves all three through the
+  // same invariants POST uses, and writes all three.
+  const touchesLinks = body.type !== undefined
+    || body.orgId !== undefined
+    || body.requestId !== undefined
+
+  if (touchesLinks) {
+    const current = await loadTaskLinks(drizzle, id)
+    if (!current) {
+      return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+    }
+
+    const currentLevel: TaskLevel = isTaskLevel(current.type)
+      ? current.type
+      : (current.orgId ? 'client_task' : 'tahi_internal')
+    const requestedLevel = isTaskLevel(body.type) ? body.type : null
+
+    let nextOrgId = body.orgId !== undefined ? body.orgId : current.orgId
+    let nextRequestId = body.requestId !== undefined ? body.requestId : current.requestId
+
+    // Clearing the client clears the request with it, because a request the
+    // task no longer shares a client with is not a link (setTaskClient again).
+    // A request named in the same call is the caller restating the pair, and
+    // wins.
+    if (body.orgId !== undefined && !body.orgId && body.requestId === undefined) {
+      nextRequestId = null
+    }
+
+    // The linked request's own client settles the pair. Linking adopts that
+    // client (setTaskRequest); a client stated in the same call wins over it
+    // instead, and a request belonging to somebody else cannot survive that
+    // move (setTaskClient). Only looked up when the pair actually moved: a
+    // stored pair was already consistent. An explicit tahi_internal drops
+    // both links below, so it never reaches the lookup.
+    if (nextRequestId && requestedLevel !== 'tahi_internal'
+      && (nextRequestId !== current.requestId || nextOrgId !== current.orgId)) {
+      const linkedOrgId = await requestOrgId(drizzle, nextRequestId)
+      if (!linkedOrgId) {
+        return NextResponse.json({ error: 'Request not found' }, { status: 404 })
+      }
+      if (body.orgId !== undefined && nextOrgId && nextOrgId !== linkedOrgId) {
+        nextRequestId = null
+      } else {
+        nextOrgId = linkedOrgId
+      }
+    }
+
+    // A level the caller stated and could not have meant is an error rather
+    // than something to repair behind their back, which is the same answer
+    // POST gives. A level the caller did not state is still coerced below.
+    if (requestedLevel && requestedLevel !== 'tahi_internal' && !nextOrgId) {
+      return NextResponse.json({ error: 'Client is required for a client task' }, { status: 400 })
+    }
+
+    const links = coerceTaskLinks(setTaskLevel(
+      { level: currentLevel, orgId: nextOrgId, requestId: nextRequestId },
+      requestedLevel ?? currentLevel,
+    ))
+
+    // Rule 11 on the NEW client. guardTask above only checked the client the
+    // task sits in today, so without this a member scoped to one client could
+    // move a task into a client they cannot see.
+    if (links.orgId && links.orgId !== current.orgId) {
+      const deniedTarget = await requireAccessToOrg(drizzle, userId, links.orgId)
+      if (deniedTarget) return deniedTarget
+    }
+
+    updates.type = links.level
+    updates.orgId = links.orgId
+    updates.requestId = links.requestId
+  }
 
   await drizzle
     .update(schema.tasks)

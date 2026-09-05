@@ -1,9 +1,16 @@
 /**
  * lib/task-access.ts
  *
- * One access rule for every task route. A task with a client is guarded by
- * that client's access rule; a task with no client is the studio's own
- * housekeeping and is allowed for every team member on this surface.
+ * The shared server-side task lookups. Two of them:
+ *
+ *   - `guardTask`, the one access rule every task route applies. A task with
+ *     a client is guarded by that client's access rule; a task with no client
+ *     is the studio's own housekeeping and is allowed for every team member
+ *     on this surface.
+ *   - `loadTaskLinks` and `requestOrgId`, the two reads the link invariants in
+ *     lib/task-consistency.ts need before they can resolve a write. Both write
+ *     doors (POST /api/admin/tasks and PATCH /api/admin/tasks/[id]) use them,
+ *     so they live here rather than as two near-copies inside routes.
  *
  * Lives in lib/ rather than in a route file because Next.js App Router
  * routes may only export HTTP methods and config; tsc accepts more, and
@@ -53,4 +60,57 @@ export async function guardTask(
   // than on the org resolveTimerOrgId falls back to.
   if (!task.orgId) return null
   return requireAccessToOrg(drizzle, userId, task.orgId)
+}
+
+/**
+ * The level / client / request triple a task holds today.
+ *
+ * PATCH needs the whole triple, not just the client `guardTask` reads, because
+ * the three fields are one state: writing any of them means resolving all
+ * three through `setTaskLevel` and `coerceTaskLinks`. Returns null when the
+ * row is gone.
+ */
+export interface TaskLinkRow {
+  type: string
+  orgId: string | null
+  requestId: string | null
+}
+
+export async function loadTaskLinks(
+  drizzle: Drizzle,
+  taskId: string,
+): Promise<TaskLinkRow | null> {
+  const [task] = await drizzle
+    .select({
+      type: schema.tasks.type,
+      orgId: schema.tasks.orgId,
+      requestId: schema.tasks.requestId,
+    })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.id, taskId))
+    .limit(1)
+
+  return task ?? null
+}
+
+/**
+ * The client a request belongs to, or null when there is no such request.
+ *
+ * Linking a task to a request adopts that request's client, because a task and
+ * its request disagreeing about the client is the one state nothing downstream
+ * can render honestly (the rule `setTaskRequest` states). A caller that knows
+ * only the request, which is what the request detail's AI action items and the
+ * discovery call promoter both send, should not have to know the client too.
+ */
+export async function requestOrgId(
+  drizzle: Drizzle,
+  requestId: string,
+): Promise<string | null> {
+  const [request] = await drizzle
+    .select({ orgId: schema.requests.orgId })
+    .from(schema.requests)
+    .where(eq(schema.requests.id, requestId))
+    .limit(1)
+
+  return request?.orgId ?? null
 }
