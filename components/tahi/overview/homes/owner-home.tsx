@@ -898,7 +898,7 @@ function PipelineStages({
   moneyCompact: (nzd: number) => string
 }) {
   return (
-    <div className="ov-subrows">
+    <div className="ov-subrows" style={{ marginTop: '0.875rem' }}>
       {chart.bars.map(bar => (
         <div className="ov-subrow" key={bar.stageId}>
           <span
