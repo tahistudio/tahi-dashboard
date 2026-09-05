@@ -52,8 +52,14 @@ function requestPhrase(
 ): { what: string; at: string } | null {
   const t = title.trim() || 'a request'
   switch (status) {
+    // 'delivered' is the TERMINAL state the client's own approval writes, not
+    // the state that asks for one. The phrase used to read "delivered X for
+    // your review", so the ticker asked a client to review work they had
+    // already signed off, one strip above a status chip that said "Delivered.
+    // Done." The one status that is genuinely with them is client_review, and
+    // it has its own phrase below.
     case 'delivered':
-      return { what: `delivered "${t}" for your review`, at: deliveredAt ?? updatedAt }
+      return { what: `delivered "${t}"`, at: deliveredAt ?? updatedAt }
     case 'client_review':
       return { what: `moved "${t}" to your review`, at: updatedAt }
     case 'in_progress':

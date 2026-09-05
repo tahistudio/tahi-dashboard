@@ -357,7 +357,11 @@ const CL_STEPS: FirstRunStep[] = [
   // dest carries the query so the step opens the New request DIALOG rather
   // than dropping a brand new client on an empty list.
   { key: 'firstRequestSubmitted', ic: 'request', t: 'Make your first request', d: 'Tell us what you need and we take it from there', time: '3 min', dest: 'requests?new=1' },
-  { key: 'billingSetUp', ic: 'receipt', t: 'Confirm billing', d: 'Check your plan and payment details', time: '1 min', dest: 'plan' },
+  // dest is 'invoices', not 'plan': 'plan' resolves to /billing, a page that is
+  // not in the client nav, so a client who followed this step had no way back.
+  // /invoices is in their nav (for an org admin) and is where they actually
+  // confirm what they are paying.
+  { key: 'billingSetUp', ic: 'receipt', t: 'Confirm billing', d: 'Check your plan and payment details', time: '1 min', dest: 'invoices' },
 ]
 const FIRSTRUN_DISMISS_KEY = 'tahi-ov-firstrun-dismissed'
 
@@ -458,6 +462,12 @@ function ClientFirstRun({ ctx }: { ctx: OverviewCtx }) {
         {CL_STEPS.map((s, i) => {
           const isDone = done[i]
           const isNext = i === nextIdx
+          // "Watch your welcome" had no video: the route has returned
+          // onboardingLoomUrl all along and nothing on this page ever read it,
+          // so the step could only be ticked, never watched. When the workspace
+          // has a Loom the step plays it; when it has not, the CTA says what it
+          // actually does instead of promising a start.
+          const stepVideo = s.key === 'welcomeVideoWatched' ? data.onboardingLoomUrl : null
           return (
             <div key={s.key} className={'ov-wstep' + (isDone ? ' done' : '') + (isNext ? ' next' : '')}>
               <button
@@ -482,10 +492,17 @@ function ClientFirstRun({ ctx }: { ctx: OverviewCtx }) {
                   onClick={() => {
                     if (ro) return
                     toggle(s.key, true)
+                    if (stepVideo) {
+                      const opened = window.open(stepVideo, '_blank')
+                      if (opened) opened.opener = null
+                      else window.location.href = stepVideo
+                      return
+                    }
                     if (s.dest) ctx.go(s.dest)
                   }}
                 >
-                  Start &middot; {s.time}
+                  {stepVideo ? 'Watch' : s.dest ? 'Start' : 'Mark done'}
+                  {stepVideo || s.dest ? <> &middot; {s.time}</> : null}
                 </button>
               ) : (
                 <span className="ws-time">{isDone ? 'Done' : s.time}</span>
