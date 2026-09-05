@@ -126,8 +126,9 @@ vi.mock('@/lib/db', () => ({
 }))
 
 import { GET, PATCH } from '@/app/api/admin/clients/[id]/route'
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth } from '@/lib/server-auth'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 const ctx = { params: Promise.resolve({ id: 'org-1' }) }
 
@@ -165,6 +166,7 @@ beforeEach(() => {
     orgId: 'org_tahi',
     sessionId: 'sess_1',
   })
+  vi.mocked(requireAccessToOrg).mockResolvedValue(null)
 })
 
 describe('GET /api/admin/clients/[id] invoicing facts', () => {
@@ -236,6 +238,17 @@ describe('PATCH /api/admin/clients/[id] invoicing facts', () => {
     expect(res.status).toBe(400)
     const body = await res.json() as { error: string }
     expect(body.error).toContain('paymentTerms')
+    expect(state.updates).toHaveLength(0)
+  })
+
+  it('answers 403, not 400, when the caller cannot reach this org', async () => {
+    // The authorisation verdict has to come before the payload verdict, or a
+    // scoped team member learns the vocabulary of a client they cannot see.
+    vi.mocked(requireAccessToOrg).mockResolvedValueOnce(
+      NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
+    )
+    const res = await PATCH(patchReq({ invoiceChannel: 'xero_bank' }), ctx)
+    expect(res.status).toBe(403)
     expect(state.updates).toHaveLength(0)
   })
 

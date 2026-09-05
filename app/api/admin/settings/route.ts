@@ -58,10 +58,17 @@ export async function PATCH(req: NextRequest) {
   }
 
   // The studio default channel is a closed vocabulary: storing anything else
-  // would silently resolve back to Stripe for every unset client.
-  if (body.key.trim() === INVOICE_CHANNEL_SETTING_KEY && !isInvoiceChannel(body.value)) {
+  // would silently resolve back to Stripe for every unset client. A null or
+  // empty value is the clear, not a bad value, and stays allowed: GET
+  // synthesises Stripe whenever the row is missing or does not hold a rail.
+  if (
+    body.key.trim() === INVOICE_CHANNEL_SETTING_KEY
+    && body.value != null
+    && body.value !== ''
+    && !isInvoiceChannel(body.value)
+  ) {
     return NextResponse.json({
-      error: `${INVOICE_CHANNEL_SETTING_KEY} must be one of ${INVOICE_CHANNELS.map(c => c.value).join(', ')}.`,
+      error: `${INVOICE_CHANNEL_SETTING_KEY} must be one of ${INVOICE_CHANNELS.map(c => c.value).join(', ')}, or empty to fall back to ${DEFAULT_INVOICE_CHANNEL}.`,
     }, { status: 400 })
   }
 

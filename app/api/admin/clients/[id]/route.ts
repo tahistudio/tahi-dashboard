@@ -284,26 +284,6 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     paymentTerms: string | null
   }>
 
-  // Two closed vocabularies. An unrecognised value would read as "unset" and
-  // silently bill the client on the studio default, so reject it loudly
-  // instead of writing it.
-  if ('invoiceChannel' in body) {
-    const value = body.invoiceChannel
-    if (value !== null && value !== '' && !isInvoiceChannel(value)) {
-      return NextResponse.json({
-        error: `invoiceChannel must be ${INVOICE_CHANNELS.map(c => c.value).join(' or ')}, or null to fall back to the studio default.`,
-      }, { status: 400 })
-    }
-  }
-  if ('paymentTerms' in body) {
-    const value = body.paymentTerms
-    if (value !== null && value !== '' && !isPaymentTerms(value)) {
-      return NextResponse.json({
-        error: `paymentTerms must be one of ${PAYMENT_TERMS.join(', ')}, or null to leave it unset.`,
-      }, { status: 400 })
-    }
-  }
-
   const now = new Date().toISOString()
   const patch: Record<string, unknown> = { updatedAt: now }
   const allowed = [
@@ -326,6 +306,28 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   // Access scoping
   const denied = await requireAccessToOrg(drizzle, userId, id)
   if (denied) return denied
+
+  // Two closed vocabularies, checked only once this caller is allowed to touch
+  // this org, so an unscoped team member still gets the 403 and never a 400
+  // about the payload. An unrecognised value would read as "unset" and
+  // silently bill the client on the studio default, so reject it loudly
+  // instead of writing it.
+  if ('invoiceChannel' in body) {
+    const value = body.invoiceChannel
+    if (value !== null && value !== '' && !isInvoiceChannel(value)) {
+      return NextResponse.json({
+        error: `invoiceChannel must be ${INVOICE_CHANNELS.map(c => c.value).join(' or ')}, or null to fall back to the studio default.`,
+      }, { status: 400 })
+    }
+  }
+  if ('paymentTerms' in body) {
+    const value = body.paymentTerms
+    if (value !== null && value !== '' && !isPaymentTerms(value)) {
+      return NextResponse.json({
+        error: `paymentTerms must be one of ${PAYMENT_TERMS.join(', ')}, or null to leave it unset.`,
+      }, { status: 400 })
+    }
+  }
 
   await drizzle
     .update(schema.organisations)

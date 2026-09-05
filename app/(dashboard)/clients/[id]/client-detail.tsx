@@ -1111,9 +1111,11 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
     preferredCurrency: org.preferredCurrency ?? 'NZD',
     retainerStartDate: org.retainerStartDate ?? '',
     retainerEndDate: org.retainerEndDate ?? '',
-    // '' is the "Studio default" option, which saves as NULL.
+    // '' is the "Studio default" / "Not set" option, which saves as NULL. Never
+    // seed a real value over a NULL: an untouched field must not decide the
+    // client's billing facts as a side effect of an unrelated edit.
     invoiceChannel: org.invoiceChannel ?? '',
-    paymentTerms: org.paymentTerms ?? 'card',
+    paymentTerms: org.paymentTerms ?? '',
   })
 
   const save = async () => {
@@ -1177,7 +1179,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
         ) : (
           <div className="flex gap-2">
             <button
-              onClick={() => { setEditing(false); setForm({ name: org.name, website: org.website ?? '', industry: org.industry ?? '', status: org.status, healthStatus: org.healthStatus ?? 'green', healthNote: org.healthNote ?? '', billingModel: org.billingModel ?? 'none', customMrr: org.customMrr ? String(org.customMrr) : '', customMrrCurrency: org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD', defaultHourlyRate: org.defaultHourlyRate ? String(org.defaultHourlyRate) : '', preferredCurrency: org.preferredCurrency ?? 'NZD', retainerStartDate: org.retainerStartDate ?? '', retainerEndDate: org.retainerEndDate ?? '', invoiceChannel: org.invoiceChannel ?? '', paymentTerms: org.paymentTerms ?? 'card' }) }}
+              onClick={() => { setEditing(false); setForm({ name: org.name, website: org.website ?? '', industry: org.industry ?? '', status: org.status, healthStatus: org.healthStatus ?? 'green', healthNote: org.healthNote ?? '', billingModel: org.billingModel ?? 'none', customMrr: org.customMrr ? String(org.customMrr) : '', customMrrCurrency: org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD', defaultHourlyRate: org.defaultHourlyRate ? String(org.defaultHourlyRate) : '', preferredCurrency: org.preferredCurrency ?? 'NZD', retainerStartDate: org.retainerStartDate ?? '', retainerEndDate: org.retainerEndDate ?? '', invoiceChannel: org.invoiceChannel ?? '', paymentTerms: org.paymentTerms ?? '' }) }}
               className="flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
             >
               <X className="w-3.5 h-3.5" /> Cancel
@@ -1299,8 +1301,12 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
               onChange={e => setForm(f => ({ ...f, paymentTerms: e.target.value }))}
               className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
             >
+              <option value="">Not set</option>
               {PAYMENT_TERMS.map(t => <option key={t} value={t}>{paymentTermsLabel(t)}</option>)}
             </select>
+            <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
+              Net terms also let an invoiced client finish onboarding without a card.
+            </p>
           </div>
           {(form.billingModel === 'retainer' || form.billingModel === 'none') && (
             <div>
@@ -1437,7 +1443,12 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
           </div>
           <div>
             <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Payment terms</dt>
-            <dd className="text-[var(--color-text)]">{paymentTermsLabel(org.paymentTerms)}</dd>
+            <dd className="text-[var(--color-text)]">
+              {paymentTermsLabel(org.paymentTerms)}
+              {!org.paymentTerms && (
+                <span className="ml-1.5 text-xs text-[var(--color-text-subtle)]">(not set)</span>
+              )}
+            </dd>
           </div>
           {org.billingModel === 'retainer' || org.customMrr ? (
             <div>
