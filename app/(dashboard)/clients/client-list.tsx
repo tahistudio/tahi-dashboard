@@ -186,12 +186,16 @@ export function ClientList() {
 
   // -- Data -----------------------------------------------------------------
 
-  // Archived rows only come back when they are asked for. `archived` is the
-  // one-bucket read for the Archived view; `both` is every other view, which
-  // still pulls the archived bucket so the rail's Archived count is a real
-  // number rather than a zero that happens to be off screen.
+  // GET /api/admin/clients hides archived rows unless it is asked for them, so
+  // both buckets are always read and the rail decides which views may see
+  // which. Fetching only the bucket on screen would make the rail lie in both
+  // directions: Archived would read zero from the live views, and All clients
+  // would read zero while standing in Archived.
+  //
+  // `page` follows whichever bucket the reader is actually paging through; the
+  // other one is only there to be counted, so it stays on its first page.
   const archivedOnly = showsArchived(savedView, filters)
-  const mode = archivedOnly ? 'archived' : 'both'
+  const mode = archivedOnly ? 'archived' : 'live'
 
   const {
     data,
@@ -202,32 +206,33 @@ export function ClientList() {
     `admin/clients?search=${urlSearch}&mode=${mode}&page=${page}`,
     async () => {
       const live = new URLSearchParams()
-      if (urlSearch) live.set('search', urlSearch)
-      live.set('page', String(page))
-
-      if (archivedOnly) {
-        live.set('status', 'archived')
-        const res = await fetch(apiPath(`/api/admin/clients?${live}`))
-        if (!res.ok) throw new Error('Failed to load clients')
-        const rows = ((await res.json()) as { organisations?: ClientApiRow[] }).organisations ?? []
-        return { rows, pageFull: rows.length >= PAGE_SIZE }
-      }
-
       const archived = new URLSearchParams()
-      if (urlSearch) archived.set('search', urlSearch)
+      if (urlSearch) {
+        live.set('search', urlSearch)
+        archived.set('search', urlSearch)
+      }
       archived.set('status', 'archived')
+      live.set('page', String(archivedOnly ? 1 : page))
+      archived.set('page', String(archivedOnly ? page : 1))
+
       const [liveRes, archivedRes] = await Promise.all([
         fetch(apiPath(`/api/admin/clients?${live}`)),
         fetch(apiPath(`/api/admin/clients?${archived}`)),
       ])
-      if (!liveRes.ok) throw new Error('Failed to load clients')
-      const liveRows = ((await liveRes.json()) as { organisations?: ClientApiRow[] }).organisations ?? []
-      // The archived bucket is a nice-to-have: it feeds one rail count, so a
-      // failure there must not take the whole list down.
+
+      // The bucket being read is the one that has to succeed. The other only
+      // feeds a rail count, so a failure there must not take the list down.
+      const readRes = archivedOnly ? archivedRes : liveRes
+      if (!readRes.ok) throw new Error('Failed to load clients')
+
+      const liveRows = liveRes.ok
+        ? ((await liveRes.json()) as { organisations?: ClientApiRow[] }).organisations ?? []
+        : []
       const archivedRows = archivedRes.ok
         ? ((await archivedRes.json()) as { organisations?: ClientApiRow[] }).organisations ?? []
         : []
-      return { rows: [...liveRows, ...archivedRows], pageFull: liveRows.length >= PAGE_SIZE }
+      const read = archivedOnly ? archivedRows : liveRows
+      return { rows: [...liveRows, ...archivedRows], pageFull: read.length >= PAGE_SIZE }
     },
     { keepPreviousData: true },
   )
@@ -538,11 +543,12 @@ export function ClientList() {
     return actions
   }, [archivedOnly, bulkStatus, selectedRows.length])
 
-  const exportSelected = React.useCallback(() => {
-    const rowsToExport = selectedRows.length > 0 ? selectedRows : visible
-    downloadCsv(`tahi-clients-${new Date().toISOString().slice(0, 10)}.csv`, clientsToCsv(rowsToExport, canSeeMoney))
-    showToast(`${rowsToExport.length} ${rowsToExport.length === 1 ? 'client' : 'clients'} exported`, 'success')
-  }, [selectedRows, visible, canSeeMoney, showToast])
+  /** The header export takes the whole view. The bulk bar takes the
+   *  selection. Neither pretends to export what is behind the page. */
+  const exportView = React.useCallback(() => {
+    downloadCsv(`tahi-clients-${new Date().toISOString().slice(0, 10)}.csv`, clientsToCsv(visible, canSeeMoney))
+    showToast(`${visible.length} ${visible.length === 1 ? 'client' : 'clients'} exported`, 'success')
+  }, [visible, canSeeMoney, showToast])
 
   // -- Columns --------------------------------------------------------------
 
@@ -672,9 +678,15 @@ export function ClientList() {
 
   // -- Render ---------------------------------------------------------------
 
-  const filtersActive = anyClientFilterActive(filters) || !!savedView || query.trim().length > 0
+  const filtersActive = anyClientFilterActive(filters)
+    || !!savedView
+    || query.trim().length > 0
+    || urlSearch.length > 0
   const firstLoad = isLoading && !data
-  const nothingAtAll = !firstLoad && !error && scopedRows.length === 0
+  // "No clients yet" is only true when nothing is narrowing the list. With a
+  // search or a filter on, an empty result is a miss, and offering "Add the
+  // first client" would be answering a question nobody asked.
+  const nothingAtAll = !firstLoad && !error && scopedRows.length === 0 && !filtersActive
 
   const emptyState = (
     <EmptyState
@@ -689,9 +701,9 @@ export function ClientList() {
         : 'Try clearing a filter, a saved view, or the search.'}
       action={nothingAtAll
         ? (!writeDisabled && !isImpersonatingTeamMember
-          ? <TahiButton size="sm" onClick={openPanel} iconLeft={<Plus className="w-3.5 h-3.5" />}>Add the first client</TahiButton>
+          ? <TahiButton size="sm" style={{ minHeight: '2.75rem' }} onClick={openPanel} iconLeft={<Plus className="w-3.5 h-3.5" />}>Add the first client</TahiButton>
           : undefined)
-        : <TahiButton size="sm" variant="secondary" onClick={clearAll}>Clear filters</TahiButton>}
+        : <TahiButton size="sm" style={{ minHeight: '2.75rem' }} variant="secondary" onClick={clearAll}>Clear filters</TahiButton>}
     />
   )
 
@@ -711,7 +723,7 @@ export function ClientList() {
             icon={<Users className="w-6 h-6" />}
             title="The client list did not load"
             description="The request to the clients endpoint failed. Nothing has changed on your side."
-            action={<TahiButton size="sm" onClick={() => { void mutateClients() }}>Try again</TahiButton>}
+            action={<TahiButton size="sm" style={{ minHeight: '2.75rem' }} onClick={() => { void mutateClients() }}>Try again</TahiButton>}
           />
         </Card>
       )
@@ -772,7 +784,12 @@ export function ClientList() {
       <PageHeader title="Clients" subtitle={subtitle}>
         <div className="flex items-center" style={{ gap: '0.5rem' }}>
           {!writeDisabled && (
-            <TahiButton iconLeft={<Plus className="w-4 h-4" />} onClick={openPanel} size="md">
+            <TahiButton
+              iconLeft={<Plus className="w-4 h-4" />}
+              onClick={openPanel}
+              size="md"
+              style={{ minHeight: '2.75rem' }}
+            >
               New client
             </TahiButton>
           )}
@@ -796,7 +813,7 @@ export function ClientList() {
               </button>
             }
           >
-            <Menu.Item icon={<Download size={14} />} onClick={exportSelected}>
+            <Menu.Item icon={<Download size={14} />} onClick={exportView}>
               Export this view as CSV
             </Menu.Item>
           </Menu>
@@ -821,7 +838,7 @@ export function ClientList() {
         saveDefaultTouch={<SaveDefaultControl isDefault={rail.isDefault} onSave={rail.saveDefault} touch />}
       >
         <div id={CLIENTS_VIEW_PANEL_ID} role="tabpanel" className="flex flex-col" style={{ gap: '0.75rem' }}>
-          {selected.size > 0 && !writeDisabled && (
+          {selected.size > 0 && (
             <BulkActionBar
               selectedCount={selected.size}
               itemNoun="client"
@@ -838,7 +855,7 @@ export function ClientList() {
                 },
                 verb: 'exported',
               }}
-              actions={bulkActions}
+              actions={writeDisabled ? [] : bulkActions}
               onClear={clearSelection}
             />
           )}

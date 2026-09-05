@@ -182,11 +182,17 @@ export function NewClientPanel({
             />
           </Field>
 
+          {/* A rule, not a one-sided border: the house rule is borders on
+              every side or none, and this is a separator between two halves
+              of one form. */}
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            style={{ height: '1px', marginTop: '0.25rem', background: 'var(--color-border-subtle)' }}
+          />
+
           <div
             style={{
-              marginTop: '0.25rem',
-              paddingTop: '0.875rem',
-              borderTop: '1px solid var(--color-border-subtle)',
               display: 'flex',
               flexDirection: 'column',
               gap: '0.625rem',
@@ -242,7 +248,7 @@ export function NewClientPanel({
       </SlideOver.Body>
 
       <SlideOver.Footer>
-        <TahiButton variant="secondary" size="sm" onClick={onClose} disabled={saving}>
+        <TahiButton variant="secondary" size="sm" style={{ minHeight: '2.75rem' }} onClick={onClose} disabled={saving}>
           Cancel
         </TahiButton>
         <span style={{ flex: 1, fontSize: '0.6875rem', color: 'var(--color-text-subtle)', paddingLeft: '0.75rem' }}>
@@ -252,6 +258,7 @@ export function NewClientPanel({
         </span>
         <TahiButton
           size="sm"
+          style={{ minHeight: '2.75rem' }}
           onClick={onSubmit}
           disabled={saving || !canSubmit}
           iconLeft={saving
