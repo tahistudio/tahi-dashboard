@@ -200,41 +200,17 @@ async function resolveTimer(
 // last non-deleted message was authored by a client contact - i.e. awaiting the
 // member's reply. Mirrors the item builder in ../replies-waiting/route.ts; kept
 // count-only here to stay within this route's owned file.
+//
+// Mirrors it exactly, including the two rules that earn the claim: the request
+// block matches on request_id ALONE (a studio reply carries a conversation id,
+// so filtering those out left every answered thread counted as waiting), and a
+// conversation is counted as the request it is attached to, once.
 async function countRepliesWaiting(drizzle: D1, memberId: string): Promise<number> {
   const cutoff = since(60)
   let count = 0
-
-  // Conversations the member participates in.
-  const convRows = await drizzle
-    .select({ conversationId: schema.conversationParticipants.conversationId })
-    .from(schema.conversationParticipants)
-    .where(and(
-      eq(schema.conversationParticipants.participantId, memberId),
-      eq(schema.conversationParticipants.participantType, 'team_member'),
-    ))
-  const convIds = [...new Set(convRows.map(c => c.conversationId))]
-  if (convIds.length > 0) {
-    const msgs = await drizzle
-      .select({
-        conversationId: schema.messages.conversationId,
-        authorType: schema.messages.authorType,
-        createdAt: schema.messages.createdAt,
-      })
-      .from(schema.messages)
-      .where(and(
-        inArray(schema.messages.conversationId, convIds),
-        isNull(schema.messages.deletedAt),
-        gte(schema.messages.createdAt, cutoff),
-      ))
-      .orderBy(desc(schema.messages.createdAt))
-    const seen = new Set<string>()
-    for (const m of msgs) {
-      const key = m.conversationId
-      if (!key || seen.has(key)) continue
-      seen.add(key)
-      if (m.authorType === 'contact') count++
-    }
-  }
+  // Requests already settled by the block below, so a reply that reaches this
+  // member through both the request and its conversation counts once.
+  const counted = new Set<string>()
 
   // Request threads the member owns or participates on.
   const reqIds = new Set<string>()
@@ -264,7 +240,6 @@ async function countRepliesWaiting(drizzle: D1, memberId: string): Promise<numbe
       .from(schema.messages)
       .where(and(
         inArray(schema.messages.requestId, reqIdList),
-        isNull(schema.messages.conversationId),
         isNull(schema.messages.deletedAt),
         gte(schema.messages.createdAt, cutoff),
       ))
@@ -274,9 +249,53 @@ async function countRepliesWaiting(drizzle: D1, memberId: string): Promise<numbe
       const key = m.requestId
       if (!key || seen.has(key)) continue
       seen.add(key)
+      counted.add(key)
       if (m.authorType === 'contact') count++
     }
   }
+
+  // Conversations the member participates in.
+  const convRows = await drizzle
+    .select({ conversationId: schema.conversationParticipants.conversationId })
+    .from(schema.conversationParticipants)
+    .where(and(
+      eq(schema.conversationParticipants.participantId, memberId),
+      eq(schema.conversationParticipants.participantType, 'team_member'),
+    ))
+  const convIds = [...new Set(convRows.map(c => c.conversationId))]
+  if (convIds.length > 0) {
+    const msgs = await drizzle
+      .select({
+        conversationId: schema.messages.conversationId,
+        convRequestId: schema.conversations.requestId,
+        authorType: schema.messages.authorType,
+        createdAt: schema.messages.createdAt,
+      })
+      .from(schema.messages)
+      .innerJoin(schema.conversations, eq(schema.messages.conversationId, schema.conversations.id))
+      .where(and(
+        inArray(schema.messages.conversationId, convIds),
+        isNull(schema.messages.deletedAt),
+        gte(schema.messages.createdAt, cutoff),
+      ))
+      .orderBy(desc(schema.messages.createdAt))
+    const seen = new Set<string>()
+    for (const m of msgs) {
+      const key = m.conversationId
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      if (m.authorType !== 'contact') continue
+      // Same rule the card uses: a conversation counts as its REQUEST, and
+      // only when the request block above did not already settle it. Without
+      // this the tile counted one waiting reply twice and disagreed with the
+      // card sitting under it on the same page.
+      const target = m.convRequestId
+      if (!target || counted.has(target)) continue
+      counted.add(target)
+      count++
+    }
+  }
+
 
   return count
 }
