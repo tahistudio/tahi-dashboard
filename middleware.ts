@@ -216,8 +216,11 @@ export default clerkMiddleware(async (auth, req) => {
     return NextResponse.redirect(url)
   }
 
-  // Admin hitting a client-only route → send to /requests
-  if (isClientOnlyRoute(req) && isAdmin) {
+  // Admin hitting a client-only route → send to /requests, unless they are
+  // previewing the portal as a client (the impersonation cookie names the org
+  // the portal routes answer for), in which case the client page renders.
+  const previewingClient = Boolean(req.cookies.get('tahi-impersonate-org')?.value)
+  if (isClientOnlyRoute(req) && isAdmin && !previewingClient) {
     const url = req.nextUrl.clone()
     url.pathname = '/requests'
     return NextResponse.redirect(url)
