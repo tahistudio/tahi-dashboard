@@ -6,6 +6,10 @@
  * (counts assigneeId) never moved. The route now also patches
  * requests.assigneeId for the assignee role. These tests assert that patch
  * lands for assignee, and does NOT fire for pm/follower.
+ *
+ * Second concern, same route: the bar handed work over and told nobody. The
+ * notification tests below pin the fan-out, including the one-entry-per-person
+ * rule that keeps a forty row assign from being forty bell rows.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -28,13 +32,27 @@ vi.mock('@/lib/require-access', () => ({
 
 vi.mock('@/db/d1', () => ({
   schema: {
-    requests: { _table: 'requests', id: 1, orgId: 1, assigneeId: 1, updatedAt: 1 },
+    requests: {
+      _table: 'requests',
+      id: 1, orgId: 1, assigneeId: 1, updatedAt: 1, title: 1, requestNumber: 1,
+    },
     requestParticipants: {
       _table: 'requestParticipants',
       id: 1, requestId: 1, participantId: 1, participantType: 1, role: 1, removedAt: 1,
     },
+    teamMembers: { _table: 'teamMembers', id: 1, clerkUserId: 1 },
   },
 }))
+
+// The bell sink is mocked; the copy helper next to it stays real so the
+// assertions below pin the words the route actually sends.
+vi.mock('@/lib/notifications', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/notifications')>()
+  return {
+    ...actual,
+    notifyTeamMember: vi.fn().mockResolvedValue({ delivered: 1, skipped: 0 }),
+  }
+})
 
 vi.mock('drizzle-orm', () => ({
   and: (...a: unknown[]) => ({ op: 'and', a }),
@@ -70,6 +88,15 @@ vi.mock('@/lib/db', () => {
 
 import { POST } from '@/app/api/admin/requests/bulk-assign/route'
 import { NextRequest } from 'next/server'
+import { notifyTeamMember } from '@/lib/notifications'
+
+interface BellPayload { title: string; body?: string | null; entityId?: string | null }
+function bellCalls(): Array<{ memberId: string; payload: BellPayload }> {
+  return vi.mocked(notifyTeamMember).mock.calls.map(([, memberId, payload]) => ({
+    memberId: memberId as string,
+    payload: payload as unknown as BellPayload,
+  }))
+}
 
 function makePost(body: Record<string, unknown>): NextRequest {
   return new NextRequest('http://localhost:3000/api/admin/requests/bulk-assign', {
@@ -82,7 +109,7 @@ function makePost(body: Record<string, unknown>): NextRequest {
 describe('POST /api/admin/requests/bulk-assign', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    state.requestRows = [{ id: 'req1', orgId: 'org_c' }]
+    state.requestRows = [{ id: 'req1', orgId: 'org_c', title: 'New homepage', requestNumber: 4 }]
     state.updates = []
     state.inserts = 0
     process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
@@ -109,5 +136,56 @@ describe('POST /api/admin/requests/bulk-assign', () => {
     }))
     expect(res.status).toBe(200)
     expect(state.updates.filter(u => u.table === 'requests')).toHaveLength(0)
+  })
+})
+
+describe('POST /api/admin/requests/bulk-assign, telling the people', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    state.requestRows = [{ id: 'req1', orgId: 'org_c', title: 'New homepage', requestNumber: 4 }]
+    state.updates = []
+    state.inserts = 0
+    process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
+  })
+
+  it('names the request when one row was assigned', async () => {
+    await POST(makePost({
+      requestIds: ['req1'],
+      participants: [{ participantId: 'tm1', participantType: 'team_member', role: 'assignee' }],
+    }))
+
+    const calls = bellCalls()
+    expect(calls).toHaveLength(1)
+    expect(calls[0].memberId).toBe('tm1')
+    expect(calls[0].payload.title).toBe('Request assigned to you: "New homepage"')
+    expect(calls[0].payload.body).toBe('REQ-4')
+    expect(calls[0].payload.entityId).toBe('req1')
+  })
+
+  it('collapses a multi row assign into one entry per person', async () => {
+    state.requestRows = [
+      { id: 'req1', orgId: 'org_c', title: 'New homepage', requestNumber: 4 },
+      { id: 'req2', orgId: 'org_c', title: 'Pricing page', requestNumber: 5 },
+      { id: 'req3', orgId: 'org_c', title: 'Blog index', requestNumber: 6 },
+    ]
+
+    await POST(makePost({
+      requestIds: ['req1', 'req2', 'req3'],
+      participants: [{ participantId: 'tm1', participantType: 'team_member', role: 'follower' }],
+    }))
+
+    const calls = bellCalls()
+    expect(calls).toHaveLength(1)
+    expect(calls[0].payload.title).toBe('You were added to 3 requests')
+    // A list rather than a deep link, because there is no single row to open.
+    expect(calls[0].payload.entityId).toBeNull()
+  })
+
+  it('never tells a contact about studio staffing', async () => {
+    await POST(makePost({
+      requestIds: ['req1'],
+      participants: [{ participantId: 'ct1', participantType: 'contact', role: 'follower' }],
+    }))
+    expect(bellCalls()).toHaveLength(0)
   })
 })

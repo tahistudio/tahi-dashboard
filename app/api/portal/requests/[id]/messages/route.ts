@@ -4,7 +4,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
-import { notifyRequestTeam } from '@/lib/notify-request-team'
+import { notifyRequestTeam, resolveRequestTeamMemberIds } from '@/lib/notify-request-team'
+import {
+  allStudioEmailTargets,
+  dispatchNotificationEmails,
+  messageSummary,
+  resolveEmailTargets,
+  threadReplyEmailPlan,
+  toPlainText,
+  truncate,
+} from '@/lib/notification-email'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
 type Params = { params: Promise<{ id: string }> }
@@ -48,9 +57,17 @@ export async function POST(req: NextRequest, { params }: Params) {
     const database = await db()
     const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-    // Verify this request belongs to the client's org
+    // Verify this request belongs to the client's org. The same read carries
+    // the title, assignee and per-org number the studio notification and its
+    // subject prefix need.
     const [request] = await drizzle
-      .select({ id: schema.requests.id, orgId: schema.requests.orgId })
+      .select({
+        id: schema.requests.id,
+        orgId: schema.requests.orgId,
+        title: schema.requests.title,
+        requestNumber: schema.requests.requestNumber,
+        assigneeId: schema.requests.assigneeId,
+      })
       .from(schema.requests)
       .where(and(
         eq(schema.requests.id, id),
@@ -63,9 +80,9 @@ export async function POST(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
 
-    // Look up contact record by Clerk user ID
+    // Look up contact record by Clerk user ID. The name signs the email.
     const [contact] = await drizzle
-      .select({ id: schema.contacts.id })
+      .select({ id: schema.contacts.id, name: schema.contacts.name })
       .from(schema.contacts)
       .where(eq(schema.contacts.clerkUserId, userId))
       .limit(1)
@@ -89,22 +106,46 @@ export async function POST(req: NextRequest, { params }: Params) {
     // Tell the studio. Fan out to the assignee, every team participant and the
     // client's PM, falling back to the whole team when the request has not been
     // triaged yet (which is exactly when a first message tends to arrive).
-    const [reqInfo] = await drizzle
-      .select({ assigneeId: schema.requests.assigneeId, title: schema.requests.title })
-      .from(schema.requests)
-      .where(eq(schema.requests.id, id))
-      .limit(1)
+    const target = { requestId: id, orgId, assigneeId: request.assigneeId ?? null }
 
-    await notifyRequestTeam(
+    await notifyRequestTeam(drizzle, target, {
+      type: 'new_message',
+      title: `New client message on "${request.title}"`,
+      body: messageSummary(safeBody),
+      entityType: 'request',
+      entityId: id,
+    })
+
+    // And put it in their inbox. A two person studio works out of email, so a
+    // client question that only lit a bell nobody had open is a question that
+    // waits a day.
+    //
+    // The audience comes from the same resolver notifyRequestTeam uses, so the
+    // two channels cannot drift. It is dispatched separately only because
+    // RequestTeamPayload has no email slot; the studio-wide fallback is the
+    // same one, for the same reason (an untriaged request still has to reach a
+    // human).
+    //
+    // The quote is the client's own message, which is external by construction
+    // on this route: an internal note can never be reached from here.
+    const memberIds = await resolveRequestTeamMemberIds(drizzle, target)
+    const specific = memberIds.length > 0
+      ? await resolveEmailTargets(drizzle, memberIds.map((teamMemberId) => ({ teamMemberId })))
+      : []
+    const studio = specific.length > 0 ? specific : await allStudioEmailTargets(drizzle)
+
+    await dispatchNotificationEmails(
       drizzle,
-      { requestId: id, orgId, assigneeId: reqInfo?.assigneeId ?? null },
-      {
-        type: 'new_message',
-        title: `New client message on "${reqInfo?.title ?? 'your request'}"`,
-        body: safeBody.slice(0, 200),
-        entityType: 'request',
-        entityId: id,
-      },
+      studio,
+      'new_message',
+      threadReplyEmailPlan({
+        audience: 'studio',
+        requestId: id,
+        requestTitle: request.title,
+        requestNumber: request.requestNumber,
+        fromName: contact?.name?.trim() || 'A client',
+        message: truncate(toPlainText(safeBody), 900),
+      }),
     )
 
     return NextResponse.json({ id: msgId }, { status: 201 })

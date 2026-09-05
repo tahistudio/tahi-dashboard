@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, asc, inArray } from 'drizzle-orm'
 import { notifyMentionedPerson, notifyOrgContacts, notifyTeamMember } from '@/lib/notifications'
+import { messageSummary, threadReplyEmailPlan, toPlainText, truncate } from '@/lib/notification-email'
 import { parseMentions } from '@/lib/parse-mentions'
 import { requireAccessToOrg } from '@/lib/require-access'
 
@@ -117,9 +118,19 @@ export async function POST(req: NextRequest, { params }: Params) {
     const database = await db()
     const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-    // Find the request to get orgId for message
+    // Find the request to get orgId for message. The same read carries what
+    // the client-facing notification and email need: the title, the per-org
+    // number for the subject prefix, and whether this request is Tahi-internal
+    // (a non-internal message on an internal request must still never reach
+    // the client, who cannot even see the row).
     const [request] = await drizzle
-      .select({ orgId: schema.requests.orgId })
+      .select({
+        orgId: schema.requests.orgId,
+        title: schema.requests.title,
+        requestNumber: schema.requests.requestNumber,
+        isInternal: schema.requests.isInternal,
+        assigneeId: schema.requests.assigneeId,
+      })
       .from(schema.requests)
       .where(eq(schema.requests.id, id))
       .limit(1)
@@ -134,9 +145,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     const denied = await requireAccessToOrg(drizzle, userId, request.orgId)
     if (denied) return denied
 
-    // Look up team member ID by Clerk user ID
+    // Look up team member ID by Clerk user ID. The name signs the email: a
+    // client should hear from a person, not from "the team".
     const [member] = await drizzle
-      .select({ id: schema.teamMembers.id })
+      .select({ id: schema.teamMembers.id, name: schema.teamMembers.name })
       .from(schema.teamMembers)
       .where(eq(schema.teamMembers.clerkUserId, userId ?? ''))
       .limit(1)
@@ -209,31 +221,44 @@ export async function POST(req: NextRequest, { params }: Params) {
       }
     }
 
-    // Notify client contacts about the new message (unless internal-only).
-    // notifyOrgContacts keys rows on each contact's Clerk user id (the id the
-    // bell queries) and skips contacts without a linked login.
-    if (!body.isInternal) {
+    // The composer posts rich text; a bell body and an email quote are both
+    // plain text, so strip once here rather than shipping tag soup into either.
+    const plainBody = toPlainText(body.body ?? '')
+
+    // Notify client contacts about the new message, and email them.
+    //
+    // Two gates, both load bearing. An internal note is a studio aside and
+    // never leaves the building. A Tahi-internal REQUEST is invisible to the
+    // portal, so even a normal message on it must not surface: the bell entry
+    // would carry an internal title and deep-link to a 404.
+    //
+    // Only ever quotes the message that was just posted, which this branch has
+    // already established is not internal.
+    if (!body.isInternal && !request.isInternal) {
+      const fromName = member?.name?.trim() || 'The Tahi team'
       await notifyOrgContacts(drizzle, request.orgId, {
         type: 'new_message',
         title: 'New message on your request',
-        body: (body.body ?? '').trim().slice(0, 200),
+        body: messageSummary(body.body ?? ''),
         entityType: 'request',
         entityId: id,
+        email: threadReplyEmailPlan({
+          audience: 'client',
+          requestId: id,
+          requestTitle: request.title,
+          requestNumber: request.requestNumber,
+          fromName,
+          message: truncate(plainBody, 900),
+        }),
       })
     }
 
     // Notify request assignee about the new message (if sender is not the assignee)
-    const [reqInfo] = await drizzle
-      .select({ assigneeId: schema.requests.assigneeId, title: schema.requests.title })
-      .from(schema.requests)
-      .where(eq(schema.requests.id, id))
-      .limit(1)
-
-    if (reqInfo?.assigneeId && reqInfo.assigneeId !== (member?.id ?? userId)) {
-      await notifyTeamMember(drizzle, reqInfo.assigneeId, {
+    if (request.assigneeId && request.assigneeId !== (member?.id ?? userId)) {
+      await notifyTeamMember(drizzle, request.assigneeId, {
         type: 'new_message',
-        title: `New message on "${reqInfo.title}"`,
-        body: (body.body ?? '').trim().slice(0, 200),
+        title: `New message on "${request.title}"`,
+        body: messageSummary(body.body ?? ''),
         entityType: 'request',
         entityId: id,
       })

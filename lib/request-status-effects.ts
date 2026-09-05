@@ -18,6 +18,7 @@
  */
 
 import { notifyOrgContacts, notifyTeamMember } from '@/lib/notifications'
+import { clientStatusEmailPlan, loadRequestNumber } from '@/lib/notification-email'
 import { dispatchDomainEvent } from '@/lib/events'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -50,6 +51,45 @@ export interface RequestStatusSubject {
 const CLIENT_SILENT_STATUSES: readonly string[] = ['archived']
 
 /**
+ * The only two moves that earn a place in a client's inbox.
+ *
+ * Both are a hand-off: the work is finished and the next action is theirs.
+ * in_review and in_progress are studio housekeeping, and mailing those is how
+ * a client learns to filter us, which costs us the two that matter. They still
+ * produce a bell row, which is the right weight for "we picked it up".
+ */
+const CLIENT_EMAIL_STATUSES = ['client_review', 'delivered'] as const
+type ClientEmailStatus = (typeof CLIENT_EMAIL_STATUSES)[number]
+
+export function isClientEmailStatus(status: string): status is ClientEmailStatus {
+  return (CLIENT_EMAIL_STATUSES as readonly string[]).includes(status)
+}
+
+/**
+ * What the client is told, in their own terms. "Request X status changed to
+ * client review" is a column name read aloud; these are the two sentences that
+ * say what they have to do about it.
+ */
+function clientStatusCopy(title: string, status: string): { title: string; body: string } {
+  if (status === 'client_review') {
+    return {
+      title: 'Your request is ready for your review',
+      body: `"${title}" is finished and waiting on your approval.`,
+    }
+  }
+  if (status === 'delivered') {
+    return {
+      title: 'Your request has been delivered',
+      body: `"${title}" is done and ready to view.`,
+    }
+  }
+  return {
+    title: `Your request "${title}" moved to ${status.replace(/_/g, ' ')}`,
+    body: 'We will let you know as soon as there is something for you to look at.',
+  }
+}
+
+/**
  * Notify + emit for one request whose status just changed.
  *
  * @param status the status now stored on the row (for a bulk archive that is
@@ -61,25 +101,45 @@ export async function emitRequestStatusChanged(
   status: string,
 ): Promise<void> {
   const statusLabel = status.replace(/_/g, ' ')
-  const payload = {
-    type: 'request_status_changed' as const,
-    title: `Request "${request.title}" status changed to ${statusLabel}`,
-    body: `Status is now "${statusLabel}"`,
-    entityType: 'request' as const,
-    entityId: request.id,
-  }
 
   // Notify the assignee (if one exists). assigneeId is a teamMembers.id;
   // notifyTeamMember resolves it to the Clerk user id the bell queries.
+  // Studio wording: the team reads status names all day, the client does not.
   if (request.assigneeId) {
-    await notifyTeamMember(database, request.assigneeId, payload)
+    await notifyTeamMember(database, request.assigneeId, {
+      type: 'request_status_changed',
+      title: `Request "${request.title}" status changed to ${statusLabel}`,
+      body: `Status is now "${statusLabel}"`,
+      entityType: 'request',
+      entityId: request.id,
+    })
   }
 
-  // Notify contacts at the client org (skips those without a linked login),
-  // unless the request is Tahi-internal or the move is housekeeping the
-  // client has no stake in.
+  // Notify contacts at the client org (bell rows skip those without a linked
+  // login, email does not), unless the request is Tahi-internal or the move is
+  // housekeeping the client has no stake in.
   if (!request.isInternal && !CLIENT_SILENT_STATUSES.includes(status)) {
-    await notifyOrgContacts(database, request.orgId, payload)
+    const copy = clientStatusCopy(request.title, status)
+    // The subject prefix is looked up here rather than passed in so both PATCH
+    // paths get it without either call site having to remember. Only paid for
+    // on the two statuses that actually send.
+    const email = isClientEmailStatus(status)
+      ? clientStatusEmailPlan({
+          status,
+          requestId: request.id,
+          requestTitle: request.title,
+          requestNumber: await loadRequestNumber(database, request.id),
+        })
+      : undefined
+
+    await notifyOrgContacts(database, request.orgId, {
+      type: 'request_status_changed',
+      title: copy.title,
+      body: copy.body,
+      entityType: 'request',
+      entityId: request.id,
+      email,
+    })
   }
 
   // Fire the domain event (automations + outgoing webhooks). Non-blocking.

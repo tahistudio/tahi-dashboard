@@ -22,6 +22,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, isNull, desc, inArray as inList } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { notifyTeamMember, requestParticipantTitle } from '@/lib/notifications'
 
 type Params = { params: Promise<{ id: string }> }
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -110,7 +111,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   const drizzle = database as Drizzle
 
   const [request] = await drizzle
-    .select({ orgId: schema.requests.orgId })
+    .select({
+      orgId: schema.requests.orgId,
+      title: schema.requests.title,
+      requestNumber: schema.requests.requestNumber,
+    })
     .from(schema.requests)
     .where(eq(schema.requests.id, id))
     .limit(1)
@@ -156,6 +161,28 @@ export async function POST(req: NextRequest, { params }: Params) {
     removedAt: null,
   }
   await drizzle.insert(schema.requestParticipants).values(newRow)
+
+  // Tell the person. Team members only: a contact added as a follower is the
+  // client's own person, and the client channel is the request thread, not a
+  // bell row about studio staffing. Never pings you for adding yourself, and
+  // never fires on the de-dupe path above, which added nothing.
+  if (body.participantType === 'team_member') {
+    const [actor] = await drizzle
+      .select({ id: schema.teamMembers.id })
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.clerkUserId, userId ?? ''))
+      .limit(1)
+
+    if (body.participantId !== actor?.id) {
+      await notifyTeamMember(drizzle, body.participantId, {
+        type: 'task_assigned',
+        title: requestParticipantTitle(body.role, request.title),
+        body: request.requestNumber ? `REQ-${request.requestNumber}` : null,
+        entityType: 'request',
+        entityId: id,
+      })
+    }
+  }
 
   return NextResponse.json({ participant: newRow }, { status: 201 })
 }

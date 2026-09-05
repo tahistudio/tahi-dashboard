@@ -9,6 +9,7 @@ import { requireAccessToOrg } from '@/lib/require-access'
 // probe, and used to land in the row verbatim.
 import { isPatchableStatus, isRequestPriority } from '@/lib/request-vocabulary'
 import { emitRequestStatusChanged } from '@/lib/request-status-effects'
+import { notifyTeamMember } from '@/lib/notifications'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -253,9 +254,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // Access scoping
+  // Access scoping. The same read carries the before-state the assignment
+  // notification needs, so handing a request over costs no extra query.
   const [ownerRow] = await drizzle
-    .select({ orgId: schema.requests.orgId })
+    .select({
+      orgId: schema.requests.orgId,
+      title: schema.requests.title,
+      assigneeId: schema.requests.assigneeId,
+      requestNumber: schema.requests.requestNumber,
+    })
     .from(schema.requests)
     .where(eq(schema.requests.id, id))
     .limit(1)
@@ -266,6 +273,32 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     .update(schema.requests)
     .set(patch)
     .where(eq(schema.requests.id, id))
+
+  // Handing a request to someone wrote the column and told nobody, so the
+  // person who now owns it found out by opening the board. Only a real change
+  // pings, and never for assigning yourself.
+  if (
+    'assigneeId' in body &&
+    body.assigneeId &&
+    ownerRow &&
+    body.assigneeId !== ownerRow.assigneeId
+  ) {
+    const [actor] = await drizzle
+      .select({ id: schema.teamMembers.id })
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.clerkUserId, userId ?? ''))
+      .limit(1)
+
+    if (body.assigneeId !== actor?.id) {
+      await notifyTeamMember(drizzle, body.assigneeId, {
+        type: 'task_assigned',
+        title: `Request assigned to you: "${ownerRow.title}"`,
+        body: ownerRow.requestNumber ? `REQ-${ownerRow.requestNumber}` : null,
+        entityType: 'request',
+        entityId: id,
+      })
+    }
+  }
 
   // Notifications + domain event on status change. Shared with the bulk PATCH
   // through lib/request-status-effects so the two paths cannot drift.
