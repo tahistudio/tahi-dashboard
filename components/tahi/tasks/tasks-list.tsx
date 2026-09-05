@@ -790,11 +790,13 @@ export function TasksList(props: TasksListProps): React.ReactElement {
       header: 'Task',
       // A real table, not the prototype's grid, so `minmax(0, 2.2fr)` becomes
       // the table idiom for the same thing: the fixed columns below take what
-      // they need and this one absorbs every remaining pixel. It has to be
-      // stated rather than left to `auto`, because the cell declares size
-      // containment for the container query and a contained cell contributes
-      // nothing to the column's intrinsic width.
-      width: '100%',
+      // they need and this one, left at `auto`, absorbs every remaining pixel.
+      // It must NOT be given `width: '100%'`: with the cell's inline-size
+      // containment contributing nothing intrinsic, a percentage width sends
+      // the auto table layout to its 1,000,000px ceiling and the other four
+      // columns land a screen away (measured live on the QA server). A floor
+      // keeps the title readable when the table is narrow.
+      minWidth: '12rem',
       wrap: true,
       sortable: true,
       sortValue: r => r.title.toLowerCase(),
