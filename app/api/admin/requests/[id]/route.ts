@@ -314,6 +314,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         orgId: schema.requests.orgId,
         assigneeId: schema.requests.assigneeId,
         isInternal: schema.requests.isInternal,
+        // Read so the client fan-out can be narrowed to the contacts the
+        // brand-scoped portal list would show this row to. Unread, the bell
+        // and the email both go org wide, which is wider than the portal.
+        brandId: schema.requests.brandId,
       })
       .from(schema.requests)
       .where(eq(schema.requests.id, id))
@@ -326,6 +330,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         orgId: updatedReq.orgId,
         assigneeId: updatedReq.assigneeId ?? null,
         isInternal: updatedReq.isInternal === true,
+        brandId: updatedReq.brandId ?? null,
       }, body.status)
     }
   }

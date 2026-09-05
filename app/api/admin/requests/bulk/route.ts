@@ -66,6 +66,10 @@ function chunkIds<T>(ids: readonly T[]): T[][] {
 /** The row fields both the scope check and the status effects need. */
 type BulkRow = { id: string; orgId: string; title: string; assigneeId: string | null
   isInternal: boolean | null
+  /** requests.brand_id, so the client fan-out is narrowed the way the portal
+   *  list is. Without it a brand-scoped contact hears about a row they would
+   *  be refused if they clicked it. */
+  brandId: string | null
 }
 
 /** Load the given requests in chunks D1 will accept. */
@@ -78,8 +82,9 @@ async function loadRequestRows(drizzle: Drizzle, ids: readonly string[]): Promis
         orgId: schema.requests.orgId,
         title: schema.requests.title,
         assigneeId: schema.requests.assigneeId,
-      isInternal: schema.requests.isInternal,
-    })
+        isInternal: schema.requests.isInternal,
+        brandId: schema.requests.brandId,
+      })
       .from(schema.requests)
       .where(inArray(schema.requests.id, chunk))
     rows.push(...part)
@@ -309,6 +314,12 @@ export async function PATCH(req: NextRequest) {
   // pre-update rows in would notify the outgoing assignee on a body carrying
   // both status and assigneeId, and never the incoming one: precisely the
   // drift the shared helper exists to prevent.
+  //
+  // Bell entries per row, email suppressed. This loop runs once per selected
+  // request, so a twenty row "Mark delivered" for a client with three contacts
+  // is sixty separate messages to the same three people, sequentially, and
+  // Resend's two a second ceiling refuses most of them. The bell rows are
+  // cheap, carry their own title and deep link, and stay.
   const nextStatus = typeof updates.status === 'string' ? updates.status : null
   if (nextStatus) {
     const touched = await loadRequestRows(drizzle, rows.map((r) => r.id))
@@ -319,7 +330,8 @@ export async function PATCH(req: NextRequest) {
         orgId: row.orgId,
         assigneeId: row.assigneeId ?? null,
         isInternal: row.isInternal === true,
-      }, nextStatus)
+        brandId: row.brandId ?? null,
+      }, nextStatus, { clientEmail: false })
     }
   }
 
