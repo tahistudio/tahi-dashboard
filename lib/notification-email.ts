@@ -38,10 +38,10 @@
 
 import { createElement, type ReactElement } from 'react'
 import { render } from '@react-email/render'
-import { and, eq, inArray } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { schema } from '@/db/d1'
 import { sendEmail } from '@/lib/email'
-import { DEFAULT_ENABLED } from '@/lib/notification-preferences'
+import { filterSubjectsByChannelPref } from '@/lib/notification-preferences'
 import { appOrigin } from '@/lib/app-url'
 import {
   notificationHref,
@@ -394,80 +394,22 @@ export async function loadRequestEmailContext(
 
 // ─── Preferences, for the whole audience at once ─────────────────────────────
 
-interface PrefRow {
-  userId: string
-  userType: string
-  eventType: string
-  channel: string
-  enabled: boolean
-}
-
-/**
- * The email half of lib/notification-preferences resolveFromRows: exact row,
- * then the per-user `'*'` default, then the hardcoded channel policy.
- *
- * Duplicated here only because the resolver in that module is private and that
- * module was not in this change's scope. Move this and filterTargetsByEmailPref
- * below into lib/notification-preferences next to filterRecipientsByInAppPref
- * when that file next opens, so one resolver serves both channels.
- */
-function emailPrefEnabled(
-  rows: readonly PrefRow[],
-  target: EmailTarget,
-  eventType: NotificationEventType,
-): boolean {
-  const clerkUserId = target.clerkUserId
-  if (!clerkUserId) return DEFAULT_ENABLED.email
-  const mine = rows.filter((r) => r.userId === clerkUserId && r.userType === target.userType)
-  const exact = mine.find((r) => r.eventType === eventType)
-  if (exact) return exact.enabled
-  const wildcard = mine.find((r) => r.eventType === '*')
-  if (wildcard) return wildcard.enabled
-  return DEFAULT_ENABLED.email
-}
-
 /**
  * Drop everyone who muted this event's email channel, in ONE query for the
- * whole audience. The per-recipient read this replaces cost an org-wide fan-out
- * N serialised SELECTs on top of N sends; the bell path has resolved the same
- * thing in a single batched query since it was written.
+ * whole audience.
  *
- * Fails open (returns everyone) exactly as filterRecipientsByInAppPref does:
- * better a stray email than a silently swallowed delivery notice.
+ * The exact / per-user `'*'` / channel-default order used to be copied out
+ * here, because the resolver in lib/notification-preferences was module
+ * private. It is not any more: that module owns both channels now, and this is
+ * the email-shaped name for it, kept so the call sites and their tests read in
+ * the language of the thing they are sending.
  */
 export async function filterTargetsByEmailPref(
   database: DrizzleDB,
   targets: readonly EmailTarget[],
   eventType: NotificationEventType,
 ): Promise<{ allowed: EmailTarget[]; muted: number }> {
-  const withLogin = targets.filter((t) => t.clerkUserId)
-  // Nobody here can have written a preference row, so nobody can have muted.
-  if (withLogin.length === 0) return { allowed: [...targets], muted: 0 }
-
-  try {
-    const userIds = [...new Set(withLogin.map((t) => t.clerkUserId as string))]
-    const rows = await database
-      .select({
-        userId: schema.notificationPreferences.userId,
-        userType: schema.notificationPreferences.userType,
-        eventType: schema.notificationPreferences.eventType,
-        channel: schema.notificationPreferences.channel,
-        enabled: schema.notificationPreferences.enabled,
-      })
-      .from(schema.notificationPreferences)
-      .where(
-        and(
-          eq(schema.notificationPreferences.channel, 'email'),
-          inArray(schema.notificationPreferences.userId, userIds),
-          inArray(schema.notificationPreferences.eventType, [eventType, '*']),
-        ),
-      )
-    if (rows.length === 0) return { allowed: [...targets], muted: 0 }
-    const allowed = targets.filter((t) => emailPrefEnabled(rows, t, eventType))
-    return { allowed, muted: targets.length - allowed.length }
-  } catch {
-    return { allowed: [...targets], muted: 0 }
-  }
+  return filterSubjectsByChannelPref(database, targets, eventType, 'email')
 }
 
 // ─── Dispatch ────────────────────────────────────────────────────────────────

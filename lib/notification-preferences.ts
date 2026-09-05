@@ -135,11 +135,71 @@ export async function isEventChannelEnabled(
 }
 
 /**
- * Filter a recipient list down to those who have the `in_app` channel enabled
- * for the given event type. Used centrally by the notification emitters so a
- * user who muted an event never gets a bell row. On any failure it returns the
- * recipients unchanged (fail-open: better a stray ping than a silenced one).
+ * Every stored preference for one audience, one event and one channel, in a
+ * single query. The per-recipient read this replaces cost an org-wide fan-out
+ * N serialised SELECTs.
  */
+async function loadPrefRows(
+  database: DrizzleDB,
+  userIds: string[],
+  eventType: NotificationEventType,
+  channel: NotificationChannel,
+): Promise<PrefRow[]> {
+  return database
+    .select({
+      userId: schema.notificationPreferences.userId,
+      userType: schema.notificationPreferences.userType,
+      eventType: schema.notificationPreferences.eventType,
+      channel: schema.notificationPreferences.channel,
+      enabled: schema.notificationPreferences.enabled,
+    })
+    .from(schema.notificationPreferences)
+    .where(
+      and(
+        eq(schema.notificationPreferences.channel, channel),
+        inArray(schema.notificationPreferences.userId, userIds),
+        inArray(schema.notificationPreferences.eventType, [eventType, '*']),
+      ),
+    )
+}
+
+/**
+ * Filter a recipient list down to those who have the given channel enabled for
+ * the given event type. Used centrally by the notification emitters so a user
+ * who muted an event never hears it on that channel. On any failure it returns
+ * the recipients unchanged (fail-open: better a stray ping than a silenced
+ * one).
+ *
+ * Everyone here is keyed by a Clerk user id, which is what the bell can reach.
+ * For an audience that includes people with no login, see
+ * filterSubjectsByChannelPref below.
+ */
+export async function filterRecipientsByChannelPref<
+  T extends { userId: string; userType: PreferenceUserType },
+>(
+  database: DrizzleDB,
+  recipients: T[],
+  eventType: NotificationEventType,
+  channel: NotificationChannel,
+): Promise<T[]> {
+  if (recipients.length === 0) return recipients
+  try {
+    const userIds = [...new Set(recipients.map((r) => r.userId))]
+    const rows = await loadPrefRows(database, userIds, eventType, channel)
+    // Nobody stored anything, so everybody falls to the channel policy. Stated
+    // rather than short-circuited to "keep them all": that reads the same for
+    // in_app and email (both default on) and silently opts a whole audience
+    // into a channel that defaults off.
+    if (rows.length === 0) return DEFAULT_ENABLED[channel] ? recipients : []
+    return recipients.filter((r) =>
+      resolveFromRows(rows, r.userId, r.userType, eventType, channel),
+    )
+  } catch {
+    return recipients
+  }
+}
+
+/** The bell's channel. The shape every notification emitter already calls. */
 export async function filterRecipientsByInAppPref<
   T extends { userId: string; userType: PreferenceUserType },
 >(
@@ -147,30 +207,54 @@ export async function filterRecipientsByInAppPref<
   recipients: T[],
   eventType: NotificationEventType,
 ): Promise<T[]> {
-  if (recipients.length === 0) return recipients
+  return filterRecipientsByChannelPref(database, recipients, eventType, 'in_app')
+}
+
+/**
+ * Someone a message can reach, who may or may not have a Clerk login.
+ *
+ * Email is the channel that has to carry this: an invited-but-never-signed-in
+ * contact has an address from the moment their row exists, and is invisible to
+ * the bell. They have no way to have written a preference row either, so they
+ * always resolve to the channel default.
+ */
+export interface ChannelPrefSubject {
+  clerkUserId: string | null
+  userType: PreferenceUserType
+}
+
+/**
+ * The same resolution for an audience that is not keyed by login, in ONE query
+ * for the whole audience, with the count of people it dropped.
+ *
+ * Fails open for the same reason as the recipient filter above: a silently
+ * swallowed delivery notice is worse than a stray one.
+ */
+export async function filterSubjectsByChannelPref<T extends ChannelPrefSubject>(
+  database: DrizzleDB,
+  subjects: readonly T[],
+  eventType: NotificationEventType,
+  channel: NotificationChannel,
+): Promise<{ allowed: T[]; muted: number }> {
+  const withLogin = subjects.filter((s) => s.clerkUserId)
+  // Nobody here can have written a preference row, so nobody can have muted.
+  if (withLogin.length === 0) return { allowed: [...subjects], muted: 0 }
+
   try {
-    const userIds = [...new Set(recipients.map((r) => r.userId))]
-    const rows = await database
-      .select({
-        userId: schema.notificationPreferences.userId,
-        userType: schema.notificationPreferences.userType,
-        eventType: schema.notificationPreferences.eventType,
-        channel: schema.notificationPreferences.channel,
-        enabled: schema.notificationPreferences.enabled,
-      })
-      .from(schema.notificationPreferences)
-      .where(
-        and(
-          eq(schema.notificationPreferences.channel, 'in_app'),
-          inArray(schema.notificationPreferences.userId, userIds),
-          inArray(schema.notificationPreferences.eventType, [eventType, '*']),
-        ),
-      )
-    if (rows.length === 0) return recipients
-    return recipients.filter((r) =>
-      resolveFromRows(rows, r.userId, r.userType, eventType, 'in_app'),
+    const userIds = [...new Set(withLogin.map((s) => s.clerkUserId as string))]
+    const rows = await loadPrefRows(database, userIds, eventType, channel)
+    if (rows.length === 0) {
+      return DEFAULT_ENABLED[channel]
+        ? { allowed: [...subjects], muted: 0 }
+        : { allowed: [], muted: subjects.length }
+    }
+    const allowed = subjects.filter((s) =>
+      s.clerkUserId
+        ? resolveFromRows(rows, s.clerkUserId, s.userType, eventType, channel)
+        : DEFAULT_ENABLED[channel],
     )
+    return { allowed, muted: subjects.length - allowed.length }
   } catch {
-    return recipients
+    return { allowed: [...subjects], muted: 0 }
   }
 }
