@@ -85,6 +85,23 @@ const INDUSTRY_OPTIONS = [
   { value: 'Other', label: 'Other' },
 ] as const
 
+/**
+ * Every field in this panel is 44px on a phone and the app's own 2.25rem from
+ * md up.
+ *
+ * <Input> and <Select> both fix their height inline at inputSize md, which is
+ * 2.25rem, and this panel stacks to one column on a 375px screen, so all of it
+ * is thumbed. min-height clamps a fixed height, which is why a class beats the
+ * primitive's inline style without touching the primitive. The same pair of
+ * classes is on the contact form in clients/[id]/tabs/people.tsx.
+ */
+const FIELD_HEIGHT = 'min-h-[2.75rem] md:min-h-[2.25rem]'
+
+/** <Select> hands its className to the positioning wrapper and not to the
+ *  native control inside it, so the target has to be named through the child.
+ *  The wrapper grows with it. */
+const SELECT_HEIGHT = '[&>select]:min-h-[2.75rem] md:[&>select]:min-h-[2.25rem]'
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export function isDraftEmailValid(draft: NewClientDraft): boolean {
@@ -173,6 +190,7 @@ export function NewClientPanel({
               onChange={e => onUpdate('name', e.target.value)}
               placeholder="Kowtow Clothing"
               inputSize="md"
+              className={FIELD_HEIGHT}
               leadingIcon={<Building2 size={13} aria-hidden="true" />}
               autoFocus
               onKeyDown={e => { if (e.key === 'Enter' && canSubmit) onSubmit() }}
@@ -186,6 +204,7 @@ export function NewClientPanel({
               placeholder="kowtowclothing.com"
               inputSize="md"
               type="url"
+              className={FIELD_HEIGHT}
               leadingIcon={<Globe size={13} aria-hidden="true" />}
             />
           </Field>
@@ -202,6 +221,7 @@ export function NewClientPanel({
                 onChange={e => onUpdate('industry', e.target.value)}
                 options={INDUSTRY_OPTIONS}
                 selectSize="md"
+                className={SELECT_HEIGHT}
                 style={{ width: '100%' }}
               />
             </Field>
@@ -211,6 +231,7 @@ export function NewClientPanel({
                 onChange={e => onUpdate('planType', e.target.value)}
                 options={PLAN_OPTIONS}
                 selectSize="md"
+                className={SELECT_HEIGHT}
                 style={{ width: '100%' }}
               />
             </Field>
@@ -241,14 +262,29 @@ export function NewClientPanel({
 
             {/* First and last, not one "Full name" box. Every client email
                 greets on the first word of the stored name, and this is the
-                only place that word is ever typed. */}
+                only place that word is ever typed.
+
+                Both halves carry the icon. <Input> renders a different box
+                depending: with a leading icon it is a padded flex group whose
+                text starts past the glyph, without one it is a bare input
+                whose text starts at its own padding. One of each side by side
+                puts the two placeholders on different left edges, and the
+                email below would not line up with either.
+
+                autoComplete is off on all three. These fields describe the
+                client's person, not the operator filling the form, and Chrome
+                reads given-name / family-name / email as one section: a single
+                tap on its suggestion would drop the operator's own name and
+                address in, and the invite switch below defaults to on. Same
+                call as the invite box in components/tahi/onboarding-content. */}
             <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: '0.75rem' }}>
               <Input
                 value={draft.primaryContactFirstName}
                 onChange={e => onUpdate('primaryContactFirstName', e.target.value)}
                 placeholder="First name"
                 inputSize="md"
-                autoComplete="given-name"
+                className={FIELD_HEIGHT}
+                autoComplete="off"
                 aria-label="Primary contact first name"
                 leadingIcon={<UserIcon size={13} aria-hidden="true" />}
               />
@@ -257,8 +293,10 @@ export function NewClientPanel({
                 onChange={e => onUpdate('primaryContactLastName', e.target.value)}
                 placeholder="Last name"
                 inputSize="md"
-                autoComplete="family-name"
+                className={FIELD_HEIGHT}
+                autoComplete="off"
                 aria-label="Primary contact last name"
+                leadingIcon={<UserIcon size={13} aria-hidden="true" />}
               />
             </div>
 
@@ -269,7 +307,8 @@ export function NewClientPanel({
                 placeholder="email@company.com"
                 inputSize="md"
                 type="email"
-                autoComplete="email"
+                className={FIELD_HEIGHT}
+                autoComplete="off"
                 aria-label="Primary contact email"
                 aria-invalid={!emailOk}
                 aria-describedby={emailOk ? undefined : emailErrorId}

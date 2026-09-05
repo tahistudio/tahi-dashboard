@@ -142,13 +142,27 @@ export function tracksLine(row: Pick<ClientRow, 'tracks' | 'engagement'>): strin
   return 'No tracks'
 }
 
-/** What the MRR cell says when there is no monthly figure. Never a dash, and
- *  never the plan chip's words: "no retainer" is a statement about the money,
- *  where "no plan" would be the chip again. */
+/**
+ * What the MRR cell says when there is no monthly figure. Never a dash, and
+ * never a word the plan chip beside it can print too.
+ *
+ * The money cell has its own vocabulary for EVERY engagement, not just the
+ * plan-less one. It used to hand the engagement word back for the other two,
+ * and ENGAGEMENT_LABEL.hourly is the exact string PlanBadge prints for an
+ * hourly plan: the table read "Hourly" under Plan and "Hourly" under MRR, and
+ * the phone card, whose chip row carries no headers at all, said it twice in
+ * one sentence. Under an MRR heading the answer is about the money, so an
+ * hourly client is billed on time and a project client is billed once.
+ */
+const MRR_FALLBACK: Record<ClientEngagement, string> = {
+  retainer: 'Not set',
+  project: 'One-off',
+  hourly: 'Time billed',
+  none: 'No retainer',
+}
+
 export function mrrFallbackLabel(engagement: ClientEngagement): string {
-  if (engagement === 'retainer') return 'Not set'
-  if (engagement === 'none') return 'No retainer'
-  return ENGAGEMENT_LABEL[engagement]
+  return MRR_FALLBACK[engagement]
 }
 
 /** The engagement word under a labelled stat, which the portfolio card shows
