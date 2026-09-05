@@ -5,11 +5,14 @@
  * rail this client is billed on, then the invoices themselves with the
  * actions each row's state allows.
  *
- * "New invoice" hands off to /invoices rather than opening a second create
- * form here. The invoice slide-over lives inside invoice-list.tsx and is not
- * exported, and this slice does not own app/(dashboard)/invoices, so building
- * a duplicate here would fork the create path. The link carries ?new=1&orgId=
- * so the invoices page can pick this client up when it learns to read them.
+ * There is no create form here. The invoice slide-over lives inside
+ * invoice-list.tsx and is not exported, and this slice does not own
+ * app/(dashboard)/invoices, so building a duplicate would fork the create path.
+ * The button says "Open invoices" because that is what it does: neither
+ * invoices/page.tsx nor invoice-list.tsx reads a search param yet, so a button
+ * labelled "New invoice" would land the operator on the unfiltered global list
+ * with nothing open. The link still carries ?new=1&orgId= for the day the
+ * invoices slice learns to read them, and the label changes back then.
  */
 
 import { useMemo, useState } from 'react'
@@ -21,11 +24,11 @@ import {
   Check,
   DollarSign,
   Mail,
-  Plus,
   Send,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { Card } from '@/components/tahi/card'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { DataTable, type DataTableAction, type DataTableColumn } from '@/components/tahi/data-table'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { Money } from '@/components/tahi/money'
@@ -35,6 +38,8 @@ import { useToast } from '@/components/tahi/toast'
 import { invoiceChannelLabel } from '@/lib/invoice-channel'
 import { paymentTermsLabel } from '@/lib/invoice-billing'
 import { Grow, InlineAction, SubBar, Tile, TileGrid } from '../_kit/chrome'
+import { MoneySums, sumByCurrency } from '../_kit/currency-sums'
+import { isInvoiceOverdue, OPEN_INVOICE_STATUSES } from '../_kit/needs'
 import type { ClientTabId, Organisation } from '../_kit/types'
 
 export interface InvoiceRow {
@@ -49,20 +54,12 @@ export interface InvoiceRow {
   updatedAt: string
 }
 
-const OPEN_STATUSES = ['sent', 'viewed', 'overdue']
+/** GET /api/admin/invoices hard-codes this and returns no total. */
+const INVOICE_PAGE_SIZE = 50
 
 function formatTabDate(dateStr: string | null): string {
   if (!dateStr) return '--'
   return new Date(dateStr).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
-}
-
-/** Sent, unpaid, and past its due date: overdue even if nobody flipped the flag. */
-function isOverdue(r: InvoiceRow, now: Date): boolean {
-  if (r.status === 'overdue') return true
-  if (r.status !== 'sent' && r.status !== 'viewed') return false
-  if (!r.dueDate) return false
-  const due = new Date(r.dueDate)
-  return !Number.isNaN(due.getTime()) && due < now
 }
 
 export function InvoicesTab({
@@ -81,6 +78,9 @@ export function InvoicesTab({
   const router = useRouter()
   const { showToast } = useToast()
   const [busyId, setBusyId] = useState<string | null>(null)
+  // Writing off changes an invoice's terminal state, so it asks first, through
+  // the same dialog Archive, Pause and the cost delete use.
+  const [pendingWriteOff, setPendingWriteOff] = useState<InvoiceRow | null>(null)
 
   const { data, isLoading: loading, mutate: reload } = useSWR<{ items: InvoiceRow[] }>(
     `/api/admin/invoices?orgId=${clientId}`,
@@ -88,12 +88,17 @@ export function InvoicesTab({
   const invoices = useMemo(() => data?.items ?? [], [data])
 
   const now = new Date()
-  const open = invoices.filter(r => OPEN_STATUSES.includes(r.status))
-  const overdue = invoices.filter(r => isOverdue(r, now))
+  const open = invoices.filter(r => OPEN_INVOICE_STATUSES.includes(r.status))
+  const overdue = invoices.filter(r => isInvoiceOverdue(r, now))
   const paid = invoices.filter(r => r.status === 'paid')
 
-  const sum = (rows: InvoiceRow[]) => rows.reduce((s, r) => s + (r.totalAmount ?? 0), 0)
+  const fallbackCurrency = org.preferredCurrency ?? 'NZD'
   const channelLabel = invoiceChannelLabel(org.effectiveInvoiceChannel ?? org.invoiceChannel)
+
+  // /api/admin/invoices hard-codes limit = 50 and this tab never asks for a
+  // second page, so past fifty the totals are short. Say so on the tiles rather
+  // than letting a partial figure read as the whole book.
+  const pageCaveat = invoices.length >= INVOICE_PAGE_SIZE ? `, of the most recent ${INVOICE_PAGE_SIZE}` : ''
 
   async function patchInvoice(id: string, body: Record<string, unknown>, done: string) {
     setBusyId(id)
@@ -155,7 +160,7 @@ export function InvoicesTab({
     }
     if (r.status === 'sent' || r.status === 'viewed' || r.status === 'overdue') {
       out.push({
-        label: isOverdue(r, now) ? 'Send overdue reminder' : 'Send reminder',
+        label: isInvoiceOverdue(r, now) ? 'Send overdue reminder' : 'Send reminder',
         icon: <Mail className="w-3.5 h-3.5" />,
         disabled: busy,
         onClick: () => { void sendEmail(r.id, 'Reminder sent') },
@@ -173,7 +178,7 @@ export function InvoicesTab({
         icon: <Ban className="w-3.5 h-3.5" />,
         tone: 'danger',
         disabled: busy,
-        onClick: () => { void patchInvoice(r.id, { status: 'written_off' }, 'Written off') },
+        onClick: () => setPendingWriteOff(r),
       })
     }
     return out
@@ -184,7 +189,7 @@ export function InvoicesTab({
       key: 'status',
       header: 'Status',
       width: '8rem',
-      render: r => <StatusBadge status={isOverdue(r, now) ? 'overdue' : r.status} type="invoice" />,
+      render: r => <StatusBadge status={isInvoiceOverdue(r, now) ? 'overdue' : r.status} type="invoice" />,
     },
     {
       key: 'amount',
@@ -209,7 +214,7 @@ export function InvoicesTab({
       sortable: true,
       sortValue: r => r.dueDate ?? '',
       render: r => (
-        <span style={{ color: isOverdue(r, now) ? 'var(--color-danger)' : undefined, fontWeight: isOverdue(r, now) ? 600 : undefined }}>
+        <span style={{ color: isInvoiceOverdue(r, now) ? 'var(--color-danger)' : undefined, fontWeight: isInvoiceOverdue(r, now) ? 600 : undefined }}>
           {formatTabDate(r.dueDate)}
         </span>
       ),
@@ -240,20 +245,20 @@ export function InvoicesTab({
       <TileGrid>
         <Tile
           label="Outstanding"
-          value={<Money native={sum(open)} currency={org.preferredCurrency ?? 'NZD'} sensitive />}
-          hint={`${open.length} open`}
+          value={<MoneySums sums={sumByCurrency(open, fallbackCurrency)} fallback={fallbackCurrency} />}
+          hint={`${open.length} open${pageCaveat}`}
         />
         <Tile
           label="Overdue"
           tone={overdue.length > 0 ? 'danger' : 'neutral'}
-          value={<Money native={sum(overdue)} currency={org.preferredCurrency ?? 'NZD'} sensitive />}
+          value={<MoneySums sums={sumByCurrency(overdue, fallbackCurrency)} fallback={fallbackCurrency} />}
           hint={overdue.length > 0 ? `${overdue.length} ${overdue.length === 1 ? 'invoice' : 'invoices'}` : 'Nothing overdue'}
         />
         <Tile
           label="Paid"
           tone={paid.length > 0 ? 'positive' : 'neutral'}
-          value={<Money native={sum(paid)} currency={org.preferredCurrency ?? 'NZD'} sensitive />}
-          hint={`${paid.length} settled`}
+          value={<MoneySums sums={sumByCurrency(paid, fallbackCurrency)} fallback={fallbackCurrency} />}
+          hint={`${paid.length} settled${pageCaveat}`}
         />
         <Tile
           label="Terms"
@@ -290,9 +295,9 @@ export function InvoicesTab({
           size="sm"
           disabled={writeDisabled}
           onClick={() => router.push(`/invoices?new=1&orgId=${clientId}`)}
-          iconLeft={<Plus className="w-3.5 h-3.5" />}
+          iconLeft={<ArrowUpRight className="w-3.5 h-3.5" />}
         >
-          New invoice
+          Open invoices
         </TahiButton>
       </SubBar>
 
@@ -308,7 +313,7 @@ export function InvoicesTab({
           mobileCard={r => (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '0.75rem' }}>
               <div className="flex items-center flex-wrap" style={{ gap: '0.5rem' }}>
-                <StatusBadge status={isOverdue(r, now) ? 'overdue' : r.status} type="invoice" />
+                <StatusBadge status={isInvoiceOverdue(r, now) ? 'overdue' : r.status} type="invoice" />
                 <Money
                   native={r.totalAmount ?? 0}
                   currency={r.currency ?? 'NZD'}
@@ -352,12 +357,29 @@ export function InvoicesTab({
               icon={<DollarSign className="w-8 h-8" />}
               title="No invoices for this client yet"
               description={`Nothing has been billed to ${org.name}. Raise the first one on the invoices page.`}
-              ctaLabel={writeDisabled ? undefined : 'New invoice'}
+              ctaLabel={writeDisabled ? undefined : 'Open invoices'}
               onCtaClick={writeDisabled ? undefined : () => router.push(`/invoices?new=1&orgId=${clientId}`)}
             />
           }
         />
       </Card>
+
+      <ConfirmDialog
+        open={pendingWriteOff != null}
+        variant="danger"
+        title="Write this invoice off?"
+        description={pendingWriteOff
+          ? `${new Intl.NumberFormat('en-NZ', { style: 'currency', currency: pendingWriteOff.currency ?? fallbackCurrency }).format(pendingWriteOff.totalAmount ?? 0)} raised ${formatTabDate(pendingWriteOff.createdAt)} stops counting as money owed and drops out of the outstanding total. It is not deleted.`
+          : ''}
+        confirmLabel="Write off"
+        onConfirm={async () => {
+          const target = pendingWriteOff
+          if (!target) return
+          await patchInvoice(target.id, { status: 'written_off' }, 'Written off')
+          setPendingWriteOff(null)
+        }}
+        onCancel={() => setPendingWriteOff(null)}
+      />
     </div>
   )
 }

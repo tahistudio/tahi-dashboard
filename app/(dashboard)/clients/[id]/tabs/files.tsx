@@ -9,6 +9,9 @@
  * upload straight to the client, a comment thread on every file) and none of
  * that has a table behind it. The search, the row and the detail panel port
  * now; folders and threads wait for the schema.
+ *
+ * Both panel actions are real anchors at the one serve route the API exposes,
+ * `/api/uploads/serve?key=`, so middle-click and "save link as" keep working.
  */
 
 import { useMemo, useState } from 'react'
@@ -41,6 +44,19 @@ function formatSize(bytes: number | null): string {
 
 function formatWhen(value: string): string {
   return new Date(value).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+/**
+ * The R2 read URL for a stored file.
+ *
+ * /api/uploads/serve is one route that reads `?key=`; it has no dynamic
+ * segment, and a storage key is `{orgId}/{requestId}/{ts}-{filename}`, so the
+ * key has to be encoded into the query rather than pasted onto the path.
+ * `download=1` is what makes the response Content-Disposition: attachment.
+ */
+function serveUrl(storageKey: string, download = false): string {
+  const q = `key=${encodeURIComponent(storageKey)}${download ? '&download=1' : ''}`
+  return apiPath(`/api/uploads/serve?${q}`)
 }
 
 export function FilesTab({
@@ -273,7 +289,7 @@ export function FilesTab({
           {open && (
             <div className="flex items-center flex-wrap" style={{ gap: '0.5rem' }}>
               <LinkButton
-                href={apiPath(`/api/uploads/serve/${open.storageKey}`)}
+                href={serveUrl(open.storageKey, true)}
                 tone="primary"
                 ariaLabel={`Download ${open.filename}`}
               >
@@ -281,7 +297,7 @@ export function FilesTab({
                 Download
               </LinkButton>
               <LinkButton
-                href={apiPath(`/api/uploads/serve/${open.storageKey}`)}
+                href={serveUrl(open.storageKey)}
                 ariaLabel={`Open ${open.filename} in a new tab`}
               >
                 <Link2 className="w-3.5 h-3.5" aria-hidden="true" />

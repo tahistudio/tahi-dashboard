@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { firstHealthReason, needsFor, type NeedsInput } from '../needs'
+import { firstHealthReason, isInvoiceOverdue, needsFor, type NeedsInput } from '../needs'
 
 const NOW = new Date('2026-09-06T09:00:00.000Z')
 
@@ -39,6 +39,41 @@ describe('needsFor', () => {
     expect(items[0].tone).toBe('danger')
     expect(items[0].tab).toBe('invoices')
     expect(items[0].text).toContain('overdue')
+  })
+
+  it('flags a viewed invoice past its due date, the same as a sent one', () => {
+    const items = needsFor(input({
+      invoices: [{ id: 'i1', status: 'viewed', totalAmount: 4000, currency: 'NZD', dueDate: '2026-08-30' }],
+    }))
+    expect(items).toHaveLength(1)
+    expect(items[0].tone).toBe('danger')
+    expect(items[0].tab).toBe('invoices')
+  })
+
+  it('drops the money rules for a viewer without the billing card', () => {
+    const invoices = [
+      { id: 'i1', status: 'overdue', totalAmount: 4000, currency: 'NZD', dueDate: '2026-08-01' },
+    ]
+    expect(needsFor(input({ invoices }))).toHaveLength(1)
+    expect(needsFor(input({ invoices, canMoney: false }))).toEqual([])
+  })
+
+  it('asks for the first request only while onboarding is still a first run', () => {
+    const firstRun = needsFor(input({
+      onboarding: { firstRunEligible: true, done: 1, total: 4, awaitingFirstRequest: true },
+    }))
+    expect(firstRun.some(i => i.key === 'onboarding')).toBe(true)
+    expect(firstRun.find(i => i.key === 'onboarding')?.tab).toBe('requests')
+
+    const established = needsFor(input({
+      onboarding: { firstRunEligible: false, done: 1, total: 4, awaitingFirstRequest: true },
+    }))
+    expect(established.some(i => i.key === 'onboarding')).toBe(false)
+
+    const sent = needsFor(input({
+      onboarding: { firstRunEligible: true, done: 3, total: 4, awaitingFirstRequest: false },
+    }))
+    expect(sent.some(i => i.key === 'onboarding')).toBe(false)
   })
 
   it('leaves a paid invoice alone', () => {
@@ -146,6 +181,22 @@ describe('needsFor', () => {
     expect(items).toHaveLength(1)
     expect(items[0].text).toBe('2 contacts have no portal access yet')
     expect(items[0].tab).toBe('people')
+  })
+})
+
+describe('isInvoiceOverdue', () => {
+  it('counts overdue, and sent or viewed past the due date', () => {
+    expect(isInvoiceOverdue({ status: 'overdue', dueDate: null }, NOW)).toBe(true)
+    expect(isInvoiceOverdue({ status: 'sent', dueDate: '2026-08-30' }, NOW)).toBe(true)
+    expect(isInvoiceOverdue({ status: 'viewed', dueDate: '2026-08-30' }, NOW)).toBe(true)
+  })
+
+  it('leaves everything else alone', () => {
+    expect(isInvoiceOverdue({ status: 'sent', dueDate: '2026-10-30' }, NOW)).toBe(false)
+    expect(isInvoiceOverdue({ status: 'viewed', dueDate: null }, NOW)).toBe(false)
+    expect(isInvoiceOverdue({ status: 'paid', dueDate: '2026-08-30' }, NOW)).toBe(false)
+    expect(isInvoiceOverdue({ status: 'draft', dueDate: '2026-08-30' }, NOW)).toBe(false)
+    expect(isInvoiceOverdue({ status: 'written_off', dueDate: '2026-08-30' }, NOW)).toBe(false)
   })
 })
 

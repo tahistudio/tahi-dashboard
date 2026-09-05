@@ -5,10 +5,17 @@
  * tab strip.
  *
  * Left: the name, the status when it is not simply "active", the studio tags,
- * a meta line, and the brand chips. Right: five stat cells that answer the
- * five questions someone opens this page with. Plan and tracks are spelled out
+ * a meta line, and the brand chips. Right: the stat cells that answer the
+ * questions someone opens this page with. Plan and tracks are spelled out
  * in words ("Scale, 1 of 2 tracks busy") rather than left as a bare meter,
  * because the meter alone does not say what it is measuring.
+ *
+ * The brand chips come from the brands table, which is what Settings edits and
+ * what requests are filed under. The organisations.brands JSON column is the
+ * deprecated store and Settings renders it as a read-only footnote, so reading
+ * it here would show names nothing in the UI can change, and hide the ones it
+ * can. The strip's column count follows the number of cells actually rendered,
+ * since MRR drops out for a seat without the billing card.
  *
  * MRR is admin-only: it is gated on clients.billing_card, the same key the
  * profitability and costs routes enforce server-side.
@@ -56,6 +63,13 @@ export interface HeroCall {
   scheduledAt: string
 }
 
+/** A row of /api/admin/brands, the source of truth the Settings tab edits. */
+export interface HeroBrand {
+  id: string
+  name: string
+  primaryColour: string | null
+}
+
 /** A stat cell. No side borders: the strip is one card, the cells are spacing. */
 function Stat({
   label,
@@ -99,14 +113,11 @@ function parseTags(raw: string | null): string[] {
   }
 }
 
-function parseBrands(raw: string | null): string[] {
-  return parseTags(raw)
-}
-
 export function ClientHero({
   org,
   contacts,
   tracks,
+  brands,
   subscription,
   teamMembers,
   assignedPm,
@@ -126,6 +137,7 @@ export function ClientHero({
   org: Organisation
   contacts: Contact[]
   tracks: Track[]
+  brands: HeroBrand[]
   subscription: Subscription | null
   teamMembers: TeamMemberPm[]
   assignedPm: string | null
@@ -143,7 +155,6 @@ export function ClientHero({
   onArchiveToggle: () => void
 }) {
   const tags = useMemo(() => parseTags(org.tags), [org.tags])
-  const brands = useMemo(() => parseBrands(org.brands), [org.brands])
 
   const health = HEALTH_META[(org.healthStatus ?? '').toLowerCase()] ?? { label: 'Not set', tone: 'neutral' as BadgeTone }
   const busyTracks = tracks.filter(t => t.currentRequestId).length
@@ -212,7 +223,7 @@ export function ClientHero({
               <div className="flex items-center flex-wrap" style={{ gap: '0.375rem' }}>
                 {brands.map(b => (
                   <button
-                    key={b}
+                    key={b.id}
                     type="button"
                     onClick={() => onTab('settings')}
                     className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.625rem]"
@@ -233,9 +244,14 @@ export function ClientHero({
                   >
                     <span
                       aria-hidden="true"
-                      style={{ width: '0.75rem', height: '0.75rem', borderRadius: 'var(--radius-leaf-sm)', background: 'var(--color-brand-light)' }}
+                      style={{
+                        width: '0.75rem',
+                        height: '0.75rem',
+                        borderRadius: 'var(--radius-leaf-sm)',
+                        background: b.primaryColour ?? 'var(--color-brand-light)',
+                      }}
                     />
-                    {b}
+                    <span data-private>{b.name}</span>
                   </button>
                 ))}
               </div>
@@ -327,9 +343,12 @@ export function ClientHero({
         </div>
       </div>
 
-      {/* Stat strip */}
+      {/* Stat strip. Four cells without the billing card, five with it, and the
+          column count follows so there is no dead column at xl. */}
       <div
-        className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5"
+        className={canMoney
+          ? 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5'
+          : 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4'}
         style={{ gap: '0.875rem', marginTop: '1rem', paddingTop: '1rem' }}
       >
         <Stat

@@ -51,6 +51,8 @@ export interface ClientRequestRow {
   requestNumber?: number | null
   updatedAt: string
   createdAt: string
+  /** Set on a sub-request. Only top-level rows belong on a board or a list. */
+  parentRequestId?: string | null
 }
 
 export const REQUESTS_BOARD_COLUMNS: BoardColumn[] = [
@@ -104,15 +106,27 @@ export function RequestsTab({
   const { data, isLoading: loading, mutate: load } = useSWR<{ requests: ClientRequestRow[] }>(
     `/api/admin/requests?clientId=${clientId}&status=all`,
   )
-  const requests = useMemo(() => data?.requests ?? [], [data])
+  // ?status=all returns sub-requests next to their parents. The shipped
+  // /requests kit filters them out before it builds either view, and this tab
+  // has to match, or a parent and each of its children read as separate
+  // top-level cards.
+  const requests = useMemo(
+    () => (data?.requests ?? []).filter(r => !r.parentRequestId),
+    [data],
+  )
 
   // This client's own board columns when settings gave them any; the studio
   // default otherwise. Same route and same fallback the /requests board uses.
   const { data: kanbanData } = useSWR<{
     columns: Array<{ statusValue: string; colour: string | null; label: string; position: number }>
+    /** The route sets this when it fell back to the studio-wide set. */
+    inherited?: boolean
   }>(`/api/admin/kanban-columns?orgId=${clientId}`)
 
-  const custom = (kanbanData?.columns?.length ?? 0) > 0
+  // Inherited columns are the studio default, not this client's own board. The
+  // route says which it handed back, so the badge only claims a bespoke board
+  // when there really is one.
+  const custom = kanbanData ? kanbanData.inherited === false && kanbanData.columns.length > 0 : false
   const columns = useMemo<BoardColumn[]>(() => {
     const cols = kanbanData?.columns
     if (cols && cols.length > 0) {

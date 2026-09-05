@@ -35,10 +35,19 @@ import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { useFeature } from '@/components/tahi/permissions-context'
 import { useToast } from '@/components/tahi/toast'
-import { ClientHero, type HeroCall } from './_kit/client-hero'
+import { ClientHero, type HeroCall, type HeroBrand } from './_kit/client-hero'
 import { ClientTabs, type ClientTabDef } from './_kit/client-tabs'
 import { LoadingSkeleton } from './_kit/loading-skeleton'
-import { firstHealthReason, needsFor, OPEN_REQUEST_STATUSES, type NeedItem, type NeedRequest } from './_kit/needs'
+import {
+  firstHealthReason,
+  isInvoiceOverdue,
+  needsFor,
+  OPEN_INVOICE_STATUSES,
+  OPEN_REQUEST_STATUSES,
+  type NeedItem,
+  type NeedRequest,
+} from './_kit/needs'
+import { clientOnboarding } from './_kit/onboarding-card'
 import type { TeamMemberPm } from './_kit/org-details-card'
 import type { ClientData, ClientTabId } from './_kit/types'
 import { CLIENT_CALLS_KEY, CallsTab, type ClientCallRow } from './tabs/calls'
@@ -84,15 +93,27 @@ export function ClientDetail({ clientId, initialTab }: { clientId: string; initi
   const { data: invoiceData } = useSWR<{ items: InvoiceRow[] }>(`/api/admin/invoices?orgId=${clientId}`)
   const { data: contractData } = useSWR<{ items: ContractRow[] }>(`/api/admin/contracts?orgId=${clientId}`)
   const { data: callData } = useSWR<{ calls: ClientCallRow[] }>(CLIENT_CALLS_KEY(clientId))
+  // Brands come from the brands table, which the Settings tab edits. The
+  // organisations.brands JSON column is the deprecated store and is shown there
+  // as a read-only footnote, so the hero must not read it.
+  const { data: brandData } = useSWR<{ items: HeroBrand[] }>(`/api/admin/brands?orgId=${clientId}`)
   const { data: teamData } = useSWR<{ items: TeamMemberPm[] }>('/api/admin/team-members')
   const { data: pmData, mutate: mutatePm } = useSWR<{ pmId: string | null; pmName: string | null }>(
     `/api/admin/clients/${clientId}/pm`,
   )
 
-  const requests = useMemo(() => requestData?.requests ?? [], [requestData])
+  // Sub-requests come back alongside their parents on ?status=all. Everything
+  // that counts work on this page counts top-level requests only, the same rule
+  // request-list.tsx applies before it builds the board, so a nested request is
+  // never double counted in the tab badge or given its own Needs-you line.
+  const requests = useMemo(
+    () => (requestData?.requests ?? []).filter(r => !r.parentRequestId),
+    [requestData],
+  )
   const invoices = useMemo(() => invoiceData?.items ?? [], [invoiceData])
   const contracts = useMemo(() => contractData?.items ?? [], [contractData])
   const calls = useMemo(() => callData?.calls ?? [], [callData])
+  const brands = useMemo(() => brandData?.items ?? [], [brandData])
   const teamMembers = useMemo(() => teamData?.items ?? [], [teamData])
 
   // ── Tab is URL state. router.replace so the back button still means "the
@@ -130,6 +151,27 @@ export function ClientDetail({ clientId, initialTab }: { clientId: string; initi
   )
 
   const org = data?.org
+
+  // The two money tabs are the ones a seat without clients.billing_card never
+  // gets. Held here rather than inside the tab array so the Needs-you strip and
+  // handleNeed answer to the same rule the strip's buttons have to obey.
+  const tabAllowed = useCallback(
+    (id: ClientTabId) => (id === 'invoices' || id === 'money' ? canMoney : true),
+    [canMoney],
+  )
+
+  // Onboarding, derived the way the portal derives it rather than read straight
+  // off the stored blob, which every import path seeds empty.
+  const onboarding = useMemo(() => {
+    if (!data) return null
+    return clientOnboarding(data.org.onboardingState, data.org.onboardingLoomUrl, {
+      requests,
+      invoices,
+      subscriptionStatus: data.subscription?.status ?? null,
+      orgCreatedAt: data.org.createdAt ?? null,
+    })
+  }, [data, requests, invoices])
+
   const needs: NeedItem[] = useMemo(() => {
     if (!data) return []
     return needsFor({
@@ -152,19 +194,29 @@ export function ClientDetail({ clientId, initialTab }: { clientId: string; initi
       calls,
       trackCount: data.tracks.length,
       occupiedTrackCount: data.tracks.filter(t => t.currentRequestId).length,
+      canMoney,
+      onboarding: onboarding ?? undefined,
     })
-  }, [data, requests, invoices, contracts, calls])
+  }, [data, requests, invoices, contracts, calls, canMoney, onboarding])
 
   const handleNeed = useCallback((item: NeedItem) => {
     if (item.requestId) {
       router.push(`/requests/${item.requestId}`)
       return
     }
-    if (item.tab) {
+    // A tab this viewer does not have is not opened silently: setTab would
+    // write ?tab= and the panel would fall back to Overview with no explanation.
+    if (item.tab && tabAllowed(item.tab)) {
       if (item.tab === 'calls' && item.action.toLowerCase().includes('book')) setBookOpen(true)
       setTab(item.tab)
     }
-  }, [router, setTab])
+  }, [router, setTab, tabAllowed])
+
+  // A deep link to a tab this viewer cannot open renders Overview, so correct
+  // the URL to match rather than leaving a link that never opens what it names.
+  useEffect(() => {
+    if (!tabAllowed(tab)) setTab('overview')
+  }, [tab, tabAllowed, setTab])
 
   const handleOwnerChange = useCallback(async (pmId: string | null) => {
     try {
@@ -266,8 +318,11 @@ export function ClientDetail({ clientId, initialTab }: { clientId: string; initi
     const d = new Date(r.dueDate)
     return !Number.isNaN(d.getTime()) && d < new Date()
   })
-  const openInvoices = invoices.filter(i => i.status === 'sent' || i.status === 'viewed' || i.status === 'overdue')
-  const overdueInvoice = invoices.some(i => i.status === 'overdue')
+  const invoicesNow = new Date()
+  const openInvoices = invoices.filter(i => OPEN_INVOICE_STATUSES.includes(i.status))
+  // One predicate for the badge, the strip and the table, so a viewed invoice
+  // thirty days past due cannot read red in one place and neutral in another.
+  const overdueInvoice = invoices.some(i => isInvoiceOverdue(i, invoicesNow))
   const openPapers = contracts.filter(k => k.status === 'draft' || k.status === 'sent').length
 
   const tabs: ClientTabDef[] = [
@@ -284,7 +339,8 @@ export function ClientDetail({ clientId, initialTab }: { clientId: string; initi
     { id: 'settings', label: 'Settings', icon: SettingsIcon },
   ]
 
-  // A tab the viewer cannot see must not stay open behind a deep link.
+  // A tab the viewer cannot see must not stay open behind a deep link. The
+  // effect above rewrites the URL; this keeps the render honest until it does.
   const activeTab: ClientTabId = tabs.some(t => t.id === tab) ? tab : 'overview'
 
   const nextCall: HeroCall | null = upcomingCalls[0]
@@ -301,6 +357,7 @@ export function ClientDetail({ clientId, initialTab }: { clientId: string; initi
         org={org}
         contacts={contacts}
         tracks={tracks}
+        brands={brands}
         subscription={subscription}
         teamMembers={teamMembers}
         assignedPm={pmData?.pmId ?? null}
@@ -332,6 +389,7 @@ export function ClientDetail({ clientId, initialTab }: { clientId: string; initi
             recentRequests={recentRequests}
             needs={needs}
             needsLoading={requestsLoading}
+            onboarding={onboarding}
             ownerName={ownerName}
             canMoney={canMoney}
             writeDisabled={false}

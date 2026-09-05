@@ -1,6 +1,12 @@
 'use client'
 
-/** The client Deals tab: this client's pipeline, linking into /pipeline. */
+/**
+ * The client Deals tab: this client's pipeline, linking into /pipeline.
+ *
+ * Every figure goes through <Money> in the currency the deal was actually
+ * raised in. The aggregate is grouped the same way rather than adding a GBP
+ * deal to a NZD one and printing a dollar sign over the result.
+ */
 
 import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
@@ -8,8 +14,10 @@ import { Clock, Handshake, Plus, User, Users } from 'lucide-react'
 import { Badge } from '@/components/tahi/badge'
 import { Card } from '@/components/tahi/card'
 import { EmptyState } from '@/components/tahi/empty-state'
+import { Money } from '@/components/tahi/money'
 import { SkeletonList } from '@/components/tahi/skeletons'
 import { TahiButton } from '@/components/tahi/tahi-button'
+import { MoneySums, sumByCurrency } from '../_kit/currency-sums'
 
 // ── Deals tab ─────────────────────────────────────────────────────────────────
 
@@ -51,7 +59,7 @@ export function DealsTab({ clientId, orgName }: { clientId: string; orgName: str
     )
   }
 
-  const totalValue = deals.reduce((s, d) => s + d.value, 0)
+  const totals = sumByCurrency(deals.map(d => ({ totalAmount: d.value, currency: d.currency })))
 
   return (
     <div>
@@ -59,8 +67,8 @@ export function DealsTab({ clientId, orgName }: { clientId: string; orgName: str
         <h2 className="font-semibold text-[var(--color-text)]">
           Deals ({deals.length})
           {deals.length > 0 && (
-            <span className="text-sm font-normal text-[var(--color-text-muted)] ml-2">
-              Total: ${totalValue.toLocaleString('en-US')}
+            <span className="text-sm font-normal text-[var(--color-text-muted)] ml-2 inline-flex items-center gap-1">
+              Total: <MoneySums sums={totals} />
             </span>
           )}
         </h2>
@@ -102,12 +110,13 @@ export function DealsTab({ clientId, orgName }: { clientId: string; orgName: str
                   )}
                 </div>
 
-                <p className="text-lg font-bold text-[var(--color-text)] mb-2">
-                  ${deal.value.toLocaleString('en-US')}
-                  <span className="text-xs font-normal text-[var(--color-text-muted)] ml-1">
-                    {deal.currency}
-                  </span>
-                </p>
+                <Money
+                  as="p"
+                  native={deal.value}
+                  currency={deal.currency}
+                  sensitive
+                  className="text-lg font-bold text-[var(--color-text)] mb-2"
+                />
 
                 <div className="flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
                   {deal.ownerName && (

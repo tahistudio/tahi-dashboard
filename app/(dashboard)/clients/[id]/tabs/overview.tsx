@@ -22,6 +22,7 @@ import { ContactsCard } from '../_kit/contacts-card'
 import { HealthNoteCard } from '../_kit/health-note-card'
 import { InternalNotesCard } from '../_kit/internal-notes-card'
 import { NeedsYou } from '../_kit/needs-you'
+import { OnboardingCard, type ClientOnboarding } from '../_kit/onboarding-card'
 import { OverviewTracks } from '../_kit/overview-tracks'
 import { RequestMixCard } from '../_kit/request-mix-card'
 import type { NeedItem, NeedRequest } from '../_kit/needs'
@@ -37,6 +38,7 @@ export function OverviewTab({
   recentRequests,
   needs,
   needsLoading,
+  onboarding,
   ownerName,
   canMoney,
   writeDisabled,
@@ -55,6 +57,8 @@ export function OverviewTab({
   recentRequests: Request[]
   needs: NeedItem[]
   needsLoading: boolean
+  /** The derived checklist, or null while the record is still loading. */
+  onboarding: ClientOnboarding | null
   ownerName: string | null
   canMoney: boolean
   writeDisabled: boolean
@@ -116,7 +120,7 @@ export function OverviewTab({
                       borderRadius: 'var(--radius-sm)',
                       background: 'none',
                       cursor: 'pointer',
-                      transition: 'background var(--motion-fast) var(--ease-out)',
+                      transition: 'background var(--motion-quick) var(--ease-out)',
                     }}
                     onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
@@ -157,6 +161,9 @@ export function OverviewTab({
           <Gate feature="clients.engagement_health">
             <EngagementHealthCard orgId={org.id} />
           </Gate>
+          {onboarding && onboarding.done < onboarding.total && (
+            <OnboardingCard onboarding={onboarding} orgName={org.name} />
+          )}
           <AiHealthCheckCard org={org} onUpdated={onUpdated} />
           {org.healthNote && <HealthNoteCard note={org.healthNote} health={org.healthStatus} />}
           {recentRequests.length > 0 && <RequestMixCard requests={recentRequests} />}

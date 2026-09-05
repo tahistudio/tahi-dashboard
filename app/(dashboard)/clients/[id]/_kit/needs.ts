@@ -38,6 +38,8 @@ export interface NeedRequest {
   dueDate?: string | null
   scopeFlagged?: boolean | number | null
   updatedAt?: string | null
+  /** Set on a sub-request. The page filters these out before calling in. */
+  parentRequestId?: string | null
 }
 
 export interface NeedInvoice {
@@ -47,6 +49,24 @@ export interface NeedInvoice {
   currency?: string | null
   dueDate?: string | null
   createdAt?: string | null
+}
+
+/** Invoice statuses that still count as money out and not yet in. */
+export const OPEN_INVOICE_STATUSES = ['sent', 'viewed', 'overdue']
+
+/**
+ * The one definition of an overdue invoice on this page.
+ *
+ * The strip, the Invoices tab badge and the Invoices table all call this, so
+ * a row cannot read red in one place and neutral in another. `viewed` counts:
+ * a client opening an invoice and not paying it is exactly the case the strip
+ * exists for, and only the nightly job ever writes the `overdue` status.
+ */
+export function isInvoiceOverdue(inv: Pick<NeedInvoice, 'status' | 'dueDate'>, now: Date): boolean {
+  if (inv.status === 'overdue') return true
+  if (inv.status !== 'sent' && inv.status !== 'viewed') return false
+  const due = parse(inv.dueDate)
+  return due != null && due < now
 }
 
 export interface NeedContract {
@@ -81,8 +101,26 @@ export interface NeedsInput {
   calls: NeedCall[]
   trackCount: number
   occupiedTrackCount: number
+  /**
+   * The viewer holds clients.billing_card. Defaults to true. When false the
+   * money rules are dropped rather than shown with a dead action, because the
+   * Invoices and Money tabs are not in this viewer's tab strip at all.
+   */
+  canMoney?: boolean
+  /** The onboarding checklist, already derived. Omitted when unknown. */
+  onboarding?: OnboardingRead
   /** Now, injectable so the rules are testable without freezing the clock. */
   now?: Date
+}
+
+/** What the Overview rail card knows, in the shape the rules need. */
+export interface OnboardingRead {
+  /** This org still reads as a first run (nothing delivered, still young). */
+  firstRunEligible: boolean
+  done: number
+  total: number
+  /** They have never sent a request. Derived, not self-attested. */
+  awaitingFirstRequest: boolean
 }
 
 /** Statuses that still count as live work on the board. */
@@ -123,11 +161,12 @@ export function needsFor(input: NeedsInput): NeedItem[] {
   const now = input.now ?? new Date()
   const out: NeedItem[] = []
 
-  // ── Money that has not landed ──
-  for (const inv of input.invoices) {
+  // ── Money that has not landed. Silent for a seat without the billing card:
+  // the amount is the same secret the hero's MRR cell and the Money tab are
+  // gated on, and the strip's action opens a tab they do not have. ──
+  for (const inv of input.canMoney === false ? [] : input.invoices) {
+    if (!isInvoiceOverdue(inv, now)) continue
     const due = parse(inv.dueDate)
-    const isOverdue = inv.status === 'overdue' || (inv.status === 'sent' && due != null && due < now)
-    if (!isOverdue) continue
     const late = due ? daysBetween(due, now) : 0
     out.push({
       key: `inv-${inv.id}`,
@@ -181,6 +220,21 @@ export function needsFor(input: NeedsInput): NeedItem[] {
         : `${requestLabel(r)} is waiting on ${input.orgName}`,
       action: 'Open',
       requestId: r.id,
+    })
+  }
+
+  // ── Still settling in. Only raised while the checklist says this is a first
+  // run and the outstanding step is one the studio can actually act on: the
+  // other two steps are the client's own (watch the welcome video, upload
+  // brand assets) and there is no button here that would move them. ──
+  const ob = input.onboarding
+  if (ob && ob.firstRunEligible && ob.awaitingFirstRequest) {
+    out.push({
+      key: 'onboarding',
+      tone: 'info',
+      text: `Onboarding ${ob.done} of ${ob.total}: ${input.orgName} has not sent a first request yet`,
+      action: 'Open requests',
+      tab: 'requests',
     })
   }
 

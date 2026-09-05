@@ -11,6 +11,12 @@
  * the card cannot be told to open its own form from outside. A successful
  * booking bumps `reloadKey`, which remounts the card so it picks the new call
  * up rather than showing a stale list.
+ *
+ * Booking writes a call and its attendees. It sends nothing: POST
+ * /api/admin/clients/[id]/calls goes to createCallForParent, which inserts a
+ * discoveryCalls row and an activity, with no email and no calendar write
+ * anywhere on the path. The form says so, because an operator who thinks the
+ * client was told is worse off than one who knows to send it themselves.
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -262,7 +268,7 @@ export function CallsTab({
 
             <div className="flex items-center flex-wrap" style={{ gap: '0.5rem' }}>
               <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
-                Everyone picked gets the invite.
+                Saved as the attendees on the call. Send the invite from your calendar.
               </span>
               <Grow />
               <TahiButton variant="secondary" size="sm" onClick={() => onBookOpenChange(false)}>Cancel</TahiButton>
@@ -280,10 +286,9 @@ export function CallsTab({
           {upcoming.slice(0, 3).map(c => (
             <span
               key={c.id}
-              className="flex items-center"
+              className="flex items-center min-h-[2.75rem] md:min-h-[2rem]"
               style={{
                 gap: '0.375rem',
-                minHeight: '2rem',
                 padding: '0 0.625rem',
                 borderRadius: 'var(--radius-md)',
                 border: '1px solid var(--color-border-subtle)',
@@ -302,7 +307,7 @@ export function CallsTab({
                   href={c.googleMeetUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="tahi-focus-ring inline-flex items-center"
+                  className="tahi-focus-ring inline-flex items-center min-h-[2.75rem] md:min-h-[1.5rem]"
                   style={{ gap: '0.25rem', color: 'var(--color-brand-dark)', fontWeight: 600, textDecoration: 'none' }}
                 >
                   <Video className="w-3 h-3" aria-hidden="true" />

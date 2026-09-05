@@ -69,6 +69,14 @@ export interface Organisation {
   paymentTerms?: string | null
   /** invoiceChannel resolved against the studio default; always a real rail. */
   effectiveInvoiceChannel?: string | null
+  /**
+   * The onboarding checklist the client's own first-run panel writes, as JSON.
+   * GET /api/admin/clients/[id] selects the whole organisations row, so both of
+   * these already come back; they were simply never declared, which is why the
+   * design's onboarding rail card had nothing to read.
+   */
+  onboardingState?: string | null
+  onboardingLoomUrl?: string | null
   /** true when a user explicitly set the field; auto-derivation will not overwrite it. */
   billingModelIsManual?: boolean
   retainerDatesIsManual?: boolean

@@ -1,13 +1,22 @@
 'use client'
 
-/** The Revenue section of the client Money tab: invoiced, paid, outstanding,
- *  hours, and what those hours cost against the client's own rate. */
+/**
+ * The Revenue section of the client Money tab: invoiced, paid, outstanding,
+ * hours, and what those hours cost against the client's own rate.
+ *
+ * The invoice tiles group by the currency each invoice was billed in rather
+ * than stamping the org's preferred code on a mixed total. The rate is NZD:
+ * /api/admin/clients/[id]/profitability treats organisations.defaultHourlyRate
+ * as NZD (`hourlyRateNzd`), so the cost goes through <Money nzd> and converts
+ * to whatever the nav bar is showing.
+ */
 
 import useSWR from 'swr'
 import { apiPath } from '@/lib/api'
 import { Money } from '@/components/tahi/money'
 import { SkeletonList } from '@/components/tahi/skeletons'
 import { Tile, TileGrid } from '../_kit/chrome'
+import { MoneySums, sumByCurrency } from '../_kit/currency-sums'
 
 export interface RevenueInvoice {
   id: string
@@ -15,6 +24,9 @@ export interface RevenueInvoice {
   currency: string | null
   status: string
 }
+
+/** Statuses that mean the money has been asked for and has not landed. */
+const OUTSTANDING_STATUSES = ['sent', 'viewed', 'overdue']
 
 export interface RevenueTimeEntry {
   id: string
@@ -59,37 +71,40 @@ export function RevenueTab({
   const invoices = data?.invoices ?? []
   const timeEntries = data?.timeEntries ?? []
 
-  const totalInvoiced = invoices.reduce((s, i) => s + (i.totalAmount ?? 0), 0)
   const paidInvoices = invoices.filter(i => i.status === 'paid')
-  const totalPaid = paidInvoices.reduce((s, i) => s + (i.totalAmount ?? 0), 0)
-  const outstandingInvoices = invoices.filter(i => i.status === 'sent' || i.status === 'viewed' || i.status === 'overdue')
-  const totalOutstanding = outstandingInvoices.reduce((s, i) => s + (i.totalAmount ?? 0), 0)
+  const outstandingInvoices = invoices.filter(i => OUTSTANDING_STATUSES.includes(i.status))
+
+  const invoicedSums = sumByCurrency(invoices, currency)
+  const paidSums = sumByCurrency(paidInvoices, currency)
+  const outstandingSums = sumByCurrency(outstandingInvoices, currency)
+  // Lifetime value: what has been paid, plus what is still expected, each in
+  // the currency it was billed in.
+  const ltvSums = sumByCurrency([...paidInvoices, ...outstandingInvoices], currency)
+  const anyOutstanding = outstandingSums.some(s => s.total > 0)
+  const anyPaid = paidSums.some(s => s.total > 0)
 
   const totalHours = timeEntries.reduce((s, e) => s + e.hours, 0)
   const billableHours = timeEntries.filter(e => e.billable).reduce((s, e) => s + e.hours, 0)
   const rate = hourlyRate ?? DEFAULT_HOURLY_RATE
   const estimatedTimeCost = billableHours * rate
 
-  // Lifetime value: what has been paid, plus what is still expected.
-  const ltv = totalPaid + totalOutstanding
-
   return (
     <TileGrid>
       <Tile
         label="Total invoiced"
-        value={<Money native={totalInvoiced} currency={currency} sensitive />}
+        value={<MoneySums sums={invoicedSums} fallback={currency} />}
         hint={`${invoices.length} ${invoices.length === 1 ? 'invoice' : 'invoices'}`}
       />
       <Tile
         label="Total paid"
-        tone={totalPaid > 0 ? 'positive' : 'neutral'}
-        value={<Money native={totalPaid} currency={currency} sensitive />}
+        tone={anyPaid ? 'positive' : 'neutral'}
+        value={<MoneySums sums={paidSums} fallback={currency} />}
         hint={`${paidInvoices.length} settled`}
       />
       <Tile
         label="Outstanding"
-        tone={totalOutstanding > 0 ? 'danger' : 'neutral'}
-        value={<Money native={totalOutstanding} currency={currency} sensitive />}
+        tone={anyOutstanding ? 'danger' : 'neutral'}
+        value={<MoneySums sums={outstandingSums} fallback={currency} />}
         hint={`${outstandingInvoices.length} unpaid`}
       />
       <Tile
@@ -99,14 +114,14 @@ export function RevenueTab({
       />
       <Tile
         label="Estimated time cost"
-        value={<Money native={estimatedTimeCost} currency={currency} sensitive />}
+        value={<Money nzd={estimatedTimeCost} sensitive />}
         hint={hourlyRate != null
-          ? `at their ${currency} ${rate}/hr rate`
-          : `at the ${currency} ${rate}/hr studio fallback, no rate set for this client`}
+          ? `at their NZD ${rate}/hr rate`
+          : `at the NZD ${rate}/hr studio fallback, no rate set for this client`}
       />
       <Tile
         label="Lifetime value"
-        value={<Money native={ltv} currency={currency} sensitive />}
+        value={<MoneySums sums={ltvSums} fallback={currency} />}
         hint="paid plus outstanding"
       />
     </TileGrid>
