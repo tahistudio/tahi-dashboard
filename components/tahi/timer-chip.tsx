@@ -93,7 +93,17 @@ function prettyHoursShort(h: number | undefined): string {
   return `${Math.round(h * 3600)}s`
 }
 
-export function TimerChip() {
+interface TimerChipProps {
+  /**
+   * 'bar' (default) is the top-bar pill. 'sheet' is the same control rendered
+   * as a full-width row inside the mobile More sheet, with the panel inline
+   * instead of floating: identical state, identical actions, no clipping.
+   */
+  variant?: 'bar' | 'sheet'
+}
+
+export function TimerChip({ variant = 'bar' }: TimerChipProps) {
+  const sheet = variant === 'sheet'
   const [timer, setTimer] = useState<ActiveTimerResponse['timer']>(null)
   const [loaded, setLoaded] = useState(false)
   const [tick, setTick] = useState(0)
@@ -323,7 +333,7 @@ export function TimerChip() {
   // doesn't jump when state arrives.
   if (!loaded) {
     return (
-      <div className="tt" data-status="idle">
+      <div className={'tt' + (sheet ? ' tt-sheet' : '')} data-status="idle">
         <button type="button" className="tt-pill" disabled aria-label="Timer loading">
           <span className="tt-ic"><ShellIcon n="clock" s={16} /></span>
           <span className="tt-lbl">Track time</span>
@@ -355,7 +365,7 @@ export function TimerChip() {
   return (
     <div
       ref={rootRef}
-      className={'tt' + (open ? ' open' : '') + (active ? ' active' : '')}
+      className={'tt' + (sheet ? ' tt-sheet' : '') + (open ? ' open' : '') + (active ? ' active' : '')}
       data-status={status}
     >
       <button

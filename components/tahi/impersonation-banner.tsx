@@ -240,8 +240,8 @@ function ClientSwitcher({ currentOrgId, label, color }: { currentOrgId: string; 
         onClick={() => { setOpen(o => !o); void loadClients() }}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="inline-flex items-center gap-1 font-semibold"
-        style={{ color, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, font: 'inherit' }}
+        className="imp-switch"
+        style={{ color }}
       >
         <strong data-private>{label}</strong>
         <ChevronDown className="w-3.5 h-3.5" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 150ms ease', flexShrink: 0 }} aria-hidden="true" />

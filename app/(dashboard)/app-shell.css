@@ -349,6 +349,9 @@
   background: var(--cream);
 }
 .tb-crumb { display: flex; align-items: center; gap: 7px; font: 500 13px 'Manrope', sans-serif; color: var(--text-muted); min-width: 0; }
+/* The group label must never wrap inside a 3.5rem bar (the page name below it
+   owns the ellipsis instead). */
+.tb-crumb > span { white-space: nowrap; }
 .tb-crumb .sep { color: var(--text-faint); }
 .tb-crumb .here { color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tb-search {
@@ -375,6 +378,81 @@
 .tb-search .kbd span { font: 600 10.5px ui-monospace, monospace; color: var(--text-faint); background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 1px 5px; }
 .tb-controls { display: flex; align-items: center; gap: 10px; }
 .tb-divider { display: inline-block; width: 1px; height: 1.25rem; background: var(--border-subtle); }
+
+/* ---------- phone-only top bar slots ----------
+   Both carry `md:hidden` in the JSX, so they exist only below the rail's
+   breakpoint: the rail owns the brand lockup and the account menu from md up. */
+.tb-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  margin-left: -0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md-shell);
+  background: none;
+  color: var(--text);
+  transition: background 0.14s var(--ease);
+}
+.tb-brand:hover { background: var(--bg-secondary); }
+.tb-brand img { width: 1.75rem; height: 1.75rem; object-fit: contain; border-radius: var(--radius-md-shell); display: block; }
+.tb-brand .tb-brand-initial {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-md-shell);
+  background: var(--brand-100);
+  color: var(--brand-strong);
+  font: 700 0.8125rem 'Manrope', sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The More trigger. Wears the viewer's avatar (it is also the account control)
+   and a live dot while a timer runs, so moving the tracker into the sheet never
+   hides that state. */
+.tb-more {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  transition: background 0.14s var(--ease);
+}
+.tb-more:hover { background: var(--bg-secondary); }
+.tb-more-av {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand-100);
+  color: var(--brand-strong);
+  font: 700 0.75rem 'Manrope', sans-serif;
+}
+.tb-more-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tb-more-dot {
+  position: absolute;
+  top: 0.1875rem;
+  right: 0.1875rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--brand);
+  border: 2px solid var(--cream);
+}
+.tb-more[data-timer="paused"] .tb-more-dot { background: var(--color-warning); }
 
 .tb-bell, .tb-cur, .tb-search, .tt { position: relative; }
 .tb-bell {
@@ -508,6 +586,16 @@
 .tt-search-x:hover { color: var(--text); background: var(--border); }
 .tt-empty { padding: 14px 6px; text-align: center; font: 500 12px 'Manrope', sans-serif; color: var(--text-faint); }
 
+/* Sheet variant (<TimerChip variant="sheet" />, mobile More sheet). Same
+   component, same actions: the pill becomes a full-width row and the panel
+   drops inline instead of floating, so nothing is clipped on a phone. */
+.tt-sheet { width: 100%; }
+.tt-sheet .tt-pill { width: 100%; min-height: 2.75rem; height: auto; padding: 0 0.75rem; border-color: transparent; background: none; gap: 0.75rem; font-size: 0.9375rem; }
+.tt-sheet .tt-pill:hover { background: var(--bg-secondary); border-color: transparent; }
+.tt-sheet .tt-lbl, .tt-sheet .tt-live { flex: 1; min-width: 0; }
+.tt-sheet .tt-chev { margin-left: auto; }
+.tt-sheet .tt-panel { position: static; width: auto; margin-top: 0.5rem; box-shadow: none; animation: none; }
+
 /* ===================================================================
    NOTIFICATIONS DROPDOWN (inside existing Popover)
    =================================================================== */
@@ -550,8 +638,16 @@
 .imp-banner::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(143, 210, 128, 0.5), transparent); }
 .imp-eye { display: flex; color: #9ec495; }
 .imp-banner b { font-weight: 700; color: #fff; }
-.imp-banner .imp-exit { margin-left: auto; border: 1px solid rgba(158, 196, 149, 0.4); background: rgba(158, 196, 149, 0.1); color: #cfe6c7; font: 600 12px 'Manrope', sans-serif; padding: 6px 13px; border-radius: 8px; cursor: pointer; transition: background 0.14s, border-color 0.14s; }
+/* flex-shrink: 0 is load-bearing. Without it the exit is the first thing the
+   row squashes on a phone, which is the one control that must stay tappable. */
+.imp-banner .imp-exit { margin-left: auto; flex-shrink: 0; border: 1px solid rgba(158, 196, 149, 0.4); background: rgba(158, 196, 149, 0.1); color: #cfe6c7; font: 600 12px 'Manrope', sans-serif; padding: 6px 13px; border-radius: 8px; cursor: pointer; transition: background 0.14s, border-color 0.14s; }
 .imp-banner .imp-exit:hover { background: rgba(158, 196, 149, 0.2); border-color: rgba(158, 196, 149, 0.6); color: #fff; }
+.imp-banner .imp-exit:focus-visible { outline: 2px solid #9ec495; outline-offset: 2px; }
+/* Inline client switcher inside the strip. Styles live here rather than in a
+   style prop so the phone breakpoint can give it a real touch target. */
+.imp-switch { display: inline-flex; align-items: center; gap: 0.25rem; font: inherit; font-weight: 600; padding: 0; border: none; background: transparent; cursor: pointer; border-radius: 6px; }
+.imp-switch:hover { text-decoration: underline; }
+.imp-switch:focus-visible { outline: 2px solid #9ec495; outline-offset: 2px; }
 
 /* ===================================================================
    ANNOUNCEMENT BAR - client broadcast strip (forest, composed in Settings)
@@ -644,6 +740,96 @@
 .msheet .ms-item.active { background: var(--rail-active); color: var(--rail-text-active); border-radius: var(--radius-leaf-shell); box-shadow: inset 0 0 0 1px rgba(143, 210, 128, 0.32), 0 0 14px -4px rgba(122, 171, 107, 0.45); }
 .msheet .ms-item.active .msi-ic { color: var(--rail-icon-active); }
 .msheet .ms-count { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: rgba(158, 196, 149, 0.16); color: #bfe0b6; font: 600 11px 'Manrope', sans-serif; display: flex; align-items: center; justify-content: center; }
+
+/* ---------- More sheet, surface variant (<TopBarMore>) ----------
+   Same sheet skeleton as the nav's More sheet, wearing page chrome instead of
+   the forest rail: the controls it hosts (time tracker, currency list, brief)
+   are page-surface controls and would fight a dark panel. */
+.msheet.msheet-surface {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--text);
+  padding: 0.5rem 0.75rem max(1.375rem, env(safe-area-inset-bottom));
+}
+.msheet-surface .msheet-grab { background: var(--border); }
+.msheet-surface .ms-glabel { color: var(--text-faint); }
+
+/* Sheet header: who you are signed in as. */
+.tbs-head { display: flex; align-items: center; gap: 0.75rem; padding: 0.25rem 0.75rem 0.75rem; min-width: 0; }
+.tbs-head .tb-more-av { width: 2.25rem; height: 2.25rem; flex-shrink: 0; font-size: 0.8125rem; }
+.tbs-head .tbs-head-t { min-width: 0; display: flex; flex-direction: column; }
+.tbs-head b { font: 700 0.9375rem 'Manrope', sans-serif; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tbs-head small { font: 500 0.75rem 'Manrope', sans-serif; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* One row shape for every control the sheet hosts: icon, label, current value. */
+.tbs-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0 0.75rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md-shell);
+  background: none;
+  color: var(--text);
+  font: 600 0.9375rem 'Manrope', sans-serif;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.14s var(--ease), color 0.14s var(--ease);
+}
+.tbs-row:hover { background: var(--bg-secondary); }
+.tbs-row:disabled { cursor: not-allowed; opacity: 0.6; }
+.tbs-row .tbs-ic { display: flex; flex-shrink: 0; color: var(--text-muted); }
+.tbs-row .tbs-lbl { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tbs-row .tbs-val { margin-left: auto; flex-shrink: 0; font: 600 0.6875rem 'Manrope', sans-serif; letter-spacing: 0.03em; text-transform: uppercase; color: var(--text-muted); background: var(--bg-secondary); padding: 0.1875rem 0.5rem; border-radius: 999px; }
+.tbs-row:hover .tbs-val { background: var(--border-subtle); }
+.tbs-row .tbs-val.on { color: var(--brand-strong); background: var(--brand-100); }
+.tbs-row.danger { color: var(--color-danger); }
+.tbs-row.danger .tbs-ic { color: var(--color-danger); }
+.tbs-row.danger:hover { background: var(--color-danger-bg); }
+/* The tracker and the brief supply their own trigger markup, so give their
+   wrappers the row's full width. */
+.tbs-slot { width: 100%; }
+
+/* ===================================================================
+   PHONE TOP BAR - five slots, nothing else
+   Brand, page name, search, notifications, More. Every other control moves
+   into the More sheet (<TopBarMore>), which is why the bar stops squashing
+   its own buttons below 38px. Nothing here applies from md up.
+   =================================================================== */
+@media (max-width: 47.9375rem) {
+  .tahi-topbar { gap: 0.25rem; padding: 0 0.75rem; }
+
+  /* Page name only. The group is desktop wayfinding and it is the piece that
+     wraps in a 3.5rem bar. */
+  .tb-crumb { flex: 1; gap: 0; }
+  .tb-crumb > :not(.here) { display: none; }
+  .tb-crumb .here { font: 600 0.9375rem 'Manrope', sans-serif; }
+
+  .tb-controls { gap: 0.25rem; }
+  /* Nothing in the cluster may shrink: that squash is the crowding. */
+  .tb-controls > * { flex-shrink: 0; }
+
+  .tb-bell {
+    width: 2.75rem;
+    height: 2.75rem;
+    border-color: transparent;
+    background: none;
+    box-shadow: none;
+  }
+  .tb-bell:hover { background: var(--bg-secondary); border-color: transparent; box-shadow: none; }
+  .tb-bell-dot { top: 0.5rem; right: 0.5rem; }
+
+  /* Impersonation strip: the exit is the one control that must never squash,
+     so the message wraps under it instead (same treatment as .ann-bar). */
+  .imp-banner { flex-wrap: wrap; column-gap: 0.625rem; padding: 0.5rem 0.75rem; }
+  .imp-eye { order: 1; }
+  .imp-banner .imp-exit { order: 2; margin-left: auto; min-height: 2.75rem; padding: 0 0.875rem; }
+  .imp-banner > span:not(.imp-eye) { order: 3; flex-basis: 100%; margin-top: 0.375rem; }
+  .imp-switch { min-height: 2.75rem; padding: 0 0.25rem; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .tb-bell.has-unread .tb-bell-dot::after,

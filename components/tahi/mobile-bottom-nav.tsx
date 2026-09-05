@@ -16,8 +16,9 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { ShellIcon, type ShellIconName } from '@/components/tahi/shell-icons'
+import { useBottomSheet } from '@/components/tahi/use-bottom-sheet'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { useUser } from '@clerk/nextjs'
 import { usePermissions } from '@/components/tahi/permissions-context'
@@ -117,26 +118,11 @@ export function MobileBottomNav({ isAdmin = false, features, clientPortalRole }:
   })
 
   const active     = (href: string) => isRouteActive(pathname, href)
-  const closeSheet = () => setSheetOpen(false)
+  const closeSheet = useCallback(() => setSheetOpen(false), [])
 
-  // Close sheet when the route changes (link was tapped inside the sheet).
-  useEffect(() => { closeSheet() }, [pathname])
-
-  // Dismiss sheet on Escape for keyboard accessibility.
-  useEffect(() => {
-    if (!sheetOpen) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeSheet() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [sheetOpen])
-
-  // Lock body scroll while sheet is open.
-  useEffect(() => {
-    if (!sheetOpen) return
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = prev }
-  }, [sheetOpen])
+  // Escape dismisses, the page underneath stops scrolling, a route change
+  // closes. Shared with the top bar's More sheet so the two behave identically.
+  useBottomSheet(sheetOpen, closeSheet)
 
   return (
     <>

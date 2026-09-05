@@ -1,5 +1,5 @@
 /**
- * <CurrencySwitcher> — nav-bar dropdown for the global display currency.
+ * <CurrencySwitcher>. Nav-bar dropdown for the global display currency.
  *
  * Lightweight, compact, keyboard-friendly. Sits next to the notification
  * bell on admin pages. Reads + writes through the DisplayCurrencyContext.
@@ -18,7 +18,17 @@ import { ShellIcon } from '@/components/tahi/shell-icons'
 import type { CurrencyCode } from '@/lib/currency'
 import { Popover } from '@/components/tahi/popover'
 
-export function CurrencySwitcher() {
+interface CurrencySwitcherProps {
+  /**
+   * 'bar' (default) is the top-bar pill. 'sheet' is the same control rendered
+   * as a full-width row inside the mobile More sheet. Only the trigger markup
+   * differs: the option list and the context wiring are shared.
+   */
+  variant?: 'bar' | 'sheet'
+}
+
+export function CurrencySwitcher({ variant = 'bar' }: CurrencySwitcherProps) {
+  const sheet = variant === 'sheet'
   const { displayCurrency, setDisplayCurrency, options } = useDisplayCurrency()
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -32,18 +42,34 @@ export function CurrencySwitcher() {
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="tb-cur"
-        onClick={() => setOpen(v => !v)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={`Display currency: ${activeOption.code}. Change currency.`}
-      >
-        {activeOption.code}
-        <span className="cur-chev"><ShellIcon n="chevron" s={13} /></span>
-      </button>
+      {sheet ? (
+        <button
+          ref={triggerRef}
+          type="button"
+          className="tbs-row tahi-focus-ring"
+          onClick={() => setOpen(v => !v)}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-label={`Display currency: ${activeOption.code}. Change currency.`}
+        >
+          <span className="tbs-ic"><ShellIcon n="currency" s={18} /></span>
+          <span className="tbs-lbl">Display currency</span>
+          <span className="tbs-val">{activeOption.code}</span>
+        </button>
+      ) : (
+        <button
+          ref={triggerRef}
+          type="button"
+          className="tb-cur"
+          onClick={() => setOpen(v => !v)}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-label={`Display currency: ${activeOption.code}. Change currency.`}
+        >
+          {activeOption.code}
+          <span className="cur-chev"><ShellIcon n="chevron" s={13} /></span>
+        </button>
+      )}
 
       <Popover
         anchorRef={triggerRef}

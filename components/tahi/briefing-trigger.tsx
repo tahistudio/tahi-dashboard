@@ -53,7 +53,17 @@ const dotColor = (tone: BriefRow['tone']): string => {
   return 'var(--color-text-subtle)'
 }
 
-export function BriefingTrigger() {
+interface BriefingTriggerProps {
+  /**
+   * 'bar' (default) is the top-bar bell. 'sheet' is the same control rendered
+   * as a full-width row inside the mobile More sheet. Only the trigger markup
+   * differs: the popover, the data and the unread rule are shared.
+   */
+  variant?: 'bar' | 'sheet'
+}
+
+export function BriefingTrigger({ variant = 'bar' }: BriefingTriggerProps) {
+  const sheet = variant === 'sheet'
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [data, setData] = useState<BriefData | null>(null)
@@ -144,19 +154,39 @@ export function BriefingTrigger() {
   ]
 
   return (
-    <div style={{ position: 'relative' }}>
-      <button
-        ref={buttonRef}
-        type="button"
-        className={'tb-bell' + (hasNew ? ' has-unread' : '')}
-        onClick={handleToggle}
-        aria-label={`Daily brief${hasNew ? ' (new)' : ''}`}
-        aria-expanded={open}
-        aria-haspopup="true"
-      >
-        <Sparkles size={18} aria-hidden="true" />
-        {hasNew && <span className="tb-bell-dot" aria-hidden="true" />}
-      </button>
+    <div className={sheet ? 'tbs-slot' : undefined} style={{ position: 'relative' }}>
+      {sheet ? (
+        <button
+          ref={buttonRef}
+          type="button"
+          className="tbs-row tahi-focus-ring"
+          onClick={handleToggle}
+          aria-label={`Daily brief${hasNew ? ' (new)' : ''}`}
+          aria-expanded={open}
+          aria-haspopup="true"
+        >
+          <span className="tbs-ic"><Sparkles size={18} aria-hidden="true" /></span>
+          <span className="tbs-lbl">Daily brief</span>
+          {hasNew
+            ? <span className="tbs-val on">New</span>
+            : data?.generatedAt
+              ? <span className="tbs-val">{formatTime(data.generatedAt)}</span>
+              : null}
+        </button>
+      ) : (
+        <button
+          ref={buttonRef}
+          type="button"
+          className={'tb-bell' + (hasNew ? ' has-unread' : '')}
+          onClick={handleToggle}
+          aria-label={`Daily brief${hasNew ? ' (new)' : ''}`}
+          aria-expanded={open}
+          aria-haspopup="true"
+        >
+          <Sparkles size={18} aria-hidden="true" />
+          {hasNew && <span className="tb-bell-dot" aria-hidden="true" />}
+        </button>
+      )}
 
       <Popover
         anchorRef={buttonRef}

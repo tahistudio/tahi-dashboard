@@ -211,7 +211,11 @@ export default async function DashboardLayout({
           <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
             {isAdmin && <ImpersonationBanner />}
             <AnnouncementBanner />
-            <AppTopNav isAdmin={isAdmin} />
+            <AppTopNav
+              isAdmin={isAdmin}
+              brandName={portalBrand.name}
+              brandLogoUrl={portalBrand.logoUrl}
+            />
             <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto dashboard-main">
               <div className="max-w-[90rem] mx-auto w-full dashboard-page-inner">
                 {children}
