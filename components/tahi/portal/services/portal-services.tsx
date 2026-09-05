@@ -93,9 +93,11 @@ export function PortalServices() {
   // The plan panel is money, so /api/portal/subscription answers workspace
   // admins only. A member seat gets a 403 and simply does not see the panel:
   // that is a rule, not a failure, and it must never render as an error.
-  const { data: planData, error: planError } = useSWR<SubscriptionResponse>(
-    '/api/portal/subscription',
-  )
+  const {
+    data: planData,
+    error: planError,
+    isLoading: planLoading,
+  } = useSWR<SubscriptionResponse>('/api/portal/subscription')
   const planDenied = planError instanceof ApiError && planError.status === 403
   const subscription = planDenied ? null : (planData?.subscription ?? null)
 
@@ -116,8 +118,9 @@ export function PortalServices() {
         subtitle="What Tahi Studio takes on, what each one gives you, and how long it usually runs."
       />
 
-      {/* Your plan */}
-      {isLoading && !planData ? (
+      {/* Your plan. A member seat is denied this read by design, so the panel
+          simply is not there for them: a rule, never an error. */}
+      {planLoading && !planData ? (
         <Card padding="lg">
           <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
             <PortalSkeleton width="10rem" height="1.125rem" />
@@ -315,7 +318,7 @@ function FilterChip({
       className="tahi-focus-ring min-h-11 md:min-h-9"
       style={{
         padding: '0.375rem 0.875rem',
-        borderRadius: 'var(--radius-badge, 999px)',
+        borderRadius: 'var(--radius-full)',
         border: `1px solid ${active ? 'var(--color-brand)' : 'var(--color-border)'}`,
         background: active ? 'var(--color-brand-50)' : 'var(--color-bg)',
         color: active ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
