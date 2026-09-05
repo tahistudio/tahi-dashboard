@@ -555,9 +555,8 @@ export function AiTaskWizardPanel({
           <button
             type="button"
             onClick={onWriteItMyself}
-            className="tahi-focus-ring"
+            className="tahi-focus-ring min-h-11 md:min-h-8"
             style={{
-              minHeight: '2rem',
               padding: '0 0.625rem',
               border: '1px solid var(--color-border)',
               borderRadius: 'var(--radius-button)',
@@ -887,7 +886,9 @@ export function AiTaskWizardPanel({
             ref={fileInputRef}
             type="file"
             accept={ACCEPTED_FILES}
-            className="sr-only"
+            // Not sr-only: an unlabelled file input in the tab order is a
+            // control nobody can name. The paperclip is the labelled way in.
+            style={{ display: 'none' }}
             onChange={e => {
               const file = e.target.files?.[0]
               if (file) void acceptFile(file)
@@ -929,6 +930,7 @@ export function AiTaskWizardPanel({
             rows={1}
             style={{
               flex: 1,
+              minWidth: 0,
               minHeight: '1.5rem',
               maxHeight: '8rem',
               resize: 'none',
