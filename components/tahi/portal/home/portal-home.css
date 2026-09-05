@@ -86,8 +86,9 @@
 /* ---------- the tile ---------- */
 
 .pfh-tile {
+  /* No margin: .ov-mast is a flex column with its own 18px gap, the same as
+     the hero this replaces. */
   position: relative;
-  margin-top: 0.875rem;
   padding: 1.375rem 1.5rem 1.25rem;
   border-radius: 0 1.625rem 0 1.625rem; /* the leaf, at hero scale */
   color: #eef6e9;
@@ -290,7 +291,6 @@
 /* ---------- the calm empty card (light, token-driven) ---------- */
 
 .pfh-quiet {
-  margin-top: 0.875rem;
   padding: 1.375rem 1.5rem;
   background: var(--bg);
   border: 0.0625rem solid var(--border);

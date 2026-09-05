@@ -992,10 +992,19 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       primary: { label: 'Join', onAct: () => window.open(joinUrl, '_blank', 'noopener,noreferrer') },
     })
   }
-  // The tile only speaks once every read behind it has answered. Saying "All
-  // quiet in the studio." to somebody with two deliveries waiting, for the
-  // length of one round trip, is the exact lie this pass set out to remove.
-  const waitingLoading = (requestsLoading && reviewLoading) || !invoicesSettled || callsLoading
+  // The tile may only claim "All quiet in the studio." once every read behind
+  // it has answered: saying that to somebody with two deliveries waiting, for
+  // the length of a round trip, is the exact lie this pass set out to remove.
+  // It does NOT wait on the slow ones to show what it already knows, though.
+  // As soon as there is a row, the row paints, and the others join it: the
+  // hero of the page must not sit as a skeleton because the invoices route is
+  // taking its time.
+  // The dedicated status=client_review read is authoritative, and the page-one
+  // slice of the active list stands in until it lands, so this is only unknown
+  // while BOTH are still in flight.
+  const reviewUnknown = requestsLoading && reviewLoading
+  const waitingUnsettled = reviewUnknown || !invoicesSettled || callsLoading
+  const waitingLoading = waiting.length === 0 ? waitingUnsettled : reviewUnknown
   const noRequestsAtAll = !requestsLoading && requests.length === 0
 
   // -- vitals ------------------------------------------------------------------
@@ -1012,9 +1021,9 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
     // exactly that cut on /requests.
     {
       lbl: 'Waiting on you',
-      num: waitingLoading ? <SkelFigure width="2.5rem" /> : inReview.length,
-      muted: !waitingLoading && inReview.length === 0,
-      sub: waitingLoading ? (
+      num: reviewUnknown ? <SkelFigure width="2.5rem" /> : inReview.length,
+      muted: !reviewUnknown && inReview.length === 0,
+      sub: reviewUnknown ? (
         <SkelFigure width="6rem" />
       ) : inReview.length === 0 ? (
         'nothing to approve'
