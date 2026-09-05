@@ -142,6 +142,20 @@ export const TASK_STATUSES: readonly StatusOption[] = [
   { value: 'done',        label: 'Done',        tone: 'positive' },
 ]
 
+/**
+ * The token quad for each task status, matching REQUEST_STATUS_CONFIG's
+ * shape so the rail select, the status chip and the board column header can
+ * all read one map. Reuses the request pipeline's tokens where the meaning
+ * lines up (todo reads as submitted, done reads as delivered) and the shared
+ * danger tokens for blocked, all of which carry a verified .dark override.
+ */
+export const TASK_STATUS_CONFIG: Record<string, StatusStyle> = {
+  todo:        { label: 'To Do',       dot: 'var(--status-submitted-dot)',   bg: 'var(--status-submitted-bg)',   text: 'var(--status-submitted-text)',   border: 'var(--status-submitted-border)'   },
+  in_progress: { label: 'In Progress', dot: 'var(--status-in-progress-dot)', bg: 'var(--status-in-progress-bg)', text: 'var(--status-in-progress-text)', border: 'var(--status-in-progress-border)' },
+  blocked:     { label: 'Blocked',     dot: 'var(--badge-danger-dot)',       bg: 'var(--badge-danger-bg)',       text: 'var(--badge-danger-text)',       border: 'var(--badge-danger-border)'       },
+  done:        { label: 'Done',        dot: 'var(--status-delivered-dot)',   bg: 'var(--status-delivered-bg)',   text: 'var(--status-delivered-text)',   border: 'var(--status-delivered-border)'   },
+}
+
 /** value -> tone lookups, derived from the arrays so they cannot drift. */
 export const REQUEST_STATUS_TONE: Record<string, BadgeTone> = Object.fromEntries(
   REQUEST_STATUSES.map((s) => [s.value, s.tone] as [string, BadgeTone]),
