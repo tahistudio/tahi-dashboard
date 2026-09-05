@@ -47,6 +47,7 @@ import {
   formatPortalMoney,
   isPortalInvoiceOpen,
   portalDueLabel,
+  portalDueRelative,
   portalInvoiceLabel,
   portalInvoiceState,
   sumByCurrency,
@@ -510,6 +511,9 @@ function InvoiceRow({
   const reference = invoiceReference(invoice.id)
   const overdue = state === 'overdue'
   const dueTone = overdue ? 'var(--color-danger)' : 'var(--color-text-muted)'
+  // Null once the due date is far enough away to speak for itself, so the
+  // row never prints the same date twice in two different words.
+  const relative = portalDueRelative(invoice)
   // Divider between siblings only, so no element carries a lone top border.
   const divider: React.CSSProperties = first
     ? {}
@@ -559,7 +563,9 @@ function InvoiceRow({
           <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: dueTone }}>
             {formatPortalDate(invoice.dueDate)}
           </span>
-          <span style={{ fontSize: '0.6875rem', color: dueTone }}>{portalDueLabel(invoice)}</span>
+          {relative && (
+            <span style={{ fontSize: '0.6875rem', color: dueTone }}>{relative}</span>
+          )}
         </span>
         <span style={{ textAlign: 'right' }}>
           <PortalMoney>{formatPortalMoney(invoice.totalAmount, invoice.currency)}</PortalMoney>

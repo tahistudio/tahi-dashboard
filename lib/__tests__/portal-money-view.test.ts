@@ -14,6 +14,8 @@ import {
   formatPortalDateLong,
   isPortalInvoiceOpen,
   portalDueLabel,
+  portalDueRelative,
+  portalDueSentence,
   portalInvoiceLabel,
   portalInvoiceState,
   sumByCurrency,
@@ -76,6 +78,32 @@ describe('portalDueLabel', () => {
   it('says when a settled invoice was paid', () => {
     expect(portalDueLabel({ status: 'paid', dueDate: '2026-07-28', paidAt: '2026-07-22' }, NOW))
       .toBe('Paid 22 Jul 2026')
+  })
+})
+
+describe('portalDueRelative and portalDueSentence', () => {
+  it('never prints the same date twice in one row', () => {
+    // The row already renders the date in bold, so the relative half stands
+    // down once the date speaks for itself.
+    expect(portalDueRelative({ status: 'sent', dueDate: '2026-09-12' }, NOW)).toBe('Due in 6 days')
+    expect(portalDueRelative({ status: 'sent', dueDate: '2026-12-25' }, NOW)).toBeNull()
+    expect(portalDueRelative({ status: 'paid', dueDate: '2026-01-01' }, NOW)).toBeNull()
+  })
+
+  it('writes one sentence for the hero, which owns both halves', () => {
+    expect(portalDueSentence({ status: 'sent', dueDate: '2026-09-18' }, NOW))
+      .toBe('Due 18 September 2026, in 12 days.')
+    expect(portalDueSentence({ status: 'sent', dueDate: '2026-08-31' }, NOW))
+      .toBe('Due 31 August 2026, 6 days overdue.')
+    expect(portalDueSentence({ status: 'sent', dueDate: '2026-09-06' }, NOW))
+      .toBe('Due today, 6 September 2026.')
+  })
+
+  it('never says "Paid Not set" for a bill settled without a paid date', () => {
+    expect(portalDueSentence({ status: 'written_off', dueDate: '2026-01-01' }, NOW))
+      .toBe('Settled. There is nothing left to pay on this one.')
+    expect(portalDueSentence({ status: 'sent', dueDate: null }, NOW))
+      .toBe('No due date on this one. Ask us if you would like one set.')
   })
 })
 

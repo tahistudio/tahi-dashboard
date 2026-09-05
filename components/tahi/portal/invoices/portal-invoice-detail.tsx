@@ -44,7 +44,7 @@ import {
   formatPortalDateLong,
   formatPortalMoney,
   isPortalInvoiceOpen,
-  portalDueLabel,
+  portalDueSentence,
   portalInvoiceLabel,
   portalInvoiceState,
 } from '@/lib/portal-invoice-view'
@@ -288,9 +288,7 @@ export function PortalInvoiceDetail({ invoiceId }: { invoiceId: string }) {
                 color: state === 'overdue' ? 'var(--color-danger)' : 'var(--color-text-muted)',
               }}
             >
-              {settled
-                ? `Paid ${formatPortalDateLong(invoice.paidAt)}.`
-                : `Due ${formatPortalDateLong(invoice.dueDate)}, ${portalDueLabel(invoice).toLowerCase()}.`}
+              {portalDueSentence(invoice)}
             </p>
           </div>
 

@@ -109,6 +109,57 @@ export function portalDueLabel(
   return `Due ${formatPortalDate(invoice.dueDate)}`
 }
 
+/**
+ * The relative half of the due date, for the places that already print the
+ * date itself.
+ *
+ * Null once the date is far enough away to speak for itself, so a row never
+ * reads "30 Oct 2026 / Due 30 Oct 2026".
+ */
+export function portalDueRelative(
+  invoice: PortalInvoiceLike,
+  now: Date = new Date(),
+): string | null {
+  if (isInvoiceSettled(invoice)) return null
+  if (!invoice.dueDate) return null
+  const days = daysUntilDue(invoice.dueDate, now)
+  if (days < 0) {
+    const late = Math.abs(days)
+    return `${late} ${late === 1 ? 'day' : 'days'} overdue`
+  }
+  if (days === 0) return 'Due today'
+  if (days === 1) return 'Due tomorrow'
+  if (days <= 30) return `Due in ${days} days`
+  return null
+}
+
+/**
+ * The whole due sentence for a hero, which owns both halves and so must not
+ * say the same thing twice.
+ */
+export function portalDueSentence(
+  invoice: PortalInvoiceLike,
+  now: Date = new Date(),
+): string {
+  if (isInvoiceSettled(invoice)) {
+    return invoice.paidAt
+      ? `Paid ${formatPortalDateLong(invoice.paidAt)}.`
+      : 'Settled. There is nothing left to pay on this one.'
+  }
+  if (!invoice.dueDate) {
+    return 'No due date on this one. Ask us if you would like one set.'
+  }
+  const date = formatPortalDateLong(invoice.dueDate)
+  const days = daysUntilDue(invoice.dueDate, now)
+  if (days < 0) {
+    const late = Math.abs(days)
+    return `Due ${date}, ${late} ${late === 1 ? 'day' : 'days'} overdue.`
+  }
+  if (days === 0) return `Due today, ${date}.`
+  if (days === 1) return `Due tomorrow, ${date}.`
+  return `Due ${date}, in ${days} days.`
+}
+
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
