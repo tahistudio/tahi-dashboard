@@ -30,8 +30,9 @@ vi.mock('@/db/d1', () => ({
     requests: { _table: 'requests', id: 1, orgId: 1, isInternal: 1 },
     contacts: { _table: 'contacts', id: 1, name: 1, clerkUserId: 1 },
     organisations: { _table: 'organisations', id: 1, name: 1 },
-    messages: { _table: 'messages', id: 1, authorId: 1, authorType: 1 },
+    messages: { _table: 'messages', id: 1, authorId: 1, authorType: 1, deletedAt: 1 },
     teamMembers: { _table: 'teamMembers', id: 1, name: 1 },
+    files: { _table: 'files', id: 1, messageId: 1, orgId: 1 },
   },
 }))
 
@@ -39,6 +40,8 @@ vi.mock('drizzle-orm', () => ({
   eq: (...args: unknown[]) => ({ op: 'eq', args }),
   and: (...args: unknown[]) => ({ op: 'and', args }),
   asc: (...args: unknown[]) => ({ op: 'asc', args }),
+  isNull: (...args: unknown[]) => ({ op: 'isNull', args }),
+  inArray: (...args: unknown[]) => ({ op: 'inArray', args }),
 }))
 
 type Chain = Promise<Row[]> & {
@@ -158,6 +161,53 @@ describe('GET /api/portal/requests/[id] projection', () => {
     expect(team.isOwn).toBe(false)
     expect(team.authorName).toBeNull()
     expect(team.teamMemberName).toBe('Ana')
+  })
+
+  it('hands the client the files posted with each message', async () => {
+    state.queues = {
+      requests: [[REQUEST_SOURCE]],
+      contacts: [[{ id: 'contact_self' }]],
+      organisations: [[{ name: 'Acme' }]],
+      messages: [[
+        { id: 'm1', authorId: 'tm1', authorType: 'team_member', body: 'Here it is', isInternal: false, editedAt: null, createdAt: 't1', teamMemberName: 'Ana', contactName: null },
+        { id: 'm2', authorId: 'tm1', authorType: 'team_member', body: 'and a note', isInternal: false, editedAt: null, createdAt: 't2', teamMemberName: 'Ana', contactName: null },
+      ]],
+      // The third row is stamped onto a message this client cannot see (an
+      // internal note, or a deleted one): the query is keyed off the ids of
+      // the messages resolved above, so it must never reach the payload.
+      files: [[
+        { id: 'f1', messageId: 'm1', filename: 'logo.svg', storageKey: 'org/req/logo.svg', mimeType: 'image/svg+xml', sizeBytes: 120 },
+        { id: 'f2', messageId: 'm1', filename: 'notes.pdf', storageKey: 'org/req/notes.pdf', mimeType: 'application/pdf', sizeBytes: 400 },
+        { id: 'f3', messageId: 'm_internal', filename: 'margins.xlsx', storageKey: 'org/req/margins.xlsx', mimeType: null, sizeBytes: 9 },
+      ]],
+    }
+    const res = await GET(makeGet(), ctx)
+    expect(res.status).toBe(200)
+    const json = await res.json() as {
+      messages: Array<{ id: string; files: Array<{ id: string; filename: string }> }>
+    }
+
+    const withFiles = json.messages.find(m => m.id === 'm1')!
+    expect(withFiles.files.map(f => f.filename)).toEqual(['logo.svg', 'notes.pdf'])
+
+    const without = json.messages.find(m => m.id === 'm2')!
+    expect(without.files).toEqual([])
+
+    const everyFileId = json.messages.flatMap(m => m.files.map(f => f.id))
+    expect(everyFileId).not.toContain('f3')
+  })
+
+  it('asks for no files at all when the thread is empty', async () => {
+    state.queues = {
+      requests: [[REQUEST_SOURCE]],
+      contacts: [[{ id: 'contact_self' }]],
+      organisations: [[{ name: 'Acme' }]],
+      messages: [[]],
+      files: [[{ id: 'f1', messageId: 'm1', filename: 'leak.pdf', storageKey: 'k', mimeType: null, sizeBytes: 1 }]],
+    }
+    const res = await GET(makeGet(), ctx)
+    const json = await res.json() as { messages: unknown[] }
+    expect(json.messages).toEqual([])
   })
 
   it('returns 404 when the request does not resolve under the caller org', async () => {

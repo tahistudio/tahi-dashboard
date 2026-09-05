@@ -26,6 +26,14 @@ interface Notification {
   createdAt: string
 }
 
+/**
+ * Fired by any surface that has just marked notifications read behind the
+ * bell's back (opening a request clears that request's rows). The bell only
+ * refetches on open, on reconnect and on a pushed row, so without this the
+ * badge kept counting rows the user had already dealt with.
+ */
+export const NOTIFICATIONS_CHANGED_EVENT = 'tahi:notifications-changed'
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatRelative(dateStr: string): string {
@@ -185,6 +193,13 @@ export function NotificationBell({ audience = 'team' }: { audience?: Notificatio
       eventSource?.close()
       eventSource = null
     }
+  }, [fetchNotifications])
+
+  // Re-read the count when another surface clears rows for the user.
+  useEffect(() => {
+    const onChanged = () => { fetchNotifications().catch(() => {}) }
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onChanged)
+    return () => window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onChanged)
   }, [fetchNotifications])
 
   const markAllRead = useCallback(async () => {

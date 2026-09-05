@@ -2,10 +2,11 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, asc, inArray } from 'drizzle-orm'
+import { eq, and, asc, inArray, isNull } from 'drizzle-orm'
 import { notifyMentionedPerson, notifyOrgContacts, notifyTeamMember } from '@/lib/notifications'
 import { parseMentions } from '@/lib/parse-mentions'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { pickThreadConversationId } from '@/lib/request-thread'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -54,7 +55,13 @@ export async function GET(req: NextRequest, { params }: Params) {
         eq(schema.messages.authorType, 'team_member')
       )
     )
-    .where(eq(schema.messages.requestId, id))
+    // A deleted message is deleted for the studio too. Without this filter a
+    // soft-deleted row kept rendering in the thread, so "delete" only ever
+    // meant "stamp a column".
+    .where(and(
+      eq(schema.messages.requestId, id),
+      isNull(schema.messages.deletedAt),
+    ))
     .orderBy(asc(schema.messages.createdAt))
 
   // Attached files (files.message_id in the message ids we just loaded).
@@ -80,7 +87,22 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
   const items = msgs.map(m => ({ ...m, files: filesByMessage.get(m.id) ?? [] }))
 
-  return NextResponse.json({ items, page: 1, limit: items.length })
+  // The request's thread conversation, so the detail page can REUSE it instead
+  // of minting a fresh one on the first message after every page load. Null
+  // when the request has never had one; the page creates it once, then reads
+  // it back from here on the next load.
+  const convRows = await drizzle
+    .select({
+      id: schema.conversations.id,
+      type: schema.conversations.type,
+      visibility: schema.conversations.visibility,
+      createdAt: schema.conversations.createdAt,
+    })
+    .from(schema.conversations)
+    .where(eq(schema.conversations.requestId, id))
+  const conversationId = pickThreadConversationId(convRows)
+
+  return NextResponse.json({ items, conversationId, page: 1, limit: items.length })
 }
 
 // ── POST /api/admin/requests/[id]/messages ───────────────────────────────────
