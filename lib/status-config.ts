@@ -142,6 +142,20 @@ export const TASK_STATUSES: readonly StatusOption[] = [
   { value: 'done',        label: 'Done',        tone: 'positive' },
 ]
 
+/**
+ * The token quad for each task status, matching REQUEST_STATUS_CONFIG's
+ * shape so the rail select, the status chip and the board column header can
+ * all read one map. Reuses the request pipeline's tokens where the meaning
+ * lines up (todo reads as submitted, done reads as delivered) and the shared
+ * danger tokens for blocked, all of which carry a verified .dark override.
+ */
+export const TASK_STATUS_CONFIG: Record<string, StatusStyle> = {
+  todo:        { label: 'To Do',       dot: 'var(--status-submitted-dot)',   bg: 'var(--status-submitted-bg)',   text: 'var(--status-submitted-text)',   border: 'var(--status-submitted-border)'   },
+  in_progress: { label: 'In Progress', dot: 'var(--status-in-progress-dot)', bg: 'var(--status-in-progress-bg)', text: 'var(--status-in-progress-text)', border: 'var(--status-in-progress-border)' },
+  blocked:     { label: 'Blocked',     dot: 'var(--badge-danger-dot)',       bg: 'var(--badge-danger-bg)',       text: 'var(--badge-danger-text)',       border: 'var(--badge-danger-border)'       },
+  done:        { label: 'Done',        dot: 'var(--status-delivered-dot)',   bg: 'var(--status-delivered-bg)',   text: 'var(--status-delivered-text)',   border: 'var(--status-delivered-border)'   },
+}
+
 /** value -> tone lookups, derived from the arrays so they cannot drift. */
 export const REQUEST_STATUS_TONE: Record<string, BadgeTone> = Object.fromEntries(
   REQUEST_STATUSES.map((s) => [s.value, s.tone] as [string, BadgeTone]),
@@ -159,3 +173,18 @@ export const REQUEST_STATUS_LABELS: Record<string, string> = Object.fromEntries(
 export const TASK_STATUS_LABELS: Record<string, string> = Object.fromEntries(
   TASK_STATUSES.map((s) => [s.value, s.label] as [string, string]),
 )
+
+/**
+ * The statuses where work is finished, per vocabulary. A closed row has no
+ * deadline worth toning, never counts as overdue, and always sorts below
+ * open work.
+ *
+ * Both live here, next to the vocabularies they belong to, because they are
+ * read from three kinds of module: a pure node-tested lib (lib/tasks-views.ts),
+ * a 'use client' component (components/tahi/due-date-chip.tsx) and route
+ * code. Two copies of a status list is exactly the drift this file exists to
+ * end, so the copies re-export these rather than declaring their own.
+ */
+export const REQUEST_CLOSED_STATUSES: readonly string[] = ['delivered', 'cancelled', 'archived']
+
+export const TASK_CLOSED_STATUSES: readonly string[] = ['done']

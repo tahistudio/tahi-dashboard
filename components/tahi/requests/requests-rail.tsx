@@ -8,15 +8,15 @@
  * The same component fills the desktop rail and the mobile Filters sheet; the
  * sheet passes `touch` so every control and every option is a 44px target.
  *
- * Each control is a 36px full-width button (label left, value right, chevron
- * far right) whose options open in a portaled <Popover>, so the rail's own
- * scroll box can never clip a menu. An active control takes a brand border and
- * grows a clear button that sits inside it, just before the chevron.
+ * The controls themselves live in components/tahi/rail/rail-controls.tsx,
+ * which the Tasks rail composes too. What stays here is the Requests
+ * vocabulary: the dimension labels, the status option list and the chip
+ * builder. SaveDefaultControl and RailOption are re-exported below so the
+ * existing importers keep their paths.
  */
 
 import * as React from 'react'
-import { Check, ChevronDown, ArrowDownUp, Search, X, Bookmark } from 'lucide-react'
-import { Popover } from '@/components/tahi/popover'
+import { ArrowDownUp } from 'lucide-react'
 import { REQUEST_STATUSES, REQUEST_STATUS_CONFIG } from '@/lib/status-config'
 import {
   DEFAULT_REQUEST_FILTERS,
@@ -28,20 +28,26 @@ import {
   savedViewsFor,
   sortDirLabel,
   sortKeyLabel,
-  type FilterOption,
   type RequestFilterKey,
   type RequestsAudience,
   type RequestsFilters,
   type RequestsSort,
   type RequestsSortKey,
 } from '@/lib/requests-views'
+import {
+  RailSelect,
+  RailViewItem,
+  RailGroupLabel,
+  SaveDefaultControl,
+  type RailOption,
+} from '@/components/tahi/rail/rail-controls'
+
+// Re-exported so the existing importers (requests-rail-layout.tsx,
+// request-list.tsx) keep working without a path change.
+export { SaveDefaultControl }
+export type { RailOption }
 
 // ── Option shapes ────────────────────────────────────────────────────────────
-
-export interface RailOption extends FilterOption {
-  /** Colour token for a leading status dot. */
-  dot?: string
-}
 
 const DIMENSION_LABELS: Record<RequestFilterKey, string> = {
   status: 'Status',
@@ -102,423 +108,6 @@ export function buildFilterChips(
         dot: match?.dot,
       }
     })
-}
-
-// ── The select control ───────────────────────────────────────────────────────
-
-interface RailSelectProps {
-  label: string
-  options: readonly RailOption[]
-  value: string
-  onChange: (next: string) => void
-  open: boolean
-  onToggle: () => void
-  onClose: () => void
-  /** Shows the clear button and paints the brand border. */
-  active?: boolean
-  onClear?: () => void
-  /** Adds a filter field above the options. The client list keeps growing. */
-  searchable?: boolean
-  searchLabel?: string
-  /** 44px targets for the mobile sheet. */
-  touch?: boolean
-}
-
-function RailSelect({
-  label,
-  options,
-  value,
-  onChange,
-  open,
-  onToggle,
-  onClose,
-  active = false,
-  onClear,
-  searchable = false,
-  searchLabel = 'Search',
-  touch = false,
-}: RailSelectProps) {
-  const triggerRef = React.useRef<HTMLButtonElement>(null)
-  const [term, setTerm] = React.useState('')
-
-  // A stale search term would hide the options the next time the menu opens.
-  React.useEffect(() => { if (!open) setTerm('') }, [open])
-
-  const current = options.find(o => o.value === value)
-  const needle = term.trim().toLowerCase()
-  const visible = searchable && needle
-    ? options.filter(o => o.label.toLowerCase().includes(needle))
-    : options
-
-  const height = touch ? '2.75rem' : '2.25rem'
-  const optionHeight = touch ? '2.75rem' : '2.125rem'
-  // The chevron stays pinned to the right edge in every state, so a row of
-  // controls keeps one vertical line down the rail. The clear button is laid
-  // over the gap just before it, and the value simply keeps clear of both.
-  const clearSize = touch ? '2rem' : '1.25rem'
-  const valueGutter = active ? (touch ? '3.125rem' : '2.375rem') : '0'
-
-  return (
-    <div style={{ position: 'relative' }}>
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={onToggle}
-        className="tahi-focus-ring"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={`${label}: ${current?.label ?? value}`}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.5rem',
-          width: '100%',
-          minHeight: height,
-          padding: '0 0.5rem 0 0.625rem',
-          border: `1px solid ${active || open ? 'var(--color-brand)' : 'var(--color-border)'}`,
-          borderRadius: 'var(--radius-sm)',
-          background: 'var(--color-bg)',
-          fontSize: touch ? '0.84375rem' : '0.78125rem',
-          fontWeight: 600,
-          fontFamily: 'inherit',
-          color: 'var(--color-text)',
-          textAlign: 'left',
-          cursor: 'pointer',
-          transition: 'border-color var(--motion-quick) var(--ease-out), background-color var(--motion-quick) var(--ease-out)',
-        }}
-        onMouseEnter={e => {
-          e.currentTarget.style.borderColor = 'var(--color-brand)'
-          e.currentTarget.style.background = 'var(--color-bg-secondary)'
-        }}
-        onMouseLeave={e => {
-          e.currentTarget.style.borderColor = active || open ? 'var(--color-brand)' : 'var(--color-border)'
-          e.currentTarget.style.background = 'var(--color-bg)'
-        }}
-      >
-        <span style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }}>{label}</span>
-        <span
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.375rem',
-            minWidth: 0,
-            marginLeft: 'auto',
-            marginRight: valueGutter,
-            color: active ? 'var(--color-brand-dark)' : 'var(--color-text)',
-          }}
-        >
-          {current?.dot && (
-            <span
-              aria-hidden="true"
-              style={{ width: '0.4375rem', height: '0.4375rem', borderRadius: 'var(--radius-full)', background: current.dot, flexShrink: 0 }}
-            />
-          )}
-          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {current?.label ?? value}
-          </span>
-        </span>
-        <ChevronDown
-          size={14}
-          aria-hidden="true"
-          style={{
-            flexShrink: 0,
-            color: 'var(--color-text-subtle)',
-            transform: open ? 'rotate(180deg)' : 'none',
-            transition: 'transform var(--motion-quick) var(--ease-out)',
-          }}
-        />
-      </button>
-
-      {active && onClear && (
-        <button
-          type="button"
-          onClick={onClear}
-          className="tahi-focus-ring"
-          title={`Clear the ${label.toLowerCase()} filter`}
-          aria-label={`Clear the ${label.toLowerCase()} filter`}
-          style={{
-            position: 'absolute',
-            top: '50%',
-            right: '1.625rem',
-            transform: 'translateY(-50%)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: clearSize,
-            height: clearSize,
-            padding: 0,
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 'var(--radius-sm)',
-            background: 'var(--color-bg-tertiary)',
-            color: 'var(--color-text-muted)',
-            cursor: 'pointer',
-            transition: 'background-color var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.background = 'var(--color-brand)'
-            e.currentTarget.style.color = 'var(--color-text-on-dark)'
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.background = 'var(--color-bg-tertiary)'
-            e.currentTarget.style.color = 'var(--color-text-muted)'
-          }}
-        >
-          <X size={touch ? 14 : 11} aria-hidden="true" />
-        </button>
-      )}
-
-      <Popover
-        anchorRef={triggerRef}
-        open={open}
-        onClose={onClose}
-        width="15rem"
-        maxHeight="22rem"
-      >
-        {searchable && (
-          <div
-            className="tahi-focus-within"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.4375rem',
-              minHeight: touch ? '2.75rem' : '2.25rem',
-              padding: '0 0.625rem',
-              flexShrink: 0,
-            }}
-          >
-            <Search size={14} aria-hidden="true" style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
-            <input
-              value={term}
-              onChange={e => setTerm(e.target.value)}
-              placeholder={searchLabel}
-              aria-label={searchLabel}
-              autoFocus
-              style={{
-                flex: 1,
-                minWidth: 0,
-                border: 'none',
-                outline: 'none',
-                background: 'transparent',
-                fontFamily: 'inherit',
-                fontSize: touch ? '1rem' : '0.8125rem',
-                color: 'var(--color-text)',
-              }}
-            />
-          </div>
-        )}
-        {searchable && (
-          <div
-            role="separator"
-            aria-orientation="horizontal"
-            style={{ height: '1px', background: 'var(--color-border-subtle)', flexShrink: 0 }}
-          />
-        )}
-        <div role="listbox" aria-label={label} style={{ overflowY: 'auto', padding: '0.25rem', minHeight: 0 }}>
-          {visible.length === 0 && (
-            <p style={{ margin: 0, padding: '0.5rem 0.5625rem', fontSize: '0.78125rem', color: 'var(--color-text-subtle)' }}>
-              No matches
-            </p>
-          )}
-          {visible.map(option => {
-            const selected = option.value === value
-            return (
-              <button
-                key={option.value}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                className="tahi-focus-ring"
-                onClick={() => { onChange(option.value); onClose() }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  width: '100%',
-                  minHeight: optionHeight,
-                  padding: '0 0.5rem',
-                  border: 'none',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'transparent',
-                  fontFamily: 'inherit',
-                  fontSize: '0.78125rem',
-                  fontWeight: selected ? 600 : 500,
-                  color: 'var(--color-text)',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  transition: 'background-color var(--motion-quick) var(--ease-out)',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-              >
-                {option.dot && (
-                  <span
-                    aria-hidden="true"
-                    style={{ width: '0.4375rem', height: '0.4375rem', borderRadius: 'var(--radius-full)', background: option.dot, flexShrink: 0 }}
-                  />
-                )}
-                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {option.label}
-                </span>
-                {selected && <Check size={14} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--color-brand)' }} />}
-              </button>
-            )
-          })}
-        </div>
-      </Popover>
-    </div>
-  )
-}
-
-// ── Saved view row ───────────────────────────────────────────────────────────
-
-function ViewItem({
-  label,
-  count,
-  active,
-  onClick,
-  touch,
-}: {
-  label: string
-  count: number
-  active: boolean
-  onClick: () => void
-  touch: boolean
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="tahi-focus-ring"
-      aria-pressed={active}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.5rem',
-        width: '100%',
-        minHeight: touch ? '2.75rem' : '2.125rem',
-        padding: '0 0.625rem',
-        border: 'none',
-        borderRadius: 'var(--radius-sm)',
-        background: active ? 'var(--color-brand-50)' : 'transparent',
-        fontFamily: 'inherit',
-        fontSize: touch ? '0.84375rem' : '0.78125rem',
-        fontWeight: 600,
-        color: active ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
-        textAlign: 'left',
-        cursor: 'pointer',
-        transition: 'background-color var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
-      }}
-      onMouseEnter={e => {
-        if (active) return
-        e.currentTarget.style.background = 'var(--color-bg-secondary)'
-        e.currentTarget.style.color = 'var(--color-text)'
-      }}
-      onMouseLeave={e => {
-        if (active) return
-        e.currentTarget.style.background = 'transparent'
-        e.currentTarget.style.color = 'var(--color-text-muted)'
-      }}
-    >
-      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {label}
-      </span>
-      <span
-        style={{
-          flexShrink: 0,
-          fontSize: '0.6875rem',
-          fontVariantNumeric: 'tabular-nums',
-          color: active ? 'var(--color-brand-dark)' : 'var(--color-text-subtle)',
-          opacity: active ? 0.75 : 1,
-        }}
-      >
-        {count}
-      </span>
-    </button>
-  )
-}
-
-function GroupLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontSize: '0.625rem',
-        fontWeight: 700,
-        letterSpacing: '0.07em',
-        textTransform: 'uppercase',
-        color: 'var(--color-text-subtle)',
-        marginBottom: '0.5rem',
-      }}
-    >
-      {children}
-    </div>
-  )
-}
-
-// ── Save as default ──────────────────────────────────────────────────────────
-
-export function SaveDefaultControl({ isDefault, onSave, touch = false }: {
-  isDefault: boolean
-  onSave: () => void
-  touch?: boolean
-}) {
-  const shared: React.CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '0.375rem',
-    minHeight: touch ? '2.75rem' : '2rem',
-    padding: '0 0.5rem',
-    border: 'none',
-    borderRadius: 'var(--radius-sm)',
-    background: 'transparent',
-    fontFamily: 'inherit',
-    fontSize: '0.75rem',
-    fontWeight: 600,
-    whiteSpace: 'nowrap',
-  }
-
-  // One element across both states. Swapping the button for a <span> once the
-  // view was saved destroyed the element holding focus, so a keyboard user who
-  // pressed Enter here landed back on <body> and the next Tab restarted at the
-  // top of the document. `aria-disabled` rather than `disabled` keeps the
-  // settled control focusable and the label live, so the change announces in
-  // place instead of vanishing silently.
-  return (
-    <button
-      type="button"
-      onClick={() => { if (!isDefault) onSave() }}
-      aria-disabled={isDefault || undefined}
-      className="tahi-focus-ring"
-      title={isDefault
-        ? 'This view, these filters, and this sort are already your default'
-        : 'Remember this view, these filters, and this sort'}
-      style={{
-        ...shared,
-        color: isDefault ? 'var(--color-text-subtle)' : 'var(--color-text-muted)',
-        cursor: isDefault ? 'default' : 'pointer',
-        transition: 'color var(--motion-quick) var(--ease-out), background-color var(--motion-quick) var(--ease-out)',
-      }}
-      onMouseEnter={e => {
-        if (isDefault) return
-        e.currentTarget.style.color = 'var(--color-brand-dark)'
-        e.currentTarget.style.background = 'var(--color-bg-secondary)'
-      }}
-      // No early return on leave, even once this IS the default. Clicking the
-      // control with the mouse flips isDefault while the pointer is still
-      // over it, and the hover background was written imperatively above;
-      // React will not undo it, because the style prop's background reads
-      // 'transparent' on both sides of the change and the diff is a no-op.
-      // Skipping the reset left a permanently shaded pill.
-      onMouseLeave={e => {
-        e.currentTarget.style.color = isDefault ? 'var(--color-text-subtle)' : 'var(--color-text-muted)'
-        e.currentTarget.style.background = 'transparent'
-      }}
-    >
-      {isDefault
-        ? <Check size={13} aria-hidden="true" />
-        : <Bookmark size={13} aria-hidden="true" />}
-      <span aria-live="polite">{isDefault ? 'Your default' : 'Save as default'}</span>
-    </button>
-  )
 }
 
 // ── The rail ─────────────────────────────────────────────────────────────────
@@ -585,9 +174,9 @@ export function RequestsRail({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.125rem' }}>
       <div>
-        <GroupLabel>Views</GroupLabel>
+        <RailGroupLabel>Views</RailGroupLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
-          <ViewItem
+          <RailViewItem
             label="All requests"
             count={counts.__all ?? 0}
             active={!savedView}
@@ -595,7 +184,7 @@ export function RequestsRail({
             touch={touch}
           />
           {views.map(view => (
-            <ViewItem
+            <RailViewItem
               key={view.key}
               label={view.label}
               count={counts[view.key] ?? 0}
@@ -608,7 +197,7 @@ export function RequestsRail({
       </div>
 
       <div>
-        <GroupLabel>Filters</GroupLabel>
+        <RailGroupLabel>Filters</RailGroupLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: touch ? '0.5rem' : '0.375rem' }}>
           {dimensions.map(key => (
             <RailSelect
@@ -631,7 +220,7 @@ export function RequestsRail({
       </div>
 
       <div>
-        <GroupLabel>Sort</GroupLabel>
+        <RailGroupLabel>Sort</RailGroupLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: touch ? '0.5rem' : '0.375rem' }}>
           <RailSelect
             label="Sort"

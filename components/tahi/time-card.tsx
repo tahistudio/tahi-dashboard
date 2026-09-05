@@ -1,10 +1,10 @@
 'use client'
 
 /**
- * <TimeCard> — unified time block on a request detail page.
+ * <TimeCard>. The unified time block on a request or a task detail page.
  *
  * Three things in one card so the user has a single place to think about
- * time on this request:
+ * time on this target:
  *
  *   1. A big centred readout with the live timer controls under it
  *      (start / pause / stop / switch prompt).
@@ -17,7 +17,7 @@
  * the state, including the one case the numerals cannot ("Running on ...",
  * where 00:00:00 is the truth for THIS request but looks like a fault).
  *
- * All mutations are optimistic — we mutate local state immediately, fire
+ * All mutations are optimistic: we mutate local state immediately, fire
  * the server call, roll back + toast on error.
  *
  * Admin-only. Server enforces this too.
@@ -78,11 +78,27 @@ interface TimeEntry {
   teamMemberName: string | null
 }
 
-interface Props {
-  requestId: string
+/** What this card is logging time against. The timers table carries both a
+ *  requestId and a taskId (see ActiveTimer above), so the kind only decides
+ *  which body key to send, which entries endpoint to read and which id on a
+ *  running timer to compare against. */
+export interface TimeCardTarget {
+  kind: 'request' | 'task'
+  id: string
 }
 
-export function TimeCard({ requestId }: Props) {
+interface Props {
+  target: TimeCardTarget
+}
+
+export function TimeCard({ target }: Props) {
+  const timerKey = target.kind === 'request' ? 'requestId' : 'taskId'
+  const entriesPath = target.kind === 'request'
+    ? `/api/admin/requests/${target.id}/time-entries`
+    : `/api/admin/time-entries?taskId=${encodeURIComponent(target.id)}`
+  /** What the copy calls this thing, so a task never reads as a request. */
+  const noun = target.kind === 'request' ? 'request' : 'task'
+
   const { showToast } = useToast()
   const [timer, setTimer] = useState<ActiveTimer | null>(null)
   const [timerLoaded, setTimerLoaded] = useState(false)
@@ -120,7 +136,7 @@ export function TimeCard({ requestId }: Props) {
 
   const fetchEntries = useCallback(async () => {
     try {
-      const res = await fetch(apiPath(`/api/admin/requests/${requestId}/time-entries`))
+      const res = await fetch(apiPath(entriesPath))
       if (res.ok) {
         const data = await res.json() as { items: TimeEntry[] }
         setEntries(data.items ?? [])
@@ -128,25 +144,25 @@ export function TimeCard({ requestId }: Props) {
     } finally {
       setEntriesLoaded(true)
     }
-  }, [requestId])
+  }, [entriesPath])
 
   useEffect(() => { void fetchTimer() }, [fetchTimer])
   useEffect(() => { void fetchEntries() }, [fetchEntries])
 
-  // Cross-component sync — if the nav stops the timer, our local display
+  // Cross-component sync. If the nav stops the timer, our local display
   // should reset immediately instead of waiting for the next poll.
   useEffect(() => subscribeToTimerChanges(() => {
     void fetchTimer()
     void fetchEntries()
   }), [fetchTimer, fetchEntries])
 
-  // Live counter — only while the timer is on THIS request + not paused.
+  // Live counter, only while the timer is on THIS target and not paused.
   useEffect(() => {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
-    if (!timer || timer.isPaused || timer.requestId !== requestId) return
+    if (!timer || timer.isPaused || timer[timerKey] !== target.id) return
     intervalRef.current = setInterval(() => setTick(t => t + 1), 1000)
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
-  }, [timer, requestId])
+  }, [timer, timerKey, target.id])
 
   // --- timer actions ------------------------------------------------------
 
@@ -157,7 +173,7 @@ export function TimeCard({ requestId }: Props) {
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId }),
+        body: JSON.stringify({ [timerKey]: target.id }),
       })
       if (res.status === 409) {
         setSwitchConfirm(true)
@@ -179,7 +195,7 @@ export function TimeCard({ requestId }: Props) {
         showToast(j.error ?? `Couldn't start timer (${res.status})`)
       }
     } catch {
-      showToast('Network error — timer not started')
+      showToast('Network error. Timer not started')
     } finally {
       setActing(false)
     }
@@ -203,7 +219,7 @@ export function TimeCard({ requestId }: Props) {
         showToast(j.error ?? 'Timer action failed')
       }
     } catch {
-      showToast('Network error — try again')
+      showToast('Network error. Try again')
     } finally {
       setActing(false)
     }
@@ -237,7 +253,7 @@ export function TimeCard({ requestId }: Props) {
         showToast(j.error ?? 'Couldn\'t stop timer')
       }
     } catch {
-      showToast('Network error — try again')
+      showToast('Network error. Try again')
     } finally {
       setActing(false)
     }
@@ -245,7 +261,7 @@ export function TimeCard({ requestId }: Props) {
 
   // --- manual log ---------------------------------------------------------
 
-  // Pretty-print decimal hours — uses minutes for sub-hour values so a
+  // Pretty-print decimal hours. Uses minutes for sub-hour values so a
   // 12-minute entry shows "12m" instead of the misleading "0.2h".
   function prettyHours(h: number): string {
     if (!h || h <= 0) return '0m'
@@ -295,11 +311,20 @@ export function TimeCard({ requestId }: Props) {
     }
     setSaving(true)
     try {
-      const res = await fetch(apiPath(`/api/admin/requests/${requestId}/time-entries`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hours: h, description: notes.trim() || undefined, billable }),
-      })
+      // The request-scoped route takes `description`; the shared route takes
+      // `notes` plus exactly one of requestId or taskId, never both and never
+      // a null second key.
+      const res = target.kind === 'request'
+        ? await fetch(apiPath(`/api/admin/requests/${target.id}/time-entries`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ hours: h, description: notes.trim() || undefined, billable }),
+        })
+        : await fetch(apiPath('/api/admin/time-entries'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId: target.id, hours: h, notes: notes.trim() || undefined, billable }),
+        })
       if (res.ok) {
         resetLogForm()
         setLogOpen(false)
@@ -311,7 +336,7 @@ export function TimeCard({ requestId }: Props) {
         showToast(j.error ?? 'Failed to log time')
       }
     } catch {
-      showToast('Network error — try again')
+      showToast('Network error. Try again')
     } finally {
       setSaving(false)
     }
@@ -319,8 +344,8 @@ export function TimeCard({ requestId }: Props) {
 
   // --- derived ------------------------------------------------------------
 
-  const onThis = timer && timer.requestId === requestId
-  const onOther = timer && timer.requestId !== requestId
+  const onThis = timer && timer[timerKey] === target.id
+  const onOther = timer && timer[timerKey] !== target.id
 
   void tick
   const now = Date.now()
@@ -472,7 +497,7 @@ export function TimeCard({ requestId }: Props) {
               ) : onOther ? (
                 <ActionButton
                   icon={<ArrowRightLeft size={13} />}
-                  label="Switch to this request"
+                  label={`Switch to this ${noun}`}
                   onClick={() => void start(false)}
                   disabled={acting}
                   variant="primary"
@@ -513,7 +538,7 @@ export function TimeCard({ requestId }: Props) {
                 >
                   {entry.teamMemberName ?? 'Unknown'}
                   {entry.notes && (
-                    <span style={{ color: 'var(--color-text-subtle)' }}> — {entry.notes}</span>
+                    <span style={{ color: 'var(--color-text-subtle)' }}>: {entry.notes}</span>
                   )}
                 </span>
                 <span
@@ -532,8 +557,8 @@ export function TimeCard({ requestId }: Props) {
           </div>
         )}
 
-        {/* Manual log form — collapsed behind a small button. Two modes:
-            duration (hours + minutes) or range (from–to clock times). */}
+        {/* Manual log form, collapsed behind a small button. Two modes:
+            duration (hours + minutes) or range (from and to clock times). */}
         {logOpen ? (
           <form onSubmit={handleLogSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.375rem' }}>
             {/* Mode tabs */}
@@ -723,7 +748,7 @@ export function TimeCard({ requestId }: Props) {
         <ConfirmDialog
           open
           title="Switch timer?"
-          description="You have another timer running. Stop it, log the time, and start a new timer on this request?"
+          description={`You have another timer running. Stop it, log the time, and start a new timer on this ${noun}?`}
           confirmLabel="Stop other & start here"
           variant="warning"
           onConfirm={() => { setSwitchConfirm(false); void start(true) }}

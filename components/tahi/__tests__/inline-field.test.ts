@@ -6,7 +6,7 @@ import {
   resolveDateCommit,
   type DateEditorEvent,
   type DateEditorState,
-} from '@/components/tahi/requests/inline-field'
+} from '@/components/tahi/inline-field'
 
 // Vitest runs in the `node` environment here, so this covers the rules the Due
 // editor commits through rather than the input itself. A native date input
