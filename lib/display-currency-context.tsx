@@ -43,6 +43,12 @@ import { apiPath } from '@/lib/api'
 
 const STORAGE_KEY = 'tahi-display-currency'
 const DEFAULT_CURRENCY: CurrencyCode = 'NZD'
+/**
+ * The currency every `toDisplay` / `format` amount is already expressed in.
+ * Separate from DEFAULT_CURRENCY on purpose: that one is a preference, this one
+ * is a fact about the data, and only one of them may change.
+ */
+const BASE_CURRENCY: CurrencyCode = 'NZD'
 
 interface DisplayCurrencyContextValue {
   /** Currently selected display currency code. */
@@ -100,6 +106,27 @@ export function asCurrencyCode(raw: string | null | undefined): CurrencyCode | n
   if (!raw) return null
   const match = SUPPORTED_CURRENCIES.find(c => c.code === raw.trim().toUpperCase())
   return match ? (match.code as CurrencyCode) : null
+}
+
+/**
+ * Which currency the dashboard shell should pin, given the audience and the
+ * org's stored preference. Pure so the rule is testable without a render.
+ *
+ * - Studio session: null. Stored preference, nav switcher, conversions, all
+ *   unchanged.
+ * - Client audience (a real client, or the studio inside Client view): their
+ *   billed currency, falling back to the NZD base rather than to "unpinned".
+ *   The fallback matters: `organisations.preferred_currency` defaults to 'USD'
+ *   in the schema while every other read in the codebase falls back to 'NZD'
+ *   (`org.preferredCurrency ?? 'NZD'`), and an unreadable / missing row must
+ *   not leave a client's money floating on whatever this browser last chose.
+ */
+export function resolvePinnedCurrency(
+  preferred: string | null | undefined,
+  isClientAudience: boolean,
+): CurrencyCode | null {
+  if (!isClientAudience) return null
+  return asCurrencyCode(preferred) ?? BASE_CURRENCY
 }
 
 interface ProviderProps {
@@ -197,10 +224,6 @@ export function DisplayCurrencyProvider({ children, initial, pinned }: ProviderP
     return convertFromNzd(amountNzd, displayCurrency, exchangeRates)
   }, [displayCurrency, exchangeRates, ratesLoaded])
 
-  const format = useCallback((amountNzd: number): string => {
-    return formatCurrencyBase(toDisplay(amountNzd), displayCurrency)
-  }, [toDisplay, displayCurrency])
-
   const formatNative = useCallback((amount: number, currency: string): string => {
     return formatCurrencyBase(amount, currency)
   }, [])
@@ -216,6 +239,21 @@ export function DisplayCurrencyProvider({ children, initial, pinned }: ProviderP
     const displayFormatted = formatCurrencyBase(toDisplay(amountNzd), displayCurrency)
     return `${native} \u2248 ${displayFormatted}`
   }, [displayCurrency, exchangeRates, ratesLoaded, toDisplay])
+
+  const format = useCallback((amountNzd: number): string => {
+    // A pin names the currency the client is BILLED in. It does not make an
+    // NZD-base figure a native one: `format` takes an amount already expressed
+    // in NZD (plan rates, catalogue prices, totals), so silently converting it
+    // at today's spot rate and printing only that would state a price nobody
+    // charges. A NZ$1,500/mo retainer would read "US$882/mo" on the same portal
+    // as an invoice row billed at US$1,200. Show the billed NZD figure and mark
+    // the conversion approximate instead; natively denominated money keeps
+    // going through formatNative / formatNativeWithDisplay and is unaffected.
+    if (pinnedCode && pinnedCode !== BASE_CURRENCY) {
+      return formatNativeWithDisplay(amountNzd, BASE_CURRENCY)
+    }
+    return formatCurrencyBase(toDisplay(amountNzd), displayCurrency)
+  }, [toDisplay, displayCurrency, pinnedCode, formatNativeWithDisplay])
 
   const value = useMemo<DisplayCurrencyContextValue>(() => ({
     displayCurrency,

@@ -11,7 +11,7 @@ import { ToastProvider } from '@/components/tahi/toast'
 import { KeyboardShortcuts } from '@/components/tahi/keyboard-shortcuts'
 import { SidebarProvider } from '@/components/tahi/sidebar-context'
 import { SkipToContent } from '@/components/tahi/skip-to-content'
-import { DisplayCurrencyProvider } from '@/lib/display-currency-context'
+import { DisplayCurrencyProvider, resolvePinnedCurrency } from '@/lib/display-currency-context'
 import { PermissionsProvider, type PermissionsValue } from '@/components/tahi/permissions-context'
 import { PrivateModeProvider } from '@/components/tahi/private-mode-context'
 import { SwrProvider } from '@/components/tahi/swr-provider'
@@ -189,25 +189,34 @@ export default async function DashboardLayout({
   //
   // orgId is a CLERK org id for a real client, so the lookup accepts either
   // side of the link, mirroring getPortalAuth's resolution + back-compat.
-  // Fail-safe: any miss leaves the currency unpinned (today's behaviour).
-  let pinnedCurrency: string | null = null
+  // Fail-safe: any miss falls back to the NZD base (resolvePinnedCurrency), not
+  // to "unpinned", so a client's money never floats on a studio preference this
+  // browser happens to hold. The same row also names the previewed org for the
+  // Client-view banner, so the preview costs no extra query.
   const currencyOrgKey = isPreviewingClient ? previewOrgId : (!isAdmin ? orgId : null)
+  let preferredCurrency: string | null = null
+  let previewOrgName: string | null = null
   if (currencyOrgKey) {
     try {
       const database = await db()
       const [row] = await database
-        .select({ preferredCurrency: schema.organisations.preferredCurrency })
+        .select({
+          name: schema.organisations.name,
+          preferredCurrency: schema.organisations.preferredCurrency,
+        })
         .from(schema.organisations)
         .where(or(
           eq(schema.organisations.clerkOrgId, currencyOrgKey),
           eq(schema.organisations.id, currencyOrgKey),
         ))
         .limit(1)
-      pinnedCurrency = row?.preferredCurrency ?? null
+      preferredCurrency = row?.preferredCurrency ?? null
+      if (isPreviewingClient) previewOrgName = row?.name ?? null
     } catch {
-      pinnedCurrency = null
+      preferredCurrency = null
     }
   }
+  const pinnedCurrency = resolvePinnedCurrency(preferredCurrency, currencyOrgKey !== null)
 
   // Favicon (favicon_light_url / favicon_dark_url) is a platform-level Tahi
   // asset (super-admin only, same for every org) rather than per-client
@@ -238,7 +247,17 @@ export default async function DashboardLayout({
             brandLogoUrl={portalBrand.logoUrl}
           />
           <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-            {isAdmin && <ImpersonationBanner />}
+            {/* The preview signal is a browser-wide cookie; the banner's own
+                state is per-tab sessionStorage. Hand the server's reading to
+                every tab so a second tab opened while Client view is on still
+                shows the strip and its Exit preview, instead of silently
+                rendering redirects and a client's currency with no way out. */}
+            {isAdmin && (
+              <ImpersonationBanner
+                serverPreviewOrgId={previewOrgId}
+                serverPreviewOrgName={previewOrgName}
+              />
+            )}
             <AnnouncementBanner />
             <AppTopNav
               isAdmin={isAdmin}
