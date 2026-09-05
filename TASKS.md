@@ -102,6 +102,20 @@ Source: `docs/superpowers/audits/2026-09-06-next-surfaces-assessment.json` (five
 
 Not yet (from the same sweep): the standalone /messages surface (8d), the T3 sales artifacts, the testimonial pipeline, automated health scoring (scorer exists, zero callers), the /notifications page and Slack and digests, request steps and client checklists (documented, not built), file-level proofing (ManyRequests has none either), ratings and NPS, a persisted per-request activity log.
 
+## Invoicing channel: Stripe or Xero per client (assessment 2026-09-06)
+
+Source: `docs/superpowers/audits/2026-09-06-invoice-channel-assessment.json`. Verdict: not handled today. The Stripe-or-Xero choice is made per invoice by a picker that resets to "Dashboard only" every time; nothing on the client says how they bill; the Xero rail pushes DRAFTs only, never captures Xero's online invoice URL, so a Xero client has nothing to click; no bank details exist anywhere to show instead.
+
+- [ ] IC.1 (0.5d) - [BE/FE] Money-path truth fixes, no schema: GET /api/admin/invoices/[id] omits `source` and `stripeHostedInvoiceUrl` so the admin detail always reads Source: Manual; PATCH drops `paidAt` and `sentAt` so a hand mark-paid leaves paid_at NULL and /financial-reports (keyed on paidAt) under-reports revenue. Building now.
+- [ ] IC.2 (1.25d) - [BE/FE] `organisations.invoiceChannel` (stripe | xero_stripe | xero_bank, NULL = studio default) plus editable `paymentTerms` on the client detail Billing card and in the PATCH allowlist; MCP update_client gains both. Waits on Liam's decisions below.
+- [ ] IC.3 (0.75d) - [FE/BE] New Invoice defaults destination and currency from the client's channel and preferredCurrency, warns on override; client list and detail show the channel.
+- [ ] IC.4 (1.5d) - [BE/FE] Xero pay path: approve on push (per decision), capture OnlineInvoiceUrl into `invoices.xeroOnlineInvoiceUrl`, portal and email show Pay now for xero_stripe and a How to pay block (amount, due date, reference, bank details from settings) for xero_bank.
+- [ ] IC.5 (1d) - [BE] One Xero status mapper (three disagree today), paginate syncXeroPayments, importers update rows they have seen.
+- [ ] IC.6 = CT.13 (1.5d) - [BE] Guard the hourly Xero export (idempotency, billing-model filter, currency, no silent zero-rate skip).
+- [ ] IC.7 = CT.14 (2.5d) - [BE/FE] Real invoice numbers from the settings prefix (zero readers today), unique, mirrored to Xero or from it (decision), the bank reference.
+
+Decisions only Liam can make: DRAFT or AUTHORISED on push; two channels or three; is the Stripe payment service attached to the Xero branding themes in use (xero-sync matches themes by currency code in the name); backfill channels by hand or by rule; who owns the invoice number on the Xero rail; does a hand mark-paid push back to the rail; who sends the Xero-rail email (dashboard or Xero); should the export get a UI button; should the client see their channel named.
+
 ## Client library and catalogue (Liam, 2026-09-06)
 
 - [ ] CL.1 - [Design first, then FE/BE] **Files as a small Google Drive with threads.** Folders per client (Deliverables, Brand, References, Uploads), drag-and-drop uploads from the client, a comment thread per file (reuse the request thread composer and the messages table with a file target), versions optional. Liam: "i'd like to give them a small version of like google drive but with threads so they can upload docs for us there." Design in Claude Design alongside the Clients pages; the current /files page (list, upload, download) stays until then.
