@@ -455,10 +455,13 @@ const TOOLS: ToolDef[] = [
   // portal impersonation token exists.
 
   // ── Read: Tasks ───────────────────────────────────────────────────────
-  tool('list_tasks', 'List tasks with optional filters. Decision #046: tasks are always Tahi-internal. Filter by orgId for client-specific tasks; omit both orgId and type for everything.', {
+  tool('list_tasks', 'List tasks with optional filters. Tasks are the studio\'s own work and are never client-visible. Filter by orgId for the tasks about one client; omit both orgId and type for everything.', {
     status: prop('string', 'Filter by task status: todo, in_progress, blocked, done'),
-    type: prop('string', 'Filter by legacy type (client_task, internal_client_task, tahi_internal). Prefer orgId.'),
+    type: prop('string', 'Filter by level: client_task, internal_client_task or tahi_internal'),
     orgId: prop('string', 'Filter by client organisation ID'),
+    assignee: prop('string', "Filter by assignee: a team member id, or 'me' for the caller"),
+    requestId: prop('string', 'Filter to the tasks linked to one request'),
+    sortBy: prop('string', "Sort: 'position' for track order, otherwise most recently updated first"),
   }),
   tool('get_task', 'Get full detail for a specific task', {
     taskId: prop('string', 'Task ID'),
@@ -466,25 +469,37 @@ const TOOLS: ToolDef[] = [
   tool('list_task_subtasks', 'List subtasks for a specific task', {
     taskId: prop('string', 'Parent task ID'),
   }, ['taskId']),
-  tool('list_task_templates', 'List all task templates'),
+  tool('list_task_templates', 'List all task templates', {
+    orgId: prop('string', 'Only the templates for this client, plus the global ones'),
+    type: prop('string', 'Filter by level: client_task, internal_client_task or tahi_internal'),
+  }),
 
   // ── Write: Tasks ──────────────────────────────────────────────────────
-  tool('create_task', 'Create a new Tahi-internal task. Decision #046: orgId presence is the source of truth \u2014 set it for tasks "for a client", omit it for Tahi-internal tasks. The legacy `type` field is optional and auto-derived when omitted.', {
+  tool('create_task', 'Create a task. A task may be about a client or about nothing; it is never visible to a client either way.', {
     title: prop('string', 'Task title'),
     description: prop('string', 'Task description'),
-    orgId: prop('string', 'Client organisation ID. Present = task is for that client; absent = Tahi-internal.'),
-    type: prop('string', 'Legacy type. Optional. Auto-derived from orgId when omitted.'),
-    priority: prop('string', 'Priority: low, standard, high, urgent. Default standard.'),
+    orgId: prop('string', 'Client organisation ID. Required for client_task and internal_client_task.'),
+    type: prop('string', 'Level: client_task (client-facing), internal_client_task (about a client, studio only) or tahi_internal (no client). Auto-derived from orgId when omitted.'),
+    priority: prop('string', 'Priority: standard, high or urgent. Default standard.'),
+    status: prop('string', 'Initial status: todo, in_progress, blocked or done. Default todo.'),
     assigneeId: prop('string', 'Team member ID to assign'),
     dueDate: prop('string', 'Due date in YYYY-MM-DD format'),
+    estimatedHours: prop('number', 'Estimate in hours'),
+    requestId: prop('string', 'Request this task delivers against'),
+    subtasks: { type: 'array', items: { type: 'string' }, description: 'Subtask titles to create alongside the task' },
   }, ['title']),
   tool('update_task', 'Update an existing task', {
     taskId: prop('string', 'Task ID'),
-    status: prop('string', 'New status'),
-    priority: prop('string', 'New priority: low, medium, high, urgent'),
+    title: prop('string', 'New title'),
+    status: prop('string', 'New status: todo, in_progress, blocked or done'),
+    priority: prop('string', 'New priority: standard, high or urgent'),
     assigneeId: prop('string', 'New assignee team member ID'),
     description: prop('string', 'Updated description'),
     dueDate: prop('string', 'Updated due date in YYYY-MM-DD format'),
+    estimatedHours: prop('number', 'Estimate in hours'),
+    orgId: prop('string', 'Client organisation ID to move the task to'),
+    requestId: prop('string', 'Request this task delivers against'),
+    type: prop('string', 'Level: client_task, internal_client_task or tahi_internal'),
     scheduleRowId: prop('string', 'Schedule gantt row ID to link this task to (delivery spine). Pass an empty string to unlink.'),
   }, ['taskId']),
   tool('create_task_subtask', 'Create a subtask under a task', {
@@ -509,6 +524,63 @@ const TOOLS: ToolDef[] = [
     orgId: prop('string', 'Client organisation ID'),
     assigneeId: prop('string', 'Team member ID to assign'),
   }, ['templateId']),
+  tool('delete_task', 'Delete a task. Its subtasks and dependency links go with it.', {
+    taskId: prop('string', 'Task ID'),
+  }, ['taskId']),
+  tool('bulk_update_tasks', 'Update many tasks at once. Only the fields you pass change.', {
+    taskIds: { type: 'array', items: { type: 'string' }, description: 'Task IDs to update' },
+    status: prop('string', 'New status: todo, in_progress, blocked or done'),
+    priority: prop('string', 'New priority: standard, high or urgent'),
+    assigneeId: prop('string', 'Team member ID, or an empty string to unassign'),
+    dueDate: prop('string', 'Due date YYYY-MM-DD, or an empty string to clear it'),
+  }, ['taskIds']),
+  tool('list_task_dependencies', 'List what a task is blocked by and what it blocks', {
+    taskId: prop('string', 'Task ID'),
+  }, ['taskId']),
+  tool('delete_task_subtask', 'Delete a subtask', {
+    taskId: prop('string', 'Parent task ID'),
+    subId: prop('string', 'Subtask ID'),
+  }, ['taskId', 'subId']),
+  tool('create_task_template', 'Create a task template', {
+    name: prop('string', 'Template name. Becomes the task title.'),
+    type: prop('string', 'Level: client_task, internal_client_task or tahi_internal'),
+    category: prop('string', 'Free-text category'),
+    description: prop('string', 'Template description'),
+    defaultPriority: prop('string', 'none, low, medium, standard, high or urgent. Mapped down to the task scale on use.'),
+    subtasks: { type: 'array', items: { type: 'string' }, description: 'Subtask titles' },
+    estimatedHours: prop('number', 'Estimate in hours'),
+    orgId: prop('string', 'Client organisation ID for a per-client override. Omit for a global template.'),
+    defaultAssignee: prop('string', 'Free-text default assignee label'),
+  }, ['name', 'type']),
+  tool('update_task_template', 'Update a task template', {
+    templateId: prop('string', 'Template ID'),
+    name: prop('string', 'Template name'),
+    type: prop('string', 'Level'),
+    category: prop('string', 'Category'),
+    description: prop('string', 'Description'),
+    defaultPriority: prop('string', 'Default priority'),
+    subtasks: { type: 'array', items: { type: 'string' }, description: 'Subtask titles' },
+    estimatedHours: prop('number', 'Estimate in hours'),
+    defaultAssignee: prop('string', 'Default assignee label'),
+  }, ['templateId']),
+  tool('delete_task_template', 'Delete a task template', {
+    templateId: prop('string', 'Template ID'),
+  }, ['templateId']),
+  tool('promote_task_to_request', 'Turn a task into a client-facing request. The task stays, linked to it.', {
+    taskId: prop('string', 'Task ID. Must have a client and no request yet.'),
+    category: prop('string', 'Request category, e.g. design or development. Default design.'),
+    size: prop('string', 'small_task (a day or less) or large_task. Default small_task.'),
+  }, ['taskId']),
+  tool('list_task_calls', 'List the calls attached to a task', {
+    taskId: prop('string', 'Task ID'),
+  }, ['taskId']),
+  tool('create_task_call', 'Schedule a call against a task', {
+    taskId: prop('string', 'Task ID'),
+    title: prop('string', 'Call title'),
+    scheduledAt: prop('string', 'ISO timestamp'),
+    durationMinutes: prop('number', 'Duration in minutes'),
+    googleMeetUrl: prop('string', 'Meeting URL'),
+  }, ['taskId', 'title', 'scheduledAt']),
 
   // ── Read: Invoices ────────────────────────────────────────────────────
   tool('list_invoices', 'List all invoices with status, amount, client, dates', {
@@ -1728,14 +1800,21 @@ async function executeTool(
       if (s('status')) p.status = s('status')!
       if (s('type')) p.type = s('type')!
       if (s('orgId')) p.orgId = s('orgId')!
+      if (s('assignee')) p.assignee = s('assignee')!
+      if (s('requestId')) p.requestId = s('requestId')!
+      if (s('sortBy')) p.sortBy = s('sortBy')!
       return json(await apiGet('/api/admin/tasks', token, p))
     }
     case 'get_task':
       return json(await apiGet(`/api/admin/tasks/${s('taskId')}`, token))
     case 'list_task_subtasks':
       return json(await apiGet(`/api/admin/tasks/${s('taskId')}/subtasks`, token))
-    case 'list_task_templates':
-      return json(await apiGet('/api/admin/task-templates', token))
+    case 'list_task_templates': {
+      const p: Record<string, string> = {}
+      if (s('orgId')) p.orgId = s('orgId')!
+      if (s('type')) p.type = s('type')!
+      return json(await apiGet('/api/admin/task-templates', token, p))
+    }
     case 'create_task':
       return json(await apiWrite('/api/admin/tasks', token, 'POST', args as Record<string, unknown>))
     case 'update_task': {
@@ -1752,6 +1831,37 @@ async function executeTool(
       return json(await apiWrite(`/api/admin/tasks/${s('taskId')}/dependencies/${s('depId')}`, token, 'DELETE'))
     case 'create_task_from_template':
       return json(await apiWrite('/api/admin/tasks/from-template', token, 'POST', args as Record<string, unknown>))
+    case 'delete_task':
+      return json(await apiWrite(`/api/admin/tasks/${s('taskId')}`, token, 'DELETE'))
+    case 'bulk_update_tasks': {
+      const { taskIds, ...rest } = args
+      return json(await apiWrite('/api/admin/tasks/bulk', token, 'PATCH', {
+        taskIds,
+        updates: rest,
+      }))
+    }
+    case 'list_task_dependencies':
+      return json(await apiGet(`/api/admin/tasks/${s('taskId')}/dependencies`, token))
+    case 'delete_task_subtask':
+      return json(await apiWrite(`/api/admin/tasks/${s('taskId')}/subtasks/${s('subId')}`, token, 'DELETE'))
+    case 'create_task_template':
+      return json(await apiWrite('/api/admin/task-templates', token, 'POST', args as Record<string, unknown>))
+    case 'update_task_template': {
+      const { templateId, ...body } = args
+      return json(await apiWrite(`/api/admin/task-templates/${templateId}`, token, 'PATCH', body))
+    }
+    case 'delete_task_template':
+      return json(await apiWrite(`/api/admin/task-templates/${s('templateId')}`, token, 'DELETE'))
+    case 'promote_task_to_request': {
+      const { taskId, ...body } = args
+      return json(await apiWrite(`/api/admin/tasks/${taskId}/promote`, token, 'POST', body))
+    }
+    case 'list_task_calls':
+      return json(await apiGet(`/api/admin/tasks/${s('taskId')}/calls`, token))
+    case 'create_task_call': {
+      const { taskId, ...body } = args
+      return json(await apiWrite(`/api/admin/tasks/${taskId}/calls`, token, 'POST', body))
+    }
 
     // ── Invoices ──────────────────────────────────────────────────────
     case 'list_invoices': {
