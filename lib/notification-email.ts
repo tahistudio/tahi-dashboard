@@ -332,27 +332,6 @@ export async function resolveEmailTargets(
   }
 }
 
-/**
- * Every Tahi team member as a target. The studio-wide fallback for an event
- * that has nobody specific to reach yet, which is exactly when a client's
- * first message arrives.
- */
-export async function allStudioEmailTargets(database: DrizzleDB): Promise<EmailTarget[]> {
-  try {
-    const rows = await database
-      .select({
-        name: schema.teamMembers.name,
-        email: schema.teamMembers.email,
-        clerkUserId: schema.teamMembers.clerkUserId,
-      })
-      .from(schema.teamMembers)
-    return toEmailTargets(rows, 'team_member')
-  } catch (err) {
-    console.warn('[notification-email] failed to load the studio:', err)
-    return []
-  }
-}
-
 /** What a request email needs about the request that its call site has not read. */
 export interface RequestEmailContext {
   /** The per-org number, for the subject prefix. */
@@ -473,8 +452,9 @@ async function sendWithBackoff(
  * no client ever learns who else is on the thread), and one failure never
  * stops the rest.
  *
- * Awaits every send: call `deferNotificationEmails` from a route handler so the
- * response does not wait on it.
+ * Awaits every send, so nothing calls this from a route handler directly:
+ * `sendNotificationEmails` is the one entry point, and it puts the whole
+ * fan-out behind waitUntil.
  */
 export async function dispatchNotificationEmails(
   database: DrizzleDB,
@@ -541,23 +521,16 @@ async function offResponsePath(
 }
 
 /**
- * Send one plan to an already-resolved target list, off the response path.
- * The entry point a route handler should use.
- */
-export async function deferNotificationEmails(
-  database: DrizzleDB,
-  targets: readonly EmailTarget[],
-  eventType: NotificationEventType,
-  plan: NotificationEmailPlan,
-): Promise<EmailDispatchResult> {
-  if (targets.length === 0 || !process.env.RESEND_API_KEY) return NO_DISPATCH
-  return offResponsePath(() => dispatchNotificationEmails(database, targets, eventType, plan))
-}
-
-/**
- * Resolve typed recipients and send, off the response path. The entry point
- * `createNotifications` calls when a payload carries an email plan, so the bell
- * row and the email are one call site.
+ * Resolve typed recipients and send, off the response path. The one entry
+ * point, called by `createNotifications` when a payload carries an email plan,
+ * so the bell row and the email are one call site.
+ *
+ * There was a second one, taking targets a caller had resolved for itself. Its
+ * last consumer (the portal thread route) now hands its plan to
+ * notifyRequestTeam instead, and resolving the same audience twice is exactly
+ * how the two channels came to disagree about who the studio side of a request
+ * is. If a caller ever genuinely has targets in hand, give it back rather than
+ * rebuilding the second resolution.
  */
 export async function sendNotificationEmails(
   database: DrizzleDB,
