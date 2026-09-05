@@ -19,12 +19,11 @@ const PANEL_TIMEOUT = 30_000
  * fixture e2e/requests.spec.ts uses. It resolves to the Tahi admin org, so
  * everything here runs on the team audience.
  *
- * The rebuilt dialog is still behind the super-admin rollout gate
- * (NEW_DIALOG_FOR_EVERYONE in components/tahi/new-request-dialog.tsx). The
- * bypass user's resolved permission level is not guaranteed, so every test
- * that needs the rebuild checks for a marker first and skips with a clear
- * reason rather than failing. When the lead flips the gate these skips turn
- * into real coverage with no edit here.
+ * The rollout gate is gone: NEW_DIALOG_FOR_EVERYONE went true in 51ef34b and
+ * the legacy slide-over it guarded has been deleted, so `rebuiltDialogIsOn` now
+ * answers true for everyone. The skips it drives are kept as a cheap guard on
+ * the dialog having rendered at all rather than a gate on the audience, and
+ * their reasons say so.
  *
  * Data resilience: nothing is created. Every assertion is on chrome that the
  * dialog owns, never on a particular client or request existing.
@@ -128,7 +127,7 @@ test.describe('New request dialog', () => {
   test('Tab cycles inside the panel, including after the body swaps', async ({ page }) => {
     await gotoRequests(page)
     await openDialog(page)
-    test.skip(!(await rebuiltDialogIsOn(page)), 'The rebuilt dialog is super-admin gated.')
+    test.skip(!(await rebuiltDialogIsOn(page)), 'The dialog body did not render.')
 
     // More presses than the form has stops, so a leaky trap walks out into the
     // sidebar and the top nav rather than wrapping.
@@ -146,7 +145,7 @@ test.describe('New request dialog', () => {
   test('the body reads in the prototype order', async ({ page }) => {
     await gotoRequests(page)
     await openDialog(page)
-    test.skip(!(await rebuiltDialogIsOn(page)), 'The rebuilt dialog is super-admin gated.')
+    test.skip(!(await rebuiltDialogIsOn(page)), 'The dialog body did not render.')
 
     // AI card, client, category, title, brief. The size control only mounts
     // for a retainer client, so it is not asserted here.
@@ -163,7 +162,7 @@ test.describe('New request dialog', () => {
   test('the category tiles behave as a radiogroup', async ({ page }) => {
     await gotoRequests(page)
     await openDialog(page)
-    test.skip(!(await rebuiltDialogIsOn(page)), 'The rebuilt dialog is super-admin gated.')
+    test.skip(!(await rebuiltDialogIsOn(page)), 'The dialog body did not render.')
 
     const group = page.getByRole('radiogroup', { name: 'What kind of work?' })
     const design = group.getByRole('radio', { name: 'Design' })
@@ -178,7 +177,7 @@ test.describe('New request dialog', () => {
   test('the ideal due date opens empty and floors at tomorrow', async ({ page }) => {
     await gotoRequests(page)
     await openDialog(page)
-    test.skip(!(await rebuiltDialogIsOn(page)), 'The rebuilt dialog is super-admin gated.')
+    test.skip(!(await rebuiltDialogIsOn(page)), 'The dialog body did not render.')
 
     const due = page.locator('#req-due-date')
     await expect(due).toBeVisible()
@@ -199,7 +198,7 @@ test.describe('New request dialog', () => {
   test('submit stays off until the form is fileable', async ({ page }) => {
     await gotoRequests(page)
     await openDialog(page)
-    test.skip(!(await rebuiltDialogIsOn(page)), 'The rebuilt dialog is super-admin gated.')
+    test.skip(!(await rebuiltDialogIsOn(page)), 'The dialog body did not render.')
 
     // No title and no client: the team path cannot file.
     await expect(page.getByRole('button', { name: 'Create request' })).toBeDisabled()
@@ -208,7 +207,7 @@ test.describe('New request dialog', () => {
   test('the AI view swaps into the same shell and hands back', async ({ page }) => {
     await gotoRequests(page)
     await openDialog(page)
-    test.skip(!(await rebuiltDialogIsOn(page)), 'The rebuilt dialog is super-admin gated.')
+    test.skip(!(await rebuiltDialogIsOn(page)), 'The dialog body did not render.')
 
     await page.getByRole('button', { name: /Build with AI/ }).click()
 
@@ -237,7 +236,7 @@ test.describe('New request dialog', () => {
   test('an empty due date and priority fill themselves, and a person can take them back', async ({ page, request }) => {
     await gotoRequests(page)
     const dialog = await openDialog(page)
-    test.skip(!(await rebuiltDialogIsOn(page)), 'The rebuilt dialog is super-admin gated.')
+    test.skip(!(await rebuiltDialogIsOn(page)), 'The dialog body did not render.')
 
     const client = await pickFirstOption(dialog, 'Select a client...')
     test.skip(!client, 'The dataset has no active client to file against.')
