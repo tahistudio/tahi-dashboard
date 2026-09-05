@@ -25,6 +25,7 @@
 import type { ReactNode } from 'react'
 import { Container, Heading, Hr, Link, Section, Text } from '@react-email/components'
 import { publicUrl } from '@/lib/app-url'
+import type { InvoiceHowToPay } from '@/lib/invoice-how-to-pay'
 
 export const EMAIL_TOKENS = {
   bg: '#f5f7f5',
@@ -325,6 +326,50 @@ export function DetailRow({ label, value, hero = false, first = false, mono = fa
     <>
       <Text style={first ? detailLabelStyle : detailLabelStyleSpaced}>{label}</Text>
       <Text style={valueStyle}>{value}</Text>
+    </>
+  )
+}
+
+// ─── How to pay — bank transfer details, when there is no pay page ────────
+//
+// A Xero-rail invoice has no pay link until Liam approves it inside Xero, and
+// the push holds every dashboard-raised invoice at DRAFT on purpose, so "no
+// link" is where each of those bills STARTS rather than an edge case. Without
+// this block the client receives a real invoice, a real due date and nothing
+// to act on but a reply.
+//
+// The caller decides whether to render it (see hasBankDestination): a "How to
+// pay" heading over a reference with no account to pay into reads as a broken
+// template to the person holding the bill.
+//
+// Amount and due date are deliberately NOT repeated here. Both already sit in
+// the DetailCard above this block in every template that uses it, and a second
+// copy is a second thing that can disagree.
+
+export function HowToPayBlock({ howToPay }: { howToPay: InvoiceHowToPay }) {
+  const rows: Array<{ label: string; value: string; mono?: boolean }> = []
+  if (howToPay.bankName) rows.push({ label: 'Bank', value: howToPay.bankName })
+  if (howToPay.accountName) rows.push({ label: 'Account name', value: howToPay.accountName })
+  if (howToPay.accountNumber) {
+    rows.push({ label: 'Account number', value: howToPay.accountNumber, mono: true })
+  }
+  rows.push({ label: 'Reference', value: howToPay.reference, mono: true })
+
+  return (
+    <>
+      <EmailEyebrow>How to pay</EmailEyebrow>
+      <DetailCard>
+        {rows.map((row, i) => (
+          <DetailRow
+            key={row.label}
+            first={i === 0}
+            label={row.label}
+            value={row.value}
+            mono={row.mono}
+          />
+        ))}
+      </DetailCard>
+      <EmailParagraph subtle>{howToPay.hint}</EmailParagraph>
     </>
   )
 }

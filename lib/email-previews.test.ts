@@ -100,10 +100,13 @@ describe('email preview registry', () => {
     expect(previews.map((p) => p.key)).toEqual([...EMAIL_PREVIEW_KEYS])
   })
 
-  it('flags the two templates nothing in the tree sends yet', () => {
+  it('flags the templates nothing in the tree sends yet', () => {
     const previews = buildSamplePreviews({ to: TO, firstName: FIRST_NAME })
     const dark = previews.filter((p) => !p.liveSender).map((p) => p.key)
-    expect(dark).toEqual(['invoice-overdue', 'review-request'])
+    // Both invoice-overdue variants: the chaser that would send them does not
+    // exist yet, so neither the pay-link nor the bank-transfer layout has ever
+    // reached a client.
+    expect(dark).toEqual(['invoice-overdue', 'invoice-overdue-bank', 'review-request'])
   })
 
   it('summarises to { key, template, liveSender, subject } without the element', () => {
@@ -285,6 +288,44 @@ describe('email preview variants', () => {
     // layout every real client has received.
     expect(asSent).toContain('Open your studio')
     expect(asSent).not.toContain('Join the call')
+  })
+
+  it('previews both sides of the invoice pay fork', async () => {
+    // The pay-link layout and the bank-transfer one are different emails off
+    // one template, and the bank-transfer one is what EVERY Xero-rail client
+    // meets first: the push holds the invoice at DRAFT until it is approved in
+    // Xero, and only then does a pay page exist.
+    const linked = await render(byKey.get('invoice-sent')!.react)
+    const bank = await render(byKey.get('invoice-sent-bank')!.react)
+
+    expect(linked).toContain('Pay invoice')
+    expect(linked).not.toContain('How to pay')
+
+    expect(bank).toContain('How to pay')
+    expect(bank).toContain('Tahi Studio Ltd')
+    expect(bank).toContain('01-0242-0198765-00')
+    // The reference the client quotes on the transfer, and the sentence that
+    // tells them to. Without both, the payment lands unmatched.
+    expect(bank).toContain('INV-1042')
+    expect(bank).toContain('so we can match your payment')
+    // No pay page, so no Pay button lying about one.
+    expect(bank).not.toContain('Pay invoice')
+    expect(bank).toContain('View invoice')
+  })
+
+  it('previews the overdue chase with and without a way to pay', async () => {
+    const linked = await render(byKey.get('invoice-overdue')!.react)
+    const bank = await render(byKey.get('invoice-overdue-bank')!.react)
+
+    expect(linked).toContain('Pay now')
+    expect(linked).not.toContain('How to pay')
+
+    // A chase with nothing to act on is a nag, so the bank details take the
+    // CTA's job here.
+    expect(bank).toContain('How to pay')
+    expect(bank).toContain('01-0242-0198765-00')
+    expect(bank).not.toContain('Pay now')
+    expect(bank).toContain('View invoice')
   })
 
   it('previews an announcement tone on each side of the button fork', async () => {

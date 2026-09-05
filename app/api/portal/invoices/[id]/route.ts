@@ -5,6 +5,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, ne } from 'drizzle-orm'
+import {
+  buildHowToPay,
+  readInvoicePayContext,
+  resolveInvoicePayUrl,
+} from '@/lib/invoice-how-to-pay'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -15,6 +20,11 @@ type Params = { params: Promise<{ id: string }> }
 // Invoice" button landed on /api/admin/invoices/[id], which 403s them. The
 // shape mirrors the admin detail route (invoice + items) so the shared
 // /invoices/[id] page renders from either source unchanged.
+//
+// The pay path, same rules as the list route: `payUrl` is Stripe's hosted
+// page or, when there is none, Xero's own online invoice; `howToPay` carries
+// the bank details, the reference and the amount for a Xero-rail invoice that
+// has no link yet, which is where every pushed Xero invoice starts.
 //
 // Tenancy: the org filter is part of the WHERE clause, not a post-check, so a
 // guessed id from another client is indistinguishable from a missing one (404).
@@ -55,7 +65,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Forbidden', code: 'not_org_admin' }, { status: 403 })
   }
 
-  const [invoice] = await drizzle
+  const [row] = await drizzle
     .select({
       id: schema.invoices.id,
       orgId: schema.invoices.orgId,
@@ -75,6 +85,12 @@ export async function GET(req: NextRequest, { params }: Params) {
       viewedAt: schema.invoices.viewedAt,
       paidAt: schema.invoices.paidAt,
       payUrl: schema.invoices.stripeHostedInvoiceUrl,
+      // Both stripped from the response below. The Xero pay page is folded
+      // into payUrl (the client does not care which rail issued the link) and
+      // the org's rail is a studio fact that decides whether a How to pay
+      // block is built, never something the client is shown.
+      xeroPayUrl: schema.invoices.xeroOnlineInvoiceUrl,
+      orgInvoiceChannel: schema.organisations.invoiceChannel,
       createdAt: schema.invoices.createdAt,
       updatedAt: schema.invoices.updatedAt,
     })
@@ -87,9 +103,39 @@ export async function GET(req: NextRequest, { params }: Params) {
     ))
     .limit(1)
 
-  if (!invoice) {
+  if (!row) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
+
+  const { xeroPayUrl, orgInvoiceChannel, ...rest } = row
+  const payUrl = resolveInvoicePayUrl(rest.payUrl, xeroPayUrl)
+
+  // Only when there is nothing to click. A bill with a hosted pay page needs
+  // no bank details, and reading the settings for one would be a round trip
+  // spent on a block that is never built.
+  let howToPay = null
+  if (!payUrl) {
+    // The whole K/V table: a handful of studio rows, one query for the two
+    // keys the block needs (the default rail and the bank details).
+    const settingRows = await drizzle
+      .select({ key: schema.settings.key, value: schema.settings.value })
+      .from(schema.settings)
+
+    const payContext = readInvoicePayContext(settingRows, orgInvoiceChannel)
+    howToPay = buildHowToPay({
+      channel: payContext.channel,
+      payUrl,
+      invoice: {
+        id: rest.id,
+        totalUsd: rest.totalUsd,
+        currency: rest.currency,
+        dueDate: rest.dueDate,
+      },
+      bankDetails: payContext.bankDetails,
+    })
+  }
+
+  const invoice = { ...rest, payUrl, ...(howToPay ? { howToPay } : {}) }
 
   const items = await drizzle
     .select({
@@ -117,6 +163,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   // Internal-only columns (Stripe / Xero ids, reconciliation state) are never
-  // selected above, so nothing internal can leak through this projection.
+  // selected above, and the two studio-side values that ARE read (the Xero pay
+  // page, the org's rail) are destructured off before the object is built, so
+  // nothing internal can leak through this projection.
   return NextResponse.json({ invoice, items })
 }

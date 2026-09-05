@@ -643,7 +643,7 @@ const TOOLS: ToolDef[] = [
     sentAt: prop('string', 'When the invoice went out, ISO 8601, or null to clear. Setting status sent stamps this for you if you omit it.'),
     pushback: prop('boolean', 'Default true. Set false to record a payment locally WITHOUT telling Stripe or Xero, for money the rail already knows about (a Stripe card payment, a Xero payment reconciled in Xero). Ignored on any status other than paid.'),
   }, ['invoiceId']),
-  tool('send_invoice_email', 'Send an invoice to the client: emails every billing contact (portal admins + the primary contact) the invoice with a Stripe pay link and a portal deep link, marks the invoice sent, and raises the client bell row. Creating a draft invoice does NOT notify anyone; this is the send.', {
+  tool('send_invoice_email', 'Send an invoice to the client: emails every billing contact (portal admins + the primary contact) the invoice with a pay link and a portal deep link, marks the invoice sent, and raises the client bell row. Creating a draft invoice does NOT notify anyone; this is the send. The pay link is the Stripe hosted page, or Xero\'s own online invoice once the bill has been approved in Xero; when neither exists and the client bills on the Xero rail the email carries a How to pay block instead (the studio bank details from the setting invoicing.bankDetails, plus the invoice number as the reference), so a client is never sent a bill with nothing to act on. WHO SENDS on the Xero rail is the setting invoicing.xeroEmailMode: dashboard (the default) sends our template only; xero calls Xero\'s own Email endpoint and stands our template down; both sends each. Xero refuses to email an invoice that is not AUTHORISED, and every dashboard-pushed invoice starts as a Xero DRAFT, so a refusal falls back to our template rather than leaving the client with nothing. The response reports what happened: xeroEmail sent | skipped | failed with a reason, alongside sentTo, failedTo, payLink and bankDetails.', {
     invoiceId: prop('string', 'Invoice ID'),
   }, ['invoiceId']),
 
@@ -1945,8 +1945,10 @@ async function executeTool(
     }
     case 'send_invoice_email':
       // The route owns the behaviour (all billing contacts, real template, pay
-      // link, status flip, client notification), so the tool stays a proxy and
-      // gains it automatically. Returns { sentTo, failedTo, payLink }.
+      // link or How to pay block, the Xero email mode and its draft fallback,
+      // status flip, client notification), so the tool stays a proxy and gains
+      // it automatically. Returns { sentTo, failedTo, payLink, bankDetails,
+      // xeroEmail?, reason? }.
       return json(await apiWrite(`/api/admin/invoices/${s('invoiceId')}/send-email`, token, 'POST'))
 
     // ── Time Tracking ─────────────────────────────────────────────────

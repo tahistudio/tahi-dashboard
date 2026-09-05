@@ -17,6 +17,7 @@ import {
   type PortalPersonSummary,
 } from '@/lib/portal-admin-label'
 import { apiPath } from '@/lib/api'
+import { useToast } from '@/components/tahi/toast'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { formatCurrency } from '@/lib/currency'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
@@ -38,6 +39,10 @@ interface InvoiceRow {
   // The same page under its column name on the admin projection, so the
   // studio can open what the client sees without a round trip to Stripe.
   stripeHostedInvoiceUrl?: string | null
+  // Xero's own client-facing pay page, captured by the syncs once the invoice
+  // is approved in Xero. Admin projection only: on the portal it is folded
+  // into payUrl, because the client does not care which rail issued the link.
+  xeroOnlineInvoiceUrl?: string | null
   source: string | null
   status: string
   amountUsd: number
@@ -98,6 +103,47 @@ function effectiveStatus(invoice: InvoiceRow): string {
   return invoice.status
 }
 
+// ─── Push-back ────────────────────────────────────────────────────────────────
+//
+// PATCH /api/admin/invoices/[id] tells the rail about a hand mark-paid and
+// reports what the rail did. Until now this page threw that body away, so the
+// two near-certain outcomes in the first weeks (no Xero payment account code
+// in settings, and a Xero invoice still sitting at DRAFT) were invisible to
+// the person who had just clicked the button: the dashboard said paid, Xero
+// kept chasing the client, and only the audit log knew.
+
+interface PushbackOutcome {
+  rail: 'xero' | 'stripe'
+  status: 'done' | 'skipped' | 'failed'
+  reason?: string
+}
+
+type ToastTone = 'success' | 'error' | 'info' | 'warning'
+
+/** One sentence for what happened, and the tone to say it in. */
+function pushbackToast(outcome: PushbackOutcome | undefined): { message: string; tone: ToastTone } {
+  // No rail to tell: a manual invoice that never reached Stripe or Xero. Not a
+  // failure, and saying "and in Xero" would be a lie.
+  if (!outcome) return { message: 'Marked paid here.', tone: 'success' }
+
+  const rail = outcome.rail === 'xero' ? 'Xero' : 'Stripe'
+  const reason = outcome.reason?.trim()
+
+  if (outcome.status === 'done') {
+    return { message: `Marked paid here and in ${rail}.`, tone: 'success' }
+  }
+  if (outcome.status === 'skipped') {
+    return {
+      message: `Marked paid here. ${rail} was not told: ${reason ?? 'no reason given'}`,
+      tone: 'info',
+    }
+  }
+  return {
+    message: `Marked paid here. ${rail} did not record the payment: ${reason ?? 'no reason given'}`,
+    tone: 'warning',
+  }
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 interface InvoiceDetailProps {
@@ -111,6 +157,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
   // Only switch to client view when impersonating a client, not a team member
   const isAdmin = isAdminProp && !isImpersonatingClient
   const { displayCurrency, formatNativeWithDisplay } = useDisplayCurrency()
+  const { showToast } = useToast()
   const [patching, setPatching] = useState<string | null>(null)
 
   // Audience-correct source. A client is not allowed on the admin route (it
@@ -153,14 +200,24 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-      if (!res.ok) throw new Error('Failed')
+      // Read the body before the ok check: the route reports the rail's answer
+      // in it, and an error carries the sentence that explains the refusal.
+      const payload = await res.json().catch(() => ({})) as {
+        error?: string
+        pushback?: PushbackOutcome
+      }
+      if (!res.ok) throw new Error(payload.error ?? 'Could not update this invoice')
       await mutate()
-    } catch {
-      // silently revert
+      if (newStatus === 'paid') {
+        const { message, tone } = pushbackToast(payload.pushback)
+        showToast(message, tone)
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Could not update this invoice', 'error')
     } finally {
       setPatching(null)
     }
-  }, [invoice, invoiceId, mutate])
+  }, [invoice, invoiceId, mutate, showToast])
 
   if (loading) {
     return (
@@ -224,9 +281,15 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
   const status = effectiveStatus(invoice)
   const statusCfg = STATUS_CFG[status] ?? STATUS_CFG['draft']
 
-  // One pay page, two projections: the portal route calls it payUrl, the admin
-  // route returns the column as stripeHostedInvoiceUrl.
+  // One pay page, two projections: the portal route calls it payUrl (already
+  // folded, Stripe's page or Xero's), the admin route returns the Stripe
+  // column under its own name and the Xero one alongside it.
   const payUrl = invoice.payUrl ?? invoice.stripeHostedInvoiceUrl ?? null
+  // Xero's own client-facing page. Shown next to the Stripe one rather than
+  // merged into it, because for the studio WHICH page the client is looking at
+  // is the whole question: a Xero link only exists once Liam has approved the
+  // invoice inside Xero, so its presence is the fastest read of that state.
+  const xeroPayUrl = invoice.xeroOnlineInvoiceUrl ?? null
 
   const subtotal = items.reduce((s, it) => s + it.totalUsd, 0)
 
@@ -362,38 +425,26 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
         {/* The studio's view of the same page. "Copy Payment Link" below asks
             Stripe for it again; this is the link we already stored, visible
             without a click so Liam can see whether a bill is actually payable
-            and open exactly what the client was sent. */}
-        {isAdmin && payUrl && (
+            and open exactly what the client was sent.
+
+            Both rails, side by side. A Xero pay page only exists once the
+            invoice has been approved inside Xero (the push holds it at DRAFT
+            on purpose), so an empty Xero slot on a Xero-rail invoice is the
+            one-glance answer to "why has the client not paid this". */}
+        {isAdmin && (payUrl || xeroPayUrl) && (
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '0.5rem',
+              gap: '0.5rem 1rem',
               flexWrap: 'wrap',
               marginTop: '1.25rem',
               paddingTop: '1.25rem',
               borderTop: '1px solid var(--color-border-subtle)',
             }}
           >
-            <a
-              href={payUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="tahi-focus-ring"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                minHeight: '2.75rem',
-                fontSize: '0.875rem',
-                fontWeight: 600,
-                color: 'var(--color-brand)',
-                textDecoration: 'none',
-              }}
-            >
-              <ExternalLink style={{ width: 14, height: 14 }} aria-hidden="true" />
-              Client pay page
-            </a>
+            {payUrl && <PayPageLink href={payUrl} label="Client pay page" />}
+            {xeroPayUrl && <PayPageLink href={xeroPayUrl} label="Xero pay page" />}
             <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
               What the client sees when they pay.
             </span>
@@ -690,6 +741,31 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
 
 // ─── Helper sub-components ────────────────────────────────────────────────────
 
+/** One "open what the client sees" link. Shared by the Stripe and Xero rows. */
+function PayPageLink({ href, label }: { href: string; label: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="tahi-focus-ring"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        minHeight: '2.75rem',
+        fontSize: '0.875rem',
+        fontWeight: 600,
+        color: 'var(--color-brand)',
+        textDecoration: 'none',
+      }}
+    >
+      <ExternalLink style={{ width: 14, height: 14 }} aria-hidden="true" />
+      {label}
+    </a>
+  )
+}
+
 function MetaField({ label, value, highlight, isPrivate }: { label: string; value: React.ReactNode; highlight?: boolean; isPrivate?: boolean }) {
   return (
     <div>
@@ -746,6 +822,49 @@ function ActionButton({
 // billing contact the real template (pay link + portal deep link) and flips the
 // invoice to sent. Reports who it actually reached rather than a bare success.
 
+/** What the send route answers, beyond the plain success. */
+interface SendEmailResult {
+  sentTo?: string[]
+  failedTo?: string[]
+  /** Only on the Xero rail: whether Xero sent its own copy as well, or why not. */
+  xeroEmail?: 'sent' | 'skipped' | 'failed'
+  reason?: string
+  error?: string
+  message?: string
+}
+
+/**
+ * One sentence for what the client actually received.
+ *
+ * The Xero half is not decoration. With invoicing.xeroEmailMode set to 'xero'
+ * the studio has handed the send to Xero, and Xero refuses to email a DRAFT,
+ * which is where every dashboard-pushed invoice starts. Our template is the
+ * fallback in that case, and if this line did not say so the studio would
+ * believe Xero sent a PDF that Xero never sent.
+ */
+function sendResultMessage(body: SendEmailResult): string {
+  const to = body.sentTo ?? []
+  const failed = body.failedTo ?? []
+
+  const ours = to.length > 0
+    ? failed.length > 0
+      ? `Sent to ${to.join(', ')}. Could not reach ${failed.join(', ')}.`
+      : `Sent to ${to.join(', ')}.`
+    : ''
+
+  if (!body.xeroEmail) return ours || 'Sent.'
+
+  const reason = body.reason?.trim()
+  if (body.xeroEmail === 'sent') {
+    // In 'xero' mode ours never went, so there may be no recipient list at all.
+    return ours ? `${ours} Xero emailed its own copy too.` : 'Xero emailed this invoice to the client.'
+  }
+  const why = body.xeroEmail === 'skipped'
+    ? `Xero did not send its own copy: ${reason ?? 'no reason given'}`
+    : `Xero could not send its own copy: ${reason ?? 'no reason given'}`
+  return ours ? `${ours} ${why}` : why
+}
+
 function SendInvoiceEmailButton({
   invoiceId,
   disabled,
@@ -765,23 +884,11 @@ function SendInvoiceEmailButton({
     setResult(null)
     try {
       const res = await fetch(apiPath(`/api/admin/invoices/${invoiceId}/send-email`), { method: 'POST' })
-      const body = await res.json().catch(() => ({})) as {
-        sentTo?: string[]
-        failedTo?: string[]
-        error?: string
-        message?: string
-      }
+      const body = await res.json().catch(() => ({})) as SendEmailResult
       if (!res.ok) {
         throw new Error(body.message || body.error || `HTTP ${res.status}`)
       }
-      const to = body.sentTo ?? []
-      const failed = body.failedTo ?? []
-      setResult({
-        ok: true,
-        message: failed.length > 0
-          ? `Sent to ${to.join(', ')}. Could not reach ${failed.join(', ')}.`
-          : `Sent to ${to.join(', ')}.`,
-      })
+      setResult({ ok: true, message: sendResultMessage(body) })
       onSent()
     } catch (err) {
       setResult({ ok: false, message: err instanceof Error ? err.message : 'Send failed' })
