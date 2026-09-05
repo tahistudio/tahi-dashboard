@@ -75,6 +75,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 07:26 NZST final tick: sales stack fully designed (pipeline, artifacts, ops) with one critic done (ops: all FIX) and two still running; portal prototype fixer still working after two restarts. Run closed; no new work after 07:30.
 
+- 07:52 NZST portal prototype fixer done (namespace collision, one data spine, nav dead ends, per-page fixes); re-critique running. Sales design critics all done (all FIX, no REDO). Liam is up and reviewing.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - [x] More sheet Track time row left-aligned (17a490b2).
