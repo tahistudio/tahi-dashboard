@@ -1,7 +1,7 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-08-18** by Claude (client-ready triage: 6-agent code audit of every client-visible surface; TASKS.md reorganised around the ManyRequests cutover)
+> Last updated: **2026-09-05** by Claude (Tasks page port: the surface, its docs and its e2e). Triage snapshot below is still the 2026-08-18 audit.
 
 ## The plan (2026-08-18)
 
@@ -23,6 +23,21 @@ Liam's call: ship every surface a client touches first (proposals, contracts, sc
 - **Requests** admin + portal (v3 lift, live-verified June; the request loop is the portal's strongest feature: intake forms, thread, AI wizard, tenancy solid)
 - **Overview homes** (owner + client verified live July; teammate home never visually verified)
 - **Settings rebuild** (verified locally + promoted; client-session QA of portal sections still pending)
+- **Tasks (ported 2026-09-05).** Three views: List, Board and My week, over the
+  same rail toolbar Requests uses (aside "Saved views, filters and sort": eight
+  saved views with counts, six filter selects, sort with a direction toggle,
+  Clear filters, Save as default). The detail is a slide-over; opening a row
+  writes `?task=<id>` and `/tasks/<id>` still redirects to `/tasks?task=<id>`,
+  which is where every task notification lands. Tasks are studio-only: a client
+  org is redirected off the route, so there is no portal audience to check.
+  Two behaviours that surprise a reader otherwise: **My week deliberately
+  ignores the rail** (the chip strip is suppressed, the count does not move,
+  and a note above Views says so), and **the saved default is browser-local**,
+  inherited from the Requests rail, so it does not follow you to another
+  machine. Levels read Client / Internal / Tahi; priorities are standard /
+  high / urgent, with `!medium` and `!low` accepted by quick add as aliases
+  for standard. Export CSV writes the rows on screen: rail-filtered on List,
+  the planner's own on My week.
 
 ### Built and impressive, but NOT client-safe yet (sprint C1)
 
@@ -41,7 +56,7 @@ Liam's call: ship every surface a client touches first (proposals, contracts, sc
 
 ### Redesign coverage (sweep 2026-08-18)
 
-**58 routes: 26 v3 / 20 partial / 8 legacy / 4 stub.** Client-facing laggards that matter: `/services` (legacy, zero primitives, client catalogue), `/billing` (legacy), `/invoices/[id]` (legacy detail behind a v3 list), `/files` (stub), `/p/contract` viewer (only public viewer off the deliverable kit). Client-facing partials: /messages, /tasks (+detail), /tracks. Better than assumed: /calls, /team, /invoices list, /affiliates, /announcements, /reviews, /sales-analytics are already v3. Biggest internal partial: /reports (10 hand-rolled tables).
+**58 routes: 26 v3 / 20 partial / 8 legacy / 4 stub.** Client-facing laggards that matter: `/services` (legacy, zero primitives, client catalogue), `/billing` (legacy), `/invoices/[id]` (legacy detail behind a v3 list), `/files` (stub), `/p/contract` viewer (only public viewer off the deliverable kit). Client-facing partials: /messages, /tracks. (/tasks left this list on 2026-09-05: it is v3 and team-only, see the trusted block above.) Better than assumed: /calls, /team, /invoices list, /affiliates, /announcements, /reviews, /sales-analytics are already v3. Biggest internal partial: /reports (10 hand-rolled tables).
 
 ---
 
@@ -52,7 +67,7 @@ Liam's call: ship every surface a client touches first (proposals, contracts, sc
 3. **P1 - the five portal blockers** (sprint C2 above).
 4. **P1 - proposal/schedule share leaks live rows; proposal accept + contract sign are silent** (sprint C1).
 5. **P2 - migrations 0081/0082 apply state unverified on prod D1** (C0.4).
-6. **P2 - /tasks/[id] full page**: GET handler was missing (June note); verify whether the slide-over is still the only working task detail.
+6. **P3 - board drop targets**: on the Tasks board a card in the SAME column as the dragged card still lights as a drop target. Cosmetic, inside `KanbanBoard`, so it shows on the Requests board too.
 
 ### Corrections to previous STATUS claims
 
