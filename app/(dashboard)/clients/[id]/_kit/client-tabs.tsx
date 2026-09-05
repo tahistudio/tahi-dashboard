@@ -37,6 +37,7 @@ export function ClientTabs({
   onChange: (next: ClientTabId) => void
 }) {
   const stripRef = useRef<HTMLDivElement>(null)
+  const fromKeyboard = useRef(false)
   const [pill, setPill] = useState<{ left: number; width: number } | null>(null)
 
   const measure = useCallback(() => {
@@ -59,8 +60,13 @@ export function ClientTabs({
     }
   }, [measure])
 
-  // Keep the open tab on screen. At 375px nine tabs are three screens wide,
-  // so switching by keyboard or by a deep link has to bring its tab into view.
+  // Keep the open tab on screen, and take focus with it. At 375px nine tabs are
+  // three screens wide, so switching by keyboard or by a deep link has to bring
+  // its tab into view. Focus moves in the same pass: under a roving tabindex
+  // the old button drops to -1, so leaving focus behind means the ring sits on
+  // a tab that is no longer selected and Enter re-selects the stale one.
+  // Selection is only chased by focus when the keyboard drove it, so a click
+  // does not yank focus and a first render does not steal it from the page.
   useEffect(() => {
     const strip = stripRef.current
     if (!strip) return
@@ -71,6 +77,10 @@ export function ClientTabs({
     if (left < strip.scrollLeft) strip.scrollTo({ left, behavior: 'smooth' })
     else if (right > strip.scrollLeft + strip.clientWidth) {
       strip.scrollTo({ left: right - strip.clientWidth, behavior: 'smooth' })
+    }
+    if (fromKeyboard.current) {
+      fromKeyboard.current = false
+      active.focus()
     }
   }, [value])
 
@@ -84,6 +94,8 @@ export function ClientTabs({
     else if (e.key === 'End') next = tabs.length - 1
     else return
     e.preventDefault()
+    if (tabs[next].id === value) return
+    fromKeyboard.current = true
     onChange(tabs[next].id)
   }
 
@@ -133,7 +145,10 @@ export function ClientTabs({
             role="tab"
             id={`client-tab-${tab.id}`}
             aria-selected={on}
-            aria-controls={`client-panel-${tab.id}`}
+            // Only the open tab has a panel in the document, so only it can
+            // point at one. An aria-controls at an id that is not rendered
+            // resolves to nothing for a screen reader.
+            aria-controls={on ? `client-panel-${tab.id}` : undefined}
             tabIndex={on ? 0 : -1}
             data-tab-active={on ? 'true' : 'false'}
             onClick={() => onChange(tab.id)}
@@ -174,9 +189,9 @@ export function ClientTabs({
                   height: '1.125rem',
                   padding: '0 0.3125rem',
                   borderRadius: '9999px',
-                  border: `1px solid ${tab.warn ? 'var(--color-danger)' : 'var(--color-border-subtle)'}`,
-                  background: tab.warn ? 'var(--color-danger-bg)' : 'var(--color-bg)',
-                  color: tab.warn ? 'var(--color-danger)' : 'var(--color-text-muted)',
+                  border: `1px solid ${tab.warn ? 'var(--badge-danger-border)' : 'var(--color-border-subtle)'}`,
+                  background: tab.warn ? 'var(--badge-danger-bg)' : 'var(--color-bg)',
+                  color: tab.warn ? 'var(--badge-danger-text)' : 'var(--color-text-muted)',
                   fontSize: '0.6875rem',
                   fontWeight: 700,
                 }}

@@ -352,8 +352,10 @@ export function NoSubscriptionCard({ planType }: { planType: string | null }) {
     <div
       style={{
         borderRadius: 'var(--radius-lg)',
-        border: '1px solid var(--color-warning)',
-        background: 'var(--color-warning-bg)',
+        // --badge-warning-* so the card survives dark mode; --color-warning-bg
+        // is not overridden there and would keep this cream under the text.
+        border: '1px solid var(--badge-warning-border)',
+        background: 'var(--badge-warning-bg)',
         padding: '0.875rem',
       }}
     >
@@ -361,7 +363,7 @@ export function NoSubscriptionCard({ planType }: { planType: string | null }) {
         <AlertTriangle
           className="w-4 h-4 flex-shrink-0 mt-0.5"
           aria-hidden="true"
-          style={{ color: 'var(--color-warning)' }}
+          style={{ color: 'var(--badge-warning-text)' }}
         />
         <div>
           <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>

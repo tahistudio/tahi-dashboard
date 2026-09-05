@@ -51,8 +51,11 @@ export function NeedsYou({
       aria-label="Needs you"
       style={{
         borderRadius: 'var(--radius-lg)',
-        border: `1px solid ${clear ? 'var(--color-border-strong)' : 'var(--color-danger)'}`,
-        background: clear ? 'var(--color-bg)' : 'var(--color-danger-bg)',
+        border: `1px solid ${clear ? 'var(--color-border-strong)' : 'var(--badge-danger-border)'}`,
+        // --badge-danger-* rather than --color-danger-bg: globals.css declares
+        // that --color-danger-bg is deliberately not overridden for dark, so a
+        // --color-text line on it is near-white on near-white in dark mode.
+        background: clear ? 'var(--color-bg)' : 'var(--badge-danger-bg)',
         overflow: 'hidden',
       }}
     >
@@ -76,7 +79,7 @@ export function NeedsYou({
         {!clear && (
           <span
             className="tabular-nums"
-            style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-danger)' }}
+            style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--badge-danger-text)' }}
           >
             {items.length}
           </span>
@@ -125,6 +128,9 @@ export function NeedsYou({
               <button
                 type="button"
                 onClick={() => onAct(item)}
+                // Three overdue requests would otherwise give three buttons
+                // named only "Open". The line itself is the distinguisher.
+                aria-label={`${item.action}: ${item.text}`}
                 className="tahi-focus-ring"
                 style={{
                   flexShrink: 0,
@@ -138,7 +144,7 @@ export function NeedsYou({
                   fontWeight: 600,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
-                  transition: 'border-color var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out)',
+                  transition: 'border-color var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
                 }}
                 onMouseEnter={e => {
                   e.currentTarget.style.borderColor = 'var(--color-brand)'
