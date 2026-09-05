@@ -23,6 +23,8 @@ const AiTaskWizard = dynamic(() => import('@/components/tahi/ai-task-wizard').th
 // is, since the module it lives in carries the editor with it.
 const RichBriefProse = dynamic(() => import('@/components/tahi/rich-brief').then(m => ({ default: m.RichBriefProse })), { ssr: false })
 import { StatusBadge } from '@/components/tahi/status-badge'
+import { PortalStatusBadge } from '@/components/tahi/portal/portal-status-badge'
+import { PortalStudioTeamCard } from '@/components/tahi/portal/portal-studio-team-card'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
@@ -1849,7 +1851,11 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
               title={`See all ${statusLabel(request.status).toLowerCase()} requests`}
               className="tahi-chip-link tahi-focus-ring min-h-11 md:min-h-0"
             >
-              <StatusBadge status={request.status} />
+              {isAdmin ? (
+                <StatusBadge status={request.status} />
+              ) : (
+                <PortalStatusBadge status={request.status} />
+              )}
             </Link>
             {request.priority === 'high' && (
               <Link
@@ -1969,7 +1975,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             >
               {request.title}
             </h1>
-            <PeopleStack participants={participants} linkPeople={isAdmin} />
+            {/* Same honesty rule as the People card below: the portal detail
+                route returns no participants, so for a client this printed an
+                "Unassigned" pill on every request, including the ones whose
+                avatars they had just seen on the list. Silence beats a wrong
+                claim. */}
+            {(isAdmin || participants.length > 0) && (
+              <PeopleStack participants={participants} linkPeople={isAdmin} />
+            )}
           </div>
 
           {/* Client + created */}
@@ -2932,17 +2945,30 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
               the legacy rail keeps Details last. */}
           {newUi && detailsCard}
 
-          {/* People - PM / Assignees / Followers */}
-          <PeoplePanel
-            requestId={requestId}
-            orgId={request.orgId}
-            participants={participants}
-            setParticipants={setParticipants}
-            isAdmin={canWrite}
-            lockPm={newUi}
-            dedupeAcrossRoles={newUi}
-            onAssigneeMirror={mirrorAssigneeFromPeople}
-          />
+          {/* People - PM / Assignees / Followers.
+              GET /api/portal/requests/[id] returns { request, messages } and no
+              participants, so for a client this panel had nothing to render and
+              printed "No PM assigned", "No assignees yet" and "No followers
+              yet" on a request that demonstrably has a PM, one click after the
+              list showed them those very avatars. That is a lie, not an empty
+              state, so a client only sees the card when the API actually
+              answered with people. Until the route carries participants they
+              get the studio team on their account instead, from a read that
+              exists (/api/portal/team). */}
+          {isAdmin || participants.length > 0 ? (
+            <PeoplePanel
+              requestId={requestId}
+              orgId={request.orgId}
+              participants={participants}
+              setParticipants={setParticipants}
+              isAdmin={canWrite}
+              lockPm={newUi}
+              dedupeAcrossRoles={newUi}
+              onAssigneeMirror={mirrorAssigneeFromPeople}
+            />
+          ) : (
+            <PortalStudioTeamCard />
+          )}
 
           {/* Checklists */}
           <ChecklistsPanel

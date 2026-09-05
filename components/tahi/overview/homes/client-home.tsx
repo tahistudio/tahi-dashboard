@@ -7,25 +7,37 @@
  * (never the design's fabricated demo numbers) and every amount formats through
  * the real DisplayCurrency provider (never a hardcoded FX rate).
  *
- * Composition (matches the design exactly):
+ * Composition:
  *   - optional ClientFirstRun welcome (ctx.home==='first') backed by
  *     /api/portal/onboarding, which derives the knowable steps and says
  *     whether this org is a first run at all
- *   - masthead: TheWire (their pulse) -> Hero (project progress OR awaiting
- *     review, by ctx.clientType) -> Vitals -> NeedsYou
+ *   - masthead: TheWire (their pulse) -> WaitingOnYou (the dark forest feature
+ *     tile that IS the hero: ranked, actionable rows) -> Vitals
  *   - Zone "Your work": TrackBoard (retainer, reorderable queue) OR ProjectBoard
  *     (project, phases), chosen by ctx.clientType
  *   - Zone "Activity": Recent requests + Next call
  *   - Zone "Library": Recent files + Your team
  *   - Zone "Billing": Invoices + Your plan | Your project
  *
- * Read-only (ctx.isReadOnly / impersonation): NewMenu is passed ro, every write
- * control (queue reorder, onboarding toggle, Pay) is guarded in JS AND visually
- * disabled, and the switcher's `.ov[data-ro="1"]` wrapper disables the rest.
+ * Three things this pass fixed, from the portal reader map:
+ *   1. ONE status vocabulary. lib/portal-status is the single dictionary the
+ *      home, the client list and the client request detail all read, so a
+ *      request cannot be called "In build" here and "In Progress" one click
+ *      later.
+ *   2. LOADING STATES EVERYWHERE (TASKS CT.3b). Every card holds its shape
+ *      until its own read answers. No card prints its empty-state copy at a
+ *      client who has plenty.
+ *   3. EVERY "new request" AFFORDANCE OPENS THE DIALOG (/requests?new=1), not
+ *      the list the reader then has to press New on again.
+ *
+ * Read-only (ctx.isReadOnly / impersonation): every write control (queue
+ * reorder, onboarding toggle, Pay, start a request) is guarded in JS AND
+ * visually disabled, and the switcher's `.ov[data-ro="1"]` wrapper disables the
+ * rest.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { CSSProperties, ReactNode } from 'react'
+import type { CSSProperties } from 'react'
 import { useResource } from '@/lib/use-resource'
 import { ApiError } from '@/lib/swr-fetcher'
 import { apiPath } from '@/lib/api'
@@ -38,21 +50,18 @@ import {
   type HomeDestination,
 } from '@/lib/client-home-signals'
 import type { OverviewCtx } from '@/components/tahi/overview/ctx'
+import { portalStatusMeta, portalStageFraction, type PortalChipTone } from '@/lib/portal-status'
+import { WaitingOnYou, type WaitingItem } from '@/components/tahi/portal/home/waiting-on-you'
 import {
   useOvFormat,
   Icon,
   Card,
   CardH,
   Row,
-  Hero,
   Vitals,
-  NeedsYou,
   TheWire,
   Zone,
-  NewMenu,
   type IconName,
-  type NeedItem,
-  type NewMenuItem,
   type VitalItem,
   type WireEvent,
 } from '@/components/tahi/overview/ov-kit'
@@ -192,42 +201,68 @@ interface OnboardingResp {
   firstRunEligible?: boolean
 }
 
-/* ---------- status -> visual mapping (data-value hexes, documented per rule 2) ---------- */
+/* ---------- status -> visual mapping ---------- */
 
-type ChipTone = 'brand' | 'info' | 'warn' | 'muted' | 'rose'
-
-/** Client-facing request status meta: leading dot colour + right chip. Only
- *  client_review reads as "your review": delivered is the terminal state the
- *  client's own approval writes, so it reads as done and sits in the quiet
- *  brand tone the closed statuses share. */
-const REQ_META: Record<string, { label: string; dot: string; chip: ChipTone }> = {
-  submitted: { label: 'Queued', dot: '#8a9987', chip: 'muted' },
-  in_review: { label: 'In review', dot: '#C9A227', chip: 'warn' },
-  in_progress: { label: 'In build', dot: '#2A6FDB', chip: 'info' },
-  client_review: { label: 'Review', dot: '#C9A227', chip: 'warn' },
-  delivered: { label: 'Delivered', dot: '#5A824E', chip: 'brand' },
-  on_hold: { label: 'On hold', dot: '#8a9987', chip: 'muted' },
-  completed: { label: 'Done', dot: '#5A824E', chip: 'brand' },
-  archived: { label: 'Archived', dot: '#8a9987', chip: 'muted' },
-  cancelled: { label: 'Cancelled', dot: '#8a9987', chip: 'muted' },
-}
-function reqMeta(status: string): { label: string; dot: string; chip: ChipTone } {
-  return REQ_META[status] ?? { label: status.replace(/_/g, ' '), dot: 'var(--brand)', chip: 'muted' }
+/**
+ * ONE client vocabulary. This home used to keep a private dictionary (Queued /
+ * In build / Review) while the requests list and the request detail printed the
+ * studio words one click away, so the same request had two names inside the
+ * same portal. Both surfaces now read lib/portal-status, which keeps the house
+ * words and adds a plain gloss, and takes its colours from the shared
+ * REQUEST_STATUS_CONFIG tokens so dark mode is correct without an override
+ * here.
+ */
+function reqMeta(status: string): { label: string; gloss: string; dot: string; chip: PortalChipTone } {
+  const meta = portalStatusMeta(status)
+  return { label: meta.label, gloss: meta.gloss, dot: meta.dot, chip: meta.chip }
 }
 
-/** Deterministic stage fraction from the real status - used only to visualise a
- *  request's pipeline position on the TrackBoard meter (not a tracked percent). */
-const STAGE_PCT: Record<string, number> = {
-  submitted: 12,
-  in_review: 30,
-  in_progress: 62,
-  on_hold: 45,
-  client_review: 88,
-  delivered: 100,
-  completed: 100,
-}
+/** Deterministic stage percentage from the real status - used only to visualise
+ *  a request's pipeline position on the TrackBoard meter (not a tracked
+ *  percent, which is why the caption beside it always says the status word). */
 function stagePct(status: string): number {
-  return STAGE_PCT[status] ?? 20
+  return Math.round(portalStageFraction(status) * 100)
+}
+
+/* ---------- loading placeholders (TASKS CT.3b) ----------
+   Every card on this home used to print its empty-state copy while its fetch
+   was still in flight, so a real client's first paint read "No requests yet",
+   "No files shared yet" and "Your team is being assigned". A card holds its
+   shape instead, and says nothing it has not checked. */
+
+function SkelRows({ rows = 3, height = '2.375rem' }: { rows?: number; height?: string }) {
+  return (
+    <div
+      aria-busy="true"
+      style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.25rem' }}
+    >
+      {Array.from({ length: rows }, (_, i) => (
+        <span
+          key={i}
+          className="tahi-shimmer"
+          style={{ height, borderRadius: '0.5rem', background: 'var(--bg-secondary)', display: 'block' }}
+        />
+      ))}
+      <span className="sr-only">Loading</span>
+    </div>
+  )
+}
+
+/** A vital's figure while its read is in flight: a bar, never a 0. */
+function SkelFigure({ width = '3rem' }: { width?: string }) {
+  return (
+    <span
+      className="tahi-shimmer"
+      style={{
+        display: 'inline-block',
+        width,
+        height: '1.25rem',
+        borderRadius: '0.25rem',
+        background: 'var(--bg-secondary)',
+        verticalAlign: 'middle',
+      }}
+    />
+  )
 }
 
 /* ---------- small helpers ---------- */
@@ -273,6 +308,19 @@ function dueLabel(iso: string | null): string {
   return `Due in ${diff} days`
 }
 
+/** "Saturday 6 September", the masthead's one line of orientation. */
+function todayLabel(): string {
+  const d = new Date()
+  return d.toLocaleDateString('en-NZ', { weekday: 'long', day: 'numeric', month: 'long' })
+}
+
+/** First name only, for the greeting. Falls back to no name rather than to a
+ *  placeholder that reads like a mail merge. */
+function firstNameOf(name: string | undefined): string {
+  const first = (name ?? '').trim().split(/\s+/)[0] ?? ''
+  return first
+}
+
 function shortDate(iso: string | null): string {
   if (!iso) return 'TBC'
   const d = new Date(iso)
@@ -306,7 +354,9 @@ interface FirstRunStep {
 const CL_STEPS: FirstRunStep[] = [
   { key: 'welcomeVideoWatched', ic: 'play', t: 'Watch your welcome', d: 'A short intro on how your studio works', time: '1 min', dest: null },
   { key: 'brandAssetsUploaded', ic: 'file', t: 'Share brand assets', d: 'Logos, fonts and guidelines so day one is on-brand', time: '2 min', dest: 'files' },
-  { key: 'firstRequestSubmitted', ic: 'request', t: 'Make your first request', d: 'Tell us what you need and we take it from there', time: '3 min', dest: 'requests' },
+  // dest carries the query so the step opens the New request DIALOG rather
+  // than dropping a brand new client on an empty list.
+  { key: 'firstRequestSubmitted', ic: 'request', t: 'Make your first request', d: 'Tell us what you need and we take it from there', time: '3 min', dest: 'requests?new=1' },
   { key: 'billingSetUp', ic: 'receipt', t: 'Confirm billing', d: 'Check your plan and payment details', time: '1 min', dest: 'plan' },
 ]
 const FIRSTRUN_DISMISS_KEY = 'tahi-ov-firstrun-dismissed'
@@ -468,13 +518,19 @@ function TrackBoard({
   tracks,
   planLabel,
   ro,
-  go,
+  loading,
+  onStart,
   onReorder,
 }: {
   tracks: TrackItem[]
   planLabel: string | null
   ro: boolean
-  go: (id: string) => void
+  /** True until /api/portal/tracks has answered. */
+  loading: boolean
+  /** Opens the New request dialog. Every "new request" affordance on this
+   *  board used to route to the /requests LIST, where the reader had to find
+   *  and press New a second time. */
+  onStart: () => void
   onReorder: (trackId: string, requestIds: string[]) => void
 }) {
   const key = laneKey(tracks)
@@ -507,6 +563,24 @@ function TrackBoard({
     [ro, onReorder],
   )
 
+  // The board holds its shape for the first round trip. "No active tracks yet."
+  // to a client with two tracks running was the worst of the CT.3b lies.
+  if (loading) {
+    return (
+      <div className="ov-trackboard">
+        <div className="ov-tb-head">
+          <div>
+            <h3>Your work in motion</h3>
+            <span className="ov-mini">
+              <SkelFigure width="9rem" />
+            </span>
+          </div>
+        </div>
+        <SkelRows rows={2} height="5.5rem" />
+      </div>
+    )
+  }
+
   if (lanes.length === 0) {
     return (
       <div className="ov-trackboard">
@@ -515,7 +589,7 @@ function TrackBoard({
             <h3>Your work in motion</h3>
             <span className="ov-mini">Your tracks appear here once your plan is set up.</span>
           </div>
-          <button className="ov-cta" disabled={ro} onClick={() => go('requests')}>
+          <button className="ov-cta" disabled={ro} onClick={onStart}>
             New request
           </button>
         </div>
@@ -534,7 +608,7 @@ function TrackBoard({
             {lanes.length} track{lanes.length === 1 ? '' : 's'} running in parallel
           </span>
         </div>
-        <button className="ov-cta" disabled={ro} onClick={() => go('requests')}>
+        <button className="ov-cta" disabled={ro} onClick={onStart}>
           New request
         </button>
       </div>
@@ -546,7 +620,11 @@ function TrackBoard({
             <div className="ov-lane" key={t.id}>
               <div className="ov-lane-h">
                 <b>Track {ti + 1}</b>
-                {meta && <span className={'ov-chip ' + meta.chip}>{meta.label}</span>}
+                {meta && (
+                  <span className={'ov-chip ' + meta.chip} title={meta.gloss || undefined}>
+                    {meta.label}
+                  </span>
+                )}
               </div>
               {cur ? (
                 <div className="ov-lane-now">
@@ -559,7 +637,9 @@ function TrackBoard({
                   <div className="ov-meter">
                     <i style={{ width: stagePct(cur.status) + '%' }} />
                   </div>
-                  <div className="ln-pct">{meta?.label}</div>
+                  <div className="ln-pct" title={meta?.gloss || undefined}>
+                    {meta?.label}
+                  </div>
                 </div>
               ) : (
                 <div className="ov-lane-now">
@@ -593,12 +673,12 @@ function TrackBoard({
                         )}
                       </div>
                     ))}
-                    <button className="ln-add" disabled={ro} onClick={() => go('requests')}>
+                    <button className="ln-add" disabled={ro} onClick={onStart}>
                       + Queue another
                     </button>
                   </>
                 ) : (
-                  <button className="ln-open" disabled={ro} onClick={() => go('requests')}>
+                  <button className="ln-open" disabled={ro} onClick={onStart}>
                     Slot open, submit a request
                   </button>
                 )}
@@ -607,10 +687,14 @@ function TrackBoard({
           )
         })}
       </div>
+      {/* "Add a track" used to route to /billing, a page absent from the
+          client nav that they could never navigate back from. Another track is
+          a conversation, so it files a request instead, which is a door that
+          exists. */}
       <div className="ov-tb-foot">
         <span className="ov-mini">Need more done at once?</span>
-        <button className="ov-cta ghost" disabled={ro} onClick={() => go('plan')}>
-          Add a track
+        <button className="ov-cta ghost" disabled={ro} onClick={onStart}>
+          Ask about another track
         </button>
       </div>
     </div>
@@ -619,11 +703,38 @@ function TrackBoard({
 
 /* ---------- ProjectBoard (project, phases) ---------- */
 
-function ProjectBoard({ project, ro, go }: { project: ProjectResp | undefined; ro: boolean; go: (id: string) => void }) {
+function ProjectBoard({
+  project,
+  ro,
+  loading,
+  onStart,
+}: {
+  project: ProjectResp | undefined
+  ro: boolean
+  /** True until /api/portal/project has answered. */
+  loading: boolean
+  onStart: () => void
+}) {
   const phases = project?.phases ?? []
   const title = project?.scheduleTitle || project?.project?.name || 'Your project'
   const activeIdx = phases.findIndex(p => p.state === 'active')
   const stage = activeIdx >= 0 ? `Phase ${activeIdx + 1} of ${phases.length}` : `${phases.length} phase${phases.length === 1 ? '' : 's'}`
+
+  if (loading) {
+    return (
+      <div className="ov-trackboard">
+        <div className="ov-tb-head">
+          <div>
+            <h3>Your project, phase by phase</h3>
+            <span className="ov-mini">
+              <SkelFigure width="9rem" />
+            </span>
+          </div>
+        </div>
+        <SkelRows rows={3} height="3.25rem" />
+      </div>
+    )
+  }
 
   return (
     <div className="ov-trackboard">
@@ -635,10 +746,12 @@ function ProjectBoard({ project, ro, go }: { project: ProjectResp | undefined; r
             {phases.length > 0 ? ` · ${stage}` : ''}
           </span>
         </div>
-        {/* Messaging is coming soon for V1: the slot stays as a quiet disabled
-            affordance rather than linking to the hidden Messages surface. */}
-        <button className="ov-cta" disabled title="Client messaging is coming soon">
-          Messaging soon
+        {/* This slot used to hold a permanently disabled "Messaging soon"
+            button, an affordance for a surface that does not exist. The one
+            thing a client can genuinely start from here is a request, so that
+            is what it does, and it opens the dialog rather than a list. */}
+        <button className="ov-cta" disabled={ro} onClick={onStart}>
+          New request
         </button>
       </div>
       {phases.length > 0 ? (
@@ -687,13 +800,15 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // by updatedAt desc and caps at 500, so a migrated client with years of
   // history would have had "Open requests" and "Next delivery" computed from
   // the 50 most recently touched rows. 200 covers the real books with room.
-  const { data: requestsData } = useResource<RequestsResp>('/api/portal/requests?status=active&limit=200')
+  const { data: requestsData, isLoading: requestsLoading } = useResource<RequestsResp>(
+    '/api/portal/requests?status=active&limit=200',
+  )
   // The review signal gets its OWN query rather than a slice of the one above.
   // A request sitting in client_review is by definition not being touched, so
   // its updatedAt goes stale and it is the first row to fall off a page of the
   // active list. Reading it back by exact status means "nothing waiting on you"
   // can never be an artefact of pagination.
-  const { data: reviewData } = useResource<RequestsResp>(
+  const { data: reviewData, isLoading: reviewLoading } = useResource<RequestsResp>(
     '/api/portal/requests?status=client_review&limit=200',
   )
   // The money routes turn a plain member seat away by design (only a workspace
@@ -713,19 +828,21 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // vanishing, so the plan card beside it does not change width under the
   // reader on the ordinary path.
   const invoicesSettled = !!invoicesData || !!invoicesError
-  const { data: subData } = useResource<SubscriptionResp>('/api/portal/subscription')
+  const { data: subData, isLoading: subLoading } = useResource<SubscriptionResp>('/api/portal/subscription')
 
   // Retainer (TrackBoard) vs project (ProjectBoard): derived from the real
   // subscription signal; ctx.clientType is a preview-only override. Defaults to
   // retainer until the subscription loads (the common case).
   const isProject = (ctx.clientType ?? subData?.clientType) === 'project'
-  const { data: callsData } = useResource<CallsResp>('/api/portal/calls')
-  const { data: filesData } = useResource<FilesResp>('/api/portal/files')
-  const { data: teamData } = useResource<TeamResp>('/api/portal/team')
-  const { data: tracksData, mutate: mutateTracks } = useResource<TracksResp>(
+  const { data: callsData, isLoading: callsLoading } = useResource<CallsResp>('/api/portal/calls')
+  const { data: filesData, isLoading: filesLoading } = useResource<FilesResp>('/api/portal/files')
+  const { data: teamData, isLoading: teamLoading } = useResource<TeamResp>('/api/portal/team')
+  const { data: tracksData, isLoading: tracksLoading, mutate: mutateTracks } = useResource<TracksResp>(
     isProject ? null : '/api/portal/tracks',
   )
-  const { data: projectData } = useResource<ProjectResp>(isProject ? '/api/portal/project' : null)
+  const { data: projectData, isLoading: projectLoading } = useResource<ProjectResp>(
+    isProject ? '/api/portal/project' : null,
+  )
 
   const requests = useMemo(() => requestsData?.requests ?? [], [requestsData])
   const invoices = useMemo(() => invoicesData?.items ?? [], [invoicesData])
@@ -806,44 +923,40 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
     when: e.when,
   }))
 
-  // ── needs you (ranked: review > invoice > call, max 3) ──────────────────────
-  const needs: NeedItem[] = []
-  if (inReview.length > 0) {
-    needs.push({
-      tone: 'work',
-      ic: 'file',
-      title: `${inReview.length} ready for your review`,
-      sub: inReview
-        .slice(0, 2)
-        .map(r => r.title)
-        .join(' · '),
-      verb: 'Review',
-      // One waiting delivery opens that delivery; several open the list
-      // already narrowed to them. /requests reads ?status= off the URL
-      // (lib/requests-url-state.ts), so the client lands on the same rows the
-      // prompt counted rather than on everything they have ever asked for.
-      onAct: () =>
-        inReview.length === 1
-          ? go(requestRouteId(inReview[0].id))
-          : go('requests?status=client_review'),
+  // -- waiting on you (ranked: review > invoice > call) ------------------------
+  // Every row here is a door. A review opens that request on its approve view,
+  // an invoice opens the payment page, a call opens the meeting. The tile shows
+  // three and expands to the rest, so a fourth thing waiting is never a count
+  // with nowhere to go.
+  const waiting: WaitingItem[] = []
+  for (const r of inReview) {
+    waiting.push({
+      key: r.id,
+      kind: 'review',
+      ic: 'spark',
+      title: r.title,
+      sub: `Ready for your review, updated ${deliveryLabel(r.updatedAt)}. Approve it, or tell us what to change.`,
+      primary: { label: 'Review', onAct: () => go(requestRouteId(r.id)) },
     })
   }
   if (nearestUnpaid) {
-    needs.push({
-      tone: 'money',
+    waiting.push({
+      key: nearestUnpaid.id,
+      kind: 'invoice',
       ic: 'receipt',
-      title: `${invoiceLabel(nearestUnpaid)} due`,
-      sub: `${formatNative(nearestUnpaid.totalAmount, nearestUnpaid.currency ?? 'NZD')} · ${dueLabel(
-        nearestUnpaid.dueDate,
+      title: `${invoiceLabel(nearestUnpaid)}, ${formatNative(
+        nearestUnpaid.totalAmount,
+        nearestUnpaid.currency ?? 'NZD',
       )}`,
-      verb: 'Pay',
-      // Belt and braces. NeedsYou now disables its own verb under `ro`
-      // (ov-kit.tsx), so an impersonating admin cannot reach the client's live
-      // Stripe page by keyboard the way the CSS pointer-events rule on
-      // .nr-verb alone allowed. Withholding the handler as well means this row
-      // does not depend on the kit remembering: the Invoices card guards its
-      // Pay the same way, and the two verbs answer the same way.
-      onAct: ro ? undefined : () => openDestination(invoicePayDestination(nearestUnpaid)),
+      sub: dueLabel(nearestUnpaid.dueDate),
+      open: { label: 'See all invoices', onOpen: () => go('invoices') },
+      // Withheld, not merely disabled, under the read-only lens: an
+      // impersonating admin must not reach a client's live payment page, and
+      // the tile disables any action that arrives with no handler.
+      primary: {
+        label: 'Pay',
+        onAct: ro ? undefined : () => openDestination(invoicePayDestination(nearestUnpaid)),
+      },
     })
   }
   // Only when there is somewhere to go. /calls is a studio page that redirects
@@ -853,46 +966,99 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   const c = calls[0]
   const joinUrl = c?.meetingUrl
   if (c && joinUrl) {
-    needs.push({
-      tone: 'call',
+    waiting.push({
+      key: c.id,
+      kind: 'call',
       ic: 'phone',
       title: c.title,
       sub: callWhen(c.whenISO, c.durationMin),
-      verb: 'Join',
-      onAct: () => window.open(joinUrl, '_blank', 'noopener,noreferrer'),
+      primary: { label: 'Join', onAct: () => window.open(joinUrl, '_blank', 'noopener,noreferrer') },
     })
   }
+  // The tile only speaks once every read behind it has answered. Saying "All
+  // quiet in the studio." to somebody with two deliveries waiting, for the
+  // length of one round trip, is the exact lie this pass set out to remove.
+  const waitingLoading = (requestsLoading && reviewLoading) || !invoicesSettled || callsLoading
+  const noRequestsAtAll = !requestsLoading && requests.length === 0
 
-  // ── vitals ──────────────────────────────────────────────────────────────────
+  // -- vitals ------------------------------------------------------------------
   const vitals: VitalItem[] = [
-    { lbl: 'Open requests', num: openReqs.length, sub: 'in progress' },
-    // Not "In review": REQ_META already uses those two words for the in_review
-    // status, which is the STUDIO reviewing, and those rows are counted in
-    // "Open requests" beside this one. A client with three requests chipped
-    // "In review" would have read "In review 0" directly under them. This vital
-    // counts client_review only, so it takes the label the client already sees
-    // for exactly that cut on /requests (CLIENT_SAVED_VIEWS 'awaiting').
+    {
+      lbl: 'Open requests',
+      num: requestsLoading ? <SkelFigure width="2.5rem" /> : openReqs.length,
+      sub: requestsLoading ? <SkelFigure width="4.5rem" /> : 'in progress',
+    },
+    // Not "In review": the status vocabulary already uses those two words for
+    // the in_review status, which is the STUDIO reviewing, and those rows are
+    // counted in "Open requests" beside this one. This vital counts
+    // client_review only, so it takes the label the client already sees for
+    // exactly that cut on /requests.
     {
       lbl: 'Waiting on you',
-      num: inReview.length,
-      muted: inReview.length === 0,
-      sub:
-        inReview.length === 0
-          ? 'nothing to approve'
-          : `${inReview.length === 1 ? 'delivery' : 'deliveries'} to approve`,
+      num: waitingLoading ? <SkelFigure width="2.5rem" /> : inReview.length,
+      muted: !waitingLoading && inReview.length === 0,
+      sub: waitingLoading ? (
+        <SkelFigure width="6rem" />
+      ) : inReview.length === 0 ? (
+        'nothing to approve'
+      ) : (
+        `${inReview.length === 1 ? 'delivery' : 'deliveries'} to approve`
+      ),
     },
     {
       lbl: 'Next delivery',
-      num: nextDelivery ? deliveryLabel(nextDelivery.dueDate) : 'None',
-      muted: !nextDelivery,
-      sub: nextDelivery ? nextDelivery.title : 'nothing scheduled',
+      num: requestsLoading ? (
+        <SkelFigure width="4rem" />
+      ) : nextDelivery ? (
+        deliveryLabel(nextDelivery.dueDate)
+      ) : (
+        'None'
+      ),
+      muted: !requestsLoading && !nextDelivery,
+      sub: requestsLoading ? (
+        <SkelFigure width="6rem" />
+      ) : nextDelivery ? (
+        nextDelivery.title
+      ) : (
+        'nothing scheduled'
+      ),
     },
   ]
+  // A project client used to read their overall percentage off the hero. The
+  // hero is now the "Waiting on you" tile, so the figure moves here rather than
+  // being dropped.
+  if (isProject) {
+    const projectPhases = projectData?.phases ?? []
+    const activePhase = projectPhases.find(ph => ph.state === 'active') ?? null
+    const doneCount = projectPhases.filter(ph => ph.state === 'done').length
+    const overallPct = projectPhases.length
+      ? Math.round((100 * (doneCount + (activePhase ? activePhase.pct / 100 : 0))) / projectPhases.length)
+      : 0
+    const knownProgress = !!projectData?.progressKnown && projectPhases.length > 0
+    vitals.push({
+      lbl: 'Project progress',
+      num: projectLoading ? (
+        <SkelFigure width="3rem" />
+      ) : knownProgress ? (
+        `${overallPct}%`
+      ) : (
+        activePhase?.name ?? projectData?.project?.status ?? 'Getting started'
+      ),
+      muted: !projectLoading && !knownProgress,
+      sub: projectLoading ? (
+        <SkelFigure width="6rem" />
+      ) : activePhase ? (
+        activePhase.name
+      ) : (
+        'your plan is being set up'
+      ),
+    })
+  }
   // "Invoices due 0 / all settled" is a claim about money this seat is not
   // allowed to see, so the tile goes rather than reassuring somebody wrongly.
-  // The strip is flex, so three tiles simply share the width. It stays away
-  // until the read has answered, too: a reassurance nobody has checked yet is
-  // the same lie one round trip earlier.
+  // The strip is flex, so the rest simply share the width. It stays away until
+  // the read has answered, too: a reassurance nobody has checked yet is the
+  // same lie one round trip earlier.
   if (invoicesSettled && !invoicesDenied) {
     vitals.push({
       lbl: 'Invoices due',
@@ -901,62 +1067,10 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       sub:
         unpaid.length === 0
           ? 'all settled'
-          : `${unpaid.length} · ${nearestUnpaid ? dueLabel(nearestUnpaid.dueDate) : 'due soon'}`,
+          : `${unpaid.length} \u00b7 ${nearestUnpaid ? dueLabel(nearestUnpaid.dueDate) : 'due soon'}`,
     })
   }
 
-  // ── hero ────────────────────────────────────────────────────────────────────
-  const retainerNewItems: NewMenuItem[] = [{ ic: 'request', label: 'New request', go: () => go('requests') }]
-  const projectNewItems: NewMenuItem[] = [
-    { ic: 'request', label: 'New request', go: () => go('requests') },
-  ]
-
-  let hero: ReactNode
-  if (isProject) {
-    const phases = projectData?.phases ?? []
-    const activePhase = phases.find(p => p.state === 'active') ?? null
-    const doneCount = phases.filter(p => p.state === 'done').length
-    const overallPct = phases.length
-      ? Math.round((100 * (doneCount + (activePhase ? activePhase.pct / 100 : 0))) / phases.length)
-      : 0
-    const milestone = projectData?.nextMilestone
-    if (projectData?.progressKnown && phases.length > 0) {
-      hero = (
-        <Hero
-          variant="forest"
-          label="Project progress"
-          value={overallPct}
-          format={n => `${Math.round(n)}%`}
-          sub={
-            activePhase
-              ? `${activePhase.note ?? activePhase.name + ' phase'}${milestone ? ` · next ${milestone.name}` : ''}`
-              : 'On track'
-          }
-          action={<NewMenu items={projectNewItems} ro={ro} variant="hero" />}
-        />
-      )
-    } else {
-      hero = (
-        <Hero
-          variant="forest"
-          label="Project progress"
-          value={activePhase?.name ?? projectData?.project?.status ?? 'Getting started'}
-          sub={milestone ? `Next: ${milestone.name}` : 'Your plan is being set up'}
-          action={<NewMenu items={projectNewItems} ro={ro} variant="hero" />}
-        />
-      )
-    }
-  } else {
-    hero = (
-      <Hero
-        variant="forest"
-        label="Awaiting your review"
-        value={inReview.length}
-        sub={inReview.length > 0 ? inReview.slice(0, 2).map(r => r.title).join(' · ') : 'Nothing waiting on you'}
-        action={<NewMenu items={retainerNewItems} ro={ro} variant="hero" />}
-      />
-    )
-  }
 
   // ── track reorder persistence ───────────────────────────────────────────────
   const onReorder = useCallback(
@@ -976,7 +1090,20 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
     [ro, mutateTracks],
   )
 
+  // Every "new request" affordance on this page used to route to /requests,
+  // the LIST, where the reader had to find and press New a second time. The
+  // list opens the real dialog on ?new=1, so the home hands straight to it.
+  const startRequest = useCallback(() => {
+    if (ro) return
+    go('requests?new=1')
+  }, [ro, go])
+
   const planLabel = subData?.subscription?.planLabel ?? null
+  const firstName = firstNameOf(ctx.userName)
+  const [today, setToday] = useState('')
+  useEffect(() => {
+    setToday(todayLabel())
+  }, [])
   const recent = requests.slice(0, 5)
   const nextCall = calls[0] ?? null
   const payDisabled: CSSProperties = ro ? { opacity: 0.5, pointerEvents: 'none' } : {}
@@ -985,19 +1112,73 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
     <div className="ov" data-ro={ro ? '1' : '0'}>
       <ClientFirstRun ctx={ctx} />
 
+      {/* A header, at last. This page had no greeting, no date and no top-level
+          way to start a request: the only primary CTA was a menu tucked inside
+          the hero that routed to the requests LIST. */}
+      <div className="pfh-mast">
+        <div className="pfh-mast-t">
+          <h1>Kia ora{firstName ? `, ${firstName}` : ''}.</h1>
+          <p>
+            {/* Resolved after mount: the server and the reader are rarely in
+                the same timezone, and a date is the classic hydration
+                mismatch. */}
+            {today && (
+              <>
+                {today}
+                <span className="pfh-mast-dot" aria-hidden="true" />
+              </>
+            )}
+            {ctx.orgName || 'Your workspace'}
+            {planLabel ? ` on the ${planLabel} plan` : ''}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="pfh-mast-cta tahi-focus-ring"
+          disabled={ro}
+          onClick={startRequest}
+          title={ro ? `Read-only while you are viewing as ${ctx.previewName ?? 'the client'}` : undefined}
+        >
+          <Icon n="plus" s={15} />
+          New request
+        </button>
+      </div>
+
       <div className="ov-mast">
         <TheWire events={wire} />
-        {hero}
+        {/* The hero IS the thing that needs them. The old page led with a green
+            number nobody could press and then repeated the same facts one strip
+            lower, so the client's single most valuable action was never the
+            most prominent element on their own home page. */}
+        <WaitingOnYou
+          items={waiting}
+          loading={waitingLoading}
+          ro={ro}
+          previewName={ctx.previewName}
+          onStart={startRequest}
+          isFirstRun={noRequestsAtAll}
+        />
         <Vitals items={vitals} />
-        <NeedsYou items={needs} ro={ro} onMore={() => go('requests')} />
       </div>
 
       <Zone label="Your work">
         <div className="ov-col-12">
           {isProject ? (
-            <ProjectBoard project={projectData} ro={ro} go={go} />
+            <ProjectBoard
+              project={projectData}
+              ro={ro}
+              loading={subLoading || projectLoading}
+              onStart={startRequest}
+            />
           ) : (
-            <TrackBoard tracks={tracks} planLabel={planLabel} ro={ro} go={go} onReorder={onReorder} />
+            <TrackBoard
+              tracks={tracks}
+              planLabel={planLabel}
+              ro={ro}
+              loading={subLoading || tracksLoading}
+              onStart={startRequest}
+              onReorder={onReorder}
+            />
           )}
         </div>
       </Zone>
@@ -1005,7 +1186,9 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       <Zone label="Activity">
         <Card span={7}>
           <CardH ic="tasks" title="Recent requests" link="All requests" onLink={() => go('requests')} />
-          {recent.length > 0 ? (
+          {requestsLoading ? (
+            <SkelRows rows={4} />
+          ) : recent.length > 0 ? (
             <div className="ov-rows">
               {recent.map(r => {
                 const meta = reqMeta(r.status)
@@ -1016,19 +1199,30 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
                     dotColor={meta.dot}
                     title={r.title}
                     sub={`${meta.label} · updated ${deliveryLabel(r.updatedAt)}`}
-                    right={<span className={'ov-chip ' + meta.chip}>{meta.label}</span>}
+                    right={
+                      <span className={'ov-chip ' + meta.chip} title={meta.gloss || undefined}>
+                        {meta.label}
+                      </span>
+                    }
                     onClick={() => go(requestRouteId(r.id))}
                   />
                 )
               })}
             </div>
           ) : (
-            <div className="ov-mini">No requests yet. Start one whenever you are ready.</div>
+            <div className="pfh-empty-cta">
+              <div className="ov-mini">No requests yet. Start one whenever you are ready.</div>
+              <button className="ov-cta" disabled={ro} onClick={startRequest}>
+                New request
+              </button>
+            </div>
           )}
         </Card>
         <Card span={5}>
           <CardH ic="phone" title="Next call" />
-          {nextCall ? (
+          {callsLoading ? (
+            <SkelRows rows={2} height="2.75rem" />
+          ) : nextCall ? (
             <>
               <Row
                 avText={nextCall.avatar ? undefined : initials(nextCall.withName ?? nextCall.title)}
@@ -1072,7 +1266,9 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       <Zone label="Library">
         <Card span={6}>
           <CardH ic="file" title="Recent files" link="All files" onLink={() => go('files')} />
-          {files.length > 0 ? (
+          {filesLoading ? (
+            <SkelRows rows={4} />
+          ) : files.length > 0 ? (
             <div className="ov-rows">
               {files.slice(0, 4).map(f => (
                 <Row
@@ -1090,30 +1286,29 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         </Card>
         <Card span={6}>
           <CardH ic="users" title="Your team" />
-          {team.length > 0 ? (
-            <div className="ov-rows">
-              {team.map((m, i) => (
-                <Row
-                  key={m.id}
-                  avText={m.avatarUrl ? undefined : initials(m.name)}
-                  img={m.avatarUrl ?? undefined}
-                  title={m.name}
-                  sub={m.role}
-                  right={
-                    i === 0 ? (
-                      <button
-                        className="ov-cta ghost"
-                        disabled
-                        style={{ height: 30, fontSize: 12, padding: '0 12px' }}
-                        title="Client messaging is coming soon"
-                      >
-                        Soon
-                      </button>
-                    ) : undefined
-                  }
-                />
-              ))}
-            </div>
+          {teamLoading ? (
+            <SkelRows rows={2} height="2.75rem" />
+          ) : team.length > 0 ? (
+            <>
+              <div className="ov-rows">
+                {team.map(m => (
+                  <Row
+                    key={m.id}
+                    avText={m.avatarUrl ? undefined : initials(m.name)}
+                    img={m.avatarUrl ?? undefined}
+                    title={m.name}
+                    sub={m.role}
+                  />
+                ))}
+              </div>
+              {/* This card used to carry a permanently disabled "Soon" button
+                  on its first row, an affordance for a Messages surface that
+                  redirects a client away. A question lives on the request it is
+                  about, so the card says where to ask instead. */}
+              <div className="ov-mini" style={{ marginTop: 'auto', paddingTop: 12 }}>
+                Questions live on the request they are about, so the answer stays next to the work.
+              </div>
+            </>
           ) : (
             <div className="ov-mini">Your team is being assigned. They will show up here soon.</div>
           )}
@@ -1223,7 +1418,10 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
           </Card>
         ) : (
           <Card span={invoicesDenied ? 12 : 5}>
-            <CardH ic="wallet" title="Your plan" link="Manage" onLink={() => go('plan')} />
+            {/* No "Manage" link: it went to /billing, a page that is not in the
+                client nav, so a client who pressed it had no way back. Another
+                track is a conversation, so the card asks for one instead. */}
+            <CardH ic="wallet" title="Your plan" />
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <span style={{ font: "700 20px 'Manrope',sans-serif", color: 'var(--text)' }}>
                 {planLabel ?? 'Retainer'}
@@ -1250,6 +1448,11 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
                     : `${tracks.length} active`}
                 </b>
               </div>
+            </div>
+            <div className="pfh-empty-cta" style={{ marginTop: 'auto', paddingTop: '0.75rem' }}>
+              <button className="ov-cta ghost" disabled={ro} onClick={startRequest}>
+                Ask about your plan
+              </button>
             </div>
           </Card>
         )}

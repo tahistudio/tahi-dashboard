@@ -1,0 +1,447 @@
+/* Client portal home - the pieces the studio homes do not share.
+
+   Today that is one thing: the "Waiting on you" feature tile, the hero of the
+   client portal home. It is the ONE deliberately dark surface in the portal,
+   fixed forest in both themes exactly like the sidebar rail, so the single
+   thing a client has to act on never recedes into the page. The forest hexes
+   are therefore hardcoded here (the same exemption the rail and .ov-hero take)
+   rather than reading --brand, which flips light in dark mode.
+
+   Everything OUTSIDE the tile (the calm empty card) is token-driven so dark
+   mode is free.
+
+   Wrapped in @layer components (repo convention) so Tailwind utilities still
+   win over these component styles. Sizes are rem throughout. Borders are all
+   sides or absent, never one edge. Every interactive element carries a hover
+   and a focus-visible state, and rises to a 2.75rem target on a coarse pointer
+   or a narrow container. */
+
+@layer components {
+
+/* ---------- masthead ----------
+   The client home had no header at all: no greeting, no date, and its only
+   primary CTA was a menu inside the hero. The hero is now the "Waiting on you"
+   tile, so the one write action a client has lives here, on the leaf radius,
+   where a primary CTA belongs. */
+
+.pfh-mast {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.875rem;
+}
+.pfh-mast-t { min-width: 0; }
+.pfh-mast-t h1 {
+  margin: 0;
+  font: 700 1.375rem/1.2 'Manrope', sans-serif;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.pfh-mast-t p {
+  margin: 0.3125rem 0 0;
+  font: 500 0.8125rem 'Manrope', sans-serif;
+  color: var(--text-muted);
+}
+.pfh-mast-dot {
+  display: inline-block;
+  width: 0.1875rem;
+  height: 0.1875rem;
+  margin: 0 0.4375rem;
+  border-radius: 50%;
+  background: var(--text-faint, var(--text-muted));
+  vertical-align: middle;
+}
+.pfh-mast-cta {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4375rem;
+  height: 2.375rem;
+  padding: 0 1rem;
+  border: none;
+  border-radius: 0 0.875rem 0 0.875rem; /* the leaf, on the one primary CTA */
+  background: var(--brand);
+  color: #ffffff;
+  font: 600 0.84375rem 'Manrope', sans-serif;
+  cursor: pointer;
+  box-shadow: 0 0.125rem 0.5rem -0.125rem rgba(20, 32, 12, 0.3);
+  transition: background 0.15s, transform 0.12s;
+}
+.pfh-mast-cta:hover:not(:disabled) { background: var(--brand-strong); }
+.pfh-mast-cta:active:not(:disabled) { transform: translateY(0.0625rem); }
+.pfh-mast-cta:focus-visible { outline: 0.125rem solid var(--brand); outline-offset: 0.125rem; }
+.pfh-mast-cta:disabled { opacity: 0.5; cursor: not-allowed; }
+
+@container (max-width: 46rem) {
+  .pfh-mast { align-items: stretch; }
+  .pfh-mast-t h1 { font-size: 1.1875rem; }
+  .pfh-mast-cta { width: 100%; height: 2.75rem; justify-content: center; }
+}
+@media (pointer: coarse) {
+  .pfh-mast-cta { min-height: 2.75rem; }
+}
+
+/* ---------- the tile ---------- */
+
+.pfh-tile {
+  position: relative;
+  margin-top: 0.875rem;
+  padding: 1.375rem 1.5rem 1.25rem;
+  border-radius: 0 1.625rem 0 1.625rem; /* the leaf, at hero scale */
+  color: #eef6e9;
+  background: linear-gradient(135deg, #5a824e, #2c4526);
+  box-shadow: 0 1.125rem 2.75rem -1.375rem rgba(20, 32, 12, 0.5);
+  overflow: hidden;
+}
+.pfh-tile-clip {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+.pfh-tile-leaf {
+  position: absolute;
+  right: -0.875rem;
+  bottom: -1.25rem;
+  display: flex;
+  opacity: 0.14;
+  transform: rotate(8deg);
+  color: #eef6e9;
+}
+
+.pfh-head {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+}
+.pfh-head h2 {
+  margin: 0;
+  font: 700 1.0625rem 'Manrope', sans-serif;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+}
+.pfh-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.375rem;
+  height: 1.375rem;
+  padding: 0 0.4375rem;
+  border-radius: 0.6875rem;
+  background: rgba(255, 255, 255, 0.18);
+  font: 700 0.75rem 'Manrope', sans-serif;
+  font-variant-numeric: tabular-nums;
+  color: #ffffff;
+}
+.pfh-head p {
+  margin: 0;
+  flex: 1 1 100%;
+  font: 500 0.8125rem 'Manrope', sans-serif;
+  color: rgba(238, 246, 233, 0.78);
+}
+
+/* ---------- rows ---------- */
+
+.pfh-list {
+  position: relative;
+  z-index: 1;
+  list-style: none;
+  margin: 0.875rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.pfh-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 0.875rem;
+  border-radius: 0.875rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 0.0625rem solid rgba(255, 255, 255, 0.14);
+}
+.pfh-row-ic {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0 0.625rem 0 0.625rem; /* the small leaf */
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+.pfh-row-t {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+.pfh-row-t b {
+  font: 600 0.875rem/1.35 'Manrope', sans-serif;
+  color: #ffffff;
+  text-wrap: pretty;
+}
+.pfh-row-t small {
+  font: 500 0.75rem/1.45 'Manrope', sans-serif;
+  color: rgba(238, 246, 233, 0.76);
+  text-wrap: pretty;
+}
+.pfh-open {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.125rem;
+  padding: 0.25rem 0.375rem;
+  margin-left: -0.375rem;
+  border: none;
+  border-radius: 0.4375rem;
+  background: none;
+  cursor: pointer;
+  font: 600 0.75rem 'Manrope', sans-serif;
+  color: rgba(238, 246, 233, 0.92);
+  text-decoration: underline;
+  text-underline-offset: 0.1875rem;
+  transition: background 0.15s, color 0.15s;
+}
+.pfh-open:hover { background: rgba(255, 255, 255, 0.14); color: #ffffff; }
+.pfh-open:focus-visible { outline: 0.125rem solid #ffffff; outline-offset: 0.125rem; }
+.pfh-open svg { transition: transform 0.18s var(--ease, ease); }
+.pfh-open:hover svg { transform: translateX(0.125rem); }
+
+.pfh-acts {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ---------- buttons on the tile ---------- */
+
+.pfh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2rem;
+  padding: 0 0.8125rem;
+  border-radius: 0.625rem;
+  border: 0.0625rem solid transparent;
+  font: 600 0.8125rem 'Manrope', sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, transform 0.12s;
+}
+.pfh-btn.primary {
+  background: #ffffff;
+  color: #24381f;
+  border-radius: 0 0.625rem 0 0.625rem; /* primary CTA carries the leaf */
+}
+.pfh-btn.primary:hover:not(:disabled) { background: #f0f7ee; }
+.pfh-btn.ghost {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.26);
+  color: #eef6e9;
+}
+.pfh-btn.ghost:hover:not(:disabled) { background: rgba(255, 255, 255, 0.2); }
+.pfh-btn:active:not(:disabled) { transform: translateY(0.0625rem); }
+.pfh-btn:focus-visible { outline: 0.125rem solid #ffffff; outline-offset: 0.125rem; }
+.pfh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.pfh-more {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.75rem;
+  padding: 0.375rem 0.625rem;
+  margin-left: -0.625rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: none;
+  cursor: pointer;
+  font: 600 0.8125rem 'Manrope', sans-serif;
+  color: rgba(238, 246, 233, 0.9);
+  transition: background 0.15s, color 0.15s;
+}
+.pfh-more:hover { background: rgba(255, 255, 255, 0.14); color: #ffffff; }
+.pfh-more:focus-visible { outline: 0.125rem solid #ffffff; outline-offset: 0.125rem; }
+
+.pfh-ro {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0.75rem 0 0;
+  font: 500 0.75rem 'Manrope', sans-serif;
+  color: rgba(238, 246, 233, 0.78);
+}
+
+/* ---------- the calm empty card (light, token-driven) ---------- */
+
+.pfh-quiet {
+  margin-top: 0.875rem;
+  padding: 1.375rem 1.5rem;
+  background: var(--bg);
+  border: 0.0625rem solid var(--border);
+  border-radius: 0.875rem;
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+}
+.pfh-quiet-leaf {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0 0.625rem 0 0.625rem;
+  background: var(--brand-100);
+  color: var(--brand-strong);
+}
+.pfh-quiet-t { flex: 1; min-width: 0; }
+.pfh-quiet-t b {
+  display: block;
+  font: 700 0.9375rem 'Manrope', sans-serif;
+  color: var(--text);
+}
+.pfh-quiet-t p {
+  margin: 0.25rem 0 0;
+  font: 500 0.8125rem/1.5 'Manrope', sans-serif;
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+.pfh-quiet-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  height: 2.125rem;
+  margin-top: 0.75rem;
+  padding: 0 0.875rem;
+  border: none;
+  border-radius: 0 0.625rem 0 0.625rem;
+  background: var(--brand);
+  color: #ffffff;
+  font: 600 0.8125rem 'Manrope', sans-serif;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.12s;
+}
+.pfh-quiet-cta:hover:not(:disabled) { background: var(--brand-strong); }
+.pfh-quiet-cta:active:not(:disabled) { transform: translateY(0.0625rem); }
+.pfh-quiet-cta:focus-visible { outline: 0.125rem solid var(--brand); outline-offset: 0.125rem; }
+.pfh-quiet-cta:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---------- an empty card that offers the way out of being empty ---------- */
+
+.pfh-empty-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.625rem;
+}
+.pfh-empty-cta .ov-cta { flex-shrink: 0; }
+
+@container (max-width: 46rem) {
+  .pfh-empty-cta { align-items: stretch; }
+  .pfh-empty-cta .ov-cta { width: 100%; justify-content: center; min-height: 2.75rem; }
+}
+@media (pointer: coarse) {
+  .pfh-empty-cta .ov-cta { min-height: 2.75rem; }
+}
+
+/* ---------- loading ---------- */
+
+.pfh-skel-row {
+  display: block;
+  height: 0.75rem;
+  border-radius: 0.375rem;
+  background: rgba(255, 255, 255, 0.16);
+}
+.pfh-skel-row + .pfh-skel-row { margin-top: 0.625rem; }
+.pfh-tile.is-loading .pfh-skel-block {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+/* ---------- the studio team card (request detail rail, client audience) ---- */
+
+.pfh-team-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+.pfh-team-row {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+.pfh-team-av {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0 0.5rem 0 0.5rem; /* avatars carry the leaf */
+  background: var(--color-brand-100, var(--brand-100));
+  color: var(--color-brand-dark, var(--brand-strong));
+  font: 700 0.6875rem 'Manrope', sans-serif;
+  overflow: hidden;
+}
+.pfh-team-av img { width: 100%; height: 100%; object-fit: cover; }
+.pfh-team-t { min-width: 0; display: flex; flex-direction: column; }
+.pfh-team-t b {
+  font: 600 0.8125rem 'Manrope', sans-serif;
+  color: var(--color-text, var(--text));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pfh-team-t small {
+  font: 500 0.75rem 'Manrope', sans-serif;
+  color: var(--color-text-muted, var(--text-muted));
+}
+
+/* ---------- narrow container and touch ---------- */
+
+@container (max-width: 46rem) {
+  .pfh-tile { padding: 1.125rem 1.125rem 1rem; border-radius: 0 1.25rem 0 1.25rem; }
+  .pfh-row { flex-wrap: wrap; }
+  .pfh-acts { width: 100%; }
+  .pfh-acts .pfh-btn { flex: 1; height: 2.75rem; }
+  .pfh-more { min-height: 2.75rem; }
+  .pfh-open { min-height: 2.75rem; }
+  .pfh-quiet { flex-direction: column; }
+  .pfh-quiet-cta { height: 2.75rem; width: 100%; justify-content: center; }
+}
+
+@media (pointer: coarse) {
+  .pfh-btn { min-height: 2.75rem; }
+  .pfh-more { min-height: 2.75rem; }
+  .pfh-open { min-height: 2.75rem; }
+  .pfh-quiet-cta { min-height: 2.75rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pfh-open svg,
+  .pfh-btn,
+  .pfh-quiet-cta { transition: none; }
+  .pfh-open:hover svg { transform: none; }
+}
+
+}
