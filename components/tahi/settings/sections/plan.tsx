@@ -19,6 +19,7 @@
  */
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { Check } from 'lucide-react'
 import { SectionShell, Chip } from '@/components/tahi/settings/primitives'
 import { Money } from '@/components/tahi/money'
@@ -391,8 +392,12 @@ export function PlanBillingSection({ isClientAdmin }: { isClientAdmin?: boolean 
               contact, to make changes.
             </p>
           )}
+          {/* The client channel is the request thread, not a standalone inbox:
+              /messages redirects a client straight back to /requests. This
+              opens the new-request dialog on their own requests list, which is
+              the surface the studio actually answers on. */}
           <p className="set-lede" style={{ marginTop: 10, marginBottom: 0 }}>
-            Need something bigger, or a custom scope? <a href="/messages">Talk to your studio contact.</a>
+            Need something bigger, or a custom scope? <Link href="/requests?new=1">Send us a request.</Link>
           </p>
         </>
       )}

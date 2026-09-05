@@ -43,7 +43,6 @@ describe('notificationHref - team audience (unchanged behaviour)', () => {
   })
 
   it('lands list-only and operator surfaces on their page', () => {
-    expect(notificationHref('message', null, 'team')).toBe('/messages')
     expect(notificationHref('call', 'x', 'team')).toBe('/calls')
     expect(notificationHref('announcement', null, 'team')).toBe('/announcements')
     expect(notificationHref('subscription', null, 'team')).toBe('/billing')
@@ -93,6 +92,36 @@ describe('notificationHref - client audience', () => {
         // Either an exact renderable route, or a detail page under one.
         const root = '/' + base.split('/').filter(Boolean)[0]
         expect(CLIENT_RENDERABLE.has(base) || CLIENT_RENDERABLE.has(root)).toBe(true)
+      }
+    }
+  })
+})
+
+describe('notificationHref - the hidden Messages surface', () => {
+  // /messages redirects (app/(dashboard)/messages/page.tsx bounces an admin to
+  // /overview and a client to /requests), so any row resolving there is a
+  // notification that vanishes on click. A message notification carries the
+  // CONVERSATION id, never the request id, so the resolver cannot deep-link it;
+  // request-thread replies already notify with entityType 'request' and get a
+  // real deep link from the case above. /requests is the honest floor: it is
+  // where every client thread lives, for both audiences.
+  it('sends a team message notification to the requests list, not /messages', () => {
+    expect(notificationHref('message', 'conv-1', 'team')).toBe('/requests')
+    expect(notificationHref('message', null, 'team')).toBe('/requests')
+  })
+
+  it('keeps the client message map on the requests list', () => {
+    expect(notificationHref('message', 'conv-1', 'client')).toBe('/requests')
+  })
+
+  it('never resolves any entity, on either audience, to /messages', () => {
+    for (const audience of ['team', 'client'] as const) {
+      for (const entity of ALL_ENTITIES) {
+        for (const id of ['x', null]) {
+          const href = notificationHref(entity, id, audience)
+          if (href === null) continue
+          expect(href.split('?')[0].split('/')[1]).not.toBe('messages')
+        }
       }
     }
   })

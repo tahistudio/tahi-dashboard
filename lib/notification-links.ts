@@ -71,7 +71,7 @@ export type NotificationAudience = 'team' | 'client'
 
 /**
  * Team (Tahi org) route map. Entities with a detail page deep-link to it;
- * list-only surfaces (messages, calls, announcements) land on the list.
+ * list-only surfaces (calls, announcements) land on the list.
  */
 function teamHref(
   entityType: NotificationEntityType,
@@ -87,7 +87,14 @@ function teamHref(
     case 'deal':         return entityId ? `/deals/${entityId}` : '/deals'
     case 'lead':         return entityId ? `/leads/${entityId}` : '/leads'
     case 'schedule':     return entityId ? `/schedules/${entityId}` : '/schedules'
-    case 'message':      return '/messages'
+    // Comms ride request threads for both audiences. /messages redirects
+    // (an admin to /overview, a client to /requests), so pointing a bell row
+    // there was a notification that vanished on click. The resolver cannot do
+    // better than the list here: a 'message' notification carries the
+    // CONVERSATION id, never the request id. Replies on a request thread are
+    // already emitted as entityType 'request' and deep-link through the case
+    // above, so this branch only catches standalone conversations.
+    case 'message':      return '/requests'
     case 'call':         return '/calls'
     case 'announcement': return '/announcements'
     case 'subscription': return '/billing'
