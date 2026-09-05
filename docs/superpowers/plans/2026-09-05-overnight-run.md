@@ -58,6 +58,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 04:50 NZST portal design complete in Claude Design (portal-home, portal-files, portal-money, portal-account modules wired into the shell by the integrator, zero errors; critic finishing). Portal port launched in three slices: home + client request views, invoices + services showcase, notifications + account + offline. Files-as-Drive and client Messages stay design-only tonight (schema needed). Client walk agent running on the QA server. Sales designers still writing.
 
+- 05:00 NZST portal prototype critique in: wiring sound, zero errors, but two cross-cutting prototype defects (portal-home and portal-files both use the pf- CSS prefix so files overwrites home; four different signed-in client identities across modules) plus the client nav in the prototype shell still lists Schedule, Contracts and Proposals. invoice-detail SHIP, messages REDO, the rest FIX. A fixer plus re-critique launched on the prototype so Liam reviews a coherent portal. Repo port unaffected (it reads the designs for look and vocabulary and the reader maps for truth).
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - [x] More sheet Track time row left-aligned (17a490b2).

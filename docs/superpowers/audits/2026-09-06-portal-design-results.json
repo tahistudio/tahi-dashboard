@@ -1348,5 +1348,219 @@
    "text",
    "Wiring complete, verified live, zero console or page errors.\n\n## What I wired (3 files, merged additively from all four designers)\n\n**`Tahi App Shell.html`** (etag `1788625037301755`, byte-verified round trip)\n- 4 stylesheet links after `clients.css`: `portal-home.css` (with `id=\"portal-home-css\"`), `portal-files.css`, `portal-money.css`, `portal-account.css` (with `id=\"pa-css\"`). The two ids are the ones the self-injectors look for, so `portal-home.jsx` and `portal-account-kit.jsx` skip their own injection and there is no FOUC and no duplicate sheet.\n- 12 script tags after `clients.jsx` and before `app-mount.jsx`, in each area's required order: portal-home (data, kit, page) then portal-files (data, kit, page) then portal-money (data, kit, page) then portal-account (kit, data, page). All sit after `requests-dialog.jsx`, so `window.TahiReqDialog` exists when the portal hands off.\n\n**`app-mount.jsx`** (etag `1788624817498312`) \u2014 four guarded blocks adding 10 render props: `portalHomeContent`, `portalRequestsContent`, `filesContent`, `messagesContent`, `invoicesContent`, `servicesContent`, `notificationsContent`, `accountContent`, `welcomeContent`, `offlineContent`.\n\n**`app-shell.jsx`** (etag `1788625402179416`) \u2014 11 edits, nothing removed:\n1. `TEAM_NAV` Workspace gains `notifications` (bell, count 3) after Messages.\n2. `TEAM_NAV` Clients group gains `files` (the studio Files lens; breadcrumb reads \"Clients / Files\").\n3. `CLIENT_NAV` \"Your project\" gains `notifications`; new \"You\" group with `account` (settings icon). I did **not** apply portal-home's optional nav trim, since it would have deleted `messages`, `schedules`, `contracts` and `proposals` that the other three designers route to.\n4. `navFor(audience, home)` + `WELCOME_GROUP`: a \"Start here / Get started\" group prepends to `CLIENT_NAV` only when `home === 'first'`.\n5. `groups` useMemo call site now passes `home`.\n6. App signature widened by 10 props.\n7. `buildIndex` pushes the nav-less `offline` page so the palette can find it.\n8. `PortalTabs` / `portalWaiting` consts beside `isMobile`.\n9. Phone tab bar: client audience gets `PortalTabs` (with `__more` \u2192 sheet, `onNew` \u2192 `go('requests')` + `window.__tahiPortalNewRequest('')`); every other audience keeps `MobileTabs`.\n10. Bell popover footer now reads \"See all notifications\" and goes to `notifications` instead of the dead `settings` jump.\n11. Page registry, one merged ternary chain, ordered: notifications \u2192 welcome \u2192 offline \u2192 account (`account` or client `settings`) \u2192 settings \u2192 client overview \u2192 client requests \u2192 overview \u2192 requests \u2192 tasks \u2192 clients \u2192 files \u2192 messages \u2192 client invoices \u2192 client services \u2192 PageBody. No `page-inner` wrapper on any portal branch (they own their own scrollers); `!denied` on every permission-gated branch; `effectiveAudience === 'client'` gates invoices and services so the studio's own Finance invoices lens still falls through to PageBody.\n\n## What renders (Playwright, real widths, both audiences)\n\nAll green, `"
   ]
- ]
+ ],
+ "critique": {
+  "pages": [
+   {
+    "key": "cross-cutting-css-namespace",
+    "verdict": "REDO",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit3\\home1280-1.png",
+    "issues": [
+     "ROOT CAUSE OF MOST VISUAL BREAKAGE. portal-home.css and portal-files.css both claim the `pf-` prefix and redefine 47 of the same class names, including the foundations: .pf, .pf-scroll, .pf-pad, .pf-grid, .pf-card, .pf-rows, .pf-row, .pf-av, .pf-pill, .pf-btn, .pf-tab, .pf-tabs, .pf-empty, .pf-crumb, .pf-msg, .pf-composer, .pf-toast. portal-files.css loads second (Tahi App Shell.html line 34) so it wins at equal specificity on every one. Fix: re-prefix portal-files.css to `pfl-` (or scope every rule under a page root, e.g. `.pfiles .pf-row`) and re-prefix its JSX to match. Nothing else on this list gets reliably better until this is done.",
+     "SECOND COLLISION. portal-files.css:468 `.pm-row{display:flex}` (the Messages conversation row) is overwritten by portal-money.css:131 `.pm-row{display:grid; grid-template-areas:\"inv state\" \"due amt\" \"iss iss\" \"act act\"}` (the invoice row). portal-money.css loads third, so the client conversation list is laid out by the invoice table at every width. `.pm-thread` collides too. Fix: rename the Messages family to `pmsg-`.",
+     "MEASURED CONSEQUENCE 1, home grid. `.pf-grid` on the client Overview computes to `184px 184px 184px 184px 184px 0px 0px 0px 0px 0px 0px 0px`, i.e. portal-files' `repeat(auto-fill,minmax(11.5rem,1fr))` with seven implicit zero tracks created by portal-home's `.pf-card{grid-column:span 12}`. The Your work in motion card measures 1074px inside a 1040px scroller (right edge 1332 vs limit 1280), so 52px is cut off the screen.",
+     "MEASURED CONSEQUENCE 2, list rows. `.pf-row` computes to `grid-template-columns:470px 128px 112px 88px 72px 44px`. The first 470px column is empty and every title lands in a 128px second column, clamped with an ellipsis. This is what breaks Recently delivered, Recent files, Your team, The pieces of this request and Files on this request.",
+     "MEASURED CONSEQUENCE 3, leaf radius. portal-home.css:99 sets `.pf-av{border-radius:var(--pf-leaf-sm)}` but portal-files.css:206 `.pf-av{border-radius:50%}` wins, so every avatar wrapper on Home, Requests and Request detail is a circle instead of a leaf. On Onboarding, Liam's photo renders as a circle beside Staci's leaf tile in the same two-row list.",
+     "MEASURED CONSEQUENCE 4, phone tab bar. portal-home.css:677 `.pf-tabs{position:absolute;bottom:0;background:var(--bg);border-top:1px}` gets portal-files.css:321 mixed in (`margin-bottom:.875rem; border:1px; border-radius:.625rem; background:var(--bg-secondary)`). Measured at 375: the bar is a bordered, 10px-rounded, secondary-tinted segmented control floating over the content, and its bottom edge sits at y=814 in an 812 viewport, so it hangs 2px off the screen."
+    ]
+   },
+   {
+    "key": "cross-cutting-data-spine",
+    "verdict": "REDO",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit2\\t1280-services.png",
+    "issues": [
+     "FOUR SIGNED-IN IDENTITIES IN ONE PORTAL. The rail user card says Jordan Reeve at Acme (app-shell.jsx PROFILES.client, CLIENT_BRAND `#2C8C7C`). Home, Requests, Account, Notifications and Onboarding say Ana Rewiri at Mahana Orchards. Files and Messages say Jordan Reeve at Physitrack with a second, different Ana (Ana Whitiora). Services and Invoices say Mahana Orchards. On Account the profile card reads Ana Rewiri while the rail card 900px below reads Jordan Reeve. Fix: pick Mahana Orchards, then align PROFILES.client, CLIENT_BRAND and portal-files-data.jsx to it.",
+     "PLAN AND PRICE CONTRADICT ACROSS THREE PAGES. Home says Scale plan, NZ$4,800 a month, 2 tracks running side by side (portal-home-data.jsx:74). Services says Maintain plan, NZ$1,500 per month, 1 track (portal-money-data.jsx:156). A client can read both in ten seconds. Fix: one PLAN object, imported by both.",
+     "THE GOLDEN PATH BREAKS ON THE NUMBER. Home's Waiting on you card offers 'September retainer, NZ$4,800, Pay now, View invoice' (INV-2087). Following it lands on Invoices, where the September retainer is INV-2026-014 at NZ$2,185.00 and no NZ$4,800 invoice exists. The Notifications row 'INV-2087 for NZ$4,800.00 is due 8 September' dead-ends the same way. Two invoice numbering schemes are in play (INV-2087 vs INV-2026-014).",
+     "REQUEST NUMBERS COLLIDE WITH DIFFERENT TITLES. TR-1042 is 'Recipe cards for the harvest box' on Requests and 'Homepage refresh' on Files and Messages. TR-1028 is 'Trade show one-pager' on Requests and 'Mobile nav overlaps hero' on Files and Messages. TR-1015 and TR-1030 exist only in Files. A client clicking a request thread from Messages arrives at a different request.",
+     "Fix order: one client fixture module that Home, Files, Money and Account all import, with a single ORG, ME, PLAN, REQUESTS and INVOICES. Until that exists no page on this list can be signed off, because each one is individually plausible and collectively false."
+    ]
+   },
+   {
+    "key": "client-nav-dead-ends",
+    "verdict": "REDO",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit\\c1280-deadend-schedule.png",
+    "issues": [
+     "CROSS-TENANT LEAK. Schedule, Contracts and Proposals are all still in CLIENT_NAV and all three fall through to the studio's PageBody placeholder, which renders the shell's demo dataset: 'Homepage refresh, Acme, in design', 'Brand system, Northwind, review', 'Q3 campaign, Kowtow, queued'. A client sees three other clients by name, with statuses. Even in a prototype this must not be reachable from the client audience.",
+     "The same three routes show fabricated KPIs that contradict the real portal: 'Active requests 3', 'Next delivery 4 days, Homepage refresh', 'Open invoices 1, Due 30 Jun' against the portal's actual 13 requests, next delivery Tomorrow, 3 open invoices. All three pages share one subtitle, 'Everything for your project with Tahi, in one place.'",
+     "They also offer a green 'New' primary button and a 'Search schedule...' field, implying create rights on surfaces that do not exist.",
+     "Fix: either give Schedule, Contracts and Proposals real client placeholder screens (leaf, title, description, one honest CTA) or drop them from CLIENT_NAV until they are built. Do not let PageBody serve the client audience at all: gate it on `effectiveAudience !== 'client'` and route the client to a proper 'not built yet' state.",
+     "Shell copy leak, minor: the top bar search carries `data-tip=\"Search \u2014 \u2318K\"` (app-shell.jsx:441), an em dash in client-visible copy, and it is hover-only. Same file, line 210, the default announcement body contains an em dash and renders in the client top bar when announcements are on."
+    ]
+   },
+   {
+    "key": "home",
+    "verdict": "FIX",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit2\\t1280-home.png",
+    "issues": [
+     "The composition is the best thing in this batch. Kia ora greeting, the dark 'Waiting on you' feature tile carrying the four things that actually need the client, then tracks, queue, delivered, call, files, team, invoices, plan. Copy is excellent throughout ('Everything below moves the moment you touch it'). Everything below is fixable damage, not a wrong idea.",
+     "Your work in motion is clipped. Measured 1074px wide in a 1040px scroller: the 'What is a track?' link, TRACK TWO's status pill, its due date and the right end of its meter are all cut off at the viewport edge. See crit3/home1280-1.png. Fix: `.pf-grid{grid-template-columns:repeat(12,minmax(0,1fr))}` and stop portal-files.css overwriting `.pf-grid` (see cross-cutting-css-namespace).",
+     "Recently delivered, Recent files and Your team render with a 470px empty first column and titles clamped to 128px ('Product labels, exp...', 'autumn-landing-pr...', 'mahana-palette-a...'). The tick or avatar sits at x=287 and the label starts at x=754. Three of the page's cards look broken. Same `.pf-row` root cause.",
+     "Phone touch targets. At 375 the 'Open TR-1049' and 'Open TR-1047' links inside the hero tile measure 15px tall, and '1 more waiting' is 29px. These are the primary drill-ins on the client's home screen. Fix: give `.pf-need-open` and `.pf-needs-more` `min-height:2.75rem` and padding, or make the whole need row the tap target.",
+     "At 375 the studio-closed notice consumes 400px, half the first screen, before the greeting. Consider collapsing it to a single line with a chevron on narrow, or moving it under the hero.",
+     "Dark mode: the page background (#131211), the always-dark rail (#1E2A1B) and the 'Waiting on you' gradient tile all land in the same narrow band, so the hero tile loses its job as the loudest thing on the page. Card contrast itself is fine (14.3:1). Fix: give the hero tile a brand-tinted or elevated dark surface, not another near-black.",
+     "The four KPI tiles under the hero are the one place the page falls into same-same cards: four identical bordered rectangles, differentiated only by the amber tint on one. Consider varying weight (the money one as a wider tile, the delivery one as a date block) so the row has rhythm."
+    ]
+   },
+   {
+    "key": "requests-list",
+    "verdict": "FIX",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit\\c1280-requests.png",
+    "issues": [
+     "Strong page. Dense, calm, scannable, and the filter tab counts are honest. This is close to ship.",
+     "Colour collision in the status column. 'Client review' uses the same magenta as the 'Design' category chip sitting 100px to its right, on the same row. Client review is the state that needs the client, so it should be the warmest and loudest thing in the row; instead it reads as a second category tag. Fix: reserve magenta for category, give Client review an amber or brand treatment.",
+     "The active filter chip 'Everything 13' is a near-black pill. Account uses a brand-green tinted active pill for the same job. Two of the four designers reached for black (Requests, Notifications, Services) and two for green. Pick brand green; black is off-palette on a green portal.",
+     "Right column collision: on delivered rows the date text runs into the chevron ('Delivered last Thursday>' at 1280). Fix: reserve the chevron column, or truncate the date.",
+     "Avatars in the assignee column are circles, not leaf wrappers, because of the `.pf-av` override. See cross-cutting-css-namespace.",
+     "There is no visible way to reach a request's empty state or the 'no results' state from the filter chips in review; worth exercising before sign-off, since the empty-state component (portal-home-kit.jsx:189) does have leaf plus title plus body plus CTA and looks right in source."
+    ]
+   },
+   {
+    "key": "request-detail",
+    "verdict": "FIX",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit2\\t1280-request-detail.png",
+    "issues": [
+     "Best-written screen in the portal. The 'Ready for your review' block, the five-step plain-language rail, 'What you answered when you sent it', the thread and 'Everything that happened' are all right. Keep the vocabulary.",
+     "MOBILE BLOCKER. At 375 the sticky bottom action bar renders Approve at y714-758 and Changes at y714-758 while the phone tab bar occupies y740-814 with z-index 100. The bottom 18px of both buttons is covered and taps in that band hit the nav. The two most important actions in the client portal are partly unreachable. Fix: add `padding-bottom` equal to the tab bar height to the detail scroller, or lift the sticky bar by `calc(3.25rem + env(safe-area-inset-bottom))`.",
+     "NEW REQUEST IS DEAD FROM THIS SCREEN. Verified at 1280 and 375: with a request detail open, `window.__tahiPortalNewRequest()` and the phone '+' tab both do nothing (DOM node count unchanged, no `.req-dialog-backdrop`, zero console errors). The '+' tab is the single most prominent action on the phone bar and it fails silently on the screen a client is most likely sitting on. Fix: have the detail view register its own dialog handler, or make PortalRequests hold the dialog above the detail branch.",
+     "'The pieces of this request' and 'Files on this request' rows are broken by `.pf-row`: tick at far left, title at 540 clamped to 128px ('Waitlist form and t...', 'autumn-landing-pr...'). Same root cause.",
+     "Vocabulary check: sub-requests are called 'pieces' here and '3 of 3 pieces' on the list. That is a deliberate plain-English alias, not the agreed request/sub-request wording. It reads well, but it needs Liam's sign-off as the client-facing term before it propagates.",
+     "Doubled breadcrumb: the shell top bar says 'Your project / Requests' while the page says 'Your requests / TR-1047' directly beneath it. Two crumbs, different content, 60px apart. Pick one, and make the shell crumb deepen to the record.",
+     "File chips inside messages are 30px tall (`.pf-chipfile`) at both widths. Under 44px on phone.",
+     "At 375 the 'Delivered' step in the status rail loses its description while the other four keep theirs, so the last step looks unfinished."
+    ]
+   },
+   {
+    "key": "new-request",
+    "verdict": "FIX",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit3\\dlg-list-375.png",
+    "issues": [
+     "Opens correctly from the Requests list and from Home at both widths (verified, `.req-dialog-backdrop` present, zero errors). Broken from the request detail, see request-detail.",
+     "Internal taxonomy leaking to the client. The six work types are Design, Development, Content, Strategy, Admin and Bug. 'Admin' is studio filing language and means nothing to a client. 'Bug' with a red bug glyph is engineering vocabulary. Fix: rename to something a client would say, for example 'Something is broken' and fold Admin into Content or drop it.",
+     "Disabled primary CTA contrast. 'Submit request' renders white text on a pale green fill, roughly 2:1. Below the 4.5:1 floor and it is the state the client sees first. Fix: darken the disabled text or use a neutral disabled fill with muted text.",
+     "No leaf radius on the dialog's primary CTA, while 'Start a request' on Home and 'New request' on the list both carry it. The dialog is the destination of both of those buttons, so the shape should carry through.",
+     "On phone this is a centred modal with visible page behind it rather than a full-height sheet. At 375 a six-tile category grid plus a title field plus a footer wants the whole screen. Compare the portal's own Sheet primitive (portal-money-kit.jsx), which does go bottom-sheet on narrow.",
+     "Design is preselected. Preselecting a category quietly steers intake and inflates one queue; leave it unselected."
+    ]
+   },
+   {
+    "key": "files",
+    "verdict": "FIX",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit\\c1280-files.png",
+    "issues": [
+     "GRID VIEW IS BROKEN TO ONE-UP. portal-files.css:216 asks for `repeat(auto-fill,minmax(11.5rem,1fr))`, roughly four columns in the 742px pane, but portal-home.css:149 `.pf-card{grid-column:span var(--span,12)}` still applies, so every file card spans 12 tracks and renders one enormous full-width preview per row. The Grid toggle currently produces a worse list than the List toggle. Same root cause as cross-cutting-css-namespace.",
+     "KEYBOARD ACCESSIBILITY GAP. portal-files.css carries exactly one `:focus-visible` rule in 46KB, against 23 in portal-home.css, 18 in portal-account.css and 12 in portal-money.css. This page has the most controls of any portal screen (50 interactive elements under 40px at 1280: 25 kebabs, 9 tree buttons, segmented toggles, chips). Fix: add focus rings to `.pf-row`, `.pf-row-open`, `.pf-kebab`, `.pf-tree-btn`, `.pf-seg-b`, `.pf-chip` at minimum.",
+     "Duplicated navigation. The left tree already lists Brand, Content, Contracts, Deliverables and Shared by you with counts, and the main pane repeats the identical five as cards immediately below the toolbar. Two browse affordances for five folders. Drop the folder cards, or drop the tree on wide and keep the cards.",
+     "Redundant label: a 'Files' label sits inside the toolbar next to the search box while the page H1 is already 'Files'.",
+     "Kebab menus at 36px and tree buttons at 34px are under 44px. `pointer:coarse` media query exists in the file (line 590) but does not appear to lift these.",
+     "At 375 the page correctly switches to `.pf.narrow` list mode. That path is sound; the wide grid is the one to fix."
+    ]
+   },
+   {
+    "key": "messages",
+    "verdict": "REDO",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit\\c375-messages.png",
+    "issues": [
+     "BROKEN AT BOTH WIDTHS. The conversation list uses `.pm-row`, which portal-money.css:131 overwrites with the invoice row's `grid-template-areas:\"inv state\" \"due amt\" \"iss iss\" \"act act\"`. At 1280 every thread title is clamped to about 90px ('TR-1042 Ho...', 'TR-1028 Mob...', 'TR-1015 Acc...', 'TR-1030 Pri...') while 400px sits empty, and the unread badge floats as a wide green bar mid-row. At 375 each row is roughly 270px tall, the leaf avatar sits alone in a dead column, the unread '2' becomes a full-width green bar on its own line, and the blue status dot renders on top of the preview text ('proper look', 'request folder'). Only three conversations fit a phone screen.",
+     "Fix is the rename in cross-cutting-css-namespace, then re-check: the thread pane on the right is well built (day dividers, a NEW marker, file cards, a voice note player with a speed control) and does not need rework.",
+     "Identity: this page's client is Jordan Reeve at Physitrack with a second Ana (Ana Whitiora), and the studio line references a July invoice of NZ$4,200 for the Scale plan. Everything else in the portal says Ana Rewiri at Mahana Orchards. The people stack in the thread header (LM SB JR AW) is therefore wrong for this client.",
+     "Thread rows link to TR-1042 'Homepage refresh' and TR-1028 'Mobile nav overlaps hero', which do not exist under those numbers in the Requests list. Every request thread in this page is a broken link.",
+     "Internal chrome check passed: the studio-only subtitle at portal-files.jsx:818 ('client facing and internal'), the `.pf-msg-int` Internal chip and the internal-note composer are all correctly gated off for the client audience. The client sees 'One line to the studio, plus a thread for every request.'",
+     "At 375 the composer and send affordance sit below the fold with no visible send control until the thread is opened; worth checking the narrow thread view once the list is fixed."
+    ]
+   },
+   {
+    "key": "invoices-list",
+    "verdict": "FIX",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit\\c375-invoices.png",
+    "issues": [
+     "DELETE THE STATES SCAFFOLDING BEFORE ANYTHING ELSE. The `.pm-states-pill` at portal-money.css:367 (`position:fixed; left:.75rem; bottom:5rem`) sits on top of the sidebar user card at 1280 (both themes) and directly on top of the real 'Open INV-2026-013' button at 375. Targets, as the designer specified: the StatesBar export in portal-money-kit.jsx (~line 289) and its entry in window.TahiMoneyKit, LIST_STATES and SVC_STATES and every h(StatesBar, ...) call in portal-money.jsx, and portal-money.css:367-377 plus the `.pm-states*` lines at 466 and 478.",
+     "THE SAME FACT IS STATED THREE TIMES IN A ROW. 'STILL TO PAY NZ$7,820.00, 3 invoices, 1 overdue', then 'WAITING LONGEST 31 Aug 2026, INV-2026-013, 6 days overdue', then a red alert card 'NZ$3,335.00 is past its due date. INV-2026-013 was due 31 August 2026.' At 375 that is 640px of scroll about one overdue invoice before the client can see any invoice. Fix: drop WAITING LONGEST, keep the two tiles plus the alert.",
+     "Alarm colour is over-applied. 'STILL TO PAY' is tinted danger red for money that is merely due; only one of the three invoices is late. Reserve red for the overdue alert and give STILL TO PAY the neutral or warning treatment.",
+     "No leaf radius anywhere on this page. 'Pay now' is the primary money CTA in the entire client portal and it renders as a plain rounded rectangle, as does 'Ask about billing'. Requests and Home both carry the leaf on their primaries.",
+     "The invoice data contradicts Home and Notifications, see cross-cutting-data-spine.",
+     "Row buttons measure 34px (`.pm-rowbtn`) at 1280 while `.pm-rowbtn` declares `min-height:2.75rem`; the row grid is compressing them. Worth a check.",
+     "Dark mode reads well here: table header on secondary, status pills legible, tinted danger card holds up."
+    ]
+   },
+   {
+    "key": "invoice-detail",
+    "verdict": "SHIP",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit2\\t1280-invoice-detail.png",
+    "issues": [
+     "Cleanest page in the batch. Org label, title, amount, status, due line, a Stripe CTA with an honest sub-label ('A secure payment page, hosted by Stripe. Card or bank transfer.'), a meta strip, a line table with a per-line Ask, totals with GST, and a questions block. Copy is excellent: 'Ask about any line and the whole invoice waits until we have answered.'",
+     "Ship-blockers are inherited, not native: the States pill overlaps the rail user card, and the invoice numbers do not match Home or Notifications.",
+     "Leaf radius: 'Pay NZ$2,300.00' should carry it. This is the highest-intent button a client will ever press in the portal.",
+     "Doubled breadcrumb again: shell says 'Billing / Invoices', page says 'Invoices / INV-2026-015' directly under it, and the shell crumb does not deepen to the record.",
+     "At 375 the layout stacks cleanly with no horizontal scroll and no target under 44px except the States pill. Dark mode clean."
+    ]
+   },
+   {
+    "key": "services",
+    "verdict": "FIX",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit2\\t1280-services.png",
+    "issues": [
+     "EIGHT SAME-SAME CARDS. The 'What we take on' grid is eight identical white cards, each icon plus title plus pill plus one-liner plus 'WHAT IS INCLUDED' plus four ticks plus a timeline box plus 'Ask about this'. Nothing distinguishes what the client already has from what they have never bought except a small pill. 'Performance and SEO care' (already on their account since June) looks exactly like 'Ordering and ecommerce' (never discussed). Fix: give the three states real visual difference. In your plan should read as owned (brand-tinted, no CTA or a different one), Add on as offerable, Project as a bigger, quieter tile. Vary the card sizes so the grid has rhythm instead of eight rectangles.",
+     "THE PLAN CARD CONTRADICTS HOME. 'Maintain', 'One track of work running at a time', 'RATE NZ$1,500 per month', 'TRACKS RUNNING 1 track' against Home's 'Scale plan', '2 tracks running side by side', 'NZ$4,800'. See cross-cutting-data-spine.",
+     "The active 'Everything' filter chip is clipped. At 1040 the chip row is right-aligned in the same row as the section description, and the description column pushes it so only 'ything' is visible. Fix: put the chips on their own row, or give the description a max-width.",
+     "Same black active chip as Requests and Notifications. Should be brand green, per Account.",
+     "Single-side border. `.pm-plan-side` (portal-money.css:271) carries `border-top:1px solid` while sitting to the right of the plan card at desktop, so a hairline runs across the top of the right panel only. House rule is borders on all sides or none. Fix: drop it and let the `--bg-secondary` fill do the separation, or use a full border.",
+     "Good: the plan card's two-tone split, the leaf-radius icon tile, 'No prices here on purpose. Every one of these is scoped and quoted for Mahana Orchards before a single hour is booked.' That last line is exactly right for a client portal."
+    ]
+   },
+   {
+    "key": "notifications",
+    "verdict": "FIX",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit2\\t1280-notifications.png",
+    "issues": [
+     "OVER-FILTERED FOR TWELVE ITEMS. Three filter mechanisms stack above the list: an All/Past segmented control, an 'Unread only' toggle plus 'Mark all as read', and then a six-chip kind row (All kinds, Requests, Replies, Invoices, Studio notes, Documents). That is 100px of chrome and eleven controls to sort twelve notifications. Fix: keep the kind chips, fold Unread into them, drop the All/Past segmented control until there is enough history to need it.",
+     "Deep links are broken by the data spine: 'Invoice ready to pay, INV-2087 for NZ$4,800.00 is due 8 September, Open Invoices' lands on a page where neither the number nor the amount exists.",
+     "'All kinds' is another near-black active chip. Same inconsistency as Requests and Services.",
+     "Header layout differs from every other portal page: 'Email preferences' sits immediately to the right of the H1 rather than at the far right of the header row, where New request, Upload, Ask about billing and Invite a colleague all live.",
+     "Chips measure 32px (`.pa-chip`) and the mark-read buttons 36px, both under 44px on phone.",
+     "Good: day grouping with counts, unread dot plus tint, per-row source and destination ('Requests, Open TR-1047'), and the honest 'Documents, Nothing to open yet' on the row with no destination. Dark mode clean."
+    ]
+   },
+   {
+    "key": "account",
+    "verdict": "FIX",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit2\\t1280-account.png",
+    "issues": [
+     "Strongest page in the batch and the closest to ship. The four sections are exactly the right four, the level legend in plain words ('Can invite people, change the plan, and see invoices') is better than most production settings pages, and it is the only page using a brand-tinted active chip rather than black.",
+     "This page makes the identity mismatch unmissable: the profile card says Ana Rewiri, Marketing lead at Mahana Orchards, while the rail card 900px below says Jordan Reeve, Acme. Fix in the shell.",
+     "Anchor strip overflows on phone. At 375 the You / Sign-in / What reaches you / Your team strip scrolls horizontally with 'Your team' cut at the edge and no fade or affordance. Fix: add an edge fade, or wrap to two rows on narrow.",
+     "The In app / Email channel chips are 32px tall and there are eight of them; they are the primary control of the 'What reaches you' section. Lift to 44px on coarse pointers.",
+     "'Sign out' is a bare red text link, 32px, right-aligned. A destructive account action deserves a real button and a confirm.",
+     "Avatar inconsistency inside one page: the profile avatar is a leaf tile, the four team avatars below are circles.",
+     "The anchor strip looks like a tab control but the page renders all four sections stacked. Either make them real tabs or make the strip visibly a jump nav."
+    ]
+   },
+   {
+    "key": "onboarding",
+    "verdict": "FIX",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit2\\t1280-welcome.png",
+    "issues": [
+     "THE WHOLE APP IS ALREADY VISIBLE BEHIND IT. A first-run 'four small things and you are set up' card renders inside the full dashboard chrome: eleven nav items, a working search, a bell, a currency switcher. The premise of the screen is undercut by its own frame. Fix: render Welcome without the rail (return it before the shell composes, the same way Offline should), or make it a full-bleed takeover with a single 'Skip for now'.",
+     "Composition problem. A 620px card floats in roughly 2000px of empty cream with a drop shadow. Two issues: the house rule is borders not shadows, and the vertical balance is wrong. Fix: remove the shadow, use a border, and centre the card in the viewport rather than pinning it to the top.",
+     "Liam's photo renders as a circle beside Staci's leaf tile in the same two-row list. Two avatar shapes, adjacent, in the client's first impression of the studio. Caused by the `.pf-av` override plus the image path; fix both.",
+     "Greeting subject is inconsistent with Home. Here it is 'Kia ora, Mahana Orchards' (the org), on Home it is 'Kia ora, Ana' (the person). Pick the person.",
+     "'I will explore on my own' is the escape hatch and it is a 32px muted grey text link in the bottom-left corner, easy to miss and hard to tap.",
+     "'Meet the team' primary CTA has no leaf radius.",
+     "Good: the 1 of 4 progress bar, per-step minute estimates, 'you can stop whenever you like', and the expand-in-place step pattern."
+    ]
+   },
+   {
+    "key": "offline",
+    "verdict": "FIX",
+    "screenshot": "C:\\Users\\Work\\AppData\\Local\\Temp\\tahi\\crit\\c1280-offline.png",
+    "issues": [
+     "IT RENDERS INSIDE THE APP CHROME. The page says 'Your connection dropped, and the dashboard needs one to load' while showing a full working nav, a search box, a bell and a currency switcher, all of which need a connection. Every nav item is clickable and would navigate to a page that cannot load. Fix: return offlineContent(ctx) before the shell is composed, as the designer's own note says.",
+     "Breadcrumb reads 'Overview' while the page reads 'You are offline', because the route is deliberately nav-less. Give offline its own crumb or suppress the crumb on this route.",
+     "The icon tile is a plain rounded square. This is the one screen that is nothing but a leaf, a title, a line and a button, so it is exactly where the leaf radius belongs.",
+     "Composition and copy are otherwise right: leaf plus title plus description plus CTA plus a reassurance card ('Anything you already sent is with the studio') plus a quiet footer. 'Try again' carries the leaf radius. Clean at 375 and in dark."
+    ]
+   }
+  ],
+  "summary": "Reviewed all thirteen client surfaces at 1280 and 375, light and dark, driven live in Chromium. Zero console or page errors on any run, which matches the integrator's report: the wiring is sound. The design is not, yet, and almost all of the damage traces to two problems that sit underneath the individual pages.\n\nFirst, a CSS namespace collision. portal-home.css and portal-files.css both claim the `pf-` prefix and redefine 47 of the same class names, including .pf-grid, .pf-card, .pf-row, .pf-av, .pf-btn and .pf-tabs; portal-files.css loads second and wins. Separately portal-files.css `.pm-row` (the Messages conversation row) is overwritten by portal-money.css `.pm-row` (the invoice row). Measured consequences: the Your work in motion card is 1074px inside a 1040px scroller and loses 52px off the right edge; Recently delivered, Recent files, Your team, The pieces of this request and Files on this request all render with a 470px empty column and titles clamped to 128px; the Files grid view collapses to one giant card per row; the Messages conversation list is laid out by the invoice table at both widths and is unusable at 375; every avatar wrapper on Home, Requests and Onboarding loses the leaf radius and becomes a circle; and the phone tab bar picks up a border, a 10px radius and a 14px bottom margin that pushes it 2px off the bottom of the screen. Fixing the prefixes fixes most of this list at once, so it should be done before any per-page polish.\n\nSecond, there is no shared data spine. Four different signed-in identities appear across one portal: Jordan Reeve at Acme in the rail card, Ana Rewiri at Mahana Orchards on Home and Account, Jordan Reeve at Physitrack in Files and Messages, and Mahana Orchards on a different plan in Services. Home says Scale, NZ$4,800 a month, two tracks; Services says Maintain, NZ$1,500, one track. Home's 'Pay now' points at INV-2087 for NZ$4,800, which does not exist on the Invoices page. TR-1042 and TR-1028 have different titles depending on which page you are on, so every request thread in Messages is a broken link. One client fixture imported by all four modules resolves it.\n\nThree things need attention beyond that. Schedule, Contracts and Proposals are still in the client nav and fall through to the studio's PageBody, which shows a client three other clients by name (Acme, Northwind, Kowtow) with statuses; that route must be closed to the client audience. On the request detail at 375 the sticky Approve and Changes buttons render at y714-758 under a tab bar occupying y740-814, so the portal's two most important actions are partly covered by the nav. And New request is silently dead from the request detail at both widths, including the phone '+' tab, verified with no errors thrown.\n\nThe States debug pill in portal-money is still live and overlaps the rail user card at 1280 and a real CTA at 375; delete targets are listed on the invoices entry.\n\nWhat is genuinely good: the writing is the best I have seen in this project, particularly on request detail, invoice detail and the account level legend. Invoice detail is ship-ready. Account is one identity fix and one overflow fix away. Home's composition, the dark hero tile and the plain-language status rail are the right direction. Dark mode holds up across every page, with card contrast measured at 14.3:1 and no regressions found; the one weakness is that the Home hero tile flattens into the page background. No em or en dashes in any portal copy, and no internal chrome leaks into the client's Messages view. The remaining consistency work is small and specific: three of the four modules use a near-black active filter chip while Account uses brand green, primary CTAs carry the leaf radius on Home and Requests but not on the new-request dialog, Pay now, or Meet the team, and portal-files.css ships one focus-visible rule against 23, 18 and 12 in the other three."
+ }
 }
