@@ -59,6 +59,12 @@ export const organisations = sqliteTable('organisations', {
   // "invoice me" at onboarding, which is also what entitles them to the portal
   // without a live subscription. See lib/invoice-billing.ts.
   paymentTerms: text('payment_terms'),
+  // Which rail this client is billed on (migration 0089): 'stripe' = a Stripe
+  // invoice with Stripe's hosted pay page, 'xero' = a Xero invoice carrying
+  // its own pay-now link. NULL means unset and falls back to the studio
+  // default (settings key `invoicing.defaultChannel`), so a client only
+  // carries a value once someone names one. See lib/invoice-channel.ts.
+  invoiceChannel: text('invoice_channel'),
   convertedFromProjectId: text('converted_from_project_id'),
   internalNotes: text('internal_notes'),
   // JSON array of brand names, e.g. ["Brand A", "Brand B"]

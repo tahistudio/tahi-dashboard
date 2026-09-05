@@ -299,6 +299,8 @@ const TOOLS: ToolDef[] = [
     healthNote: prop('string', 'Note explaining health status'),
     defaultHourlyRate: prop('number', 'Default hourly rate for this client'),
     preferredCurrency: prop('string', 'Preferred currency: NZD, USD, GBP, EUR, AUD'),
+    invoiceChannel: prop('string', 'How this client is billed: stripe (a Stripe invoice paid on the Stripe hosted page) or xero (a Xero invoice carrying its own pay-now link), or an empty string to clear it and fall back to the studio default'),
+    paymentTerms: prop('string', 'When their invoices are due: card (card on file), net_7, net_14 or net_30, or an empty string to clear it and leave it unset'),
   }, ['clientId']),
   tool('create_client_contact', 'Create a new contact at a client organisation', {
     clientId: prop('string', 'Client organisation ID'),

@@ -7,6 +7,13 @@ import { eq, desc, and, sql } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { applyBillingDerivation } from '@/lib/billing-derivation'
 import { resolveTracksConfig, buildEffectiveTracks } from '@/lib/plan-utils'
+import {
+  INVOICE_CHANNELS,
+  INVOICE_CHANNEL_SETTING_KEY,
+  isInvoiceChannel,
+  resolveInvoiceChannel,
+} from '@/lib/invoice-channel'
+import { PAYMENT_TERMS, isPaymentTerms } from '@/lib/invoice-billing'
 
 type BillingDb = Parameters<typeof applyBillingDerivation>[0]
 
@@ -108,7 +115,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     }
   }
 
-  const [contacts, subscription, recentRequests] = await Promise.all([
+  const [contacts, subscription, recentRequests, studioDefaultChannel] = await Promise.all([
     drizzle
       .select()
       .from(schema.contacts)
@@ -142,6 +149,16 @@ export async function GET(req: NextRequest, { params }: Params) {
       ))
       .orderBy(desc(schema.requests.updatedAt))
       .limit(10),
+
+    // The studio-wide default rail, so the caller can print "Stripe (studio
+    // default)" for a client that carries no channel of its own.
+    drizzle
+      .select({ value: schema.settings.value })
+      .from(schema.settings)
+      .where(eq(schema.settings.key, INVOICE_CHANNEL_SETTING_KEY))
+      .limit(1)
+      .then(rows => rows[0]?.value ?? null)
+      .catch(() => null),
   ])
 
   // Get tracks if subscription exists. The header track meter must agree with
@@ -214,7 +231,19 @@ export async function GET(req: NextRequest, { params }: Params) {
     }
   }
 
-  return NextResponse.json({ org: { ...org, ...billingExtras }, contacts, subscription, tracks, recentRequests })
+  return NextResponse.json({
+    org: {
+      ...org,
+      ...billingExtras,
+      // invoiceChannel + paymentTerms are already on `org`; this is the value
+      // an invoice would actually use once the studio default is applied.
+      effectiveInvoiceChannel: resolveInvoiceChannel(org.invoiceChannel, studioDefaultChannel),
+    },
+    contacts,
+    subscription,
+    tracks,
+    recentRequests,
+  })
 }
 
 // ── PATCH /api/admin/clients/[id] ────────────────────────────────────────────
@@ -251,6 +280,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     tracksMode: string | null
     customSmallTracks: number | null
     customLargeTracks: number | null
+    invoiceChannel: string | null
+    paymentTerms: string | null
   }>
 
   const now = new Date().toISOString()
@@ -259,11 +290,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     'name', 'website', 'industry', 'planType', 'status',
     'healthStatus', 'healthNote', 'internalNotes', 'brands', 'tags',
     'customFields', 'defaultHourlyRate', 'preferredCurrency',
-    'size', 'annualRevenue',
+    'size', 'annualRevenue', 'invoiceChannel', 'paymentTerms',
   ] as const
   for (const key of allowed) {
     if (key in body) patch[key] = body[key] ?? null
   }
+  // An empty select means "unset", which is NULL, not an empty string: only
+  // NULL resolves to the studio default.
+  if (patch.invoiceChannel === '') patch.invoiceChannel = null
+  if (patch.paymentTerms === '') patch.paymentTerms = null
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -271,6 +306,28 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   // Access scoping
   const denied = await requireAccessToOrg(drizzle, userId, id)
   if (denied) return denied
+
+  // Two closed vocabularies, checked only once this caller is allowed to touch
+  // this org, so an unscoped team member still gets the 403 and never a 400
+  // about the payload. An unrecognised value would read as "unset" and
+  // silently bill the client on the studio default, so reject it loudly
+  // instead of writing it.
+  if ('invoiceChannel' in body) {
+    const value = body.invoiceChannel
+    if (value !== null && value !== '' && !isInvoiceChannel(value)) {
+      return NextResponse.json({
+        error: `invoiceChannel must be ${INVOICE_CHANNELS.map(c => c.value).join(' or ')}, or null to fall back to the studio default.`,
+      }, { status: 400 })
+    }
+  }
+  if ('paymentTerms' in body) {
+    const value = body.paymentTerms
+    if (value !== null && value !== '' && !isPaymentTerms(value)) {
+      return NextResponse.json({
+        error: `paymentTerms must be one of ${PAYMENT_TERMS.join(', ')}, or null to leave it unset.`,
+      }, { status: 400 })
+    }
+  }
 
   await drizzle
     .update(schema.organisations)

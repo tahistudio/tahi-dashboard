@@ -1,0 +1,50 @@
+-- Migration 0089: per-client invoicing channel
+--
+--   organisations.invoice_channel
+--     'stripe' = the client is billed through a Stripe invoice and pays on
+--     Stripe's hosted invoice page. 'xero' = the client is billed through a
+--     Xero invoice, which carries its own pay-now link. NULL = unset, which
+--     falls back to the studio default held in the settings key
+--     `invoicing.defaultChannel` ('stripe' when that is unset too).
+--
+-- Deliberately two values, not three. A Xero invoice surfaces its own pay
+-- link, so there is no need to split "Xero paid by card" from "Xero paid by
+-- bank transfer" at the client level.
+--
+-- No backfill. Most organisations rows are dummy records, so every client
+-- stays NULL (studio default) until someone sets the handful of real ones by
+-- hand on the client page.
+--
+-- This column answers HOW a client is billed. organisations.payment_terms
+-- (migration 0086) stays as WHEN it is due; the two are edited side by side on
+-- the client detail's Organisation details card.
+--
+-- ALTER TABLE ADD COLUMN cannot use IF NOT EXISTS in SQLite; the runtime
+-- runner (app/api/admin/db/migrate) swallows the "duplicate column name"
+-- error so re-running is safe.
+--
+-- MERGE ORDER, NOT OPTIONAL. Apply this to staging and then production D1
+-- BEFORE the code that references the column is deployed, not after. Drizzle
+-- expands a bare .select() into an explicit column list from db/schema.ts, so
+-- from the moment the new schema ships, EXISTING surfaces break on a database
+-- without this column ("no such column: invoice_channel" -> 500): the clients
+-- list (app/api/admin/clients/route.ts), the client detail
+-- (app/api/admin/clients/[id]/route.ts) and the data export
+-- (app/api/admin/danger/export/route.ts). The column is additive and nullable,
+-- so applying it AHEAD of the deploy is harmless to the running code.
+--
+-- The runtime runner (POST /api/admin/db/migrate) cannot go first: the "0089"
+-- entry lives in app/api/admin/db/migrate/route.ts and does not exist until
+-- that deploy lands, so calling it beforehand answers 400 Unknown migration.
+-- Apply the file directly with wrangler instead. wrangler.json carries both
+-- database ids (staging b91cd27f, production 3bfa4848), so the names below
+-- resolve without any extra flags:
+--   1. wrangler d1 execute tahi-db-staging --remote --file=drizzle/migrations/0089_org_invoice_channel.sql
+--   2. deploy, then smoke /clients and /clients/[id] in that order
+--   3. wrangler d1 execute tahi-db --remote --file=drizzle/migrations/0089_org_invoice_channel.sql
+--   4. approve the production deploy, then smoke the same two pages
+--
+-- POST /api/admin/db/migrate {"name":"0089"} is the after-the-fact fallback,
+-- usable once the deploy that carries the entry is live. Taken that way round,
+-- /clients, the client detail and the export are 500s until it runs.
+ALTER TABLE organisations ADD COLUMN invoice_channel text;

@@ -4,6 +4,11 @@ import { useEffect, useState } from 'react'
 import { SectionShell } from '@/components/tahi/settings/primitives'
 import { useResource } from '@/lib/use-resource'
 import { apiPath } from '@/lib/api'
+import {
+  DEFAULT_INVOICE_CHANNEL,
+  INVOICE_CHANNELS,
+  INVOICE_CHANNEL_SETTING_KEY,
+} from '@/lib/invoice-channel'
 
 type SettingsMap = Record<string, string | null>
 
@@ -15,10 +20,11 @@ const LEDE =
  * Studio details (design: `function Studio(){...}` in settings-app.jsx).
  *
  * Legal name, GST number, registered address, billing currency, invoice
- * number prefix and invoice footer note. Batch-saved to the settings K/V
- * store (studio_legal_name, studio_gst_number, studio_address,
- * studio_billing_currency, invoice_number_prefix, invoice_footer_note)
- * via PATCH /api/admin/settings, one call per key.
+ * number prefix, default invoicing channel and invoice footer note.
+ * Batch-saved to the settings K/V store (studio_legal_name,
+ * studio_gst_number, studio_address, studio_billing_currency,
+ * invoice_number_prefix, invoicing.defaultChannel, invoice_footer_note) via
+ * PATCH /api/admin/settings, one call per key.
  */
 export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
   const { data, isLoading, mutate } = useResource<{ settings: SettingsMap }>(
@@ -30,6 +36,7 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
   const [address, setAddress] = useState('')
   const [currency, setCurrency] = useState('NZD')
   const [invoicePrefix, setInvoicePrefix] = useState('INV-')
+  const [invoiceChannel, setInvoiceChannel] = useState<string>(DEFAULT_INVOICE_CHANNEL)
   const [invoiceFooter, setInvoiceFooter] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -42,6 +49,8 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
       setAddress(data.settings.studio_address ?? '')
       setCurrency(data.settings.studio_billing_currency ?? 'NZD')
       setInvoicePrefix(data.settings.invoice_number_prefix ?? 'INV-')
+      // The GET fills this key in with the studio default when no row exists.
+      setInvoiceChannel(data.settings[INVOICE_CHANNEL_SETTING_KEY] ?? DEFAULT_INVOICE_CHANNEL)
       setInvoiceFooter(data.settings.invoice_footer_note ?? '')
     }
   }, [data])
@@ -65,6 +74,7 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
         saveKey('studio_address', address.trim()),
         saveKey('studio_billing_currency', currency),
         saveKey('invoice_number_prefix', invoicePrefix.trim()),
+        saveKey(INVOICE_CHANNEL_SETTING_KEY, invoiceChannel),
         saveKey('invoice_footer_note', invoiceFooter.trim()),
       ])
       setSaved(true)
@@ -84,11 +94,11 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
       <SectionShell title="Studio details" lede={LEDE}>
         <div className="set-card">
           <div className="set-grid2">
-            {[0, 1, 2, 3, 4, 5].map((i) => (
+            {[0, 1, 2, 3, 4, 5, 6].map((i) => (
               <div
                 key={i}
                 className="set-field"
-                style={i === 2 || i === 5 ? { gridColumn: '1 / -1' } : undefined}
+                style={i === 2 || i === 6 ? { gridColumn: '1 / -1' } : undefined}
               >
                 <div
                   className="animate-pulse"
@@ -103,7 +113,7 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
                 <div
                   className="animate-pulse"
                   style={{
-                    height: i === 5 ? 70 : 40,
+                    height: i === 6 ? 70 : 40,
                     borderRadius: 9,
                     background: 'var(--bg-tertiary)',
                   }}
@@ -174,6 +184,31 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               onChange={(e) => setInvoicePrefix(e.target.value)}
               placeholder="INV-"
             />
+          </div>
+          <div className="set-field">
+            <label htmlFor="studio-invoice-channel">Default invoicing channel</label>
+            <select
+              id="studio-invoice-channel"
+              className="set-input"
+              value={invoiceChannel}
+              onChange={(e) => setInvoiceChannel(e.target.value)}
+            >
+              {INVOICE_CHANNELS.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+            <small
+              style={{
+                display: 'block',
+                marginTop: 5,
+                color: 'var(--text-faint)',
+                font: '500 12px Manrope',
+              }}
+            >
+              Used for any client without their own channel.
+            </small>
           </div>
           <div className="set-field" style={{ gridColumn: '1 / -1' }}>
             <label htmlFor="studio-invoice-footer">Invoice footer note</label>
