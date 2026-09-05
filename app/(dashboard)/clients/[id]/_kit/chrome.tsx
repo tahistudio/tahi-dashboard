@@ -94,7 +94,7 @@ export function InlineAction({
     color: disabled ? 'var(--color-text-subtle)' : 'var(--color-brand-dark)',
     textDecoration: 'none',
     cursor: disabled ? 'not-allowed' : 'pointer',
-    transition: 'background var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out)',
+    transition: 'background var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
   }
 
   if (href && !disabled) {

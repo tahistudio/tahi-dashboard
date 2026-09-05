@@ -14,6 +14,7 @@ import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { SkeletonList } from '@/components/tahi/skeletons'
 import { TahiButton } from '@/components/tahi/tahi-button'
+import { useToast } from '@/components/tahi/toast'
 
 // ── Profitability tab (T595) ─────────────────────────────────────────────────
 // Shows gross margin for this client (revenue minus costs including
@@ -44,6 +45,7 @@ export interface ClientCostRow {
 }
 
 export function ProfitabilityTab({ clientId }: { clientId: string }) {
+  const { showToast } = useToast()
   // Deleting a cost changes a margin number, so it asks first, through the
   // design-system dialog rather than a browser confirm().
   const [pendingDelete, setPendingDelete] = useState<ClientCostRow | null>(null)
@@ -117,14 +119,24 @@ export function ProfitabilityTab({ clientId }: { clientId: string }) {
     }
   }
 
+  // ConfirmDialog has no catch of its own, so a thrown fetch here would reject
+  // out of its handler while the dialog closed and the row stayed. The failure
+  // is caught, reported, and leaves the dialog open so the operator can retry.
   async function handleDelete() {
     const cost = pendingDelete
     if (!cost) return
     try {
-      await fetch(apiPath(`/api/admin/clients/${clientId}/costs/${cost.id}`), { method: 'DELETE' })
-      await loadAll()
-    } finally {
+      const res = await fetch(apiPath(`/api/admin/clients/${clientId}/costs/${cost.id}`), { method: 'DELETE' })
+      if (!res.ok) {
+        const json = await res.json().catch(() => null) as { error?: string } | null
+        showToast(json?.error ?? 'That cost was not deleted. Please try again.', 'error')
+        return
+      }
+      showToast('Cost deleted', 'success')
       setPendingDelete(null)
+      await loadAll()
+    } catch {
+      showToast('That cost was not deleted. Please try again.', 'error')
     }
   }
 

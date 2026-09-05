@@ -1,16 +1,24 @@
 'use client'
 
-/** The client Brands tab: the real brands table, with create, edit and
- *  delete. */
+/**
+ * The client Brands tab: the real brands table, with create, edit and delete.
+ *
+ * Deleting asks first, through the design-system dialog the rest of this
+ * surface uses, and names what is attached to the brand: requests are filed
+ * under these, so removing one is not a cosmetic change. A failed delete says
+ * so in a toast rather than leaving the row on screen with no explanation.
+ */
 
 import { useState } from 'react'
 import useSWR from 'swr'
 import { Check, Loader2, Palette, Pencil, Plus, Trash2 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { Card } from '@/components/tahi/card'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { SkeletonList } from '@/components/tahi/skeletons'
 import { TahiButton } from '@/components/tahi/tahi-button'
+import { useToast } from '@/components/tahi/toast'
 import { CountText, Grow, SubBar } from '../_kit/chrome'
 
 // ── Brands tab ────────────────────────────────────────────────────────────────
@@ -28,6 +36,8 @@ export interface BrandRow {
 }
 
 export function BrandsTab({ clientId }: { clientId: string }) {
+  const { showToast } = useToast()
+  const [pendingDelete, setPendingDelete] = useState<BrandRow | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -109,14 +119,22 @@ export function BrandsTab({ clientId }: { clientId: string }) {
     }
   }
 
-  const handleDelete = async (id: string) => {
-    setDeletingId(id)
+  const handleDelete = async () => {
+    const brand = pendingDelete
+    if (!brand) return
+    setDeletingId(brand.id)
     try {
-      const res = await fetch(apiPath(`/api/admin/brands/${id}`), { method: 'DELETE' })
-      if (!res.ok) throw new Error('Failed')
-      void load()
+      const res = await fetch(apiPath(`/api/admin/brands/${brand.id}`), { method: 'DELETE' })
+      if (!res.ok) {
+        const json = await res.json().catch(() => null) as { error?: string } | null
+        showToast(json?.error ?? `${brand.name} was not deleted. Please try again.`, 'error')
+        return
+      }
+      showToast(`${brand.name} deleted`, 'success')
+      setPendingDelete(null)
+      await load()
     } catch {
-      // silently fail
+      showToast(`${brand.name} was not deleted. Please try again.`, 'error')
     } finally {
       setDeletingId(null)
     }
@@ -345,7 +363,7 @@ export function BrandsTab({ clientId }: { clientId: string }) {
                   Edit
                 </button>
                 <button
-                  onClick={() => handleDelete(brand.id)}
+                  onClick={() => setPendingDelete(brand)}
                   disabled={deletingId === brand.id}
                   className="tahi-focus-ring inline-flex items-center gap-1 min-h-[2.75rem] md:min-h-[1.5rem] text-xs font-medium transition-colors"
                   style={{
@@ -370,6 +388,18 @@ export function BrandsTab({ clientId }: { clientId: string }) {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingDelete != null}
+        variant="danger"
+        title={pendingDelete ? `Delete ${pendingDelete.name}?` : 'Delete this brand?'}
+        description={pendingDelete
+          ? `${pendingDelete.requestCount} ${pendingDelete.requestCount === 1 ? 'request is' : 'requests are'} filed under it and ${pendingDelete.contactCount} ${pendingDelete.contactCount === 1 ? 'contact is' : 'contacts are'} attached. They stay, but they lose the brand.`
+          : ''}
+        confirmLabel="Delete brand"
+        onConfirm={handleDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   )
 }

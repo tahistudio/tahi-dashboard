@@ -15,6 +15,7 @@ import useSWR from 'swr'
 import { Minus, Plus } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { TahiButton } from '@/components/tahi/tahi-button'
+import { useToast } from '@/components/tahi/toast'
 import { CLIENT_CAPACITY_KEY, fetchCapacity, type CapacityWithMode } from './overview-tracks'
 
 export const MAX_TRACKS = 4
@@ -27,6 +28,7 @@ export function TracksConfig({
   clientId: string
   writeDisabled: boolean
 }) {
+  const { showToast } = useToast()
   const [mode, setMode] = useState<TracksMode>('auto')
   const [smallCount, setSmallCount] = useState(0)
   const [largeCount, setLargeCount] = useState(0)
@@ -46,19 +48,29 @@ export function TracksConfig({
     setLargeCount(data.customLargeTracks ?? 0)
   }, [data])
 
+  // Called as `void save(...)`, so an uncaught rejection here would be an
+  // unhandled one. A refused save is reported rather than left to look applied
+  // until the next revalidate snaps the counts back.
   const save = useCallback(async (next: { tracksMode: TracksMode; customSmallTracks?: number; customLargeTracks?: number }) => {
     setSaving(true)
     try {
-      await fetch(apiPath(`/api/admin/clients/${clientId}`), {
+      const res = await fetch(apiPath(`/api/admin/clients/${clientId}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(next),
       })
+      if (!res.ok) {
+        const json = await res.json().catch(() => null) as { error?: string } | null
+        showToast(json?.error ?? 'The track settings did not save. Please try again.', 'error')
+      }
+      await mutate()
+    } catch {
+      showToast('The track settings did not save. Please try again.', 'error')
       await mutate()
     } finally {
       setSaving(false)
     }
-  }, [clientId, mutate])
+  }, [clientId, mutate, showToast])
 
   const total = smallCount + largeCount
   const busy = saving || writeDisabled

@@ -140,7 +140,7 @@ export function OverviewTracks({
                   border: '1px solid var(--color-border-subtle)',
                   background: 'var(--color-bg)',
                   cursor: 'pointer',
-                  transition: 'border-color var(--motion-fast) var(--ease-out)',
+                  transition: 'border-color var(--motion-quick) var(--ease-out)',
                 }}
                 onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-brand)' }}
                 onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-subtle)' }}
