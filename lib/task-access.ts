@@ -114,3 +114,28 @@ export async function requestOrgId(
 
   return request?.orgId ?? null
 }
+
+/**
+ * Which table an assignee id belongs to. The tasks surface assigns team
+ * members, but legacy rows and the MCP tool can still carry a contact, and
+ * the assignment notification is addressed off this value, so the server
+ * settles it from the id rather than trusting the caller to send the pair.
+ * Returns null when the id matches neither table.
+ */
+export async function resolveAssigneeType(
+  drizzle: Drizzle,
+  assigneeId: string,
+): Promise<'team_member' | 'contact' | null> {
+  const [member] = await drizzle
+    .select({ id: schema.teamMembers.id })
+    .from(schema.teamMembers)
+    .where(eq(schema.teamMembers.id, assigneeId))
+    .limit(1)
+  if (member) return 'team_member'
+  const [contact] = await drizzle
+    .select({ id: schema.contacts.id })
+    .from(schema.contacts)
+    .where(eq(schema.contacts.id, assigneeId))
+    .limit(1)
+  return contact ? 'contact' : null
+}

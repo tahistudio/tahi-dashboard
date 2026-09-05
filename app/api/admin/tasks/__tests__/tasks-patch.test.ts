@@ -36,12 +36,18 @@ vi.mock('@/db/d1', () => ({
   },
 }))
 
-vi.mock('@/lib/notifications', () => ({ createNotification: async () => undefined }))
+const notified: Record<string, unknown>[] = []
+let assigneeKinds: Record<string, 'team_member' | 'contact'> = {}
+
+vi.mock('@/lib/notifications', () => ({
+  createNotification: async (_drizzle: unknown, input: Record<string, unknown>) => { notified.push(input) },
+}))
 
 vi.mock('@/lib/task-access', () => ({
   guardTask: async () => null,
   loadTaskLinks: async () => current,
   requestOrgId: async (_drizzle: unknown, requestId: string) => requestOrgs[requestId] ?? null,
+  resolveAssigneeType: async (_drizzle: unknown, assigneeId: string) => assigneeKinds[assigneeId] ?? null,
 }))
 
 vi.mock('@/lib/require-access', () => ({
@@ -175,5 +181,51 @@ describe('PATCH /api/admin/tasks/[id] link invariants', () => {
     expect(updates[0]).not.toHaveProperty('orgId')
     expect(updates[0]).not.toHaveProperty('requestId')
     expect(updates[0].status).toBe('done')
+  })
+})
+
+describe('PATCH /api/admin/tasks/[id] assignee type', () => {
+  beforeEach(() => {
+    updates.length = 0
+    notified.length = 0
+    requestOrgs = {}
+    deniedOrgIds = []
+    current = { type: 'tahi_internal', orgId: null, requestId: null }
+    assigneeKinds = { tm1: 'team_member', c1: 'contact' }
+  })
+
+  it('derives team_member from the id when the caller sends the id alone', async () => {
+    const res = await PATCH(patch({ assigneeId: 'tm1' }) as never, params)
+    expect(res.status).toBe(200)
+    expect(updates[0].assigneeId).toBe('tm1')
+    expect(updates[0].assigneeType).toBe('team_member')
+    expect(notified[0]?.recipient).toEqual({ teamMemberId: 'tm1' })
+  })
+
+  it('derives contact and addresses the notification to the contact', async () => {
+    const res = await PATCH(patch({ assigneeId: 'c1' }) as never, params)
+    expect(res.status).toBe(200)
+    expect(updates[0].assigneeType).toBe('contact')
+    expect(notified[0]?.recipient).toEqual({ contactId: 'c1' })
+  })
+
+  it('clears the type with the assignee', async () => {
+    const res = await PATCH(patch({ assigneeId: null }) as never, params)
+    expect(res.status).toBe(200)
+    expect(updates[0].assigneeId).toBeNull()
+    expect(updates[0].assigneeType).toBeNull()
+    expect(notified).toHaveLength(0)
+  })
+
+  it('keeps an explicit type the caller states', async () => {
+    const res = await PATCH(patch({ assigneeId: 'c1', assigneeType: 'contact' }) as never, params)
+    expect(res.status).toBe(200)
+    expect(updates[0].assigneeType).toBe('contact')
+  })
+
+  it('refuses an id that names nobody', async () => {
+    const res = await PATCH(patch({ assigneeId: 'ghost' }) as never, params)
+    expect(res.status).toBe(400)
+    expect(updates).toHaveLength(0)
   })
 })

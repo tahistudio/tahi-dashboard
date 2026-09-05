@@ -109,6 +109,7 @@ export function TasksBoard({
       // "Adds to Acme Ltd". It does not repeat the keyboard hint, which the
       // composer already prints beside its own Add button.
       quickAddHint="Lands in this column, unassigned"
+      quickAddNoun="task"
       onItemClick={(item) => onOpenTask(item.id)}
     />
   )

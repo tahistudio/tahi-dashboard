@@ -213,6 +213,10 @@ interface KanbanBoardProps {
    *  against, e.g. "Adds to Acme Ltd". Without it the composer says which
    *  column a card joins but not which client it belongs to. */
   quickAddHint?: string
+  /** What the composer creates, in the singular and lower case: "request"
+   *  (the default) or "task". Drives the collapsed button, the textarea
+   *  placeholder and its accessible name. */
+  quickAddNoun?: string
   /** Click a checklist checkbox. */
   onToggleChecklist?: (itemId: string, checklistItemId: string) => void
   /** Click a card body (not the chips / checkboxes). */
@@ -357,6 +361,7 @@ export function KanbanBoard({
   onQuickAdd,
   canAddTo,
   quickAddHint,
+  quickAddNoun = 'request',
   onToggleChecklist,
   onItemClick,
   onAssigneeClick,
@@ -493,6 +498,7 @@ export function KanbanBoard({
             onAdd={readOnly || !addable ? undefined : onAdd}
             onQuickAdd={readOnly || !addable ? undefined : onQuickAdd}
             quickAddHint={quickAddHint}
+            quickAddNoun={quickAddNoun}
             onDragOver={(e) => onColumnDragOver(e, col)}
             onDragLeave={() => setDropColumn(null)}
             onDrop={(e) => onColumnDrop(e, col)}
@@ -559,6 +565,7 @@ function Column({
   onAdd,
   onQuickAdd,
   quickAddHint,
+  quickAddNoun,
   onDragOver,
   onDragLeave,
   onDrop,
@@ -571,6 +578,7 @@ function Column({
   onAdd?: (status: string) => void
   onQuickAdd?: (status: string, title: string) => void | Promise<void>
   quickAddHint?: string
+  quickAddNoun: string
   onDragOver: (e: React.DragEvent) => void
   onDragLeave: (e: React.DragEvent) => void
   onDrop: (e: React.DragEvent) => void
@@ -789,6 +797,7 @@ function Column({
         <QuickAdd
           label={column.label}
           hint={quickAddHint}
+          noun={quickAddNoun}
           open={composerOpen}
           onOpenChange={setComposerOpen}
           onSubmit={(title) => onQuickAdd(column.statusValue, title)}
@@ -845,12 +854,14 @@ function Column({
 function QuickAdd({
   label,
   hint,
+  noun,
   open,
   onOpenChange,
   onSubmit,
 }: {
   label: string
   hint?: string
+  noun: string
   open: boolean
   onOpenChange: (open: boolean) => void
   onSubmit: (title: string) => void | Promise<void>
@@ -919,7 +930,7 @@ function QuickAdd({
         }}
       >
         <Plus size={13} aria-hidden="true" />
-        Add request
+        Add {noun}
       </button>
     )
   }
@@ -938,8 +949,8 @@ function QuickAdd({
         ref={inputRef}
         value={value}
         onChange={e => setValue(e.target.value)}
-        placeholder="Request title"
-        aria-label={`New request in ${label}`}
+        placeholder={`${noun.charAt(0).toUpperCase()}${noun.slice(1)} title`}
+        aria-label={`New ${noun} in ${label}`}
         rows={2}
         readOnly={saving}
         onKeyDown={e => {

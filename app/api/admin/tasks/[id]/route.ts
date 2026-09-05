@@ -6,7 +6,7 @@ import { eq } from 'drizzle-orm'
 import { createNotification } from '@/lib/notifications'
 import { TASK_PRIORITIES } from '@/lib/task-priorities'
 import { TASK_STATUSES } from '@/lib/status-config'
-import { guardTask, loadTaskLinks, requestOrgId } from '@/lib/task-access'
+import { guardTask, loadTaskLinks, requestOrgId, resolveAssigneeType } from '@/lib/task-access'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { isTaskLevel, type TaskLevel } from '@/lib/tasks-views'
 import { coerceTaskLinks, setTaskLevel } from '@/lib/task-consistency'
@@ -129,8 +129,22 @@ export async function PATCH(
     }
     updates.priority = body.priority
   }
-  if (body.assigneeId !== undefined) updates.assigneeId = body.assigneeId
-  if (body.assigneeType !== undefined) updates.assigneeType = body.assigneeType
+  if (body.assigneeId !== undefined) {
+    updates.assigneeId = body.assigneeId
+    if (body.assigneeType !== undefined) {
+      updates.assigneeType = body.assigneeType
+    } else if (!body.assigneeId) {
+      // Clearing the assignee clears the type with it, or a stale type sits
+      // behind a null id and misroutes the next assignment notification.
+      updates.assigneeType = null
+    } else {
+      // The panel sends the id alone; the server settles which table it
+      // names so the notification below reaches the right person.
+      const kind = await resolveAssigneeType(drizzle, body.assigneeId)
+      if (!kind) return NextResponse.json({ error: 'Unknown assignee' }, { status: 400 })
+      updates.assigneeType = kind
+    }
+  }
   if (body.dueDate !== undefined) updates.dueDate = body.dueDate
   if (body.estimatedHours !== undefined) {
     const hours = body.estimatedHours
@@ -242,7 +256,7 @@ export async function PATCH(
     // assigneeId is a teamMembers.id or contacts.id; the typed recipient
     // resolves it to the Clerk user id the bell queries.
     await createNotification(drizzle, {
-      recipient: body.assigneeType === 'contact'
+      recipient: updates.assigneeType === 'contact'
         ? { contactId: body.assigneeId }
         : { teamMemberId: body.assigneeId },
       type: 'task_assigned',
