@@ -106,6 +106,18 @@ describe('filterSubjectsByChannelPref', () => {
     expect(muted).toBe(0)
   })
 
+  it('still applies the channel policy to an audience with no logins', async () => {
+    let selects = 0
+    const db = prefDb([], () => { selects += 1 })
+    // Slack defaults off, so an audience nobody could have opted in for is not
+    // an audience to send to. The same shortcut in the recipient filter was the
+    // bug this pins.
+    const { allowed, muted } = await filterSubjectsByChannelPref(db, [invited], 'new_message', 'slack')
+    expect(selects).toBe(0)
+    expect(allowed).toEqual([])
+    expect(muted).toBe(1)
+  })
+
   it('keeps an invited contact who has never signed in, alongside a muted one', async () => {
     const db = prefDb([row('user_jo', 'new_message', 'email', false, 'contact')])
     const { allowed, muted } = await filterSubjectsByChannelPref(

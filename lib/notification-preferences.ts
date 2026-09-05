@@ -237,8 +237,16 @@ export async function filterSubjectsByChannelPref<T extends ChannelPrefSubject>(
   channel: NotificationChannel,
 ): Promise<{ allowed: T[]; muted: number }> {
   const withLogin = subjects.filter((s) => s.clerkUserId)
-  // Nobody here can have written a preference row, so nobody can have muted.
-  if (withLogin.length === 0) return { allowed: [...subjects], muted: 0 }
+  // Nobody here can have written a preference row, so the whole audience falls
+  // to the channel policy without a read. Stated rather than short-circuited to
+  // "keep them all": that reads the same for in_app and email (both default on)
+  // and silently opts an audience of invited-but-never-signed-in contacts into
+  // a channel that defaults off.
+  if (withLogin.length === 0) {
+    return DEFAULT_ENABLED[channel]
+      ? { allowed: [...subjects], muted: 0 }
+      : { allowed: [], muted: subjects.length }
+  }
 
   try {
     const userIds = [...new Set(withLogin.map((s) => s.clerkUserId as string))]
