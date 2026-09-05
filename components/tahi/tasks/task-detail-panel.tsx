@@ -17,7 +17,12 @@
  *
  * The three link rows (level, client, request) never write a raw value: they
  * run through lib/task-consistency.ts, which is the one place the invariants
- * between them live.
+ * between them live. The Level control also refuses to offer a move those
+ * invariants forbid, rather than letting the write bounce off the API: see
+ * canLeaveTahi below.
+ *
+ * The checklist card is backed by task_subtasks rows. The table, the props
+ * and the API paths keep the word subtask; nothing a person reads does.
  */
 
 import * as React from 'react'
@@ -285,7 +290,7 @@ const PANEL_CSS = `
 }
 .tskd-desc:read-only:hover{ border-color: var(--color-border-subtle); }
 
-/* The quiet head action every card shares: add a subtask, open the menu. */
+/* The quiet head action every card shares: add a checklist item, open the menu. */
 .tskd-head-action{
   border: none;
   background: none;
@@ -466,7 +471,7 @@ export function TaskDetailPanel(props: TaskDetailPanelProps): React.ReactElement
       <ConfirmDialog
         open={confirm === 'delete' && !!task && !readOnly}
         title="Delete this task?"
-        description="It goes for good, along with its subtasks and its logged time."
+        description="It goes for good, along with its checklist and its logged time."
         confirmLabel="Delete"
         variant="danger"
         onCancel={() => setConfirm(null)}
@@ -613,6 +618,26 @@ function TaskDetailBody({
 
   const linkState: TaskLinkState = { level, orgId: task.orgId, requestId: task.requestId }
 
+  /**
+   * Whether Client and Internal are reachable at all right now.
+   *
+   * A task with no client can only be Tahi. coerceTaskLinks in
+   * lib/task-consistency.ts states it, and PATCH /api/admin/tasks/[id]
+   * enforces it with a 400 ("Client is required for a client task").
+   * setTaskLevel, by design, only drops links on the way to Tahi: moving the
+   * other way it keeps orgId as it found it, so on a clientless task it hands
+   * back a triple the server will refuse.
+   *
+   * Offering those two anyway is what made this control look like it had no
+   * animation. The optimistic patch moved the value, the pill set off on its
+   * 360ms slide, the 400 came back inside about 40ms and the shell rolled the
+   * row back, so the pill reversed into its own start before the eye read it
+   * as movement. Nothing was wrong with the pill: the panel was offering a
+   * move that could not land. The way through is the Client row below, and
+   * picking a client there moves the level for you.
+   */
+  const canLeaveTahi = !!task.orgId
+
   function applyLinks(next: TaskLinkState) {
     if (next.level === level && next.orgId === task.orgId && next.requestId === task.requestId) return
     const orgName = next.orgId
@@ -679,7 +704,7 @@ function TaskDetailBody({
     }
   }
 
-  // ---- Subtasks --------------------------------------------------------------
+  // ---- Checklist (task_subtasks rows; the table and the API keep the old name) ---
 
   const subtaskRows = subtasks ?? []
   const subtaskTotal = subtaskRows.length
@@ -947,10 +972,12 @@ function TaskDetailBody({
                 ariaLabel="Level"
                 options={TASK_LEVELS.map(l => {
                   const Glyph = LEVEL_ICON[l.value]
+                  const needsClient = !canLeaveTahi && l.value !== 'tahi_internal'
                   return {
                     value: l.value,
                     label: l.label,
-                    title: l.hint,
+                    disabled: needsClient,
+                    title: needsClient ? `${l.label} work needs a client. Link one below first.` : l.hint,
                     icon: <Glyph size={12} aria-hidden />,
                   }
                 })}
@@ -1015,7 +1042,12 @@ function TaskDetailBody({
               color: 'var(--color-text-subtle)',
             }}
           >
-            {TASK_LEVEL_HINTS[level]}
+            {/* A native title is hover-only, so the reason two of the three
+                options are unavailable is repeated here where a touch user
+                and a screen reader both meet it. */}
+            {canLeaveTahi || readOnly
+              ? TASK_LEVEL_HINTS[level]
+              : `${TASK_LEVEL_HINTS[level]} Client and Internal both need a client, so link one below first.`}
           </p>
         </SidebarCard>
 
@@ -1096,16 +1128,16 @@ function TaskDetailBody({
           </DetailRow>
         </SidebarCard>
 
-        {/* 4. Subtasks. */}
+        {/* 4. Checklist. */}
         <SidebarCard
-          title="Subtasks"
+          title="Checklist"
           icon={<ListChecks size={14} />}
           action={!readOnly && !addingSubtask ? (
             <button
               type="button"
               onClick={() => setAddingSubtask(true)}
-              aria-label="Add subtask"
-              title="Add subtask"
+              aria-label="Add checklist item"
+              title="Add checklist item"
               className="tskd-head-action tahi-focus-ring inline-flex items-center justify-center h-11 w-11 md:h-6 md:w-6"
             >
               <Plus size={15} aria-hidden="true" />
@@ -1119,7 +1151,7 @@ function TaskDetailBody({
                 aria-valuenow={subtaskProgress}
                 aria-valuemin={0}
                 aria-valuemax={100}
-                aria-label="Subtask progress"
+                aria-label="Checklist progress"
                 style={{
                   flex: 1,
                   height: '0.375rem',
@@ -1150,7 +1182,7 @@ function TaskDetailBody({
 
           {subtaskTotal === 0 && !addingSubtask ? (
             <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 500, lineHeight: 1.55, color: 'var(--color-text-subtle)' }}>
-              Break it down if it helps. Subtasks show as progress on the row.
+              Break it down if it helps. Checklist items show as progress on the row.
             </p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
@@ -1187,7 +1219,7 @@ function TaskDetailBody({
                       type="button"
                       className="tskd-x tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 h-11 w-11 md:h-6 md:w-6"
                       aria-label={`Remove ${s.title}`}
-                      title="Remove subtask"
+                      title="Remove checklist item"
                       style={{ marginLeft: 'auto' }}
                       onClick={e => {
                         e.stopPropagation()
@@ -1208,8 +1240,8 @@ function TaskDetailBody({
               className="tskd-input"
               autoFocus
               value={subtaskDraft}
-              aria-label="New subtask"
-              placeholder="Name the subtask, press Enter"
+              aria-label="New checklist item"
+              placeholder="Name the checklist item, press Enter"
               style={{ marginTop: subtaskTotal > 0 ? '0.375rem' : '0.5rem' }}
               onChange={e => setSubtaskDraft(e.target.value)}
               onBlur={() => { setAddingSubtask(false); setSubtaskDraft('') }}
