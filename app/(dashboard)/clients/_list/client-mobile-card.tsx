@@ -71,7 +71,12 @@ export function ClientMobileCard({
         background: selected ? 'var(--color-brand-50)' : 'var(--color-bg)',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+      {/* The three cells of this row are all 2.75rem now, so it centres them
+          rather than topping them: the checkbox glyph, the client name and the
+          health badge read off one line. The checkbox keeps only its negative
+          left margin, the optical one; the vertical pair it used to carry was
+          pulling its glyph half a target above the name. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         <button
           type="button"
           role="checkbox"
@@ -83,7 +88,7 @@ export function ClientMobileCard({
             flexShrink: 0,
             width: '2.75rem',
             height: '2.75rem',
-            margin: '-0.5rem 0 -0.5rem -0.5rem',
+            margin: '0 0 0 -0.5rem',
             border: 'none',
             borderRadius: 'var(--radius-sm)',
             background: 'transparent',
@@ -112,6 +117,11 @@ export function ClientMobileCard({
           </span>
         </button>
 
+        {/* The card's headline action. <ClientCell> is two nowrap lines and an
+            md avatar, which measured 2.375rem: under the target on its own, so
+            the button pads out to 2.75rem rather than setting the name in
+            bigger type. Still display: block, so the cell keeps the full width
+            to truncate a long client name against. */}
         <button
           type="button"
           onClick={onOpen}
@@ -120,7 +130,8 @@ export function ClientMobileCard({
             flex: 1,
             minWidth: 0,
             display: 'block',
-            padding: 0,
+            minHeight: '2.75rem',
+            padding: '0.1875rem 0',
             border: 'none',
             background: 'transparent',
             textAlign: 'left',

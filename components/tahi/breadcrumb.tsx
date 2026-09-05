@@ -39,18 +39,24 @@ export function Breadcrumb({ items }: BreadcrumbProps) {
                 {item.label}
               </span>
             ) : (
+              // The parent link measured 21px on a phone: a line of 13px type
+              // and nothing else. It gets a real 2.75rem target below md,
+              // padded out rather than set in bigger type, and md: hands the
+              // height back to the line. The box has to centre that extra
+              // space, so it becomes a flex box, and the clamp moves onto the
+              // label because text-overflow needs a text container to sit on.
               <Link
                 href={item.href}
-                className="font-medium truncate transition-colors hover:underline"
+                className="tahi-focus-ring inline-flex items-center font-medium transition-colors hover:underline min-h-[2.75rem] md:min-h-0"
                 style={{
                   color: 'var(--color-text-muted)',
                   textDecoration: 'none',
-                  maxWidth: '15rem',
+                  borderRadius: 'var(--radius-sm)',
                 }}
                 onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-brand)' }}
                 onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
               >
-                {item.label}
+                <span className="truncate" style={{ maxWidth: '15rem' }}>{item.label}</span>
               </Link>
             )}
           </span>

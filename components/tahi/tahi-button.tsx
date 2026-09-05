@@ -59,13 +59,27 @@ const BASE_STYLE: React.CSSProperties = {
   transition: 'background-color var(--motion-quick) var(--ease-out), border-color var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
 }
 
-// Padding + font sizes match the design pack. Minimum tap target of 44px
-// on mobile is enforced via min-height where size <= md (sm + md naturally
-// sit below 44px). WCAG 2.5.8 Target Size minimum.
+// Padding + font sizes match the design pack.
+//
+// Height is NOT here. It lives in globals.css as .tahi-btn-sm / -md / -lg,
+// because a phone has to raise all three to a 2.75rem tap target (WCAG 2.5.8)
+// and an inline style cannot carry a media query. An inline minHeight would
+// also outrank the stylesheet, so the two cannot coexist: the class is the
+// only place the size height is stated. A caller that passes its own
+// `style={{ minHeight }}` still wins, and a caller that passes a min-h-*
+// utility wins too, since Tailwind's utilities layer sits after components.
 const SIZE_STYLE: Record<Size, React.CSSProperties> = {
-  sm: { fontSize: '0.75rem',    padding: '0.375rem 0.625rem',  gap: '0.375rem', minHeight: '1.75rem' },
-  md: { fontSize: '0.8125rem',  padding: '0.5rem 0.875rem',    gap: '0.375rem', minHeight: '2.25rem' },
-  lg: { fontSize: '0.875rem',   padding: '0.625rem 1.125rem',  gap: '0.5rem',   minHeight: '2.5rem'  },
+  sm: { fontSize: '0.75rem',    padding: '0.375rem 0.625rem',  gap: '0.375rem' },
+  md: { fontSize: '0.8125rem',  padding: '0.5rem 0.875rem',    gap: '0.375rem' },
+  lg: { fontSize: '0.875rem',   padding: '0.625rem 1.125rem',  gap: '0.5rem'   },
+}
+
+// Static, one per size. Never built by interpolation: a runtime-assembled
+// class name is invisible to the Tailwind scanner and to a reader.
+const SIZE_CLASS: Record<Size, string> = {
+  sm: 'tahi-btn-sm',
+  md: 'tahi-btn-md',
+  lg: 'tahi-btn-lg',
 }
 
 interface StyleForState {
@@ -168,7 +182,7 @@ export function TahiButton({
     <button
       type={rest.type ?? 'button'}
       {...rest}
-      className={className}
+      className={cn(SIZE_CLASS[size], className)}
       disabled={loading || disabled}
       aria-busy={loading || undefined}
       aria-disabled={disabled || loading || undefined}

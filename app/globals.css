@@ -2699,3 +2699,41 @@ html.reduce-motion *::after {
     gap: 0.125rem;
   }
 }
+
+/* ============================================================
+   TAHI BUTTON: SIZE HEIGHTS
+   ============================================================
+   <TahiButton> paints everything else inline, but its height has to change
+   with the viewport and an inline style cannot hold a media query. So the
+   three sizes state their height here instead, and the primitive attaches
+   .tahi-btn-sm / -md / -lg.
+
+   Below md every size clears 2.75rem (WCAG 2.5.8 Target Size, and the house
+   rule): sm sat at 1.75rem and md at 2.25rem, which is what left the Clients
+   pages full of 28px and 36px targets on a phone. From 48rem up each size
+   returns to its design-pack height, so desktop density is untouched. Only
+   the height moved; padding, type and gap are still inline on the primitive.
+
+   Layered as components on purpose: a caller's own min-h-* utility sits in
+   Tailwind's later utilities layer and still wins, and a caller's own inline
+   minHeight outranks any stylesheet rule, so both escape hatches survive.
+
+   The query is the complement of md, not a hand-computed max-width. A
+   max-width: 47.9375rem stops at 767px while the md: utilities these rules
+   pair with start at 768px, and a viewport strictly between the two (which
+   Windows fractional display scaling and some Android devices really do
+   report) would match neither, dropping every sm button back to 28px. This is
+   what Tailwind's own max-md: variant emits, so the two cannot drift. */
+@layer components {
+  .tahi-btn-sm { min-height: 1.75rem; }
+  .tahi-btn-md { min-height: 2.25rem; }
+  .tahi-btn-lg { min-height: 2.5rem; }
+
+  @media not all and (min-width: 48rem) {
+    .tahi-btn-sm,
+    .tahi-btn-md,
+    .tahi-btn-lg {
+      min-height: 2.75rem;
+    }
+  }
+}

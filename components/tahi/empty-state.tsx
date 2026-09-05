@@ -113,16 +113,19 @@ export function EmptyState({
       )}
 
       {ctaLabel && onCtaClick && (
+        // The height is a class pair, not an inline minHeight, so a phone can
+        // raise it: this CTA sat at 2.25rem, which is every "New request" and
+        // "Add a contact" in an empty card landing under the 2.75rem target.
         <button
+          type="button"
           onClick={onCtaClick}
-          className="inline-flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+          className="tahi-focus-ring inline-flex items-center gap-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 min-h-[2.75rem] md:min-h-[2.25rem]"
           style={{
             padding: '0.5rem 1rem',
             background: 'var(--color-brand)',
             borderRadius: 'var(--radius-md)',
             border: 'none',
             cursor: 'pointer',
-            minHeight: '2.25rem',
           }}
         >
           {ctaLabel}
