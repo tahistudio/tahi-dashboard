@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
+import { REVIEWABLE_STATUS } from './request-review'
 import {
   CLIENT_OPEN_STATUSES,
+  CLIENT_REVIEW_STATUS,
   fileOpenDestination,
   invoicePayDestination,
   isDeliveredForClient,
@@ -43,11 +45,29 @@ describe('needsClientReview', () => {
       expect(needsClientReview(s)).toBe(false)
     }
   })
+
+  it('reads the same status the review route enforces', () => {
+    // The home's review signal and the portal review route must never disagree
+    // about which status a client is allowed to act on, so the slug is owned
+    // once in lib/request-review.ts and only aliased here.
+    expect(CLIENT_REVIEW_STATUS).toBe(REVIEWABLE_STATUS)
+    expect(needsClientReview(REVIEWABLE_STATUS)).toBe(true)
+  })
 })
 
 describe('isOpenForClient', () => {
   it('covers the statuses where the studio still holds the work', () => {
-    for (const s of CLIENT_OPEN_STATUSES) expect(isOpenForClient(s)).toBe(true)
+    // Spelled out rather than iterated over CLIENT_OPEN_STATUSES: iterating the
+    // list the predicate is built from cannot fail, not even when a status is
+    // deleted from it. 'on_hold' is the one that differs from the /requests
+    // "In progress" saved view, so it is the one worth pinning.
+    for (const s of ['submitted', 'in_review', 'in_progress', 'on_hold']) {
+      expect(isOpenForClient(s)).toBe(true)
+    }
+  })
+
+  it('exports the same list the predicate reads', () => {
+    expect([...CLIENT_OPEN_STATUSES]).toEqual(['submitted', 'in_review', 'in_progress', 'on_hold'])
   })
 
   it('excludes client_review, delivered and every closed status', () => {
@@ -164,7 +184,16 @@ describe('fileOpenDestination', () => {
   })
 
   it('refuses anything that is not an in-app absolute path', () => {
-    for (const bad of ['https://evil.example.com/x', '//evil.example.com', 'javascript:alert(1)', 'api/uploads/serve']) {
+    for (const bad of [
+      'https://evil.example.com/x',
+      '//evil.example.com',
+      // A browser normalises the backslash for special schemes, so this
+      // resolves protocol-relative to an external host just like '//host'.
+      '/\\evil.example.com',
+      '\\\\evil.example.com',
+      'javascript:alert(1)',
+      'api/uploads/serve',
+    ]) {
       expect(fileOpenDestination({ url: bad })).toEqual({ kind: 'route', routeId: 'files' })
     }
   })

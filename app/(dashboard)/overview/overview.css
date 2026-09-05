@@ -408,6 +408,16 @@
 
 .ov-cta{ height:38px; padding:0 16px; border-radius:11px; border:none; background:var(--brand); color:#fff; font:600 13.5px 'Manrope',sans-serif; cursor:pointer; }
 .ov-cta.ghost{ background:var(--bg); border:1px solid var(--border); color:var(--text); }
+/* The client home's Pay button. It sat at a hardcoded inline 28px with no
+   mobile override, which is under half the 44px minimum, on the one control on
+   that page that actually reaches a payment page. It stays compact inside a
+   dense invoice row on a fine pointer and clears 2.75rem wherever the pointer
+   is coarse or the container has gone narrow, the same treatment the queue
+   reorder controls got. */
+.ov-cta.ov-pay{ height:1.75rem; padding:0 0.625rem; font-size:0.75rem; }
+@media (pointer: coarse){
+  .ov-cta.ov-pay{ height:2.75rem; padding:0 1rem; font-size:0.8125rem; }
+}
 
 /* section heading */
 .ov-sec-h{ font:700 11px 'Manrope',sans-serif; letter-spacing:.06em; text-transform:uppercase; color:var(--text-faint); margin:26px 0 2px; }
@@ -427,6 +437,7 @@
   .ov-tb-lanes{ grid-template-columns:1fr; }
   /* Narrow enough to be a phone whatever the pointer reports. */
   .ln-q .ln-q-ctl button{ width:2.75rem; height:2.75rem; }
+  .ov-cta.ov-pay{ height:2.75rem; padding:0 1rem; font-size:0.8125rem; }
   /* mobile fit fixes */
   .ov-hero-fig{ display:none; }
   .ov-hero .ov-hero-num{ font-size:36px; }

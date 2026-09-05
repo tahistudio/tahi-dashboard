@@ -682,7 +682,19 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
 
   // ── data ───────────────────────────────────────────────────────────────────
   const { data: activityData } = useResource<ActivityResp>('/api/portal/activity')
-  const { data: requestsData } = useResource<RequestsResp>('/api/portal/requests?status=active')
+  // Page-bounded on purpose. /api/portal/requests defaults to 50 rows ordered
+  // by updatedAt desc and caps at 500, so a migrated client with years of
+  // history would have had "Open requests" and "Next delivery" computed from
+  // the 50 most recently touched rows. 200 covers the real books with room.
+  const { data: requestsData } = useResource<RequestsResp>('/api/portal/requests?status=active&limit=200')
+  // The review signal gets its OWN query rather than a slice of the one above.
+  // A request sitting in client_review is by definition not being touched, so
+  // its updatedAt goes stale and it is the first row to fall off a page of the
+  // active list. Reading it back by exact status means "nothing waiting on you"
+  // can never be an artefact of pagination.
+  const { data: reviewData } = useResource<RequestsResp>(
+    '/api/portal/requests?status=client_review&limit=200',
+  )
   const { data: invoicesData } = useResource<InvoicesResp>('/api/portal/invoices?status=all')
   const { data: subData } = useResource<SubscriptionResp>('/api/portal/subscription')
 
@@ -712,7 +724,10 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // them, and approving a delivery now moves it OUT of the count rather than
   // parking it there forever.
   const buckets = useMemo(() => partitionClientRequests(requests), [requests])
-  const inReview = buckets.review
+  // The dedicated status=client_review read is authoritative once it lands. The
+  // page-one slice of the active list stands in until then, so the figure never
+  // flashes zero on first paint.
+  const inReview = useMemo(() => reviewData?.requests ?? buckets.review, [reviewData, buckets.review])
   const openReqs = buckets.open
   const nextDelivery = useMemo(() => {
     const dated = openReqs
@@ -747,7 +762,21 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       }
       // In-app paths need the basePath prefix that next/navigation applies for
       // us and window.open does not; a hosted pay link is already absolute.
-      window.open(dest.url.startsWith('/') ? apiPath(dest.url) : dest.url, '_blank', 'noopener,noreferrer')
+      const url = dest.url.startsWith('/') ? apiPath(dest.url) : dest.url
+      // 'noopener' in the feature string makes window.open return null even
+      // when the tab did open (that is what the spec says it returns), so a
+      // blocked-popup check would fire on every success. The handle is taken
+      // plainly instead and the opener reference severed on the way out, which
+      // is the same protection. A null handle then genuinely means the tab was
+      // suppressed: a popup blocker, or the embedded browser an email client
+      // opens a link in. Pay is the highest-value action on this page and must
+      // never be a button that does nothing, so it navigates in place instead.
+      const opened = window.open(url, '_blank')
+      if (opened) {
+        opened.opener = null
+        return
+      }
+      window.location.href = url
     },
     [go],
   )
@@ -772,10 +801,14 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         .map(r => r.title)
         .join(' · '),
       verb: 'Review',
-      // One waiting delivery opens that delivery; several open the list they
-      // are all on.
+      // One waiting delivery opens that delivery; several open the list
+      // already narrowed to them. /requests reads ?status= off the URL
+      // (lib/requests-url-state.ts), so the client lands on the same rows the
+      // prompt counted rather than on everything they have ever asked for.
       onAct: () =>
-        inReview.length === 1 ? go(requestRouteId(inReview[0].id)) : go('requests'),
+        inReview.length === 1
+          ? go(requestRouteId(inReview[0].id))
+          : go('requests?status=client_review'),
     })
   }
   if (nearestUnpaid) {
@@ -787,7 +820,13 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         nearestUnpaid.dueDate,
       )}`,
       verb: 'Pay',
-      onAct: () => openDestination(invoicePayDestination(nearestUnpaid)),
+      // Guarded in JS as well as visually. NeedsYou declares a `ro` prop but
+      // does not read it, so the only thing standing between an impersonating
+      // admin and the client's live Stripe page was the CSS pointer-events
+      // rule on .nr-verb, which a keyboard walks straight past. The Invoices
+      // card disables its own Pay under `ro`; the same verb answers the same
+      // way here.
+      onAct: ro ? undefined : () => openDestination(invoicePayDestination(nearestUnpaid)),
     })
   }
   // Only when there is somewhere to go. /calls is a studio page that redirects
@@ -810,7 +849,21 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // ── vitals ──────────────────────────────────────────────────────────────────
   const vitals: VitalItem[] = [
     { lbl: 'Open requests', num: openReqs.length, sub: 'in progress' },
-    { lbl: 'In review', num: inReview.length, muted: inReview.length === 0, sub: 'waiting on you' },
+    // Not "In review": REQ_META already uses those two words for the in_review
+    // status, which is the STUDIO reviewing, and those rows are counted in
+    // "Open requests" beside this one. A client with three requests chipped
+    // "In review" would have read "In review 0" directly under them. This vital
+    // counts client_review only, so it takes the label the client already sees
+    // for exactly that cut on /requests (CLIENT_SAVED_VIEWS 'awaiting').
+    {
+      lbl: 'Waiting on you',
+      num: inReview.length,
+      muted: inReview.length === 0,
+      sub:
+        inReview.length === 0
+          ? 'nothing to approve'
+          : `${inReview.length === 1 ? 'delivery' : 'deliveries'} to approve`,
+    },
     {
       lbl: 'Next delivery',
       num: nextDelivery ? deliveryLabel(nextDelivery.dueDate) : 'None',
@@ -1066,10 +1119,15 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
                           <b style={{ color: 'var(--text)', font: "700 13px 'Manrope',sans-serif" }}>
                             {formatNative(inv.totalAmount, inv.currency ?? 'NZD')}
                           </b>
+                          {/* Sizing lives in overview.css under .ov-pay, not in
+                              an inline height, so a coarse pointer and the
+                              narrow container can raise it to the 2.75rem touch
+                              minimum. This is the only control on the client
+                              home that reaches a payment page. */}
                           <button
-                            className="ov-cta"
+                            className="ov-cta ov-pay"
                             disabled={ro}
-                            style={{ height: 28, fontSize: 11.5, padding: '0 10px', ...payDisabled }}
+                            style={payDisabled}
                             onClick={() => openDestination(invoicePayDestination(inv))}
                           >
                             Pay

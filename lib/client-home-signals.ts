@@ -24,16 +24,35 @@
  *      back to a list when there is genuinely no item to open.
  *
  * Pure and dependency-free on purpose: no React, no fetch, no DOM, so the
- * arithmetic that drives the primary client surface is unit-testable.
+ * arithmetic that drives the primary client surface is unit-testable. The one
+ * import is another pure status module, so the vocabulary has a single owner.
  */
 
-/** The one request status that is genuinely waiting on the client. */
-export const CLIENT_REVIEW_STATUS = 'client_review'
+import { REVIEWABLE_STATUS } from '@/lib/request-review'
+
+/**
+ * The one request status that is genuinely waiting on the client. Re-exported
+ * from lib/request-review.ts rather than redeclared: that module is the one
+ * that decides what a client may review and what approving writes, and a
+ * second copy of the slug here is exactly the drift lib/status-config.ts warns
+ * about. The alias exists so this module reads in the home's own vocabulary.
+ */
+export { REVIEWABLE_STATUS as CLIENT_REVIEW_STATUS }
 
 /** Terminal state after the client approves a delivery. Done, not pending. */
 export const CLIENT_DELIVERED_STATUS = 'delivered'
 
-/** Statuses where the studio, not the client, still holds the work. */
+/**
+ * Statuses where the studio, not the client, still holds the work.
+ *
+ * Deliberately WIDER than CLIENT_ACTIVE_STATUSES in lib/requests-views.ts,
+ * which drives the /requests "In progress" saved view: this list adds
+ * 'on_hold'. A vital labelled "Open requests" is a count of everything still
+ * open on the client's account, and a paused request is still open work the
+ * studio owes them; hiding it would make the home under-report. The saved view
+ * is a narrower reading on purpose ("what is moving right now"). If the two are
+ * ever meant to agree, change them together.
+ */
 export const CLIENT_OPEN_STATUSES: readonly string[] = [
   'submitted',
   'in_review',
@@ -43,7 +62,7 @@ export const CLIENT_OPEN_STATUSES: readonly string[] = [
 
 /** True only when the request is sitting in the client's court. */
 export function needsClientReview(status: string): boolean {
-  return status === CLIENT_REVIEW_STATUS
+  return status === REVIEWABLE_STATUS
 }
 
 /** True while the studio is still moving the request along. */
@@ -105,9 +124,14 @@ function isSafeExternalUrl(value: string): boolean {
   return /^https?:\/\/[^/]/i.test(value)
 }
 
-/** In-app absolute path only: one leading slash, no scheme, no host. */
+/**
+ * In-app absolute path only: one leading slash, no scheme, no host. The second
+ * character matters as much as the first. '//host' is protocol-relative, and
+ * browsers normalise a backslash to a forward slash for special schemes, so
+ * '/\host' resolves off-site too. Both are rejected.
+ */
 function isSafeAppPath(value: string): boolean {
-  return value.startsWith('/') && !value.startsWith('//')
+  return /^\/(?![/\\])/.test(value)
 }
 
 function trimmed(value: string | null | undefined): string {
