@@ -26,6 +26,9 @@ import { useUserPreference, oneOf } from '@/lib/use-user-preference'
 
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
+// Shared with the invoice detail page so the two surfaces cannot disagree
+// about what raised a bill.
+import { SourceBadge } from './source-badge'
 import { Card } from '@/components/tahi/card'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { SlideOver } from '@/components/tahi/slide-over'
@@ -65,15 +68,6 @@ const STATUS_TONE: Record<string, { label: string; tone: BadgeTone }> = {
   overdue:      { label: 'Overdue',     tone: 'danger'   },
   paid:         { label: 'Paid',        tone: 'positive' },
   written_off:  { label: 'Written Off', tone: 'neutral'  },
-}
-
-// Source -> badge tone. Manual = neutral, Xero = teal (close to its
-// brand cyan), Stripe = purple. Brand-correct enough to be obvious
-// without hardcoding hex inside the row.
-const SOURCE_TONE: Record<string, { label: string; tone: BadgeTone }> = {
-  manual: { label: 'Manual', tone: 'neutral' },
-  xero:   { label: 'Xero',   tone: 'teal'    },
-  stripe: { label: 'Stripe', tone: 'purple'  },
 }
 
 const SUPPORTED_CURRENCIES = ['NZD', 'USD', 'AUD', 'GBP', 'EUR'] as const
@@ -127,12 +121,6 @@ const PAY_LINK_STYLE: React.CSSProperties = {
 function StatusBadge({ status, dueDate }: { status: string; dueDate: string | null }) {
   const eff = effectiveStatus({ status, dueDate })
   const cfg = STATUS_TONE[eff] ?? STATUS_TONE['draft']
-  return <Badge tone={cfg.tone} variant="soft" size="sm">{cfg.label}</Badge>
-}
-
-function SourceBadge({ source }: { source: string | null }) {
-  const key = source ?? 'manual'
-  const cfg = SOURCE_TONE[key] ?? SOURCE_TONE['manual']
   return <Badge tone={cfg.tone} variant="soft" size="sm">{cfg.label}</Badge>
 }
 

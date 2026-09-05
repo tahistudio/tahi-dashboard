@@ -4,7 +4,8 @@ import { useState, useCallback, useEffect } from 'react'
 import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, RefreshCw, FileText, Sparkles, Send, X, CreditCard, Mail, Lock } from 'lucide-react'
+import { ArrowLeft, RefreshCw, FileText, Sparkles, Send, X, CreditCard, Mail, Lock, ExternalLink } from 'lucide-react'
+import { SourceBadge } from '../source-badge'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
 import { Card } from '@/components/tahi/card'
 import { EmptyState } from '@/components/tahi/empty-state'
@@ -34,6 +35,9 @@ interface InvoiceRow {
   xeroInvoiceId?: string | null
   // Stripe hosted invoice page, served to the client so they can pay.
   payUrl?: string | null
+  // The same page under its column name on the admin projection, so the
+  // studio can open what the client sees without a round trip to Stripe.
+  stripeHostedInvoiceUrl?: string | null
   source: string | null
   status: string
   amountUsd: number
@@ -220,6 +224,10 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
   const status = effectiveStatus(invoice)
   const statusCfg = STATUS_CFG[status] ?? STATUS_CFG['draft']
 
+  // One pay page, two projections: the portal route calls it payUrl, the admin
+  // route returns the column as stripeHostedInvoiceUrl.
+  const payUrl = invoice.payUrl ?? invoice.stripeHostedInvoiceUrl ?? null
+
   const subtotal = items.reduce((s, it) => s + it.totalUsd, 0)
 
   return (
@@ -306,15 +314,12 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
           {invoice.paidAt && <MetaField label="Paid" value={formatDate(invoice.paidAt)} />}
           {invoice.stripeInvoiceId && <MetaField label="Stripe ID" value={invoice.stripeInvoiceId} isPrivate />}
           {invoice.xeroInvoiceId && <MetaField label="Xero ID" value={invoice.xeroInvoiceId.slice(0, 8)} isPrivate />}
-          <MetaField
-            label="Source"
-            value={invoice.source === 'xero' ? 'Xero' : invoice.source === 'stripe' ? 'Stripe' : 'Manual'}
-          />
+          <MetaField label="Source" value={<SourceBadge source={invoice.source} />} />
         </div>
 
         {/* Client pay CTA. Only for a bill that is actually payable, and only
             when Stripe has given us a hosted invoice page for it. */}
-        {!isAdmin && invoice.payUrl && status !== 'paid' && status !== 'written_off' && (
+        {!isAdmin && payUrl && status !== 'paid' && status !== 'written_off' && (
           <div
             style={{
               display: 'flex',
@@ -327,7 +332,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
             }}
           >
             <a
-              href={invoice.payUrl}
+              href={payUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="tahi-focus-ring"
@@ -350,6 +355,47 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
             </a>
             <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
               Secure payment page, hosted by Stripe.
+            </span>
+          </div>
+        )}
+
+        {/* The studio's view of the same page. "Copy Payment Link" below asks
+            Stripe for it again; this is the link we already stored, visible
+            without a click so Liam can see whether a bill is actually payable
+            and open exactly what the client was sent. */}
+        {isAdmin && payUrl && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              flexWrap: 'wrap',
+              marginTop: '1.25rem',
+              paddingTop: '1.25rem',
+              borderTop: '1px solid var(--color-border-subtle)',
+            }}
+          >
+            <a
+              href={payUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="tahi-focus-ring"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                minHeight: '2.75rem',
+                fontSize: '0.875rem',
+                fontWeight: 600,
+                color: 'var(--color-brand)',
+                textDecoration: 'none',
+              }}
+            >
+              <ExternalLink style={{ width: 14, height: 14 }} aria-hidden="true" />
+              Client pay page
+            </a>
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
+              What the client sees when they pay.
             </span>
           </div>
         )}
@@ -644,15 +690,15 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
 
 // ─── Helper sub-components ────────────────────────────────────────────────────
 
-function MetaField({ label, value, highlight, isPrivate }: { label: string; value: string; highlight?: boolean; isPrivate?: boolean }) {
+function MetaField({ label, value, highlight, isPrivate }: { label: string; value: React.ReactNode; highlight?: boolean; isPrivate?: boolean }) {
   return (
     <div>
       <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.125rem' }}>
         {label}
       </p>
-      <p {...(isPrivate ? { 'data-private': true } : {})} style={{ fontSize: '0.8125rem', fontWeight: 500, color: highlight ? 'var(--color-danger)' : 'var(--color-text)' }}>
+      <div {...(isPrivate ? { 'data-private': true } : {})} style={{ fontSize: '0.8125rem', fontWeight: 500, color: highlight ? 'var(--color-danger)' : 'var(--color-text)' }}>
         {value}
-      </p>
+      </div>
     </div>
   )
 }
