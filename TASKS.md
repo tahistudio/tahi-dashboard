@@ -122,7 +122,7 @@ Decisions only Liam can make: ANSWERED.
 - Invoice number: Tahi's own sequence pushed into Xero (we control it; CT.14 already wants a real number). Both would be unique; he does not mind, so use ours.
 - A hand mark-paid from the dashboard pushes the payment back to the rail (mark paid in Xero, void the open Stripe invoice).
 - Xero-rail email: both, behind a studio toggle (send our template with the portal link, let Xero send its PDF, or both).
-- Backfill channel per client BY HAND (a short pass over the client book), not by rule, so a wrong guess never bills a client through the wrong system.
+- Backfill channel per client BY HAND, not by rule. Liam: most orgs in the client book are dummy, so only the handful of real clients need a value; the rest stay unset (NULL falls back to the studio default and nothing bills).
 - The client sees only what they need to act: for a Xero invoice, a How to pay block (amount, due date, invoice number as reference, and the pay-now link when present). No internal channel label.
 
 
