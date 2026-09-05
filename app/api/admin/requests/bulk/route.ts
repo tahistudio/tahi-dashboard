@@ -315,14 +315,24 @@ export async function PATCH(req: NextRequest) {
   // both status and assigneeId, and never the incoming one: precisely the
   // drift the shared helper exists to prevent.
   //
-  // Bell entries per row, email suppressed. This loop runs once per selected
-  // request, so a twenty row "Mark delivered" for a client with three contacts
-  // is sixty separate messages to the same three people, sequentially, and
-  // Resend's two a second ceiling refuses most of them. The bell rows are
-  // cheap, carry their own title and deep link, and stay.
+  // Bell entries per row. The email is suppressed per client, not per call:
+  // this loop runs once per selected request, so a twenty row "Mark delivered"
+  // for a client with three contacts would be sixty separate messages to the
+  // same three people, sequentially, against a Resend account that allows two a
+  // second. Suppressing it unconditionally cost the other half: selecting ONE
+  // row and pressing Mark delivered from the bulk bar sent that client nothing,
+  // while the identical move from the detail page or the board emailed them.
+  // One row for a client is a single move by another door, and keeps its email.
+  //
+  // The better answer for a real batch is one digest per client ("3 requests
+  // delivered") rather than silence; this holds the line until that exists.
   const nextStatus = typeof updates.status === 'string' ? updates.status : null
   if (nextStatus) {
     const touched = await loadRequestRows(drizzle, rows.map((r) => r.id))
+    const touchedPerOrg = new Map<string, number>()
+    for (const row of touched) {
+      touchedPerOrg.set(row.orgId, (touchedPerOrg.get(row.orgId) ?? 0) + 1)
+    }
     for (const row of touched) {
       await emitRequestStatusChanged(drizzle, {
         id: row.id,
@@ -331,7 +341,7 @@ export async function PATCH(req: NextRequest) {
         assigneeId: row.assigneeId ?? null,
         isInternal: row.isInternal === true,
         brandId: row.brandId ?? null,
-      }, nextStatus, { clientEmail: false })
+      }, nextStatus, { clientEmail: touchedPerOrg.get(row.orgId) === 1 })
     }
   }
 

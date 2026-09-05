@@ -9,10 +9,13 @@
  *      when the caller actually read requests.brand_id. Neither caller did, so
  *      a contact scoped to brand A was told about brand B's work and handed a
  *      link they would be refused.
- *   2. The email suppression on the bulk door. That loop runs once per selected
- *      request, so a twenty row "Mark delivered" for a client with three
- *      contacts was sixty sequential messages to the same three people, against
- *      a Resend account that allows two a second.
+ *   2. The email suppression on the bulk door, which is per client rather than
+ *      per call. That loop runs once per selected request, so a twenty row
+ *      "Mark delivered" for a client with three contacts was sixty sequential
+ *      messages to the same three people, against a Resend account that allows
+ *      two a second. Suppressing it for every batch cost the other half:
+ *      selecting one row and pressing Mark delivered emailed that client
+ *      nothing, while the identical move from the detail page did.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -182,6 +185,15 @@ describe('PATCH /api/admin/requests/bulk, the client fan-out', () => {
     { id: 'req_2', orgId: 'org_client', title: 'Two', assigneeId: null, isInternal: false, brandId: null },
   ]
 
+  /** id -> the clientEmail option that row was emitted with. */
+  function emailByRequest(): Record<string, boolean | undefined> {
+    const out: Record<string, boolean | undefined> = {}
+    for (const [, subject, , options] of vi.mocked(emitRequestStatusChanged).mock.calls) {
+      out[subject.id] = options?.clientEmail
+    }
+    return out
+  }
+
   it('emits per row, with the brand, and suppresses the client email', async () => {
     // Two reads of the same rows: the scope check, then the re-read after the
     // write that the effects are built from.
@@ -199,6 +211,35 @@ describe('PATCH /api/admin/requests/bulk, the client fan-out', () => {
     }
     const brands = vi.mocked(emitRequestStatusChanged).mock.calls.map(([, subject]) => subject.brandId)
     expect(brands).toEqual(['brand_a', null])
+  })
+
+  it('keeps the email when the batch holds one row for that client', async () => {
+    // Selecting a single row and pressing Mark delivered from the bulk bar is
+    // the same move as the detail page's, and used to be the silent one.
+    const one = [rows[0]]
+    dbMock.state.queues = { requests: [one, one] }
+
+    const res = await patchBulk(
+      patch('/api/admin/requests/bulk', { ids: ['req_1'], status: 'delivered' }),
+    )
+    expect(res.status).toBe(200)
+    expect(emailByRequest()).toEqual({ req_1: true })
+  })
+
+  it('counts per client, not per batch', async () => {
+    // One client moving twice is a fan-out to hold back; the other client in
+    // the same selection is moving once and should still hear about it.
+    const mixed = [
+      ...rows,
+      { id: 'req_3', orgId: 'org_other', title: 'Three', assigneeId: null, isInternal: false, brandId: null },
+    ]
+    dbMock.state.queues = { requests: [mixed, mixed] }
+
+    const res = await patchBulk(
+      patch('/api/admin/requests/bulk', { ids: ['req_1', 'req_2', 'req_3'], status: 'client_review' }),
+    )
+    expect(res.status).toBe(200)
+    expect(emailByRequest()).toEqual({ req_1: false, req_2: false, req_3: true })
   })
 
   it('still tells nobody when the batch changes no status', async () => {
