@@ -633,7 +633,7 @@ const TOOLS: ToolDef[] = [
     notes: prop('string', 'Invoice notes'),
     dueDate: prop('string', 'Due date in YYYY-MM-DD format'),
   }, ['orgId', 'amountUsd', 'totalUsd']),
-  tool('update_invoice', 'Update an existing invoice: status, notes, due date, owner and the paid / sent dates. Amounts and line items are not editable here, delete the invoice and create a fresh one instead. This does NOT send it: flipping an invoice to the client is send_invoice_email, which is the only door that emails the billing contacts and raises their bell row.', {
+  tool('update_invoice', 'Update an existing invoice: status, notes, due date, owner and the paid / sent dates. Amounts and line items are not editable here, delete the invoice and create a fresh one instead. This does NOT send it: flipping an invoice to the client is send_invoice_email, which is the only door that emails the billing contacts and raises their bell row. Moving the status to paid PUSHES BACK TO THE RAIL after the local write: a Xero-sourced invoice gets a payment recorded against the bank account code in the setting invoicing.xeroPaymentAccountCode (skipped, not guessed, when that is unset), and a Stripe-sourced one is marked paid out of band in Stripe. The push never blocks the local write and its outcome comes back as pushback { rail, status: done | skipped | failed, reason? }. Pass pushback false to record the payment locally only, for money the rail already knows about. Only a real transition into paid pushes; re-patching an already-paid invoice does not, so it cannot double-post.', {
     invoiceId: prop('string', 'Invoice ID'),
     status: prop('string', 'Updated status: draft, overdue, paid, written_off. To send an invoice use send_invoice_email instead, which sets sent for you.'),
     notes: prop('string', 'Updated invoice notes'),
@@ -641,6 +641,7 @@ const TOOLS: ToolDef[] = [
     orgId: prop('string', 'Reassign invoice to a different client organisation ID'),
     paidAt: prop('string', 'When the money actually landed, full ISO 8601 timestamp, or null to clear (rejected alongside status paid). Setting status paid stamps this for you if you omit it; pass it to backdate a bank transfer. /financial-reports counts revenue from this, not from status.'),
     sentAt: prop('string', 'When the invoice went out, ISO 8601, or null to clear. Setting status sent stamps this for you if you omit it.'),
+    pushback: prop('boolean', 'Default true. Set false to record a payment locally WITHOUT telling Stripe or Xero, for money the rail already knows about (a Stripe card payment, a Xero payment reconciled in Xero). Ignored on any status other than paid.'),
   }, ['invoiceId']),
   tool('send_invoice_email', 'Send an invoice to the client: emails every billing contact (portal admins + the primary contact) the invoice with a Stripe pay link and a portal deep link, marks the invoice sent, and raises the client bell row. Creating a draft invoice does NOT notify anyone; this is the send.', {
     invoiceId: prop('string', 'Invoice ID'),
@@ -1449,8 +1450,8 @@ const TOOLS: ToolDef[] = [
   tool('list_reviews', 'List all client reviews and testimonial submissions'),
 
   // ── Settings ──────────────────────────────────────────────────────────
-  tool('get_settings', 'Get all dashboard settings'),
-  tool('update_settings', 'Update a dashboard setting', {
+  tool('get_settings', 'Get all dashboard settings as a key/value map. invoicing.defaultChannel and invoicing.xeroEmailMode are always present, filled in with their studio defaults (stripe, dashboard) when no row holds a value.'),
+  tool('update_settings', 'Update a dashboard setting. Any key is accepted; four are validated and answer 400 with a sentence when the value is wrong: invoicing.defaultChannel (stripe | xero), invoicing.xeroEmailMode (dashboard | xero | both, who emails a Xero-rail invoice), invoicing.xeroPaymentAccountCode (a Xero bank account code, up to 10 letters, digits or dashes; a mark-paid records the payment against it), and invoicing.bankDetails (a JSON string with any of accountName, accountNumber, bankName, referenceHint, all strings; accountNumber may only hold digits, dashes and spaces). An empty value clears any of them.', {
     key: prop('string', 'Setting key'),
     value: prop('string', 'Setting value'),
   }, ['key', 'value']),
@@ -1458,8 +1459,8 @@ const TOOLS: ToolDef[] = [
   // ── AI ────────────────────────────────────────────────────────────────
   // ── Financial / Xero ───────────────────────────────────────────────
   tool('get_financial_health', 'Get financial health: invoice totals, pipeline projections, MRR, Xero P&L, bank balances'),
-  tool('import_xero_invoices', 'Import a page of ACCREC invoices from Xero into the dashboard with auto-match to clients. Invoices already imported are now UPDATED in place (status, subtotal, total, currency, due date, sent date, paid date) instead of skipped, so a status change made in Xero lands here. The update is a diff, so an unchanged invoice is reported as no_change and not rewritten. Status only ever moves forward: Xero cannot demote a sent or paid invoice back to draft, because a dashboard-raised invoice stays DRAFT in Xero until the push-back slice lands. Rows billed on another rail (source not xero) are never touched.'),
-  tool('sync_xero_payments', 'Sync invoice payment statuses from Xero back to the dashboard. Pages through every Xero ACCREC invoice (100 per page, 50 page ceiling) rather than only the first page, updates every known row it has seen, and stamps the paid date from Xero FullyPaidOnDate. Status only ever moves forward, so a stale Xero DRAFT cannot walk a sent or paid invoice backwards. Returns pagesRead, truncated and partial: a truncated or partial read means invoices past the gap were not reconciled.'),
+  tool('import_xero_invoices', 'Import a page of ACCREC invoices from Xero into the dashboard with auto-match to clients. Invoices already imported are now UPDATED in place (status, subtotal, total, currency, due date, sent date, paid date) instead of skipped, so a status change made in Xero lands here. The update is a diff, so an unchanged invoice is reported as no_change and not rewritten. Status only ever moves forward: Xero cannot demote a sent or paid invoice back to draft, because a dashboard-raised invoice stays DRAFT in Xero until the push-back slice lands. Rows billed on another rail (source not xero) are never touched. Also captures Xero online invoice URL (the client pay link) for any invoice Xero has issued and the dashboard has not stored one for, capped at 25 extra fetches per run and reported as payLinks; a failure there leaves the link unset and does not fail the run.'),
+  tool('sync_xero_payments', 'Sync invoice payment statuses from Xero back to the dashboard. Pages through every Xero ACCREC invoice (100 per page, 50 page ceiling) rather than only the first page, updates every known row it has seen, and stamps the paid date from Xero FullyPaidOnDate. Status only ever moves forward, so a stale Xero DRAFT cannot walk a sent or paid invoice backwards. Returns pagesRead, truncated and partial: a truncated or partial read means invoices past the gap were not reconciled. Also captures the Xero online invoice URL (the client pay link) for approved or paid invoices that have none stored, capped at 25 extra fetches per run and reported as payLinks.'),
   tool('get_xero_profit_loss', 'Get Xero Profit and Loss report', {
     fromDate: prop('string', 'Start date YYYY-MM-DD'),
     toDate: prop('string', 'End date YYYY-MM-DD'),

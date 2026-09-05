@@ -42,6 +42,12 @@ import {
   XERO_MAX_PAGES,
   XERO_PAGE_SIZE,
 } from '@/lib/xero-sync'
+import {
+  ONLINE_INVOICE_FETCH_CAP,
+  captureOnlineInvoiceUrls,
+  needsOnlineInvoiceUrl,
+  readOnlineInvoiceUrl,
+} from '@/lib/xero-online-invoice'
 
 // ---------------------------------------------------------------------------
 // Fake D1
@@ -641,5 +647,292 @@ describe('importXeroInvoices', () => {
 
     const set = argOf(byEntry(queries, 'update')[0], 'set') as Record<string, unknown>
     expect(set.status).toBe('written_off')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The Xero pay link (OnlineInvoiceUrl)
+// ---------------------------------------------------------------------------
+//
+// A Xero-rail client has no Stripe hosted page. What they get is Xero's own
+// online invoice, and Xero only issues that URL once the invoice is AUTHORISED
+// (approved by hand in Xero, long after our push, which stays DRAFT on
+// purpose). So the readers are the only things that can ever watch the link
+// appear, and asking for one on a DRAFT is an ERROR at Xero, not an empty
+// answer. Four properties are pinned: it is captured when it exists, it is
+// never asked for when it cannot, the run is capped, and a failure is silent.
+describe('Xero pay link capture', () => {
+  /**
+   * One mocked Xero for both endpoints the readers now call: the paged ACCREC
+   * list, and GET /Invoices/{id}/OnlineInvoice. Returns the endpoints hit, so
+   * "never asked" is asserted against the calls rather than against a result.
+   */
+  function serveXero(opts: {
+    pages?: Array<Array<Record<string, unknown>>>
+    importPage?: Array<Record<string, unknown>>
+    onlineInvoiceUrl?: (xeroInvoiceId: string) => string | null
+  }): string[] {
+    const endpoints: string[] = []
+    vi.mocked(callXeroAPI).mockImplementation(async (_method, endpoint) => {
+      const ep = String(endpoint)
+      endpoints.push(ep)
+
+      const online = /^\/Invoices\/([^/?]+)\/OnlineInvoice$/.exec(ep)
+      if (online) {
+        const url = opts.onlineInvoiceUrl?.(online[1]) ?? null
+        return url ? ({ OnlineInvoices: [{ OnlineInvoiceUrl: url }] } as never) : null
+      }
+
+      if (opts.importPage) return { Invoices: opts.importPage } as never
+
+      const page = Number(/[?&]page=(\d+)/.exec(ep)?.[1] ?? '1')
+      return { Invoices: opts.pages?.[page - 1] ?? [] } as never
+    })
+    return endpoints
+  }
+
+  /** Every OnlineInvoice endpoint the run actually asked for. */
+  function onlineInvoiceCalls(endpoints: string[]): string[] {
+    return endpoints.filter(e => e.endsWith('/OnlineInvoice'))
+  }
+
+  /** The `.set({...})` of the update that wrote a pay link, if there was one. */
+  function payLinkWrite(queries: QueryRecord[]): Record<string, unknown> | undefined {
+    for (const q of byEntry(queries, 'update')) {
+      const set = argOf(q, 'set') as Record<string, unknown> | undefined
+      if (set && 'xeroOnlineInvoiceUrl' in set) return set
+    }
+    return undefined
+  }
+
+  const IMPORT_ORGS = [{ id: 'org-a', name: 'Kowhai Ltd', xeroContactId: 'contact-1' }]
+
+  it('captures the link for an approved invoice the payment sync already knows', async () => {
+    const endpoints = serveXero({
+      pages: [[xeroInvoice({ Status: 'AUTHORISED' })]],
+      onlineInvoiceUrl: () => 'https://in.xero.com/abc123',
+    })
+    const { handle, queries } = makeDb([
+      [{
+        id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'sent', source: 'xero',
+        sentAt: '2026-08-01T00:00:00.000Z', xeroOnlineInvoiceUrl: null,
+      }],
+    ])
+
+    const outcome = await syncXeroPayments(handle as unknown as Db)
+
+    expect(onlineInvoiceCalls(endpoints)).toEqual(['/Invoices/xero-1/OnlineInvoice'])
+    expect(payLinkWrite(queries)).toMatchObject({ xeroOnlineInvoiceUrl: 'https://in.xero.com/abc123' })
+    expect(outcome.body.payLinks).toMatchObject({ candidates: 1, fetched: 1, captured: 1, failed: 0, deferred: 0 })
+    // The status already agreed with Xero, so no status write happened: the
+    // capture has to survive the no-change bail-out, which is the whole point.
+    expect(outcome.body).toMatchObject({ updated: 0 })
+  })
+
+  it('never asks Xero for a link on a DRAFT, which would be an error', async () => {
+    const endpoints = serveXero({
+      pages: [[xeroInvoice({ Status: 'DRAFT' })]],
+      onlineInvoiceUrl: () => 'https://in.xero.com/never-asked-for',
+    })
+    const { handle, queries } = makeDb([
+      [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'draft', source: 'xero', xeroOnlineInvoiceUrl: null }],
+    ])
+
+    const outcome = await syncXeroPayments(handle as unknown as Db)
+
+    expect(onlineInvoiceCalls(endpoints)).toEqual([])
+    expect(payLinkWrite(queries)).toBeUndefined()
+    expect(outcome.body.payLinks).toMatchObject({ candidates: 0, fetched: 0, captured: 0 })
+  })
+
+  it('never asks twice: a row that already holds a link is left alone', async () => {
+    const endpoints = serveXero({
+      pages: [[xeroInvoice({ Status: 'AUTHORISED' })]],
+      onlineInvoiceUrl: () => 'https://in.xero.com/second-fetch',
+    })
+    const { handle, queries } = makeDb([
+      [{
+        id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'sent', source: 'xero',
+        sentAt: '2026-08-01T00:00:00.000Z', xeroOnlineInvoiceUrl: 'https://in.xero.com/already-here',
+      }],
+    ])
+
+    await syncXeroPayments(handle as unknown as Db)
+
+    expect(onlineInvoiceCalls(endpoints)).toEqual([])
+    expect(payLinkWrite(queries)).toBeUndefined()
+  })
+
+  it('never asks for a row billed on the Stripe rail', async () => {
+    const endpoints = serveXero({
+      pages: [[xeroInvoice({ Status: 'AUTHORISED' })]],
+      onlineInvoiceUrl: () => 'https://in.xero.com/wrong-rail',
+    })
+    const { handle } = makeDb([
+      [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'sent', source: 'stripe', xeroOnlineInvoiceUrl: null }],
+    ])
+
+    await syncXeroPayments(handle as unknown as Db)
+
+    expect(onlineInvoiceCalls(endpoints)).toEqual([])
+  })
+
+  it('caps the extra fetches per run and defers the rest', async () => {
+    // A first sync over a ledger of approved invoices must not spend hundreds
+    // of calls on links. The backlog drains across the following hourly runs.
+    const total = ONLINE_INVOICE_FETCH_CAP + 7
+    const rows = Array.from({ length: total }, (_, i) => xeroInvoice({ InvoiceID: `xero-${i}`, Status: 'AUTHORISED' }))
+    const endpoints = serveXero({
+      pages: [rows],
+      onlineInvoiceUrl: id => `https://in.xero.com/${id}`,
+    })
+    const { handle } = makeDb([
+      rows.map((_, i) => ({
+        id: `inv-${i}`, xeroInvoiceId: `xero-${i}`, status: 'sent', source: 'xero',
+        sentAt: '2026-08-01T00:00:00.000Z', xeroOnlineInvoiceUrl: null,
+      })),
+    ])
+
+    const outcome = await syncXeroPayments(handle as unknown as Db)
+
+    expect(onlineInvoiceCalls(endpoints)).toHaveLength(ONLINE_INVOICE_FETCH_CAP)
+    expect(outcome.body.payLinks).toMatchObject({
+      candidates: total,
+      fetched: ONLINE_INVOICE_FETCH_CAP,
+      captured: ONLINE_INVOICE_FETCH_CAP,
+      deferred: 7,
+    })
+  })
+
+  it('tolerates a failed fetch: no link, no failed run', async () => {
+    // Xero rate limits, the org has online invoicing off, the invoice was
+    // voided between the list read and this one. All of it leaves the column
+    // NULL, which is the state every draft is already in.
+    const endpoints = serveXero({
+      pages: [[xeroInvoice({ Status: 'AUTHORISED' })]],
+      onlineInvoiceUrl: () => null,
+    })
+    const { handle, queries } = makeDb([
+      [{
+        id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'sent', source: 'xero',
+        sentAt: '2026-08-01T00:00:00.000Z', xeroOnlineInvoiceUrl: null,
+      }],
+    ])
+
+    const outcome = await syncXeroPayments(handle as unknown as Db)
+
+    expect(onlineInvoiceCalls(endpoints)).toHaveLength(1)
+    expect(payLinkWrite(queries)).toBeUndefined()
+    expect(outcome.ok).toBe(true)
+    expect(outcome.body.payLinks).toMatchObject({ fetched: 1, captured: 0, failed: 1 })
+  })
+
+  it('captures the link for a paid invoice too, which is the client receipt', async () => {
+    const endpoints = serveXero({
+      pages: [[xeroInvoice({ Status: 'PAID', AmountDue: 0, FullyPaidOnDate: '2026-09-01' })]],
+      onlineInvoiceUrl: () => 'https://in.xero.com/paid-one',
+    })
+    const { handle, queries } = makeDb([
+      [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'sent', source: 'xero', xeroOnlineInvoiceUrl: null }],
+    ])
+
+    await syncXeroPayments(handle as unknown as Db)
+
+    expect(onlineInvoiceCalls(endpoints)).toHaveLength(1)
+    expect(payLinkWrite(queries)).toMatchObject({ xeroOnlineInvoiceUrl: 'https://in.xero.com/paid-one' })
+  })
+
+  it('captures on the importer too, for a known row and for one it just created', async () => {
+    const endpoints = serveXero({
+      importPage: [
+        xeroInvoice({ InvoiceID: 'xero-known', Status: 'AUTHORISED' }),
+        xeroInvoice({ InvoiceID: 'xero-new', InvoiceNumber: 'INV-0002', Status: 'AUTHORISED' }),
+        xeroInvoice({ InvoiceID: 'xero-draft', InvoiceNumber: 'INV-0003', Status: 'DRAFT' }),
+      ],
+      onlineInvoiceUrl: id => `https://in.xero.com/${id}`,
+    })
+    const { handle } = makeDb([
+      [{
+        id: 'inv-known', xeroInvoiceId: 'xero-known', status: 'sent', source: 'xero',
+        amountUsd: 1000, totalUsd: 1150, currency: 'NZD', dueDate: '2026-08-15',
+        sentAt: '2026-08-01T00:00:00.000Z', xeroOnlineInvoiceUrl: null,
+      }],
+      IMPORT_ORGS,
+    ])
+
+    const outcome = await importXeroInvoices(handle as unknown as Db, 1)
+
+    // The known approved row and the freshly imported approved row, never the
+    // draft.
+    expect(onlineInvoiceCalls(endpoints).sort()).toEqual([
+      '/Invoices/xero-known/OnlineInvoice',
+      '/Invoices/xero-new/OnlineInvoice',
+    ])
+    expect(outcome.body.payLinks).toMatchObject({ candidates: 2, fetched: 2, captured: 2, failed: 0 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// lib/xero-online-invoice.ts, directly
+// ---------------------------------------------------------------------------
+describe('captureOnlineInvoiceUrls', () => {
+  it('reads the URL out of the Xero shape and ignores everything else', () => {
+    expect(readOnlineInvoiceUrl({ OnlineInvoices: [{ OnlineInvoiceUrl: ' https://in.xero.com/x ' }] }))
+      .toBe('https://in.xero.com/x')
+    // An org with online invoicing switched off, a failed call, a shape change.
+    expect(readOnlineInvoiceUrl({ OnlineInvoices: [] })).toBeNull()
+    expect(readOnlineInvoiceUrl({ OnlineInvoices: [{ OnlineInvoiceUrl: '' }] })).toBeNull()
+    expect(readOnlineInvoiceUrl(null)).toBeNull()
+    expect(readOnlineInvoiceUrl('nope')).toBeNull()
+  })
+
+  it('only queues a row Xero has issued and the dashboard has not stored', () => {
+    expect(needsOnlineInvoiceUrl('sent', null)).toBe(true)
+    expect(needsOnlineInvoiceUrl('paid', '')).toBe(true)
+    expect(needsOnlineInvoiceUrl('sent', 'https://in.xero.com/x')).toBe(false)
+    expect(needsOnlineInvoiceUrl('draft', null)).toBe(false)
+    expect(needsOnlineInvoiceUrl('written_off', null)).toBe(false)
+    expect(needsOnlineInvoiceUrl(null, null)).toBe(false)
+  })
+
+  it('stops at the cap and counts what it left behind', async () => {
+    const asked: string[] = []
+    const { handle } = makeDb()
+    const candidates = Array.from({ length: 5 }, (_, i) => ({ id: `inv-${i}`, xeroInvoiceId: `xero-${i}` }))
+
+    const capture = await captureOnlineInvoiceUrls(
+      handle as unknown as Db,
+      candidates,
+      '2026-09-05T00:00:00.000Z',
+      {
+        cap: 2,
+        fetchOnlineInvoice: async (id) => {
+          asked.push(id)
+          return { OnlineInvoices: [{ OnlineInvoiceUrl: `https://in.xero.com/${id}` }] }
+        },
+      },
+    )
+
+    expect(asked).toEqual(['xero-0', 'xero-1'])
+    expect(capture).toEqual({ candidates: 5, fetched: 2, captured: 2, failed: 0, deferred: 3 })
+  })
+
+  it('swallows a throwing fetch and keeps going', async () => {
+    const { handle, queries } = makeDb()
+
+    const capture = await captureOnlineInvoiceUrls(
+      handle as unknown as Db,
+      [{ id: 'inv-1', xeroInvoiceId: 'xero-1' }, { id: 'inv-2', xeroInvoiceId: 'xero-2' }],
+      '2026-09-05T00:00:00.000Z',
+      {
+        fetchOnlineInvoice: async (id) => {
+          if (id === 'xero-1') throw new Error('Xero 429')
+          return { OnlineInvoices: [{ OnlineInvoiceUrl: 'https://in.xero.com/two' }] }
+        },
+      },
+    )
+
+    expect(capture).toMatchObject({ fetched: 2, captured: 1, failed: 1 })
+    expect(byEntry(queries, 'update')).toHaveLength(1)
   })
 })

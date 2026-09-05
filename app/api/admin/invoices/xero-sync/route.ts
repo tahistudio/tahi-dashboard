@@ -13,7 +13,20 @@ interface XeroContactResponse {
 }
 
 interface XeroInvoiceResponse {
-  Invoices: Array<{ InvoiceID: string; InvoiceNumber?: string; Status: string }>
+  Invoices: Array<{
+    InvoiceID: string
+    InvoiceNumber?: string
+    Status: string
+    /**
+     * Xero's client-facing pay page. Normally ABSENT here: Xero only issues
+     * one for an AUTHORISED or PAID invoice and this route pushes DRAFTs, so
+     * the link is captured later by the syncs (lib/xero-online-invoice.ts).
+     * Read anyway so that if a push ever does come back carrying one (an
+     * update to an invoice already approved in Xero by hand), the link is
+     * stored on the spot instead of waiting an hour for the cron.
+     */
+    OnlineInvoiceUrl?: string
+  }>
 }
 
 interface XeroBrandingTheme {
@@ -233,9 +246,18 @@ export async function POST(req: NextRequest) {
 
       const createdInv = invoiceRes?.Invoices?.[0]
       if (createdInv) {
+        // The push stays DRAFT (Liam, 2026-09-06: auto-approve comes later,
+        // behind a studio setting), so Xero almost never returns a pay link
+        // here. When it does, take it rather than making the client wait for
+        // the next sync.
+        const onlineUrl = typeof createdInv.OnlineInvoiceUrl === 'string' && createdInv.OnlineInvoiceUrl.trim() !== ''
+          ? createdInv.OnlineInvoiceUrl.trim()
+          : null
+
         await database.update(schema.invoices).set({
           xeroInvoiceId: createdInv.InvoiceID,
           source: 'xero',
+          ...(onlineUrl ? { xeroOnlineInvoiceUrl: onlineUrl } : {}),
           updatedAt: now,
         }).where(eq(schema.invoices.id, invId))
 

@@ -8,8 +8,13 @@ import { eq } from 'drizzle-orm'
 import { callXeroAPI } from '@/lib/xero'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { dispatchDomainEvent } from '@/lib/events'
+import {
+  XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY,
+  resolveXeroPaymentAccountCode,
+} from '@/lib/invoice-pay-settings'
 
 type Params = { params: Promise<{ id: string }> }
+type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 // Statuses that mean the payment did not happen, or has been undone. A
 // write-off is deliberately not one of them: on a written-off invoice the
@@ -17,6 +22,153 @@ type Params = { params: Promise<{ id: string }> }
 // 90-day collected, the tax-year totals and the monthly series off paid_at
 // rather than status, so nulling the date there would erase real revenue.
 const UNWINDS_PAYMENT = new Set(['draft', 'sent', 'viewed', 'overdue'])
+
+// ── Push-back ────────────────────────────────────────────────────────────────
+//
+// A hand mark-paid here is usually a bank transfer that landed, and the rail
+// has no way of knowing (Liam, 2026-09-06: "a hand mark-paid from the
+// dashboard pushes the payment back to the rail"). Without this, a Xero
+// invoice stays open in Xero forever and a Stripe invoice keeps chasing the
+// client for money they have already sent.
+//
+// Three rules the implementation below never breaks:
+//
+//   1. It runs AFTER the local write and can never block it. The dashboard is
+//      the source of truth for the paid date; the rail is a copy. A Xero
+//      outage must not stop Liam recording revenue.
+//   2. It only fires on an actual TRANSITION into paid. Re-PATCHing an
+//      already-paid invoice would post a SECOND payment against the same Xero
+//      invoice, which is an over-payment to unpick by hand.
+//   3. It is skippable with `{ pushback: false }`, for a caller reconciling a
+//      payment the rail already knows about. The syncs never come through this
+//      route, but MCP does.
+//
+// The outcome is reported rather than thrown: `{ rail, status, reason? }` in
+// the response body, and on the invoice_paid domain event so automations and
+// outgoing webhooks can see a rail that did not take the payment.
+type PushbackRail = 'xero' | 'stripe'
+
+interface PushbackOutcome {
+  rail: PushbackRail
+  status: 'done' | 'skipped' | 'failed'
+  reason?: string
+}
+
+/** The invoice columns push-back needs, read in the same pre-read as the rest. */
+interface PushbackInvoice {
+  source: string | null
+  xeroInvoiceId: string | null
+  stripeInvoiceId: string | null
+  totalUsd: number | null
+}
+
+/**
+ * Record the payment against the invoice's Xero bank account.
+ *
+ * The account code is a studio setting with NO default on purpose. Posting a
+ * payment to a guessed account is worse than not posting it: it lands in the
+ * ledger, reconciles against nothing, and has to be found and reversed. So an
+ * unset code is reported as a clean skip with the reason, which is what the
+ * settings UI (next slice) turns into a prompt.
+ */
+async function pushPaidToXero(
+  drizzle: D1,
+  xeroInvoiceId: string,
+  amount: number | null,
+  paidOn: string,
+): Promise<PushbackOutcome> {
+  const [row] = await drizzle
+    .select({ value: schema.settings.value })
+    .from(schema.settings)
+    .where(eq(schema.settings.key, XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY))
+    .limit(1)
+
+  const accountCode = resolveXeroPaymentAccountCode(row?.value)
+  if (!accountCode) {
+    return { rail: 'xero', status: 'skipped', reason: 'No Xero payment account code in settings' }
+  }
+
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+    return { rail: 'xero', status: 'skipped', reason: 'Invoice has no positive total to record' }
+  }
+
+  const res = await callXeroAPI('PUT', '/Payments', {
+    Invoice: { InvoiceID: xeroInvoiceId },
+    Account: { Code: accountCode },
+    // Xero wants a plain date here, not a timestamp.
+    Date: paidOn.slice(0, 10),
+    Amount: amount,
+  })
+
+  if (!res) {
+    // callXeroAPI swallows the error into a null and logs it. Common causes:
+    // the invoice is still a DRAFT in Xero (a payment needs an AUTHORISED
+    // invoice), the account code is not a bank account, or the amount exceeds
+    // what is due.
+    return { rail: 'xero', status: 'failed', reason: 'Xero did not accept the payment' }
+  }
+
+  return { rail: 'xero', status: 'done' }
+}
+
+/**
+ * Mark the Stripe invoice paid without charging anyone: the money arrived
+ * somewhere else (a transfer, a cheque, a card taken by hand), which is
+ * exactly what Stripe's paid_out_of_band means. Voiding instead would lose the
+ * revenue from Stripe's own reporting.
+ */
+async function pushPaidToStripe(stripeInvoiceId: string): Promise<PushbackOutcome> {
+  const key = stripeSecretKey()
+  if (!key) {
+    return { rail: 'stripe', status: 'skipped', reason: 'Stripe is not configured' }
+  }
+
+  const res = await fetch(`https://api.stripe.com/v1/invoices/${stripeInvoiceId}/pay`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ paid_out_of_band: 'true' }).toString(),
+  })
+
+  if (!res.ok) {
+    let message = `Stripe answered ${res.status}`
+    try {
+      const data = await res.json() as { error?: { message?: string } }
+      if (data?.error?.message) message = data.error.message
+    } catch { /* keep the status line */ }
+    return { rail: 'stripe', status: 'failed', reason: message }
+  }
+
+  return { rail: 'stripe', status: 'done' }
+}
+
+/**
+ * Tell the rail this invoice was paid. Returns undefined when there is no rail
+ * to tell (a manual invoice, or one that never reached Stripe or Xero), which
+ * is not a failure and is reported as no `pushback` key at all.
+ *
+ * Never throws: the local write has already happened and must stand.
+ */
+async function pushPaymentToRail(
+  drizzle: D1,
+  invoice: PushbackInvoice,
+  paidOn: string,
+): Promise<PushbackOutcome | undefined> {
+  try {
+    if (invoice.source === 'xero' && invoice.xeroInvoiceId) {
+      return await pushPaidToXero(drizzle, invoice.xeroInvoiceId, invoice.totalUsd, paidOn)
+    }
+    if (invoice.source === 'stripe' && invoice.stripeInvoiceId) {
+      return await pushPaidToStripe(invoice.stripeInvoiceId)
+    }
+    return undefined
+  } catch (err) {
+    const rail: PushbackRail = invoice.source === 'xero' ? 'xero' : 'stripe'
+    return { rail, status: 'failed', reason: err instanceof Error ? err.message : 'Push-back failed' }
+  }
+}
 
 // ── GET /api/admin/invoices/[id] ─────────────────────────────────────────────
 export async function GET(req: NextRequest, { params }: Params) {
@@ -104,6 +256,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     orgId?: string
     paidAt?: string | null
     sentAt?: string | null
+    // Opt OUT of telling the rail. Not one of FIELDS: it is a modifier on a
+    // status change, never a change on its own.
+    pushback?: boolean
   }
 
   const FIELDS = ['status', 'dueDate', 'notes', 'orgId', 'paidAt', 'sentAt'] as const
@@ -165,6 +320,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       status: schema.invoices.status,
       paidAt: schema.invoices.paidAt,
       sentAt: schema.invoices.sentAt,
+      // Push-back inputs, read in this same query rather than a second one:
+      // which rail owns the bill, its id there, and the amount to record.
+      source: schema.invoices.source,
+      xeroInvoiceId: schema.invoices.xeroInvoiceId,
+      stripeInvoiceId: schema.invoices.stripeInvoiceId,
+      totalUsd: schema.invoices.totalUsd,
     })
     .from(schema.invoices)
     .where(eq(schema.invoices.id, id))
@@ -224,9 +385,38 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     }
   }
 
+  // Tell the rail. Strictly after the local write (the dashboard is the source
+  // of truth for the paid date and a rail outage must not stop Liam recording
+  // revenue), only on a real transition INTO paid (a repeat PATCH would post a
+  // second Xero payment against the same invoice), and skippable with
+  // `{ pushback: false }` for a caller reconciling a payment the rail already
+  // knows about.
+  let pushback: PushbackOutcome | undefined
+  if (
+    body.status === 'paid'
+    && currentOwner?.status !== 'paid'
+    && body.pushback !== false
+  ) {
+    const paidOn = (typeof patch.paidAt === 'string' ? patch.paidAt : null)
+      ?? currentOwner?.paidAt
+      ?? now
+    pushback = await pushPaymentToRail(
+      drizzle,
+      {
+        source: currentOwner?.source ?? null,
+        xeroInvoiceId: currentOwner?.xeroInvoiceId ?? null,
+        stripeInvoiceId: currentOwner?.stripeInvoiceId ?? null,
+        totalUsd: currentOwner?.totalUsd ?? null,
+      },
+      paidOn,
+    )
+  }
+
   // Fire lifecycle events on a paid / overdue transition (automations +
   // outgoing webhooks). Non-blocking. Other status changes are not lifecycle
-  // events, so they emit nothing.
+  // events, so they emit nothing. The push-back outcome rides along: this
+  // route keeps no audit log of its own, and the event stream is where an
+  // automation or a webhook can see that a rail refused the payment.
   const lifecycleType =
     body.status === 'paid' ? 'invoice_paid' as const
     : body.status === 'overdue' ? 'invoice_overdue' as const
@@ -237,11 +427,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       entityId: id,
       entityType: 'invoice',
       orgId: currentOwner?.orgId ?? null,
-      data: { status: body.status },
+      data: { status: body.status, ...(pushback ? { pushback } : {}) },
     })
   }
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true, ...(pushback ? { pushback } : {}) })
 }
 
 // ── DELETE /api/admin/invoices/[id] ─────────────────────────────────────────
