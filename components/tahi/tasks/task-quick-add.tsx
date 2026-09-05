@@ -135,13 +135,23 @@ export function TaskQuickAdd({ clients, onAdd, disabled = false, now }: TaskQuic
 
   return (
     <div
+      // The class still earns its keep: it clears the inner input's own
+      // outline. The ring itself is painted here rather than left to the
+      // class, because this box has a resting shadow and an inline
+      // box-shadow outranks any stylesheet rule that would replace it.
       className="tahi-focus-within flex flex-col"
+      onFocusCapture={() => setFocused(true)}
+      onBlurCapture={e => {
+        // Only drop the ring when focus leaves the box entirely, not when it
+        // hops from the input to the Add button.
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false)
+      }}
       style={{
         marginTop: '1rem',
-        border: '1px solid var(--color-border)',
+        border: `1px solid ${focused ? 'var(--focus-ring-color)' : 'var(--color-border)'}`,
         borderRadius: '0.875rem',
         background: 'var(--color-bg)',
-        boxShadow: 'var(--shadow-sm)',
+        boxShadow: focused ? 'var(--focus-ring)' : 'var(--shadow-sm)',
         transition: 'border-color var(--motion-quick) var(--ease-out), box-shadow var(--motion-quick) var(--ease-out)',
       }}
     >
@@ -171,8 +181,6 @@ export function TaskQuickAdd({ clients, onAdd, disabled = false, now }: TaskQuic
           aria-label="Add a task"
           placeholder={disabled ? 'Read-only' : 'Add a task, press Enter'}
           onChange={e => setValue(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
           onKeyDown={e => {
             if (e.key === 'Enter') { e.preventDefault(); void submit() }
             if (e.key === 'Escape') setValue('')
