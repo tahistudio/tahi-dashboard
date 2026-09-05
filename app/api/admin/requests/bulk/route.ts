@@ -64,7 +64,9 @@ function chunkIds<T>(ids: readonly T[]): T[][] {
 }
 
 /** The row fields both the scope check and the status effects need. */
-type BulkRow = { id: string; orgId: string; title: string; assigneeId: string | null }
+type BulkRow = { id: string; orgId: string; title: string; assigneeId: string | null
+  isInternal: boolean | null
+}
 
 /** Load the given requests in chunks D1 will accept. */
 async function loadRequestRows(drizzle: Drizzle, ids: readonly string[]): Promise<BulkRow[]> {
@@ -316,7 +318,7 @@ export async function PATCH(req: NextRequest) {
         title: row.title,
         orgId: row.orgId,
         assigneeId: row.assigneeId ?? null,
-        isInternal: row.isInternal === 1,
+        isInternal: row.isInternal === true,
       }, nextStatus)
     }
   }
