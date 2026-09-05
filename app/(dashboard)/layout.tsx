@@ -104,9 +104,15 @@ export default async function DashboardLayout({
     isAdmin, isSuperAdmin: false, canManagePermissions: isAdmin,
     features: {},
   }
+  // The client's seat at their own org, resolved from the SAME contacts row the
+  // permission resolver already reads, so the nav costs no extra query. Stays
+  // null for team sessions and for anyone we could not resolve, which the nav
+  // treats as "unknown, show it" (see filterNav's clientPortalRole).
+  let clientPortalRole: 'admin' | 'member' | null = null
   try {
     const drizzle = (await db()) as unknown as D1
     const access = await resolvePermissions(drizzle, { userId, orgId })
+    clientPortalRole = access.portalRole ?? null
 
     // Workspace module toggles (settings Modules tab) fold into the nav feature
     // map here, server-side, so a disabled module hides its feature for EVERYONE
@@ -198,6 +204,7 @@ export default async function DashboardLayout({
           <AppSidebar
             isAdmin={isAdmin}
             features={perms.features}
+            clientPortalRole={clientPortalRole}
             brandName={portalBrand.name}
             brandLogoUrl={portalBrand.logoUrl}
           />
@@ -211,7 +218,7 @@ export default async function DashboardLayout({
               </div>
             </main>
           </div>
-          <MobileBottomNav isAdmin={isAdmin} features={perms.features} />
+          <MobileBottomNav isAdmin={isAdmin} features={perms.features} clientPortalRole={clientPortalRole} />
           <ProductTour isAdmin={isAdmin} />
           <KeyboardShortcuts />
         </div>

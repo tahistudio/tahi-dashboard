@@ -40,11 +40,16 @@ import * as React from 'react'
 export function AppSidebar({
   isAdmin,
   features,
+  clientPortalRole,
   brandName,
   brandLogoUrl,
 }: {
   isAdmin: boolean
   features?: Record<string, boolean>
+  /** Client seat, resolved server-side by the layout. 'member' hides the money
+   *  items the portal API refuses them; null (team session, or an admin
+   *  previewing a portal) changes nothing. See filterNav. */
+  clientPortalRole?: 'admin' | 'member' | null
   // Client-portal brand lockup. Both undefined for admin/team sessions, so the
   // default Tahi wordmark renders and the admin path stays pixel-identical.
   brandName?: string | null
@@ -168,6 +173,7 @@ export function AppSidebar({
     // client-only page reads as denied in it. While previewing the portal as a
     // client, show the client nav unfiltered instead of hiding Files and Services.
     features: isImpersonatingClient ? undefined : features,
+    clientPortalRole,
   })
 
   const isItemActive = (href: string) => isRouteActive(pathname, href)
