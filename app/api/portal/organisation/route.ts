@@ -57,6 +57,10 @@ export async function GET(req: NextRequest) {
       industry: schema.organisations.industry,
       logoUrl: schema.organisations.logoUrl,
       accentColour: schema.organisations.accentColour,
+      // The currency this client is billed in. Not studio-only: it is the
+      // client's own fact, and every money figure the portal shows them is
+      // stated in it (see lib/display-currency-context.tsx).
+      preferredCurrency: schema.organisations.preferredCurrency,
     })
     .from(schema.organisations)
     .where(eq(schema.organisations.id, orgId))

@@ -1,4 +1,4 @@
-import { getServerAuth } from '@/lib/server-auth'
+import { getViewAudience } from '@/lib/view-audience'
 import { redirect } from 'next/navigation'
 import { requirePageFeature } from '@/lib/page-guard'
 
@@ -9,9 +9,9 @@ export const metadata = { title: 'Messages - Tahi Dashboard' }
 // intact. Restore by re-adding the nav items (nav-model.tsx and
 // mobile-bottom-nav.tsx) and rendering <MessagesContent> here again.
 export default async function MessagesPage() {
-  const { userId, orgId } = await getServerAuth()
+  const { userId, isAdmin, isPreviewingClient } = await getViewAudience()
   if (!userId) redirect('/sign-in')
-  const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
   await requirePageFeature('messages')
-  redirect(isAdmin ? '/overview' : '/requests')
+  // Client view lands exactly where a real client lands.
+  redirect(isAdmin && !isPreviewingClient ? '/overview' : '/requests')
 }
