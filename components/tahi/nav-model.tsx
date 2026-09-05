@@ -51,6 +51,9 @@ export const ADMIN_NAV: NavGroup[] = [
       { label: 'Overview', href: '/overview', icon: 'overview' },
       { label: 'Requests', href: '/requests', icon: 'requests' },
       { label: 'Tasks',    href: '/tasks',    icon: 'tasks' },
+      // The page behind the bell. Self-scoping (rows are keyed on the caller's
+      // Clerk user id), so it serves both audiences from one route.
+      { label: 'Notifications', href: '/notifications', icon: 'bell' },
       // Messages is hidden for V1: restore by re-adding the item here, in
       // CLIENT_NAV, and in app/(dashboard)/messages/page.tsx.
     ],
@@ -125,6 +128,9 @@ export const CLIENT_NAV: NavGroup[] = [
     items: [
       { label: 'Overview', href: '/overview',  icon: 'overview',  clientVisible: true },
       { label: 'Requests', href: '/requests',  icon: 'requests',  clientVisible: true },
+      // The page behind the bell. Rows are keyed on the caller's own Clerk user
+      // id, so the route needs no org gate and never bounces a client.
+      { label: 'Notifications', href: '/notifications', icon: 'bell', clientVisible: true },
       // Messages is hidden for V1 (see the ADMIN_NAV note above).
     ],
   },

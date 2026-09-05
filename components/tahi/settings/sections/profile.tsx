@@ -241,7 +241,8 @@ export function ProfileSection({ isAdmin = false }: { isAdmin?: boolean } = {}) 
           </div>
           <div className="set-field">
             <label htmlFor="profile-email">Email</label>
-            <input id="profile-email" className="set-input" value={email} disabled />
+            <input id="profile-email" className="set-input" value={email} disabled data-private />
+            <small className="set-field-note">This is also your sign-in, so it changes with your login provider, not here.</small>
           </div>
           <div className="set-field">
             <label htmlFor="profile-role">Role / title</label>
@@ -249,8 +250,10 @@ export function ProfileSection({ isAdmin = false }: { isAdmin?: boolean } = {}) 
               id="profile-role"
               className="set-input"
               value={role}
+              placeholder="Marketing lead"
               onChange={(e) => setRole(e.target.value)}
             />
+            <small className="set-field-note">Optional. It is what your colleagues and the studio see next to your name.</small>
           </div>
           <div className="set-field">
             <label htmlFor="profile-phone">Phone</label>
@@ -258,8 +261,10 @@ export function ProfileSection({ isAdmin = false }: { isAdmin?: boolean } = {}) 
               id="profile-phone"
               className="set-input"
               value={phone}
+              data-private
               onChange={(e) => setPhone(e.target.value)}
             />
+            <small className="set-field-note">Optional. Only the studio sees this, and we use it when something is time critical.</small>
           </div>
         </div>
         <div className="set-row" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border-subtle)' }}>
@@ -269,7 +274,8 @@ export function ProfileSection({ isAdmin = false }: { isAdmin?: boolean } = {}) 
         </div>
       </div>
       <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>
-        Email is managed through your login provider.
+        Your email, password and two-step verification live with your sign-in
+        provider rather than here. Ask the studio and we will point you at them.
       </p>
       <Toasts toasts={toasts} />
     </SectionShell>

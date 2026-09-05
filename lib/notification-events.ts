@@ -17,3 +17,12 @@
  * badge kept counting rows the user had already dealt with.
  */
 export const NOTIFICATIONS_CHANGED_EVENT = 'tahi:notifications-changed'
+
+/**
+ * Announce that rows were marked read outside the popover. Safe to call during
+ * SSR or in a test: it no-ops when there is no window.
+ */
+export function notifyNotificationsChanged(): void {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT))
+}

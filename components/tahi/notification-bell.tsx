@@ -341,6 +341,18 @@ export function NotificationBell({ audience = 'team' }: { audience?: Notificatio
               ))
             )}
           </div>
+
+          {/* The popover holds 20 rows and no history. This is the footer the
+              dead `.notif-foot` / `.notif-all` rules in app-shell.css were
+              always for; /notifications is the page behind it. */}
+          <div className="notif-foot">
+            <button
+              className="notif-all tahi-focus-ring"
+              onClick={() => { setOpen(false); router.push('/notifications') }}
+            >
+              See all notifications
+            </button>
+          </div>
         </div>
       </Popover>
     </div>

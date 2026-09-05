@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { apiPath } from '@/lib/api'
 import { useResource } from '@/lib/use-resource'
 import { SectionShell, Toasts, Toggle, useToasts } from '@/components/tahi/settings/primitives'
@@ -43,6 +44,8 @@ interface EventDef {
   event: string
   label: string
   desc: string
+  /** Channels this event really sends on. Defaults to the audience's full set. */
+  only?: Channel[]
 }
 
 const NTF_TEAM: EventDef[] = [
@@ -56,12 +59,28 @@ const NTF_TEAM: EventDef[] = [
   { event: 'weekly_digest', label: 'Weekly digest', desc: 'A Monday summary of the studio' },
 ]
 
+/**
+ * The client list is exactly the events that have a real send path.
+ *
+ * 'delivery_ready' and 'weekly_summary' were dropped: both are quarantined
+ * event types (EXTRA_CLIENT_EVENT_TYPES in app/api/portal/notifications) that
+ * no send path resolves, so both switches were inert. 'announcement_posted'
+ * was added: lib/announcement-emails.ts genuinely reads it, and there was no
+ * way to mute a broadcast from any screen.
+ *
+ * Studio notes carry an EMAIL switch only. The announcement send path fans out
+ * email and writes no notification row (nothing in the repo inserts one with
+ * entityType 'announcement'), so an in-app switch there would control nothing.
+ * It gets its second half back the day the send path writes bell rows.
+ *
+ * Mentions are deliberately not a row: notifyMentionedPerson writes
+ * type 'new_message', so muting Replies already mutes them.
+ */
 const NTF_CLIENT: EventDef[] = [
-  { event: 'request_status_changed', label: 'Request updates', desc: 'When your request changes status' },
-  { event: 'new_message', label: 'New message', desc: 'When the studio replies to you' },
-  { event: 'delivery_ready', label: 'Delivery ready', desc: 'When work is ready for your review' },
-  { event: 'invoice_created', label: 'Invoice due', desc: 'When an invoice needs paying' },
-  { event: 'weekly_summary', label: 'Weekly summary', desc: 'A Monday recap of your project' },
+  { event: 'request_status_changed', label: 'Request updates', desc: 'When a request moves, is delivered, or is waiting on you' },
+  { event: 'new_message', label: 'Replies', desc: 'When someone at the studio replies on one of your requests' },
+  { event: 'invoice_created', label: 'Invoices', desc: 'When an invoice is ready to pay, is paid, or falls overdue' },
+  { event: 'announcement_posted', label: 'Studio notes', desc: 'The occasional notice from Tahi. A few a year, never a newsletter', only: ['email'] },
 ]
 
 const TEAM_CHANNELS: { key: Channel; label: string }[] = [
@@ -70,11 +89,24 @@ const TEAM_CHANNELS: { key: Channel; label: string }[] = [
   { key: 'slack', label: 'Slack' },
 ]
 
-// Slack is a shared team channel, so portal clients only pick email + in-app.
-const CLIENT_CHANNELS = TEAM_CHANNELS.slice(0, 2)
+// Slack is a shared team channel, so portal clients only pick in-app + email.
+// In app leads: it is the one that lands immediately.
+const CLIENT_CHANNELS: { key: Channel; label: string }[] = [
+  { key: 'in_app', label: 'In app' },
+  { key: 'email', label: 'Email' },
+]
 
 function keyOf(event: string, channel: string): string {
   return event + '|' + channel
+}
+
+/** The channels an event actually sends on, so no row draws a dead switch. */
+function channelsFor(
+  e: EventDef,
+  all: { key: Channel; label: string }[],
+): { key: Channel; label: string }[] {
+  const only = e.only
+  return only ? all.filter((c) => only.includes(c.key)) : all
 }
 
 export function NotificationsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
@@ -143,7 +175,9 @@ export function NotificationsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
     }
   }
 
-  const lede = 'Choose exactly what reaches you, and where. These preferences are yours alone.'
+  const lede = isAdmin
+    ? 'Choose exactly what reaches you, and where. These preferences are yours alone.'
+    : 'In app shows in your bell. Email lands in your inbox. Both can be off, and these preferences are yours alone.'
 
   if (isLoading && !data) {
     return (
@@ -156,7 +190,7 @@ export function NotificationsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
                 <div style={{ height: 11, width: '55%', borderRadius: 6, marginTop: 6, background: 'var(--bg-tertiary)' }} />
               </div>
               <div className="ntf-chs">
-                {channels.map((c) => (
+                {channelsFor(e, channels).map((c) => (
                   <div key={c.key} style={{ width: 76, height: 31, borderRadius: 999, background: 'var(--bg-tertiary)' }} />
                 ))}
               </div>
@@ -177,7 +211,7 @@ export function NotificationsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               <small>{e.desc}</small>
             </div>
             <div className="ntf-chs">
-              {channels.map((c) => {
+              {channelsFor(e, channels).map((c) => {
                 const on = resolved(e.event, c.key)
                 return (
                   <button
@@ -201,16 +235,27 @@ export function NotificationsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
       <div className="set-card" style={{ marginTop: 16 }}>
         <div className="set-row">
           <div className="sr-t">
-            <b>Quiet hours</b>
-            <small>Hold non-urgent notifications between 7pm and 8am. Mentions and overdue invoices still come through.</small>
+            <b>{isAdmin ? 'Quiet hours' : 'Hold non-urgent email overnight'}</b>
+            <small>
+              {isAdmin
+                ? 'Hold non-urgent notifications between 7pm and 8am. Mentions and overdue invoices still come through.'
+                : 'Between 7pm and 8am. We are wiring this into each alert as it adopts your preferences, and invoices or anything waiting on you always come through.'}
+            </small>
           </div>
           <Toggle on={quietOn} onClick={toggleQuiet} ariaLabel="Toggle quiet hours" />
         </div>
       </div>
       <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>
-        In-app preferences apply immediately; email and Slack preferences apply
-        as each alert adopts them. Transactional emails such as receipts and
-        contracts always send.
+        In-app preferences apply immediately; email{isAdmin ? ' and Slack preferences' : ' preferences'} apply
+        as each alert adopts them. Transactional email such as receipts and
+        contracts always sends.
+      </p>
+      <p className="set-lede" style={{ marginTop: 12, marginBottom: 0 }}>
+        {/* --color-link, not --color-brand-dark: brand-dark has no .dark
+            override, so it reads at roughly 1.6:1 once the panel goes dark. */}
+        <Link href="/notifications" className="tahi-focus-ring" style={{ color: 'var(--color-link)', fontWeight: 600 }}>
+          See everything that has reached you
+        </Link>
       </p>
       <Toasts toasts={toasts} />
     </SectionShell>

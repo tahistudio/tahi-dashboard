@@ -393,7 +393,7 @@ describe('nav model - messaging hidden for V1', () => {
       userEmail: null, canManagePermissions: false,
     }))
     expect(visible).toEqual([
-      '/overview', '/requests',
+      '/overview', '/requests', '/notifications',
       '/files', '/services',
       '/invoices',
     ])
@@ -420,6 +420,9 @@ describe('client nav - no dead ends (Tier 1 item 10)', () => {
     // about whether the page actually has a client branch.
     const CLIENT_RENDERABLE = new Set([
       '/overview', '/requests', '/files', '/services', '/invoices', '/billing',
+      // Rows are keyed on the caller's own Clerk user id, so the page and its
+      // API are self-scoping: no org gate, nothing to bounce.
+      '/notifications',
     ])
     for (const href of navHrefs(CLIENT_NAV)) {
       expect(CLIENT_RENDERABLE.has(href)).toBe(true)
