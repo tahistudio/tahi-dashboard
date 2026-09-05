@@ -755,6 +755,13 @@ export const invoices = sqliteTable('invoices', {
   // portal and in the invoice email without an admin re-deriving the link.
   stripeHostedInvoiceUrl: text('stripe_hosted_invoice_url'),
   xeroInvoiceId: text('xero_invoice_id'),
+  // Xero's own client-facing pay page, the OnlineInvoiceUrl (migration 0091).
+  // Xero only issues one once the invoice is AUTHORISED (approved in Xero by
+  // hand; the push route holds every dashboard invoice at DRAFT on purpose),
+  // so it cannot be captured at push time and is picked up by the syncs
+  // instead. NULL means "Xero has not issued one yet", which is the normal
+  // state of a draft and is never an error. See lib/xero-online-invoice.ts.
+  xeroOnlineInvoiceUrl: text('xero_online_invoice_url'),
   source: text('source').default('manual'), // 'manual' | 'xero' | 'stripe'
   // draft | sent | viewed | paid | overdue | written_off
   status: text('status').notNull().default('draft'),

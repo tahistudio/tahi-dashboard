@@ -2047,6 +2047,13 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE organisations ADD COLUMN invoice_channel text`,
     ],
   },
+  {
+    name: '0091',
+    description: 'invoices.xero_online_invoice_url: Xero\'s own client-facing pay page for the bill (the OnlineInvoiceUrl). Xero only issues one for an AUTHORISED or PAID ACCREC invoice and errors on a DRAFT, and the push route holds every dashboard invoice at Xero DRAFT on purpose, so the link cannot be captured at push time. The two Xero readers (importXeroInvoices, syncXeroPayments) fetch it once per invoice, capped at 25 fetches per run, store it here, and clear it again when Xero stops serving it (voided, deleted, or demoted back to DRAFT). NULL is the normal state of a draft, never an error. Apply this BEFORE deploying the code that reads it: without the column the hourly sync-xero cron fails in both steps, every push to Xero fails after the Xero invoice has already been created, and the admin data export 500s. Additive only; the duplicate-column error is swallowed upstream so re-runs are idempotent.',
+    statements: [
+      `ALTER TABLE invoices ADD COLUMN xero_online_invoice_url text`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

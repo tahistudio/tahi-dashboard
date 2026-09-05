@@ -1,0 +1,61 @@
+-- Migration 0091: the Xero pay link
+--
+--   invoices.xero_online_invoice_url
+--     Xero's own client-facing pay page for this bill, the OnlineInvoiceUrl.
+--     NULL until Xero issues one, and NULL again the moment Xero stops serving
+--     it (voided, deleted, or demoted back to DRAFT by our own push).
+--
+-- Why this cannot be captured when we push. The push route
+-- (app/api/admin/invoices/xero-sync) sends every dashboard invoice to Xero as
+-- Status DRAFT and deliberately keeps doing so (Liam, 2026-09-06: auto-approve
+-- comes later, behind a studio setting, once the system is trusted). Xero only
+-- issues an OnlineInvoiceUrl for an AUTHORISED or PAID ACCREC invoice and
+-- errors on a DRAFT, so the link does not exist at push time. It appears the
+-- moment the invoice is approved in Xero by hand, which is why the two Xero
+-- readers (lib/xero-sync.ts: importXeroInvoices and syncXeroPayments) pick it
+-- up on their next run and write it here. See lib/xero-online-invoice.ts.
+--
+-- A NULL is the normal state of a draft, never an error. The client-facing
+-- "How to pay" block that reads this column is the next slice; nothing renders
+-- it yet.
+--
+-- ALTER TABLE ADD COLUMN cannot use IF NOT EXISTS in SQLite; the runtime
+-- runner (app/api/admin/db/migrate) swallows the "duplicate column name"
+-- error so re-running is safe.
+--
+-- MERGE ORDER, NOT OPTIONAL, AND NOT AN EXPORT-ONLY CONCERN. Apply this to
+-- staging and then production D1 BEFORE the code that references the column is
+-- deployed, not after. On a database without the column, every one of these
+-- fails with "no such column: xero_online_invoice_url":
+--
+--   * the hourly sync-xero cron, BOTH of its steps. The payment sync selects
+--     the column (lib/xero-sync.ts, syncXeroPayments) and so does the importer
+--     (lib/xero-sync.ts, importXeroInvoices), so the whole run 500s and no
+--     invoice status is reconciled at all.
+--   * every push to Xero (app/api/admin/invoices/xero-sync), which writes the
+--     column in the same UPDATE that stores xero_invoice_id. That write
+--     happens AFTER the Xero invoice has already been created, so the failure
+--     leaves an orphan invoice in Xero that the dashboard does not know about.
+--   * the admin data export (app/api/admin/danger/export/route.ts:78), the one
+--     bare .select() on this table: Drizzle expands it into an explicit column
+--     list from db/schema.ts.
+--
+-- Every other reader of `invoices` names its columns, including both portal
+-- routes, so the CLIENT surfaces survive either ordering. The column is
+-- additive and nullable, so applying it AHEAD of the deploy is harmless to the
+-- running code, which is why the order is this way round and not the other.
+--
+-- The runtime runner (POST /api/admin/db/migrate) cannot go first: the "0091"
+-- entry lives in app/api/admin/db/migrate/route.ts and does not exist until
+-- that deploy lands, so calling it beforehand answers 400 Unknown migration.
+-- Apply the file directly with wrangler instead. wrangler.json carries both
+-- database ids (staging b91cd27f, production 3bfa4848), so the names below
+-- resolve without any extra flags:
+--   1. wrangler d1 execute tahi-db-staging --remote --file=drizzle/migrations/0091_invoice_xero_online_url.sql
+--   2. deploy, then run the Xero sync and check /api/admin/danger/export
+--   3. wrangler d1 execute tahi-db --remote --file=drizzle/migrations/0091_invoice_xero_online_url.sql
+--   4. approve the production deploy, then smoke the same two
+--
+-- POST /api/admin/db/migrate {"name":"0091"} is the after-the-fact fallback,
+-- usable once the deploy that carries the entry is live.
+ALTER TABLE invoices ADD COLUMN xero_online_invoice_url text;

@@ -68,6 +68,12 @@ vi.mock('@/lib/db', () => ({
 import { GET, PATCH } from '@/app/api/admin/settings/route'
 import { NextRequest } from 'next/server'
 import { INVOICE_CHANNEL_SETTING_KEY, isInvoiceChannel } from '@/lib/invoice-channel'
+import {
+  BANK_DETAILS_SETTING_KEY,
+  DEFAULT_XERO_EMAIL_MODE,
+  XERO_EMAIL_MODE_SETTING_KEY,
+  XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY,
+} from '@/lib/invoice-pay-settings'
 
 function getReq(): NextRequest {
   return new NextRequest('http://localhost:3000/api/admin/settings')
@@ -153,5 +159,74 @@ describe('PATCH /api/admin/settings default invoicing channel', () => {
     const res = await PATCH(patchReq({ key: 'invoicing.prefix', value: 'anything at all' }))
     expect(res.status).toBe(200)
     expect(state.inserts[0]).toMatchObject({ key: 'invoicing.prefix', value: 'anything at all' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The pay-path keys (IC.4a)
+// ---------------------------------------------------------------------------
+//
+// The shapes themselves are pinned in lib/__tests__/invoice-pay-settings.test.ts.
+// What is pinned HERE is that the route actually runs them and that GET fills
+// the mode in the same way it fills the default channel, so no reader has to
+// know that an absent row means our own email.
+describe('the invoice pay-path settings on /api/admin/settings', () => {
+  it('fills the Xero email mode in with the studio default', async () => {
+    const res = await GET(getReq())
+    const body = await res.json() as { settings: Record<string, string | null> }
+    expect(body.settings[XERO_EMAIL_MODE_SETTING_KEY]).toBe(DEFAULT_XERO_EMAIL_MODE)
+  })
+
+  it('returns a stored mode, and reads a cleared one as the default', async () => {
+    state.rows = [{ key: XERO_EMAIL_MODE_SETTING_KEY, value: 'both' }]
+    let body = await (await GET(getReq())).json() as { settings: Record<string, string | null> }
+    expect(body.settings[XERO_EMAIL_MODE_SETTING_KEY]).toBe('both')
+
+    state.rows = [{ key: XERO_EMAIL_MODE_SETTING_KEY, value: null }]
+    body = await (await GET(getReq())).json() as { settings: Record<string, string | null> }
+    expect(body.settings[XERO_EMAIL_MODE_SETTING_KEY]).toBe(DEFAULT_XERO_EMAIL_MODE)
+  })
+
+  it('stores the three keys when the value has the right shape', async () => {
+    const writes = [
+      { key: BANK_DETAILS_SETTING_KEY, value: JSON.stringify({ accountName: 'Tahi Studio Limited', accountNumber: '12-3456-7890123-00' }) },
+      { key: XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY, value: '090' },
+      { key: XERO_EMAIL_MODE_SETTING_KEY, value: 'both' },
+    ]
+    for (const write of writes) {
+      state.inserts = []
+      const res = await PATCH(patchReq(write))
+      expect(res.status).toBe(200)
+      expect(state.inserts[0]).toMatchObject(write)
+    }
+  })
+
+  it('400s a bad value on each of them without writing anything', async () => {
+    const writes = [
+      { key: BANK_DETAILS_SETTING_KEY, value: 'not json' },
+      { key: BANK_DETAILS_SETTING_KEY, value: JSON.stringify({ accountNumber: 'ANZ 12-3456' }) },
+      { key: XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY, value: 'ANZ Business Account' },
+      { key: XERO_EMAIL_MODE_SETTING_KEY, value: 'post' },
+    ]
+    for (const write of writes) {
+      state.inserts = []
+      state.updates = []
+      const res = await PATCH(patchReq(write))
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toContain(write.key)
+      expect(state.inserts).toHaveLength(0)
+      expect(state.updates).toHaveLength(0)
+    }
+  })
+
+  it('lets an empty value through as the clear on each of them', async () => {
+    for (const key of [BANK_DETAILS_SETTING_KEY, XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY, XERO_EMAIL_MODE_SETTING_KEY]) {
+      state.rows = [{ key, value: 'whatever was there' }]
+      state.updates = []
+      const res = await PATCH(patchReq({ key, value: '' }))
+      expect(res.status).toBe(200)
+      expect(state.updates).toHaveLength(1)
+    }
   })
 })

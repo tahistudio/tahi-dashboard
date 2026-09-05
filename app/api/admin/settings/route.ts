@@ -9,12 +9,19 @@ import {
   INVOICE_CHANNEL_SETTING_KEY,
   isInvoiceChannel,
 } from '@/lib/invoice-channel'
+import {
+  DEFAULT_XERO_EMAIL_MODE,
+  XERO_EMAIL_MODE_SETTING_KEY,
+  isXeroEmailMode,
+  validateInvoicePaySetting,
+} from '@/lib/invoice-pay-settings'
 
 // -- GET /api/admin/settings --
 // Returns all settings as key-value pairs.
 //
-// `invoicing.defaultChannel` is filled in with the studio default when no row
-// exists, so a reader never has to know that an absent row means Stripe.
+// `invoicing.defaultChannel` and `invoicing.xeroEmailMode` are filled in with
+// their studio defaults when no row holds a valid value, so a reader never has
+// to know that an absent row means Stripe, or means our own email.
 export async function GET(req: NextRequest) {
   const { orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
@@ -34,6 +41,10 @@ export async function GET(req: NextRequest) {
 
   if (!isInvoiceChannel(settings[INVOICE_CHANNEL_SETTING_KEY])) {
     settings[INVOICE_CHANNEL_SETTING_KEY] = DEFAULT_INVOICE_CHANNEL
+  }
+
+  if (!isXeroEmailMode(settings[XERO_EMAIL_MODE_SETTING_KEY])) {
+    settings[XERO_EMAIL_MODE_SETTING_KEY] = DEFAULT_XERO_EMAIL_MODE
   }
 
   return NextResponse.json({ settings })
@@ -70,6 +81,17 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({
       error: `${INVOICE_CHANNEL_SETTING_KEY} must be one of ${INVOICE_CHANNELS.map(c => c.value).join(', ')}, or empty to fall back to ${DEFAULT_INVOICE_CHANNEL}.`,
     }, { status: 400 })
+  }
+
+  // The pay-path keys (bank details, the Xero payment account code, who sends
+  // a Xero-rail invoice). `settings` is untyped TEXT, so the shape has to be
+  // enforced here or not at all: a malformed bankDetails blob would otherwise
+  // only surface as an empty "How to pay" block on a live client invoice, and
+  // a mistyped account code would post real payments to the wrong Xero
+  // account. An empty value is the clear on all three and stays allowed.
+  const payCheck = validateInvoicePaySetting(body.key.trim(), body.value)
+  if (!payCheck.ok) {
+    return NextResponse.json({ error: payCheck.error }, { status: 400 })
   }
 
   const database = await db()

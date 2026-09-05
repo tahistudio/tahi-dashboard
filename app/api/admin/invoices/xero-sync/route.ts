@@ -13,7 +13,11 @@ interface XeroContactResponse {
 }
 
 interface XeroInvoiceResponse {
-  Invoices: Array<{ InvoiceID: string; InvoiceNumber?: string; Status: string }>
+  Invoices: Array<{
+    InvoiceID: string
+    InvoiceNumber?: string
+    Status: string
+  }>
 }
 
 interface XeroBrandingTheme {
@@ -233,9 +237,26 @@ export async function POST(req: NextRequest) {
 
       const createdInv = invoiceRes?.Invoices?.[0]
       if (createdInv) {
+        // Any stored pay link is dead as of this call, so it goes.
+        //
+        // The push stays DRAFT (Liam, 2026-09-06: auto-approve comes later,
+        // behind a studio setting) on the UPDATE path as well as the create,
+        // which DEMOTES an invoice Liam had already approved in Xero. Xero
+        // revokes the online invoice when that happens, and the column was
+        // write-once, so the row would keep serving the client a URL that now
+        // 404s. Nulling it is honest: there is no link again until the invoice
+        // is re-approved in Xero, at which point the syncs capture the new one
+        // (they only fetch when the column is empty, so leaving a stale value
+        // would mean it never refreshed).
+        //
+        // Nothing is captured here on purpose. Xero's POST /Invoices response
+        // does not carry OnlineInvoiceUrl at all; only
+        // GET /Invoices/{id}/OnlineInvoice serves it, which is why
+        // lib/xero-online-invoice.ts lives in the readers.
         await database.update(schema.invoices).set({
           xeroInvoiceId: createdInv.InvoiceID,
           source: 'xero',
+          xeroOnlineInvoiceUrl: null,
           updatedAt: now,
         }).where(eq(schema.invoices.id, invId))
 
