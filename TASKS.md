@@ -157,8 +157,8 @@ Decisions only Liam can make: ANSWERED.
 - [ ] MR.3 - [Design] Notifications page: filters move into a side rail like the rest of the site; place the Email preferences action better.
 - [x] MR.4 - [FE] Clients list: one plan chip per row; the tracks line and the MRR cell no longer repeat the plan (tracksLine, mrrFallbackLabel, engagementStatLabel in _list/clients-views.ts; hourly and project rows covered too). 0e0a99dd, render-checked on QA, deployed 2026-09-06 09:20 NZST.
 - [x] MR.5 - [FE] New client panel: Industry beside Plan (stacks under 40rem), primary contact as First name and Last name joined for the API (contacts has one name column; the email greeting reads the first word), matching icons and autocomplete off for third-party fields. 0e0a99dd.
-- [ ] MR.6 - [Design then FE] Studio invoices list and detail redesigned in Claude Design ('meh' today), then ported.
-- [ ] MR.7 - [Design then FE] Services showcase redesigned to be brand-forward like onboarding, home and sign-in: the client's plan, how they are using it, what else Tahi does; then ported over the current showcase.
+- [~] MR.6 - [Design then FE] Studio invoices designed in Claude Design (invoices-studio.* module: list with totals strip, seven saved views, rail chip with pay-link state, bulk bar, New invoice slide-over with the IC.3 defaults; detail with hero, metadata grid, grouped actions, activity strip, chase drafter). Critic: FIX (two blocking interaction bugs in the scratch mount, plus defects); fixer running; then wire into the shell under Finance and port.
+- [~] MR.7 - [Design then FE] Services showcase redesigned in portal-money.* (dark forest plan stage with the two tracks as objects, How you are using Tahi with honest charts, an editorial catalogue with a feature, stories and lines, an add-ons shelf tied to the plan, member-seat and read-only degrades). Critic: FIX not REDO ('best single tile in the prototype'); fixer running; then port over the live showcase.
 
 ## Client library and catalogue (Liam, 2026-09-06)
 
