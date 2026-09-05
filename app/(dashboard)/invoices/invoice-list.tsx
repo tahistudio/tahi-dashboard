@@ -11,7 +11,12 @@ import {
 import { type DateRange } from '@/components/tahi/date-range-picker'
 import { apiPath } from '@/lib/api'
 import { ApiError } from '@/lib/swr-fetcher'
-import { portalAdminLabel, type PortalPersonSummary } from '@/lib/portal-admin-label'
+import {
+  portalAdminLabel,
+  portalMoneyDenial,
+  portalInvoiceDenialCopy,
+  type PortalPersonSummary,
+} from '@/lib/portal-admin-label'
 import { useToast } from '@/components/tahi/toast'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { formatCurrency } from '@/lib/currency'
@@ -742,16 +747,27 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
   // Retry that could never work. Split it out: a 403 on the CLIENT endpoint gets
   // an honest explanation, every other error keeps the retryable failure state.
   // The admin endpoint is never read this way, so the admin page is unchanged.
-  const restricted = !isAdmin && fetchError instanceof ApiError && fetchError.status === 403
+  //
+  // A 403 there has more than one meaning, though: the feature can be switched
+  // off for the whole org, and the login may not be linked to an org at all. So
+  // classify the body rather than assuming the seat. Unknown bodies keep the
+  // member-seat reading, which is what a bare Forbidden means on those routes.
+  const denial = !isAdmin && fetchError instanceof ApiError && fetchError.status === 403
+    ? portalMoneyDenial(fetchError.info)
+    : null
+  const restricted = denial !== null
   const error = !!fetchError && !restricted
 
-  // Who to ask. Fetched ONLY for the seat that is being turned away, so no other
-  // session pays for it; any signed-in contact may read their own org's roster.
-  // Falls back to a generic phrase if the read fails or names nobody.
+  // Who to ask. Fetched ONLY for the seat that is being turned away, and only
+  // for the denial whose copy actually names somebody, so no other session pays
+  // for it; any signed-in contact may read their own org's roster. Falls back to
+  // a generic phrase if the read fails or names nobody.
   const { data: peopleData } = useSWR<{ items?: PortalPersonSummary[] }>(
-    restricted ? '/api/portal/people' : null,
+    denial === 'member_seat' ? '/api/portal/people' : null,
   )
-  const askWho = portalAdminLabel(peopleData?.items)
+  const denialCopy = denial
+    ? portalInvoiceDenialCopy(denial, portalAdminLabel(peopleData?.items))
+    : null
 
   // Client-side filtering: status chip + source chip + date range + search
   const filteredInvoices = useMemo(() => {
@@ -968,20 +984,21 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
     />
   ), [router])
 
-  // ── Client member seat ─────────────────────────────────────────────────────
-  // Their org's invoices are not theirs to see, so say that plainly instead of
-  // shipping them a filter bar over a table they will never fill and a Retry
-  // that cannot succeed. Every hook above has already run, so this early return
-  // is order-safe. Deep links and bookmarks land here; the nav no longer does.
-  if (restricted) {
+  // ── Client denied their org's money surface ────────────────────────────────
+  // Whatever the reason, these invoices are not theirs to see right now, so say
+  // which reason plainly instead of shipping them a filter bar over a table they
+  // will never fill and a Retry that cannot succeed. Every hook above has
+  // already run, so this early return is order-safe. Deep links and bookmarks
+  // land here; the nav no longer does.
+  if (denialCopy) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
         <PageHeader title="Invoices" subtitle="Billing for your organisation." />
         <Card padding="none">
           <EmptyState
             icon={<Lock className="w-6 h-6" />}
-            title="Invoices are visible to your organisation admin"
-            description={`Ask ${askWho} if you need one. Your requests, files and services are unaffected.`}
+            title={denialCopy.title}
+            description={denialCopy.description}
           />
         </Card>
       </div>
