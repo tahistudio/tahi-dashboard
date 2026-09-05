@@ -2,19 +2,26 @@
 
 /**
  * The phone reading of a Clients row, handed to <DataTable mobileCard>. Below
- * md the table is replaced by these, so this card also has to carry the row
- * actions the 3-dots column would have carried: the card itself opens the
- * client, and the two buttons under it are 2.75rem targets in their own right.
+ * md the table is unmounted, and with it the 3-dots column, so this card also
+ * has to carry the row actions: Open and View as client sit on the face, and
+ * the write actions the desktop kebab offers (Invite to portal, Archive or
+ * Restore) live behind a matching overflow control. Every one of the three is
+ * a 2.75rem target.
+ *
+ * DataTable stacks its cards as bare fragments, so the bottom margin here is
+ * what keeps two bordered boxes from butting their corners together.
  */
 
 import * as React from 'react'
-import { ArrowUpRight, Eye } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowUpRight, Eye, MailPlus, MoreHorizontal } from 'lucide-react'
+import { Menu } from '@/components/tahi/menu'
 import { RelativeTime } from '@/components/tahi/relative-time'
 import { PlanBadge } from '@/components/tahi/status-badge'
 import {
   ClientCell,
   ClientHealthBadge,
   ClientMoneyCell,
+  ClientOwnerCell,
   ClientStatusBadge,
   ClientTagChips,
   OpenWorkCell,
@@ -25,17 +32,30 @@ import type { ClientRow } from './clients-views'
 export function ClientMobileCard({
   row,
   canSeeMoney,
+  mrrUnknown,
+  ownersKnown,
   selected,
+  writeDisabled,
   onToggleSelect,
   onOpen,
   onViewAs,
+  onInvite,
+  onArchive,
+  onRestore,
 }: {
   row: ClientRow
   canSeeMoney: boolean
+  mrrUnknown: boolean
+  ownersKnown: boolean
   selected: boolean
+  /** A viewer-scoped impersonation. Read-only, exactly as the kebab is. */
+  writeDisabled: boolean
   onToggleSelect: () => void
   onOpen: () => void
   onViewAs: (() => void) | null
+  onInvite: () => void
+  onArchive: () => void
+  onRestore: () => void
 }) {
   const activity = row.updatedAt ?? row.createdAt
   return (
@@ -44,6 +64,7 @@ export function ClientMobileCard({
         display: 'flex',
         flexDirection: 'column',
         gap: '0.625rem',
+        marginBottom: '0.5rem',
         padding: '0.875rem 1rem',
         border: `1px solid ${selected ? 'var(--color-brand)' : 'var(--color-border-subtle)'}`,
         borderRadius: 'var(--radius-md)',
@@ -118,8 +139,9 @@ export function ClientMobileCard({
         <ClientStatusBadge status={row.status} />
         <PlanBadge plan={row.planType} />
         <TrackMeterCell tracks={row.tracks} engagement={row.engagement} />
-        {canSeeMoney && <ClientMoneyCell row={row} />}
+        {canSeeMoney && <ClientMoneyCell row={row} unknownLabel={mrrUnknown ? 'Unknown' : undefined} />}
         <OpenWorkCell row={row} />
+        <ClientOwnerCell row={row} known={ownersKnown} />
       </div>
 
       <ClientTagChips tags={row.tags} max={3} />
@@ -131,6 +153,35 @@ export function ClientMobileCard({
         <MobileAction label="Open" icon={<ArrowUpRight size={14} aria-hidden="true" />} onClick={onOpen} />
         {onViewAs && (
           <MobileAction label="View as client" icon={<Eye size={14} aria-hidden="true" />} onClick={onViewAs} />
+        )}
+        {!writeDisabled && (
+          <Menu
+            align="end"
+            width="14rem"
+            trigger={
+              <button
+                type="button"
+                aria-label={`More actions for ${row.name}`}
+                className="tahi-focus-ring inline-flex items-center justify-center"
+                style={{
+                  width: '2.75rem',
+                  height: '2.75rem',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'var(--color-bg)',
+                  color: 'var(--color-text-muted)',
+                  cursor: 'pointer',
+                }}
+              >
+                <MoreHorizontal size={16} aria-hidden="true" />
+              </button>
+            }
+          >
+            <Menu.Item icon={<MailPlus size={14} />} onClick={onInvite}>Invite to portal</Menu.Item>
+            {row.status === 'archived'
+              ? <Menu.Item icon={<ArchiveRestore size={14} />} onClick={onRestore}>Restore from archive</Menu.Item>
+              : <Menu.Item icon={<Archive size={14} />} tone="danger" onClick={onArchive}>Archive client</Menu.Item>}
+          </Menu>
         )}
       </div>
     </div>

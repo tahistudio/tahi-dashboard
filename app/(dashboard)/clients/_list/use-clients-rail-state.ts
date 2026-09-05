@@ -87,6 +87,13 @@ export interface ClientsRailState {
   setSort: (next: ClientsSort) => void
   query: string
   setQuery: (next: string) => void
+  /**
+   * Push the status a URL is currently asking for, or null for "no override".
+   * The page calls this whenever `?status=` changes under it, which is what
+   * makes the browser Back button move the rail rather than leave it holding a
+   * filter the address bar no longer names.
+   */
+  syncUrlStatus: (next: string | null) => void
   /** True when the live state matches the saved default exactly. */
   isDefault: boolean
   saveDefault: () => void
@@ -173,6 +180,13 @@ export function useClientsRailState({
     setStoredSort(normaliseClientsSort(next, canSeeMoney))
   }, [setStoredSort, canSeeMoney])
 
+  // The URL moving under the rail: a Back out of a filtered view, or a link
+  // opened into a tab that already had state. `all` is the absence of an
+  // override, not a value, so it lands as null.
+  const syncUrlStatus = React.useCallback((next: string | null) => {
+    setUrlStatus(next && next !== DEFAULT_CLIENT_FILTERS.status ? next : null)
+  }, [])
+
   const isDefault = clientsSnapshotsEqual(storedDefault, { view, savedView, filters, sort })
 
   // Saving is the user adopting what is on screen, so the URL's share of it
@@ -211,6 +225,7 @@ export function useClientsRailState({
     setSort,
     query,
     setQuery,
+    syncUrlStatus,
     isDefault,
     saveDefault,
     hasDefault: storedDefault !== null,

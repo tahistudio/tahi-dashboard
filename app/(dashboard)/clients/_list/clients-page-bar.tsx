@@ -19,6 +19,7 @@ export function ClientsPageBar({
   shown,
   pageSize,
   hasNext,
+  scopeNote,
   onPageChange,
 }: {
   page: number
@@ -27,6 +28,10 @@ export function ClientsPageBar({
   pageSize: number
   /** True when the API returned a full page, so there is probably another. */
   hasNext: boolean
+  /** What the narrowing on screen actually covers, when it is not the whole
+   *  roster. Status and plan are pushed to the server; health, tag and tracks
+   *  can only ever narrow the page that came back. */
+  scopeNote?: string | null
   onPageChange: (next: number) => void
 }) {
   const canPrev = page > 1
@@ -34,6 +39,7 @@ export function ClientsPageBar({
     return (
       <p style={{ margin: 0, fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>
         {shown} {shown === 1 ? 'client' : 'clients'} in this view.
+        {scopeNote ? ` ${scopeNote}` : ''}
       </p>
     )
   }
@@ -54,6 +60,7 @@ export function ClientsPageBar({
         {', '}
         <span style={{ fontWeight: 700, color: 'var(--color-text)' }}>{shown}</span>
         {' '}{shown === 1 ? 'client' : 'clients'} in this view. The list loads {pageSize} at a time.
+        {scopeNote ? ` ${scopeNote}` : ''}
       </p>
       <div className="flex items-center" style={{ gap: '0.375rem' }}>
         <PageButton

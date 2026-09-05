@@ -33,11 +33,13 @@ import {
   CLIENT_STATUS_LABELS,
   CLIENT_TRACK_OPTIONS,
   DEFAULT_CLIENT_FILTERS,
+  UNASSIGNED_OWNER,
   clientSortDirLabel,
   clientSortKeyLabel,
   clientSortKeys,
   isClientFilterActive,
   type ClientFilterKey,
+  type ClientOwner,
   type ClientsFilters,
   type ClientsSort,
   type ClientsSortKey,
@@ -86,16 +88,32 @@ export function clientTagOptions(tags: readonly string[]): RailOption[] {
   return [{ value: 'all', label: 'Any tag' }, ...tags.map(t => ({ value: t, label: t }))]
 }
 
+/**
+ * Owner options come from the access rules rather than the loaded page, so the
+ * control can name a project manager whose clients all sit on page two.
+ * "Nobody assigned" is offered whenever the owner index was readable at all,
+ * because an account with no owner is the thing this filter is most often
+ * looking for.
+ */
+export function clientOwnerOptions(owners: readonly ClientOwner[], known: boolean): RailOption[] {
+  const out: RailOption[] = [{ value: 'all', label: 'Anyone' }]
+  if (known) out.push({ value: UNASSIGNED_OWNER, label: 'Nobody assigned' })
+  for (const owner of owners) out.push({ value: owner.id, label: owner.name })
+  return out
+}
+
 /** The chip builder the shell reads, kept beside the option lists the controls
  *  use so a chip can never disagree with the control that set it. */
 export function buildClientChips(
   filters: ClientsFilters,
   tagOptions: readonly RailOption[],
+  ownerOptions: readonly RailOption[],
 ): RailFilterChip[] {
   const lists: Record<ClientFilterKey, readonly RailOption[]> = {
     status: STATUS_OPTIONS,
     plan: PLAN_OPTIONS,
     health: HEALTH_OPTIONS,
+    owner: ownerOptions,
     tag: tagOptions,
     tracks: TRACK_OPTIONS,
   }
@@ -120,8 +138,17 @@ export interface ClientsRailProps {
   onSortChange: (next: ClientsSort) => void
   /** Built from the loaded rows, already carrying its "Any tag" entry. */
   tagOptions: readonly RailOption[]
+  /** Built from the access rules, already carrying its "Anyone" entry. */
+  ownerOptions: readonly RailOption[]
   /** Hides the MRR sort key from anyone who cannot see money. */
   canSeeMoney: boolean
+  /**
+   * What the counts beside the saved views actually cover. The endpoint pages
+   * at 50 and returns no total, so once there is more than one page the counts
+   * describe the clients loaded rather than the roster, and saying so is the
+   * difference between a count and a claim.
+   */
+  countsNote?: string | null
   isDefault: boolean
   onSaveDefault: () => void
   /** 2.75rem targets. Set inside the mobile Filters sheet. */
@@ -137,7 +164,9 @@ export function ClientsRail({
   sort,
   onSortChange,
   tagOptions,
+  ownerOptions,
   canSeeMoney,
+  countsNote = null,
   isDefault,
   onSaveDefault,
   touch = false,
@@ -159,6 +188,7 @@ export function ClientsRail({
       case 'status': return STATUS_OPTIONS
       case 'plan': return PLAN_OPTIONS
       case 'health': return HEALTH_OPTIONS
+      case 'owner': return ownerOptions
       case 'tag': return tagOptions
       case 'tracks': return TRACK_OPTIONS
     }
@@ -193,6 +223,11 @@ export function ClientsRail({
             />
           ))}
         </div>
+        {countsNote && (
+          <p style={{ margin: '0.375rem 0 0', fontSize: '0.6875rem', lineHeight: 1.35, color: 'var(--color-text-subtle)' }}>
+            {countsNote}
+          </p>
+        )}
       </div>
 
       <div>
@@ -210,8 +245,8 @@ export function ClientsRail({
               onClose={close}
               active={isClientFilterActive(filters, key)}
               onClear={() => setFilter(key, DEFAULT_CLIENT_FILTERS[key])}
-              searchable={key === 'tag'}
-              searchLabel="Search tags"
+              searchable={key === 'tag' || key === 'owner'}
+              searchLabel={key === 'owner' ? 'Search people' : 'Search tags'}
               touch={touch}
             />
           ))}

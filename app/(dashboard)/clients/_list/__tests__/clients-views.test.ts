@@ -3,6 +3,7 @@ import {
   ARCHIVED_VIEW_KEY,
   DEFAULT_CLIENTS_SORT,
   DEFAULT_CLIENT_FILTERS,
+  UNASSIGNED_OWNER,
   applyClientViews,
   clientTagValues,
   clientsSnapshotsEqual,
@@ -70,6 +71,15 @@ describe('toClientRow', () => {
     expect(row.planType).toBeNull()
     expect(row.engagement).toBe('none')
   })
+
+  it('carries the account owner when one is handed in, and null when not', () => {
+    const held = toClientRow(api({ id: 'a', name: 'Held' }), 1500, { id: 'tm_1', name: 'Liam Miller' })
+    expect(held.ownerId).toBe('tm_1')
+    expect(held.ownerName).toBe('Liam Miller')
+    const loose = toClientRow(api({ id: 'b', name: 'Loose' }))
+    expect(loose.ownerId).toBeNull()
+    expect(loose.ownerName).toBeNull()
+  })
 })
 
 describe('archived rows', () => {
@@ -122,6 +132,19 @@ describe('filters', () => {
     const noPlan = toClientRow(api({ id: 'c', name: 'Bare', planType: null }))
     expect(matchesClientFilters(noPlan, { ...DEFAULT_CLIENT_FILTERS, plan: 'none' })).toBe(true)
     expect(matchesClientFilters(row, { ...DEFAULT_CLIENT_FILTERS, plan: 'none' })).toBe(false)
+  })
+
+  it('filters on the account owner, and can ask for the unheld ones', () => {
+    const held = toClientRow(api({ id: 'h', name: 'Held' }), null, { id: 'tm_1', name: 'Liam Miller' })
+    const loose = toClientRow(api({ id: 'l', name: 'Loose' }))
+    expect(matchesClientFilters(held, { ...DEFAULT_CLIENT_FILTERS, owner: 'tm_1' })).toBe(true)
+    expect(matchesClientFilters(held, { ...DEFAULT_CLIENT_FILTERS, owner: 'tm_2' })).toBe(false)
+    expect(matchesClientFilters(loose, { ...DEFAULT_CLIENT_FILTERS, owner: 'tm_1' })).toBe(false)
+    expect(matchesClientFilters(loose, { ...DEFAULT_CLIENT_FILTERS, owner: UNASSIGNED_OWNER })).toBe(true)
+    expect(matchesClientFilters(held, { ...DEFAULT_CLIENT_FILTERS, owner: UNASSIGNED_OWNER })).toBe(false)
+    // The default dimension keeps both.
+    expect(matchesClientFilters(held, DEFAULT_CLIENT_FILTERS)).toBe(true)
+    expect(matchesClientFilters(loose, DEFAULT_CLIENT_FILTERS)).toBe(true)
   })
 
   it('filters on the configured track shape', () => {

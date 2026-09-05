@@ -3,7 +3,7 @@
 /**
  * The small pieces a Clients row is built out of: the identity cell, the
  * status pill, the health badge with its evidence, the track meter, the open
- * work count and the money cell.
+ * work count, the money cell and the account owner.
  *
  * Every one of them is shared by the list rows, the mobile cards and the
  * portfolio cards, which is what keeps the three readings of a client saying
@@ -54,19 +54,39 @@ const HEALTH_TONE: Record<string, BadgeTone> = {
 }
 
 /**
- * The badge is the claim; the bubble is the evidence. `showOnTap` is set so a
- * phone can reach the reasons too: a health verdict a touch user cannot open
+ * The badge is the claim; the bubble is the evidence.
+ *
+ * Three things make the evidence reachable by everyone. `showOnTap` opens the
+ * bubble on a phone, `tabIndex` gives it a tab stop so a keyboard reaches it
+ * through focus (a <Badge> is a plain span, and focus can never fire on a span
+ * with no tabindex), and every caller that nests the badge inside a clickable
+ * row or card stops the click there. A health verdict only a mouse can open
  * would be a hover-only affordance, which the house rules forbid.
  */
-export function ClientHealthBadge({ row, compact = false }: { row: ClientRow; compact?: boolean }) {
+export function ClientHealthBadge({ row }: { row: ClientRow }) {
   const key = healthKeyOf(row)
-  const reasons = compact ? [] : healthReasons(row)
+  const reasons = healthReasons(row)
+  const label = CLIENT_HEALTH_LABELS[key]
+  if (reasons.length === 0) {
+    return (
+      <Badge tone={HEALTH_TONE[key] ?? 'neutral'} variant="soft" size="sm" dot>
+        {label}
+      </Badge>
+    )
+  }
   const badge = (
-    <Badge tone={HEALTH_TONE[key] ?? 'neutral'} variant="soft" size="sm" dot>
-      {CLIENT_HEALTH_LABELS[key]}
+    <Badge
+      tone={HEALTH_TONE[key] ?? 'neutral'}
+      variant="soft"
+      size="sm"
+      dot
+      tabIndex={0}
+      className="tahi-focus-ring"
+      aria-label={`${label}. ${reasons.length} ${reasons.length === 1 ? 'reason' : 'reasons'}.`}
+    >
+      {label}
     </Badge>
   )
-  if (reasons.length === 0) return badge
   return (
     <Tooltip
       showOnTap
@@ -175,7 +195,7 @@ export function ClientCell({ row, size = 'sm' }: { row: ClientRow; size?: 'sm' |
           }}
         >
           {row.industry && <span>{row.industry}</span>}
-          {row.industry && website && <span aria-hidden="true">.</span>}
+          {row.industry && website && <span aria-hidden="true">·</span>}
           {website && (
             <span data-private style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
               <Globe size={10} aria-hidden="true" />
@@ -184,7 +204,7 @@ export function ClientCell({ row, size = 'sm' }: { row: ClientRow; size?: 'sm' |
           )}
           {row.brandCount > 1 && (
             <>
-              <span aria-hidden="true">.</span>
+              <span aria-hidden="true">·</span>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                 <Building2 size={10} aria-hidden="true" />
                 {row.brandCount} brands
@@ -226,6 +246,12 @@ export function OpenWorkCell({ row }: { row: ClientRow }) {
  * MRR, or the engagement word when there is none to show. Never a dash: a
  * project client has no monthly figure, and saying so is more use than an
  * empty cell. `sensitive` puts data-private on the figure.
+ *
+ * `unknownLabel` is what the caller passes when the figures could not be read
+ * at all (the retainer-health report is behind its own feature gate, so an
+ * admin holding the billing card but not reports gets a 403). "Not set" would
+ * then be a claim about the client rather than about the read, and a $4,000
+ * retainer would be describing itself as unbilled.
  */
 export function ClientMoneyCell({ row, unknownLabel }: { row: ClientRow; unknownLabel?: string }) {
   if (row.mrrNzd != null && row.mrrNzd > 0) {
@@ -242,6 +268,48 @@ export function ClientMoneyCell({ row, unknownLabel }: { row: ClientRow; unknown
   return (
     <span style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
       {fallback}
+    </span>
+  )
+}
+
+// -- Owner -------------------------------------------------------------------
+
+/**
+ * The account owner: avatar plus first name, never the avatar alone. An
+ * initials disc whose meaning only arrives on hover is a hover-only affordance,
+ * and the name is what an operator scans for.
+ *
+ * `known` is false when the owner index could not be read, which is a
+ * different statement from "nobody owns this": the first is about the read,
+ * the second is about the client.
+ */
+export function ClientOwnerCell({ row, known }: { row: ClientRow; known: boolean }) {
+  if (!row.ownerName) {
+    return (
+      <span style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
+        {known ? 'Unassigned' : 'Unknown'}
+      </span>
+    )
+  }
+  const first = row.ownerName.split(' ')[0]
+  return (
+    <span
+      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', minWidth: 0 }}
+      title={`${row.ownerName}, account owner`}
+    >
+      <Avatar name={row.ownerName} size="sm" tooltip={false} />
+      <span
+        style={{
+          fontSize: '0.75rem',
+          fontWeight: 600,
+          color: 'var(--color-text-muted)',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {first}
+      </span>
     </span>
   )
 }

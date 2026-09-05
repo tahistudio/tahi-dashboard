@@ -85,8 +85,11 @@ export function isDraftEmailValid(draft: NewClientDraft): boolean {
   return email.length === 0 || EMAIL_RE.test(email)
 }
 
+/** The endpoint asks for a non-empty name and nothing more, so this asks for
+ *  exactly that. A stricter rule here is a button that sits dead with no copy
+ *  saying why: the guard also blocks submit, so the inline error never fires. */
 export function canSubmitDraft(draft: NewClientDraft): boolean {
-  return draft.name.trim().length > 1 && isDraftEmailValid(draft)
+  return draft.name.trim().length > 0 && isDraftEmailValid(draft)
 }
 
 export function NewClientPanel({
@@ -109,6 +112,7 @@ export function NewClientPanel({
   const emailOk = isDraftEmailValid(draft)
   const hasEmail = draft.primaryContactEmail.trim().length > 0
   const canSubmit = canSubmitDraft(draft)
+  const emailErrorId = React.useId()
 
   return (
     <SlideOver
@@ -223,11 +227,12 @@ export function NewClientPanel({
                   type="email"
                   aria-label="Primary contact email"
                   aria-invalid={!emailOk}
+                  aria-describedby={emailOk ? undefined : emailErrorId}
                   leadingIcon={<Mail size={13} aria-hidden="true" />}
                 />
                 <div aria-live="polite">
                   {!emailOk && (
-                    <p style={{ margin: '0.25rem 0 0', fontSize: '0.6875rem', color: 'var(--color-danger)' }}>
+                    <p id={emailErrorId} style={{ margin: '0.25rem 0 0', fontSize: '0.6875rem', color: 'var(--color-danger)' }}>
                       That does not look like an email address.
                     </p>
                   )}
@@ -272,10 +277,29 @@ export function NewClientPanel({
   )
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+/**
+ * A labelled control. The label is a real <label htmlFor>, and the id it names
+ * is minted here and handed to the child, so the control it labels is the
+ * control that gets it. A sibling <label> with no `htmlFor` names nothing: a
+ * screen reader reads the field as an unlabelled text box.
+ *
+ * `hint`, when present, is wired through aria-describedby for the same reason.
+ */
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string
+  hint?: string
+  children: React.ReactElement<{ id?: string; 'aria-describedby'?: string }>
+}) {
+  const id = React.useId()
+  const hintId = `${id}-hint`
   return (
     <div>
       <label
+        htmlFor={id}
         style={{
           display: 'block',
           fontSize: '0.625rem',
@@ -288,9 +312,12 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
       >
         {label}
       </label>
-      {children}
+      {React.cloneElement(children, {
+        id,
+        'aria-describedby': hint ? hintId : children.props['aria-describedby'],
+      })}
       {hint && (
-        <p style={{ margin: '0.3125rem 0 0', fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>{hint}</p>
+        <p id={hintId} style={{ margin: '0.3125rem 0 0', fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>{hint}</p>
       )}
     </div>
   )

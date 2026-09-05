@@ -1,6 +1,6 @@
 /**
  * The pure vocabulary behind the Clients rail: two peer views, five saved
- * views, five filter dimensions, six sort keys, and the shapes persisted per
+ * views, six filter dimensions, six sort keys, and the shapes persisted per
  * user. Structural twin of lib/tasks-views.ts and lib/requests-views.ts,
  * deliberately a separate file rather than a shared generic: the surfaces
  * share a shape, not a vocabulary.
@@ -28,6 +28,16 @@ export interface ClientTracks {
   small: number
   large: number
   total: number
+}
+
+/**
+ * The account owner: the team member holding a `project_manager` access rule
+ * linked to this client. Exactly what GET /api/admin/clients/[id]/pm resolves,
+ * read once for the whole roster rather than once per row.
+ */
+export interface ClientOwner {
+  id: string
+  name: string
 }
 
 /** The subset of an organisation the rail reasons about, after the raw API
@@ -58,6 +68,11 @@ export interface ClientRow {
    * otherwise. Null renders as the engagement word, never as a dash.
    */
   mrrNzd: number | null
+  /** The account owner's team member id, or null when nobody holds this
+   *  client. Null is also what an unreadable owner source leaves behind, so
+   *  the cell states which of the two it is rather than guessing. */
+  ownerId: string | null
+  ownerName: string | null
 }
 
 /** The raw shape the clients list endpoint returns. Every field is optional
@@ -124,7 +139,11 @@ export function parseStringArray(raw: string | null | undefined): string[] {
  * shape here is the plan's base entitlement. The meter says "configured", not
  * "in use", for exactly that reason.
  */
-export function toClientRow(raw: ClientApiRow, mrrNzd: number | null = null): ClientRow {
+export function toClientRow(
+  raw: ClientApiRow,
+  mrrNzd: number | null = null,
+  owner: ClientOwner | null = null,
+): ClientRow {
   const planType = raw.planType && raw.planType !== 'none' ? raw.planType : null
   const config = resolveTracksConfig(
     {
@@ -157,6 +176,8 @@ export function toClientRow(raw: ClientApiRow, mrrNzd: number | null = null): Cl
     },
     engagement: engagementOf(planType),
     mrrNzd,
+    ownerId: owner?.id ?? null,
+    ownerName: owner?.name ?? null,
   }
 }
 
@@ -293,17 +314,19 @@ export interface ClientsFilters {
   status: string
   plan: string
   health: string
+  owner: string
   tag: string
   tracks: string
 }
 
-export const CLIENT_FILTER_KEYS = ['status', 'plan', 'health', 'tag', 'tracks'] as const
+export const CLIENT_FILTER_KEYS = ['status', 'plan', 'health', 'owner', 'tag', 'tracks'] as const
 export type ClientFilterKey = (typeof CLIENT_FILTER_KEYS)[number]
 
 export const DEFAULT_CLIENT_FILTERS: ClientsFilters = {
   status: 'all',
   plan: 'all',
   health: 'all',
+  owner: 'all',
   tag: 'all',
   tracks: 'all',
 }
@@ -312,9 +335,14 @@ export const CLIENT_DIMENSION_LABELS: Record<ClientFilterKey, string> = {
   status: 'Status',
   plan: 'Plan',
   health: 'Health',
+  owner: 'Owner',
   tag: 'Tag',
   tracks: 'Tracks',
 }
+
+/** The Owner option for "nobody holds this account". A real team member id can
+ *  never collide with it: ids are UUIDs. */
+export const UNASSIGNED_OWNER = 'unassigned'
 
 /**
  * The track dimension. The prototype filtered on live track occupancy; the
@@ -347,6 +375,12 @@ export function matchesClientFilters(row: ClientRow, filters: ClientsFilters): b
   }
 
   if (filters.health !== 'all' && healthKeyOf(row) !== filters.health) return false
+
+  if (filters.owner === UNASSIGNED_OWNER) {
+    if (row.ownerId) return false
+  } else if (filters.owner !== 'all' && row.ownerId !== filters.owner) {
+    return false
+  }
 
   if (filters.tag !== 'all' && !row.tags.includes(filters.tag)) return false
 
