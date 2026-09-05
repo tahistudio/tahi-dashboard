@@ -66,6 +66,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 06:05 NZST portal port merged (home, money, account; 2680 tests, build green), render-checked as a client at desktop, 375 and dark on the QA server (all pages render, no overflow, no page errors; the QA snapshot's own 500 on one portal read remains local), pushed and deploying. Prototype fixer restarted after a hung render.
 
+- 06:15 NZST portal port LIVE on production (e3b3a4a2). Smoke as Client view of Tahi Test Client: masthead with plan, Waiting on you tile (2 items), vitals, New request CTA, first-run welcome, bottom tabs; /api/notifications paginated (items, unreadCount, nextCursor, hasMore); invoice rows carry howToPay.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - [x] More sheet Track time row left-aligned (17a490b2).
