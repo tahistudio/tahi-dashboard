@@ -7,10 +7,18 @@
  * halves are covered where they are wired (request-status-effects, the portal
  * POST suite, the request thread routes).
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+
+import { createElement } from 'react'
+
+const sendEmail = vi.hoisted(() => vi.fn())
+
+vi.mock('@/lib/email', () => ({ sendEmail }))
+
 import {
   clientStatusEmailPlan,
   dedupeEmailTargets,
+  dispatchNotificationEmails,
   filterTargetsByEmailPref,
   greetingName,
   isSendableEmail,
@@ -22,6 +30,7 @@ import {
   toPlainText,
   truncate,
   type EmailTarget,
+  type NotificationEmailPlan,
 } from '@/lib/notification-email'
 
 describe('isSendableEmail', () => {
@@ -322,5 +331,89 @@ describe('filterTargetsByEmailPref', () => {
     const { allowed, muted } = await filterTargetsByEmailPref(broken, [jo, sam], 'new_message')
     expect(allowed).toHaveLength(2)
     expect(muted).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Dispatch: the parts that actually reach Resend
+// ---------------------------------------------------------------------------
+
+describe('dispatchNotificationEmails, the plain text alternative', () => {
+  // Nobody here has a Clerk login, so the preference read short-circuits and
+  // the database is never touched.
+  const invited: EmailTarget = {
+    email: 'new@acme.com', name: 'Jo Yarnall', userType: 'contact', clerkUserId: null,
+  }
+  const noDb = {} as never
+
+  /**
+   * A plan whose element is built by hand rather than taken from emails/: what
+   * is under test is the dispatcher (does it derive a text part, does it reuse
+   * it) and not any one template's markup.
+   */
+  function spyPlan(): NotificationEmailPlan & { render: ReturnType<typeof vi.fn> } {
+    const render = vi.fn((target: EmailTarget) =>
+      createElement(
+        'html',
+        null,
+        createElement(
+          'body',
+          null,
+          createElement('p', null, `Hi ${greetingName(target.name, 'there')},`),
+          createElement('p', null, 'The second draft is up for you to look at.'),
+        ),
+      ),
+    )
+    return { subject: '[REQ-4] Liam replied on "New homepage"', render }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    sendEmail.mockResolvedValue({ success: true })
+    vi.stubEnv('RESEND_API_KEY', 'test_key')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.useRealTimers()
+  })
+
+  it('hands Resend a text part built from the same element as the HTML', async () => {
+    const plan = spyPlan()
+    const res = await dispatchNotificationEmails(noDb, [invited], 'new_message', plan)
+    expect(res.sent).toBe(1)
+
+    const [to, subject, element, text] = sendEmail.mock.calls[0]
+    expect(to).toBe('new@acme.com')
+    expect(subject).toBe(plan.subject)
+    expect(element).toBe(plan.render.mock.results[0].value)
+    expect(typeof text).toBe('string')
+    expect(text).toContain('The second draft is up for you to look at.')
+    expect(text).toContain('Hi Jo,')
+    // Text, not markup: an HTML-only message is what this part exists to fix.
+    expect(text).not.toContain('<')
+  })
+
+  it('renders the template once, and reuses both parts on a rate limited retry', async () => {
+    vi.useFakeTimers()
+    sendEmail.mockResolvedValueOnce({ success: false, error: 'Too many requests' })
+    sendEmail.mockResolvedValue({ success: true })
+
+    const plan = spyPlan()
+    const promise = dispatchNotificationEmails(noDb, [invited], 'new_message', plan)
+    await vi.runAllTimersAsync()
+    const res = await promise
+
+    expect(res.sent).toBe(1)
+    expect(sendEmail).toHaveBeenCalledTimes(2)
+    expect(plan.render).toHaveBeenCalledTimes(1)
+    expect(sendEmail.mock.calls[0][3]).toBe(sendEmail.mock.calls[1][3])
+  })
+
+  it('sends nothing at all when Resend is not configured', async () => {
+    vi.stubEnv('RESEND_API_KEY', '')
+    const res = await dispatchNotificationEmails(noDb, [invited], 'new_message', spyPlan())
+    expect(res).toEqual({ sent: 0, muted: 0, failed: 0, deferred: false })
+    expect(sendEmail).not.toHaveBeenCalled()
   })
 })

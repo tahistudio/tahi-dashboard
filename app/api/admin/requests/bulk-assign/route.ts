@@ -188,7 +188,7 @@ export async function POST(req: NextRequest) {
       const single = items.length === 1
       const first = items[0]
       await notifyTeamMember(drizzle, memberId, {
-        type: 'task_assigned',
+        type: 'request_assigned',
         title: single
           ? requestParticipantTitle(first.role, first.title)
           : `You were added to ${items.length} requests`,

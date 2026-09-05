@@ -42,11 +42,19 @@ export async function GET(req: NextRequest) {
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
   // Brand portal scoping (T352): if the contact is linked to specific brands,
-  // only show requests for those brands
+  // only show requests for those brands.
+  //
+  // Held to the caller's org as well as their login: one person can be a
+  // contact at two client orgs on the same Clerk account, and an unscoped
+  // lookup would pick whichever row came back first and scope this org's list
+  // by the other org's brands (CLAUDE.md rule 12).
   const [contact] = await drizzle
     .select({ id: schema.contacts.id })
     .from(schema.contacts)
-    .where(eq(schema.contacts.clerkUserId, userId))
+    .where(and(
+      eq(schema.contacts.clerkUserId, userId),
+      eq(schema.contacts.orgId, orgId),
+    ))
     .limit(1)
 
   let brandIds: string[] | null = null
@@ -63,7 +71,15 @@ export async function GET(req: NextRequest) {
 
   const conditions = [eq(schema.requests.orgId, orgId)]
 
-  // If contact is linked to brands, scope requests to those brands
+  // If contact is linked to brands, scope requests to those brands.
+  //
+  // `IN` never matches NULL, so a request with no brand is invisible to a
+  // contact who has links. That is deliberate and it is the same rule the
+  // client notification audience applies (contactsForBrand in
+  // lib/notifications.ts drops a linked contact when the row carries no
+  // brand), so the list and the inbox cannot disagree about who a request
+  // belongs to. The POST below therefore never files a brand-linked
+  // submitter's request without a brand.
   if (brandIds !== null) {
     conditions.push(inArray(schema.requests.brandId, brandIds))
   }
@@ -202,6 +218,89 @@ function largeTaskAllowed(
   return config.largeTracks > 0
 }
 
+/** How many brand links are read for one submitter. Far past any real client. */
+const BRAND_LINK_LIMIT = 50
+
+/** The person filing, as this route needs them: for the brand, and for the
+ *  studio notification body. */
+interface Submitter {
+  id: string
+  name: string | null
+}
+
+/**
+ * The submitter's contact row at the org the request is being filed under.
+ *
+ * Scoped to the org, not just the login: one person can hold a contacts row at
+ * two client orgs on the same Clerk account, and an unscoped `.limit(1)` picks
+ * whichever comes back first. That value is written to the row here (it decides
+ * requests.brand_id), so an unscoped read would stamp the other org's brand on
+ * this org's request (CLAUDE.md rule 12).
+ *
+ * Never throws: a contact lookup that fails costs the brand and the name in
+ * the studio's notification body, not the client's request.
+ */
+async function loadSubmitter(
+  drizzle: ReturnType<typeof import('drizzle-orm/d1').drizzle>,
+  userId: string,
+  orgId: string,
+): Promise<Submitter | null> {
+  try {
+    const [contact] = await drizzle
+      .select({ id: schema.contacts.id, name: schema.contacts.name })
+      .from(schema.contacts)
+      .where(and(
+        eq(schema.contacts.clerkUserId, userId),
+        eq(schema.contacts.orgId, orgId),
+      ))
+      .limit(1)
+    return contact?.id ? { id: contact.id, name: contact.name ?? null } : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Which brand this request is filed under.
+ *
+ * A brand-linked contact only ever sees requests whose brand is one of theirs
+ * (the GET above), and the client notification audience applies the same rule,
+ * so filing without a brand hides the request from the person who filed it and
+ * takes their reply and delivery emails with it. A submitter who holds any
+ * link therefore always gets one written.
+ *
+ * `asked` is the dialog's answer once it grows a picker, and is honoured only
+ * when it is one of this submitter's own links: an arbitrary id on the body
+ * must never stamp another client's brand onto this row. Otherwise the first
+ * link wins, ordered so the same person filing twice lands on the same brand.
+ *
+ * Null means the submitter holds no links at all, which is the org-wide row:
+ * visible to every contact at the org who is likewise unlinked, and invisible
+ * to brand-scoped ones, in the list and in the inbox alike.
+ *
+ * Never throws: a brand lookup failure costs the brand, not the request.
+ */
+async function resolveSubmitterBrandId(
+  drizzle: ReturnType<typeof import('drizzle-orm/d1').drizzle>,
+  contactId: string,
+  asked: string | null,
+): Promise<string | null> {
+  try {
+    const links = await drizzle
+      .select({ brandId: schema.brandContacts.brandId })
+      .from(schema.brandContacts)
+      .where(eq(schema.brandContacts.contactId, contactId))
+      .orderBy(asc(schema.brandContacts.createdAt), asc(schema.brandContacts.brandId))
+      .limit(BRAND_LINK_LIMIT)
+    const ids = links.map((l) => l.brandId).filter((b): b is string => !!b)
+    if (ids.length === 0) return null
+    if (asked && ids.includes(asked)) return asked
+    return ids[0]
+  } catch {
+    return null
+  }
+}
+
 // ── POST /api/portal/requests ────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   // getPortalAuth resolves the caller's Clerk org -> the D1 organisations.id, so
@@ -221,9 +320,15 @@ export async function POST(req: NextRequest) {
   const body = await req.json() as {
     title?: string; type?: string; category?: string; description?: string
     dueDate?: string | null; formResponses?: string; placement?: string
+    brandId?: string | null
   }
   const { title, type, category, description, dueDate, formResponses } = body
   const placement = parsePlacement(body.placement)
+  // Only ever a hint: validated against the submitter's own links below, so an
+  // id from anywhere else is ignored rather than trusted.
+  const askedBrandId = typeof body.brandId === 'string' && body.brandId.trim()
+    ? body.brandId.trim()
+    : null
 
   if (!title?.trim()) {
     return NextResponse.json({ error: 'Request title is required' }, { status: 400 })
@@ -310,6 +415,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Who is filing, and which brand it belongs to. One read of the contacts row
+  // serves both: the brand before the insert, the name in the studio's
+  // notification body after it.
+  const submitter = await loadSubmitter(drizzle2, userId, orgId)
+  const brandId = submitter
+    ? await resolveSubmitterBrandId(drizzle2, submitter.id, askedBrandId)
+    : null
+
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 
@@ -354,12 +467,13 @@ export async function POST(req: NextRequest) {
   // learns the studio's total cross-client request volume (T-privacy).
   await drizzle2.run(sql`
     INSERT INTO requests (
-      id, org_id, title, type, category, description, due_date, form_responses,
+      id, org_id, brand_id, title, type, category, description, due_date, form_responses,
       status, priority, queue_order, submitted_by_id, is_internal,
       revision_count, max_revisions, request_number, created_at, updated_at
     ) VALUES (
       ${id},
       ${orgId},
+      ${brandId},
       ${title.trim()},
       ${type ?? 'small_task'},
       ${category ?? 'development'},
@@ -416,12 +530,6 @@ export async function POST(req: NextRequest) {
     .where(eq(schema.organisations.id, orgId))
     .limit(1)
   const clientName = org?.name ?? 'a client'
-
-  const [submitter] = await drizzle2
-    .select({ name: schema.contacts.name })
-    .from(schema.contacts)
-    .where(eq(schema.contacts.clerkUserId, userId))
-    .limit(1)
 
   const cleanTitle = title.trim()
   await notifyAllAdmins(drizzle2, {

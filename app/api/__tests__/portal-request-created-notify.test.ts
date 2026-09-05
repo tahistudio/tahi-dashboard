@@ -48,7 +48,8 @@ vi.mock('@/db/d1', () => ({
     subscriptions: { orgId: 'org_id', status: 'status', planType: 'plan_type', hasPrioritySupport: 'has_priority_support' },
     organisations: { id: 'id', name: 'name', tracksMode: 'tracks_mode', customSmallTracks: 'custom_small_tracks', customLargeTracks: 'custom_large_tracks' },
     requests: { id: 'id', orgId: 'org_id', requestNumber: 'request_number', isInternal: 'is_internal', status: 'status', createdAt: 'created_at', queueOrder: 'queue_order' },
-    contacts: { id: 'id', name: 'name', clerkUserId: 'clerk_user_id' },
+    contacts: { id: 'id', name: 'name', orgId: 'org_id', clerkUserId: 'clerk_user_id' },
+    brandContacts: { contactId: 'contact_id', brandId: 'brand_id', createdAt: 'created_at' },
   },
 }))
 
@@ -114,13 +115,35 @@ function makeRequest(body: Record<string, unknown>): NextRequest {
   })
 }
 
-/** The three reads the route makes after the insert, in order. */
-function afterInsert(requestNumber: number | null, orgName: string | null, submitter: string | null) {
+/**
+ * Every read the route makes, in order: the submitter's contact row and their
+ * brand links before the insert (which decide requests.brand_id), then the
+ * request number and the org name the studio notification needs after it.
+ *
+ * The submitter's name rides on the first read: the row is read once and used
+ * for both halves, where it used to be fetched again after the insert.
+ */
+function seedReads(
+  requestNumber: number | null,
+  orgName: string | null,
+  submitter: string | null,
+  brands: string[] = [],
+) {
   captured.selectResults = [
+    [{ id: 'ct_1', name: submitter }],
+    brands.map((brandId) => ({ brandId })),
     requestNumber === null ? [] : [{ requestNumber }],
     orgName === null ? [] : [{ name: orgName }],
-    submitter === null ? [] : [{ name: submitter }],
   ]
+}
+
+/**
+ * The brand bound into the INSERT. Not every column is a bound value (status,
+ * is_internal and the request_number subquery are literal), so this reads the
+ * one position that matters: id, org_id, brand_id are the first three.
+ */
+function insertedBrandId(): unknown {
+  return captured.runArgs[0].values[2]
 }
 
 interface StudioPayload {
@@ -147,7 +170,7 @@ describe('POST /api/portal/requests, telling the studio', () => {
   })
 
   it('fans a request_created event out to every Tahi admin', async () => {
-    afterInsert(7, 'Acme Ltd', 'Jo Yarnall')
+    seedReads(7, 'Acme Ltd', 'Jo Yarnall')
 
     const res = await POST(makeRequest({ title: 'Fix the footer' }))
     expect(res.status).toBe(201)
@@ -160,7 +183,7 @@ describe('POST /api/portal/requests, telling the studio', () => {
   })
 
   it('puts the per-org request number in the title, with the client in the body', async () => {
-    afterInsert(7, 'Acme Ltd', 'Jo Yarnall')
+    seedReads(7, 'Acme Ltd', 'Jo Yarnall')
     await POST(makeRequest({ title: 'Fix the footer' }))
 
     const payload = studioPayload()
@@ -170,20 +193,72 @@ describe('POST /api/portal/requests, telling the studio', () => {
   })
 
   it('prefixes the email subject with the same reference', async () => {
-    afterInsert(7, 'Acme Ltd', 'Jo Yarnall')
+    seedReads(7, 'Acme Ltd', 'Jo Yarnall')
     await POST(makeRequest({ title: 'Fix the footer' }))
 
     expect(studioPayload().email?.subject).toBe('[REQ-7] New request from Acme Ltd: Fix the footer')
   })
 
   it('degrades to a bare title and subject for a row with no number yet', async () => {
-    afterInsert(null, 'Acme Ltd', null)
+    seedReads(null, 'Acme Ltd', null)
     await POST(makeRequest({ title: 'Fix the footer' }))
 
     const payload = studioPayload()
     expect(payload.title).toBe('New request: Fix the footer')
     expect(payload.body).toBe('From Acme Ltd')
     expect(payload.email?.subject).toBe('New request from Acme Ltd: Fix the footer')
+  })
+
+  it("files the request under the submitter's brand when they have exactly one", async () => {
+    seedReads(7, 'Acme Ltd', 'Jo Yarnall', ['brand_a'])
+    await POST(makeRequest({ title: 'Fix the footer' }))
+
+    expect(captured.runArgs[0].strings.join('')).toContain('brand_id')
+    // Without this the portal hid the row from the person who filed it: the
+    // client list only shows a brand-linked contact their own brands.
+    expect(insertedBrandId()).toBe('brand_a')
+  })
+
+  it('files a multi-brand submitter under their first link, never under none', async () => {
+    seedReads(8, 'Acme Ltd', 'Jo Yarnall', ['brand_a', 'brand_b'])
+    await POST(makeRequest({ title: 'Fix the header' }))
+    // A null brand is not "everyone can see it": SQL IN never matches NULL, so
+    // the portal list and the client email audience would both drop the person
+    // who filed it. The first link is a brand they hold, so both keep them.
+    expect(insertedBrandId()).toBe('brand_a')
+  })
+
+  it('honours a brand the client names, when it is one of their own links', async () => {
+    seedReads(9, 'Acme Ltd', 'Jo Yarnall', ['brand_a', 'brand_b'])
+    await POST(makeRequest({ title: 'Fix the header', brandId: 'brand_b' }))
+    expect(insertedBrandId()).toBe('brand_b')
+  })
+
+  it('ignores a brand the submitter does not hold', async () => {
+    seedReads(10, 'Acme Ltd', 'Jo Yarnall', ['brand_a'])
+    await POST(makeRequest({ title: 'Fix the header', brandId: 'brand_of_another_client' }))
+    // An id on the body is a hint, never an authority: it cannot stamp another
+    // client's brand onto this row.
+    expect(insertedBrandId()).toBe('brand_a')
+  })
+
+  it('leaves the brand off only when the submitter holds no links at all', async () => {
+    seedReads(11, 'Acme Ltd', 'Jo Yarnall', [])
+    await POST(makeRequest({ title: 'Fix the footer' }))
+    // Nobody at the org is brand scoped for this row, and the notification
+    // audience drops brand-linked contacts for exactly the same reason, so the
+    // list and the inbox still agree.
+    expect(insertedBrandId()).toBeNull()
+  })
+
+  it('files the request anyway when the submitter has no contact row here', async () => {
+    captured.selectResults = [[], [{ requestNumber: 12 }], [{ name: 'Acme Ltd' }]]
+    const res = await POST(makeRequest({ title: 'Fix the footer' }))
+
+    expect(res.status).toBe(201)
+    expect(insertedBrandId()).toBeNull()
+    // The brand and the submitter's name are both worth less than the request.
+    expect(studioPayload().body).toBe('From Acme Ltd')
   })
 
   it('tells nobody when the submission is refused', async () => {

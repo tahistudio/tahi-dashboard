@@ -90,7 +90,7 @@ import { POST } from '@/app/api/admin/requests/bulk-assign/route'
 import { NextRequest } from 'next/server'
 import { notifyTeamMember } from '@/lib/notifications'
 
-interface BellPayload { title: string; body?: string | null; entityId?: string | null }
+interface BellPayload { type: string; title: string; body?: string | null; entityId?: string | null }
 function bellCalls(): Array<{ memberId: string; payload: BellPayload }> {
   return vi.mocked(notifyTeamMember).mock.calls.map(([, memberId, payload]) => ({
     memberId: memberId as string,
@@ -160,6 +160,8 @@ describe('POST /api/admin/requests/bulk-assign, telling the people', () => {
     expect(calls[0].payload.title).toBe('Request assigned to you: "New homepage"')
     expect(calls[0].payload.body).toBe('REQ-4')
     expect(calls[0].payload.entityId).toBe('req1')
+    // Its own event, not the task toggle it used to borrow.
+    expect(calls[0].payload.type).toBe('request_assigned')
   })
 
   it('collapses a multi row assign into one entry per person', async () => {

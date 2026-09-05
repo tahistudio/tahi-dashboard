@@ -16,6 +16,13 @@ export type NotificationEventType =
   | 'request_status_changed'
   | 'request_created'
   | 'new_message'
+  // Somebody was handed a request, or added to one as PM or follower. Its own
+  // event because the three request assignment routes used to borrow
+  // 'task_assigned', which put request rows under the task toggle in settings
+  // and made "mute task assignments" silence work hand-overs as well.
+  // No notificationHref case: these carry entityType 'request', so the deep
+  // link is the request case below, for both audiences.
+  | 'request_assigned'
   | 'task_assigned'
   | 'task_status_changed'
   | 'invoice_created'

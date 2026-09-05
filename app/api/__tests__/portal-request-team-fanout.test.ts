@@ -263,6 +263,63 @@ describe('POST /api/portal/requests/[id]/messages - studio fan-out', () => {
     expect(notifyAllAdmins).not.toHaveBeenCalled()
   })
 
+  it('carries the studio email on the same payload as the bell', async () => {
+    vi.mocked(createNotifications).mockResolvedValue({ delivered: 1, skipped: 0 })
+    dbMock.state.queues = {
+      requests: [
+        [{ id: 'req_1', orgId: 'org_client', assigneeId: 'tm_assignee', title: 'New homepage', requestNumber: 4 }],
+      ],
+      contacts: [[{ id: 'ct_1', name: 'Jo Yarnall' }]],
+      request_participants: [[]],
+      team_member_access: [[]],
+    }
+
+    await postMessage(messageRequest({ body: 'Any progress?' }), params)
+
+    // One resolved audience, two channels. The route used to resolve the
+    // studio a second time and dispatch the email itself, on its own fallback
+    // rule, so the two could disagree about who the studio side is.
+    expect(createNotifications).toHaveBeenCalledTimes(1)
+    const [, , payload] = vi.mocked(createNotifications).mock.calls[0]
+    expect(payload.email?.subject).toBe('[REQ-4] New client message on "New homepage"')
+    expect(notifyAllAdmins).not.toHaveBeenCalled()
+  })
+
+  it('sends the studio fallback email once, on the branch that reaches nobody', async () => {
+    dbMock.state.queues = {
+      requests: [
+        [{ id: 'req_1', orgId: 'org_client', assigneeId: null, title: 'Just submitted', requestNumber: 1 }],
+      ],
+      contacts: [[{ id: 'ct_1', name: 'Jo Yarnall' }]],
+      request_participants: [[]],
+      team_member_access: [[]],
+    }
+
+    await postMessage(messageRequest({ body: 'First message' }), params)
+    const [, payload] = vi.mocked(notifyAllAdmins).mock.calls[0]
+    expect(payload.email?.subject).toBe('[REQ-1] New client message on "Just submitted"')
+  })
+
+  it('does not mail the same person twice when the bell escalates', async () => {
+    // 1 recipient, 1 skipped: they have no Clerk login, so the bell escalates.
+    // Their inbox was already reached by the call above (an address needs no
+    // login), so the studio-wide bell fallback must not carry the plan again.
+    vi.mocked(createNotifications).mockResolvedValue({ delivered: 0, skipped: 1 })
+    dbMock.state.queues = {
+      requests: [
+        [{ id: 'req_1', orgId: 'org_client', assigneeId: 'tm_never_signed_in', title: 'Orphaned', requestNumber: 2 }],
+      ],
+      contacts: [[{ id: 'ct_1', name: 'Jo Yarnall' }]],
+      request_participants: [[]],
+      team_member_access: [[]],
+    }
+
+    await postMessage(messageRequest({ body: 'Hello?' }), params)
+    expect(vi.mocked(createNotifications).mock.calls[0][2].email).toBeDefined()
+    expect(notifyAllAdmins).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(notifyAllAdmins).mock.calls[0][1].email).toBeUndefined()
+  })
+
   it('still refuses a request outside the caller org', async () => {
     dbMock.state.queues = { requests: [[]] }
     const res = await postMessage(messageRequest({ body: 'Sneaky' }), params)

@@ -182,7 +182,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     if (body.participantId !== actor?.id) {
       await notifyTeamMember(drizzle, body.participantId, {
-        type: 'task_assigned',
+        type: 'request_assigned',
         title: requestParticipantTitle(body.role, request.title),
         body: request.requestNumber ? `REQ-${request.requestNumber}` : null,
         entityType: 'request',

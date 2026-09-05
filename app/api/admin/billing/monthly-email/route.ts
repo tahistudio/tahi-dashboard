@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, gte, lt } from 'drizzle-orm'
+import { emailFromAddress } from '@/lib/email'
 
 /**
  * POST /api/admin/billing/monthly-email
@@ -139,7 +140,7 @@ export async function POST(req: NextRequest) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          from: 'Tahi Studio <business@tahi.studio>',
+          from: emailFromAddress(),
           to: ['liam@tahi.studio'],
           subject: `Monthly Billing Summary - ${monthLabel}`,
           html: emailHtml,

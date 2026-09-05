@@ -37,10 +37,11 @@
  */
 
 import { createElement, type ReactElement } from 'react'
-import { and, eq, inArray } from 'drizzle-orm'
+import { render } from '@react-email/render'
+import { eq, inArray } from 'drizzle-orm'
 import { schema } from '@/db/d1'
 import { sendEmail } from '@/lib/email'
-import { DEFAULT_ENABLED } from '@/lib/notification-preferences'
+import { filterSubjectsByChannelPref } from '@/lib/notification-preferences'
 import { appOrigin } from '@/lib/app-url'
 import {
   notificationHref,
@@ -331,27 +332,6 @@ export async function resolveEmailTargets(
   }
 }
 
-/**
- * Every Tahi team member as a target. The studio-wide fallback for an event
- * that has nobody specific to reach yet, which is exactly when a client's
- * first message arrives.
- */
-export async function allStudioEmailTargets(database: DrizzleDB): Promise<EmailTarget[]> {
-  try {
-    const rows = await database
-      .select({
-        name: schema.teamMembers.name,
-        email: schema.teamMembers.email,
-        clerkUserId: schema.teamMembers.clerkUserId,
-      })
-      .from(schema.teamMembers)
-    return toEmailTargets(rows, 'team_member')
-  } catch (err) {
-    console.warn('[notification-email] failed to load the studio:', err)
-    return []
-  }
-}
-
 /** What a request email needs about the request that its call site has not read. */
 export interface RequestEmailContext {
   /** The per-org number, for the subject prefix. */
@@ -393,80 +373,22 @@ export async function loadRequestEmailContext(
 
 // ─── Preferences, for the whole audience at once ─────────────────────────────
 
-interface PrefRow {
-  userId: string
-  userType: string
-  eventType: string
-  channel: string
-  enabled: boolean
-}
-
-/**
- * The email half of lib/notification-preferences resolveFromRows: exact row,
- * then the per-user `'*'` default, then the hardcoded channel policy.
- *
- * Duplicated here only because the resolver in that module is private and that
- * module was not in this change's scope. Move this and filterTargetsByEmailPref
- * below into lib/notification-preferences next to filterRecipientsByInAppPref
- * when that file next opens, so one resolver serves both channels.
- */
-function emailPrefEnabled(
-  rows: readonly PrefRow[],
-  target: EmailTarget,
-  eventType: NotificationEventType,
-): boolean {
-  const clerkUserId = target.clerkUserId
-  if (!clerkUserId) return DEFAULT_ENABLED.email
-  const mine = rows.filter((r) => r.userId === clerkUserId && r.userType === target.userType)
-  const exact = mine.find((r) => r.eventType === eventType)
-  if (exact) return exact.enabled
-  const wildcard = mine.find((r) => r.eventType === '*')
-  if (wildcard) return wildcard.enabled
-  return DEFAULT_ENABLED.email
-}
-
 /**
  * Drop everyone who muted this event's email channel, in ONE query for the
- * whole audience. The per-recipient read this replaces cost an org-wide fan-out
- * N serialised SELECTs on top of N sends; the bell path has resolved the same
- * thing in a single batched query since it was written.
+ * whole audience.
  *
- * Fails open (returns everyone) exactly as filterRecipientsByInAppPref does:
- * better a stray email than a silently swallowed delivery notice.
+ * The exact / per-user `'*'` / channel-default order used to be copied out
+ * here, because the resolver in lib/notification-preferences was module
+ * private. It is not any more: that module owns both channels now, and this is
+ * the email-shaped name for it, kept so the call sites and their tests read in
+ * the language of the thing they are sending.
  */
 export async function filterTargetsByEmailPref(
   database: DrizzleDB,
   targets: readonly EmailTarget[],
   eventType: NotificationEventType,
 ): Promise<{ allowed: EmailTarget[]; muted: number }> {
-  const withLogin = targets.filter((t) => t.clerkUserId)
-  // Nobody here can have written a preference row, so nobody can have muted.
-  if (withLogin.length === 0) return { allowed: [...targets], muted: 0 }
-
-  try {
-    const userIds = [...new Set(withLogin.map((t) => t.clerkUserId as string))]
-    const rows = await database
-      .select({
-        userId: schema.notificationPreferences.userId,
-        userType: schema.notificationPreferences.userType,
-        eventType: schema.notificationPreferences.eventType,
-        channel: schema.notificationPreferences.channel,
-        enabled: schema.notificationPreferences.enabled,
-      })
-      .from(schema.notificationPreferences)
-      .where(
-        and(
-          eq(schema.notificationPreferences.channel, 'email'),
-          inArray(schema.notificationPreferences.userId, userIds),
-          inArray(schema.notificationPreferences.eventType, [eventType, '*']),
-        ),
-      )
-    if (rows.length === 0) return { allowed: [...targets], muted: 0 }
-    const allowed = targets.filter((t) => emailPrefEnabled(rows, t, eventType))
-    return { allowed, muted: targets.length - allowed.length }
-  } catch {
-    return { allowed: [...targets], muted: 0 }
-  }
+  return filterSubjectsByChannelPref(database, targets, eventType, 'email')
 }
 
 // ─── Dispatch ────────────────────────────────────────────────────────────────
@@ -485,19 +407,41 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * The text/plain half of a multipart message, rendered from the same element
+ * the HTML half comes from so the two can never say different things.
+ *
+ * Best effort: a template that cannot be rendered to text still sends as HTML,
+ * because losing a delivery notice is worse than losing an alternative part.
+ */
+async function plainTextAlternative(el: ReactElement): Promise<string | undefined> {
+  try {
+    const text = await render(el, { plainText: true })
+    return text.trim() ? text : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * One address, with a retry on the one failure that is worth retrying. Every
  * other refusal (bad address, unverified domain) is permanent and retrying it
  * just spends the next recipient's budget.
+ *
+ * The element and its text alternative are rendered ONCE, above the loop: a
+ * rate limited retry used to re-render the template, which is the expensive
+ * half of a send and the half that cannot change between attempts.
  */
 async function sendWithBackoff(
   target: EmailTarget,
   plan: NotificationEmailPlan,
 ): Promise<{ success: boolean; error?: string }> {
-  let last = await sendEmail(target.email, plan.subject, plan.render(target))
+  const el = plan.render(target)
+  const text = await plainTextAlternative(el)
+  let last = await sendEmail(target.email, plan.subject, el, text)
   for (let attempt = 0; attempt < RATE_LIMIT_RETRIES; attempt += 1) {
     if (last.success || !isRateLimited(last.error)) return last
     await sleep(RATE_LIMIT_BACKOFF_MS[attempt])
-    last = await sendEmail(target.email, plan.subject, plan.render(target))
+    last = await sendEmail(target.email, plan.subject, el, text)
   }
   return last
 }
@@ -508,8 +452,9 @@ async function sendWithBackoff(
  * no client ever learns who else is on the thread), and one failure never
  * stops the rest.
  *
- * Awaits every send: call `deferNotificationEmails` from a route handler so the
- * response does not wait on it.
+ * Awaits every send, so nothing calls this from a route handler directly:
+ * `sendNotificationEmails` is the one entry point, and it puts the whole
+ * fan-out behind waitUntil.
  */
 export async function dispatchNotificationEmails(
   database: DrizzleDB,
@@ -576,23 +521,16 @@ async function offResponsePath(
 }
 
 /**
- * Send one plan to an already-resolved target list, off the response path.
- * The entry point a route handler should use.
- */
-export async function deferNotificationEmails(
-  database: DrizzleDB,
-  targets: readonly EmailTarget[],
-  eventType: NotificationEventType,
-  plan: NotificationEmailPlan,
-): Promise<EmailDispatchResult> {
-  if (targets.length === 0 || !process.env.RESEND_API_KEY) return NO_DISPATCH
-  return offResponsePath(() => dispatchNotificationEmails(database, targets, eventType, plan))
-}
-
-/**
- * Resolve typed recipients and send, off the response path. The entry point
- * `createNotifications` calls when a payload carries an email plan, so the bell
- * row and the email are one call site.
+ * Resolve typed recipients and send, off the response path. The one entry
+ * point, called by `createNotifications` when a payload carries an email plan,
+ * so the bell row and the email are one call site.
+ *
+ * There was a second one, taking targets a caller had resolved for itself. Its
+ * last consumer (the portal thread route) now hands its plan to
+ * notifyRequestTeam instead, and resolving the same audience twice is exactly
+ * how the two channels came to disagree about who the studio side of a request
+ * is. If a caller ever genuinely has targets in hand, give it back rather than
+ * rebuilding the second resolution.
  */
 export async function sendNotificationEmails(
   database: DrizzleDB,

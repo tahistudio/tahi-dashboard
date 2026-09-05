@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc } from 'drizzle-orm'
 import { logActivity } from '@/lib/deal-activity'
+import { emailFromAddress } from '@/lib/email'
 import { requireDealAccess } from '../../_access'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -81,8 +82,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   // Send immediately if requested
   if (body.sendNow) {
     try {
-      const fromEmail = process.env.RESEND_FROM_EMAIL ?? 'business@tahi.studio'
-
       // Pull signature from settings and append to body. Stored as raw HTML
       // under key `pipeline.nudgeSignatureHtml`. If unset/blank, send as-is.
       let outgoingHtml = body.bodyHtml
@@ -108,7 +107,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            from: `Liam from Tahi Studio <${fromEmail}>`,
+            // A nudge is written in one person's voice, so it keeps the display
+            // name and takes the mailbox from the one configured lockup. Built
+            // by hand it produced "Liam from Tahi Studio <Tahi Studio <...>>"
+            // the moment RESEND_FROM_EMAIL held a full lockup.
+            from: emailFromAddress('Liam from Tahi Studio'),
             to: body.contactEmails,
             subject: body.subject,
             html: outgoingHtml,

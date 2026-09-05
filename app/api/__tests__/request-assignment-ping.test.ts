@@ -189,6 +189,7 @@ describe('POST /api/admin/requests/[id]/participants', () => {
     const [, memberId, payload] = vi.mocked(notifyTeamMember).mock.calls[0]
     expect(memberId).toBe('tm_pm')
     expect(payload.title).toBe('You are now PM on: "Rebuild the checkout"')
+    expect(payload.type).toBe('request_assigned')
   })
 
   it('still tells a follower', async () => {
@@ -227,6 +228,10 @@ describe('PATCH /api/admin/requests/[id]', () => {
     // The same string requestParticipantTitle produces for the bulk assign bar.
     expect(payload.title).toBe('Request assigned to you: "Rebuild the checkout"')
     expect(payload.body).toBe('REQ-4')
+    // A request hand-over is its own event: it used to be filed as
+    // 'task_assigned', which put it under the task toggle in settings.
+    expect(payload.type).toBe('request_assigned')
+    expect(payload.entityType).toBe('request')
   })
 
   it('does not ping you for assigning yourself', async () => {
