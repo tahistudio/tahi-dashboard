@@ -4,10 +4,14 @@
  * <TasksList>. The List view: the quick-add bar, the bulk bar when rows are
  * selected, and the table itself.
  *
- * Built on <DataTable> with expandedRowMode="rows", so a row's subtask panel
+ * Built on <DataTable> with expandedRowMode="rows", so a row's checklist panel
  * is real <tr>s in the same <tbody> and its columns line up with the parent's
  * for free. Below md the table is replaced by mobileCard, which is the one
  * layout DataTable mounts once it has measured the width.
+ *
+ * The short tick-off items under a task are a CHECKLIST. They are backed by
+ * task_subtasks rows, so the table, the props, the state and the API paths
+ * all keep the word subtask; nothing a person reads does.
  *
  * This component fetches nothing and stores nothing. Every mutation leaves
  * through a callback so the shell can make it optimistic in one place.
@@ -384,7 +388,7 @@ function SubtaskRow({
         {!readOnly && onRemove && (
           <button
             type="button"
-            aria-label={`Remove subtask ${subtask.title}`}
+            aria-label={`Remove checklist item ${subtask.title}`}
             className="tahi-focus-ring inline-flex items-center justify-center w-11 h-11 md:w-[1.625rem] md:h-[1.625rem]"
             onClick={e => { e.stopPropagation(); onRemove() }}
             style={{
@@ -489,7 +493,7 @@ function AddSubtaskRow({
     } catch {
       // The draft stays in the field on purpose, the same bargain the
       // quick-add strikes: retrying is one keypress, retyping is not.
-      if (mountedRef.current) showToast("Couldn't add the subtask", 'error')
+      if (mountedRef.current) showToast("Couldn't add the checklist item", 'error')
     } finally {
       savingRef.current = false
       if (mountedRef.current) setSaving(false)
@@ -512,8 +516,8 @@ function AddSubtaskRow({
             // freezes the text and keeps the caret exactly where it was.
             readOnly={saving}
             aria-busy={saving}
-            aria-label="New subtask"
-            placeholder="Name the subtask, press Enter"
+            aria-label="New checklist item"
+            placeholder="Name the checklist item, press Enter"
             className="tahi-focus-ring"
             onChange={e => setDraft(e.target.value)}
             onBlur={() => {
@@ -573,7 +577,7 @@ function AddSubtaskRow({
         }}
       >
         <Plus size={13} strokeWidth={2.4} aria-hidden="true" />
-        Add subtask
+        Add checklist item
       </button>
     </PanelRow>
   )
@@ -887,7 +891,7 @@ export function TasksList(props: TasksListProps): React.ReactElement {
                 color: 'var(--color-text-subtle)',
               }}
             >
-              No subtasks yet.
+              No checklist items yet.
             </span>
           </PanelRow>
         )}
@@ -986,7 +990,7 @@ export function TasksList(props: TasksListProps): React.ReactElement {
           expandedRowMode="rows"
           expandedIds={expandedIds}
           onExpandedChange={handleExpandedChange}
-          expandAllLabel="subtasks"
+          expandAllLabel="checklist items"
           mobileCard={renderMobileCard}
           empty={hasFilter ? (
             <TasksEmpty

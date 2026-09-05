@@ -274,7 +274,7 @@ export function SubtaskBadge({ done, total }: { done: number; total: number }) {
   return (
     <span
       className="inline-flex items-center tabular-nums"
-      title={`${done} of ${total} subtasks done`}
+      title={`${done} of ${total} checklist items done`}
       style={{
         gap: '0.1875rem',
         flexShrink: 0,

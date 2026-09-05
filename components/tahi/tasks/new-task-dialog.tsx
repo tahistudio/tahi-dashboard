@@ -15,6 +15,10 @@
  *
  * Nothing here posts. The draft goes to `onCreate`, which is the shell's job,
  * so this file has no idea what an endpoint is.
+ *
+ * The short tick-off items under a task are a CHECKLIST. They are backed by
+ * task_subtasks rows, so the table, the props, the state and the API paths
+ * all keep the word subtask; nothing a person reads does.
  */
 
 import * as React from 'react'
@@ -346,7 +350,7 @@ export function NewTaskDialog({
                   value: t.id,
                   label: t.name,
                   subtitle: t.subtasks.length > 0
-                    ? `${t.subtasks.length} subtask${t.subtasks.length === 1 ? '' : 's'}`
+                    ? `${t.subtasks.length} checklist item${t.subtasks.length === 1 ? '' : 's'}`
                     : undefined,
                 }))}
                 value={templateId}
@@ -491,7 +495,7 @@ export function NewTaskDialog({
             />
           </FieldGroup>
 
-          <FieldGroup label="Subtasks" htmlFor="new-task-subtask">
+          <FieldGroup label="Checklist" htmlFor="new-task-subtask">
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
               {subtasks.map((s, index) => (
                 <div key={`${index}-${s}`} className="flex items-center" style={{ gap: '0.375rem' }}>
@@ -515,7 +519,7 @@ export function NewTaskDialog({
                     type="button"
                     className="tskn-x tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 h-11 w-11 md:h-8 md:w-8"
                     aria-label={`Remove ${s}`}
-                    title="Remove subtask"
+                    title="Remove checklist item"
                     onClick={() => setSubtasks(list => list.filter((_, i) => i !== index))}
                   >
                     <X size={14} aria-hidden="true" />
@@ -528,7 +532,7 @@ export function NewTaskDialog({
                   type="text"
                   className="tskn-input"
                   value={subtaskDraft}
-                  placeholder="Name a subtask, press Enter"
+                  placeholder="Name a checklist item, press Enter"
                   onChange={e => setSubtaskDraft(e.target.value)}
                   onKeyDown={e => {
                     if (e.key === 'Enter') { e.preventDefault(); addSubtask() }
@@ -537,8 +541,8 @@ export function NewTaskDialog({
                 <button
                   type="button"
                   className="tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 h-11 w-11 md:h-9 md:w-9"
-                  aria-label="Add subtask"
-                  title="Add subtask"
+                  aria-label="Add checklist item"
+                  title="Add checklist item"
                   onClick={addSubtask}
                   style={{
                     border: '1px solid var(--color-border)',

@@ -2559,6 +2559,18 @@ html.reduce-motion *::after {
 .tahi-seg-b[aria-disabled="true"]:hover {
   color: var(--color-text-subtle);
 }
+/* The current value is never a move, so a disabled ACTIVE option has to stay
+   as legible as an enabled one. Without this rule the option sitting under the
+   pill renders at 0.55 opacity in subtle ink with its brand-tinted icon
+   dimmed, because the disabled colour matches the data-active colour for
+   specificity and follows it: the control's current value becomes its least
+   readable part. Two attributes outweigh the plain disabled rule, and this
+   sits after the :hover one, which it ties with. Only the cursor still says
+   the press does nothing. */
+.tahi-seg-b[data-active="true"][aria-disabled="true"] {
+  color: var(--color-text);
+  opacity: 1;
+}
 .tahi-seg-ic {
   display: inline-flex;
   flex-shrink: 0;

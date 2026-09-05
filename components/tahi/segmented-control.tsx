@@ -19,8 +19,10 @@
  * Roles: tablist (role=tab, aria-selected), radiogroup (role=radio,
  * aria-checked) and group (aria-pressed). tablist and radiogroup use a roving
  * tabindex with Arrow Left/Right cycling and Home/End jumping, skipping
- * disabled options. The focus ring is the shared .tahi-focus-ring class; the
- * buttons never carry an inline box-shadow, so the pill cannot swallow it.
+ * disabled options. The tab stop itself stays on the active option even when
+ * that option is disabled: see segmentTabStop. The focus ring is the shared
+ * .tahi-focus-ring class; the buttons never carry an inline box-shadow, so
+ * the pill cannot swallow it.
  */
 
 import * as React from 'react'
@@ -115,6 +117,26 @@ export function nextSegmentIndex<V extends string>(
     if (!options[i].disabled) return i
   }
   return null
+}
+
+/**
+ * The index that holds the group's single tab stop.
+ *
+ * The active option keeps it even when it is disabled. Options are marked
+ * aria-disabled rather than natively disabled, so they stay focusable, and a
+ * radiogroup whose checked option has dropped out of the tab order sends the
+ * keyboard to a value the user never picked (and a strip with every option
+ * disabled would have no tab stop at all, stranding it). Only when nothing
+ * matches the value does the first enabled option take it.
+ * @internal Exported for the unit tests.
+ */
+export function segmentTabStop<V extends string>(
+  options: ReadonlyArray<SegmentedControlOption<V>>,
+  value: V,
+): number {
+  const active = options.findIndex(o => o.value === value)
+  if (active >= 0) return active
+  return options.findIndex(o => !o.disabled)
 }
 
 const TRACK_SIZE: Record<SegmentedControlSize, string> = {
@@ -226,9 +248,7 @@ export function SegmentedControl<V extends string>({
   }, [pill, settled])
 
   const roving = role !== 'group'
-  const activeIndex = options.findIndex(o => o.value === value)
-  const activeEnabled = activeIndex >= 0 && !options[activeIndex].disabled
-  const tabStop = activeEnabled ? activeIndex : options.findIndex(o => !o.disabled)
+  const tabStop = segmentTabStop(options, value)
 
   const handleKeyDown = (index: number) => (e: React.KeyboardEvent<HTMLButtonElement>) => {
     if (!roving) return
