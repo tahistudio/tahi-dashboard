@@ -14,6 +14,8 @@ import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { SkeletonList } from '@/components/tahi/skeletons'
 import { useToast } from '@/components/tahi/toast'
+import { INVOICE_CHANNELS, invoiceChannelLabel } from '@/lib/invoice-channel'
+import { PAYMENT_TERMS, paymentTermsLabel } from '@/lib/invoice-billing'
 import {
   Globe,
   Building2,
@@ -164,6 +166,12 @@ interface Organisation {
   defaultHourlyRate: number | null
   retainerStartDate: string | null
   retainerEndDate: string | null
+  /** How this client is billed: 'stripe' | 'xero', or null for the studio default. */
+  invoiceChannel?: string | null
+  /** When it is due: 'card' | 'net_7' | 'net_14' | 'net_30', or null. */
+  paymentTerms?: string | null
+  /** invoiceChannel resolved against the studio default; always a real rail. */
+  effectiveInvoiceChannel?: string | null
   /** true when a user explicitly set the field; auto-derivation will not overwrite it. */
   billingModelIsManual?: boolean
   retainerDatesIsManual?: boolean
@@ -1103,6 +1111,9 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
     preferredCurrency: org.preferredCurrency ?? 'NZD',
     retainerStartDate: org.retainerStartDate ?? '',
     retainerEndDate: org.retainerEndDate ?? '',
+    // '' is the "Studio default" option, which saves as NULL.
+    invoiceChannel: org.invoiceChannel ?? '',
+    paymentTerms: org.paymentTerms ?? 'card',
   })
 
   const save = async () => {
@@ -1116,6 +1127,8 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
         defaultHourlyRate: form.defaultHourlyRate ? parseFloat(form.defaultHourlyRate) : null,
         retainerStartDate: form.retainerStartDate || null,
         retainerEndDate: form.retainerEndDate || null,
+        invoiceChannel: form.invoiceChannel || null,
+        paymentTerms: form.paymentTerms || null,
       }
       await fetch(apiPath(`/api/admin/clients/${org.id}`), {
         method: 'PATCH',
@@ -1164,7 +1177,7 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
         ) : (
           <div className="flex gap-2">
             <button
-              onClick={() => { setEditing(false); setForm({ name: org.name, website: org.website ?? '', industry: org.industry ?? '', status: org.status, healthStatus: org.healthStatus ?? 'green', healthNote: org.healthNote ?? '', billingModel: org.billingModel ?? 'none', customMrr: org.customMrr ? String(org.customMrr) : '', customMrrCurrency: org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD', defaultHourlyRate: org.defaultHourlyRate ? String(org.defaultHourlyRate) : '', preferredCurrency: org.preferredCurrency ?? 'NZD', retainerStartDate: org.retainerStartDate ?? '', retainerEndDate: org.retainerEndDate ?? '' }) }}
+              onClick={() => { setEditing(false); setForm({ name: org.name, website: org.website ?? '', industry: org.industry ?? '', status: org.status, healthStatus: org.healthStatus ?? 'green', healthNote: org.healthNote ?? '', billingModel: org.billingModel ?? 'none', customMrr: org.customMrr ? String(org.customMrr) : '', customMrrCurrency: org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD', defaultHourlyRate: org.defaultHourlyRate ? String(org.defaultHourlyRate) : '', preferredCurrency: org.preferredCurrency ?? 'NZD', retainerStartDate: org.retainerStartDate ?? '', retainerEndDate: org.retainerEndDate ?? '', invoiceChannel: org.invoiceChannel ?? '', paymentTerms: org.paymentTerms ?? 'card' }) }}
               className="flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
             >
               <X className="w-3.5 h-3.5" /> Cancel
@@ -1266,6 +1279,27 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
               className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
             >
               {['NZD', 'USD', 'GBP', 'EUR', 'AUD'].map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Invoicing channel</label>
+            <select
+              value={form.invoiceChannel}
+              onChange={e => setForm(f => ({ ...f, invoiceChannel: e.target.value }))}
+              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            >
+              <option value="">Studio default</option>
+              {INVOICE_CHANNELS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Payment terms</label>
+            <select
+              value={form.paymentTerms}
+              onChange={e => setForm(f => ({ ...f, paymentTerms: e.target.value }))}
+              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            >
+              {PAYMENT_TERMS.map(t => <option key={t} value={t}>{paymentTermsLabel(t)}</option>)}
             </select>
           </div>
           {(form.billingModel === 'retainer' || form.billingModel === 'none') && (
@@ -1391,6 +1425,19 @@ function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdated: () =
                 reenabling={reenablingField === 'billingModel'}
               />
             </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Invoicing</dt>
+            <dd className="text-[var(--color-text)]">
+              {invoiceChannelLabel(org.effectiveInvoiceChannel ?? org.invoiceChannel)}
+              {!org.invoiceChannel && (
+                <span className="ml-1.5 text-xs text-[var(--color-text-subtle)]">(studio default)</span>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Payment terms</dt>
+            <dd className="text-[var(--color-text)]">{paymentTermsLabel(org.paymentTerms)}</dd>
           </div>
           {org.billingModel === 'retainer' || org.customMrr ? (
             <div>

@@ -2040,6 +2040,13 @@ const MIGRATIONS: Migration[] = [
        SELECT d.id, 'task', d.task_id, 'task', d.depends_on_task_id, NULL, d.created_at FROM task_dependencies AS d`,
     ],
   },
+  {
+    name: '0089',
+    description: 'organisations.invoice_channel: which rail a client is billed on. "stripe" = a Stripe invoice paid on Stripe\'s hosted page, "xero" = a Xero invoice carrying its own pay-now link. NULL = unset, which falls back to the studio default in the settings key `invoicing.defaultChannel` (itself "stripe" when unset). Two values, not three: a Xero invoice surfaces its own pay link, so there is no client-level split between card and bank transfer. Answers HOW a client is billed, next to organisations.payment_terms (0086) which answers WHEN it is due. No backfill; the real clients are set by hand. Additive only; the duplicate-column error is swallowed upstream so re-runs are idempotent.',
+    statements: [
+      `ALTER TABLE organisations ADD COLUMN invoice_channel text`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
