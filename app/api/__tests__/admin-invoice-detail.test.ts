@@ -461,10 +461,18 @@ describe('PATCH /api/admin/invoices/[id] paid date', () => {
 //
 // The invariants, in order of how much they would cost to get wrong:
 //   - the local write happens first and stands whatever the rail does;
-//   - only a real transition INTO paid pushes, so a repeat PATCH cannot post a
-//     second Xero payment against the same invoice;
+//   - the Xero payment is for the balance XERO reports, read back with a GET,
+//     never the local total: a dashboard-raised NZD invoice is pushed with
+//     LineAmountTypes 'Exclusive' + TaxType 'OUTPUT2', so Xero owes
+//     subtotal x 1.15 while invoices.total_usd is the bare subtotal, and Xero
+//     takes a short Amount as a silent PARTIAL payment;
+//   - only a real transition INTO paid, on a row with no paid date yet,
+//     pushes, so neither a repeat PATCH nor paid -> written_off -> paid can
+//     post a second Xero payment against the same invoice;
 //   - no account code means SKIP, never a guess, because a payment posted to
 //     the wrong Xero account has to be found and reversed by hand;
+//   - anything other than a clean 'done' leaves an audit row, because the
+//     caller that presses "Mark as Paid" throws the response body away;
 //   - `{ pushback: false }` is the door for a caller reconciling money the
 //     rail already knows about.
 describe('PATCH /api/admin/invoices/[id] push-back', () => {
@@ -478,11 +486,46 @@ describe('PATCH /api/admin/invoices/[id] push-back', () => {
    */
   const AFTER_THE_WRITE: unknown[] = []
 
+  let warnSpy: ReturnType<typeof vi.spyOn>
+
+  /**
+   * Xero answering GET /Invoices/{id} with one invoice, and {} for everything
+   * else (the PUT /Payments the route makes next). AUTHORISED with a balance
+   * is the state a payment is allowed against; every test that wants another
+   * one overrides it here rather than mocking the endpoint again.
+   */
+  function serveXeroInvoice(over: Record<string, unknown> = {}) {
+    const invoice = { InvoiceID: 'xero-1', Status: 'AUTHORISED', AmountDue: 1150, ...over }
+    vi.mocked(callXeroAPI).mockImplementation(async (method, endpoint) => {
+      if (String(method) === 'GET' && String(endpoint).startsWith('/Invoices/')) {
+        return { Invoices: [invoice] } as never
+      }
+      return {} as never
+    })
+  }
+
+  /** The `.values({...})` of the audit row this request wrote, if any. */
+  function auditRow(queries: QueryRecord[]): Record<string, unknown> | undefined {
+    for (const q of byEntry(queries, 'insert')) {
+      const values = argOf(q, 'values') as Record<string, unknown> | undefined
+      if (values && typeof values.action === 'string' && values.action.startsWith('invoice.pushback')) {
+        return values
+      }
+    }
+    return undefined
+  }
+
   beforeEach(() => {
     // clearAllMocks does not reset implementations, so a test that made Xero
     // or Stripe fail would otherwise leak into the next one.
-    vi.mocked(callXeroAPI).mockResolvedValue({} as never)
+    serveXeroInvoice()
     vi.mocked(stripeSecretKey).mockReturnValue(undefined)
+    // A skipped or failed push warns by design; keep the run readable.
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    warnSpy.mockRestore()
   })
 
   function stripeFetch(response: { ok: boolean; status?: number; body?: unknown }) {
@@ -500,8 +543,11 @@ describe('PATCH /api/admin/invoices/[id] push-back', () => {
   }
 
   it('records the payment in Xero when the studio marks a Xero invoice paid', async () => {
+    // The local total is the bare subtotal; Xero owes it plus 15% GST. Paying
+    // the local number would be a PARTIAL payment Xero accepts in silence.
+    serveXeroInvoice({ AmountDue: 1150 })
     const { handle, queries } = makeDb([
-      existing({ source: 'xero', xeroInvoiceId: 'xero-1', totalUsd: 1150 }),
+      existing({ source: 'xero', xeroInvoiceId: 'xero-1', totalUsd: 1000 }),
       AFTER_THE_WRITE,
       ACCOUNT_CODE_ROW,
     ])
@@ -514,15 +560,125 @@ describe('PATCH /api/admin/invoices/[id] push-back', () => {
     expect(res.status).toBe(200)
     expect(await bodyOf(res)).toMatchObject({ pushback: { rail: 'xero', status: 'done' } })
 
+    // Xero is asked what is outstanding before anything is posted.
+    expect(callXeroAPI).toHaveBeenCalledWith('GET', '/Invoices/xero-1')
     expect(callXeroAPI).toHaveBeenCalledWith('PUT', '/Payments', {
       Invoice: { InvoiceID: 'xero-1' },
       Account: { Code: '090' },
       // Xero wants a plain date, taken from the paid date the studio gave us
       // rather than from "now", so a backdated transfer books on its own day.
       Date: '2026-09-04',
+      // Xero's balance, not the row's 1000.
       Amount: 1150,
     })
     // The local write still happened, and happened first.
+    expect(patchOf(queries).status).toBe('paid')
+    // A clean push is not audit noise.
+    expect(auditRow(queries)).toBeUndefined()
+  })
+
+  it('pays the Xero balance rather than the local total, to the cent', async () => {
+    // Float noise in either number is a payment Xero rejects or a residue of
+    // a cent that keeps the invoice open.
+    serveXeroInvoice({ AmountDue: 402.50000000000006 })
+    const { handle } = makeDb([
+      existing({ source: 'xero', xeroInvoiceId: 'xero-1', totalUsd: 350 }),
+      AFTER_THE_WRITE,
+      ACCOUNT_CODE_ROW,
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    await patchInvoice(patchReq('inv-1', { status: 'paid' }), params('inv-1'))
+
+    const payment = vi.mocked(callXeroAPI).mock.calls.find(c => c[1] === '/Payments')
+    expect((payment?.[2] as { Amount: number }).Amount).toBe(402.5)
+  })
+
+  it('falls back to the Xero Total when the payload carries no AmountDue', async () => {
+    serveXeroInvoice({ AmountDue: undefined, Total: 920 })
+    const { handle } = makeDb([
+      existing({ source: 'xero', xeroInvoiceId: 'xero-1', totalUsd: 800 }),
+      AFTER_THE_WRITE,
+      ACCOUNT_CODE_ROW,
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await patchInvoice(patchReq('inv-1', { status: 'paid' }), params('inv-1'))
+    expect(await bodyOf(res)).toMatchObject({ pushback: { rail: 'xero', status: 'done' } })
+
+    const payment = vi.mocked(callXeroAPI).mock.calls.find(c => c[1] === '/Payments')
+    expect((payment?.[2] as { Amount: number }).Amount).toBe(920)
+  })
+
+  it('books the payment on the studio calendar day, not the UTC one', async () => {
+    // 22:00 UTC on 31 August is 10:00 on 1 September in Pacific/Auckland.
+    // Slicing the ISO stamp would book it in the wrong month, and across a
+    // GST period boundary that is drift Liam reconciles by hand.
+    const { handle } = makeDb([
+      existing({ source: 'xero', xeroInvoiceId: 'xero-1' }),
+      AFTER_THE_WRITE,
+      ACCOUNT_CODE_ROW,
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    await patchInvoice(
+      patchReq('inv-1', { status: 'paid', paidAt: '2026-08-31T22:00:00.000Z' }),
+      params('inv-1'),
+    )
+
+    const payment = vi.mocked(callXeroAPI).mock.calls.find(c => c[1] === '/Payments')
+    expect((payment?.[2] as { Date: string }).Date).toBe('2026-09-01')
+  })
+
+  it('skips a Xero invoice that is still a draft rather than posting at it', async () => {
+    // The push route holds every dashboard invoice at Xero DRAFT on purpose,
+    // so this is the ORDINARY answer until Liam approves it in Xero.
+    serveXeroInvoice({ Status: 'DRAFT' })
+    const { handle, queries } = makeDb([
+      existing({ source: 'xero', xeroInvoiceId: 'xero-1' }),
+      AFTER_THE_WRITE,
+      ACCOUNT_CODE_ROW,
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await patchInvoice(patchReq('inv-1', { status: 'paid' }), params('inv-1'))
+    const body = await bodyOf(res)
+    expect(body.pushback).toMatchObject({ rail: 'xero', status: 'skipped' })
+    expect(body.pushback?.reason).toContain('draft')
+
+    // Nothing was posted, and the local payment stands.
+    expect(vi.mocked(callXeroAPI).mock.calls.some(c => c[1] === '/Payments')).toBe(false)
+    expect(patchOf(queries).status).toBe('paid')
+  })
+
+  it('skips when Xero already shows nothing outstanding', async () => {
+    // The second of two racing clicks, or a payment reconciled inside Xero.
+    // Posting again would be an over-payment to unpick by hand.
+    serveXeroInvoice({ AmountDue: 0 })
+    const { handle } = makeDb([
+      existing({ source: 'xero', xeroInvoiceId: 'xero-1' }),
+      AFTER_THE_WRITE,
+      ACCOUNT_CODE_ROW,
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await patchInvoice(patchReq('inv-1', { status: 'paid' }), params('inv-1'))
+    expect(await bodyOf(res)).toMatchObject({ pushback: { rail: 'xero', status: 'skipped' } })
+    expect(vi.mocked(callXeroAPI).mock.calls.some(c => c[1] === '/Payments')).toBe(false)
+  })
+
+  it('fails rather than guessing when Xero will not say what is owed', async () => {
+    vi.mocked(callXeroAPI).mockResolvedValue(null as never)
+    const { handle, queries } = makeDb([
+      existing({ source: 'xero', xeroInvoiceId: 'xero-1' }),
+      AFTER_THE_WRITE,
+      ACCOUNT_CODE_ROW,
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await patchInvoice(patchReq('inv-1', { status: 'paid' }), params('inv-1'))
+    expect(await bodyOf(res)).toMatchObject({ pushback: { rail: 'xero', status: 'failed' } })
+    expect(vi.mocked(callXeroAPI).mock.calls.some(c => c[1] === '/Payments')).toBe(false)
     expect(patchOf(queries).status).toBe('paid')
   })
 
@@ -583,7 +739,12 @@ describe('PATCH /api/admin/invoices/[id] push-back', () => {
   })
 
   it('reports a rail failure as failed and still keeps the local payment', async () => {
-    vi.mocked(callXeroAPI).mockResolvedValue(null as never)
+    // Xero answers the read but refuses the payment: a bad account code, a
+    // currency mismatch, a 429.
+    vi.mocked(callXeroAPI).mockImplementation(async (method, endpoint) => {
+      if (String(endpoint) === '/Payments') return null as never
+      return { Invoices: [{ InvoiceID: 'xero-1', Status: 'AUTHORISED', AmountDue: 1150 }] } as never
+    })
     const { handle, queries } = makeDb([
       existing({ source: 'xero', xeroInvoiceId: 'xero-1' }),
       AFTER_THE_WRITE,
@@ -598,6 +759,52 @@ describe('PATCH /api/admin/invoices/[id] push-back', () => {
     expect(res.status).toBe(200)
     expect(await bodyOf(res)).toMatchObject({ success: true, pushback: { rail: 'xero', status: 'failed' } })
     expect(patchOf(queries).status).toBe('paid')
+  })
+
+  it('leaves an audit row for a push that did not land', async () => {
+    // The invoice detail page checks res.ok and throws the body away, so
+    // without this row a skipped push is invisible to the person who caused
+    // it. Guaranteed on day one: the account code has no default and no UI.
+    const { handle, queries } = makeDb([
+      existing({ source: 'xero', xeroInvoiceId: 'xero-1' }),
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    await patchInvoice(patchReq('inv-1', { status: 'paid' }), params('inv-1'))
+
+    expect(auditRow(queries)).toMatchObject({
+      action: 'invoice.pushback_skipped',
+      entityType: 'invoice',
+      entityId: 'inv-1',
+      actorId: 'user_admin',
+    })
+    const metadata = JSON.parse(String(auditRow(queries)?.metadata)) as Record<string, unknown>
+    expect(metadata).toMatchObject({ rail: 'xero', status: 'skipped' })
+    expect(metadata.reason).toBe('No Xero payment account code in settings')
+    // And a line in the Worker log, so it is findable without the table.
+    expect(warnSpy).toHaveBeenCalled()
+  })
+
+  it('does not push again for a row that already carries a paid date', async () => {
+    // paid -> written_off -> paid. A write-off deliberately KEEPS its paid
+    // date (UNWINDS_PAYMENT excludes it), so the status check alone would let
+    // this post a second payment against the same Xero invoice.
+    const { handle } = makeDb([
+      existing({
+        status: 'written_off',
+        paidAt: '2026-08-01T00:00:00.000Z',
+        source: 'xero',
+        xeroInvoiceId: 'xero-1',
+      }),
+      AFTER_THE_WRITE,
+      ACCOUNT_CODE_ROW,
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await patchInvoice(patchReq('inv-1', { status: 'paid' }), params('inv-1'))
+    expect(res.status).toBe(200)
+    expect(await bodyOf(res)).not.toHaveProperty('pushback')
+    expect(callXeroAPI).not.toHaveBeenCalled()
   })
 
   it('surfaces the Stripe error message rather than a bare status', async () => {

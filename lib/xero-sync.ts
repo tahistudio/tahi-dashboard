@@ -27,6 +27,7 @@ import {
 import {
   captureOnlineInvoiceUrls,
   needsOnlineInvoiceUrl,
+  shouldClearOnlineInvoiceUrl,
   type OnlineInvoiceCandidate,
 } from '@/lib/xero-online-invoice'
 
@@ -353,9 +354,12 @@ interface XeroPaymentInvoicesResponse {
  * happens to carry a xeroInvoiceId belongs to the Stripe rail.
  *
  * Also captures Xero's own pay link. Any row Xero has issued (mapped 'sent' or
- * 'paid') that has no xero_online_invoice_url yet gets one extra GET, capped
- * per run, and the outcome is reported as `payLinks` in the body. A failure
- * there leaves the column NULL and does not affect the sync's result. See
+ * 'paid', and not still awaiting approval) that has no xero_online_invoice_url
+ * yet gets one extra GET, capped per run, and the outcome is reported as
+ * `payLinks` in the body. A failure there leaves the column NULL and does not
+ * affect the sync's result. The reverse is handled here too: a row whose Xero
+ * counterpart has gone back to DRAFT or been voided loses the stored link with
+ * its status, so the client is never shown a URL Xero has revoked. See
  * lib/xero-online-invoice.ts for why the reader, not the push, has to do it.
  */
 export async function syncXeroPayments(database: D1): Promise<SyncOutcome> {
@@ -420,19 +424,33 @@ export async function syncXeroPayments(database: D1): Promise<SyncOutcome> {
         xeroInvoice.AmountDue,
         xeroInvoice.FullyPaidOnDate,
       )
-      const write = resolveXeroStatusWrite(localInvoice, mapped, xeroInvoice.FullyPaidOnDate, now)
+      const write: Record<string, unknown> = {
+        ...resolveXeroStatusWrite(localInvoice, mapped, xeroInvoice.FullyPaidOnDate, now),
+      }
 
       // Queue the pay link BEFORE the no-change bail-out. The common case is
       // exactly a row Xero agrees with (local 'sent', Xero AUTHORISED) that
       // has simply never been asked for its OnlineInvoiceUrl, and skipping it
       // with the status write would mean the link was never captured at all.
-      if (localInvoice.xeroInvoiceId && needsOnlineInvoiceUrl(mapped, localInvoice.xeroOnlineInvoiceUrl)) {
+      if (
+        localInvoice.xeroInvoiceId
+        && needsOnlineInvoiceUrl(mapped, localInvoice.xeroOnlineInvoiceUrl, xeroInvoice.Status)
+      ) {
         payLinkCandidates.push({ id: localInvoice.id, xeroInvoiceId: localInvoice.xeroInvoiceId })
       }
 
+      // The other direction: Xero has taken the bill back out of AUTHORISED /
+      // PAID, so the link we hold is dead. Cleared here, with the status, or
+      // the client-facing surface hands someone a URL that 404s or shows a
+      // voided invoice.
+      if (shouldClearOnlineInvoiceUrl(mapped, localInvoice.xeroOnlineInvoiceUrl)) {
+        write.xeroOnlineInvoiceUrl = null
+      }
+
       // Nothing Xero says would change this row: no status move it is allowed
-      // to make, no better paid date, no missing sent date. Do not bump
-      // updated_at for it, and do not report work that did not happen.
+      // to make, no better paid date, no missing sent date, no dead link to
+      // clear. Do not bump updated_at for it, and do not report work that did
+      // not happen.
       if (Object.keys(write).length === 0) {
         results.push({
           invoiceId: localInvoice.id,
@@ -784,8 +802,9 @@ interface XeroImportInvoicesResponse {
  *
  * Captures Xero's own pay link on the same pass, for both the rows it updates
  * and the rows it creates, whenever Xero has issued one and the column is
- * still empty. Capped per run, reported as `payLinks`, never fatal. See
- * lib/xero-online-invoice.ts.
+ * still empty, and CLEARS a stored link when Xero has taken the bill back out
+ * of AUTHORISED / PAID. Capped per run, reported as `payLinks`, never fatal.
+ * See lib/xero-online-invoice.ts.
  */
 export async function importXeroInvoices(database: D1, page: number): Promise<SyncOutcome> {
   try {
@@ -854,12 +873,18 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
         // Queued before the no-change bail-out below, for the same reason as
         // in syncXeroPayments: the row whose status already agrees with Xero
         // is precisely the one that has been sitting there without a pay link.
-        if (needsOnlineInvoiceUrl(mapped, known.xeroOnlineInvoiceUrl)) {
+        if (needsOnlineInvoiceUrl(mapped, known.xeroOnlineInvoiceUrl, inv.Status)) {
           payLinkCandidates.push({ id: known.id, xeroInvoiceId: inv.InvoiceID })
         }
 
         const updates: Record<string, unknown> = {
           ...resolveXeroStatusWrite(known, mapped, inv.FullyPaidOnDate, now),
+        }
+
+        // A link Xero no longer serves (voided, deleted, or demoted back to
+        // DRAFT) has to go with the status, or the client keeps a dead URL.
+        if (shouldClearOnlineInvoiceUrl(mapped, known.xeroOnlineInvoiceUrl)) {
+          updates.xeroOnlineInvoiceUrl = null
         }
 
         // Money columns: only what actually differs, so an unchanged invoice
@@ -1001,7 +1026,7 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
         // A row imported already-approved has a pay link waiting for it right
         // now; making it wait for the next run would leave the client with
         // nothing to click for an hour for no reason.
-        if (needsOnlineInvoiceUrl(localStatus, null)) {
+        if (needsOnlineInvoiceUrl(localStatus, null, inv.Status)) {
           payLinkCandidates.push({ id: invoiceId, xeroInvoiceId: inv.InvoiceID })
         }
         results.push({

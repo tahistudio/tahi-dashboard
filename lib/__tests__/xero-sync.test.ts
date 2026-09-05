@@ -44,9 +44,12 @@ import {
 } from '@/lib/xero-sync'
 import {
   ONLINE_INVOICE_FETCH_CAP,
+  ONLINE_INVOICE_ROTATION_MS,
   captureOnlineInvoiceUrls,
   needsOnlineInvoiceUrl,
+  onlineInvoiceWindow,
   readOnlineInvoiceUrl,
+  shouldClearOnlineInvoiceUrl,
 } from '@/lib/xero-online-invoice'
 
 // ---------------------------------------------------------------------------
@@ -745,6 +748,62 @@ describe('Xero pay link capture', () => {
     expect(outcome.body.payLinks).toMatchObject({ candidates: 0, fetched: 0, captured: 0 })
   })
 
+  it('never asks for a SUBMITTED invoice, which is still awaiting approval', async () => {
+    // It maps to 'sent' (the money is owed) but Xero has not issued it, so the
+    // OnlineInvoice endpoint errors. Asking buys a failure that requeues on
+    // every run and holds a slot in the cap.
+    const endpoints = serveXero({
+      pages: [[xeroInvoice({ Status: 'SUBMITTED' })]],
+      onlineInvoiceUrl: () => 'https://in.xero.com/never-asked-for',
+    })
+    const { handle } = makeDb([
+      [{
+        id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'sent', source: 'xero',
+        sentAt: '2026-08-01T00:00:00.000Z', xeroOnlineInvoiceUrl: null,
+      }],
+    ])
+
+    const outcome = await syncXeroPayments(handle as unknown as Db)
+
+    expect(onlineInvoiceCalls(endpoints)).toEqual([])
+    expect(outcome.body.payLinks).toMatchObject({ candidates: 0, fetched: 0 })
+  })
+
+  it('clears the stored link when Xero voids the invoice', async () => {
+    // The column used to be write-once, so a voided bill kept a URL that now
+    // shows the client a cancelled invoice or a 404.
+    serveXero({ pages: [[xeroInvoice({ Status: 'VOIDED' })]] })
+    const { handle, queries } = makeDb([
+      [{
+        id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'sent', source: 'xero',
+        sentAt: '2026-08-01T00:00:00.000Z', xeroOnlineInvoiceUrl: 'https://in.xero.com/dead',
+      }],
+    ])
+
+    await syncXeroPayments(handle as unknown as Db)
+
+    expect(payLinkWrite(queries)).toMatchObject({ status: 'written_off', xeroOnlineInvoiceUrl: null })
+  })
+
+  it('clears the link even when nothing else about the row changes', async () => {
+    // Our own push route re-sends Status DRAFT on an UPDATE, demoting an
+    // invoice Liam had approved and revoking its online invoice. The local
+    // status does not move (Xero may only move a row forward), so the clear
+    // has to survive the no-change bail-out on its own.
+    serveXero({ pages: [[xeroInvoice({ Status: 'DRAFT' })]] })
+    const { handle, queries } = makeDb([
+      [{
+        id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'draft', source: 'xero',
+        xeroOnlineInvoiceUrl: 'https://in.xero.com/revoked',
+      }],
+    ])
+
+    const outcome = await syncXeroPayments(handle as unknown as Db)
+
+    expect(payLinkWrite(queries)).toMatchObject({ xeroOnlineInvoiceUrl: null })
+    expect(outcome.body).toMatchObject({ updated: 1 })
+  })
+
   it('never asks twice: a row that already holds a link is left alone', async () => {
     const endpoints = serveXero({
       pages: [[xeroInvoice({ Status: 'AUTHORISED' })]],
@@ -893,6 +952,60 @@ describe('captureOnlineInvoiceUrls', () => {
     expect(needsOnlineInvoiceUrl('draft', null)).toBe(false)
     expect(needsOnlineInvoiceUrl('written_off', null)).toBe(false)
     expect(needsOnlineInvoiceUrl(null, null)).toBe(false)
+  })
+
+  it('never queues a SUBMITTED invoice, which maps to sent but has no link', () => {
+    // Awaiting approval in Xero: the OnlineInvoice endpoint errors, and a
+    // guaranteed failure requeues on every run and eats the cap forever.
+    expect(needsOnlineInvoiceUrl('sent', null, 'SUBMITTED')).toBe(false)
+    expect(needsOnlineInvoiceUrl('sent', null, 'AUTHORISED')).toBe(true)
+    expect(needsOnlineInvoiceUrl('paid', null, 'PAID')).toBe(true)
+  })
+
+  it('clears a stored link only when Xero has stopped serving one', () => {
+    const url = 'https://in.xero.com/x'
+    // Voided or deleted in Xero, and demoted back to DRAFT by our own push:
+    // both revoke the online invoice, and the client must not keep a dead URL.
+    expect(shouldClearOnlineInvoiceUrl('written_off', url)).toBe(true)
+    expect(shouldClearOnlineInvoiceUrl('draft', url)).toBe(true)
+    // Still issued, so the link stands.
+    expect(shouldClearOnlineInvoiceUrl('sent', url)).toBe(false)
+    expect(shouldClearOnlineInvoiceUrl('paid', url)).toBe(false)
+    // Xero had no opinion worth writing: never a reason to bin a good link.
+    expect(shouldClearOnlineInvoiceUrl(null, url)).toBe(false)
+    // Nothing stored, nothing to clear: no pointless write.
+    expect(shouldClearOnlineInvoiceUrl('written_off', null)).toBe(false)
+    expect(shouldClearOnlineInvoiceUrl('draft', '  ')).toBe(false)
+  })
+
+  it('rotates the window so a poisoned head cannot hold the cap forever', () => {
+    // A candidate that can never yield a link writes nothing and requeues on
+    // every run. With a stable prefix, 25 of those would starve every newly
+    // approved invoice indefinitely.
+    const candidates = Array.from({ length: 5 }, (_, i) => `c${i}`)
+    const base = Date.parse('2026-09-05T00:00:00.000Z')
+    const at = (runs: number) => new Date(base + runs * ONLINE_INVOICE_ROTATION_MS).toISOString()
+
+    expect(onlineInvoiceWindow(candidates, 2, at(0))).toEqual(['c0', 'c1'])
+    expect(onlineInvoiceWindow(candidates, 2, at(1))).toEqual(['c2', 'c3'])
+    // The last block wraps rather than running short.
+    expect(onlineInvoiceWindow(candidates, 2, at(2))).toEqual(['c4', 'c0'])
+    expect(onlineInvoiceWindow(candidates, 2, at(3))).toEqual(['c0', 'c1'])
+
+    // Every candidate is reached inside one cycle, which is the property that
+    // matters: ceil(5 / 2) = 3 runs.
+    const seen = new Set([0, 1, 2].flatMap(r => onlineInvoiceWindow(candidates, 2, at(r))))
+    expect(seen).toEqual(new Set(candidates))
+  })
+
+  it('leaves a queue that fits under the cap in its found order', () => {
+    // No rotation to do, and reordering a short queue for no reason would make
+    // the sync summary harder to read.
+    const candidates = ['a', 'b', 'c']
+    expect(onlineInvoiceWindow(candidates, 25, '2026-09-05T07:00:00.000Z')).toEqual(candidates)
+    expect(onlineInvoiceWindow(candidates, 0, '2026-09-05T07:00:00.000Z')).toEqual([])
+    // An unparseable stamp is a window, not a crash.
+    expect(onlineInvoiceWindow(['a', 'b', 'c', 'd'], 2, 'not-a-date')).toEqual(['a', 'b'])
   })
 
   it('stops at the cap and counts what it left behind', async () => {
