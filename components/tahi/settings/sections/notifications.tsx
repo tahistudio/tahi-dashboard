@@ -46,7 +46,8 @@ interface EventDef {
 }
 
 const NTF_TEAM: EventDef[] = [
-  { event: 'request_created', label: 'Request assigned', desc: 'A request lands in your queue' },
+  { event: 'request_created', label: 'New request', desc: 'A client files a request' },
+  { event: 'request_assigned', label: 'Request assigned', desc: 'A request is handed to you' },
   { event: 'request_status_changed', label: 'Request status changed', desc: 'Something you’re on moves stage' },
   { event: 'new_message', label: 'New message', desc: 'A client or teammate messages you' },
   { event: 'mention', label: 'Mentions', desc: 'Someone @tags you in a thread' },

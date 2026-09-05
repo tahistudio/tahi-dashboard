@@ -478,11 +478,11 @@ export function TeammateHome({ ctx }: { ctx: OverviewCtx }) {
       {/* ---- Waiting ---- */}
       <Zone label="Waiting">
         <Card span={12}>
-          <CardH ic="msg" title="Recent client replies" link="All requests" onLink={() => go('requests')} />
+          <CardH ic="msg" title="Client replies waiting" link="All requests" onLink={() => go('requests')} />
           {repliesRes.isLoading && !repliesRes.data ? (
             <RowsSkeleton n={3} />
           ) : threads.length === 0 ? (
-            <EmptyLine text="No client replies on your requests recently." />
+            <EmptyLine text="No client replies are waiting on you." />
           ) : (
             <div className="ov-rows">
               {threads.map(t => (

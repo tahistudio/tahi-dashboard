@@ -522,9 +522,9 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
     setSharing(true)
     try {
       const res = await fetch(apiPath(`/api/admin/schedules/${scheduleId}/share`), { method: 'POST' })
-      const data = await res.json() as { token?: string }
+      const data = await res.json() as { token?: string; publishedAt?: string | null }
       if (!res.ok || !data.token) throw new Error('Failed')
-      setSchedule(prev => prev ? { ...prev, status: 'shared', publicShareToken: data.token! } : prev)
+      setSchedule(prev => prev ? { ...prev, status: 'shared', publicShareToken: data.token!, publishedAt: data.publishedAt ?? prev.publishedAt } : prev)
       const url = `${window.location.origin}/p/schedule/${data.token}`
       try {
         await navigator.clipboard.writeText(url)

@@ -241,10 +241,15 @@ export async function createNotificationsForRecipient(
 
     const now = new Date().toISOString()
     const rows: Array<typeof schema.notifications.$inferInsert> = []
+    const targetsByType = new Map<string, typeof resolved>()
     for (const payload of payloads) {
       // The preference is per event type, so it is asked once per DISTINCT
       // type rather than once per row; a bulk action is one type in practice.
-      const targets = await filterRecipientsByInAppPref(database, resolved, payload.type)
+      let targets = targetsByType.get(payload.type)
+      if (!targets) {
+        targets = await filterRecipientsByInAppPref(database, resolved, payload.type)
+        targetsByType.set(payload.type, targets)
+      }
       for (const target of targets) {
         rows.push({
           id: crypto.randomUUID(),

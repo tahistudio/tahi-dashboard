@@ -51,7 +51,7 @@ export interface RequestStatusEffectOptions {
    * May this move put an email in the client's inbox? Default true, which is
    * right for a single request moving.
    *
-   * A batch caller must pass false. The bulk PATCH calls this once per row, so
+   * A batch caller must pass false for any client with more than one row in the batch; one row for a client is a single move by another door and keeps its email.
    * a twenty row "Mark delivered" for a client with three contacts is sixty
    * separate emails to the same three people, sequentially, and Resend's two a
    * second ceiling refuses most of them. The bell entries are cheap and stay.

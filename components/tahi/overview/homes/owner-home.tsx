@@ -1313,39 +1313,29 @@ interface ReplyThread {
  * to open. Every row now lands on the request the reply was written on, which
  * is where the studio answers it.
  *
- * The heading says "Recent client replies" and NOT "waiting on you", because
- * the feed cannot prove a thread is unanswered. Its request branch filters on
- * messages.conversation_id IS NULL; the admin composer stamps a conversation id
- * on every studio reply (request-detail mints a request_thread conversation on
- * the first send of each page load) while the portal never sets one, so the
- * "last message" on a request thread is always the last CLIENT message and a
- * thread stays listed after the studio has answered it. Two route changes earn
- * the stronger claim back, both outside this file:
- *   1. drop the conversation_id IS NULL predicate from the request branch of
- *      app/api/admin/overview/replies-waiting/route.ts, so a studio reply can
- *      win the per-request "last message" race, and
- *   2. move the kind filter below server-side (a ?kind=request param applied
- *      before the 12 row cap), so conversation rows cannot spend the cap and
- *      leave this card empty while request replies are in fact waiting.
- * Until both land, the card promises only what the feed can actually show.
+ * The heading says "Client replies waiting" because the feed can now prove
+ * a thread is unanswered: app/api/admin/overview/replies-waiting/route.ts
+ * reads the last message per request_id alone (no conversation_id filter,
+ * so a studio reply wins the race and clears the row), excludes internal
+ * notes, and applies the kind filter server-side before its cap.
  *
- * The empty line is likewise weaker than the truth deserves in one case: the
- * route also answers { threads: [] } for a signed-in user with no teamMembers
- * row, which is "we could not work out who you are", not "nothing is here".
- * That needs a discriminator on the route before the copy can split.
+ * The empty line stays plain: the route also answers { threads: [] } for a
+ * signed-in user with no teamMembers row, which is "we could not work out
+ * who you are", not "nothing is here". That needs a discriminator on the
+ * route before the copy can split.
  */
 function ClientReplies({ go }: { go: (id: string) => void }) {
   const { data, error } = useResource<{ threads: ReplyThread[] }>('/api/admin/overview/replies-waiting?scope=me')
   const threads = (data?.threads ?? []).filter(t => t.kind === 'request').slice(0, 3)
   return (
     <Card span={7}>
-      <CardH ic="msg" title="Recent client replies" link="All requests" onLink={() => go('requests')} />
+      <CardH ic="msg" title="Client replies waiting" link="All requests" onLink={() => go('requests')} />
       {!data && error ? (
         <EmptyLine>Could not load client replies. Try again shortly.</EmptyLine>
       ) : !data ? (
         <Shim h={90} />
       ) : threads.length === 0 ? (
-        <EmptyLine>No client replies on your requests recently.</EmptyLine>
+        <EmptyLine>No client replies are waiting on you.</EmptyLine>
       ) : (
         <div className="ov-rows">
           {threads.map(t => {
