@@ -12,6 +12,13 @@ import { requireFeature } from '@/lib/require-feature'
 import { createNotifications, type NotificationRecipient } from '@/lib/notifications'
 import { invoiceReference, selectBillingContacts, selectInvoiceRecipients } from '@/lib/invoice-billing'
 import { stripeSecretKey } from '@/lib/stripe-key'
+import {
+  buildHowToPay,
+  hasBankDestination,
+  readInvoicePayContext,
+  resolveInvoicePayUrl,
+} from '@/lib/invoice-how-to-pay'
+import { emailInvoiceFromXero, type XeroEmailOutcome } from '@/lib/xero-invoice-email'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -70,9 +77,35 @@ async function resolvePayUrl(
 // list and the invoice detail, so a bell row carrying the amount would be a
 // disclosure followed by a 403 on the click.
 //
-// Idempotent on a resend: sentAt is stamped once (it means FIRST send, which
-// is what receivables aging reads), the status is only promoted out of
-// 'draft', and a second send raises no second bell row.
+// Idempotent on a resend, on every side that can be: sentAt is stamped once
+// (it means FIRST send, which is what receivables aging reads), the status is
+// only promoted out of 'draft', a second send raises no second bell row, and
+// the Xero send below refuses when Xero's own SentToContact flag says it has
+// already mailed an invoice we have already sent. OUR OWN template is the one
+// thing a resend does re-send, because re-sending it is what the button is for.
+//
+// ── The Xero rail ───────────────────────────────────────────────────────────
+//
+// A client on the Xero rail gets one of three treatments, chosen by the studio
+// setting invoicing.xeroEmailMode (Liam, 2026-09-06: "Xero-rail email: both,
+// behind a studio toggle"):
+//
+//   dashboard  our template only. The default, and the only one that can carry
+//              a portal deep link.
+//   xero       Xero sends its own PDF and we stay out of the way.
+//   both       both copies, for a client who wants the formal Xero one on file.
+//
+// The fallback is the part that matters. Xero refuses to email a DRAFT, and
+// the push route holds every dashboard-raised invoice at DRAFT on purpose, so
+// "Xero will not send it" is the ORDINARY state of a freshly pushed bill. In
+// 'xero' mode a refusal therefore falls back to our own email rather than
+// leaving the client with nothing, and the response says which happened so the
+// admin detail can tell the studio.
+//
+// What the client is handed also depends on the rail: a pay page when either
+// rail has issued one (Stripe's hosted invoice, or Xero's online invoice once
+// it is approved), and otherwise a How to pay block with the studio's bank
+// details and the invoice reference.
 export async function POST(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
@@ -98,8 +131,16 @@ export async function POST(req: NextRequest, { params }: Params) {
       sentAt: schema.invoices.sentAt,
       stripeInvoiceId: schema.invoices.stripeInvoiceId,
       stripeHostedInvoiceUrl: schema.invoices.stripeHostedInvoiceUrl,
+      // The Xero half of the pay path: the id Xero is asked to email, and the
+      // online invoice URL the syncs capture once the bill is approved there.
+      xeroInvoiceId: schema.invoices.xeroInvoiceId,
+      xeroOnlineInvoiceUrl: schema.invoices.xeroOnlineInvoiceUrl,
+      // Which rail this client bills on. Joined rather than read separately:
+      // the answer decides both what the client is shown and who sends.
+      orgInvoiceChannel: schema.organisations.invoiceChannel,
     })
     .from(schema.invoices)
+    .leftJoin(schema.organisations, eq(schema.invoices.orgId, schema.organisations.id))
     .where(eq(schema.invoices.id, id))
     .limit(1)
 
@@ -168,33 +209,94 @@ export async function POST(req: NextRequest, { params }: Params) {
   // Client-openable deep link. /invoices/[id] renders from the portal API for
   // a client audience, so this no longer lands them on a 403.
   const invoiceUrl = publicUrl(`/invoices/${invoiceRow.id}`)
-  const payUrl = await resolvePayUrl(drizzle, invoiceRow)
+  // Stripe's hosted page first (backfilled from Stripe for invoices finalised
+  // before the column existed), then Xero's own online invoice.
+  const payUrl = resolveInvoicePayUrl(
+    await resolvePayUrl(drizzle, invoiceRow),
+    invoiceRow.xeroOnlineInvoiceUrl,
+  )
+
+  // The rail, the bank details and who sends, all out of the settings K/V
+  // table in one read. It is a handful of studio rows.
+  const settingRows = await drizzle
+    .select({ key: schema.settings.key, value: schema.settings.value })
+    .from(schema.settings)
+  const payContext = readInvoicePayContext(settingRows, invoiceRow.orgInvoiceChannel)
+
+  // Bank details, the reference and the amount, for a Xero-rail invoice that
+  // has no pay page yet. Null on the Stripe rail and null once a link exists.
+  const howToPay = buildHowToPay({
+    channel: payContext.channel,
+    payUrl,
+    invoice: {
+      id: invoiceRow.id,
+      // Never settled by the time we get here (the 409 above turns a paid or
+      // written-off invoice away), but the block refuses to build for one, and
+      // saying so here is what makes that guarantee readable.
+      status: invoiceRow.status,
+      totalUsd: invoiceRow.totalUsd,
+      currency: invoiceRow.currency,
+      dueDate: invoiceRow.dueDate,
+    },
+    bankDetails: payContext.bankDetails,
+  })
+
+  // Has this invoice been sent before? Read once, used twice: it guards the
+  // Xero send against a resend below, and it decides the sentAt stamp and the
+  // bell row further down.
+  const alreadySent = !!invoiceRow.sentAt
+
+  // Let Xero send its own copy, when the rail and the setting both say so.
+  // Attempted BEFORE our own send because its outcome decides whether ours
+  // goes at all: in 'xero' mode we stand down, unless Xero refuses (a draft
+  // invoice, which is where every pushed bill starts), in which case our
+  // template is the fallback rather than the client receiving nothing.
+  //
+  // `alreadySent` is passed so the Xero half is self-guarding: Xero's Email
+  // endpoint has no idempotency key, and this call happens before the D1 write
+  // and the notification write, so a retry after an apparent failure would mail
+  // the client a second PDF. emailInvoiceFromXero refuses when Xero's own
+  // SentToContact flag and our sentAt BOTH say it has gone already.
+  const onXeroRail = payContext.channel === 'xero'
+  const wantsXeroEmail = onXeroRail && payContext.xeroEmailMode !== 'dashboard'
+  const xeroOutcome: XeroEmailOutcome | null = wantsXeroEmail
+    ? await emailInvoiceFromXero(invoiceRow.xeroInvoiceId, { alreadySent })
+    : null
+
+  // Ours goes unless the setting handed the job to Xero AND Xero took it.
+  const sendOurs = !(payContext.xeroEmailMode === 'xero' && xeroOutcome?.status === 'sent')
 
   // One email per recipient (no shared To header), so a colleague's bad
   // address never blocks the rest and each greeting is addressed properly.
   const subject = `Invoice ${reference} from Tahi Studio`
-  const outcomes = await Promise.all(recipients.map(async (r) => {
-    const res = await sendEmail(
-      r.email,
-      subject,
-      createElement(InvoiceSentEmail, {
-        clientName: r.name,
-        invoiceId: invoiceRow.id,
-        amountFormatted,
-        currency,
-        dueDate: dueDateDisplay,
-        notes: invoiceRow.notes ?? undefined,
-        invoiceUrl,
-        paymentUrl: payUrl ?? undefined,
-      }),
-    )
-    return { email: r.email, ok: res.success, error: res.error }
-  }))
+  const outcomes = sendOurs
+    ? await Promise.all(recipients.map(async (r) => {
+      const res = await sendEmail(
+        r.email,
+        subject,
+        createElement(InvoiceSentEmail, {
+          clientName: r.name,
+          invoiceId: invoiceRow.id,
+          amountFormatted,
+          currency,
+          dueDate: dueDateDisplay,
+          notes: invoiceRow.notes ?? undefined,
+          invoiceUrl,
+          paymentUrl: payUrl ?? undefined,
+          howToPay: howToPay ?? undefined,
+        }),
+      )
+      return { email: r.email, ok: res.success, error: res.error }
+    }))
+    : []
 
   const sentTo = outcomes.filter(o => o.ok).map(o => o.email)
   const failed = outcomes.filter(o => !o.ok)
 
-  if (sentTo.length === 0) {
+  // Nothing reached the client: neither our send nor Xero's. `sendOurs` false
+  // with a clean Xero send is the one case where an empty sentTo is a success,
+  // so the check is "did anybody get it", not "did we send it".
+  if (sentTo.length === 0 && xeroOutcome?.status !== 'sent') {
     return NextResponse.json(
       { error: 'Failed to send email', message: failed[0]?.error ?? 'Unknown error' },
       { status: 502 },
@@ -205,7 +307,6 @@ export async function POST(req: NextRequest, { params }: Params) {
   // aging and any future dunning read it), and 'viewed' / 'overdue' are states
   // this invoice has already earned, so only a draft is promoted.
   const now = new Date().toISOString()
-  const alreadySent = !!invoiceRow.sentAt
   await drizzle
     .update(schema.invoices)
     .set({
@@ -235,6 +336,19 @@ export async function POST(req: NextRequest, { params }: Params) {
     sentTo,
     failedTo: failed.map(f => f.email),
     payLink: !!payUrl,
+    // The client was given bank details instead of a button. Reported off the
+    // SAME test the email renders on (hasBankDestination), not off "a block was
+    // built": until the studio fills in invoicing.bankDetails the block names
+    // nowhere to send the money, the email falls back to the plain portal CTA,
+    // and answering true here would tell the studio (and MCP send_invoice_email)
+    // that a client got account details they never saw.
+    bankDetails: hasBankDestination(howToPay),
     notified: !alreadySent,
+    // Only on the Xero rail, and only what actually happened: 'sent' means
+    // Xero emailed its own copy, 'skipped' means it would not (and ours went
+    // instead), 'failed' means the call broke (and ours went instead).
+    ...(xeroOutcome
+      ? { xeroEmail: xeroOutcome.status, ...(xeroOutcome.reason ? { reason: xeroOutcome.reason } : {}) }
+      : {}),
   })
 }

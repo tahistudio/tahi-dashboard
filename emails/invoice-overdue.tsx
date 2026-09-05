@@ -1,6 +1,11 @@
 /**
- * <InvoiceOverdueEmail> — sent when an invoice has slipped past its due
- * date. Warning banner + pay-now CTA in warning orange.
+ * <InvoiceOverdueEmail>: sent when an invoice has slipped past its due date.
+ * Warning banner plus a pay-now CTA in warning orange.
+ *
+ * When there is no pay page (a Xero-rail invoice still waiting on approval in
+ * Xero) the CTA falls back to the portal and a How to pay block carries the
+ * bank details and the reference, so a chase email always tells the client how
+ * to actually clear the bill. See lib/invoice-how-to-pay.ts.
  */
 import { Body, Head, Html, Preview } from '@react-email/components'
 import {
@@ -15,9 +20,11 @@ import {
   EmailHeading,
   EmailParagraph,
   EmailShell,
+  HowToPayBlock,
   PrimaryButton,
   emailBodyStyle,
 } from './_components'
+import { hasBankDestination, type InvoiceHowToPay } from '@/lib/invoice-how-to-pay'
 
 interface InvoiceOverdueEmailProps {
   clientName: string
@@ -27,7 +34,10 @@ interface InvoiceOverdueEmailProps {
   dueDate: string
   daysOverdue: number
   dashboardUrl: string
+  /** Hosted pay page (Stripe, or Xero's online invoice), when one exists. */
   paymentUrl?: string
+  /** Bank transfer details, for a Xero-rail invoice with no pay page yet. */
+  howToPay?: InvoiceHowToPay
 }
 
 export function InvoiceOverdueEmail({
@@ -39,11 +49,15 @@ export function InvoiceOverdueEmail({
   daysOverdue,
   dashboardUrl,
   paymentUrl,
+  howToPay,
 }: InvoiceOverdueEmailProps) {
   const invoiceUrl = `${dashboardUrl}/invoices`
   const displayId = invoiceId.slice(0, 8).toUpperCase()
   const firstName = clientName.split(' ')[0] ?? clientName
   const dayWord = daysOverdue === 1 ? 'day' : 'days'
+  // A chase with no way to pay is just a nag. When neither rail has issued a
+  // pay page, the bank details take the CTA's job.
+  const showTransfer = !paymentUrl && hasBankDestination(howToPay)
 
   return (
     <Html>
@@ -72,6 +86,8 @@ export function InvoiceOverdueEmail({
               <DetailRow label="Original due date" value={dueDate} />
               <DetailRow label="Days overdue" value={String(daysOverdue)} />
             </DetailCard>
+
+            {showTransfer && howToPay && <HowToPayBlock howToPay={howToPay} />}
 
             <PrimaryButton href={paymentUrl ?? invoiceUrl} variant="warning">
               {paymentUrl ? 'Pay now' : 'View invoice'}

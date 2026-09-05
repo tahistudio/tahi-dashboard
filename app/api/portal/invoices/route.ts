@@ -5,10 +5,34 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, desc, ne } from 'drizzle-orm'
+import {
+  buildHowToPay,
+  isInvoiceSettled,
+  readInvoicePayContext,
+  resolveInvoicePayUrl,
+} from '@/lib/invoice-how-to-pay'
 
 // ── GET /api/portal/invoices ──────────────────────────────────────────────────
 // Returns invoices scoped to the authenticated client's org.
 // Query params: status (draft|sent|overdue|paid|all, default all), page (default 1)
+//
+// Two pay-path fields, and both are things the CLIENT needs in order to act:
+//
+//   payUrl     Stripe's hosted page, or Xero's own online invoice when there
+//              is no Stripe one. A link is a link; the client does not care
+//              which rail issued it, and gating the Xero page on the org's
+//              nominal channel would leave a payable bill unpayable.
+//   howToPay   bank details, the reference and the amount, for a Xero-rail
+//              invoice that is STILL OWED and has no link yet. That is the
+//              ORDINARY state of a pushed Xero invoice (it sits at DRAFT until
+//              Liam approves it), and without this block the client holds a
+//              real bill with nothing on the page to act on. It disappears the
+//              moment the bill is settled: this list returns every non-draft
+//              invoice, so a paid one would otherwise keep quoting an account
+//              number and a reference under the words "How to pay".
+//
+// Nothing studio-side rides along: no rail label, no Stripe or Xero id, no
+// reconciliation state. See lib/invoice-how-to-pay.ts.
 export async function GET(req: NextRequest) {
   const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
 
@@ -64,6 +88,10 @@ export async function GET(req: NextRequest) {
         // Stripe's hosted invoice page, persisted at finalise time. Drives the
         // client's Pay now CTA straight from the list row.
         payUrl: schema.invoices.stripeHostedInvoiceUrl,
+        // Xero's own client-facing pay page, captured by the syncs once Liam
+        // approves the invoice in Xero. Folded into payUrl below and never
+        // returned under its own name.
+        xeroPayUrl: schema.invoices.xeroOnlineInvoiceUrl,
         createdAt: schema.invoices.createdAt,
         updatedAt: schema.invoices.updatedAt,
       })
@@ -90,6 +118,10 @@ export async function GET(req: NextRequest) {
         // Stripe's hosted invoice page, persisted at finalise time. Drives the
         // client's Pay now CTA straight from the list row.
         payUrl: schema.invoices.stripeHostedInvoiceUrl,
+        // Xero's own client-facing pay page, captured by the syncs once Liam
+        // approves the invoice in Xero. Folded into payUrl below and never
+        // returned under its own name.
+        xeroPayUrl: schema.invoices.xeroOnlineInvoiceUrl,
         createdAt: schema.invoices.createdAt,
         updatedAt: schema.invoices.updatedAt,
       })
@@ -100,5 +132,53 @@ export async function GET(req: NextRequest) {
       .offset(offset)
   }
 
-  return NextResponse.json({ items, page, limit })
+  // The pay-path reads are only worth making when at least one bill on this
+  // page is still owed AND has nothing to click. A client whose invoices all
+  // carry a hosted page, or are all settled, pays no extra D1 round trips for
+  // a block they will never see.
+  const needsPayPath = items.some(row =>
+    !resolveInvoicePayUrl(row.payUrl, row.xeroPayUrl) && !isInvoiceSettled(row),
+  )
+
+  let payContext: ReturnType<typeof readInvoicePayContext> | null = null
+  if (needsPayPath) {
+    const [org] = await drizzle
+      .select({ invoiceChannel: schema.organisations.invoiceChannel })
+      .from(schema.organisations)
+      .where(eq(schema.organisations.id, orgId))
+      .limit(1)
+
+    // The whole K/V table: it is a handful of studio rows, and reading it
+    // whole keeps this to one query for the two keys the block needs (the
+    // default rail and the bank details).
+    const settingRows = await drizzle
+      .select({ key: schema.settings.key, value: schema.settings.value })
+      .from(schema.settings)
+
+    payContext = readInvoicePayContext(settingRows, org?.invoiceChannel)
+  }
+
+  // `xeroPayUrl` is dropped here rather than returned: the client is handed
+  // one `payUrl` and never has to know which rail issued it.
+  const projected = items.map(({ xeroPayUrl, ...row }) => {
+    const payUrl = resolveInvoicePayUrl(row.payUrl, xeroPayUrl)
+    const howToPay = payContext
+      ? buildHowToPay({
+        channel: payContext.channel,
+        payUrl,
+        invoice: {
+          id: row.id,
+          status: row.status,
+          totalUsd: row.totalAmount,
+          currency: row.currency,
+          dueDate: row.dueDate,
+          paidAt: row.paidAt,
+        },
+        bankDetails: payContext.bankDetails,
+      })
+      : null
+    return { ...row, payUrl, ...(howToPay ? { howToPay } : {}) }
+  })
+
+  return NextResponse.json({ items: projected, page, limit })
 }

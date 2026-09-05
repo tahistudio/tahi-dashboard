@@ -79,6 +79,7 @@ import WelcomeEmail from '@/emails/welcome'
 
 import { appOrigin, publicUrl } from '@/lib/app-url'
 import { invoiceReference } from '@/lib/invoice-billing'
+import { buildHowToPay } from '@/lib/invoice-how-to-pay'
 import {
   clientStatusEmailPlan,
   studioNewRequestEmailPlan,
@@ -106,7 +107,9 @@ export const EMAIL_PREVIEW_ENTRIES = [
   { key: 'contract-sign', template: 'contract-sign', liveSender: true },
   { key: 'contract-sign-tahi', template: 'contract-sign', liveSender: true },
   { key: 'invoice-overdue', template: 'invoice-overdue', liveSender: false },
+  { key: 'invoice-overdue-bank', template: 'invoice-overdue', liveSender: false },
   { key: 'invoice-sent', template: 'invoice-sent', liveSender: true },
+  { key: 'invoice-sent-bank', template: 'invoice-sent', liveSender: true },
   { key: 'kickoff-booked', template: 'kickoff-booked', liveSender: true },
   { key: 'kickoff-booked-no-link', template: 'kickoff-booked', liveSender: true },
   { key: 'new-message', template: 'new-message', liveSender: true },
@@ -269,6 +272,33 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
   const invoiceRef = invoiceReference(INVOICE_ID)
   const invoiceDueIso = isoFromNow(9)
   const overdueDueIso = isoFromNow(-12)
+
+  // The bank-transfer half of the invoice fork. A Xero-rail invoice has no pay
+  // page until it is approved inside Xero, and the push holds every
+  // dashboard-raised invoice at DRAFT on purpose, so this is the layout the
+  // FIRST email about a Xero bill uses. Previewing only the Pay-button version
+  // would leave it unread. Built the way the routes build it (buildHowToPay in
+  // lib/invoice-how-to-pay.ts) rather than typed by hand, so a change to the
+  // block's shape breaks the preview instead of the client's email.
+  const howToPay = buildHowToPay({
+    channel: 'xero',
+    payUrl: null,
+    invoice: {
+      id: INVOICE_ID,
+      // Outstanding, because the block only exists for a bill that is still
+      // owed: buildHowToPay refuses to build one for a settled invoice.
+      status: 'sent',
+      totalUsd: 4312.5,
+      currency: INVOICE_CURRENCY,
+      dueDate: invoiceDueIso,
+    },
+    bankDetails: {
+      bankName: 'ANZ',
+      accountName: 'Tahi Studio Ltd',
+      accountNumber: '01-0242-0198765-00',
+      referenceHint: 'Please quote the reference above so we can match your payment to this invoice.',
+    },
+  })!
   const kickoffIso = isoFromNow(3, 21, 0)
   const callIso = isoFromNow(0, 22, 0)
   const signedIso = isoFromNow(-1, 3, 15)
@@ -528,6 +558,33 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
       },
     },
 
+    // The same chase for a client on the Xero rail whose invoice has no pay
+    // page: the CTA falls back to the portal and the bank details carry the
+    // job of telling them how to clear it. A chase with nothing to act on is
+    // just a nag, which is why this variant is previewed too.
+    'invoice-overdue-bank': {
+      subject: `Invoice ${invoiceRef} from Tahi Studio is overdue`,
+      react: createElement(InvoiceOverdueEmail, {
+        clientName: firstName,
+        invoiceId: INVOICE_ID,
+        amountFormatted: INVOICE_AMOUNT,
+        currency: INVOICE_CURRENCY,
+        dueDate: nzLongDate(overdueDueIso),
+        daysOverdue: 12,
+        dashboardUrl: origin,
+        howToPay,
+      }),
+      personalisation: {
+        Greeting: firstName,
+        Reference: invoiceRef,
+        Amount: `${INVOICE_AMOUNT} ${INVOICE_CURRENCY}`,
+        'Original due date': nzLongDate(overdueDueIso),
+        'Days overdue': '12',
+        'How to pay': 'bank, account name, account number and the reference',
+        'Pay button': 'absent, so the CTA falls back to "View invoice"',
+      },
+    },
+
     // app/api/admin/invoices/[id]/send-email/route.ts.
     'invoice-sent': {
       subject: `Invoice ${invoiceRef} from Tahi Studio`,
@@ -548,6 +605,34 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
         'Due date': nzLongDate(invoiceDueIso),
         Notes: 'present',
         'Pay button': 'present (plus a portal link underneath)',
+      },
+    },
+
+    // The layout every Xero-rail client sees FIRST. The push route holds a
+    // dashboard-raised invoice at DRAFT until Liam approves it in Xero, and
+    // Xero only issues its online invoice once approved, so the first email
+    // about a Xero bill has no pay page and carries the bank details instead.
+    // Same template, different branch, and the branch a real client meets.
+    'invoice-sent-bank': {
+      subject: `Invoice ${invoiceRef} from Tahi Studio`,
+      react: createElement(InvoiceSentEmail, {
+        clientName: firstName,
+        invoiceId: INVOICE_ID,
+        amountFormatted: INVOICE_AMOUNT,
+        currency: INVOICE_CURRENCY,
+        dueDate: nzLongDate(invoiceDueIso),
+        notes: 'Covers the spring campaign landing page and the two follow-up email templates.',
+        invoiceUrl: publicUrl(`/invoices/${INVOICE_ID}`),
+        howToPay,
+      }),
+      personalisation: {
+        Greeting: firstName,
+        Reference: invoiceRef,
+        Amount: `${INVOICE_AMOUNT} ${INVOICE_CURRENCY}`,
+        'Due date': nzLongDate(invoiceDueIso),
+        Notes: 'present',
+        'How to pay': 'bank, account name, account number and the reference',
+        'Pay button': 'absent, so the CTA falls back to "View invoice"',
       },
     },
 
