@@ -59,6 +59,12 @@ const isPublicRoute = createRouteMatcher([
   // is validated by the /api/public/review data routes, so the page itself
   // must not sit behind the sign-in wall.
   '/review/(.*)',
+  // The PWA offline fallback. public/sw.js precaches '/offline' at install; a
+  // signed-out fetch of a protected route answers with a redirect to /sign-in,
+  // and Cache.addAll REJECTS a redirect, so leaving it behind the wall could
+  // fail the install and leave the people most likely to need the fallback
+  // without one. The page itself shows no data.
+  '/offline',
 ])
 
 // Admin-only routes : if a client hits these, redirect them to /requests.
