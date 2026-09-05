@@ -1,5 +1,4 @@
-import { getServerAuth } from '@/lib/server-auth'
-import { cookies } from 'next/headers'
+import { getViewAudience } from '@/lib/view-audience'
 import { redirect } from 'next/navigation'
 import { InvoiceDetail } from './invoice-detail'
 import { PortalInvoiceDetail } from '@/components/tahi/portal/invoices/portal-invoice-detail'
@@ -11,14 +10,13 @@ interface Props {
 }
 
 export default async function InvoiceDetailPage({ params }: Props) {
-  const { userId, orgId } = await getServerAuth()
+  const { userId, isAdmin, isPreviewingClient } = await getViewAudience()
   if (!userId) redirect('/sign-in')
 
   const { id } = await params
-  const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
   // Passed down as a prop: the cookie is browser wide, the client-side
   // impersonation store is per tab, and the pay link must obey the cookie.
-  const previewing = isAdmin && Boolean((await cookies()).get('tahi-impersonate-org')?.value)
+  const previewing = isPreviewingClient
 
   // The client's invoice: line items, How to pay, a way to ask about any
   // line, and no Source badge. The shared detail below stays the studio's.
