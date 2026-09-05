@@ -2,20 +2,25 @@
 
 /**
  * The small pieces every Tasks view shares: the level chip, the request chip,
- * the completion tick, the status badge and the subtask badge.
+ * the completion tick, the status badge and the checklist badge.
  *
  * All five come straight off the prototype's tasks.css and are sized in rem
  * against the same tokens the Requests chips use, so a row of tasks and a row
  * of requests read as one system.
  *
+ * This file also holds the studio's counting vocabulary, so one word is used
+ * wherever a count of the short tick-off items under a task is printed. A
+ * REQUEST is client work, a SUB-REQUEST is a request nested under another, a
+ * TASK is the studio's own to-do, and the tick-off items under either are a
+ * CHECKLIST. The table and the API still say subtask; only the reading moved.
+ *
  * The level chip is deliberately the widest of them: it carries the client
- * avatar, and the container query on the row lets the OTHER chips give up
+ * name, and the container query on the row lets the OTHER chips give up
  * their icons first. The title never gives up width.
  */
 
 import * as React from 'react'
 import { Check, Inbox, Leaf, Lock, Users } from 'lucide-react'
-import { Avatar } from '@/components/tahi/avatar'
 import { Badge } from '@/components/tahi/badge'
 import { TASK_STATUS_LABELS, TASK_STATUS_TONE } from '@/lib/status-config'
 import { TASK_LEVEL_LABELS, type TaskLevel } from '@/lib/tasks-views'
@@ -47,11 +52,22 @@ const LEVEL_TINT: Record<TaskLevel, { bg: string; text: string; border: string }
   },
 }
 
+/**
+ * How wide the client name may run before it ellipses. About sixteen
+ * characters at the chip's own size, which prints every client the studio has
+ * whole and still leaves the row's other chips room at 375px. The full name is
+ * always in the title, so a truncated one is never lost.
+ */
+const CLIENT_NAME_MAX_WIDTH = '7.5rem'
+
 export function LevelChip({ level, clientName, compact = false }: {
   level: TaskLevel
-  /** Renders a client avatar after the label. Omit for a Tahi task. */
+  /** Printed after the label, as "Internal / Kowtow". Omit it for a task with
+   *  no client. There is no avatar here on purpose: a 14px monogram beside a
+   *  word is unreadable, and the word the reader wants is the client's name. */
   clientName?: string | null
-  /** Board cards use the icon alone: 1.25rem tall, no label, no avatar. */
+  /** Board cards and the week planner use the icon alone: 1.25rem tall, no
+   *  label, no client. */
   compact?: boolean
 }) {
   const Icon = LEVEL_ICON[level]
@@ -80,6 +96,11 @@ export function LevelChip({ level, clientName, compact = false }: {
     )
   }
 
+  // maxWidth 100% rather than a shrink: the chip keeps its whole reading in
+  // any row that can hold it, and only the client name gives way, inside the
+  // chip, when the line itself is narrower than the chip wants to be. That is
+  // why the icon, the label and the separator are all pinned and the name is
+  // the one part with slack.
   return (
     <span
       className="inline-flex items-center"
@@ -88,6 +109,8 @@ export function LevelChip({ level, clientName, compact = false }: {
         height: '1.375rem',
         padding: '0 0.5rem',
         flexShrink: 0,
+        minWidth: 0,
+        maxWidth: '100%',
         borderRadius: 'var(--radius-sm)',
         border: `1px solid ${tint.border}`,
         background: tint.bg,
@@ -97,12 +120,26 @@ export function LevelChip({ level, clientName, compact = false }: {
         whiteSpace: 'nowrap',
       }}
     >
-      <Icon size={11} aria-hidden />
-      {label}
+      <span className="inline-flex" style={{ flexShrink: 0 }}>
+        <Icon size={11} aria-hidden />
+      </span>
+      <span style={{ flexShrink: 0 }}>{label}</span>
       {clientName && (
         <>
-          <span aria-hidden="true" style={{ opacity: 0.5 }}>/</span>
-          <Avatar name={clientName} size={14} noRing tooltip={clientName} />
+          <span aria-hidden="true" style={{ flexShrink: 0, opacity: 0.5 }}>/</span>
+          <span
+            title={clientName}
+            style={{
+              minWidth: 0,
+              maxWidth: CLIENT_NAME_MAX_WIDTH,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              lineHeight: 1.4,
+              fontWeight: 500,
+            }}
+          >
+            {clientName}
+          </span>
         </>
       )}
     </span>
@@ -184,7 +221,7 @@ export function TaskTick({ done, blocked = false, size = 'md', disabled = false,
   /** Dashed danger ring: the task is stalled and reads that way before you
    *  open it. */
   blocked?: boolean
-  /** 'sm' 1.0625rem inside the subtask panel, 'md' 1.25rem on a row,
+  /** 'sm' 1.0625rem inside the checklist panel, 'md' 1.25rem on a row,
    *  'lg' 1.5rem in the detail head. */
   size?: 'sm' | 'md' | 'lg'
   disabled?: boolean
@@ -268,13 +305,33 @@ export function TaskStatusBadge({ status, size = 'sm' }: {
   )
 }
 
+/**
+ * "1 checklist item" / "4 checklist items". The studio's word for the short
+ * tick-off items under a task or a request, in the one place every count
+ * string reads it from.
+ */
+export function checklistCountLabel(count: number): string {
+  return `${count} checklist item${count === 1 ? '' : 's'}`
+}
+
+/** "2 of 5 checklist items done", for a badge that shows the bare fraction. */
+export function checklistProgressLabel(done: number, total: number): string {
+  return `${done} of ${checklistCountLabel(total)} done`
+}
+
 export function SubtaskBadge({ done, total }: { done: number; total: number }) {
   if (total === 0) return null
   const complete = done >= total
+  const reading = checklistProgressLabel(done, total)
   return (
     <span
+      // role and aria-label together, because the visible text is a bare
+      // fraction: without them the row announces "3 slash 5" and nothing says
+      // what was counted.
+      role="img"
       className="inline-flex items-center tabular-nums"
-      title={`${done} of ${total} subtasks done`}
+      title={reading}
+      aria-label={reading}
       style={{
         gap: '0.1875rem',
         flexShrink: 0,
