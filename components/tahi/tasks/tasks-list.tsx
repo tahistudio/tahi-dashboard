@@ -40,6 +40,7 @@ import {
   TaskTick,
 } from '@/components/tahi/tasks/task-chips'
 import { TaskQuickAdd } from '@/components/tahi/tasks/task-quick-add'
+import { useToast } from '@/components/tahi/toast'
 import { TASK_STATUSES } from '@/lib/status-config'
 import { taskPriorityLabel } from '@/lib/task-priorities'
 import { levelOf, taskDayKey, taskShiftedDayKey, type TaskRow } from '@/lib/tasks-views'
@@ -59,8 +60,14 @@ export interface TasksListProps {
   readOnly: boolean
 
   /** Subtasks for the rows the user has expanded. The shell fetches them
-   *  lazily; an id with no entry yet renders the skeleton. */
+   *  lazily; an id with no entry yet renders the skeleton, unless the row's
+   *  own `subtaskCount` is 0, which is the answer already and renders the
+   *  empty line instead. */
   subtasks: Readonly<Record<string, TaskSubtask[] | undefined>>
+  /** Fetch or revalidate this row's subtasks. Called on the first expand of a
+   *  row that has any, and again after a subtask is added, so it has to be
+   *  safe to call more than once for the same id. A row whose `subtaskCount`
+   *  is 0 is never announced, so Expand all costs nothing on an empty page. */
   onExpandRow: (taskId: string) => void
 
   onOpenTask: (taskId: string) => void
@@ -69,6 +76,12 @@ export interface TasksListProps {
   onStatusChange: (taskId: string, status: string) => Promise<void>
   onToggleSubtask: (taskId: string, subtaskId: string, completed: boolean) => void
   onAddSubtask: (taskId: string, title: string) => Promise<void>
+  /** Optional so the interface Slice 6 was written against still satisfies
+   *  this component. Pass it and each subtask row grows its remove button;
+   *  leave it out and the panel is add-and-tick only, with removal living in
+   *  the detail slide-over. The plan pins the button but states no callback,
+   *  and an additive optional prop is the only reading that honours both. */
+  onRemoveSubtask?: (taskId: string, subtaskId: string) => void
   onQuickAdd: (parsed: QuickAddParse) => Promise<void>
 
   /** Bulk. `run` resolves to the shape BulkActionBar expects. */
@@ -94,8 +107,16 @@ const PANEL_BG = 'var(--color-bg-secondary)'
 /** Indent that puts a subtask tick under the row tick: the selection column,
  *  the cell padding, the chevron gutter and the row tick's own width. Below
  *  md the mobile cards take over, so the phone value only ever shows on a
- *  narrow tablet. */
-const SUBTASK_INDENT_CLASS = 'pl-4 md:pl-[5.25rem]'
+ *  narrow tablet.
+ *
+ *  A read-only table has no selection column (`selectable={false}`), so every
+ *  column shifts left by its 4.25rem and the fixed indent would push the
+ *  subtask ticks that far to the right of the parent's. Both class strings are
+ *  written out in full rather than composed, because Tailwind reads source
+ *  text and a built class name is a class name that does not exist. */
+function subtaskIndentClass(leadingCells: number): string {
+  return leadingCells > 0 ? 'pl-4 md:pl-[5.25rem]' : 'pl-4 md:pl-4'
+}
 
 /**
  * Mirrors the rank `compareTasks` sorts on, negated so the header's first
@@ -108,6 +129,11 @@ const PRIORITY_RANK: Record<string, number> = { urgent: 3, high: 2, standard: 1 
 /** Sorts undated work below dated work whichever direction the header is in,
  *  matching `compareTasks`'s own placeholder. */
 const NO_DUE_DATE = '9999-12-31'
+
+/** Stands in for a list the shell was never asked to fetch, because the row
+ *  said there was nothing to fetch. One shared array rather than a fresh
+ *  literal per render. */
+const NO_SUBTASKS: readonly TaskSubtask[] = []
 
 function firstName(name: string | null | undefined): string {
   if (!name) return ''
@@ -142,6 +168,12 @@ function NoValue({ children }: { children: React.ReactNode }) {
  * The Task cell. A CSS container, so the chips inside it can give up their
  * icons when the cell runs short: the title never gives up width, the chips
  * give way first (the rule lives in app/globals.css, keyed on `tsk-task`).
+ *
+ * `tsk-title` is not decoration. Inline-size containment means this box
+ * contributes nothing to the intrinsic width of anything above it, and
+ * DataTable wraps the first column's body in a flex row to seat the expand
+ * chevron. That wrapper sizes to its content, so without the rule this class
+ * hangs the fix off it would resolve to zero and take the title with it.
  */
 function TitleCell({
   row,
@@ -158,6 +190,7 @@ function TitleCell({
   const total = subtaskTotal(row)
   return (
     <span
+      className="tsk-title"
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -242,9 +275,22 @@ function AssigneeCell({ person }: { person: TaskPerson | undefined }) {
   )
 }
 
+/** `completedAt` is a full UTC instant, unlike `dueDate`, which is already a
+ *  local calendar day. `formatDueDateLabel` slices the first ten characters
+ *  and reads them as a local day, so handing it the raw timestamp prints the
+ *  UTC date: a task ticked at 10am in Auckland would read as the day before.
+ *  Convert to the reader's own day first, and fall back to the bare `Done`
+ *  when the value is not a date at all. */
+function completedDayKey(completedAt: string | null): string | null {
+  if (!completedAt) return null
+  const at = new Date(completedAt)
+  if (Number.isNaN(at.getTime())) return null
+  return taskDayKey(at)
+}
+
 function DueCell({ row }: { row: TaskRow }) {
   if (isDone(row)) {
-    const label = formatDueDateLabel(row.completedAt)
+    const label = formatDueDateLabel(completedDayKey(row.completedAt))
     return <NoValue>{label ? `Done ${label}` : 'Done'}</NoValue>
   }
   if (!row.dueDate) return <NoValue>No date</NoValue>
@@ -296,16 +342,20 @@ function SubtaskRow({
   subtask,
   readOnly,
   onToggle,
+  onRemove,
 }: {
   table: DataTableExpandedContext
   subtask: TaskSubtask
   readOnly: boolean
   onToggle: () => void
+  /** Optional: the panel is one-way without it, and removal then lives only
+   *  in the detail slide-over. See the note on `TasksListProps`. */
+  onRemove?: () => void
 }) {
   return (
     <PanelRow table={table}>
       <div
-        className={`flex items-center min-h-11 md:min-h-10 ${SUBTASK_INDENT_CLASS}`}
+        className={`flex items-center min-h-11 md:min-h-10 ${subtaskIndentClass(table.leadingCells)}`}
         style={{ gap: '0.625rem', paddingRight: '1rem' }}
       >
         <TaskTick
@@ -331,6 +381,33 @@ function SubtaskRow({
         >
           {subtask.title}
         </span>
+        {!readOnly && onRemove && (
+          <button
+            type="button"
+            aria-label={`Remove subtask ${subtask.title}`}
+            className="tahi-focus-ring inline-flex items-center justify-center w-11 h-11 md:w-[1.625rem] md:h-[1.625rem]"
+            onClick={e => { e.stopPropagation(); onRemove() }}
+            style={{
+              flexShrink: 0,
+              border: 'none',
+              borderRadius: 'var(--radius-sm)',
+              background: 'transparent',
+              color: 'var(--color-text-subtle)',
+              cursor: 'pointer',
+              transition: 'color var(--motion-quick) var(--ease-out), background-color var(--motion-quick) var(--ease-out)',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.color = 'var(--color-danger)'
+              e.currentTarget.style.background = 'var(--color-danger-bg)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.color = 'var(--color-text-subtle)'
+              e.currentTarget.style.background = 'transparent'
+            }}
+          >
+            <X size={13} strokeWidth={2.4} aria-hidden="true" />
+          </button>
+        )}
       </div>
     </PanelRow>
   )
@@ -344,7 +421,7 @@ function SubtaskSkeleton({ table }: { table: DataTableExpandedContext }) {
       {[0, 1].map(i => (
         <PanelRow key={i} table={table}>
           <div
-            className={`flex items-center min-h-11 md:min-h-10 ${SUBTASK_INDENT_CLASS}`}
+            className={`flex items-center min-h-11 md:min-h-10 ${subtaskIndentClass(table.leadingCells)}`}
             style={{ gap: '0.625rem', paddingRight: '1rem' }}
           >
             <span
@@ -385,10 +462,14 @@ function AddSubtaskRow({
   taskId: string
   onAddSubtask: (taskId: string, title: string) => Promise<void>
 }) {
+  const { showToast } = useToast()
   const [adding, setAdding] = React.useState(false)
   const [draft, setDraft] = React.useState('')
   const [saving, setSaving] = React.useState(false)
   const mountedRef = React.useRef(true)
+  // Read by the blur handler, which can fire inside the same commit that set
+  // the flag, before React has handed that handler the new props.
+  const savingRef = React.useRef(false)
 
   React.useEffect(() => {
     mountedRef.current = true
@@ -397,14 +478,20 @@ function AddSubtaskRow({
 
   async function commit() {
     const title = draft.trim()
-    if (!title || saving) return
+    if (!title || savingRef.current) return
+    savingRef.current = true
     setSaving(true)
     try {
       await onAddSubtask(taskId, title)
       // The field stays open and empty: naming three subtasks in a row is
       // the normal case, and reopening it each time is three extra clicks.
       if (mountedRef.current) setDraft('')
+    } catch {
+      // The draft stays in the field on purpose, the same bargain the
+      // quick-add strikes: retrying is one keypress, retyping is not.
+      if (mountedRef.current) showToast("Couldn't add the subtask", 'error')
     } finally {
+      savingRef.current = false
       if (mountedRef.current) setSaving(false)
     }
   }
@@ -413,18 +500,27 @@ function AddSubtaskRow({
     return (
       <PanelRow table={table}>
         <div
-          className={`flex items-center min-h-11 md:min-h-10 ${SUBTASK_INDENT_CLASS}`}
+          className={`flex items-center min-h-11 md:min-h-10 ${subtaskIndentClass(table.leadingCells)}`}
           style={{ gap: '0.5rem', paddingRight: '1rem', paddingTop: '0.375rem', paddingBottom: '0.5rem' }}
         >
           <input
             autoFocus
             value={draft}
-            disabled={saving}
+            // readOnly, not disabled: disabling a focused input runs the
+            // unfocusing steps, so the browser fires blur at the row that is
+            // mid-write and the cancel below would collapse it. readOnly
+            // freezes the text and keeps the caret exactly where it was.
+            readOnly={saving}
+            aria-busy={saving}
             aria-label="New subtask"
             placeholder="Name the subtask, press Enter"
             className="tahi-focus-ring"
             onChange={e => setDraft(e.target.value)}
-            onBlur={() => { setAdding(false); setDraft('') }}
+            onBlur={() => {
+              if (savingRef.current) return
+              setAdding(false)
+              setDraft('')
+            }}
             onKeyDown={e => {
               if (e.key === 'Enter') { e.preventDefault(); void commit() }
               if (e.key === 'Escape') { setAdding(false); setDraft('') }
@@ -452,7 +548,7 @@ function AddSubtaskRow({
     <PanelRow table={table}>
       <button
         type="button"
-        className={`tahi-focus-ring flex items-center w-full min-h-11 md:min-h-10 ${SUBTASK_INDENT_CLASS}`}
+        className={`tahi-focus-ring flex items-center w-full min-h-11 md:min-h-10 ${subtaskIndentClass(table.leadingCells)}`}
         onClick={e => { e.stopPropagation(); setAdding(true) }}
         style={{
           gap: '0.5rem',
@@ -625,7 +721,7 @@ export function TasksList(props: TasksListProps): React.ReactElement {
     rows, loading, people, peopleList, clients, readOnly,
     subtasks, onExpandRow,
     onOpenTask, onOpenRequest, onToggleDone, onStatusChange,
-    onToggleSubtask, onAddSubtask, onQuickAdd,
+    onToggleSubtask, onAddSubtask, onRemoveSubtask, onQuickAdd,
     onBulkStatus, onBulkPriority, onBulkAssignee, onBulkDueDate,
     hasFilter, onClearFilters, onNewTask,
   } = props
@@ -646,15 +742,34 @@ export function TasksList(props: TasksListProps): React.ReactElement {
     setSelectedIds(prev => pruneExpandedIds(prev, ids))
   }, [rows])
 
+  // Counts travel on the row itself, so a row that has none already answers
+  // the question the fetch would have asked. That matters most under Expand
+  // all, which opens every row on the page at once: without this it would be
+  // one round trip per row, up to a hundred at the largest page size.
+  const subtaskCounts = React.useMemo(() => {
+    const counts = new Map<string, number>()
+    rows.forEach(r => counts.set(r.id, subtaskTotal(r)))
+    return counts
+  }, [rows])
+
   const handleExpandedChange = React.useCallback((next: Set<string>) => {
     next.forEach(id => {
-      if (!requestedRef.current.has(id)) {
-        requestedRef.current.add(id)
-        onExpandRow(id)
-      }
+      if (requestedRef.current.has(id)) return
+      if ((subtaskCounts.get(id) ?? 0) === 0) return
+      requestedRef.current.add(id)
+      onExpandRow(id)
     })
     setExpandedIds(next)
-  }, [onExpandRow])
+  }, [onExpandRow, subtaskCounts])
+
+  // A row whose count was zero never asked for its list, so after the first
+  // subtask lands it has to ask now, or the panel would sit on a skeleton
+  // with nothing on the way.
+  const handleAddSubtask = React.useCallback(async (taskId: string, title: string) => {
+    await onAddSubtask(taskId, title)
+    requestedRef.current.add(taskId)
+    onExpandRow(taskId)
+  }, [onAddSubtask, onExpandRow])
 
   const handleSelectionChange = React.useCallback((next: Set<string>) => {
     setSelectedIds(next)
@@ -739,7 +854,10 @@ export function TasksList(props: TasksListProps): React.ReactElement {
   // ── Expanded subtask rows ─────────────────────────────────────────────────
 
   const renderSubtaskRows = React.useCallback((row: TaskRow, table: DataTableExpandedContext) => {
-    const list = subtasks[row.id]
+    // No entry yet AND a zero count is the empty case, not the loading one:
+    // the row already carries the answer, so nothing was ever requested and
+    // a skeleton would be waiting on a fetch that is not coming.
+    const list = subtasks[row.id] ?? (subtaskTotal(row) === 0 ? NO_SUBTASKS : undefined)
     if (list === undefined) return <SubtaskSkeleton table={table} />
     return (
       <>
@@ -750,12 +868,13 @@ export function TasksList(props: TasksListProps): React.ReactElement {
             subtask={sub}
             readOnly={readOnly}
             onToggle={() => onToggleSubtask(row.id, sub.id, !sub.completed)}
+            onRemove={onRemoveSubtask ? () => onRemoveSubtask(row.id, sub.id) : undefined}
           />
         ))}
         {list.length === 0 && (
           <PanelRow table={table}>
             <span
-              className={SUBTASK_INDENT_CLASS}
+              className={subtaskIndentClass(table.leadingCells)}
               style={{
                 display: 'block',
                 paddingTop: '0.625rem',
@@ -771,11 +890,11 @@ export function TasksList(props: TasksListProps): React.ReactElement {
           </PanelRow>
         )}
         {!readOnly && (
-          <AddSubtaskRow table={table} taskId={row.id} onAddSubtask={onAddSubtask} />
+          <AddSubtaskRow table={table} taskId={row.id} onAddSubtask={handleAddSubtask} />
         )}
       </>
     )
-  }, [subtasks, readOnly, onToggleSubtask, onAddSubtask])
+  }, [subtasks, readOnly, onToggleSubtask, onRemoveSubtask, handleAddSubtask])
 
   const isExpandable = React.useCallback(
     (row: TaskRow) => subtaskTotal(row) > 0 || !readOnly,

@@ -2614,7 +2614,7 @@ html.reduce-motion *::after {
 /* ============================================================
    TASKS LIST
    ============================================================
-   The two rules the Tasks list cannot state inline.
+   The three rules the Tasks list cannot state inline.
 
    1. A row's chips thin themselves before the title is ever asked to give
       up width. The Task cell declares container-name: tsk-task, so this is
@@ -2622,7 +2622,15 @@ html.reduce-motion *::after {
       narrow Task column thins the chips too, which a media query could not
       do. The level chip is deliberately absent, because it carries the
       client avatar and is the one chip that never thins.
-   2. The mobile card list draws one hairline between cards and none under
+   2. The Task cell is a size container, and a size container contributes
+      nothing to the intrinsic width of its ancestors. DataTable wraps the
+      first column's body in a flex row so the expand chevron can lead it,
+      and that wrapper sizes to its content, so the cell would resolve to
+      zero and the title with it. Hand the wrapper the row's slack instead.
+      Scoped through the cell's own class so no other table is touched: the
+      alternative is flex: 1 1 auto on the wrapper inside data-table.tsx,
+      which is a shared file this surface does not own.
+   3. The mobile card list draws one hairline between cards and none under
       the last. An inline border would outrank the :last-child rule, so
       both halves of that pair live here. */
 @layer components {
@@ -2630,6 +2638,10 @@ html.reduce-motion *::after {
     .tsk-chip-thin-icon svg {
       display: none;
     }
+  }
+
+  td > span > span:has(> .tsk-title) {
+    flex: 1 1 auto;
   }
 
   .tsk-mc {
