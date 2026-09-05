@@ -215,6 +215,61 @@ export async function createNotifications(
   return result
 }
 
+/**
+ * Several DIFFERENT events for ONE recipient, in three queries flat.
+ *
+ * createNotifications takes one payload for many people; this is the other
+ * shape: many payloads for one person, which is what a bulk action produces
+ * (one row per task it moved, each with its own title and deep link). Calling
+ * createNotification in a loop re-resolved the recipient and re-read their
+ * in-app preference for every row, so a selection of N cost 3N sequential D1
+ * round trips. Resolve once, filter once, insert once.
+ *
+ * Bell only, deliberately: an email twin per row would be a mailbox flood, and
+ * the bulk callers that do want email send one digest themselves. Never
+ * throws, like the rest of this module.
+ */
+export async function createNotificationsForRecipient(
+  database: DrizzleDB,
+  recipient: NotificationRecipient,
+  payloads: NotificationPayload[],
+): Promise<NotifyResult> {
+  if (payloads.length === 0) return NO_RESULT
+  try {
+    const { resolved, skipped } = await resolveRecipients(database, [recipient])
+    if (resolved.length === 0) return { delivered: 0, skipped }
+
+    const now = new Date().toISOString()
+    const rows: Array<typeof schema.notifications.$inferInsert> = []
+    for (const payload of payloads) {
+      // The preference is per event type, so it is asked once per DISTINCT
+      // type rather than once per row; a bulk action is one type in practice.
+      const targets = await filterRecipientsByInAppPref(database, resolved, payload.type)
+      for (const target of targets) {
+        rows.push({
+          id: crypto.randomUUID(),
+          userId: target.userId,
+          userType: target.userType,
+          eventType: payload.type,
+          title: payload.title,
+          body: payload.body ?? null,
+          entityType: payload.entityType ?? null,
+          entityId: payload.entityId ?? null,
+          read: false,
+          createdAt: now,
+        })
+      }
+    }
+    if (rows.length === 0) return { delivered: 0, skipped }
+
+    await database.insert(schema.notifications).values(rows)
+    return { delivered: rows.length, skipped }
+  } catch (err) {
+    console.error('[createNotificationsForRecipient] failed to insert notifications:', err)
+    return NO_RESULT
+  }
+}
+
 interface CreateNotificationParams extends NotificationPayload {
   recipient: NotificationRecipient
 }

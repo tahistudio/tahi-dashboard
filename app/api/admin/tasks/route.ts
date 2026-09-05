@@ -195,6 +195,16 @@ export async function POST(req: NextRequest) {
     requestId?: string | null
     scheduleRowId?: string | null
     subtasks?: string[]
+    /**
+     * The team member the caller IS, when the caller cannot be read from the
+     * session. A worker MCP call authenticates as the service user, which by
+     * design is nobody's team member, so "create a task for me" through
+     * create_task used to write the asker their own bell row. The MCP tool
+     * forwards this; the self-check below prefers it. Only ever suppresses a
+     * notification, never sends one anywhere new, so a wrong value costs at
+     * most a missing bell row on an admin-only route.
+     */
+    actorTeamMemberId?: string | null
   }
 
   const title = body.title?.trim()
@@ -286,7 +296,13 @@ export async function POST(req: NextRequest) {
   const assigneeType = assigneeId
     ? statedType ?? await resolveAssigneeType(drizzle, assigneeId)
     : null
-  const me = assigneeType === 'team_member' ? await resolveTeamMember(drizzle, userId) : null
+  const statedActor = typeof body.actorTeamMemberId === 'string' && body.actorTeamMemberId.trim()
+    ? body.actorTeamMemberId.trim()
+    : null
+  const me = assigneeType === 'team_member' && !statedActor
+    ? await resolveTeamMember(drizzle, userId)
+    : null
+  const actorId = statedActor ?? me?.id ?? null
 
   const id = crypto.randomUUID()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
@@ -353,13 +369,11 @@ export async function POST(req: NextRequest) {
   // task; nobody outside the studio is told about it.
   //
   // Assigning yourself something is not news, so the creator is never
-  // notified. KNOWN GAP, accepted rather than half-closed: a worker MCP call
-  // authenticates as the service user, which by design IS nobody's team
-  // member (lib/team-identity SERVICE_USER_ID), so `me` is null and "create
-  // a task for me" through create_task still writes the asker a row. Closing
-  // it needs the MCP to forward the acting team member id, which is a change
-  // in workers/mcp-server, not here.
-  if (assigneeId && assigneeType === 'team_member' && me?.id !== assigneeId) {
+  // notified. A worker MCP call authenticates as the service user, which by
+  // design IS nobody's team member (lib/team-identity SERVICE_USER_ID), so
+  // `resolveTeamMember` cannot answer for it: create_task forwards the acting
+  // team member as `actorTeamMemberId` and that is preferred when present.
+  if (assigneeId && assigneeType === 'team_member' && actorId !== assigneeId) {
     await createNotification(drizzle, {
       recipient: { teamMemberId: assigneeId },
       type: 'task_assigned',

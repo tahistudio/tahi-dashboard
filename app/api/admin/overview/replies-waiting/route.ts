@@ -11,12 +11,19 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 // How far back an inbound (client-authored) last message can be and still count
 // as "waiting on you". Older than this is treated as stale, not a live reply.
 const LOOKBACK_DAYS = 60
-// Max rows the card ever needs.
+// Max rows the card ever needs. Every row is a request now, so a single cap can
+// no longer be spent by one kind on behalf of another.
 const CAP = 12
+// Newest messages read per request in the window. Only the newest VISIBLE row
+// per request decides the answer, so the read is bounded rather than pulling
+// the whole 60 day history (bodies are Tiptap JSON, and D1's result size is the
+// failure mode on a migrated org). Twenty apiece leaves room for a burst of
+// internal notes on top of the reply that settles it.
+const MESSAGE_BUDGET_PER_REQUEST = 20
 
 interface ReplyThread {
   id: string
-  kind: 'conversation' | 'request'
+  kind: 'request'
   threadTitle: string
   clientName: string | null
   lastSnippet: string
@@ -26,13 +33,30 @@ interface ReplyThread {
 }
 
 // ── GET /api/admin/overview/replies-waiting?scope=me ────────────────────────
-// Threads (conversations + request threads) the signed-in team member is on
-// where the LAST non-deleted message was authored by a client contact - i.e.
-// the ball is in the member's court. Newest inbound first, capped.
+// Request threads the signed-in team member is on where the LAST message the
+// client can see was authored by a client contact - i.e. the ball is in the
+// member's court. Newest inbound first, capped.
 //
 // Honest empty: returns { threads: [] } when nothing is waiting (or the caller
 // has no team_members row). Only scope=me is supported today; any other scope
 // yields the same member-scoped feed.
+//
+// Every row opens the REQUEST the reply was written on. The standalone
+// Messages page is hidden (app/(dashboard)/messages/page.tsx redirects an
+// admin to /overview and there is no [id] route at all), so this feed no
+// longer reads conversations at all: it used to hand rows out as
+// `/messages/{id}` (a hard 404), then as the request its conversation was
+// attached to, which resolved the client name off conversations.org_id and the
+// title off a left join that a deleted request answers with nulls. Every
+// message on a request carries requests.id whether or not it also carries a
+// conversation id, so the request branch alone already sees the whole thread,
+// and dropping the second pass saves two D1 reads on every overview load.
+// Restore it in the same change that re-renders the Messages surface.
+//
+// "The last message the client can see": internal notes are excluded, so
+// reading a client's question and writing a studio-only note beside it does
+// not clear the request off this card. An answer the client never receives is
+// not an answer.
 export async function GET(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
@@ -61,61 +85,6 @@ export async function GET(req: NextRequest) {
   const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString()
   const now = Date.now()
   const threads: ReplyThread[] = []
-
-  // ── Conversations the member participates in ──────────────────────────────
-  try {
-    const convRows = await drizzle
-      .select({ conversationId: schema.conversationParticipants.conversationId })
-      .from(schema.conversationParticipants)
-      .where(and(
-        eq(schema.conversationParticipants.participantId, memberId),
-        eq(schema.conversationParticipants.participantType, 'team_member'),
-      ))
-    const convIds = [...new Set(convRows.map(c => c.conversationId))]
-
-    if (convIds.length > 0) {
-      const rows = await drizzle
-        .select({
-          messageId: schema.messages.id,
-          conversationId: schema.messages.conversationId,
-          body: schema.messages.body,
-          authorType: schema.messages.authorType,
-          createdAt: schema.messages.createdAt,
-          convName: schema.conversations.name,
-          convOrgId: schema.conversations.orgId,
-          orgName: schema.organisations.name,
-        })
-        .from(schema.messages)
-        .innerJoin(schema.conversations, eq(schema.messages.conversationId, schema.conversations.id))
-        .leftJoin(schema.organisations, eq(schema.conversations.orgId, schema.organisations.id))
-        .where(and(
-          inArray(schema.messages.conversationId, convIds),
-          isNull(schema.messages.deletedAt),
-          gte(schema.messages.createdAt, cutoff),
-        ))
-        .orderBy(desc(schema.messages.createdAt))
-
-      const seen = new Set<string>()
-      for (const r of rows) {
-        const key = r.conversationId
-        if (!key || seen.has(key)) continue
-        seen.add(key)
-        if (r.authorType !== 'contact') continue
-        threads.push({
-          id: key,
-          kind: 'conversation',
-          threadTitle: r.convName?.trim() || r.orgName?.trim() || 'Conversation',
-          clientName: r.orgName?.trim() || null,
-          lastSnippet: snippet(r.body),
-          ago: relativeAgo(r.createdAt, now),
-          at: r.createdAt,
-          to: `/messages/${key}`,
-        })
-      }
-    }
-  } catch {
-    // conversations / messages tables missing - skip conversation threads.
-  }
 
   // ── Request threads the member owns or participates on ────────────────────
   try {
@@ -153,11 +122,16 @@ export async function GET(req: NextRequest) {
         .leftJoin(schema.organisations, eq(schema.requests.orgId, schema.organisations.id))
         .where(and(
           inArray(schema.messages.requestId, reqIdList),
-          isNull(schema.messages.conversationId),
+          // Studio-only notes are not an answer to the client, so they must not
+          // win the per-request "last message" race. Without this, reading a
+          // client's question and writing an internal note beside it cleared
+          // the request off the card while the client was still waiting.
+          eq(schema.messages.isInternal, false),
           isNull(schema.messages.deletedAt),
           gte(schema.messages.createdAt, cutoff),
         ))
         .orderBy(desc(schema.messages.createdAt))
+        .limit(reqIdList.length * MESSAGE_BUDGET_PER_REQUEST)
 
       const seen = new Set<string>()
       for (const r of rows) {

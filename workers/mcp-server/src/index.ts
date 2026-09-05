@@ -494,6 +494,7 @@ const TOOLS: ToolDef[] = [
     priority: prop('string', 'Priority: standard, high or urgent. Default standard.'),
     status: prop('string', 'Initial status: todo, in_progress, blocked or done. Default todo.'),
     assigneeId: prop('string', 'Team member ID to assign'),
+    actorTeamMemberId: prop('string', "The team member YOU are acting as. Pass it when the assignee is that same person, so they are not sent a bell row about work they gave themselves. This server authenticates as the service user, which is not any team member's login, so the route cannot work it out on its own."),
     dueDate: prop('string', 'Due date in YYYY-MM-DD format'),
     estimatedHours: prop('number', 'Estimate in hours'),
     requestId: prop('string', "Request this task delivers against. Linking adopts that request's client, so orgId is optional when you pass one."),
@@ -554,6 +555,7 @@ const TOOLS: ToolDef[] = [
     templateId: prop('string', 'Task template ID'),
     orgId: prop('string', 'Client organisation ID'),
     assigneeId: prop('string', 'Team member ID to assign'),
+    actorTeamMemberId: prop('string', "The team member YOU are acting as. Pass it when the assignee is that same person, so they are not sent a bell row about work they gave themselves. This server authenticates as the service user, which is not any team member's login, so the route cannot work it out on its own."),
   }, ['templateId']),
   tool('delete_task', 'Delete a task. Its checklist items cascade and its blocker links are swept.', {
     taskId: prop('string', 'Task ID'),
@@ -1613,6 +1615,9 @@ const TOOLS: ToolDef[] = [
   tool('mark_request_read', 'Mark a request read for the current user (clears unread-message badge)', {
     requestId: prop('string', 'Request ID'),
   }, ['requestId']),
+  tool('list_request_reads', 'Who has read a request and when (client receipts included)', {
+    requestId: prop('string', 'Request ID'),
+  }, ['requestId']),
   tool('bulk_assign_requests', 'Assign the same set of participants to multiple requests at once', {
     requestIds: prop('array', 'Array of request IDs'),
     participants: prop('array', 'Array of {participantId, participantType, role}'),
@@ -2660,6 +2665,8 @@ async function executeTool(
       return json(await apiWrite(`/api/admin/requests/${s('requestId')}/scope-flag`, token, 'DELETE'))
     case 'mark_request_read':
       return json(await apiWrite(`/api/admin/requests/${s('requestId')}/reads`, token, 'POST'))
+    case 'list_request_reads':
+      return json(await apiGet(`/api/admin/requests/${s('requestId')}/reads`, token))
     case 'bulk_assign_requests':
       return json(await apiWrite(`/api/admin/requests/bulk-assign`, token, 'POST', {
         requestIds: args.requestIds,

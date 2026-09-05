@@ -150,5 +150,10 @@ export async function requirePortalFeature(
   }, featureKey)
   if (allowed) return null
 
-  return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  // Machine-readable WHY, on top of the bare message. A portal 403 has several
+  // meanings and the client pages have to say the right sentence: this one is
+  // "your workspace does not have this feature", which is NOT "ask your
+  // organisation admin" (the reader may BE the admin). lib/portal-admin-label
+  // classifies on this code.
+  return NextResponse.json({ error: 'Forbidden', code: 'feature_disabled' }, { status: 403 })
 }

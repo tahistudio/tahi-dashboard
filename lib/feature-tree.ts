@@ -26,6 +26,14 @@ export interface FeatureNode {
   appliesTo: ReadonlyArray<FeatureAudience>
   /** Sidebar route for top-level page nodes (used by nav filtering). */
   route?: string
+  /**
+   * Why the surface this key governs is not currently reachable. Set on a node
+   * whose page is hidden but whose KEY is still enforced somewhere, so the
+   * permissions pickers can say so rather than offering a switch that looks
+   * like it controls a page nobody can open. Never a permission decision:
+   * `decideFeature` ignores it, so an existing override keeps working.
+   */
+  unavailable?: string
 }
 
 // Order here is the display order in the builder tree.
@@ -35,7 +43,21 @@ export const FEATURE_TREE: ReadonlyArray<FeatureNode> = [
   { key: 'requests', label: 'Requests', description: 'Client work requests (submit, track, board).', parent: null, appliesTo: ['team', 'client'], route: '/requests' },
   { key: 'requests.board', label: 'Requests board', description: 'Kanban / timeline board view of requests.', parent: 'requests', appliesTo: ['team', 'client'] },
   { key: 'requests.bulk_actions', label: 'Requests bulk actions', description: 'Multi-select bulk status / assign / archive.', parent: 'requests', appliesTo: ['team'] },
-  { key: 'messages', label: 'Messages', description: 'Conversations between Tahi and the client.', parent: null, appliesTo: ['team', 'client'], route: '/messages' },
+  // The standalone Messages page is hidden: app/(dashboard)/messages/page.tsx
+  // redirects both audiences away and the client channel is the request
+  // thread. The KEY is still live, though: the daily brief gates its "N client
+  // replies came in overnight" row on it (app/api/admin/overview/brief), so
+  // deleting the node would strand control of something that does render.
+  // It is marked unavailable and described by what it actually governs.
+  {
+    key: 'messages',
+    label: 'Messages',
+    description: 'Client replies on the daily brief. The standalone Messages page is hidden; the request thread is the client channel.',
+    parent: null,
+    appliesTo: ['team', 'client'],
+    route: '/messages',
+    unavailable: 'The Messages page is hidden. This switch only governs the client-replies row on the daily brief.',
+  },
   { key: 'files', label: 'Files', description: 'Client file browser (R2 uploads).', parent: null, appliesTo: ['client'], route: '/files' },
   { key: 'invoices', label: 'Invoices', description: 'Billing records.', parent: null, appliesTo: ['team', 'client'], route: '/invoices' },
   { key: 'services', label: 'Services', description: 'Client portal service catalogue.', parent: null, appliesTo: ['client'], route: '/services' },
@@ -98,6 +120,12 @@ export function featureAncestry(key: string): string[] {
     cur = BY_KEY.get(cur)?.parent ?? null
   }
   return chain
+}
+
+/** Why a feature's surface is unreachable, or undefined when it is live. The
+ *  permissions pickers show this beside the toggle; the resolver ignores it. */
+export function featureUnavailableReason(key: string): string | undefined {
+  return BY_KEY.get(key)?.unavailable
 }
 
 /** Top-level page nodes that map to a sidebar route, filtered by audience. */

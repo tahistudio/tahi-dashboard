@@ -4,6 +4,8 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { createNotification } from '@/lib/notifications'
+import { resolveTeamMember } from '@/lib/team-identity'
 
 /** Task templates carry their own six-value priority enum (none, low,
  *  medium, standard, high, urgent) while a task takes three. Mapping here is
@@ -27,6 +29,9 @@ export async function POST(req: NextRequest) {
     orgId?: string | null
     assigneeId?: string | null
     trackId?: string | null
+    /** The team member the caller is acting AS, when the login cannot say.
+     *  See the notify block at the bottom of this handler. */
+    actorTeamMemberId?: string | null
   }
 
   const { templateId } = body
@@ -109,6 +114,37 @@ export async function POST(req: NextRequest) {
         title: subtaskTitle.trim(),
         completed: false,
         createdAt: now,
+      })
+    }
+  }
+
+  // The third create door. POST /api/admin/tasks tells the assignee and PATCH
+  // /api/admin/tasks/[id] tells them, and this one, which the dashboard's
+  // template picker and the MCP create_task_from_template tool both reach,
+  // handed somebody work in silence.
+  //
+  // It writes assigneeType 'team_member' itself, so there is nothing to
+  // resolve. Never the caller: applying a template to yourself is not news.
+  //
+  // "The caller" is a Clerk login, and the worker MCP authenticates as the
+  // service user, which is nobody's login: resolveTeamMember answers null for
+  // it, so an MCP run that applied a template to the asker rang their own
+  // bell. `actorTeamMemberId` is the caller naming themselves, and is
+  // preferred over the lookup exactly as POST /api/admin/tasks does it, so the
+  // two doors cannot drift apart again.
+  if (body.assigneeId) {
+    const statedActor = typeof body.actorTeamMemberId === 'string' && body.actorTeamMemberId.trim()
+      ? body.actorTeamMemberId.trim()
+      : null
+    const actorId = statedActor ?? (await resolveTeamMember(drizzle, userId))?.id ?? null
+    if (actorId !== body.assigneeId) {
+      await createNotification(drizzle, {
+        recipient: { teamMemberId: body.assigneeId },
+        type: 'task_assigned',
+        title: `Task assigned to you: "${template.name}"`,
+        body: null,
+        entityType: 'task',
+        entityId: taskId,
       })
     }
   }

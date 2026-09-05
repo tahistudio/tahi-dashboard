@@ -221,6 +221,23 @@ describe('POST /api/admin/tasks', () => {
     expect(inserted[0].values.assigneeType).toBe('contact')
   })
 
+  it('lets a service caller name itself so it is not sent its own bell row', async () => {
+    // A worker MCP call authenticates as the service user, which by design is
+    // nobody's team member, so resolveTeamMember answers null and "create a
+    // task for me" wrote the asker a row. create_task forwards the acting team
+    // member; the self-check prefers it over the session.
+    callerTeamMemberId = null
+    await POST(post({ title: 'x', assigneeId: 'tm_staci', actorTeamMemberId: 'tm_staci' }) as never)
+    expect(notified).toHaveLength(0)
+  })
+
+  it('still tells somebody else when the service caller names itself', async () => {
+    callerTeamMemberId = null
+    await POST(post({ title: 'x', assigneeId: 'tm_staci', actorTeamMemberId: 'tm_me' }) as never)
+    expect(notified).toHaveLength(1)
+    expect(notified[0].recipient).toEqual({ teamMemberId: 'tm_staci' })
+  })
+
   it('takes the assignee kind from the caller when they state one', async () => {
     assigneeTypes = {}
     await POST(post({ title: 'x', assigneeId: 'tm_staci', assigneeType: 'team_member' }) as never)

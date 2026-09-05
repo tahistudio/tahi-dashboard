@@ -6,19 +6,28 @@ import { and, inArray, isNull, or } from 'drizzle-orm'
 import { isTaskPriority } from '@/lib/task-priorities'
 import { TASK_STATUSES } from '@/lib/status-config'
 import { resolveAccessScoping } from '@/lib/access-scoping'
-import { createNotification } from '@/lib/notifications'
+import { createNotification, createNotificationsForRecipient } from '@/lib/notifications'
 import { resolveTeamMember } from '@/lib/team-identity'
 
 /**
  * How many tasks a bulk assign will name one by one before it summarises.
  *
- * Every createNotification is three sequential D1 round trips (resolve the
- * recipient, read their in-app preference, insert), and the board's select-all
- * checkbox selects every FILTERED row rather than every visible one, so an
- * uncapped loop turned one click into hundreds of subrequests inside a single
- * Worker invocation. The bell also only shows the 20 newest rows and counts
- * unread from that page, so a hundred rows would bury everything else the
- * assignee had and still report 20.
+ * Two arguments hold this cap up, and only one of them is a comfort.
+ *
+ * The BELL argument is the one that would keep it even if the writes were
+ * free: the popover shows the 20 newest rows and counts unread from that page,
+ * so a hundred rows would bury everything else the assignee had and still
+ * report 20.
+ *
+ * The COST argument is smaller than it was but NOT gone, so do not lift this
+ * cap on the strength of the batching alone. The named rows go in through
+ * createNotificationsForRecipient, which resolves the recipient once and
+ * inserts every row in one call, but it still reads the in-app preference
+ * inside its per-payload loop, so N named tasks cost 1 resolve + N preference
+ * SELECTs + 1 insert. At five that is seven sequential D1 round trips; at two
+ * hundred it is the O(N) fan-out this cap exists to prevent. Hoist that read
+ * out of the loop in lib/notifications.ts first (memoise by event type), then
+ * the only question left is the bell one.
  *
  * Five is where a list stops being a list: up to five, each task gets its own
  * row and its own deep link, which is the useful shape. Above it, one row that
@@ -146,16 +155,19 @@ export async function PATCH(req: NextRequest) {
           entityId: null,
         })
       } else {
-        for (const task of moved) {
-          await createNotification(drizzle, {
-            recipient: { teamMemberId: newAssigneeId },
-            type: 'task_assigned',
+        // One row per task, each naming its own task and deep-linking to it,
+        // in one insert rather than one round trip per row.
+        await createNotificationsForRecipient(
+          drizzle,
+          { teamMemberId: newAssigneeId },
+          moved.map(task => ({
+            type: 'task_assigned' as const,
             title: `Task assigned to you: "${task.title ?? 'Untitled'}"`,
             body: null,
-            entityType: 'task',
+            entityType: 'task' as const,
             entityId: task.id,
-          })
-        }
+          })),
+        )
       }
     }
   }

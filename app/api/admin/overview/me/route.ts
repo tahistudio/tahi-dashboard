@@ -13,6 +13,11 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 const TASK_CLOSED = new Set(['done', 'completed', 'cancelled', 'archived'])
 // Request statuses that count as live work in front of the member.
 const REQUEST_OPEN = new Set(['submitted', 'in_review', 'in_progress', 'client_review'])
+// Newest messages read per request when settling "replies waiting". Only the
+// newest visible row per request decides the answer, so the read is bounded
+// rather than pulling the whole 60 day history into the Worker to discard it.
+// Matches ../replies-waiting/route.ts, which the tile has to agree with.
+const MESSAGE_BUDGET_PER_REQUEST = 20
 
 // Lookback for "replies waiting" - older inbound threads are stale.
 function since(days: number): string {
@@ -196,45 +201,26 @@ async function resolveTimer(
   }
 }
 
-// Count of threads (conversations + request threads) the member is on where the
-// last non-deleted message was authored by a client contact - i.e. awaiting the
-// member's reply. Mirrors the item builder in ../replies-waiting/route.ts; kept
-// count-only here to stay within this route's owned file.
+// Count of request threads the member is on where the last message the CLIENT
+// can see was authored by a client contact - i.e. awaiting the member's reply.
+// Mirrors the item builder in ../replies-waiting/route.ts; kept count-only here
+// to stay within this route's owned file.
+//
+// Mirrors it exactly, including the two rules that earn the claim. It matches
+// on request_id ALONE (a studio reply carries a conversation id, so filtering
+// those out left every answered thread counted as waiting), and it ignores
+// internal notes, because a studio-only note is not an answer the client ever
+// receives and must not settle the per-request "last message" race.
+//
+// Conversations are not read here at all, for the same reason the card stopped
+// reading them: every message on a request carries requests.id whether or not
+// it also carries a conversation id, so the block below already sees the whole
+// thread, and the conversation pass only ever added rows this tile then had to
+// de-duplicate against. The tile and the card must agree on the same page, so
+// the two changed together.
 async function countRepliesWaiting(drizzle: D1, memberId: string): Promise<number> {
   const cutoff = since(60)
   let count = 0
-
-  // Conversations the member participates in.
-  const convRows = await drizzle
-    .select({ conversationId: schema.conversationParticipants.conversationId })
-    .from(schema.conversationParticipants)
-    .where(and(
-      eq(schema.conversationParticipants.participantId, memberId),
-      eq(schema.conversationParticipants.participantType, 'team_member'),
-    ))
-  const convIds = [...new Set(convRows.map(c => c.conversationId))]
-  if (convIds.length > 0) {
-    const msgs = await drizzle
-      .select({
-        conversationId: schema.messages.conversationId,
-        authorType: schema.messages.authorType,
-        createdAt: schema.messages.createdAt,
-      })
-      .from(schema.messages)
-      .where(and(
-        inArray(schema.messages.conversationId, convIds),
-        isNull(schema.messages.deletedAt),
-        gte(schema.messages.createdAt, cutoff),
-      ))
-      .orderBy(desc(schema.messages.createdAt))
-    const seen = new Set<string>()
-    for (const m of msgs) {
-      const key = m.conversationId
-      if (!key || seen.has(key)) continue
-      seen.add(key)
-      if (m.authorType === 'contact') count++
-    }
-  }
 
   // Request threads the member owns or participates on.
   const reqIds = new Set<string>()
@@ -264,11 +250,12 @@ async function countRepliesWaiting(drizzle: D1, memberId: string): Promise<numbe
       .from(schema.messages)
       .where(and(
         inArray(schema.messages.requestId, reqIdList),
-        isNull(schema.messages.conversationId),
+        eq(schema.messages.isInternal, false),
         isNull(schema.messages.deletedAt),
         gte(schema.messages.createdAt, cutoff),
       ))
       .orderBy(desc(schema.messages.createdAt))
+      .limit(reqIdList.length * MESSAGE_BUDGET_PER_REQUEST)
     const seen = new Set<string>()
     for (const m of msgs) {
       const key = m.requestId

@@ -7,6 +7,7 @@ import { createNotification } from '@/lib/notifications'
 import { TASK_PRIORITIES } from '@/lib/task-priorities'
 import { TASK_STATUSES } from '@/lib/status-config'
 import { guardTask, loadTaskLinks, requestOrgId, resolveAssigneeType } from '@/lib/task-access'
+import { resolveTeamMember } from '@/lib/team-identity'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { isTaskLevel, type TaskLevel } from '@/lib/tasks-views'
 import { coerceTaskLinks, setTaskLevel } from '@/lib/task-consistency'
@@ -246,26 +247,38 @@ export async function PATCH(
     .set(updates)
     .where(eq(schema.tasks.id, id))
 
-  // Notify assignee when a task is assigned to them
-  if (body.assigneeId !== undefined && body.assigneeId) {
-    const [task] = await drizzle
-      .select({ title: schema.tasks.title })
-      .from(schema.tasks)
-      .where(eq(schema.tasks.id, id))
-      .limit(1)
+  // Notify the assignee when a task is handed to them. Two doors, one rule:
+  // POST /api/admin/tasks answers exactly the same way.
+  //
+  // Team members only, never a contact. Tasks are not a client surface (the
+  // portal has no task page, and lib/notification-links clientHref returns
+  // null for 'task'), so a contact addressed here would be handed a
+  // Tahi-internal task TITLE in their bell on a row that cannot be clicked.
+  // The task still holds the contact and still stores the kind; nobody
+  // outside the studio is told about it.
+  //
+  // And never the caller: taking a task on yourself is not news. `me` is read
+  // only when it can change the answer, and only for a team assignee.
+  if (body.assigneeId && updates.assigneeType !== 'contact') {
+    const me = await resolveTeamMember(drizzle, userId)
+    if (me?.id !== body.assigneeId) {
+      const [task] = await drizzle
+        .select({ title: schema.tasks.title })
+        .from(schema.tasks)
+        .where(eq(schema.tasks.id, id))
+        .limit(1)
 
-    // assigneeId is a teamMembers.id or contacts.id; the typed recipient
-    // resolves it to the Clerk user id the bell queries.
-    await createNotification(drizzle, {
-      recipient: updates.assigneeType === 'contact'
-        ? { contactId: body.assigneeId }
-        : { teamMemberId: body.assigneeId },
-      type: 'task_assigned',
-      title: `Task assigned to you: "${task?.title ?? 'Untitled'}"`,
-      body: null,
-      entityType: 'task',
-      entityId: id,
-    })
+      // assigneeId is a teamMembers.id; the typed recipient resolves it to the
+      // Clerk user id the bell queries.
+      await createNotification(drizzle, {
+        recipient: { teamMemberId: body.assigneeId },
+        type: 'task_assigned',
+        title: `Task assigned to you: "${task?.title ?? 'Untitled'}"`,
+        body: null,
+        entityType: 'task',
+        entityId: id,
+      })
+    }
   }
 
   return NextResponse.json({ success: true })

@@ -87,7 +87,10 @@ describe('portal routes enforce client feature_visibility', () => {
     vi.mocked(db).mockResolvedValue(makeDb([{ featureKey: 'tracks', effect: 'deny' }]) as never)
     const res = await portalTracks(req('/api/portal/tracks'))
     expect(res.status).toBe(403)
-    expect(await res.json()).toEqual({ error: 'Forbidden' })
+    // The code travels with every requirePortalFeature denial, on every portal
+    // route, so a client page can tell "switched off for your workspace" from
+    // "your seat cannot see this" without guessing.
+    expect(await res.json()).toEqual({ error: 'Forbidden', code: 'feature_disabled' })
   })
 
   it('403s a client org denied Services', async () => {

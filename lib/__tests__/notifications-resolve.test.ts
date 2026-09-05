@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   createNotification,
   createNotifications,
+  createNotificationsForRecipient,
   notifyTeamMember,
   resolveOwnerSetting,
   resolveParticipants,
@@ -251,5 +252,71 @@ describe('createNotifications with pre-resolved clerk recipients', () => {
     expect(result).toEqual({ delivered: 2, skipped: 0 })
     expect(inserted).toHaveLength(1)
     expect(inserted[0].rows.map((r) => r.userId)).toEqual(['user_a', 'user_b'])
+  })
+})
+
+describe('createNotificationsForRecipient', () => {
+  const rows = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      type: 'task_assigned' as const,
+      title: `Task assigned to you: "Task ${i}"`,
+      body: null,
+      entityType: 'task' as const,
+      entityId: `t${i}`,
+    }))
+
+  it('resolves the recipient once and inserts every row in one call', async () => {
+    const inserted: InsertCapture[] = []
+    const dbm = makeDrizzle(
+      new Map<unknown, Row[][]>([
+        [schema.teamMembers, [[{ id: 'tm-1', clerkUserId: 'user_tm_1' }]]],
+      ]),
+      inserted,
+    )
+
+    const result = await createNotificationsForRecipient(dbm, { teamMemberId: 'tm-1' }, rows(5))
+
+    expect(result).toEqual({ delivered: 5, skipped: 0 })
+    // One insert, five rows: the whole point. A loop of createNotification
+    // took three sequential D1 round trips per row.
+    expect(inserted).toHaveLength(1)
+    expect(inserted[0].table).toBe(schema.notifications)
+    expect(inserted[0].rows.map((r) => r.entityId)).toEqual(['t0', 't1', 't2', 't3', 't4'])
+    expect(inserted[0].rows.every((r) => r.userId === 'user_tm_1')).toBe(true)
+    expect(inserted[0].rows.every((r) => r.userType === 'team_member')).toBe(true)
+  })
+
+  it('keeps the title and the deep link of every row', async () => {
+    const inserted: InsertCapture[] = []
+    const dbm = makeDrizzle(
+      new Map<unknown, Row[][]>([
+        [schema.teamMembers, [[{ id: 'tm-1', clerkUserId: 'user_tm_1' }]]],
+      ]),
+      inserted,
+    )
+
+    await createNotificationsForRecipient(dbm, { teamMemberId: 'tm-1' }, rows(2))
+
+    expect(inserted[0].rows.map((r) => r.title)).toEqual([
+      'Task assigned to you: "Task 0"',
+      'Task assigned to you: "Task 1"',
+    ])
+  })
+
+  it('writes nothing for an empty batch, or for somebody with no linked login', async () => {
+    const inserted: InsertCapture[] = []
+    const empty = makeDrizzle(new Map(), inserted)
+    expect(await createNotificationsForRecipient(empty, { teamMemberId: 'tm-1' }, []))
+      .toEqual({ delivered: 0, skipped: 0 })
+
+    const unlinked = makeDrizzle(
+      new Map<unknown, Row[][]>([
+        [schema.teamMembers, [[{ id: 'tm-1', clerkUserId: null }]]],
+      ]),
+      inserted,
+    )
+    expect(await createNotificationsForRecipient(unlinked, { teamMemberId: 'tm-1' }, rows(3)))
+      .toEqual({ delivered: 0, skipped: 1 })
+    expect(inserted).toHaveLength(0)
   })
 })
