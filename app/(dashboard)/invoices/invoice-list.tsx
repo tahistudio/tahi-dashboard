@@ -1,16 +1,30 @@
 'use client'
 
 import type * as React from 'react'
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  Plus, FileText, RefreshCw, Download, X as XIcon, Lock,
+  Plus, FileText, RefreshCw, Download, X as XIcon, Lock, AlertTriangle,
 } from 'lucide-react'
 import { type DateRange } from '@/components/tahi/date-range-picker'
 import { apiPath } from '@/lib/api'
 import { ApiError } from '@/lib/swr-fetcher'
+// The client's rail, terms and currency decide what a new invoice opens on.
+import {
+  INVOICE_CHANNEL_SETTING_KEY,
+  invoiceChannelLabel,
+  resolveInvoiceChannel,
+} from '@/lib/invoice-channel'
+import { paymentTermsLabel } from '@/lib/invoice-billing'
+import {
+  DEFAULT_INVOICE_CURRENCY,
+  defaultCurrency,
+  defaultDestination,
+  defaultDueDate,
+  localCalendarDay,
+} from '@/lib/invoice-defaults'
 import {
   portalAdminLabel,
   portalMoneyDenial,
@@ -198,6 +212,23 @@ function InvoiceMobileCard({
 
 // ─── Create Invoice Slide-over ────────────────────────────────────────────────
 
+/**
+ * A row from GET /api/admin/clients, narrowed to what the create form reads.
+ * The three billing columns are nullable in the schema and free text in the
+ * currency's case, so they stay `string | null` here and are normalised by the
+ * lib/invoice-defaults helpers rather than trusted.
+ */
+interface ClientOption {
+  id: string
+  name: string
+  /** organisations.invoiceChannel. null = fall back to the studio default. */
+  invoiceChannel?: string | null
+  /** organisations.paymentTerms. null = no net terms, so due today. */
+  paymentTerms?: string | null
+  /** organisations.preferredCurrency. */
+  preferredCurrency?: string | null
+}
+
 function CreateInvoiceSlideOver({
   open,
   onClose,
@@ -216,11 +247,20 @@ function CreateInvoiceSlideOver({
   const [lineItems, setLineItems] = useState([{ description: '', quantity: '1', unitAmount: '' }])
 
   // Fetch the client list when the slide-over is open; SWR caches it globally
-  // so re-opening is instant and no spinner flash occurs.
-  const { data: clientsData } = useSWR<{ organisations?: Array<{ id: string; name: string }> }>(
+  // so re-opening is instant and no spinner flash occurs. The list route does a
+  // bare select over organisations, so the billing columns this form defaults
+  // from are already on the wire: no second per-client request.
+  const { data: clientsData } = useSWR<{ organisations?: ClientOption[] }>(
     open ? '/api/admin/clients' : null
   )
-  const orgOptions = clientsData?.organisations ?? []
+  const orgOptions = useMemo(() => clientsData?.organisations ?? [], [clientsData])
+
+  // The studio-wide rail, read once when the slide-over opens. A client with no
+  // channel of its own bills on this one, so it is half of the resolution.
+  const { data: settingsData, isLoading: settingsLoading } = useSWR<{
+    settings?: Record<string, string | null>
+  }>(open ? '/api/admin/settings' : null, { revalidateOnFocus: false })
+  const studioDefaultChannel = settingsData?.settings?.[INVOICE_CHANNEL_SETTING_KEY]
 
   // Check if the selected org has at least one contact with an email.
   // Stripe rejects customer creation without one. keepPreviousData:false so
@@ -234,11 +274,60 @@ function CreateInvoiceSlideOver({
     ? null
     : contactsData?.contacts?.some(c => !!c.email) ?? false
 
-  const [currency, setCurrency] = useState('NZD')
+  const [currency, setCurrency] = useState<string>(DEFAULT_INVOICE_CURRENCY)
   const [dueDate, setDueDate] = useState('')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  // ── Defaults from the client ───────────────────────────────────────────────
+  // Picking a client used to change nothing: the form stayed on Dashboard only,
+  // NZD and an empty due date whoever it was for. These three memos read the
+  // client row instead, and the effect below lands them on the form ONCE per
+  // pick, so the operator keeps every field afterwards.
+
+  const selectedOrg = useMemo(
+    () => orgOptions.find(o => o.id === orgId) ?? null,
+    [orgOptions, orgId],
+  )
+
+  /** The rail this client's invoices actually go out on. */
+  const effectiveChannel = useMemo(
+    () => resolveInvoiceChannel(selectedOrg?.invoiceChannel, studioDefaultChannel),
+    [selectedOrg, studioDefaultChannel],
+  )
+
+  /** What the note under the destination picker reports, for this client. */
+  const clientDefaults = useMemo(() => {
+    if (!selectedOrg) return null
+    return {
+      channelLabel: invoiceChannelLabel(effectiveChannel),
+      termsLabel: paymentTermsLabel(selectedOrg.paymentTerms),
+      currency: defaultCurrency(selectedOrg.preferredCurrency, DEFAULT_INVOICE_CURRENCY, SUPPORTED_CURRENCIES),
+    }
+  }, [selectedOrg, effectiveChannel])
+
+  // Guards the apply-once rule. Holding the org id (not a boolean) means
+  // switching client re-applies, while typing in the form never does.
+  const defaultsAppliedFor = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    if (!orgId) { defaultsAppliedFor.current = null; return }
+    if (!selectedOrg) return
+    // Wait for the studio default, or an unset client would flash onto Stripe
+    // and then be left there once the real answer arrived.
+    if (settingsLoading) return
+    if (defaultsAppliedFor.current === orgId) return
+    defaultsAppliedFor.current = orgId
+    setDestination(defaultDestination(effectiveChannel))
+    setCurrency(defaultCurrency(selectedOrg.preferredCurrency, DEFAULT_INVOICE_CURRENCY, SUPPORTED_CURRENCIES))
+    setDueDate(defaultDueDate(selectedOrg.paymentTerms, localCalendarDay(new Date())))
+  }, [open, orgId, selectedOrg, settingsLoading, effectiveChannel])
+
+  /** True when the operator has moved to the rail this client does NOT bill on. */
+  const destinationOverridesClient =
+    !!selectedOrg && destination !== 'manual' && destination !== effectiveChannel
 
   // Reset form when the slide-over closes
   useEffect(() => {
@@ -248,11 +337,12 @@ function CreateInvoiceSlideOver({
     setSelectedOrgName('')
     setDestination('manual')
     setLineItems([{ description: '', quantity: '1', unitAmount: '' }])
-    setCurrency('NZD')
+    setCurrency(DEFAULT_INVOICE_CURRENCY)
     setDueDate('')
     setNotes('')
     setSaving(false)
     setError('')
+    defaultsAppliedFor.current = null
   }, [open])
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
@@ -410,11 +500,52 @@ function CreateInvoiceSlideOver({
                   selected={destination === opt.value}
                   onClick={() => setDestination(opt.value)}
                   size="md"
+                  // Thumb-sized below md, unchanged from md up, and it carries
+                  // the app's focus ring: this picker is the one control on the
+                  // form that decides where real money goes.
+                  className="tahi-focus-ring min-h-11 md:min-h-0"
                 >
                   {opt.label}
                 </Badge>
               ))}
             </div>
+            {/* Where the defaults came from, and a nudge when the operator
+                leaves the client's own rail. Dashboard only never warns: it
+                pushes nowhere, so it contradicts nothing. */}
+            {clientDefaults && (
+              <div aria-live="polite" style={{ marginTop: '0.5rem' }}>
+                {destinationOverridesClient ? (
+                  // --badge-warning-* rather than --color-warning-bg /
+                  // --color-warning: globals.css only re-resolves the badge
+                  // pair for dark, so the colour pair above would have worn a
+                  // near-white tint on the dark slide-over.
+                  <p
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '0.375rem',
+                      margin: 0,
+                      padding: '0.375rem 0.5rem',
+                      borderRadius: 'var(--radius-sm)',
+                      background: 'var(--badge-warning-bg)',
+                      color: 'var(--badge-warning-text)',
+                      fontSize: '0.75rem',
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    <AlertTriangle size={13} aria-hidden="true" style={{ flexShrink: 0, marginTop: '0.0625rem' }} />
+                    <span>
+                      <strong data-private style={{ fontWeight: 600 }}>{selectedOrgName}</strong>
+                      {' '}usually bills through {clientDefaults.channelLabel}.
+                    </span>
+                  </p>
+                ) : (
+                  <p style={{ margin: 0, fontSize: '0.75rem', lineHeight: 1.4, color: 'var(--color-text-muted)' }}>
+                    Defaults from <span data-private>{selectedOrgName}</span>: {clientDefaults.channelLabel}, {clientDefaults.termsLabel}, {clientDefaults.currency}.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Client search */}
