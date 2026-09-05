@@ -6,7 +6,7 @@ import { eq, and, asc, inArray, isNull } from 'drizzle-orm'
 import { notifyMentionedPerson, notifyOrgContacts, notifyTeamMember } from '@/lib/notifications'
 import { parseMentions } from '@/lib/parse-mentions'
 import { requireAccessToOrg } from '@/lib/require-access'
-import { pickThreadConversationId } from '@/lib/request-thread'
+import { chunkThreadIds, pickThreadConversationId } from '@/lib/request-thread'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -64,21 +64,37 @@ export async function GET(req: NextRequest, { params }: Params) {
     ))
     .orderBy(asc(schema.messages.createdAt))
 
-  // Attached files (files.message_id in the message ids we just loaded).
-  // One query, then bucket per message_id.
+  // Attached files (files.message_id in the message ids we just loaded),
+  // bucketed per message_id.
+  //
+  // Sliced, because a thread is unbounded and D1 caps a statement at 100 bound
+  // parameters: one IN over every message in the thread threw at roughly the
+  // 99th and took the whole thread payload with it.
   const msgIds = msgs.map(m => m.id)
-  const fileRows = msgIds.length > 0 ? await drizzle
-    .select({
-      id: schema.files.id,
-      messageId: schema.files.messageId,
-      filename: schema.files.filename,
-      mimeType: schema.files.mimeType,
-      sizeBytes: schema.files.sizeBytes,
-      storageKey: schema.files.storageKey,
-    })
-    .from(schema.files)
-    .where(inArray(schema.files.messageId, msgIds)) : []
-  const filesByMessage = new Map<string, typeof fileRows>()
+  type MessageFileRow = {
+    id: string
+    messageId: string | null
+    filename: string
+    mimeType: string | null
+    sizeBytes: number | null
+    storageKey: string
+  }
+  const fileRows: MessageFileRow[] = []
+  for (const idSlice of chunkThreadIds(msgIds)) {
+    const rows = await drizzle
+      .select({
+        id: schema.files.id,
+        messageId: schema.files.messageId,
+        filename: schema.files.filename,
+        mimeType: schema.files.mimeType,
+        sizeBytes: schema.files.sizeBytes,
+        storageKey: schema.files.storageKey,
+      })
+      .from(schema.files)
+      .where(inArray(schema.files.messageId, idSlice))
+    fileRows.push(...rows)
+  }
+  const filesByMessage = new Map<string, MessageFileRow[]>()
   for (const f of fileRows) {
     if (!f.messageId) continue
     const arr = filesByMessage.get(f.messageId) ?? []

@@ -39,9 +39,10 @@ import { fetchSchedulePhaseOptions } from '@/lib/schedule-phases'
 import {
   buildRequestThreadConversationPayload,
   formatClientSeenBy,
+  latestClientReadAt,
   type ThreadReadReceipt,
 } from '@/lib/request-thread'
-import { NOTIFICATIONS_CHANGED_EVENT } from '@/components/tahi/notification-bell'
+import { NOTIFICATIONS_CHANGED_EVENT } from '@/lib/notification-events'
 import {
   CATEGORY_CONFIG,
   EDITABLE_STATUSES,
@@ -770,12 +771,31 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   // Read receipts (admin only). The studio's question is "did the client
   // actually open this", so the sentence only ever names contacts; the
   // helper drops the studio's own receipts before it says anything.
+  //
+  // Polled, because the global SWR config turns revalidateOnFocus off and this
+  // is the one number on the page that changes while nobody touches it: the
+  // client opening the request is exactly the event the studio is waiting for.
   const { data: readsData } = useSWR<{ items: ThreadReadReceipt[] }>(
     isAdmin ? `/api/admin/requests/${requestId}/reads` : null,
+    { refreshInterval: 60_000 },
   )
-  const seenBy = useMemo(
-    () => formatClientSeenBy(readsData?.items ?? [], new Date()),
+  const clientReadAt = useMemo(
+    () => latestClientReadAt(readsData?.items ?? []),
     [readsData],
+  )
+  // The sentence is relative ("about 2 hours ago"), so it needs its own clock:
+  // SWR hands back the SAME data reference when a refetch changes nothing, so
+  // polling alone would leave the phrasing frozen on a tab left open. One tick
+  // a minute, and only while there is a receipt to age.
+  const [receiptNow, setReceiptNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!clientReadAt) return
+    const t = setInterval(() => setReceiptNow(Date.now()), 60_000)
+    return () => clearInterval(t)
+  }, [clientReadAt])
+  const seenBy = useMemo(
+    () => formatClientSeenBy(readsData?.items ?? [], new Date(receiptNow)),
+    [readsData, receiptNow],
   )
 
   // Delivery-phase options for the spine selector. Conditional key skips the
@@ -821,7 +841,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   useEffect(() => {
     if (loading || !hasRequest || isImpersonatingClient) return
     if (bellClearedFor.current === requestId) return
+    // Claim the id before the call so a re-render mid-flight cannot fire a
+    // second PATCH, and release it again on anything but a success: a dropped
+    // connection on a mobile portal session used to leave the badge counting a
+    // request the reader had already dealt with, for the rest of the mount.
     bellClearedFor.current = requestId
+    const release = () => {
+      if (bellClearedFor.current === requestId) bellClearedFor.current = null
+    }
     fetch(apiPath('/api/notifications'), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -830,8 +857,9 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       .then(res => {
         // The bell owns its own state and only refetches on open, so tell it.
         if (res.ok) window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT))
+        else release()
       })
-      .catch(() => { /* non-fatal */ })
+      .catch(release)
   }, [loading, hasRequest, isImpersonatingClient, requestId])
 
   async function handleSendMessage(
@@ -2394,11 +2422,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
 
               {/* Did the client actually open this? The receipt is written by
                   the portal detail page, so an empty line here means nobody at
-                  the client has opened the request since read state shipped. */}
+                  the client has opened the request since read state shipped.
+                  The sentence is relative; the title carries the exact time so
+                  it stays recoverable however long the tab has been open. */}
               {isAdmin && seenBy && (
                 <span
                   className="inline-flex items-center gap-1 text-xs"
                   style={{ color: 'var(--color-text-subtle)' }}
+                  title={clientReadAt ? formatDateTime(clientReadAt) : undefined}
                 >
                   <Eye size={12} aria-hidden="true" />
                   <span data-private>{seenBy}</span>
@@ -4807,6 +4838,17 @@ function FileActions({ file, onDeleted, canDelete = true }: {
 function formatDate(iso: string) {
   try {
     return new Date(iso).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
+  } catch {
+    return iso
+  }
+}
+
+/** Date AND time, for the title behind a relative phrase that goes stale. */
+function formatDateTime(iso: string) {
+  try {
+    return new Date(iso).toLocaleString('en-NZ', {
+      day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit',
+    })
   } catch {
     return iso
   }

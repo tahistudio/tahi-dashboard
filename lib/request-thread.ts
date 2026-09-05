@@ -24,12 +24,49 @@
  * 3. "Seen by" is about the CLIENT. A studio read receipt is not news to the
  *    studio, so formatClientSeenBy filters to contact receipts before it says
  *    anything at all.
+ *
+ * 4. A thread is unbounded, so anything keyed off its message ids has to be
+ *    sliced before it reaches D1. chunkThreadIds is that slice.
  */
 
 import { formatDistance } from 'date-fns'
 
 export const REQUEST_THREAD_CONVERSATION_TYPE = 'request_thread'
 export const REQUEST_THREAD_CONVERSATION_VISIBILITY = 'external'
+
+// ── D1 parameter budget ──────────────────────────────────────────────────────
+
+/**
+ * How many ids go into one IN clause.
+ *
+ * D1 caps a statement at 100 bound parameters, and a request thread grows
+ * without limit: a retainer request collects messages for as long as the
+ * client keeps talking. Both thread GETs join the files stamped onto each
+ * message, which binds one parameter per visible message, so an unsliced IN
+ * threw somewhere around the 99th message and took the WHOLE detail payload
+ * with it (title, status, thread, participants), not just the attachments.
+ *
+ * 90 leaves room for the other predicates in the same statement. It matches
+ * the ID_CHUNK that lib/delivery-aggregate.ts, lib/blockers-server.ts,
+ * lib/request-participants.ts and app/api/admin/requests/bulk/route.ts each
+ * hold privately; one shared constant would be better and is left to a pass
+ * that owns all of them.
+ */
+export const THREAD_ID_CHUNK = 90
+
+/**
+ * Slice ids into groups small enough to bind in one D1 statement.
+ *
+ * Empty in, empty out, so a caller can loop over the result without a
+ * separate length guard around the query.
+ */
+export function chunkThreadIds(ids: readonly string[]): string[][] {
+  const out: string[][] = []
+  for (let i = 0; i < ids.length; i += THREAD_ID_CHUNK) {
+    out.push(ids.slice(i, i + THREAD_ID_CHUNK))
+  }
+  return out
+}
 
 // ── One conversation per request ─────────────────────────────────────────────
 
@@ -52,6 +89,23 @@ export interface ThreadConversationRow {
  * Rows minted before the hydration fix therefore collapse on their own: every
  * new message attaches to the row this function picks, and the strays are left
  * inert for a reviewed tidy rather than deleted underneath live data.
+ *
+ * Two notes ride on that ordering, both for the tidy rather than for live
+ * code:
+ *
+ *  - the fallback to a non-external row exists only because the old create
+ *    call could mint one. Running
+ *      UPDATE conversations SET visibility = 'external'
+ *        WHERE type = 'request_thread' AND visibility <> 'external';
+ *    once (idempotent, touches no message rows) makes that branch unreachable
+ *    in live data and restores rule 2 as an invariant rather than a promise
+ *    about rows created from here on.
+ *
+ *  - when the tidy collapses duplicates it should repoint
+ *    messages.conversation_id at the row it keeps rather than only deleting
+ *    the strays, and prefer the row the existing messages already reference
+ *    over the visibility rank, so one request's history cannot end up split
+ *    across two ids the day the conversations surface ships.
  */
 export function pickThreadConversationId(rows: ThreadConversationRow[]): string | null {
   const candidates = rows.filter(r => !!r.id && r.type === REQUEST_THREAD_CONVERSATION_TYPE)
@@ -77,13 +131,25 @@ export function pickThreadConversationId(rows: ThreadConversationRow[]): string 
   return sorted[0].id
 }
 
+/** One seed participant, in the shape POST /api/admin/conversations reads. */
+export interface ThreadParticipantSeed {
+  id: string
+  type: 'team_member' | 'contact'
+}
+
 export interface RequestThreadConversationPayload {
   type: typeof REQUEST_THREAD_CONVERSATION_TYPE
   name: string
   orgId: string
   requestId: string
   visibility: typeof REQUEST_THREAD_CONVERSATION_VISIBILITY
-  participantIds: string[]
+  /**
+   * Always empty today: the thread reads by requestId, so nothing depends on
+   * conversation_participants yet. Typed as the route's own shape rather than
+   * as bare ids because this helper is now the documented body for that POST,
+   * and the route builds each row from { id, type }.
+   */
+  participantIds: ThreadParticipantSeed[]
 }
 
 /** The create body for a request's thread conversation. Visibility is fixed. */
@@ -113,6 +179,31 @@ export interface ThreadReadReceipt {
   /** Resolved display name, null when the row has no matching person. */
   name: string | null
   lastReadAt: string
+}
+
+/**
+ * The most recent CLIENT receipt, as the ISO string it was stored with, or
+ * null when nobody at the client has opened the request.
+ *
+ * formatClientSeenBy phrases the same fact relatively, and a relative phrase
+ * goes stale on a tab somebody leaves open all afternoon. This is the absolute
+ * timestamp behind that sentence: the header hangs it off a title so the exact
+ * time is always recoverable, and the page uses it to decide whether the
+ * sentence needs a clock at all.
+ */
+export function latestClientReadAt(reads: ThreadReadReceipt[]): string | null {
+  let bestTime = Number.NEGATIVE_INFINITY
+  let best: string | null = null
+  for (const r of reads) {
+    if (r.userType !== 'contact') continue
+    const t = new Date(r.lastReadAt).getTime()
+    if (Number.isNaN(t)) continue
+    if (t > bestTime) {
+      bestTime = t
+      best = r.lastReadAt
+    }
+  }
+  return best
 }
 
 /**

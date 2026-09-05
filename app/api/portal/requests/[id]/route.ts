@@ -6,6 +6,7 @@ import { schema } from '@/db/d1'
 import { eq, and, asc, inArray, isNull } from 'drizzle-orm'
 import { notifyTeamMember } from '@/lib/notifications'
 import { dispatchDomainEvent } from '@/lib/events'
+import { chunkThreadIds } from '@/lib/request-thread'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -124,24 +125,43 @@ export async function GET(req: NextRequest, { params }: Params) {
   // sentence that explains it instead of only in the Files panel (the admin
   // thread has always shown both). Keyed off the message ids resolved above,
   // which are already filtered to non-internal, non-deleted rows, so a file
-  // stamped onto an internal note can never be reached through here.
+  // stamped onto an internal note is unreachable through THIS endpoint. The
+  // Files panel beside the thread (app/api/portal/requests/[id]/files) still
+  // lists every file on the request with no message filter; closing that is
+  // the next slice and is not claimed here.
+  //
+  // Sliced, because a thread is unbounded and D1 caps a statement at 100 bound
+  // parameters: one IN over every visible message threw at roughly the 99th
+  // and took the whole detail payload down with it.
   const msgIds = msgRows.map(m => m.id)
-  const fileRows = msgIds.length > 0 ? await drizzle
-    .select({
-      id: schema.files.id,
-      messageId: schema.files.messageId,
-      filename: schema.files.filename,
-      storageKey: schema.files.storageKey,
-      mimeType: schema.files.mimeType,
-      sizeBytes: schema.files.sizeBytes,
-    })
-    .from(schema.files)
-    .where(and(
-      inArray(schema.files.messageId, msgIds),
-      // Belt and braces on top of the message scoping: never hand over a row
-      // that belongs to another org.
-      eq(schema.files.orgId, orgId),
-    )) : []
+  type MessageFileRow = {
+    id: string
+    messageId: string | null
+    filename: string
+    storageKey: string
+    mimeType: string | null
+    sizeBytes: number | null
+  }
+  const fileRows: MessageFileRow[] = []
+  for (const idSlice of chunkThreadIds(msgIds)) {
+    const rows = await drizzle
+      .select({
+        id: schema.files.id,
+        messageId: schema.files.messageId,
+        filename: schema.files.filename,
+        storageKey: schema.files.storageKey,
+        mimeType: schema.files.mimeType,
+        sizeBytes: schema.files.sizeBytes,
+      })
+      .from(schema.files)
+      .where(and(
+        inArray(schema.files.messageId, idSlice),
+        // Belt and braces on top of the message scoping: never hand over a row
+        // that belongs to another org.
+        eq(schema.files.orgId, orgId),
+      ))
+    fileRows.push(...rows)
+  }
 
   const filesByMessage = new Map<string, Array<{
     id: string

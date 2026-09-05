@@ -10,6 +10,7 @@ import {
   type NotificationAudience,
   type NotificationEntityType,
 } from '@/lib/notification-links'
+import { NOTIFICATIONS_CHANGED_EVENT } from '@/lib/notification-events'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,14 +26,6 @@ interface Notification {
   read: boolean
   createdAt: string
 }
-
-/**
- * Fired by any surface that has just marked notifications read behind the
- * bell's back (opening a request clears that request's rows). The bell only
- * refetches on open, on reconnect and on a pushed row, so without this the
- * badge kept counting rows the user had already dealt with.
- */
-export const NOTIFICATIONS_CHANGED_EVENT = 'tahi:notifications-changed'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -14,8 +14,11 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildRequestThreadConversationPayload,
+  chunkThreadIds,
   formatClientSeenBy,
+  latestClientReadAt,
   pickThreadConversationId,
+  THREAD_ID_CHUNK,
   type ThreadConversationRow,
   type ThreadReadReceipt,
 } from '@/lib/request-thread'
@@ -94,11 +97,74 @@ describe('buildRequestThreadConversationPayload', () => {
     expect(payload.participantIds).toEqual([])
   })
 
+  it('carries participants in the shape POST /api/admin/conversations reads', () => {
+    // The route turns participantIds into conversation_participants rows from
+    // { id, type }, not from bare ids, so the helper's type has to agree with
+    // it or the next caller that actually seeds a thread builds the wrong body
+    // and the compiler agrees with them.
+    const payload = buildRequestThreadConversationPayload({ requestId: 'r1', orgId: 'o', title: 'x' })
+    const seeded: typeof payload.participantIds = [{ id: 'tm1', type: 'team_member' }]
+    expect(seeded[0].type).toBe('team_member')
+    expect(payload.participantIds).toEqual([])
+  })
+
   it('falls back to a generic name when the request has no usable title', () => {
     expect(buildRequestThreadConversationPayload({ requestId: 'r1', orgId: 'o', title: '   ' }).name)
       .toBe('Request thread')
     expect(buildRequestThreadConversationPayload({ requestId: 'r1', orgId: 'o', title: null }).name)
       .toBe('Request thread')
+  })
+})
+
+describe('chunkThreadIds', () => {
+  it('stays inside D1 bound-parameter budget', () => {
+    expect(THREAD_ID_CHUNK).toBeLessThan(100)
+  })
+
+  it('is empty for no ids, so a caller can loop without a length guard', () => {
+    expect(chunkThreadIds([])).toEqual([])
+  })
+
+  it('keeps a short thread in one statement', () => {
+    const ids = Array.from({ length: 10 }, (_, i) => `m${i}`)
+    expect(chunkThreadIds(ids)).toEqual([ids])
+  })
+
+  it('slices a long thread and loses nothing', () => {
+    const ids = Array.from({ length: 150 }, (_, i) => `m${i}`)
+    const chunks = chunkThreadIds(ids)
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(chunks.every(c => c.length <= THREAD_ID_CHUNK)).toBe(true)
+    expect(chunks.flat()).toEqual(ids)
+  })
+
+  it('does not emit a trailing empty chunk on an exact multiple', () => {
+    const ids = Array.from({ length: THREAD_ID_CHUNK * 2 }, (_, i) => `m${i}`)
+    expect(chunkThreadIds(ids)).toHaveLength(2)
+  })
+})
+
+describe('latestClientReadAt', () => {
+  it('is null when only the studio has read it', () => {
+    expect(latestClientReadAt([
+      { userId: 'tm1', userType: 'team_member', name: 'Liam', lastReadAt: '2026-09-05T10:00:00.000Z' },
+    ])).toBeNull()
+  })
+
+  it('returns the most recent contact receipt, whatever the row order', () => {
+    const reads: ThreadReadReceipt[] = [
+      { userId: 'u1', userType: 'contact', name: 'Sam', lastReadAt: '2026-09-04T12:00:00.000Z' },
+      { userId: 'u2', userType: 'contact', name: 'Jo', lastReadAt: '2026-09-05T10:00:00.000Z' },
+      { userId: 'tm1', userType: 'team_member', name: 'Liam', lastReadAt: '2026-09-05T11:00:00.000Z' },
+    ]
+    expect(latestClientReadAt(reads)).toBe('2026-09-05T10:00:00.000Z')
+    expect(latestClientReadAt([...reads].reverse())).toBe('2026-09-05T10:00:00.000Z')
+  })
+
+  it('skips a receipt whose timestamp cannot be parsed', () => {
+    expect(latestClientReadAt([
+      { userId: 'u1', userType: 'contact', name: 'Sam', lastReadAt: 'not-a-date' },
+    ])).toBeNull()
   })
 })
 
