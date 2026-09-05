@@ -150,6 +150,16 @@ Decisions only Liam can make: ANSWERED.
 - [x] PP.4 - [FE/BE] Notifications page, Account and Offline ported (branch port/portal-account): /notifications for both audiences (All last 30 days by day, Past, kind filters, mark all read scoped to the window, honest deep links via lib/notification-links.ts), GET/PATCH /api/notifications paginated with kind and window filters, bell links to the page, nav entry; the offline page standalone with a real probe instead of navigator.onLine. Follow-ups: welcome page, sign-in card, list_notifications MCP tool.
 - [ ] PP.5 - [FE] Client-walk fixes (branch fix/client-walk-fix + c14169bc) REVERTED 2026-09-06 06:35 NZST: after deploy every signed-in page threw a server-side exception (digest 1095162490) and unauthenticated pages answered 404, although type-check, lint, 2701 tests and the build were green. Rolled back to the portal-port tree (e3b3a4a2 code) within 12 minutes; a read-only diagnosis is in docs/superpowers/audits/2026-09-06-prod-500-diagnosis.json. Re-land after the fix is verified on the QA server AND a post-deploy health probe passes. Content: getViewAudience() on every studio page so Client view resolves the audience server-side, client money pinned to the client's currency with no switcher, branded not-found page, TRIAGE badge hidden from clients, dark-mode rail contrast, banner copy.
 
+## Morning review feedback (Liam, 2026-09-06 08:30)
+
+- [ ] MR.1 - [Design] Wire sales-pipeline, sales-artifacts and ops modules into the app shell (Sales and Operations groups) and archive the *-preview.html scratch files; Liam wants every module reachable in the shell like requests and tasks.
+- [ ] MR.2 - [Design] Account page: separate sections with the segmented slider (the Level control pattern) and reuse the settings page look.
+- [ ] MR.3 - [Design] Notifications page: filters move into a side rail like the rest of the site; place the Email preferences action better.
+- [ ] MR.4 - [FE] Clients list: the Plan and tracks cell repeats itself (No plan / No plan / No plan); one plan chip, one tracks line.
+- [ ] MR.5 - [FE] New client panel: Industry and Plan side by side; the primary contact takes first name and last name (not one full name) so emails personalise properly; API keeps working.
+- [ ] MR.6 - [Design then FE] Studio invoices list and detail redesigned in Claude Design ('meh' today), then ported.
+- [ ] MR.7 - [Design then FE] Services showcase redesigned to be brand-forward like onboarding, home and sign-in: the client's plan, how they are using it, what else Tahi does; then ported over the current showcase.
+
 ## Client library and catalogue (Liam, 2026-09-06)
 
 - [ ] CL.1 - [Design first, then FE/BE] **Files as a small Google Drive with threads.** Folders per client (Deliverables, Brand, References, Uploads), drag-and-drop uploads from the client, a comment thread per file (reuse the request thread composer and the messages table with a file target), versions optional. Liam: "i'd like to give them a small version of like google drive but with threads so they can upload docs for us there." Design in Claude Design alongside the Clients pages; the current /files page (list, upload, download) stays until then.
