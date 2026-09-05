@@ -8,6 +8,7 @@ import {
   SegmentedControl,
   nextSegmentIndex,
   pillStyle,
+  segmentTabStop,
   type SegmentedControlOption,
 } from '@/components/tahi/segmented-control'
 import { SlideSeg } from '@/components/tahi/settings/primitives'
@@ -87,6 +88,18 @@ describe('SegmentedControl markup', () => {
     expect(workload).toContain('tabindex="-1"')
     expect(workload).toContain('title="Tahi only"')
     expect(workload).not.toContain(' disabled')
+  })
+
+  it('keeps the tab stop on the active option even when that option is disabled', () => {
+    const html = renderToStaticMarkup(
+      <SegmentedControl role="radiogroup" ariaLabel="View" value="workload" onChange={noop} options={OPTIONS} />,
+    )
+    const tabs = buttonTags(html)
+    expect(tabs[2]).toContain('aria-checked="true"')
+    expect(tabs[2]).toContain('aria-disabled="true"')
+    expect(tabs[2]).toContain('tabindex="0"')
+    expect(tabs[0]).toContain('tabindex="-1"')
+    expect(tabs[1]).toContain('tabindex="-1"')
   })
 
   it('hides the pill until the first measurement so hydration never jumps', () => {
@@ -182,6 +195,30 @@ describe('pillStyle', () => {
   })
 })
 
+describe('segmentTabStop', () => {
+  it('parks the tab stop on the active option', () => {
+    expect(segmentTabStop(OPTIONS, 'list')).toBe(0)
+    expect(segmentTabStop(OPTIONS, 'kanban')).toBe(1)
+  })
+
+  it('keeps it there when the active option is disabled', () => {
+    expect(segmentTabStop(OPTIONS, 'workload')).toBe(2)
+    const allOff = OPTIONS.map(o => ({ ...o, disabled: true }))
+    expect(segmentTabStop(allOff, 'kanban')).toBe(1)
+  })
+
+  it('falls back to the first enabled option when no option holds the value', () => {
+    const orphan = 'timeline' as View
+    expect(segmentTabStop(OPTIONS, orphan)).toBe(0)
+    expect(segmentTabStop(OPTIONS.map((o, i) => ({ ...o, disabled: i === 0 })), orphan)).toBe(1)
+  })
+
+  it('reports no tab stop when nothing matches and nothing is enabled', () => {
+    const allOff = OPTIONS.map(o => ({ ...o, disabled: true }))
+    expect(segmentTabStop(allOff, 'timeline' as View)).toBe(-1)
+  })
+})
+
 describe('nextSegmentIndex', () => {
   it('moves right and left between enabled options', () => {
     expect(nextSegmentIndex(OPTIONS, 0, 'ArrowRight')).toBe(1)
@@ -228,6 +265,16 @@ describe('stylesheet contract', () => {
     expect(rule).toMatch(/width 360ms var\(--ease-out\)/)
     const base = css.match(/\n\.tahi-seg-pill\s*\{([^}]*)\}/)?.[1] ?? ''
     expect(base).not.toMatch(/transition/)
+  })
+
+  it('keeps a disabled active option as legible as an enabled one', () => {
+    const rule = css.match(/\.tahi-seg-b\[data-active="true"\]\[aria-disabled="true"\]\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(rule).toMatch(/color:\s*var\(--color-text\)/)
+    expect(rule).toMatch(/opacity:\s*1/)
+    // It ties with the :hover rule (one class plus two simple selectors on
+    // both sides), so it only wins by coming after it.
+    expect(css.indexOf('.tahi-seg-b[data-active="true"][aria-disabled="true"]'))
+      .toBeGreaterThan(css.indexOf('.tahi-seg-b[aria-disabled="true"]:hover'))
   })
 
   it('lets fill columns shrink below a long label instead of widening the track', () => {
