@@ -12,6 +12,7 @@ import type { BoardColumn, BoardItem, BoardPriority } from '@/components/tahi/ka
 import type { TaskPerson } from '@/components/tahi/tasks/task-types'
 import { TASK_CLOSED_STATUSES, TASK_STATUSES, TASK_STATUS_CONFIG } from '@/lib/status-config'
 import { isTaskOverdue, type TaskRow } from '@/lib/tasks-views'
+import { blockedWarningLabel } from '@/lib/blockers'
 
 /** The four columns, straight off the status vocabulary so they cannot
  *  drift from the chip, the filter or the bulk menu. */
@@ -73,9 +74,11 @@ export function toTaskBoardItems(
       // wanted for the tooltip, so it is hidden rather than dropped.
       hideDueChip: done || undefined,
       isOverdue: isTaskOverdue(row, ctx.now),
-      warning: blockers > 0
-        ? `Blocked by ${blockers} ${blockers === 1 ? 'task' : 'tasks'}`
-        : undefined,
+      // "items", not "tasks": since the blocker model went polymorphic a
+      // blocker can be a request, and the count that arrives here cannot tell
+      // you which. The requests board spends the same single warning slot on
+      // the same idea through the same helper, so both boards say one thing.
+      warning: blockedWarningLabel(blockers, false),
       subtasks: total > 0 ? { done: row.subtaskDone ?? 0, total } : undefined,
       // BoardPerson.role is a free-form human label the tooltip prints, so
       // it is capitalised here rather than being a slug.

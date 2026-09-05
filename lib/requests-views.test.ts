@@ -21,6 +21,7 @@ import {
   filterKeysFor,
   isRequestsFilters,
   isRequestsSort,
+  isRequestBlocked,
   isRequestsSnapshot,
   snapshotsEqual,
   sortKeyLabel,
@@ -103,13 +104,13 @@ describe('normaliseViewKey', () => {
 describe('savedViewsFor', () => {
   it('gives an admin the team set without "Assigned to me"', () => {
     expect(savedViewsFor('admin').map(v => v.key)).toEqual([
-      'active', 'triage', 'overdue', 'week', 'awaiting', 'delivered',
+      'active', 'triage', 'overdue', 'blocked', 'week', 'awaiting', 'delivered',
     ])
   })
 
   it('adds "Assigned to me" for a non-admin team member', () => {
     expect(savedViewsFor('team_member').map(v => v.key)).toEqual([
-      'active', 'triage', 'mine', 'overdue', 'week', 'awaiting', 'delivered',
+      'active', 'triage', 'mine', 'overdue', 'blocked', 'week', 'awaiting', 'delivered',
     ])
   })
 
@@ -118,6 +119,12 @@ describe('savedViewsFor', () => {
     expect(savedViewsFor('client').map(v => v.label)).toEqual([
       'In progress', 'Waiting on you', 'Delivered',
     ])
+  })
+
+  it('never offers a client the Blocked view, because a client never sees a blocker', () => {
+    expect(savedViewsFor('client').map(v => v.key)).not.toContain('blocked')
+    expect(CLIENT_SAVED_VIEWS.map(v => v.key)).not.toContain('blocked')
+    expect(TEAM_SAVED_VIEWS.map(v => v.key)).toContain('blocked')
   })
 
   it('shares the keys the team and client sets have in common', () => {
@@ -176,6 +183,22 @@ describe('team saved view predicates', () => {
     expect(test('week', req({ dueDate: day(3), status: 'delivered' }))).toBe(false)
   })
 
+  it('blocked is the open blocker count and nothing else', () => {
+    expect(test('blocked', req({ blockedByCount: 2 }))).toBe(true)
+    expect(test('blocked', req({ blockedByCount: 1 }))).toBe(true)
+    expect(test('blocked', req({ blockedByCount: 0 }))).toBe(false)
+    // Absent on a row an older caller fetched. Not blocked, not a crash.
+    expect(test('blocked', req())).toBe(false)
+    // on_hold is a human decision, not a derived one, so it is not blocked.
+    expect(test('blocked', req({ status: 'on_hold' }))).toBe(false)
+  })
+
+  it('a client can never select the blocked view, even by carrying the key', () => {
+    // Decision 13: the key is not in the client set, so matchesSavedView
+    // treats it as no narrowing rather than leaking a filtered list.
+    expect(matchesSavedView(req({ blockedByCount: 0 }), 'blocked', 'client', { now: NOW })).toBe(true)
+  })
+
   it('awaiting client is client_review, delivered is delivered', () => {
     expect(test('awaiting', req({ status: 'client_review' }))).toBe(true)
     expect(test('awaiting', req({ status: 'in_progress' }))).toBe(false)
@@ -191,6 +214,26 @@ describe('team saved view predicates', () => {
   it('ignores a saved view the audience does not have', () => {
     // "mine" is not in the admin set, so an admin carrying it sees everything.
     expect(matchesSavedView(req({ assigneeId: 'tm-9' }), 'mine', 'admin', ctx)).toBe(true)
+  })
+})
+
+// ── Blocked predicate ────────────────────────────────────────────────────────
+
+describe('isRequestBlocked', () => {
+  it('is the count, because a request has no blocked status of its own', () => {
+    expect(isRequestBlocked(req({ blockedByCount: 1 }))).toBe(true)
+    expect(isRequestBlocked(req({ blockedByCount: 4 }))).toBe(true)
+    expect(isRequestBlocked(req({ blockedByCount: 0 }))).toBe(false)
+  })
+
+  it('reads an absent count as not blocked', () => {
+    expect(isRequestBlocked(req())).toBe(false)
+    expect(isRequestBlocked(req({ blockedByCount: undefined }))).toBe(false)
+  })
+
+  it('does not confuse on_hold with blocked', () => {
+    expect(isRequestBlocked(req({ status: 'on_hold' }))).toBe(false)
+    expect(isRequestBlocked(req({ status: 'on_hold', blockedByCount: 2 }))).toBe(true)
   })
 })
 

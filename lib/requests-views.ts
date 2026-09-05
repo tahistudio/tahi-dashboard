@@ -34,6 +34,10 @@ export interface RequestRow {
   orgName?: string | null
   assigneeId?: string | null
   requestNumber?: number | null
+  /** Open blockers, counted by the list route. Absent on rows fetched by an
+   *  older caller, which reads as not blocked. Never present on a portal
+   *  payload: a client does not see a blocker, not even the count. */
+  blockedByCount?: number
 }
 
 /** Who is looking. `admin` is the Tahi org, `team_member` is a scoped
@@ -95,6 +99,15 @@ export function isDueWithin(row: RequestRow, days: number, now: Date): boolean {
   return row.dueDate >= dayKey(now) && row.dueDate <= shiftedDayKey(now, days)
 }
 
+// ── Blocked ──────────────────────────────────────────────────────────────────
+
+/** Blocked in the sense the rail reads it. A request has no `blocked` status
+ *  of its own (`on_hold` is a human decision, not a derived one), so unlike
+ *  the tasks predicate this is only ever the count. */
+export function isRequestBlocked(row: RequestRow): boolean {
+  return (row.blockedByCount ?? 0) > 0
+}
+
 // ── Saved views ──────────────────────────────────────────────────────────────
 
 export interface SavedViewContext {
@@ -119,6 +132,7 @@ export const TEAM_SAVED_VIEWS: readonly RequestsSavedView[] = [
   { key: 'triage',    label: 'Triage',          test: r => r.status === 'submitted' },
   { key: 'mine',      label: 'Assigned to me',  test: (r, c) => !!c.assigneeId && r.assigneeId === c.assigneeId },
   { key: 'overdue',   label: 'Overdue',         test: (r, c) => isOverdue(r, c.now ?? new Date()) },
+  { key: 'blocked',   label: 'Blocked',         test: r => isRequestBlocked(r) },
   { key: 'week',      label: 'Due this week',   test: (r, c) => isDueWithin(r, 7, c.now ?? new Date()) },
   { key: 'awaiting',  label: 'Awaiting client', test: r => r.status === 'client_review' },
   { key: 'delivered', label: 'Delivered',       test: r => r.status === 'delivered' },

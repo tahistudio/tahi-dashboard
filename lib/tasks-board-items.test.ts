@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { TASK_BOARD_COLUMNS, toTaskBoardItems, toBoardPriority } from './tasks-board-items'
 import { isTaskOverdue, type TaskRow } from './tasks-views'
+import { blockedWarningLabel } from './blockers'
 
 const NOW = new Date(2026, 8, 5)
 
@@ -108,12 +109,27 @@ describe('toTaskBoardItems', () => {
 
   it('warns when the card is blocked by something', () => {
     const [item] = toTaskBoardItems([row({ blockedByCount: 2 })], ctx)
-    expect(item.warning).toBe('Blocked by 2 tasks')
+    expect(item.warning).toBe('Blocked by 2 items')
   })
 
-  it('says task in the singular when one thing blocks the card', () => {
+  it('says item in the singular when one thing blocks the card', () => {
     const [item] = toTaskBoardItems([row({ blockedByCount: 1 })], ctx)
-    expect(item.warning).toBe('Blocked by 1 task')
+    expect(item.warning).toBe('Blocked by 1 item')
+  })
+
+  it('says items, not tasks, because a blocker can be a request', () => {
+    // The count is type-blind by the time it reaches a card: the two blockers
+    // behind this 2 may be one task and one request. Saying "2 tasks" would
+    // be a claim the number cannot support, and it would disagree with the
+    // requests board, which spends the same warning slot on the same idea.
+    const [item] = toTaskBoardItems([row({ blockedByCount: 2 })], ctx)
+    expect(item.warning).not.toContain('task')
+    expect(item.warning).toBe(blockedWarningLabel(2, false))
+  })
+
+  it('leaves the warning empty when nothing is holding the card up', () => {
+    expect(toTaskBoardItems([row({ blockedByCount: 0 })], ctx)[0].warning).toBeUndefined()
+    expect(toTaskBoardItems([row()], ctx)[0].warning).toBeUndefined()
   })
 
   it('names the assignee', () => {
