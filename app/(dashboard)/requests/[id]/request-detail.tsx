@@ -2571,7 +2571,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             they still escape this scroll container. */}
         <div className="flex flex-col gap-4 md:self-start md:sticky md:top-4 lg:top-6 md:max-h-[calc(100vh_-_6rem)] lg:max-h-[calc(100vh_-_7rem)] md:overflow-y-auto md:overscroll-contain">
           {/* Time (admin only): live timer + manual log + recent entries */}
-          {isAdmin && <TimeCard requestId={requestId} />}
+          {isAdmin && <TimeCard target={{ kind: 'request', id: requestId }} />}
 
           {/* Calls: kickoff, scope review, mid-build check-ins. The ported
               rail puts Actions directly under Time, so a phone-width column
