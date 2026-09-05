@@ -1,4 +1,5 @@
-import { getViewAudience } from '@/lib/view-audience'
+import { cookies } from 'next/headers'
+import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { NotificationsContent } from '@/components/tahi/notifications/notifications-content'
 import './notifications.css'
@@ -21,9 +22,10 @@ export const metadata = { title: 'Notifications - Tahi Dashboard' }
  * from a preview would be a surprise.
  */
 export default async function NotificationsPage() {
-  const { userId, isAdmin, isPreviewingClient } = await getViewAudience()
+  const { userId, orgId } = await getServerAuth()
   if (!userId) redirect('/sign-in')
-  const previewing = isPreviewingClient
+  const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
+  const previewing = isAdmin && Boolean((await cookies()).get('tahi-impersonate-org')?.value)
   return (
     <NotificationsContent
       audience={isAdmin ? 'team' : 'client'}
