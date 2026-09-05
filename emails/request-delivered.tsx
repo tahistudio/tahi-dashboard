@@ -1,6 +1,11 @@
 /**
- * <RequestDeliveredEmail> — sent to the client when the team marks a
- * request delivered. Friendly tone, prominent "view + review" CTA.
+ * <RequestDeliveredEmail>: sent to the client when the team marks a request
+ * delivered. Friendly tone, prominent "view + review" CTA.
+ *
+ * recipientName and clientName are deliberately separate. The greeting is the
+ * person reading it; the "Client" row is the company the work belongs to.
+ * Feeding one value to both rendered "Client: Jo" under a company label, or
+ * "Client: there" when the contact row had no usable name.
  */
 import { Body, Head, Html, Preview } from '@react-email/components'
 import {
@@ -21,21 +26,22 @@ import {
 
 interface RequestDeliveredEmailProps {
   requestTitle: string
-  clientName: string
+  /** The person being greeted, first name already resolved. */
+  recipientName: string
+  /** The client company. Omitted when the caller does not know it. */
+  clientName?: string | null
   deliveredAt: string
-  dashboardUrl: string
-  requestId: string
+  /** Absolute URL for the request, resolved for the client's route map. */
+  requestUrl: string
 }
 
 export function RequestDeliveredEmail({
   requestTitle,
+  recipientName,
   clientName,
   deliveredAt,
-  dashboardUrl,
-  requestId,
+  requestUrl,
 }: RequestDeliveredEmailProps) {
-  const requestUrl = `${dashboardUrl}/requests/${requestId}`
-
   return (
     <Html>
       <Head />
@@ -52,13 +58,13 @@ export function RequestDeliveredEmail({
             </EmailHeading>
 
             <EmailParagraph>
-              Hi {clientName.split(' ')[0]}, the team has wrapped up your request and the
+              Hi {recipientName}, the team has wrapped up your request and the
               deliverables are waiting in the dashboard.
             </EmailParagraph>
 
             <DetailCard>
               <DetailRow first label="Request" value={requestTitle} hero />
-              <DetailRow label="Client" value={clientName} />
+              {clientName && <DetailRow label="Client" value={clientName} />}
               <DetailRow label="Delivered" value={deliveredAt} />
             </DetailCard>
 

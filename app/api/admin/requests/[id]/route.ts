@@ -9,7 +9,7 @@ import { requireAccessToOrg } from '@/lib/require-access'
 // probe, and used to land in the row verbatim.
 import { isPatchableStatus, isRequestPriority } from '@/lib/request-vocabulary'
 import { emitRequestStatusChanged } from '@/lib/request-status-effects'
-import { notifyTeamMember } from '@/lib/notifications'
+import { notifyTeamMember, requestParticipantTitle } from '@/lib/notifications'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -292,7 +292,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (body.assigneeId !== actor?.id) {
       await notifyTeamMember(drizzle, body.assigneeId, {
         type: 'task_assigned',
-        title: `Request assigned to you: "${ownerRow.title}"`,
+        // The shared helper, so this line and the bulk assign bar cannot drift.
+        // This PATCH is the sole owner of the assignment ping: both UI paths
+        // (the detail header and the People panel) end up making it, and the
+        // participants POST deliberately stays quiet for role 'assignee'.
+        title: requestParticipantTitle('assignee', ownerRow.title),
         body: ownerRow.requestNumber ? `REQ-${ownerRow.requestNumber}` : null,
         entityType: 'request',
         entityId: id,

@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest'
 import {
   clientStatusEmailPlan,
   dedupeEmailTargets,
+  filterTargetsByEmailPref,
   greetingName,
   isSendableEmail,
   messageSummary,
@@ -193,6 +194,31 @@ describe('the wired event plans', () => {
     expect(plan.subject).toBe('[REQ-7] Delivered: "Fix the footer"')
   })
 
+  it('greets the reader and labels the company separately on a delivery', () => {
+    // One value fed to both rendered "Client: Jo" under a company label, and
+    // "Client: there" for a contact row with no usable name.
+    const plan = clientStatusEmailPlan({
+      status: 'delivered',
+      requestId: 'req_1',
+      requestTitle: 'Fix the footer',
+      requestNumber: 7,
+      clientName: 'Acme Ltd',
+    })
+    const props = plan.render(target).props as Record<string, unknown>
+    expect(props.recipientName).toBe('Jo')
+    expect(props.clientName).toBe('Acme Ltd')
+  })
+
+  it('sends both client statuses to the same resolved request URL', () => {
+    const shared = { requestId: 'req_1', requestTitle: 'Fix the footer', requestNumber: 7 }
+    const review = clientStatusEmailPlan({ ...shared, status: 'client_review' })
+    const delivered = clientStatusEmailPlan({ ...shared, status: 'delivered' })
+    const reviewUrl = (review.render(target).props as Record<string, unknown>).reviewUrl
+    const deliveredUrl = (delivered.render(target).props as Record<string, unknown>).requestUrl
+    expect(reviewUrl).toBe(deliveredUrl)
+    expect(deliveredUrl).toContain('/requests/req_1')
+  })
+
   it('names the replier for the client and the client for the studio', () => {
     const toClient = threadReplyEmailPlan({
       audience: 'client',
@@ -224,5 +250,77 @@ describe('the wired event plans', () => {
       submittedBy: 'Jo Yarnall',
     })
     expect(plan.subject).toBe('[REQ-3] New request from Acme Ltd: Fix the footer')
+  })
+})
+
+describe('filterTargetsByEmailPref', () => {
+  type Row = Record<string, unknown>
+  type Chain = Promise<Row[]> & { where: () => Chain }
+
+  /** A database that answers the one batched preference read. */
+  function prefDb(rows: Row[], onSelect?: () => void) {
+    const chain = Promise.resolve(rows) as Chain
+    chain.where = () => chain
+    return {
+      select: () => {
+        onSelect?.()
+        return { from: () => chain }
+      },
+    } as never
+  }
+
+  const jo: EmailTarget = {
+    email: 'jo@acme.com', name: 'Jo', userType: 'contact', clerkUserId: 'user_jo',
+  }
+  const sam: EmailTarget = {
+    email: 'sam@acme.com', name: 'Sam', userType: 'contact', clerkUserId: 'user_sam',
+  }
+  const invited: EmailTarget = {
+    email: 'new@acme.com', name: 'New', userType: 'contact', clerkUserId: null,
+  }
+
+  function prefRow(userId: string, eventType: string, enabled: boolean): Row {
+    return { userId, userType: 'contact', eventType, channel: 'email', enabled }
+  }
+
+  it('asks the database once for the whole audience', async () => {
+    let selects = 0
+    const db = prefDb([], () => { selects += 1 })
+    const { allowed, muted } = await filterTargetsByEmailPref(db, [jo, sam], 'new_message')
+    expect(selects).toBe(1)
+    expect(allowed).toHaveLength(2)
+    expect(muted).toBe(0)
+  })
+
+  it('never queries for people who cannot have a preference row', async () => {
+    let selects = 0
+    const db = prefDb([], () => { selects += 1 })
+    const { allowed } = await filterTargetsByEmailPref(db, [invited], 'new_message')
+    expect(selects).toBe(0)
+    expect(allowed).toEqual([invited])
+  })
+
+  it('drops the person who muted this event and counts them', async () => {
+    const db = prefDb([prefRow('user_jo', 'new_message', false)])
+    const { allowed, muted } = await filterTargetsByEmailPref(db, [jo, sam], 'new_message')
+    expect(allowed.map((t) => t.email)).toEqual(['sam@acme.com'])
+    expect(muted).toBe(1)
+  })
+
+  it('honours a per-user default, and lets an exact row beat it', async () => {
+    const db = prefDb([
+      prefRow('user_jo', '*', false),
+      prefRow('user_sam', '*', false),
+      prefRow('user_sam', 'new_message', true),
+    ])
+    const { allowed } = await filterTargetsByEmailPref(db, [jo, sam], 'new_message')
+    expect(allowed.map((t) => t.email)).toEqual(['sam@acme.com'])
+  })
+
+  it('fails open, because a silenced delivery notice is worse than a stray one', async () => {
+    const broken = { select: () => { throw new Error('D1 unavailable') } } as never
+    const { allowed, muted } = await filterTargetsByEmailPref(broken, [jo, sam], 'new_message')
+    expect(allowed).toHaveLength(2)
+    expect(muted).toBe(0)
   })
 })

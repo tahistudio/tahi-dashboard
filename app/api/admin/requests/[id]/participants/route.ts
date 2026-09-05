@@ -9,7 +9,7 @@
  *            - Only one 'pm' per request (replaces any existing PM).
  *            - De-dupes : if the same (id, type, role) already exists and
  *              isn't soft-deleted, returns the existing row.
- *   DELETE is not defined here — use the nested [participantId] route.
+ *   DELETE is not defined here: use the nested [participantId] route.
  *
  * All scoped to Tahi admin. Access-scoping to the request's org is
  * enforced so a scoped team member can't add participants to a request
@@ -166,7 +166,14 @@ export async function POST(req: NextRequest, { params }: Params) {
   // client's own person, and the client channel is the request thread, not a
   // bell row about studio staffing. Never pings you for adding yourself, and
   // never fires on the de-dupe path above, which added nothing.
-  if (body.participantType === 'team_member') {
+  //
+  // Role 'assignee' is deliberately silent here. Both UI paths make BOTH
+  // writes: the detail header PATCHes assigneeId and then mirrors the
+  // participant row, and the People panel POSTs the participant row and then
+  // mirrors the PATCH. Notifying in both places sent two identical bell rows
+  // for one hand-over, so PATCH /api/admin/requests/[id] owns that ping and
+  // this route owns 'pm' and 'follower'.
+  if (body.participantType === 'team_member' && body.role !== 'assignee') {
     const [actor] = await drizzle
       .select({ id: schema.teamMembers.id })
       .from(schema.teamMembers)

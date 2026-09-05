@@ -18,7 +18,11 @@
  */
 
 import { notifyOrgContacts, notifyTeamMember } from '@/lib/notifications'
-import { clientStatusEmailPlan, loadRequestNumber } from '@/lib/notification-email'
+import {
+  clientStatusEmailPlan,
+  loadRequestEmailContext,
+  type NotificationEmailPlan,
+} from '@/lib/notification-email'
 import { dispatchDomainEvent } from '@/lib/events'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -33,6 +37,26 @@ export interface RequestStatusSubject {
    *  the portal hides the row, so the bell entry would carry an internal
    *  title and deep-link to a 404. */
   isInternal: boolean
+  /**
+   * requests.brand_id, when the caller read it. Present (string or null) and
+   * the client fan-out is narrowed to the contacts the brand-scoped portal
+   * list would show this row to; absent and it stays org wide, which is what
+   * every caller did before.
+   */
+  brandId?: string | null
+}
+
+export interface RequestStatusEffectOptions {
+  /**
+   * May this move put an email in the client's inbox? Default true, which is
+   * right for a single request moving.
+   *
+   * A batch caller must pass false. The bulk PATCH calls this once per row, so
+   * a twenty row "Mark delivered" for a client with three contacts is sixty
+   * separate emails to the same three people, sequentially, and Resend's two a
+   * second ceiling refuses most of them. The bell entries are cheap and stay.
+   */
+  clientEmail?: boolean
 }
 
 /**
@@ -94,11 +118,13 @@ function clientStatusCopy(title: string, status: string): { title: string; body:
  *
  * @param status the status now stored on the row (for a bulk archive that is
  *               'archived', not the caller's `archived: true` flag).
+ * @param options `clientEmail: false` from any caller in a loop.
  */
 export async function emitRequestStatusChanged(
   database: DrizzleDB,
   request: RequestStatusSubject,
   status: string,
+  options?: RequestStatusEffectOptions,
 ): Promise<void> {
   const statusLabel = status.replace(/_/g, ' ')
 
@@ -120,26 +146,38 @@ export async function emitRequestStatusChanged(
   // housekeeping the client has no stake in.
   if (!request.isInternal && !CLIENT_SILENT_STATUSES.includes(status)) {
     const copy = clientStatusCopy(request.title, status)
-    // The subject prefix is looked up here rather than passed in so both PATCH
-    // paths get it without either call site having to remember. Only paid for
-    // on the two statuses that actually send.
-    const email = isClientEmailStatus(status)
-      ? clientStatusEmailPlan({
-          status,
-          requestId: request.id,
-          requestTitle: request.title,
-          requestNumber: await loadRequestNumber(database, request.id),
-        })
-      : undefined
+    // The subject prefix and the client company name are looked up here rather
+    // than passed in so both PATCH paths get them without either call site
+    // having to remember. One read, and only paid for on the two statuses that
+    // actually send.
+    let email: NotificationEmailPlan | undefined
+    if ((options?.clientEmail ?? true) && isClientEmailStatus(status)) {
+      const context = await loadRequestEmailContext(database, request.id)
+      email = clientStatusEmailPlan({
+        status,
+        requestId: request.id,
+        requestTitle: request.title,
+        requestNumber: context.requestNumber,
+        clientName: context.orgName,
+      })
+    }
 
-    await notifyOrgContacts(database, request.orgId, {
-      type: 'request_status_changed',
-      title: copy.title,
-      body: copy.body,
-      entityType: 'request',
-      entityId: request.id,
-      email,
-    })
+    await notifyOrgContacts(
+      database,
+      request.orgId,
+      {
+        type: 'request_status_changed',
+        title: copy.title,
+        body: copy.body,
+        entityType: 'request',
+        entityId: request.id,
+        email,
+      },
+      // Only scope when the caller actually read the column. Treating an
+      // unread column as "this request has no brand" would hide the move from
+      // every brand-scoped contact at the org.
+      request.brandId !== undefined ? { brandId: request.brandId } : undefined,
+    )
   }
 
   // Fire the domain event (automations + outgoing webhooks). Non-blocking.

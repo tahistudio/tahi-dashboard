@@ -7,7 +7,7 @@ import { eq, and } from 'drizzle-orm'
 import { notifyRequestTeam, resolveRequestTeamMemberIds } from '@/lib/notify-request-team'
 import {
   allStudioEmailTargets,
-  dispatchNotificationEmails,
+  deferNotificationEmails,
   messageSummary,
   resolveEmailTargets,
   threadReplyEmailPlan,
@@ -134,7 +134,9 @@ export async function POST(req: NextRequest, { params }: Params) {
       : []
     const studio = specific.length > 0 ? specific : await allStudioEmailTargets(drizzle)
 
-    await dispatchNotificationEmails(
+    // Deferred, like every other send: the client's message is already stored,
+    // and their composer should not wait on Resend to clear.
+    await deferNotificationEmails(
       drizzle,
       studio,
       'new_message',

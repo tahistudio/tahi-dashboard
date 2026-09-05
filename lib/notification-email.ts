@@ -18,20 +18,29 @@
  *      and email is the only way to reach them, which is exactly the audience
  *      a studio replying to a new client is talking to.
  *   2. The channel preference read is per person, per event, per channel
- *      (lib/notification-preferences), on the 'email' channel. Someone with no
- *      Clerk id has no preference row and no way to have written one, so the
+ *      (lib/notification-preferences), on the 'email' channel, resolved for the
+ *      whole audience in ONE query the way the bell path does it. Someone with
+ *      no Clerk id has no preference row and no way to have written one, so the
  *      channel default applies (email on).
+ *
+ * Sending happens OFF the response path. One Resend call per recipient, awaited
+ * inline, meant an admin marking thirty requests delivered sat through a
+ * hundred sequential round trips before their fetch resolved, so the fan-out is
+ * handed to `ctx.waitUntil` exactly as lib/events.ts does with the webhook
+ * fan-out. Where there is no Cloudflare context (vitest, plain node) it is
+ * awaited instead, so tests stay deterministic.
  *
  * Failure is a logged warning, never an exception: a Resend outage must not
  * fail the client's submit or the studio's reply. Everything here returns a
- * count and swallows its own errors.
+ * count and swallows its own errors. A rate limited send (Resend allows two a
+ * second by default) is retried with backoff rather than counted as lost.
  */
 
 import { createElement, type ReactElement } from 'react'
-import { eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { schema } from '@/db/d1'
 import { sendEmail } from '@/lib/email'
-import { isEventChannelEnabled } from '@/lib/notification-preferences'
+import { DEFAULT_ENABLED } from '@/lib/notification-preferences'
 import { appOrigin } from '@/lib/app-url'
 import {
   notificationHref,
@@ -87,11 +96,18 @@ export interface EmailDispatchResult {
   sent: number
   /** Recipients dropped by their own email preference. */
   muted: number
-  /** Addresses Resend refused, or that threw. */
+  /** Addresses Resend refused, or that threw, after retries. */
   failed: number
+  /**
+   * True when the send was handed to `ctx.waitUntil` and the counts above are
+   * therefore not yet known. The caller has already returned by the time the
+   * last address is attempted, which is the point.
+   */
+  deferred: boolean
 }
 
-const NO_DISPATCH: EmailDispatchResult = { sent: 0, muted: 0, failed: 0 }
+const NO_DISPATCH: EmailDispatchResult = { sent: 0, muted: 0, failed: 0, deferred: false }
+const DEFERRED: EmailDispatchResult = { sent: 0, muted: 0, failed: 0, deferred: true }
 
 // ─── Pure helpers ────────────────────────────────────────────────────────────
 
@@ -336,33 +352,164 @@ export async function allStudioEmailTargets(database: DrizzleDB): Promise<EmailT
   }
 }
 
+/** What a request email needs about the request that its call site has not read. */
+export interface RequestEmailContext {
+  /** The per-org number, for the subject prefix. */
+  requestNumber: number | null
+  /** The client company, for the "Client" line of a client-facing template. */
+  orgName: string | null
+}
+
+const NO_REQUEST_CONTEXT: RequestEmailContext = { requestNumber: null, orgName: null }
+
 /**
- * The per-org request number, for the subject prefix. Returns null rather than
- * throwing so a lookup failure costs the prefix, never the email.
+ * The per-org request number and the owning company name, in one read.
+ *
+ * Both are cosmetic: returns nulls rather than throwing, so a lookup failure
+ * costs the subject prefix and a detail row, never the email.
  */
-export async function loadRequestNumber(
+export async function loadRequestEmailContext(
   database: DrizzleDB,
   requestId: string,
-): Promise<number | null> {
+): Promise<RequestEmailContext> {
   try {
     const [row] = await database
-      .select({ requestNumber: schema.requests.requestNumber })
+      .select({
+        requestNumber: schema.requests.requestNumber,
+        orgName: schema.organisations.name,
+      })
       .from(schema.requests)
+      .leftJoin(schema.organisations, eq(schema.organisations.id, schema.requests.orgId))
       .where(eq(schema.requests.id, requestId))
       .limit(1)
-    return typeof row?.requestNumber === 'number' ? row.requestNumber : null
+    return {
+      requestNumber: typeof row?.requestNumber === 'number' ? row.requestNumber : null,
+      orgName: typeof row?.orgName === 'string' && row.orgName.trim() ? row.orgName.trim() : null,
+    }
   } catch {
-    return null
+    return NO_REQUEST_CONTEXT
+  }
+}
+
+// ─── Preferences, for the whole audience at once ─────────────────────────────
+
+interface PrefRow {
+  userId: string
+  userType: string
+  eventType: string
+  channel: string
+  enabled: boolean
+}
+
+/**
+ * The email half of lib/notification-preferences resolveFromRows: exact row,
+ * then the per-user `'*'` default, then the hardcoded channel policy.
+ *
+ * Duplicated here only because the resolver in that module is private and that
+ * module was not in this change's scope. Move this and filterTargetsByEmailPref
+ * below into lib/notification-preferences next to filterRecipientsByInAppPref
+ * when that file next opens, so one resolver serves both channels.
+ */
+function emailPrefEnabled(
+  rows: readonly PrefRow[],
+  target: EmailTarget,
+  eventType: NotificationEventType,
+): boolean {
+  const clerkUserId = target.clerkUserId
+  if (!clerkUserId) return DEFAULT_ENABLED.email
+  const mine = rows.filter((r) => r.userId === clerkUserId && r.userType === target.userType)
+  const exact = mine.find((r) => r.eventType === eventType)
+  if (exact) return exact.enabled
+  const wildcard = mine.find((r) => r.eventType === '*')
+  if (wildcard) return wildcard.enabled
+  return DEFAULT_ENABLED.email
+}
+
+/**
+ * Drop everyone who muted this event's email channel, in ONE query for the
+ * whole audience. The per-recipient read this replaces cost an org-wide fan-out
+ * N serialised SELECTs on top of N sends; the bell path has resolved the same
+ * thing in a single batched query since it was written.
+ *
+ * Fails open (returns everyone) exactly as filterRecipientsByInAppPref does:
+ * better a stray email than a silently swallowed delivery notice.
+ */
+export async function filterTargetsByEmailPref(
+  database: DrizzleDB,
+  targets: readonly EmailTarget[],
+  eventType: NotificationEventType,
+): Promise<{ allowed: EmailTarget[]; muted: number }> {
+  const withLogin = targets.filter((t) => t.clerkUserId)
+  // Nobody here can have written a preference row, so nobody can have muted.
+  if (withLogin.length === 0) return { allowed: [...targets], muted: 0 }
+
+  try {
+    const userIds = [...new Set(withLogin.map((t) => t.clerkUserId as string))]
+    const rows = await database
+      .select({
+        userId: schema.notificationPreferences.userId,
+        userType: schema.notificationPreferences.userType,
+        eventType: schema.notificationPreferences.eventType,
+        channel: schema.notificationPreferences.channel,
+        enabled: schema.notificationPreferences.enabled,
+      })
+      .from(schema.notificationPreferences)
+      .where(
+        and(
+          eq(schema.notificationPreferences.channel, 'email'),
+          inArray(schema.notificationPreferences.userId, userIds),
+          inArray(schema.notificationPreferences.eventType, [eventType, '*']),
+        ),
+      )
+    if (rows.length === 0) return { allowed: [...targets], muted: 0 }
+    const allowed = targets.filter((t) => emailPrefEnabled(rows, t, eventType))
+    return { allowed, muted: targets.length - allowed.length }
+  } catch {
+    return { allowed: [...targets], muted: 0 }
   }
 }
 
 // ─── Dispatch ────────────────────────────────────────────────────────────────
+
+/** Resend allows two requests a second by default, so a fan-out will hit it. */
+const RATE_LIMIT_RETRIES = 2
+const RATE_LIMIT_BACKOFF_MS = [600, 1500] as const
+
+function isRateLimited(error: string | undefined): boolean {
+  if (!error) return false
+  return /rate.?limit|too many requests|\b429\b/i.test(error)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * One address, with a retry on the one failure that is worth retrying. Every
+ * other refusal (bad address, unverified domain) is permanent and retrying it
+ * just spends the next recipient's budget.
+ */
+async function sendWithBackoff(
+  target: EmailTarget,
+  plan: NotificationEmailPlan,
+): Promise<{ success: boolean; error?: string }> {
+  let last = await sendEmail(target.email, plan.subject, plan.render(target))
+  for (let attempt = 0; attempt < RATE_LIMIT_RETRIES; attempt += 1) {
+    if (last.success || !isRateLimited(last.error)) return last
+    await sleep(RATE_LIMIT_BACKOFF_MS[attempt])
+    last = await sendEmail(target.email, plan.subject, plan.render(target))
+  }
+  return last
+}
 
 /**
  * Send one plan to a resolved target list, honouring each person's email
  * preference for this event. One message per person (no shared To header, so
  * no client ever learns who else is on the thread), and one failure never
  * stops the rest.
+ *
+ * Awaits every send: call `deferNotificationEmails` from a route handler so the
+ * response does not wait on it.
  */
 export async function dispatchNotificationEmails(
   database: DrizzleDB,
@@ -375,24 +522,12 @@ export async function dispatchNotificationEmails(
   // recipient on every local request.
   if (!process.env.RESEND_API_KEY) return NO_DISPATCH
 
-  const result: EmailDispatchResult = { sent: 0, muted: 0, failed: 0 }
+  const { allowed, muted } = await filterTargetsByEmailPref(database, targets, eventType)
+  const result: EmailDispatchResult = { sent: 0, muted, failed: 0, deferred: false }
 
-  for (const target of targets) {
+  for (const target of allowed) {
     try {
-      if (target.clerkUserId) {
-        const allowed = await isEventChannelEnabled(
-          database,
-          target.clerkUserId,
-          target.userType,
-          eventType,
-          'email',
-        )
-        if (!allowed) {
-          result.muted += 1
-          continue
-        }
-      }
-      const res = await sendEmail(target.email, plan.subject, plan.render(target))
+      const res = await sendWithBackoff(target, plan)
       if (res.success) result.sent += 1
       else {
         result.failed += 1
@@ -404,13 +539,60 @@ export async function dispatchNotificationEmails(
     }
   }
 
+  // A swallowed failure that nobody can see is how a client quietly stops
+  // hearing from us, so the total is stated once even when every send failed
+  // for the same reason.
+  if (result.failed > 0) {
+    console.warn(
+      `[notification-email] ${eventType}: ${result.failed} of ${allowed.length} addresses did not send`,
+    )
+  }
+
   return result
 }
 
 /**
- * Resolve typed recipients and send. The entry point `createNotifications`
- * calls when a payload carries an email plan, so the bell row and the email
- * are one call site.
+ * Run the fan-out after the response, the way lib/events.ts runs the webhook
+ * fan-out. Falls back to awaiting where no Cloudflare execution context exists
+ * (vitest, plain node), so a test still sees the counts and nothing is left
+ * floating.
+ */
+async function offResponsePath(
+  work: () => Promise<EmailDispatchResult>,
+): Promise<EmailDispatchResult> {
+  let waitUntil: ((promise: Promise<unknown>) => void) | null = null
+  try {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare')
+    const cfCtx = await getCloudflareContext({ async: true })
+    if (cfCtx?.ctx?.waitUntil) waitUntil = cfCtx.ctx.waitUntil.bind(cfCtx.ctx)
+  } catch {
+    // No context here. Awaiting is the correct fallback, not an error.
+    waitUntil = null
+  }
+  const promise = work()
+  if (!waitUntil) return await promise
+  waitUntil(promise)
+  return DEFERRED
+}
+
+/**
+ * Send one plan to an already-resolved target list, off the response path.
+ * The entry point a route handler should use.
+ */
+export async function deferNotificationEmails(
+  database: DrizzleDB,
+  targets: readonly EmailTarget[],
+  eventType: NotificationEventType,
+  plan: NotificationEmailPlan,
+): Promise<EmailDispatchResult> {
+  if (targets.length === 0 || !process.env.RESEND_API_KEY) return NO_DISPATCH
+  return offResponsePath(() => dispatchNotificationEmails(database, targets, eventType, plan))
+}
+
+/**
+ * Resolve typed recipients and send, off the response path. The entry point
+ * `createNotifications` calls when a payload carries an email plan, so the bell
+ * row and the email are one call site.
  */
 export async function sendNotificationEmails(
   database: DrizzleDB,
@@ -418,13 +600,18 @@ export async function sendNotificationEmails(
   eventType: NotificationEventType,
   plan: NotificationEmailPlan,
 ): Promise<EmailDispatchResult> {
-  try {
-    const targets = await resolveEmailTargets(database, recipients)
-    return await dispatchNotificationEmails(database, targets, eventType, plan)
-  } catch (err) {
-    console.warn(`[notification-email] ${eventType} dispatch failed:`, err)
-    return NO_DISPATCH
-  }
+  // Nothing is configured to send, so do not spend the recipient lookup or the
+  // execution-context probe on every local request.
+  if (recipients.length === 0 || !process.env.RESEND_API_KEY) return NO_DISPATCH
+  return offResponsePath(async () => {
+    try {
+      const targets = await resolveEmailTargets(database, recipients)
+      return await dispatchNotificationEmails(database, targets, eventType, plan)
+    } catch (err) {
+      console.warn(`[notification-email] ${eventType} dispatch failed:`, err)
+      return NO_DISPATCH
+    }
+  })
 }
 
 // ─── The wired events ────────────────────────────────────────────────────────
@@ -479,6 +666,9 @@ export function clientStatusEmailPlan(input: {
   requestId: string
   requestTitle: string
   requestNumber: number | null
+  /** The client COMPANY, for the delivered template's "Client" row. Never the
+   *  recipient: that is a greeting, and the two are different sentences. */
+  clientName?: string | null
   /** ISO timestamp for the delivered stamp. */
   deliveredAt?: string | null
 }): NotificationEmailPlan {
@@ -503,10 +693,12 @@ export function clientStatusEmailPlan(input: {
     render: (target) =>
       createElement(RequestDeliveredEmail, {
         requestTitle: input.requestTitle,
-        clientName: greetingName(target.name, 'there'),
+        recipientName: greetingName(target.name, 'there'),
+        clientName: input.clientName ?? null,
         deliveredAt: formatDeliveredAt(input.deliveredAt),
-        dashboardUrl: appOrigin(),
-        requestId: input.requestId,
+        // Same resolver the bell click uses, so the button and the bell can
+        // never land on different pages if the client route ever moves.
+        requestUrl: url,
       }),
   }
 }

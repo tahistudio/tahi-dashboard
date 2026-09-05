@@ -308,6 +308,12 @@ export async function resolveParticipants(
  * Skips when the mention id matches the sender id (no self-pings).
  * Silently no-ops if the mention id can't be resolved to a Clerk
  * user, e.g. team members that haven't been invited yet.
+ *
+ * `allowContacts: false` stops the contacts fallback dead. The composer's
+ * mention chips carry no trustworthy table hint (lib/parse-mentions always
+ * reports 'team_member'), so a caller writing something a client must never
+ * see has to be able to say "team members only" here rather than filter on a
+ * type it cannot rely on.
  */
 export async function notifyMentionedPerson(
   database: DrizzleDB,
@@ -319,6 +325,8 @@ export async function notifyMentionedPerson(
     body?: string | null
     entityType: NotificationEntityType
     entityId: string
+    /** Default true. False on an internal note or an internal request. */
+    allowContacts?: boolean
   },
 ): Promise<void> {
   if (params.mentionedId === params.senderTeamMemberId) return
@@ -342,7 +350,9 @@ export async function notifyMentionedPerson(
       return
     }
 
-    // Fall back to contacts (portal users).
+    // Fall back to contacts (portal users), unless the caller has told us this
+    // message is studio-only.
+    if (params.allowContacts === false) return
     const ct = await database
       .select({ clerkUserId: schema.contacts.clerkUserId })
       .from(schema.contacts)
@@ -403,8 +413,62 @@ export async function notifyAllAdmins(
   }
 }
 
+export interface OrgContactAudience {
+  /**
+   * requests.brand_id for the thing being announced. Pass it and the audience
+   * is narrowed to the contacts who can actually open that row in the portal.
+   *
+   * The portal request list is brand scoped (app/api/portal/requests GET): a
+   * contact with brand links only sees requests whose brand is one of theirs,
+   * and a contact with no brand links sees everything. Without this the email
+   * was strictly wider than the portal, so a contact scoped to brand A got a
+   * subject line carrying brand B's request title plus 900 characters of the
+   * studio's reply, and a link they would be refused.
+   *
+   * Omit the option entirely (not `{ brandId: null }`) when the caller has not
+   * read the brand: the audience then stays org wide, which is what every
+   * pre-existing call site did.
+   */
+  brandId: string | null
+}
+
 /**
- * Notify every contact at a client org. The audience emitter for client-facing
+ * Narrow an org's contacts to the ones the portal would show this brand's work
+ * to. Same rule as the portal GET, in the same direction: no brand links means
+ * no scoping, so an ordinary single brand client is unaffected.
+ */
+async function contactsForBrand(
+  database: DrizzleDB,
+  contactIds: string[],
+  brandId: string | null,
+): Promise<string[]> {
+  if (contactIds.length === 0) return contactIds
+  const links = await database
+    .select({
+      contactId: schema.brandContacts.contactId,
+      brandId: schema.brandContacts.brandId,
+    })
+    .from(schema.brandContacts)
+    .where(inArray(schema.brandContacts.contactId, contactIds))
+  if (links.length === 0) return contactIds
+
+  const brandsByContact = new Map<string, Set<string>>()
+  for (const link of links) {
+    if (!link.contactId || !link.brandId) continue
+    const set = brandsByContact.get(link.contactId) ?? new Set<string>()
+    set.add(link.brandId)
+    brandsByContact.set(link.contactId, set)
+  }
+  return contactIds.filter((id) => {
+    const brands = brandsByContact.get(id)
+    if (!brands || brands.size === 0) return true
+    return brandId !== null && brands.has(brandId)
+  })
+}
+
+/**
+ * Notify every contact at a client org, optionally narrowed to the ones who can
+ * see the brand the event belongs to. The audience emitter for client-facing
  * events (status changed, message posted, invoice sent).
  *
  * A contact without a Clerk login gets no bell row (there is no id to key one
@@ -415,15 +479,18 @@ export async function notifyOrgContacts(
   database: DrizzleDB,
   orgId: string,
   payload: NotificationPayload,
+  audience?: OrgContactAudience,
 ): Promise<void> {
   try {
     const contacts = await database
       .select({ id: schema.contacts.id })
       .from(schema.contacts)
       .where(eq(schema.contacts.orgId, orgId))
-    const recipients: NotificationRecipient[] = contacts
-      .filter((c): c is { id: string } => !!c.id)
-      .map((c) => ({ contactId: c.id }))
+    let contactIds = contacts.filter((c): c is { id: string } => !!c.id).map((c) => c.id)
+    if (audience) {
+      contactIds = await contactsForBrand(database, contactIds, audience.brandId)
+    }
+    const recipients: NotificationRecipient[] = contactIds.map((id) => ({ contactId: id }))
     await createNotifications(database, recipients, payload)
   } catch (err) {
     console.error('[notifyOrgContacts] failed:', err)

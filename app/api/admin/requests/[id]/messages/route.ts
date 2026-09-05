@@ -130,6 +130,9 @@ export async function POST(req: NextRequest, { params }: Params) {
         requestNumber: schema.requests.requestNumber,
         isInternal: schema.requests.isInternal,
         assigneeId: schema.requests.assigneeId,
+        // The portal request list is brand scoped, so the fan-out below is too:
+        // a contact linked to another brand cannot open this row.
+        brandId: schema.requests.brandId,
       })
       .from(schema.requests)
       .where(eq(schema.requests.id, id))
@@ -190,6 +193,17 @@ export async function POST(req: NextRequest, { params }: Params) {
       .set({ updatedAt: msgNow })
       .where(eq(schema.requests.id, id))
 
+    // The composer posts rich text; a bell body and an email quote are both
+    // plain text, so strip once here rather than shipping tag soup into either.
+    const plainBody = toPlainText(body.body ?? '')
+
+    // An internal note, or any note on a Tahi-internal request, is studio-only.
+    // The @mention fan-out below is held to the same two gates as the client
+    // fan-out further down: without that, mentioning a client contact in an
+    // internal note pinged them with its body and a deep link to a row the
+    // portal will not show them.
+    const clientVisible = !body.isInternal && !request.isInternal
+
     // Process @mentions and create mention rows + notifications
     const mentionedPeople = parseMentions((body.body ?? '').trim())
     if (mentionedPeople.length > 0) {
@@ -214,16 +228,17 @@ export async function POST(req: NextRequest, { params }: Params) {
           mentionedId: m.id,
           senderTeamMemberId: authorId,
           title: 'You were mentioned in a request message',
-          body: (body.body ?? '').trim().slice(0, 200),
+          // Plain text, same as every other body on this route. Slicing the raw
+          // composer HTML put half a tag in the bell.
+          body: messageSummary(body.body ?? ''),
           entityType: 'request',
           entityId: id,
+          // parseMentions cannot tell a contact from a team member, so the gate
+          // has to live where the id is resolved.
+          allowContacts: clientVisible,
         })
       }
     }
-
-    // The composer posts rich text; a bell body and an email quote are both
-    // plain text, so strip once here rather than shipping tag soup into either.
-    const plainBody = toPlainText(body.body ?? '')
 
     // Notify client contacts about the new message, and email them.
     //
@@ -234,23 +249,31 @@ export async function POST(req: NextRequest, { params }: Params) {
     //
     // Only ever quotes the message that was just posted, which this branch has
     // already established is not internal.
-    if (!body.isInternal && !request.isInternal) {
+    if (clientVisible) {
       const fromName = member?.name?.trim() || 'The Tahi team'
-      await notifyOrgContacts(drizzle, request.orgId, {
-        type: 'new_message',
-        title: 'New message on your request',
-        body: messageSummary(body.body ?? ''),
-        entityType: 'request',
-        entityId: id,
-        email: threadReplyEmailPlan({
-          audience: 'client',
-          requestId: id,
-          requestTitle: request.title,
-          requestNumber: request.requestNumber,
-          fromName,
-          message: truncate(plainBody, 900),
-        }),
-      })
+      await notifyOrgContacts(
+        drizzle,
+        request.orgId,
+        {
+          type: 'new_message',
+          title: 'New message on your request',
+          body: messageSummary(body.body ?? ''),
+          entityType: 'request',
+          entityId: id,
+          email: threadReplyEmailPlan({
+            audience: 'client',
+            requestId: id,
+            requestTitle: request.title,
+            requestNumber: request.requestNumber,
+            fromName,
+            message: truncate(plainBody, 900),
+          }),
+        },
+        // Email is permanent, searchable and forwardable, and its subject
+        // carries the request title, so the audience is held to exactly the
+        // contacts the portal would let open this request.
+        { brandId: request.brandId ?? null },
+      )
     }
 
     // Notify request assignee about the new message (if sender is not the assignee)
