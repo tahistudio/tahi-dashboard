@@ -34,3 +34,8 @@ Tier 3, the rest: financial reports, reports, sales analytics, calculator, annou
 No em or en dashes. No any. Tokens not hex. Rem not px. No single-side borders. Hover, focus, 2.75rem targets. Every page keeps export const metadata. MCP parity for new API capability. Migrations additive and idempotent, mirrored in the migrate route, applied to both D1s before deploy. Never git add -A. Commit trailer: Co-Authored-By Claude Fable 5.1 plus Claude-Session.
 
 Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:00Z).
+
+## Standing rules from Liam mid-run
+
+- Claude Design has less context than we do. If the design omits a field, dropdown or action that the reader map or the repo needs, the port ADDS it. The design sets look, density and vocabulary; the repo's data model and the reader maps are the spec.
+- Mobile first, every page, 375px. The mobile top nav bar is too crowded: declutter it (brand mark, page title, search, bell, account; Track time, Daily brief, currency and theme move into a More sheet). Tier 1 item, being built now.
