@@ -110,6 +110,10 @@ export function TasksBoard({
       // composer already prints beside its own Add button.
       quickAddHint="Lands in this column, unassigned"
       quickAddNoun="task"
+      // What the card's rollup counts. Without it a card reads "3 of 5
+      // subtasks" while the list row it just came from reads "3 of 5
+      // checklist items done" and the create dialog says Checklist.
+      rollupNoun="checklist item"
       onItemClick={(item) => onOpenTask(item.id)}
     />
   )

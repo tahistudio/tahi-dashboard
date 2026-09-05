@@ -67,19 +67,24 @@ export function LevelChip({ level, clientName, compact = false }: {
    *  word is unreadable, and the word the reader wants is the client's name. */
   clientName?: string | null
   /** Board cards and the week planner use the icon alone: 1.25rem tall, no
-   *  label, no client. */
+   *  visible label. The client still reaches a hover and a screen reader
+   *  through the accessible name, because on a week card nothing else names
+   *  the client at all. */
   compact?: boolean
 }) {
   const Icon = LEVEL_ICON[level]
   const tint = LEVEL_TINT[level]
   const label = TASK_LEVEL_LABELS[level] ?? level
+  // "Internal, Kowtow" reads as two facts in both variants. The comma is what
+  // a screen reader pauses on; the slash the wide chip draws is decoration.
+  const reading = clientName ? `${label}, ${clientName}` : label
 
   if (compact) {
     return (
       <span
         className="inline-flex items-center justify-center"
-        title={label}
-        aria-label={label}
+        title={reading}
+        aria-label={reading}
         role="img"
         style={{
           width: '1.25rem',
@@ -128,6 +133,10 @@ export function LevelChip({ level, clientName, compact = false }: {
         <>
           <span aria-hidden="true" style={{ flexShrink: 0, opacity: 0.5 }}>/</span>
           <span
+            // The client's name is on screen here, not a monogram, so private
+            // mode has to be able to mask it the way it masks the row title
+            // beside it and the org name on a request card.
+            data-private
             title={clientName}
             style={{
               minWidth: 0,

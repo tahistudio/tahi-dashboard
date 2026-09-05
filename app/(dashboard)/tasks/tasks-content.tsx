@@ -771,7 +771,7 @@ export function TasksContent() {
       if (!res.ok) throw new Error(await readError(res))
       void mutateTasks()
     } catch {
-      showToast('Could not remove that subtask', 'error')
+      showToast('Could not remove that checklist item', 'error')
       void loadSubtasks(taskId)
     }
   }, [mutateTasks, loadSubtasks, showToast])

@@ -235,7 +235,13 @@ function TitleCell({
           flexShrink: 1,
         }}
       >
-        <span style={{ display: 'inline-flex', opacity: done ? 0.7 : 1 }}>
+        {/* minWidth 0 is load-bearing, not tidiness: without it this wrapper's
+            automatic minimum is the chip's min-content (icon, level word,
+            separator and the full 7.5rem of client name, 204px measured), the
+            chip's own maxWidth 100% resolves against that floor and never
+            clamps, and a Task cell at its own 12rem minimum gets an
+            overflowing chip instead of an ellipsed client name. */}
+        <span style={{ display: 'inline-flex', minWidth: 0, opacity: done ? 0.7 : 1 }}>
           <LevelChip level={levelOf(row)} clientName={row.orgName} />
         </span>
         {row.requestId && (
