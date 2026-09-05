@@ -23,6 +23,13 @@
  * close. Nothing fires at all unless the local context gate passes, which is
  * the same rule the route runs before it spends anything.
  *
+ * Two more strands on that leash, because a debounce alone only rate-limits a
+ * question worth asking twice. An answer that fills NOTHING does not shrink
+ * the field list, so an abstaining route was asked the identical question at
+ * every pause for as long as somebody kept typing; it now buys a cooldown.
+ * And the whole opening is capped, so no trigger bug can spend a studio-wide
+ * daily budget on one dialog.
+ *
  * INERT FOR CLIENTS. The New Request dialog is one component serving both
  * audiences, so `isAdmin` gates the hook itself rather than the fields it
  * fills: with it false there is no timer, no fetch and no state. A studio
@@ -31,6 +38,7 @@
 
 import * as React from 'react'
 import { apiPath } from '@/lib/api'
+import { suggestionAnnouncement } from '@/lib/predict/announce'
 import { hasEnoughContext } from '@/lib/predict/context'
 import type {
   PredictFieldsResponse,
@@ -43,6 +51,26 @@ const DEBOUNCE_MS = 700
 
 /** How long a template apply or an AI draft holds the predictor off. */
 const SETTLE_MS = 2000
+
+/**
+ * How long the predictor stands off after a pass that filled nothing.
+ *
+ * An empty answer is the normal case, and it does not shrink the field list:
+ * `emptyFields` only stops asking about a field that RECEIVED a suggestion. So
+ * a route that abstains, which is what a studio below the cohort floor answers
+ * all day, was asked the identical question at every 700ms pause for as long
+ * as somebody kept typing. Seven D1 statements and a ledger row each time.
+ */
+const EMPTY_ANSWER_COOLDOWN_MS = 20_000
+
+/**
+ * A hard ceiling on calls per opening of the dialog, whatever the typing does.
+ *
+ * The debounce is the leash and this is the collar: one bug in the trigger,
+ * one control that rewrites its own value, and a studio-wide daily budget goes
+ * in an afternoon. Nine is far more than a person filling one form can use.
+ */
+const MAX_RUNS_PER_OPENING = 9
 
 /** A field's current value, in the shapes the two dialogs actually hold. */
 export type FieldValue = string | number | null | undefined
@@ -62,10 +90,26 @@ export interface UseFieldPredictionsOptions {
   level?: string | null
   category?: string | null
   parentRequestId?: string | null
-  /** The fields this dialog will accept a suggestion for at all. */
+  /**
+   * The fields this dialog will accept a suggestion for at all.
+   *
+   * Read through a ref at fire time, so a caller may hand a different list on
+   * every render (a field whose control is not on screen for this client
+   * belongs out of it) at no cost.
+   */
   fields: readonly PredictableField[]
   /** Current values, read at fire time so a filled field is never asked for. */
   values: Partial<Record<PredictableField, FieldValue>>
+  /**
+   * The value each control OPENS on, in the same vocabulary as `values`.
+   *
+   * `values` reports a control still sitting on its default as null, because
+   * an unanswered field is what a prediction is for. That makes the default
+   * invisible here, and a model answering with the default itself would tint a
+   * control that never moved, put a Suggested chip on it and offer to clear a
+   * value nobody set. Naming the defaults lets that suggestion be dropped.
+   */
+  defaults?: Partial<Record<PredictableField, string | number>>
   /** Writes one suggested value into the form. Only ever called untouched. */
   apply: (field: PredictableField, value: string | number) => void
   /** Puts one field back to its empty state. */
@@ -79,6 +123,16 @@ export interface FieldPredictions {
   reasonFor: (field: PredictableField) => string | undefined
   /** Any suggestion still on screen. Drives the "Clear suggestions" link. */
   hasAny: boolean
+  /**
+   * One sentence for a polite live region, or '' when there is nothing to say.
+   *
+   * Suggestions land in fields that are usually below the caret while somebody
+   * is still typing a title, so without this a screen reader user is given no
+   * signal at all that three controls just changed. One announcement per
+   * batch, never one per field: three regions firing in the same tick read as
+   * a stutter and the useful information is the list.
+   */
+  announcement: string
   /** The operator edited this field. Removes the suggestion, blocks re-filling. */
   markTouched: (field: PredictableField) => void
   /** A template or an AI draft wrote these. Same precedence effect, and it
@@ -103,24 +157,30 @@ export function useFieldPredictions(options: UseFieldPredictionsOptions): FieldP
   const {
     open, isAdmin, paused = false,
     subject, title, description, orgId, level, category, parentRequestId,
-    fields, values, apply, clear,
+    fields, values, defaults, apply, clear,
   } = options
 
   const [suggested, setSuggested] = React.useState<Partial<Record<PredictableField, string>>>({})
+  const [announcement, setAnnouncement] = React.useState('')
   const suggestedRef = React.useRef(suggested)
   const touchedRef = React.useRef<Set<PredictableField>>(new Set())
   const valuesRef = React.useRef(values)
+  const defaultsRef = React.useRef(defaults)
   const applyRef = React.useRef(apply)
   const clearRef = React.useRef(clear)
   const fieldsRef = React.useRef(fields)
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const abortRef = React.useRef<AbortController | null>(null)
   const settleUntilRef = React.useRef(0)
+  const cooldownUntilRef = React.useRef(0)
+  const runsRef = React.useRef(0)
+  const clearedCategoryRef = React.useRef(false)
   const lastCategoryRef = React.useRef<string | null | undefined>(category)
 
   // Refs rather than effect deps: a value changing because the predictor just
   // wrote it must not schedule another prediction.
   valuesRef.current = values
+  defaultsRef.current = defaults
   applyRef.current = apply
   clearRef.current = clear
   fieldsRef.current = fields
@@ -158,6 +218,9 @@ export function useFieldPredictions(options: UseFieldPredictionsOptions): FieldP
     const empty = emptyFields()
     if (empty.length === 0) return
     if (!hasEnoughContext({ subject, title, orgId, level })) return
+    if (runsRef.current >= MAX_RUNS_PER_OPENING) return
+    if (Date.now() < cooldownUntilRef.current) return
+    runsRef.current += 1
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -203,11 +266,23 @@ export function useFieldPredictions(options: UseFieldPredictionsOptions): FieldP
         if (touchedRef.current.has(field)) continue
         if (!isEmptyValue(valuesRef.current[field])) continue
         if (!suggestion) continue
+        // A suggestion equal to what the control already reads is not a
+        // suggestion. Filing it would tint a field nobody moved, put a chip on
+        // it and offer a Clear that changes nothing. The field is known empty
+        // by the line above, so what it "already reads" is its default.
+        const openedOn = defaultsRef.current?.[field]
+        if (openedOn !== undefined && String(openedOn) === String(suggestion.value)) continue
         applyRef.current(field, suggestion.value)
         landed[field] = suggestion.reason
       }
-      if (Object.keys(landed).length > 0) {
+      const landedFields = Object.keys(landed) as PredictableField[]
+      if (landedFields.length > 0) {
         setSuggested(prev => ({ ...prev, ...landed }))
+        setAnnouncement(suggestionAnnouncement(landedFields))
+      } else {
+        // Nothing landed, and the question will not have changed by the next
+        // keystroke pause. Stand off rather than paying for the same answer.
+        cooldownUntilRef.current = Date.now() + EMPTY_ANSWER_COOLDOWN_MS
       }
     } catch {
       // An aborted or failed prediction is a non-event. The form is already
@@ -223,14 +298,24 @@ export function useFieldPredictions(options: UseFieldPredictionsOptions): FieldP
   // be the one moment the form never gets a suggestion.
   React.useEffect(() => {
     if (!open || !isAdmin) return
-    const categoryChanged = lastCategoryRef.current !== category
+    let categoryChanged = lastCategoryRef.current !== category
     lastCategoryRef.current = category
+    // A category the operator CLEARED changed for a reason that is not a new
+    // question. Without this, dismissing one suggestion bought an immediate,
+    // undebounced pass asking about the fields the model just declined.
+    if (categoryChanged && clearedCategoryRef.current) categoryChanged = false
+    if (categoryChanged) clearedCategoryRef.current = false
+
+    // Above the pause, not below it. An in-flight call issued a moment before
+    // the AI panel opened used to keep running and land its values in a form
+    // the operator can no longer see.
+    cancelInFlight()
     if (paused) return
 
     const settleDelay = Math.max(0, settleUntilRef.current - Date.now())
-    const delay = Math.max(categoryChanged ? 0 : DEBOUNCE_MS, settleDelay)
+    const cooldownDelay = Math.max(0, cooldownUntilRef.current - Date.now())
+    const delay = Math.max(categoryChanged ? 0 : DEBOUNCE_MS, settleDelay, cooldownDelay)
 
-    cancelInFlight()
     timerRef.current = setTimeout(() => {
       timerRef.current = null
       void run()
@@ -252,7 +337,11 @@ export function useFieldPredictions(options: UseFieldPredictionsOptions): FieldP
     cancelInFlight()
     touchedRef.current = new Set()
     settleUntilRef.current = 0
+    cooldownUntilRef.current = 0
+    runsRef.current = 0
+    clearedCategoryRef.current = false
     setSuggested(prev => (Object.keys(prev).length === 0 ? prev : {}))
+    setAnnouncement(prev => (prev === '' ? prev : ''))
   }, [open, isAdmin, cancelInFlight])
 
   // Unmounting is the one exit the two effects above do not cover: a dialog
@@ -287,8 +376,13 @@ export function useFieldPredictions(options: UseFieldPredictionsOptions): FieldP
   }, [])
 
   const clearField = React.useCallback((field: PredictableField) => {
+    // Clearing the category puts it back on its default, which is a change to
+    // the value this hook watches. Flagged so the trigger reads it as the
+    // decision it is rather than as a fresh click worth an immediate re-run.
+    if (field === 'category') clearedCategoryRef.current = true
     clearRef.current(field)
     markTouched(field)
+    setAnnouncement('')
   }, [markTouched])
 
   // The writes happen outside the updater on purpose: React may run an updater
@@ -296,23 +390,30 @@ export function useFieldPredictions(options: UseFieldPredictionsOptions): FieldP
   // hides a real bug the day the body does something that is not idempotent.
   const clearAll = React.useCallback(() => {
     for (const key of Object.keys(suggestedRef.current) as PredictableField[]) {
+      if (key === 'category') clearedCategoryRef.current = true
       clearRef.current(key)
       touchedRef.current.add(key)
     }
     setSuggested({})
+    setAnnouncement('')
   }, [])
 
   const reset = React.useCallback(() => {
     cancelInFlight()
     touchedRef.current = new Set()
     settleUntilRef.current = 0
+    cooldownUntilRef.current = 0
+    runsRef.current = 0
+    clearedCategoryRef.current = false
     setSuggested({})
+    setAnnouncement('')
   }, [cancelInFlight])
 
   return {
     isSuggested: (field) => field in suggested,
     reasonFor: (field) => suggested[field],
     hasAny: Object.keys(suggested).length > 0,
+    announcement,
     markTouched,
     markWritten,
     clearField,

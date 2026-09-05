@@ -1,5 +1,5 @@
-import { test, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
-import { primePage } from './helpers'
+import { test, expect, type Locator, type Page } from '@playwright/test'
+import { deleteRequest, getRequest, primePage } from './helpers'
 
 /** One day, for the "the floor is not yesterday" assertion. */
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -105,12 +105,6 @@ async function describedByText(field: Locator): Promise<string> {
       .join(' ')
       .trim()
   })
-}
-
-/** Soft cleanup: a leaked request is noise on the board, not a failed run. */
-async function deleteRequest(request: APIRequestContext, id: string): Promise<void> {
-  const res = await request.delete(`/api/admin/requests/${id}`)
-  expect.soft(res.ok(), `the request fixture ${id} was not cleaned up`).toBeTruthy()
 }
 
 test.describe('New request dialog', () => {
@@ -259,6 +253,13 @@ test.describe('New request dialog', () => {
     // And the reason is wired to the field rather than floating beside it.
     expect(await describedByText(due)).not.toBe('')
 
+    // One polite announcement for the batch, so fields filling themselves
+    // below the caret is not a change only a sighted operator notices. The
+    // region is asserted, not the sentence: the wording is copy.
+    const live = dialog.locator('[aria-live="polite"].sr-only')
+    await expect(live).toHaveCount(1)
+    await expect(live).toContainText('Suggested', { timeout: PANEL_TIMEOUT })
+
     // No confidence number anywhere on the panel.
     await expect(dialog.getByText(/\d{1,3}\s?% confiden/i)).toHaveCount(0)
 
@@ -286,11 +287,7 @@ test.describe('New request dialog', () => {
     const { id } = await res.json() as { id: string }
 
     try {
-      const row = await request.get(`/api/admin/requests/${id}`)
-      expect(row.ok()).toBeTruthy()
-      const { request: saved } = await row.json() as {
-        request: { title: string; dueDate: string | null; priority: string }
-      }
+      const saved = await getRequest(request, id)
       expect(saved.title).toBe(title)
       // Cleared means cleared: the suggestion does not come back on submit.
       expect(saved.dueDate).toBeNull()

@@ -35,7 +35,11 @@ vi.mock('@/lib/require-access', () => ({
   requireAccessToOrg: vi.fn().mockResolvedValue(null),
 }))
 
-vi.mock('@/lib/ai-cost', () => ({
+// Only the write is stubbed. estimateCostUsd stays real, because the ceiling
+// this route enforces is exactly "what does the rate card say these tokens
+// cost", and a stub would make the cap tests assert their own arithmetic.
+vi.mock('@/lib/ai-cost', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ai-cost')>()),
   recordCost: vi.fn().mockResolvedValue(1),
 }))
 
@@ -166,9 +170,13 @@ describe('the gate', () => {
     expect(createMessage).not.toHaveBeenCalled()
   })
 
-  it('answers an empty field list the same way, rather than asking for nothing', async () => {
+  it('tells "nothing left to fill" apart from "your title is too thin"', async () => {
+    // Two different situations with two different answers for the caller. The
+    // brief was fine here; there was simply nothing left to ask about, which
+    // is not a complaint about anything the operator typed.
     const body = await post({ empty: [] })
-    expect(body.reason).toBe('thin_context')
+    expect(body.reason).toBe('nothing_to_fill')
+    expect(body.suggestions).toEqual({})
     expect(createMessage).not.toHaveBeenCalled()
   })
 
@@ -288,6 +296,24 @@ describe('what survives the model', () => {
     const body = await post({})
     expect(body.suggestions).toEqual({})
   })
+
+  it('keeps a large size for a plan that has a multi-day track', async () => {
+    seedCohort()
+    modelAnswers({ size: { value: 'large', reason: 'It spans several days.', confidence: 0.9 } })
+    const body = await post({ empty: ['size'] })
+    expect(body.suggestions.size?.value).toBe('large')
+  })
+
+  it('drops a large size for a plan that has none, rather than leaving the dialog to undo it', async () => {
+    // The prompt says so too, but a sentence in a prompt is a request. Without
+    // the parser rule the dialog's own guard rewrote type back to small_task a
+    // beat later while the chip and the reason kept arguing for multi-day.
+    seedCohort()
+    state.rows.organisations = [{ name: 'Kowhai Co', planType: 'maintain' }]
+    modelAnswers({ size: { value: 'large', reason: 'It spans several days.', confidence: 0.9 } })
+    const body = await post({ empty: ['size'] })
+    expect(body.suggestions.size).toBeUndefined()
+  })
 })
 
 describe('cost and limits', () => {
@@ -321,6 +347,45 @@ describe('cost and limits', () => {
   it('answers ai_rate_limited once one operator has burned their hour', async () => {
     const now = new Date().toISOString()
     state.rows.aiCostLog = Array.from({ length: 60 }, () => ({ cents: 1, scopeId: 'user_1', createdAt: now }))
+    const body = await post({})
+    expect(body.reason).toBe('ai_rate_limited')
+    expect(createMessage).not.toHaveBeenCalled()
+  })
+
+  it('reads the day\'s spend from the tokens, not the rounded-up cents column', async () => {
+    // estimateCostCents is Math.ceil(usd * 100), so a Haiku pass at ~900 in /
+    // 80 out really costs about 0.13 cents and is STORED as 1. Summing the
+    // column made a $2 ceiling into a cap of 200 calls a day studio-wide.
+    // Two hundred rows here is about 26 cents of real Haiku spend, so the
+    // door stays open. Another operator's rows, so the hourly ceiling is not
+    // what is being measured.
+    const now = new Date().toISOString()
+    state.rows.aiCostLog = Array.from({ length: 200 }, () => ({
+      cents: 1,
+      provider: 'anthropic',
+      model: 'claude-haiku-4-5',
+      inputTokens: 900,
+      outputTokens: 80,
+      scopeId: 'user_other',
+      createdAt: now,
+    }))
+    modelAnswers({})
+    const body = await post({})
+    expect(body.reason).toBeUndefined()
+    expect(createMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('still trips once the tokens really do add up to the ceiling', async () => {
+    const now = new Date().toISOString()
+    state.rows.aiCostLog = Array.from({ length: 40 }, () => ({
+      cents: 1,
+      provider: 'anthropic',
+      model: 'claude-haiku-4-5',
+      inputTokens: 4_000_000,
+      outputTokens: 200_000,
+      scopeId: 'user_other',
+      createdAt: now,
+    }))
     const body = await post({})
     expect(body.reason).toBe('ai_rate_limited')
     expect(createMessage).not.toHaveBeenCalled()
@@ -373,7 +438,13 @@ describe('degraded paths', () => {
     expect(body.reason).toBe('ai_rate_limited')
   })
 
-  it('caches the system block, so repeat passes pay the discounted rate', async () => {
+  it('carries the cache marker, which is inert at this prompt length', async () => {
+    // Haiku 4.5 will not cache a prefix under 4096 tokens and the system block
+    // is about 480, so the API ignores this marker in silence: no error, and
+    // cache_read_input_tokens stays 0. Nothing here pays a discounted rate
+    // today. It is asserted only so the marker is not deleted by accident
+    // before the prompt or the model crosses that line, and this name says so
+    // rather than claiming a saving nobody has measured.
     modelAnswers({})
     await post({})
     const [params] = createMessage.mock.calls[0] as [{

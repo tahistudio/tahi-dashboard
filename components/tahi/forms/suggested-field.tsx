@@ -102,7 +102,11 @@ export function SuggestedLabel({
           padding: '0.125rem 0.4375rem',
           borderRadius: 'var(--radius-badge)',
           background: 'var(--color-brand-100)',
-          color: 'var(--color-brand-dark)',
+          // --color-link, not --color-brand-dark. brand-dark has no .dark
+          // override, so on the dark surface this chip's ink and the Clear
+          // link beside it came out near 2:1. --color-link is the repo's
+          // dark-aware brand ink for small text and lifts to #93C98A there.
+          color: 'var(--color-link)',
           fontSize: '0.625rem',
           fontWeight: 700,
           letterSpacing: '0.03em',
@@ -148,7 +152,8 @@ export function SuggestionLink({
         minHeight: '2.75rem',
         border: 'none',
         background: 'none',
-        color: 'var(--color-brand-dark)',
+        // Dark-aware brand ink. See the chip above.
+        color: 'var(--color-link)',
         fontSize: '0.75rem',
         fontWeight: 600,
         cursor: 'pointer',

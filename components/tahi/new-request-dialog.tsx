@@ -33,6 +33,7 @@ import { Tooltip } from '@/components/tahi/tooltip'
 import {
   RichBrief,
   richBriefIsEmpty,
+  richBriefPlainText,
   plainTextToBriefHtml,
   looksLikeBriefHtml,
 } from '@/components/tahi/rich-brief'
@@ -182,10 +183,36 @@ const PREDICTED_REQUEST_FIELDS: readonly PredictableField[] = [
   'dueDate', 'priority', 'estimatedHours', 'category', 'size',
 ]
 
+/**
+ * The same list for a client whose plan draws no Size control.
+ *
+ * `showSize` is false for every plan that is not maintain or scale, and for a
+ * client the list has not loaded yet. Asking for a size there filed the
+ * model's answer into `type`, which goes in the POST body verbatim, with no
+ * chip, no reason and no control anywhere on screen to correct it. A field
+ * nobody can see is a field nobody should be able to guess.
+ */
+const PREDICTED_REQUEST_FIELDS_NO_SIZE: readonly PredictableField[] =
+  PREDICTED_REQUEST_FIELDS.filter(f => f !== 'size')
+
 /** The defaults a control opens on, which read as empty until someone chooses. */
 const DEFAULT_CATEGORY = 'development'
 const DEFAULT_PRIORITY = 'standard'
 const DEFAULT_SIZE: RequestSize = 'small_task'
+
+/**
+ * What each predictable control opens on, in the predictor's own vocabulary.
+ *
+ * A suggestion equal to one of these is dropped rather than written. Without
+ * it a model answering "standard" or "development", which are the two most
+ * likely answers there are, tinted a control that never moved, put a Suggested
+ * chip beside it and offered a Clear link that changed nothing.
+ */
+const PREDICTION_DEFAULTS: Partial<Record<PredictableField, string | number>> = {
+  category: DEFAULT_CATEGORY,
+  priority: DEFAULT_PRIORITY,
+  size: 'small',
+}
 
 /**
  * A brief handed in from outside the editor, in the shape RichBrief stores.
@@ -501,9 +528,13 @@ function AlignedRequestDialog({
         break
       case 'estimatedHours':
         setEstimatedHours(String(value))
-        // A suggestion inside a collapsed disclosure is a suggestion nobody
-        // sees, and one that lands on submit unread is worse than none.
-        setMoreOpen(true)
+        // The disclosure is deliberately NOT opened. Expanding it mid-sentence
+        // pushes everything under the caret down by a two-field row with no
+        // interaction from the person typing, which at 375px is the whole
+        // reason they lose their place. The signal moves to the disclosure's
+        // own summary instead: a Suggested chip on the "More details" button,
+        // plus the polite live region, so a suggestion in there is still
+        // announced and still visibly waiting rather than landing unread.
         break
       case 'category':
         setCategory(String(value))
@@ -527,16 +558,25 @@ function AlignedRequestDialog({
     }
   }, [])
 
+  // The brief is Tiptap HTML in this dialog, and the route documents its
+  // `description` as plain text: it truncates at 2000 characters, so markup
+  // eats the budget a long brief needs, and the degraded path runs its
+  // escalation regex over the words, where a pasted link like
+  // "/blog/urgent-launch-notes" is not somebody saying this one is urgent.
+  const briefText = useMemo(() => richBriefPlainText(description), [description])
+
   const predictions = useFieldPredictions({
     open: open && !isSubRequest,
     isAdmin,
     paused: view !== 'form',
     subject: 'request',
     title,
-    description,
+    description: briefText,
     orgId: clientOrgId || null,
     category: category === DEFAULT_CATEGORY ? null : category,
-    fields: PREDICTED_REQUEST_FIELDS,
+    // Size is asked for only while its control is on screen. See
+    // PREDICTED_REQUEST_FIELDS_NO_SIZE.
+    fields: showSize ? PREDICTED_REQUEST_FIELDS : PREDICTED_REQUEST_FIELDS_NO_SIZE,
     // A control sitting on the value it opened with has not been answered, so
     // it reads as empty here. Anything the operator actually chose is in the
     // touched set already and never reaches this map.
@@ -545,8 +585,11 @@ function AlignedRequestDialog({
       priority: priority === DEFAULT_PRIORITY ? null : priority,
       estimatedHours: estimatedHours || null,
       category: category === DEFAULT_CATEGORY ? null : category,
-      size: type === DEFAULT_SIZE ? null : type,
+      // In the predictor's vocabulary (small | large), not the API's, so it
+      // can be compared against PREDICTION_DEFAULTS.
+      size: type === DEFAULT_SIZE ? null : 'large',
     },
+    defaults: PREDICTION_DEFAULTS,
     apply: applyPrediction,
     clear: clearPrediction,
   })
@@ -667,6 +710,14 @@ function AlignedRequestDialog({
         setDueDate('')
         setEstimatedHours('')
         setAiDrafted(false)
+        // Category and size go back too, but only when the LAST item's guess
+        // is what they are still carrying. reset() empties the suggested map,
+        // so anything left behind would read on the second item as an ordinary
+        // operator choice, with no chip and no Clear, and the next prediction
+        // would inherit its precedence from a guess about a different request.
+        // A category somebody actually picked is left alone: they picked it.
+        if (predictions.isSuggested('category')) setCategory(DEFAULT_CATEGORY)
+        if (predictions.isSuggested('size')) setType(DEFAULT_SIZE)
         // A second item is a second item's worth of decisions.
         predictions.reset()
         setSuccessMessage('Request created. Create another one below.')
@@ -908,6 +959,9 @@ function AlignedRequestDialog({
                         <SegmentedControl
                           role="radiogroup"
                           ariaLabel="Request size"
+                          describedBy={isAdmin && predictions.isSuggested('size')
+                            ? suggestionReasonId('req-size')
+                            : undefined}
                           value={type}
                           onChange={(next) => { markTouched('size'); setType(next) }}
                           options={sizeOptions}
@@ -1039,6 +1093,31 @@ function AlignedRequestDialog({
                   >
                     <ChevronDown size={14} aria-hidden="true" className="tahi-reqd-more-chev" />
                     More details
+                    {/* A suggestion inside a collapsed disclosure is one
+                        nobody sees. Rather than expanding it under a person
+                        mid-sentence, the summary says there is something in
+                        there, and the button's own name says so out loud. */}
+                    {!moreOpen && predictions.isSuggested('estimatedHours') && (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.25rem',
+                          marginLeft: '0.375rem',
+                          padding: '0.125rem 0.4375rem',
+                          borderRadius: 'var(--radius-badge)',
+                          background: 'var(--color-brand-100)',
+                          color: 'var(--color-link)',
+                          fontSize: '0.625rem',
+                          fontWeight: 700,
+                          letterSpacing: '0.03em',
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        <Sparkles size={12} aria-hidden="true" />
+                        Suggested estimate
+                      </span>
+                    )}
                   </button>
                   {moreOpen && (
                     <div
@@ -1084,6 +1163,15 @@ function AlignedRequestDialog({
                   )}
                 </div>
               )}
+
+              {/* Suggestions land in fields below the caret while somebody is
+                  still typing the title. Sighted operators catch that in
+                  peripheral vision; without this region a screen reader user
+                  gets no signal that three controls just changed. One sentence
+                  per batch, and it empties when the suggestions are cleared. */}
+              <div aria-live="polite" className="sr-only">
+                {predictions.announcement}
+              </div>
 
               {/* One link that empties every still-suggested field at once,
                   above the footer so it reads as "before you file this". */}

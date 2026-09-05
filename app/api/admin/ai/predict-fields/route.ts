@@ -22,6 +22,27 @@
  *
  * Nothing is written. The dialog fills its own fields and a human presses
  * Create, exactly as with the wizards.
+ *
+ * ACCESS SCOPING, and why three reads here are not filtered by it (CLAUDE.md
+ * rule 11). The named client is gated by requireAccessToOrg, and every
+ * grounding statement that touches a client's work is filtered to that one
+ * org. Three reads are not:
+ *
+ *   1. The studio-wide turnaround cohort. It runs only when the named client's
+ *      own cohort is under COHORT_FLOOR, and only a median in days leaves the
+ *      route: no row, no id, no title, nothing attributable to a client the
+ *      caller cannot see. A scoped operator learns how long the studio takes,
+ *      which is a fact about the studio.
+ *   2. The reads on the no-client path. hasEnoughContext only lets an absent
+ *      orgId through for `subject: 'task'` with `level: 'tahi_internal'`, and
+ *      a tahi_internal task carries no client by construction, so the cohort
+ *      and the billed hours there are the studio's own internal work.
+ *   3. The team roster. It is the vocabulary an assigneeId is validated
+ *      against, so a partial roster would silently drop valid suggestions, and
+ *      team members are not one of the three things rule 11 names.
+ *
+ * Every one of those is an aggregate or a colleague's name. Anything
+ * row-level about a client stays behind the org filter.
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -30,7 +51,8 @@ import { and, desc, eq, gte, isNull, sql } from 'drizzle-orm'
 import { HAIKU_MODEL } from '@/lib/ai-models'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { recordCost } from '@/lib/ai-cost'
+import { estimateCostUsd, recordCost } from '@/lib/ai-cost'
+import { getTrackEntitlements } from '@/lib/plan-utils'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { REQUEST_CATEGORIES, REQUEST_PRIORITIES } from '@/lib/request-vocabulary'
 import { TASK_PRIORITIES } from '@/lib/task-priorities'
@@ -41,8 +63,10 @@ import {
   isoDaysAgo,
   isoHoursAgo,
   median,
+  meetsCohortFloor,
   modeOf,
   startOfTodayIso,
+  usableTurnarounds,
 } from '@/lib/predict/stats'
 import {
   MAX_EMPTY_FIELDS,
@@ -77,6 +101,13 @@ const PREDICT_TIMEOUT_MS = 6000
  * A soft daily ceiling on prediction spend, read against prediction rows only.
  * Summing the whole `wizard` scope would mean the task wizard's own $5 budget
  * closed this door permanently the first time it was used.
+ *
+ * $2, and it means $2. The spend behind it is recomputed from each row's
+ * logged tokens rather than read off `estimated_usd_cents`, because that
+ * column is `Math.ceil(usd * 100)` and a Haiku pass at roughly 900 in / 80 out
+ * really costs about 0.13 cents. Summing the stored column made this a cap of
+ * 200 CALLS a day studio-wide, roughly a sixth of the money it reads like, and
+ * the feature went silently dead for everyone once it tripped.
  */
 const PREDICT_DAILY_CAP_CENTS = 200
 
@@ -98,10 +129,18 @@ const COST_STAGE = 'predict_fields'
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 //
-// One constant, byte-identical on every call, so the ephemeral cache block
-// actually hits. Both vocabularies are named here rather than interpolated per
-// subject: a prompt that changes shape between a request and a task would
-// cache twice and hit half as often.
+// One constant, byte-identical on every call. Both vocabularies are named here
+// rather than interpolated per subject: a prompt that changes shape between a
+// request and a task would be two prefixes rather than one.
+//
+// It carries a cache_control marker that is INERT at this length, and stays
+// there on purpose. Haiku 4.5's minimum cacheable prefix is 4096 tokens and
+// this block is about 480, so the API ignores the marker silently:
+// cache_creation_input_tokens and cache_read_input_tokens both stay 0 and no
+// error is raised. Nothing here pays a discounted rate today. The marker is
+// kept so the day this prompt grows past the minimum, or the model moves to
+// one with a lower one, caching starts working with no edit; if you ever want
+// to claim a saving from it, read usage.cache_read_input_tokens first.
 
 const SYSTEM_PROMPT = `You are a filing assistant for Tahi Studio, a Webflow design and development agency. Someone is part way through creating a work item and has left some fields empty. You suggest values for those fields only. You never take action, and a human sees every suggestion before it is saved.
 
@@ -295,6 +334,15 @@ async function loadStudioFacts(
   // Actual billed hours on comparable delivered work. The estimatedHours
   // column is nullable and nothing writes it unless a human typed it, so
   // grounding an estimate on it would eventually train on its own output.
+  //
+  // `billable` is filtered because the prompt line and the fallback's reason
+  // both say "billed hours". Summing internal time as well would inflate the
+  // estimate an operator is shown and make the sentence under it untrue.
+  //
+  // Both branches carry an ORDER BY. Without one the LIMIT picks whichever 200
+  // groups SQLite happened to build, so the median behind the estimate moved
+  // between two calls with identical inputs; most recent first is the window
+  // the rest of this file already reasons in.
   const billedHours = subject === 'request'
     ? database
       .select({ hours: sql<number>`SUM(${schema.timeEntries.hours})` })
@@ -302,11 +350,13 @@ async function loadStudioFacts(
       .innerJoin(schema.requests, eq(schema.timeEntries.requestId, schema.requests.id))
       .where(and(
         sql`${schema.requests.deliveredAt} IS NOT NULL`,
+        eq(schema.timeEntries.billable, true),
         gte(schema.requests.createdAt, since),
         category ? eq(schema.requests.category, category) : undefined,
         orgId ? eq(schema.requests.orgId, orgId) : undefined,
       ))
       .groupBy(schema.timeEntries.requestId)
+      .orderBy(sql`MAX(${schema.requests.deliveredAt}) DESC`)
       .limit(COHORT_LIMIT)
     : database
       .select({ hours: sql<number>`SUM(${schema.timeEntries.hours})` })
@@ -314,11 +364,13 @@ async function loadStudioFacts(
       .innerJoin(schema.tasks, eq(schema.timeEntries.taskId, schema.tasks.id))
       .where(and(
         sql`${schema.tasks.completedAt} IS NOT NULL`,
+        eq(schema.timeEntries.billable, true),
         gte(schema.tasks.createdAt, since),
         level ? eq(schema.tasks.type, level) : undefined,
         orgId ? eq(schema.tasks.orgId, orgId) : undefined,
       ))
       .groupBy(schema.timeEntries.taskId)
+      .orderBy(sql`MAX(${schema.tasks.completedAt}) DESC`)
       .limit(COHORT_LIMIT)
 
   // Who usually owns this category for this client. The junction rather than
@@ -340,7 +392,7 @@ async function loadStudioFacts(
       .limit(PARTICIPANT_LIMIT)
     : Promise.resolve([] as Array<{ participantId: string }>)
 
-  const [orgRows, orgCohort, studioCohort, hoursRows, assigneeRows, roster, sla] = await Promise.all([
+  const [orgRows, orgCohort, hoursRows, assigneeRows, roster, sla] = await Promise.all([
     orgId
       ? database
         .select({ name: schema.organisations.name, planType: schema.organisations.planType })
@@ -349,7 +401,6 @@ async function loadStudioFacts(
         .limit(1)
       : Promise.resolve([] as Array<{ name: string; planType: string | null }>),
     subject === 'request' ? requestCohort(true) : taskCohort(true),
-    subject === 'request' ? requestCohort(false) : taskCohort(false),
     billedHours,
     assignees,
     database
@@ -367,17 +418,33 @@ async function loadStudioFacts(
   const org = orgRows[0]
   facts.orgName = org?.name ?? null
   facts.planType = org?.planType ?? null
-  // The dialog's own rule (new-request-dialog.tsx largeAllowed), restated so a
-  // suggested size and the control it lands in can never disagree.
-  facts.canUseLargeTrack = org?.planType !== 'maintain'
+  // The entitlement itself rather than a restatement of it. The dialog's own
+  // `largeAllowed` reads `planType !== 'maintain'`, which is true for exactly
+  // the plans that have no track at all and whose Size control never renders;
+  // getTrackEntitlements is the one place that says which plans really carry a
+  // multi-day track. hasPrioritySupport only moves the slot COUNTS, never
+  // canUseLargeTrack, so false is safe to pass here.
+  facts.canUseLargeTrack = getTrackEntitlements(org?.planType ?? null, false).canUseLargeTrack
 
   const orgRowsTyped = orgCohort as CohortRow[]
-  const studioRowsTyped = studioCohort as CohortRow[]
+  const orgDeltas = orgRowsTyped.map(r => r.turnaroundDays)
 
-  const turnaround = turnaroundFromCohorts(
-    orgRowsTyped.map(r => r.turnaroundDays),
-    studioRowsTyped.map(r => r.turnaroundDays),
-  )
+  // The studio-wide cohort is a SECOND await rather than a seventh statement in
+  // the pass above, because turnaroundFromCohorts only ever looks at it when
+  // the client's own cohort is under the floor. It also cannot use either index
+  // migration 0090 adds a composite for, so unconditionally it was a full scan
+  // of every delivered request plus a sort, on every debounce, for a number
+  // usually thrown away. It is skipped entirely when there is no org to fall
+  // back FROM: the scoped query and the unscoped one are then the same query.
+  let studioDeltas: Array<number | null> = []
+  if (orgId && !meetsCohortFloor(usableTurnarounds(orgDeltas).length)) {
+    const studioRows = (subject === 'request'
+      ? await requestCohort(false)
+      : await taskCohort(false)) as CohortRow[]
+    studioDeltas = studioRows.map(r => r.turnaroundDays)
+  }
+
+  const turnaround = turnaroundFromCohorts(orgDeltas, studioDeltas)
   if (turnaround) {
     facts.cohortCount = turnaround.cohortCount
     if (turnaround.scope === 'client') facts.orgTurnaroundDays = turnaround.days
@@ -412,14 +479,31 @@ async function loadStudioFacts(
  * Null is deliberately not zero, the way the task wizard reads it: a database
  * that cannot be reached must not read as "nothing spent" and must not close
  * the door either.
+ *
+ * Two windows, one read, and the lower bound is the EARLIER of them. Reading
+ * only from midnight UTC meant that between 00:00 and 01:00 the hourly count
+ * silently lost the rows from the hour before, so a runaway debounce got a
+ * free pass once a day.
+ *
+ * The money is recomputed from each row's tokens rather than summed off the
+ * stored cents column. See PREDICT_DAILY_CAP_CENTS: that column is rounded up
+ * to a whole cent per row, and every call here costs a fraction of one.
  */
 async function readLedger(
   database: Database,
   userId: string | null,
 ): Promise<{ spentCents: number | null; recentCalls: number | null }> {
+  const dayStart = startOfTodayIso()
+  const hourAgo = isoHoursAgo(1)
+  const since = dayStart < hourAgo ? dayStart : hourAgo
+
   const rows = await database
     .select({
       cents: schema.aiCostLog.estimatedUsdCents,
+      provider: schema.aiCostLog.provider,
+      model: schema.aiCostLog.model,
+      inputTokens: schema.aiCostLog.inputTokens,
+      outputTokens: schema.aiCostLog.outputTokens,
       scopeId: schema.aiCostLog.scopeId,
       createdAt: schema.aiCostLog.createdAt,
     })
@@ -427,16 +511,26 @@ async function readLedger(
     .where(and(
       eq(schema.aiCostLog.scope, 'wizard'),
       eq(schema.aiCostLog.stage, COST_STAGE),
-      gte(schema.aiCostLog.createdAt, startOfTodayIso()),
+      gte(schema.aiCostLog.createdAt, since),
     ))
     .limit(2000)
 
-  const hourAgo = isoHoursAgo(1)
   let spentCents = 0
   let recentCalls = 0
   for (const row of rows) {
-    spentCents += row.cents ?? 0
-    if (userId && row.scopeId === userId && (row.createdAt ?? '') >= hourAgo) recentCalls += 1
+    const at = row.createdAt ?? ''
+    if (at >= dayStart) {
+      const fromTokens = estimateCostUsd({
+        provider: row.provider ?? '',
+        model: row.model ?? '',
+        inputTokens: row.inputTokens ?? 0,
+        outputTokens: row.outputTokens ?? 0,
+      }) * 100
+      // A row off a model the rate card does not carry still counts for
+      // something, so the stored figure stands in rather than reading as free.
+      spentCents += fromTokens > 0 ? fromTokens : (row.cents ?? 0)
+    }
+    if (userId && row.scopeId === userId && at >= hourAgo) recentCalls += 1
   }
   return { spentCents, recentCalls }
 }
@@ -555,7 +649,14 @@ export async function POST(req: NextRequest) {
   // The gate, before anything is spent: no model call, no D1 read, no cost
   // row. A four word title with no client is the overwhelmingly common state
   // of a dialog someone just opened, and answering it is not free.
-  if (empty.length === 0 || !hasEnoughContext({ subject, title, orgId, level })) {
+  //
+  // The two empty answers are told apart. "Nothing left to fill" is not a
+  // complaint about the brief, and a caller (the MCP tool included) that
+  // cannot tell them apart has no idea whether typing more would help.
+  if (empty.length === 0) {
+    return answer({ suggestions: {}, reason: 'nothing_to_fill' })
+  }
+  if (!hasEnoughContext({ subject, title, orgId, level })) {
     return answer({ suggestions: {}, reason: 'thin_context' })
   }
 
@@ -570,6 +671,30 @@ export async function POST(req: NextRequest) {
     const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
     const denied = await requireAccessToOrg(drizzle, userId, orgId)
     if (denied) return denied
+  }
+
+  // The ceiling is read BEFORE the grounding. An operator already past their
+  // hour was still paying for the whole grounding pass, once per keystroke
+  // pause, to build a prompt this route was never going to send. Guarded on
+  // the key as well: a deploy with no key never sends anything, so it has no
+  // spend to check and should not pay for a ledger read to learn that.
+  if (database && process.env.ANTHROPIC_API_KEY) {
+    let spentCents: number | null = null
+    let recentCalls: number | null = null
+    try {
+      const ledger = await readLedger(database, userId)
+      spentCents = ledger.spentCents
+      recentCalls = ledger.recentCalls
+    } catch {
+      // An unreadable ledger is unknown spend, not zero spend, and it must not
+      // close the door either. Same reading the task wizard takes.
+    }
+    if (
+      (spentCents !== null && spentCents >= PREDICT_DAILY_CAP_CENTS) ||
+      (recentCalls !== null && recentCalls >= PREDICT_HOURLY_CALLS_PER_USER)
+    ) {
+      return answer({ suggestions: {}, reason: 'ai_rate_limited' })
+    }
   }
 
   // The facts feed both paths, so they are loaded before the key is checked:
@@ -593,25 +718,6 @@ export async function POST(req: NextRequest) {
     return fallback('ai_unavailable')
   }
 
-  if (database) {
-    let spentCents: number | null = null
-    let recentCalls: number | null = null
-    try {
-      const ledger = await readLedger(database, userId)
-      spentCents = ledger.spentCents
-      recentCalls = ledger.recentCalls
-    } catch {
-      // An unreadable ledger is unknown spend, not zero spend, and it must not
-      // close the door either. Same reading the task wizard takes.
-    }
-    if (
-      (spentCents !== null && spentCents >= PREDICT_DAILY_CAP_CENTS) ||
-      (recentCalls !== null && recentCalls >= PREDICT_HOURLY_CALLS_PER_USER)
-    ) {
-      return answer({ suggestions: {}, reason: 'ai_rate_limited' })
-    }
-  }
-
   const userMessage = buildUserMessage({
     subject, title, description, category, level, empty, todayIso, facts,
   })
@@ -625,8 +731,8 @@ export async function POST(req: NextRequest) {
       {
         model: HAIKU_MODEL,
         max_tokens: MAX_OUTPUT_TOKENS,
-        // Stable and byte-identical on every call, so repeat passes inside the
-        // TTL pay the discounted rate on the whole instruction block.
+        // Inert below Haiku 4.5's 4096 token minimum, and kept for the day
+        // the prompt or the model crosses it. See the note above SYSTEM_PROMPT.
         system: [{
           type: 'text',
           text: SYSTEM_PROMPT,
@@ -679,6 +785,7 @@ export async function POST(req: NextRequest) {
     requested: empty,
     rosterIds: facts.roster.map(r => r.id),
     filledKeys,
+    canUseLargeTrack: facts.canUseLargeTrack,
   })
 
   return answer({ suggestions })

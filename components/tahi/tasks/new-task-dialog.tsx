@@ -111,6 +111,16 @@ const PREDICTED_TASK_FIELDS: readonly PredictableField[] = [
 /** The priority a task opens on, which reads as unanswered until someone picks. */
 const DEFAULT_PRIORITY = 'standard'
 
+/**
+ * What each predictable control opens on.
+ *
+ * A suggestion equal to one of these is dropped rather than written, so a
+ * model answering "standard" cannot chip a control that never moved.
+ */
+const PREDICTION_DEFAULTS: Partial<Record<PredictableField, string | number>> = {
+  priority: DEFAULT_PRIORITY,
+}
+
 /** The repo's reference for a request, everywhere: #042, never TR-0042. */
 function requestRef(requestNumber: number | null): string {
   return requestNumber != null ? `#${String(requestNumber).padStart(3, '0')}` : 'Request'
@@ -320,6 +330,7 @@ export function NewTaskDialog({
       estimatedHours: estimate || null,
       assigneeId,
     },
+    defaults: PREDICTION_DEFAULTS,
     apply: applyPrediction,
     clear: clearPrediction,
   })
@@ -622,6 +633,9 @@ export function NewTaskDialog({
                 size="sm"
                 fill
                 ariaLabel="Priority"
+                describedBy={predictions.isSuggested('priority')
+                  ? suggestionReasonId('new-task-priority')
+                  : undefined}
                 options={TASK_PRIORITIES.map(p => ({ value: p, label: taskPriorityLabel(p) }))}
               />
             </SuggestedField>
@@ -696,6 +710,9 @@ export function NewTaskDialog({
                 allowClear
                 placeholder="Unassigned"
                 searchPlaceholder="Search people..."
+                describedBy={predictions.isSuggested('assigneeId')
+                  ? suggestionReasonId('new-task-assignee')
+                  : undefined}
                 onChange={next => { markTouched('assigneeId'); setAssigneeId(next) }}
               />
             </SuggestedField>
@@ -763,6 +780,14 @@ export function NewTaskDialog({
               </div>
             </div>
           </FieldGroup>
+          {/* Suggestions land in fields below the caret while somebody is
+              still typing the title. One polite sentence per batch, so a
+              screen reader user is told what changed instead of finding out
+              on submit. It empties when the suggestions are cleared. */}
+          <div aria-live="polite" className="sr-only">
+            {predictions.announcement}
+          </div>
+
           {predictions.hasAny && (
             <div>
               <SuggestionLink onClick={predictions.clearAll}>Clear suggestions</SuggestionLink>

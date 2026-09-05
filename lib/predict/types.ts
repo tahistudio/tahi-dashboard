@@ -62,9 +62,16 @@ export type PredictSuggestions = Partial<Record<PredictableField, FieldSuggestio
 /**
  * Why an answer came back empty or from the keyword tables rather than the
  * model. Never an error status: a thin brief is the normal case.
+ *
+ * `thin_context` and `nothing_to_fill` are deliberately separate. The first
+ * says the title is too short to reason from and the caller should type more;
+ * the second says every field was already answered, which is a compliment.
+ * Conflating them left a caller (the MCP tool included) unable to tell "your
+ * title is too thin" from "there was nothing left to do".
  */
 export type PredictDegradedReason =
   | 'thin_context'
+  | 'nothing_to_fill'
   | 'ai_unavailable'
   | 'ai_rate_limited'
   | 'timeout'

@@ -15,6 +15,12 @@
 --     assignee and due_date only), so the level cohort scanned every task at
 --     that level including the open ones, which are the majority.
 --
+--   idx_requests_delivered (delivered_at)
+--     the studio-wide fallback cohort, read only when a client's own cohort is
+--     under five rows, has no org_id predicate and so cannot use the composite
+--     above. Without this one SQLite scans requests and sorts it for the
+--     ORDER BY delivered_at DESC.
+--
 -- Both are IF NOT EXISTS, so re-running is safe. Additive only: no column is
 -- added, nothing is backfilled, and no existing query changes shape, so this
 -- can be applied in any order relative to the deploy. Applying it FIRST is
@@ -30,3 +36,4 @@
 -- carrying the entry is live.
 CREATE INDEX IF NOT EXISTS idx_requests_org_delivered ON requests(org_id, delivered_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_type_completed ON tasks(type, completed_at);
+CREATE INDEX IF NOT EXISTS idx_requests_delivered ON requests(delivered_at);

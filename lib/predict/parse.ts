@@ -65,6 +65,15 @@ export interface ParseContext {
   rosterIds: readonly string[]
   /** Fields the operator has already touched. Never returned, whatever the model says. */
   filledKeys: readonly string[]
+  /**
+   * False when this client's plan has no multi-day track, which makes 'large'
+   * a value the control cannot hold. The prompt says so too, but a sentence in
+   * a prompt is a request and this is the rule: everything else in this file
+   * abstains rather than letting a value through for someone else to correct,
+   * and a suggested size the dialog immediately rewrites back to Small, with
+   * the reason still arguing for multi-day above it, is exactly that.
+   */
+  canUseLargeTrack: boolean
 }
 
 function asReason(value: unknown): string | null {
@@ -95,7 +104,8 @@ function validateValue(
     case 'category':
       return typeof value === 'string' && isRequestCategory(value) ? value : null
     case 'size':
-      return value === 'small' || value === 'large' ? value : null
+      if (value === 'small') return value
+      return value === 'large' && ctx.canUseLargeTrack ? value : null
     case 'assigneeId':
       return typeof value === 'string' && ctx.rosterIds.includes(value) ? value : null
     case 'dueDate': {
