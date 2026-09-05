@@ -95,8 +95,9 @@ import { useClientsRailState } from './_list/use-clients-rail-state'
 const PAGE_SIZE = 50
 
 interface ClientsFetch {
+  /** Both buckets, merged. The views decide which of them may be seen. */
   rows: ClientApiRow[]
-  /** The live bucket came back full, so there is probably another page. */
+  /** The bucket being paged came back full, so there is probably another. */
   pageFull: boolean
 }
 
