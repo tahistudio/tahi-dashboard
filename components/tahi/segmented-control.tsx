@@ -56,6 +56,13 @@ export interface SegmentedControlProps<V extends string> {
   onChange: (next: V) => void
   options: ReadonlyArray<SegmentedControlOption<V>>
   ariaLabel: string
+  /**
+   * id of a caption that describes the whole group, e.g. the one-line reason
+   * under a suggested field. Emitted as aria-describedby on the track, which
+   * is the element carrying the role, so the description reaches a screen
+   * reader on focus rather than sitting unreferenced beside the control.
+   */
+  describedBy?: string
   /** tablist and radiogroup get a roving tabindex plus Arrow, Home and End keys. */
   role?: SegmentedControlRole
   /** sm is 2rem tall from md up, md is 2.25rem; both are 2.75rem below md. */
@@ -169,6 +176,7 @@ export function SegmentedControl<V extends string>({
   onChange,
   options,
   ariaLabel,
+  describedBy,
   role = 'group',
   size = 'md',
   fill = false,
@@ -271,7 +279,13 @@ export function SegmentedControl<V extends string>({
     .join(' ')
 
   return (
-    <div ref={trackRef} role={role} aria-label={ariaLabel} className={trackClass}>
+    <div
+      ref={trackRef}
+      role={role}
+      aria-label={ariaLabel}
+      aria-describedby={describedBy}
+      className={trackClass}
+    >
       <span
         ref={pillRef}
         className="tahi-seg-pill"

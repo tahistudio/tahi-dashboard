@@ -338,6 +338,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       // could only offer "Copy Payment Link", a round trip to Stripe, while
       // the link we already persisted at finalise time sat unread.
       stripeHostedInvoiceUrl: schema.invoices.stripeHostedInvoiceUrl,
+      xeroOnlineInvoiceUrl: schema.invoices.xeroOnlineInvoiceUrl,
       xeroInvoiceId: schema.invoices.xeroInvoiceId,
       // Which channel raised this bill. Omitting it made every invoice read
       // "Source: Manual" on the detail page while the list badged it right.

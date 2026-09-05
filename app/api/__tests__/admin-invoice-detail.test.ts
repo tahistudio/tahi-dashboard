@@ -237,6 +237,7 @@ describe('GET /api/admin/invoices/[id]', () => {
     expect(res.status).toBe(200)
 
     expect(projectionOf(queries[1]).stripeHostedInvoiceUrl).toBe('stripe_hosted_invoice_url')
+    expect(projectionOf(queries[1]).xeroOnlineInvoiceUrl).toBe('xero_online_invoice_url')
 
     const body = await res.json() as { invoice: { stripeHostedInvoiceUrl: string } }
     expect(body.invoice.stripeHostedInvoiceUrl).toBe(INVOICE_ROW.stripeHostedInvoiceUrl)

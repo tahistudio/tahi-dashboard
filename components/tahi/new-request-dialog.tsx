@@ -1,30 +1,28 @@
 'use client'
 
 /**
- * <NewRequestDialog>. Two dialogs behind one export.
+ * <NewRequestDialog>. One dialog, two audiences.
  *
- * <AlignedRequestDialog> is the rebuild against the approved Claude Design
- * prototype: a centred modal, an audience that runs off `isAdmin` alone, and
- * the body in the order a person fills it in (AI card, client, category tiles,
- * title, brief, size, priority or placement, ideal due date). Planning fields
- * that are not intake fields sit behind a "More details" disclosure.
+ * The rebuild against the approved Claude Design prototype: a centred modal,
+ * an audience that runs off `isAdmin` alone, and the body in the order a
+ * person fills it in (AI card, client, category tiles, title, brief, size,
+ * priority or placement, ideal due date). Planning fields that are not intake
+ * fields sit behind a "More details" disclosure.
  *
- * <LegacyRequestDialog> is the right-hand slide-over the team and clients have
- * today, kept verbatim so nothing changes for them until the lead flips
- * NEW_DIALOG_FOR_EVERYONE below. That flag plus `isSuperAdmin` is the whole
- * rollout gate; the audience split inside the new dialog has nothing to do
- * with it. "Verbatim" is meant literally, down to the intake block
- * (<LegacyIntakeQuestions>) and its copy: the AI card, the size suggestion,
- * the queue placement and the confirmation the shipped dialog carried were
- * already `isSuperAdmin`-only, and a super admin now gets the rebuild, so no
- * pixel a client sees moves before the flip.
+ * There was a second dialog in this file, the right-hand slide-over the
+ * rebuild replaced, kept verbatim behind a NEW_DIALOG_FOR_EVERYONE flag so
+ * that nothing moved for a client before the lead flipped it. The flag went
+ * true in 51ef34b and every admin and every client has had the rebuild since,
+ * which left seven hundred unreachable lines duplicating every field, still
+ * type-checked, still linted, and still the first hit for anyone searching
+ * this file for where a control lives. It is gone.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { apiPath } from '@/lib/api'
 import {
-  X, Loader2, Zap, CheckCircle2, Lock, Layers, AlignLeft, Clock,
+  Loader2, CheckCircle2, Layers, Clock,
   Sparkles, ChevronRight, ChevronDown, Check, Inbox, ArrowUp, ArrowLeftRight,
   Info, Palette, Code2, FileText, Compass, Briefcase, Bug,
 } from 'lucide-react'
@@ -35,26 +33,25 @@ import { Tooltip } from '@/components/tahi/tooltip'
 import {
   RichBrief,
   richBriefIsEmpty,
+  richBriefPlainText,
   plainTextToBriefHtml,
   looksLikeBriefHtml,
 } from '@/components/tahi/rich-brief'
 import { useToast } from '@/components/tahi/toast'
-import { usePermissions } from '@/components/tahi/permissions-context'
 import { AiRequestWizardPanel } from '@/components/tahi/ai-request-wizard'
 import {
   suggestRequestSize,
   sizeToRequestType,
   type SizeSuggestion,
 } from '@/lib/request-size-suggestion'
-
-// ── Rollout gate ───────────────────────────────────────────────────────────────
-
-/**
- * The rebuilt dialog is Liam and Staci only while it beds in. Flip this to
- * true in one commit and every admin and every client gets it; the legacy
- * component below can then be deleted in the commit after.
- */
-const NEW_DIALOG_FOR_EVERYONE = true
+import {
+  SuggestedField,
+  SuggestedLabel,
+  SuggestionLink,
+  suggestionReasonId,
+} from '@/components/tahi/forms/suggested-field'
+import { useFieldPredictions } from '@/components/tahi/forms/use-field-predictions'
+import type { PredictableField } from '@/lib/predict/types'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -135,33 +132,6 @@ interface CreatedSummary {
   retainer: boolean
 }
 
-const REQUEST_TYPES = [
-  {
-    value: 'small_task',
-    label: 'Small task',
-    desc: '1 day or less',
-    icon: AlignLeft,
-    hint: 'Content updates, bug fixes, quick changes',
-  },
-  {
-    value: 'large_task',
-    label: 'Large task',
-    desc: 'Multi-day',
-    icon: Layers,
-    hint: 'New features, redesigns, complex builds',
-    requiresScale: true,
-  },
-]
-
-const CATEGORIES = [
-  { value: 'development', label: 'Development' },
-  { value: 'design',      label: 'Design'      },
-  { value: 'content',     label: 'Content'     },
-  { value: 'strategy',    label: 'Strategy'    },
-  { value: 'admin',       label: 'Admin'       },
-  { value: 'bug',         label: 'Bug fix'     },
-]
-
 /** The tile grid. Colours come from the --cat-* tokens in app/globals.css. */
 const CATEGORY_TILES: Array<{
   value: string
@@ -189,17 +159,60 @@ function pad2(n: number): string {
 
 /**
  * An ISO date `days` from `from`, in the person's own calendar rather than
- * UTC, so "tomorrow" is tomorrow wherever they are. The dialog defaults the
- * ideal due date to seven days out and floors the picker at one.
+ * UTC, so "tomorrow" is tomorrow wherever they are. The picker floors at one
+ * day out.
  */
 export function isoDatePlusDays(days: number, from: Date = new Date()): string {
   const d = new Date(from.getFullYear(), from.getMonth(), from.getDate() + days)
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 }
 
-/** Days the ideal due date defaults to, and the floor under the picker. */
-export const DUE_DATE_DEFAULT_DAYS = 7
+/**
+ * The floor under the picker.
+ *
+ * There is deliberately no default any more. The ideal due date used to open
+ * at today plus seven, a blind constant rendered as an ordinary filled field,
+ * so nobody could tell a date the studio had thought about from one nobody
+ * had. It now opens empty, which is honest on its own and leaves somewhere for
+ * a grounded suggestion to land.
+ */
 export const DUE_DATE_MIN_DAYS = 1
+
+/** The fields the team's request dialog will accept a suggestion for. */
+const PREDICTED_REQUEST_FIELDS: readonly PredictableField[] = [
+  'dueDate', 'priority', 'estimatedHours', 'category', 'size',
+]
+
+/**
+ * The same list for a client whose plan draws no Size control.
+ *
+ * `showSize` is false for every plan that is not maintain or scale, and for a
+ * client the list has not loaded yet. Asking for a size there filed the
+ * model's answer into `type`, which goes in the POST body verbatim, with no
+ * chip, no reason and no control anywhere on screen to correct it. A field
+ * nobody can see is a field nobody should be able to guess.
+ */
+const PREDICTED_REQUEST_FIELDS_NO_SIZE: readonly PredictableField[] =
+  PREDICTED_REQUEST_FIELDS.filter(f => f !== 'size')
+
+/** The defaults a control opens on, which read as empty until someone chooses. */
+const DEFAULT_CATEGORY = 'development'
+const DEFAULT_PRIORITY = 'standard'
+const DEFAULT_SIZE: RequestSize = 'small_task'
+
+/**
+ * What each predictable control opens on, in the predictor's own vocabulary.
+ *
+ * A suggestion equal to one of these is dropped rather than written. Without
+ * it a model answering "standard" or "development", which are the two most
+ * likely answers there are, tinted a control that never moved, put a Suggested
+ * chip beside it and offered a Clear link that changed nothing.
+ */
+const PREDICTION_DEFAULTS: Partial<Record<PredictableField, string | number>> = {
+  category: DEFAULT_CATEGORY,
+  priority: DEFAULT_PRIORITY,
+  size: 'small',
+}
 
 /**
  * A brief handed in from outside the editor, in the shape RichBrief stores.
@@ -336,13 +349,13 @@ const DIALOG_CSS = `
 
 // ── Entry point ────────────────────────────────────────────────────────────────
 
+/** Kept as the export every caller already names, rather than renaming a
+ *  dozen import sites on the day the second dialog went away. */
 export function NewRequestDialog(props: NewRequestDialogProps) {
-  const { isSuperAdmin } = usePermissions()
-  const rebuilt = NEW_DIALOG_FOR_EVERYONE || isSuperAdmin
-  return rebuilt ? <AlignedRequestDialog {...props} /> : <LegacyRequestDialog {...props} />
+  return <AlignedRequestDialog {...props} />
 }
 
-// ── The rebuilt dialog ─────────────────────────────────────────────────────────
+// ── The dialog ─────────────────────────────────────────────────────────
 
 type DialogView = 'form' | 'ai' | 'done'
 
@@ -374,12 +387,13 @@ function AlignedRequestDialog({
 
   // Form fields
   const [title, setTitle] = useState('')
-  const [type, setType] = useState<RequestSize>('small_task')
-  const [category, setCategory] = useState('development')
+  const [type, setType] = useState<RequestSize>(DEFAULT_SIZE)
+  const [category, setCategory] = useState(DEFAULT_CATEGORY)
   const [description, setDescription] = useState('')
-  const [priority, setPriority] = useState('standard')
+  const [priority, setPriority] = useState(DEFAULT_PRIORITY)
   const [placement, setPlacement] = useState<Placement>('queue')
-  const [dueDate, setDueDate] = useState(() => isoDatePlusDays(DUE_DATE_DEFAULT_DAYS))
+  // Empty on purpose. See DUE_DATE_MIN_DAYS.
+  const [dueDate, setDueDate] = useState('')
   const [startDate, setStartDate] = useState('')
   const [estimatedHours, setEstimatedHours] = useState('')
   const [moreOpen, setMoreOpen] = useState(false)
@@ -448,15 +462,15 @@ function AlignedRequestDialog({
     if (!open) return
     setView('form')
     setTitle('')
-    setType('small_task')
-    setCategory('development')
+    setType(DEFAULT_SIZE)
+    setCategory(DEFAULT_CATEGORY)
     setDescription('')
-    setPriority('standard')
+    setPriority(DEFAULT_PRIORITY)
     setPlacement('queue')
     setFormResponses({})
     setIntakeQuestions([])
     setStartDate('')
-    setDueDate(isoDatePlusDays(DUE_DATE_DEFAULT_DAYS))
+    setDueDate('')
     setEstimatedHours('')
     setMoreOpen(false)
     setClientOrgId(forceOrgId ?? defaultOrgId ?? '')
@@ -494,14 +508,106 @@ function AlignedRequestDialog({
     setType(prev => (prev === next ? prev : next))
   }, [suggestionShowing, suggestion.size])
 
-  // An AI-authored draft handed in by the caller pre-fills the form.
+  // ── Predictive autofill, team only ───────────────────────────────────────
+  //
+  // This dialog is one component serving both audiences, so the gate is the
+  // hook itself rather than the fields it fills: with isAdmin false there is
+  // no timer, no fetch and no state. A due date derived from the studio's own
+  // medians and shown to a client reads as an SLA nobody agreed to, and a
+  // client never sees priority or hours at all.
+  //
+  // A sub-request is out too: it inherits its parent's category and dates
+  // locally, which is a better answer than a model's and costs nothing.
+  const applyPrediction = useCallback((field: PredictableField, value: string | number) => {
+    switch (field) {
+      case 'dueDate':
+        setDueDate(String(value))
+        break
+      case 'priority':
+        setPriority(String(value))
+        break
+      case 'estimatedHours':
+        setEstimatedHours(String(value))
+        // The disclosure is deliberately NOT opened. Expanding it mid-sentence
+        // pushes everything under the caret down by a two-field row with no
+        // interaction from the person typing, which at 375px is the whole
+        // reason they lose their place. The signal moves to the disclosure's
+        // own summary instead: a Suggested chip on the "More details" button,
+        // plus the polite live region, so a suggestion in there is still
+        // announced and still visibly waiting rather than landing unread.
+        break
+      case 'category':
+        setCategory(String(value))
+        break
+      case 'size':
+        setType(sizeToRequestType(value === 'large' ? 'large' : 'small'))
+        break
+      default:
+        break
+    }
+  }, [])
+
+  const clearPrediction = useCallback((field: PredictableField) => {
+    switch (field) {
+      case 'dueDate': setDueDate(''); break
+      case 'priority': setPriority(DEFAULT_PRIORITY); break
+      case 'estimatedHours': setEstimatedHours(''); break
+      case 'category': setCategory(DEFAULT_CATEGORY); break
+      case 'size': setType(DEFAULT_SIZE); break
+      default: break
+    }
+  }, [])
+
+  // The brief is Tiptap HTML in this dialog, and the route documents its
+  // `description` as plain text: it truncates at 2000 characters, so markup
+  // eats the budget a long brief needs, and the degraded path runs its
+  // escalation regex over the words, where a pasted link like
+  // "/blog/urgent-launch-notes" is not somebody saying this one is urgent.
+  const briefText = useMemo(() => richBriefPlainText(description), [description])
+
+  const predictions = useFieldPredictions({
+    open: open && !isSubRequest,
+    isAdmin,
+    paused: view !== 'form',
+    subject: 'request',
+    title,
+    description: briefText,
+    orgId: clientOrgId || null,
+    category: category === DEFAULT_CATEGORY ? null : category,
+    // Size is asked for only while its control is on screen. See
+    // PREDICTED_REQUEST_FIELDS_NO_SIZE.
+    fields: showSize ? PREDICTED_REQUEST_FIELDS : PREDICTED_REQUEST_FIELDS_NO_SIZE,
+    // A control sitting on the value it opened with has not been answered, so
+    // it reads as empty here. Anything the operator actually chose is in the
+    // touched set already and never reaches this map.
+    values: {
+      dueDate: dueDate || null,
+      priority: priority === DEFAULT_PRIORITY ? null : priority,
+      estimatedHours: estimatedHours || null,
+      category: category === DEFAULT_CATEGORY ? null : category,
+      // In the predictor's vocabulary (small | large), not the API's, so it
+      // can be compared against PREDICTION_DEFAULTS.
+      size: type === DEFAULT_SIZE ? null : 'large',
+    },
+    defaults: PREDICTION_DEFAULTS,
+    apply: applyPrediction,
+    clear: clearPrediction,
+  })
+  const { markTouched, markWritten } = predictions
+
+  // An AI-authored draft handed in by the caller pre-fills the form. It writes
+  // the category, so the predictor is told: a draft outranks a guess, and the
+  // two must not both land on the same field.
   useEffect(() => {
     if (!open || !aiDraft) return
     if (aiDraft.title) setTitle(aiDraft.title)
     if (aiDraft.description) setDescription(toBriefHtml(aiDraft.description))
-    if (aiDraft.category) setCategory(aiDraft.category)
+    if (aiDraft.category) {
+      setCategory(aiDraft.category)
+      markWritten(['category'])
+    }
     setAiDrafted(true)
-  }, [open, aiDraft])
+  }, [open, aiDraft, markWritten])
 
   const gateInput: SubmitGateInput = {
     title,
@@ -524,9 +630,13 @@ function AlignedRequestDialog({
     setType(draft.type === 'large_task' || draft.type === 'new_feature' ? 'large_task' : 'small_task')
     setAiDrafted(true)
     setSizeChangeOpen(false)
+    // A draft beats a prediction. Both fields it wrote are now spoken for, and
+    // the predictor stands off for a moment rather than answering a title that
+    // changed under it.
+    markWritten(['category', 'size'])
     setView('form')
     showToast('Draft ready. Review it below.')
-  }, [showToast])
+  }, [showToast, markWritten])
 
   async function handleSubmit(e: React.FormEvent, saveAndCreateAnother = false) {
     e.preventDefault()
@@ -595,11 +705,21 @@ function AlignedRequestDialog({
       if (saveAndCreateAnother) {
         setTitle('')
         setDescription('')
-        setPriority('standard')
+        setPriority(DEFAULT_PRIORITY)
         setStartDate('')
-        setDueDate(isoDatePlusDays(DUE_DATE_DEFAULT_DAYS))
+        setDueDate('')
         setEstimatedHours('')
         setAiDrafted(false)
+        // Category and size go back too, but only when the LAST item's guess
+        // is what they are still carrying. reset() empties the suggested map,
+        // so anything left behind would read on the second item as an ordinary
+        // operator choice, with no chip and no Clear, and the next prediction
+        // would inherit its precedence from a guess about a different request.
+        // A category somebody actually picked is left alone: they picked it.
+        if (predictions.isSuggested('category')) setCategory(DEFAULT_CATEGORY)
+        if (predictions.isSuggested('size')) setType(DEFAULT_SIZE)
+        // A second item is a second item's worth of decisions.
+        predictions.reset()
         setSuccessMessage('Request created. Create another one below.')
         // onCreated is a refresh signal, not a close signal: the callers that
         // close do that themselves, and the sub-request panels do their
@@ -755,8 +875,23 @@ function AlignedRequestDialog({
               )}
 
               {/* Category tiles */}
-              <FieldGroup label="What kind of work?">
-                <CategoryGrid value={category} onChange={setCategory} />
+              <FieldGroup
+                label="What kind of work?"
+                after={predictions.isSuggested('category')
+                  ? <SuggestedLabel label="category" onClear={() => predictions.clearField('category')} />
+                  : null}
+              >
+                <SuggestedField
+                  suggested={predictions.isSuggested('category')}
+                  reason={predictions.reasonFor('category')}
+                  fieldId="req-category"
+                >
+                  <CategoryGrid
+                    value={category}
+                    describedBy={predictions.isSuggested('category') ? suggestionReasonId('req-category') : undefined}
+                    onChange={(v) => { markTouched('category'); setCategory(v) }}
+                  />
+                </SuggestedField>
               </FieldGroup>
 
               {/* Title */}
@@ -802,7 +937,12 @@ function AlignedRequestDialog({
 
               {/* Size */}
               {showSize && (
-                <FieldGroup label="Size">
+                <FieldGroup
+                  label="Size"
+                  after={isAdmin && predictions.isSuggested('size')
+                    ? <SuggestedLabel label="size" onClear={() => predictions.clearField('size')} />
+                    : null}
+                >
                   {suggestionShowing ? (
                     <SizeSuggestionChip
                       suggestion={suggestion}
@@ -811,21 +951,33 @@ function AlignedRequestDialog({
                     />
                   ) : (
                     <>
-                      <SegmentedControl
-                        role="radiogroup"
-                        ariaLabel="Request size"
-                        value={type}
-                        onChange={setType}
-                        options={sizeOptions}
-                        fill
-                      />
+                      <SuggestedField
+                        suggested={isAdmin && predictions.isSuggested('size')}
+                        reason={predictions.reasonFor('size')}
+                        fieldId="req-size"
+                      >
+                        <SegmentedControl
+                          role="radiogroup"
+                          ariaLabel="Request size"
+                          describedBy={isAdmin && predictions.isSuggested('size')
+                            ? suggestionReasonId('req-size')
+                            : undefined}
+                          value={type}
+                          onChange={(next) => { markTouched('size'); setType(next) }}
+                          options={sizeOptions}
+                          fill
+                        />
+                      </SuggestedField>
                       {isClient && (
                         <QuietLink onClick={() => setSizeChangeOpen(false)}>Use suggestion</QuietLink>
                       )}
                       {/* Only while there are two sizes to choose between:
                           on a single-track plan the hint and the Info note
                           below would say the same sentence twice. */}
-                      {isAdmin && largeAllowed && (
+                      {/* The deterministic hint steps aside while a grounded
+                          suggestion is on screen, or the field carries two
+                          sentences about the same choice. */}
+                      {isAdmin && largeAllowed && !predictions.isSuggested('size') && (
                         <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', margin: '0.375rem 0 0', lineHeight: 1.45 }}>
                           {suggestion.hint}
                         </p>
@@ -848,20 +1000,55 @@ function AlignedRequestDialog({
               {/* Team: priority beside the date. Client: placement, then date. */}
               {isAdmin ? (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '0.75rem' }}>
-                  <FieldGroup label="Priority" htmlFor="req-priority">
-                    <StyledSelect id="req-priority" value={priority} onChange={setPriority}>
-                      <option value="standard">Standard</option>
-                      <option value="high">High</option>
-                    </StyledSelect>
+                  <FieldGroup
+                    label="Priority"
+                    htmlFor="req-priority"
+                    after={predictions.isSuggested('priority')
+                      ? <SuggestedLabel label="priority" onClear={() => predictions.clearField('priority')} />
+                      : null}
+                  >
+                    <SuggestedField
+                      suggested={predictions.isSuggested('priority')}
+                      reason={predictions.reasonFor('priority')}
+                      fieldId="req-priority"
+                    >
+                      <StyledSelect
+                        id="req-priority"
+                        value={priority}
+                        describedBy={predictions.isSuggested('priority') ? suggestionReasonId('req-priority') : undefined}
+                        onChange={(v) => { markTouched('priority'); setPriority(v) }}
+                      >
+                        <option value="standard">Standard</option>
+                        <option value="high">High</option>
+                      </StyledSelect>
+                    </SuggestedField>
                   </FieldGroup>
-                  <FieldGroup label="Ideal due date" htmlFor="req-due-date" after={<DueDateInfo />}>
-                    <StyledInput
-                      id="req-due-date"
-                      type="date"
-                      value={dueDate}
-                      min={isoDatePlusDays(DUE_DATE_MIN_DAYS)}
-                      onChange={e => setDueDate(e.target.value)}
-                    />
+                  <FieldGroup
+                    label="Ideal due date"
+                    htmlFor="req-due-date"
+                    after={(
+                      <>
+                        <DueDateInfo />
+                        {predictions.isSuggested('dueDate') && (
+                          <SuggestedLabel label="due date" onClear={() => predictions.clearField('dueDate')} />
+                        )}
+                      </>
+                    )}
+                  >
+                    <SuggestedField
+                      suggested={predictions.isSuggested('dueDate')}
+                      reason={predictions.reasonFor('dueDate')}
+                      fieldId="req-due-date"
+                    >
+                      <StyledInput
+                        id="req-due-date"
+                        type="date"
+                        value={dueDate}
+                        min={isoDatePlusDays(DUE_DATE_MIN_DAYS)}
+                        aria-describedby={predictions.isSuggested('dueDate') ? suggestionReasonId('req-due-date') : undefined}
+                        onChange={e => { markTouched('dueDate'); setDueDate(e.target.value) }}
+                      />
+                    </SuggestedField>
                   </FieldGroup>
                 </div>
               ) : (
@@ -906,6 +1093,31 @@ function AlignedRequestDialog({
                   >
                     <ChevronDown size={14} aria-hidden="true" className="tahi-reqd-more-chev" />
                     More details
+                    {/* A suggestion inside a collapsed disclosure is one
+                        nobody sees. Rather than expanding it under a person
+                        mid-sentence, the summary says there is something in
+                        there, and the button's own name says so out loud. */}
+                    {!moreOpen && predictions.isSuggested('estimatedHours') && (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.25rem',
+                          marginLeft: '0.375rem',
+                          padding: '0.125rem 0.4375rem',
+                          borderRadius: 'var(--radius-badge)',
+                          background: 'var(--color-brand-100)',
+                          color: 'var(--color-link)',
+                          fontSize: '0.625rem',
+                          fontWeight: 700,
+                          letterSpacing: '0.03em',
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        <Sparkles size={12} aria-hidden="true" />
+                        Suggested estimate
+                      </span>
+                    )}
                   </button>
                   {moreOpen && (
                     <div
@@ -925,17 +1137,47 @@ function AlignedRequestDialog({
                           onChange={e => setStartDate(e.target.value)}
                         />
                       </FieldGroup>
-                      <FieldGroup label="Est. hours" htmlFor="req-est-hours">
-                        <StyledInput
-                          id="req-est-hours"
-                          type="number" min="0.5" max="999" step="0.5"
-                          value={estimatedHours}
-                          onChange={e => setEstimatedHours(e.target.value)}
-                          placeholder="e.g. 4"
-                        />
+                      <FieldGroup
+                        label="Est. hours"
+                        htmlFor="req-est-hours"
+                        after={predictions.isSuggested('estimatedHours')
+                          ? <SuggestedLabel label="estimated hours" onClear={() => predictions.clearField('estimatedHours')} />
+                          : null}
+                      >
+                        <SuggestedField
+                          suggested={predictions.isSuggested('estimatedHours')}
+                          reason={predictions.reasonFor('estimatedHours')}
+                          fieldId="req-est-hours"
+                        >
+                          <StyledInput
+                            id="req-est-hours"
+                            type="number" min="0.5" max="999" step="0.5"
+                            value={estimatedHours}
+                            aria-describedby={predictions.isSuggested('estimatedHours') ? suggestionReasonId('req-est-hours') : undefined}
+                            onChange={e => { markTouched('estimatedHours'); setEstimatedHours(e.target.value) }}
+                            placeholder="e.g. 4"
+                          />
+                        </SuggestedField>
                       </FieldGroup>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Suggestions land in fields below the caret while somebody is
+                  still typing the title. Sighted operators catch that in
+                  peripheral vision; without this region a screen reader user
+                  gets no signal that three controls just changed. One sentence
+                  per batch, and it empties when the suggestions are cleared. */}
+              <div aria-live="polite" className="sr-only">
+                {predictions.announcement}
+              </div>
+
+              {/* One link that empties every still-suggested field at once,
+                  above the footer so it reads as "before you file this". */}
+              {predictions.hasAny && (
+                <div>
+                  <SuggestionLink onClick={predictions.clearAll}>Clear suggestions</SuggestionLink>
                 </div>
               )}
 
@@ -1194,10 +1436,22 @@ function AiDraftChip() {
 
 // ── Category tiles ─────────────────────────────────────────────────────────────
 
-function CategoryGrid({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function CategoryGrid({
+  value, onChange, describedBy,
+}: {
+  value: string
+  onChange: (v: string) => void
+  /** The id of a caption under the grid, e.g. a suggestion's reason. */
+  describedBy?: string
+}) {
   const activeIndex = Math.max(0, CATEGORY_TILES.findIndex(c => c.value === value))
   return (
-    <div className="tahi-reqd-catgrid" role="radiogroup" aria-label="What kind of work?">
+    <div
+      className="tahi-reqd-catgrid"
+      role="radiogroup"
+      aria-label="What kind of work?"
+      aria-describedby={describedBy}
+    >
       {CATEGORY_TILES.map((tile, index) => {
         const Icon = tile.icon
         const active = tile.value === value
@@ -1672,793 +1926,6 @@ function IntakeQuestions({
   )
 }
 
-// ── The legacy dialog, unchanged for everyone outside the gate ─────────────────
-
-/**
- * The intake block exactly as the shipped dialog draws it: a top-divider
- * section, "Additional questions", the required marker inside the label text
- * and the question repeated as the checkbox's own words. Kept legacy-local
- * rather than pointed at the shared <IntakeQuestions> above so that the
- * rollout gate really does mean nothing changes for a client until it flips.
- * Delete it with LegacyRequestDialog.
- */
-function LegacyIntakeQuestions({
-  questions, responses, onChange,
-}: {
-  questions: FormQuestion[]
-  responses: Record<string, string>
-  onChange: (id: string, value: string) => void
-}) {
-  return (
-    <div style={{
-      borderTop: '1px solid var(--color-border-subtle)',
-      paddingTop: '1rem',
-      marginTop: '0.5rem',
-    }}>
-      <p style={{
-        fontSize: '0.75rem',
-        fontWeight: 600,
-        color: 'var(--color-text-muted)',
-        textTransform: 'uppercase',
-        letterSpacing: '0.05em',
-        marginBottom: '0.75rem',
-      }}>
-        Additional questions
-      </p>
-      {questions.map(q => (
-        <FieldGroup key={q.id} label={`${q.label}${q.required ? ' *' : ''}`} htmlFor={`intake-${q.id}`}>
-          {q.type === 'textarea' ? (
-            <StyledTextarea
-              id={`intake-${q.id}`}
-              value={responses[q.id] ?? ''}
-              onChange={e => onChange(q.id, e.target.value)}
-              rows={3}
-              required={q.required}
-            />
-          ) : q.type === 'select' ? (
-            <StyledSelect
-              id={`intake-${q.id}`}
-              value={responses[q.id] ?? ''}
-              onChange={v => onChange(q.id, v)}
-              required={q.required}
-            >
-              <option value="">Select...</option>
-              {(q.options ?? []).map(opt => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
-            </StyledSelect>
-          ) : q.type === 'checkbox' ? (
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: 'var(--color-text)' }}>
-              <input
-                type="checkbox"
-                checked={responses[q.id] === 'true'}
-                onChange={e => onChange(q.id, e.target.checked ? 'true' : 'false')}
-              />
-              {q.label}
-            </label>
-          ) : (
-            <StyledInput
-              id={`intake-${q.id}`}
-              type={q.type === 'url' ? 'url' : 'text'}
-              value={responses[q.id] ?? ''}
-              onChange={e => onChange(q.id, e.target.value)}
-              required={q.required}
-            />
-          )}
-        </FieldGroup>
-      ))}
-    </div>
-  )
-}
-
-function LegacyRequestDialog({
-  open, onClose, isAdmin, canUseLargeTrack = true, defaultOrgId,
-  parentRequestId, forceOrgId, onCreated, aiDraft,
-}: NewRequestDialogProps) {
-  const isSubRequest = !!parentRequestId
-  const router = useRouter()
-  const { showToast } = useToast()
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [createAnother, setCreateAnother] = useState(false)
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
-
-  // Admin: client picker
-  const [clients, setClients] = useState<OrgOption[]>([])
-  const [clientsLoading, setClientsLoading] = useState(false)
-  const [clientOrgId, setClientOrgId] = useState('')
-
-  // Admin: brand picker (filtered by selected client)
-  const [brandOptions, setBrandOptions] = useState<{ id: string; name: string }[]>([])
-  const [brandsLoading, setBrandsLoading] = useState(false)
-  const [brandId, setBrandId] = useState('')
-
-  const selectedClient = clients.find(c => c.id === clientOrgId)
-  const clientUsesTracks = isAdmin
-    ? selectedClient?.planType === 'maintain' || selectedClient?.planType === 'scale'
-    : canUseLargeTrack
-  const showTrackSelector = isAdmin ? clientUsesTracks : true
-
-  const [title, setTitle] = useState('')
-  const [type, setType] = useState<RequestSize>('small_task')
-  const [category, setCategory] = useState('development')
-  const [description, setDescription] = useState('')
-  const [priority, setPriority] = useState('standard')
-  const [startDate, setStartDate] = useState('')
-  const [dueDate, setDueDate] = useState('')
-  const [estimatedHours, setEstimatedHours] = useState('')
-
-  const [intakeQuestions, setIntakeQuestions] = useState<FormQuestion[]>([])
-  const [formResponses, setFormResponses] = useState<Record<string, string>>({})
-  const [intakeLoading, setIntakeLoading] = useState(false)
-
-  useEffect(() => {
-    if (isAdmin || !open) return
-    setIntakeLoading(true)
-    fetch(apiPath(`/api/portal/request-forms?category=${category}`))
-      .then(r => r.json() as Promise<{ form?: { questions: string } }>)
-      .then(data => setIntakeQuestions(parseIntakeQuestions(data.form?.questions)))
-      .catch(() => setIntakeQuestions([]))
-      .finally(() => setIntakeLoading(false))
-  }, [category, open, isAdmin])
-
-  useEffect(() => {
-    if (!open || !isAdmin) return
-    setClientsLoading(true)
-    fetch(apiPath('/api/admin/clients?status=active'))
-      .then(r => r.json() as Promise<{ organisations: Array<{ id: string; name: string; planType?: string | null }> }>)
-      .then(data => setClients((data.organisations ?? []).map(o => ({ id: o.id, name: o.name, planType: o.planType }))))
-      .catch(() => setClients([]))
-      .finally(() => setClientsLoading(false))
-  }, [open, isAdmin])
-
-  useEffect(() => {
-    if (!isAdmin || !clientOrgId) {
-      setBrandOptions([])
-      setBrandId('')
-      return
-    }
-    setBrandsLoading(true)
-    fetch(apiPath(`/api/admin/brands?orgId=${clientOrgId}`))
-      .then(r => r.json() as Promise<{ items: Array<{ id: string; name: string }> }>)
-      .then(data => setBrandOptions((data.items ?? []).map(b => ({ id: b.id, name: b.name }))))
-      .catch(() => setBrandOptions([]))
-      .finally(() => setBrandsLoading(false))
-  }, [isAdmin, clientOrgId])
-
-  useEffect(() => {
-    if (!open) return
-    setTitle('')
-    setType('small_task')
-    setCategory('development')
-    setDescription('')
-    setPriority('standard')
-    setFormResponses({})
-    setIntakeQuestions([])
-    setStartDate('')
-    setDueDate('')
-    setEstimatedHours('')
-    setClientOrgId(forceOrgId ?? defaultOrgId ?? '')
-    setBrandId('')
-    setBrandOptions([])
-    setError(null)
-    setSuccessMessage(null)
-    setCreateAnother(false)
-  }, [open, forceOrgId, defaultOrgId])
-
-  useEffect(() => {
-    if (isAdmin && selectedClient?.planType === 'maintain' && type === 'large_task') {
-      setType('small_task')
-    }
-  }, [isAdmin, selectedClient?.planType, type])
-
-  const largeAllowed = isAdmin ? selectedClient?.planType !== 'maintain' : canUseLargeTrack
-  const suggestion: SizeSuggestion = useMemo(
-    () => suggestRequestSize({ brief: description, category, canUseLargeTrack: largeAllowed }),
-    [description, category, largeAllowed],
-  )
-
-  useEffect(() => {
-    if (!open || !aiDraft) return
-    if (aiDraft.title) setTitle(aiDraft.title)
-    if (aiDraft.description) setDescription(aiDraft.description)
-    if (aiDraft.category) setCategory(aiDraft.category)
-  }, [open, aiDraft])
-
-  async function handleSubmit(e: React.FormEvent, saveAndCreateAnother = false) {
-    e.preventDefault()
-    if (!title.trim()) return
-    if (isAdmin && !isSubRequest && !clientOrgId) {
-      setError('Please select a client.')
-      return
-    }
-    setError(null)
-    setSuccessMessage(null)
-    setSubmitting(true)
-
-    try {
-      const url = isSubRequest
-        ? apiPath(`/api/admin/requests/${parentRequestId}/sub-requests`)
-        : (isAdmin ? apiPath('/api/admin/requests') : apiPath('/api/portal/requests'))
-
-      const reqBody = isSubRequest
-        ? {
-            title: title.trim(),
-            description,
-            size: (type === 'large_task' ? 'large' : 'small') as 'large' | 'small',
-            category,
-            priority,
-            dueDate: dueDate || null,
-            estimatedHours: estimatedHours ? Number(estimatedHours) : null,
-          }
-        : isAdmin
-        ? {
-            clientOrgId, title: title.trim(), type, category, description, priority,
-            isInternal: 0,
-            startDate: startDate || null,
-            dueDate: dueDate || null,
-            estimatedHours: estimatedHours ? Number(estimatedHours) : null,
-            brandId: brandId || null,
-          }
-        : {
-            title: title.trim(), type, category, description, dueDate: dueDate || null,
-            formResponses: Object.keys(formResponses).length > 0 ? JSON.stringify(formResponses) : undefined,
-          }
-
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reqBody),
-      })
-
-      if (!res.ok) {
-        const data = await res.json() as { error?: string }
-        setError(data.error ?? 'Something went wrong. Please try again.')
-        return
-      }
-
-      const data = await res.json() as { id: string }
-      showToast('Request created successfully')
-
-      if (saveAndCreateAnother) {
-        setTitle('')
-        setDescription('')
-        setPriority('standard')
-        setStartDate('')
-        setDueDate('')
-        setEstimatedHours('')
-        setSuccessMessage('Request created successfully. Create another one below.')
-        setCreateAnother(true)
-        // Same refresh signal as the aligned branch above: the callers that
-        // close do that themselves, and the sub-request panels revalidate in
-        // here. Until the gate flips this is the branch a normal admin sees.
-        onCreated?.(data.id)
-      } else if (onCreated) {
-        onCreated(data.id)
-        onClose()
-      } else {
-        onClose()
-        router.push(`/requests/${data.id}`)
-      }
-    } catch {
-      setError('Network error. Please try again.')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  if (!open) return null
-
-  return (
-    <>
-      {/* Backdrop */}
-      <div
-        style={{
-          position: 'fixed', inset: 0,
-          background: 'rgba(0,0,0,0.4)',
-          backdropFilter: 'blur(2px)',
-          zIndex: 60,
-        }}
-        onClick={onClose}
-      />
-
-      {/* Slide-over panel */}
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="new-request-dialog-title"
-        style={{
-          position: 'fixed',
-          top: 0, right: 0, bottom: 0,
-          width: '100%',
-          maxWidth: '32.5rem',
-          background: 'var(--color-bg)',
-          boxShadow: 'var(--shadow-lg)',
-          zIndex: 70,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            justifyContent: 'space-between',
-            padding: '1.25rem 1.5rem',
-            borderBottom: '1px solid var(--color-border-subtle)',
-            flexShrink: 0,
-          }}
-        >
-          <div>
-            <h2 id="new-request-dialog-title" style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
-              {isAdmin ? 'Create a request' : 'Submit a request'}
-            </h2>
-            <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
-              {isAdmin
-                ? 'Create a request on behalf of a client.'
-                : "Tell us what you need and we'll get started."}
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            className="tahi-focus-ring"
-            style={{
-              padding: '0.375rem',
-              borderRadius: 'var(--radius-button)',
-              border: 'none',
-              background: 'transparent',
-              color: 'var(--color-text-subtle)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              marginLeft: '0.75rem',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-tertiary)'; e.currentTarget.style.color = 'var(--color-text)' }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-subtle)' }}
-            aria-label="Close"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <form
-          id="legacy-new-request-form"
-          onSubmit={handleSubmit}
-          style={{ flex: 1, overflowY: 'auto', padding: '1.5rem' }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-
-            {isSubRequest && (
-              <div
-                role="note"
-                style={{
-                  padding: '0.625rem 0.75rem',
-                  borderRadius: 'var(--radius-card)',
-                  background: 'var(--color-brand-50)',
-                  border: '1px solid var(--color-brand-100)',
-                  fontSize: '0.75rem',
-                  color: 'var(--color-brand-dark)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                }}
-              >
-                <Layers size={13} aria-hidden="true" />
-                <span>This will be created as a <strong>sub-request</strong> of the current request. Client is locked to the parent&rsquo;s organisation.</span>
-              </div>
-            )}
-
-            {isAdmin && !isSubRequest && (
-              <FieldGroup label="Client" required htmlFor="req-client">
-                {clientsLoading ? (
-                  <LoadingField>Loading clients...</LoadingField>
-                ) : (
-                  <SearchableSelect
-                    options={clients.map(c => ({ value: c.id, label: c.name }))}
-                    value={clientOrgId || null}
-                    onChange={(v) => setClientOrgId(v ?? '')}
-                    placeholder="Select a client..."
-                    searchPlaceholder="Search clients..."
-                  />
-                )}
-              </FieldGroup>
-            )}
-
-            {isAdmin && clientOrgId && (brandOptions.length > 0 || brandsLoading) && (
-              <FieldGroup label="Brand" htmlFor="req-brand">
-                {brandsLoading ? (
-                  <LoadingField>Loading brands...</LoadingField>
-                ) : (
-                  <SearchableSelect
-                    options={brandOptions.map(b => ({ value: b.id, label: b.name }))}
-                    value={brandId || null}
-                    onChange={(v) => setBrandId(v ?? '')}
-                    placeholder="Select a brand (optional)..."
-                    searchPlaceholder="Search brands..."
-                    allowClear
-                  />
-                )}
-              </FieldGroup>
-            )}
-
-            <FieldGroup label="Request title" required htmlFor="req-title">
-              <StyledInput
-                id="req-title"
-                type="text"
-                value={title}
-                onChange={e => setTitle(e.target.value)}
-                required
-                maxLength={200}
-                placeholder="e.g. Update homepage hero section"
-              />
-            </FieldGroup>
-
-            {isAdmin && clientOrgId && (
-              <div style={{
-                padding: '0.625rem 0.75rem',
-                borderRadius: 'var(--radius-card)',
-                background: clientUsesTracks ? 'var(--color-brand-50)' : 'var(--color-bg-secondary)',
-                border: `1px solid ${clientUsesTracks ? 'var(--color-brand-100)' : 'var(--color-border-subtle)'}`,
-                fontSize: '0.75rem',
-                color: clientUsesTracks ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-              }}>
-                <Zap size={12} aria-hidden="true" />
-                {clientUsesTracks
-                  ? `Retainer client (${selectedClient?.planType}) - select task size below`
-                  : 'Project / hourly client - no track selection needed'}
-              </div>
-            )}
-
-            {showTrackSelector && (
-            <FieldGroup label="Task size">
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.625rem' }}>
-                {REQUEST_TYPES.map(t => {
-                  const clientPlan = selectedClient?.planType
-                  const locked = t.requiresScale && (
-                    isAdmin ? clientPlan === 'maintain' : !canUseLargeTrack
-                  )
-                  const active = type === t.value
-                  const Icon = t.icon
-                  return (
-                    <button
-                      key={t.value}
-                      type="button"
-                      disabled={locked}
-                      onClick={() => !locked && setType(t.value as RequestSize)}
-                      className="tahi-focus-ring"
-                      style={{
-                        padding: '0.875rem 0.75rem',
-                        borderRadius: 'var(--radius-card)',
-                        border: active
-                          ? '2px solid var(--color-brand)'
-                          : locked
-                            ? '2px solid var(--color-border-subtle)'
-                            : '2px solid var(--color-border)',
-                        background: active
-                          ? 'var(--color-brand-50)'
-                          : locked
-                            ? 'var(--color-bg-secondary)'
-                            : 'var(--color-bg)',
-                        cursor: locked ? 'not-allowed' : 'pointer',
-                        textAlign: 'left',
-                        opacity: locked ? 0.6 : 1,
-                        transition: 'border-color 0.1s, background 0.1s',
-                        position: 'relative',
-                      }}
-                      onMouseEnter={e => {
-                        if (!active && !locked) {
-                          e.currentTarget.style.borderColor = 'var(--color-brand-200)'
-                          e.currentTarget.style.background = 'var(--color-bg-secondary)'
-                        }
-                      }}
-                      onMouseLeave={e => {
-                        if (!active && !locked) {
-                          e.currentTarget.style.borderColor = 'var(--color-border)'
-                          e.currentTarget.style.background = 'var(--color-bg)'
-                        }
-                      }}
-                    >
-                      {active && (
-                        <CheckCircle2
-                          size={13}
-                          style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', color: BRAND }}
-                        />
-                      )}
-                      {locked && (
-                        <Lock
-                          size={12}
-                          style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', color: 'var(--color-text-subtle)' }}
-                        />
-                      )}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.3125rem' }}>
-                        <Icon size={14} style={{ color: active ? BRAND : 'var(--color-text-muted)', flexShrink: 0 }} />
-                        <p style={{
-                          fontSize: '0.8125rem', fontWeight: 600,
-                          color: active ? 'var(--color-brand-dark)' : 'var(--color-text)',
-                          margin: 0,
-                        }}>
-                          {t.label}
-                        </p>
-                        <span style={{
-                          fontSize: '0.6875rem', fontWeight: 500,
-                          color: active ? 'var(--color-brand)' : 'var(--color-text-subtle)',
-                          background: active ? 'var(--color-brand-100)' : 'var(--color-bg-tertiary)',
-                          padding: '0.0625rem 0.375rem',
-                          borderRadius: 'var(--radius-full)',
-                        }}>
-                          {t.desc}
-                        </span>
-                      </div>
-                      <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', margin: 0, lineHeight: 1.4 }}>
-                        {locked ? 'Scale plan required' : t.hint}
-                      </p>
-                    </button>
-                  )
-                })}
-              </div>
-              {isAdmin && (
-                <p style={{
-                  fontSize: '0.75rem',
-                  color: 'var(--color-text-subtle)',
-                  margin: '0.375rem 0 0',
-                  lineHeight: 1.45,
-                }}>
-                  {suggestion.hint}
-                </p>
-              )}
-            </FieldGroup>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: isAdmin ? '1fr 1fr' : '1fr', gap: '1rem' }}>
-              <FieldGroup label="Category" htmlFor="req-category">
-                <StyledSelect id="req-category" value={category} onChange={setCategory}>
-                  {CATEGORIES.map(c => (
-                    <option key={c.value} value={c.value}>{c.label}</option>
-                  ))}
-                </StyledSelect>
-              </FieldGroup>
-
-              {isAdmin && (
-                <FieldGroup label="Priority">
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    {(['standard', 'high'] as const).map(p => (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => setPriority(p)}
-                        className="tahi-focus-ring"
-                        style={{
-                          flex: 1,
-                          height: '2.625rem',
-                          borderRadius: 'var(--radius-button)',
-                          border: priority === p
-                            ? p === 'high' ? '2px solid var(--status-in-review-dot)' : '2px solid var(--color-brand)'
-                            : '2px solid var(--color-border)',
-                          background: priority === p
-                            ? p === 'high' ? 'var(--status-in-review-bg)' : 'var(--color-brand-50)'
-                            : 'var(--color-bg)',
-                          color: priority === p
-                            ? p === 'high' ? 'var(--status-in-review-text)' : 'var(--color-brand-dark)'
-                            : 'var(--color-text-muted)',
-                          fontSize: '0.8125rem',
-                          fontWeight: 500,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '0.3125rem',
-                          transition: 'all 0.1s',
-                        }}
-                      >
-                        {p === 'high' && <Zap size={13} />}
-                        {p === 'high' ? 'High' : 'Standard'}
-                      </button>
-                    ))}
-                  </div>
-                </FieldGroup>
-              )}
-            </div>
-
-            {isAdmin && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
-                <FieldGroup label="Start date">
-                  <StyledInput type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
-                </FieldGroup>
-                <FieldGroup label="Due date">
-                  <StyledInput type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
-                </FieldGroup>
-                <FieldGroup label="Est. hours">
-                  <StyledInput
-                    type="number" min="0.5" max="999" step="0.5"
-                    value={estimatedHours}
-                    onChange={e => setEstimatedHours(e.target.value)}
-                    placeholder="e.g. 4"
-                  />
-                </FieldGroup>
-              </div>
-            )}
-
-            {!isAdmin && (
-              <FieldGroup label="Due date (optional)" htmlFor="req-due-date-portal">
-                <StyledInput
-                  id="req-due-date-portal"
-                  type="date"
-                  value={dueDate}
-                  onChange={e => setDueDate(e.target.value)}
-                />
-              </FieldGroup>
-            )}
-
-            <FieldGroup label="Description" htmlFor="req-description">
-              <StyledTextarea
-                id="req-description"
-                value={description}
-                onChange={e => setDescription(e.target.value)}
-                rows={5}
-                placeholder="Describe what you need: include links, context, and any steps you have in mind."
-              />
-              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginTop: '0.375rem' }}>
-                You can add files, images, and voice notes after submitting.
-              </p>
-            </FieldGroup>
-
-            {!isAdmin && intakeQuestions.length > 0 && (
-              <LegacyIntakeQuestions
-                questions={intakeQuestions}
-                responses={formResponses}
-                onChange={(id, value) => setFormResponses(prev => ({ ...prev, [id]: value }))}
-              />
-            )}
-            {!isAdmin && intakeLoading && (
-              <div style={{ textAlign: 'center', padding: '0.5rem', color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
-                Loading form...
-              </div>
-            )}
-
-            <div aria-live="polite">
-              {successMessage && (
-                <div style={{
-                  fontSize: '0.8125rem',
-                  color: 'var(--color-success)',
-                  background: 'var(--color-success-bg)',
-                  border: '1px solid var(--color-success)',
-                  borderRadius: 'var(--radius-button)',
-                  padding: '0.625rem 0.875rem',
-                }}>
-                  {successMessage}
-                </div>
-              )}
-            </div>
-
-            <div aria-live="polite">
-              {error && (
-                <div style={{
-                  fontSize: '0.8125rem',
-                  color: 'var(--color-danger)',
-                  background: 'var(--color-danger-bg)',
-                  border: '1px solid var(--color-danger)',
-                  borderRadius: 'var(--radius-button)',
-                  padding: '0.625rem 0.875rem',
-                }}>
-                  {error}
-                </div>
-              )}
-            </div>
-          </div>
-        </form>
-
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '1rem 1.5rem',
-            paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))',
-            borderTop: '1px solid var(--color-border-subtle)',
-            background: 'var(--color-bg-secondary)',
-            flexShrink: 0,
-          }}
-        >
-          <button
-            type="button"
-            onClick={onClose}
-            className="tahi-focus-ring"
-            style={{
-              padding: '0.5rem 1rem',
-              fontSize: '0.875rem',
-              fontWeight: 500,
-              color: 'var(--color-text-muted)',
-              background: 'transparent',
-              border: 'none',
-              borderRadius: 'var(--radius-button)',
-              cursor: 'pointer',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-text)' }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
-          >
-            Cancel
-          </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <button
-              type="button"
-              disabled={submitting || !title.trim()}
-              onClick={e => handleSubmit(e, true)}
-              className="tahi-focus-ring"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.375rem',
-                padding: '0.5625rem 0.875rem',
-                fontSize: '0.8125rem',
-                fontWeight: 500,
-                color: submitting || !title.trim() ? 'var(--color-text-subtle)' : 'var(--color-brand)',
-                background: 'var(--color-bg)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-button)',
-                cursor: submitting || !title.trim() ? 'not-allowed' : 'pointer',
-                transition: 'all 0.15s',
-                whiteSpace: 'nowrap',
-              }}
-              onMouseEnter={e => {
-                if (!submitting && title.trim()) {
-                  e.currentTarget.style.borderColor = 'var(--color-brand)'
-                  e.currentTarget.style.background = 'var(--color-brand-50)'
-                }
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.borderColor = 'var(--color-border)'
-                e.currentTarget.style.background = 'var(--color-bg)'
-              }}
-            >
-              {submitting && createAnother && <Loader2 size={13} className="animate-spin" />}
-              Save + another
-            </button>
-            <button
-              type="submit"
-              form="legacy-new-request-form"
-              disabled={submitting || !title.trim()}
-              // Kept from the shipped dialog: the click handler preventDefaults,
-              // so the form's own submit never runs and native validation stays
-              // out of the way exactly as it does today.
-              onClick={handleSubmit}
-              className="tahi-focus-ring"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.5625rem 1.25rem',
-                fontSize: '0.875rem',
-                fontWeight: 600,
-                color: 'white',
-                background: submitting || !title.trim() ? 'var(--color-brand-200)' : BRAND,
-                border: 'none',
-                borderRadius: 'var(--radius-button)',
-                cursor: submitting || !title.trim() ? 'not-allowed' : 'pointer',
-                transition: 'background 0.15s',
-              }}
-              onMouseEnter={e => {
-                if (!submitting && title.trim()) e.currentTarget.style.background = 'var(--color-brand-dark)'
-              }}
-              onMouseLeave={e => {
-                if (!submitting && title.trim()) e.currentTarget.style.background = BRAND
-              }}
-            >
-              {submitting && !createAnother && <Loader2 size={14} className="animate-spin" />}
-              {isAdmin ? 'Create request' : 'Submit request'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </>
-  )
-}
-
 // ── Small shared pieces ────────────────────────────────────────────────────────
 
 function FieldGroup({
@@ -2597,12 +2064,14 @@ function StyledTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>
 }
 
 function StyledSelect({
-  id, value, onChange, required, children,
+  id, value, onChange, required, describedBy, children,
 }: {
   id?: string
   value: string
   onChange: (v: string) => void
   required?: boolean
+  /** The id of a caption under the field, e.g. a suggestion's reason. */
+  describedBy?: string
   children: React.ReactNode
 }) {
   return (
@@ -2611,6 +2080,7 @@ function StyledSelect({
         id={id}
         value={value}
         required={required}
+        aria-describedby={describedBy}
         onChange={e => onChange(e.target.value)}
         className="tahi-focus-ring"
         style={{

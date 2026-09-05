@@ -22,6 +22,13 @@ interface SearchableSelectProps {
   allowClear?: boolean
   disabled?: boolean
   size?: 'sm' | 'default'
+  /**
+   * id of a caption describing the current value, e.g. the one-line reason
+   * under a suggested field. Emitted as aria-describedby on the trigger, which
+   * is the focusable element, so the description is announced on focus rather
+   * than sitting on the page unreferenced.
+   */
+  describedBy?: string
 }
 
 export function SearchableSelect({
@@ -34,6 +41,7 @@ export function SearchableSelect({
   allowClear = false,
   disabled = false,
   size = 'default',
+  describedBy,
 }: SearchableSelectProps) {
   const isSmall = size === 'sm'
   const [open, setOpen] = useState(false)
@@ -314,6 +322,7 @@ export function SearchableSelect({
         }}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-describedby={describedBy}
       >
         <span className="truncate" style={{ flex: 1, textAlign: 'left' }}>
           {selectedOption ? selectedOption.label : placeholder}

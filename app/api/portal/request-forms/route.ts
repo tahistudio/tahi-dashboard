@@ -73,11 +73,23 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ form: null })
 }
 
+/**
+ * The resolved form, as the caller reads it.
+ *
+ * `sla` and `description` used to be dropped here. `sla` is the only
+ * human-authored turnaround signal in the schema ("2 business days", written
+ * on the form in admin settings), so dropping it meant no surface could ever
+ * read it: the client dialog could not show the agreed turnaround, and
+ * predictive autofill could not let it outrank a statistical median. Both are
+ * additive fields on the response; nothing that reads `questions` changes.
+ */
 function parseForm(row: typeof schema.requestForms.$inferSelect) {
   return {
     id: row.id,
     name: row.name,
     category: row.category,
+    description: row.description,
+    sla: row.sla,
     questions: JSON.parse(row.questions ?? '[]'),
   }
 }
