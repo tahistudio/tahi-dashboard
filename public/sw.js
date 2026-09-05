@@ -2,9 +2,15 @@
 // bytes of this file change, so an existing installation would otherwise keep
 // serving the version of /offline it cached the first time, forever.
 //   v4: the rebuilt offline page (retry, back-online state, reassurance list).
-const CACHE_NAME = 'tahi-v4'
+//   v5: that page now carries its own stylesheet inline, so the cached document
+//       renders correctly with no other asset in the cache.
+const CACHE_NAME = 'tahi-v5'
 const OFFLINE_URL = '/offline'
 
+// The document only. Next fingerprints its CSS and JS chunks per build, so
+// there is no stable URL to list here; the page is written to stand up on the
+// cached HTML alone (inline styles, and a submit that falls back to a plain
+// GET when the JS chunk never arrives).
 const PRECACHE_URLS = [
   '/offline',
 ]

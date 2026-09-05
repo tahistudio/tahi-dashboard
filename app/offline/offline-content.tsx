@@ -36,6 +36,17 @@ function Ic({ d, s = 16, sw = 2 }: { d: string; s?: number; sw?: number }) {
 export function OfflineContent() {
   const [state, setState] = useState<State>('offline')
 
+  // A real round trip, not navigator.onLine: "connected to a router" is not
+  // the same as "can reach the dashboard".
+  const probe = useCallback(async () => {
+    try {
+      const res = await fetch(apiPath('/manifest.json'), { cache: 'no-store' })
+      return res.ok
+    } catch {
+      return false
+    }
+  }, [])
+
   // The browser tells us the moment the radio comes back; the retry button is
   // for the case where it is lying (captive portal, flaky uplink).
   useEffect(() => {
@@ -43,25 +54,30 @@ export function OfflineContent() {
     const onOffline = () => setState('offline')
     window.addEventListener('online', onOnline)
     window.addEventListener('offline', onOffline)
-    if (typeof navigator !== 'undefined' && navigator.onLine) setState('back')
     return () => {
       window.removeEventListener('online', onOnline)
       window.removeEventListener('offline', onOffline)
     }
   }, [])
 
+  // The worker only serves this page when fetch() REJECTS, and navigator.onLine
+  // is still true for nearly every one of those failures (DNS down, connection
+  // refused, wifi up but no WAN). Trusting it on mount made the page announce
+  // "you are back online" the instant it appeared, which is the one thing it
+  // knows to be untrue. So the mount check is the same round trip the button
+  // makes, and it only ever promotes to "back": a failed probe leaves the page
+  // saying exactly what it already said.
+  useEffect(() => {
+    let live = true
+    probe().then(ok => { if (live && ok) setState('back') }).catch(() => {})
+    return () => { live = false }
+  }, [probe])
+
   const retry = useCallback(async () => {
     setState('checking')
-    try {
-      // A real round trip, not navigator.onLine: "connected to a router" is not
-      // the same as "can reach the dashboard".
-      const res = await fetch(apiPath('/manifest.json'), { cache: 'no-store' })
-      if (res.ok) { setState('back'); return }
-    } catch {
-      // Still nothing.
-    }
-    setState('still')
-  }, [])
+    const ok = await probe()
+    setState(ok ? 'back' : 'still')
+  }, [probe])
 
   const back = state === 'back'
 
@@ -85,24 +101,27 @@ export function OfflineContent() {
           </p>
         )}
 
-        <div className="pa-off-actions">
-          {back ? (
-            <button type="button" className="pa-off-btn" onClick={() => window.location.reload()}>
-              <Ic d={PATHS.refresh} s={15} />
-              Reload the dashboard
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="pa-off-btn"
-              disabled={state === 'checking'}
-              onClick={() => { retry().catch(() => setState('still')) }}
-            >
-              <Ic d={PATHS.refresh} s={15} />
-              {state === 'checking' ? 'Checking' : 'Try again'}
-            </button>
-          )}
-        </div>
+        {/* A form, not a bare button: the worker precaches this document but
+            not its JS chunk, so on a cold HTTP cache the page can render
+            without ever hydrating. Unhydrated, the submit is a plain GET at
+            the dashboard root, which is the very thing the button is for.
+            Hydrated, onSubmit takes over and does the round trip in place. */}
+        <form
+          className="pa-off-actions"
+          action={apiPath('/')}
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (back) { window.location.reload(); return }
+            retry().catch(() => setState('still'))
+          }}
+        >
+          <button type="submit" className="pa-off-btn" disabled={state === 'checking'}>
+            <Ic d={PATHS.refresh} s={15} />
+            {back
+              ? 'Reload the dashboard'
+              : state === 'checking' ? 'Checking' : 'Try again'}
+          </button>
+        </form>
 
         <ul className="pa-off-list">
           <li><Ic d={PATHS.check} s={14} />Anything you already sent is with the studio.</li>

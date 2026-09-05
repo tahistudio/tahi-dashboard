@@ -1,10 +1,19 @@
-/* offline.css : the offline fallback the service worker serves.
-   Ported from the Claude Design module portal-account.css (.pa-off-*). This
-   page lives outside the (dashboard) group, so it fills the window with no rail
-   and no top bar. Every colour is a globals.css token with a literal fallback,
-   because the stylesheet that defines them may itself have failed to load on
-   the request that landed here. */
-
+/**
+ * The offline fallback's stylesheet, as a string rather than an imported
+ * `.css` file.
+ *
+ * Ported from the Claude Design module portal-account.css (.pa-off-*). This
+ * page lives outside the (dashboard) group, so it fills the window with no rail
+ * and no top bar. Every colour is a globals.css token with a literal fallback,
+ * because the stylesheet that defines them may itself have failed to load on
+ * the request that landed here.
+ *
+ * It is inlined into the document by app/offline/page.tsx because public/sw.js
+ * precaches the HTML of this route and none of its asset chunks: a separate CSS
+ * file only arrives if the browser's HTTP cache happens to still hold it, which
+ * is exactly the assumption an offline fallback must not make.
+ */
+export const OFFLINE_CSS = `
 .pa-offline {
   --pa-ease: var(--ease-out, cubic-bezier(.22, 1, .36, 1));
   --pa-leaf: var(--radius-leaf-sm, 0 .625rem 0 .625rem);
@@ -29,18 +38,21 @@
   margin: 0; font-size: 1.375rem; font-weight: 700; line-height: 1.2;
   letter-spacing: -0.02em; color: var(--color-text, #1A1914);
 }
-.pa-off-card p {
+/* The lede only. Scoped to the paragraph after the heading so it cannot
+   outrank .pa-off-still and .pa-off-foot, which are paragraphs of their own
+   with their own size, spacing and colour. */
+.pa-off-card > h1 + p {
   margin: .625rem 0 0; font-size: .875rem; font-weight: 500; line-height: 1.6;
   color: var(--color-text-muted, #6B6A63); max-width: 24rem;
 }
 .pa-off-still {
   display: inline-flex; align-items: flex-start; gap: .4375rem;
-  margin-top: .875rem; padding: .5rem .75rem; max-width: 22rem; text-align: left;
+  margin: .875rem 0 0; padding: .5rem .75rem; max-width: 22rem; text-align: left;
   border: 1px solid var(--color-border, rgba(26, 25, 20, .10)); border-radius: .625rem;
   font-size: .75rem; font-weight: 600; line-height: 1.45; color: var(--color-text-muted, #6B6A63);
 }
 .pa-off-still svg { flex-shrink: 0; margin-top: .125rem; }
-.pa-off-actions { margin-top: 1.5rem; width: 100%; display: flex; justify-content: center; }
+.pa-off-actions { margin: 1.5rem 0 0; width: 100%; display: flex; justify-content: center; }
 .pa-off-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: .4375rem;
   min-width: 12rem; min-height: 2.75rem; padding: 0 1rem;
@@ -71,7 +83,7 @@
 .pa-off-list svg { flex-shrink: 0; margin-top: .125rem; color: var(--color-brand, #5A824E); }
 .pa-off-foot {
   display: inline-flex; align-items: center; gap: .375rem;
-  margin-top: 1.5rem; font-size: .6875rem; font-weight: 600; letter-spacing: .05em;
+  margin: 1.5rem 0 0; font-size: .6875rem; font-weight: 600; letter-spacing: .05em;
   color: var(--color-text-subtle, #63615B);
 }
 .pa-off-foot svg { color: var(--color-brand, #5A824E); }
@@ -80,3 +92,4 @@
   .pa-off-card h1 { font-size: 1.625rem; }
   .pa-off-btn { min-height: 2.5rem; }
 }
+`
