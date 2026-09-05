@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { TASK_BOARD_COLUMNS, toTaskBoardItems, toBoardPriority } from './tasks-board-items'
-import type { TaskRow } from './tasks-views'
+import { isTaskOverdue, type TaskRow } from './tasks-views'
 
 const NOW = new Date(2026, 8, 5)
 
@@ -88,6 +88,18 @@ describe('toTaskBoardItems', () => {
     expect(item.isOverdue).toBe(true)
   })
 
+  it('gives the same overdue answer as the shipped helper the rail reads', () => {
+    const rows = [
+      row({ id: 'a', dueDate: '2026-09-01' }),
+      row({ id: 'b', dueDate: '2026-09-01', status: 'done' }),
+      row({ id: 'c', dueDate: '2026-09-30' }),
+      row({ id: 'd' }),
+    ]
+    expect(toTaskBoardItems(rows, ctx).map(i => i.isOverdue)).toEqual(
+      rows.map(r => isTaskOverdue(r, NOW)),
+    )
+  })
+
   it('trims a stored timestamp down to the day the card compares on', () => {
     const [item] = toTaskBoardItems([row({ dueDate: '2026-09-05T09:30:00.000Z' })], ctx)
     expect(item.dueDate).toBe('2026-09-05')
@@ -116,10 +128,13 @@ describe('toTaskBoardItems', () => {
     expect(item.unassigned).toBe(true)
   })
 
-  it('flags a card whose assignee is missing from the roster', () => {
+  it('stays quiet about a card whose assignee is missing from the roster', () => {
+    // The roster arrives on its own fetch, so an unresolved id means "not
+    // known yet", not "nobody". The card draws no people row rather than
+    // asserting the task is unassigned.
     const [item] = toTaskBoardItems([row({ assigneeId: 'ghost' })], ctx)
     expect(item.people).toBeUndefined()
-    expect(item.unassigned).toBe(true)
+    expect(item.unassigned).toBeUndefined()
   })
 
   it('prints a linked request as the padded hash reference the repo uses', () => {

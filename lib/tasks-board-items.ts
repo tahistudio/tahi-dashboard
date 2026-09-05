@@ -9,8 +9,9 @@
  */
 
 import type { BoardColumn, BoardItem, BoardPriority } from '@/components/tahi/kanban-board'
-import { TASK_STATUSES, TASK_STATUS_CONFIG } from '@/lib/status-config'
-import { taskDayKey, type TaskRow } from '@/lib/tasks-views'
+import type { TaskPerson } from '@/components/tahi/tasks/task-types'
+import { TASK_CLOSED_STATUSES, TASK_STATUSES, TASK_STATUS_CONFIG } from '@/lib/status-config'
+import { isTaskOverdue, type TaskRow } from '@/lib/tasks-views'
 
 /** The four columns, straight off the status vocabulary so they cannot
  *  drift from the chip, the filter or the bulk menu. */
@@ -28,14 +29,11 @@ export function toBoardPriority(priority: string): BoardPriority {
   return 'medium'
 }
 
-export interface TaskBoardPerson {
-  id: string
-  name: string
-  avatarUrl?: string | null
-}
-
 export interface TaskBoardContext {
-  people: Readonly<Record<string, TaskBoardPerson>>
+  /** The roster, keyed by team member id. `TaskPerson` is the one shared
+   *  shape every Tasks leaf reads, so the board cannot drift a second
+   *  definition of a person away from the list and the detail panel. */
+  people: Readonly<Record<string, TaskPerson>>
   /** requestId -> display number, for the card's top-right reference. Omit
    *  it and a linked card simply carries no reference, which is better than
    *  printing a uuid there. */
@@ -47,10 +45,12 @@ export function toTaskBoardItems(
   rows: readonly TaskRow[],
   ctx: TaskBoardContext,
 ): BoardItem[] {
-  const today = taskDayKey(ctx.now)
-
   return rows.map((row) => {
-    const done = row.status === 'done'
+    // Closed is read off the shared vocabulary and overdue off the shipped
+    // helper, so the card, the rail count, the saved views and the list can
+    // only ever give one answer. A literal 'done' here would quietly
+    // disagree with all three the day a second closed status is added.
+    const done = TASK_CLOSED_STATUSES.includes(row.status)
     const dueDate = row.dueDate ? row.dueDate.slice(0, 10) : undefined
     const assignee = row.assigneeId ? ctx.people[row.assigneeId] : undefined
     const requestNumber = row.requestId ? ctx.requestNumbers?.[row.requestId] ?? null : null
@@ -72,7 +72,7 @@ export function toTaskBoardItems(
       // Finished work needs no deadline on the card, but the date is still
       // wanted for the tooltip, so it is hidden rather than dropped.
       hideDueChip: done || undefined,
-      isOverdue: !done && !!dueDate && dueDate < today,
+      isOverdue: isTaskOverdue(row, ctx.now),
       warning: blockers > 0
         ? `Blocked by ${blockers} ${blockers === 1 ? 'task' : 'tasks'}`
         : undefined,
@@ -82,9 +82,12 @@ export function toTaskBoardItems(
       people: assignee
         ? [{ id: assignee.id, name: assignee.name, role: 'Assignee', avatarUrl: assignee.avatarUrl ?? undefined }]
         : undefined,
-      // No assignee means the card shows the dashed "Unassigned" placeholder
-      // rather than an empty people row.
-      unassigned: assignee ? undefined : true,
+      // Only a task that genuinely has no assignee gets the dashed
+      // "Unassigned" placeholder. A task whose assignee is not in the roster
+      // (the map has not loaded yet, or the member was deleted) draws no
+      // people row at all: saying nobody owns it would be a claim about the
+      // data made from a gap in a separately fetched lookup.
+      unassigned: row.assigneeId ? undefined : true,
     }
   })
 }

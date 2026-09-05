@@ -19,12 +19,14 @@
 
 import * as React from 'react'
 import { KanbanBoard } from '@/components/tahi/kanban-board'
+import type { TaskPerson } from '@/components/tahi/tasks/task-types'
 import { TASK_BOARD_COLUMNS, toTaskBoardItems } from '@/lib/tasks-board-items'
 import type { TaskRow } from '@/lib/tasks-views'
 
 export interface TasksBoardProps {
   rows: readonly TaskRow[]
-  people: Readonly<Record<string, { id: string; name: string; avatarUrl?: string | null }>>
+  /** The same roster map the list and the detail panel take. */
+  people: Readonly<Record<string, TaskPerson>>
   /** requestId -> display number, for a linked card's reference chip. */
   requestNumbers?: Readonly<Record<string, number | null | undefined>>
   readOnly: boolean
@@ -69,6 +71,25 @@ export function TasksBoard({
     [onMove],
   )
 
+  // KanbanBoard reads a drop ONTO a card as a nest, and it swallows that drop
+  // whether or not the caller handles it: the card's own handler stops the
+  // event before the column's does, so a board without `onNest` lights the
+  // card brand-green and then does nothing. Tasks do not nest, but a card
+  // stack is most of a full column's drop area, so the gesture is honoured as
+  // the move it looked like: the dragged task takes the status of the card it
+  // landed on. Landing on a card in its own column stays a no-op rather than
+  // firing a PATCH that writes the status back unchanged, because tasks carry
+  // no board ordering for a same-column drop to mean anything else.
+  const handleNest = React.useCallback(
+    (childId: string, parentId: string) => {
+      const child = rows.find((r) => r.id === childId)
+      const target = rows.find((r) => r.id === parentId)
+      if (!child || !target || child.status === target.status) return
+      handleMove(childId, target.status)
+    },
+    [rows, handleMove],
+  )
+
   return (
     <KanbanBoard
       boardId="tasks-board"
@@ -77,13 +98,17 @@ export function TasksBoard({
       readOnly={readOnly}
       iconOnlyPriority
       onMove={readOnly ? undefined : handleMove}
+      onNest={readOnly ? undefined : handleNest}
       // Passed through unwrapped: the composer awaits this promise, closing
       // on resolve and staying open with the title intact on reject.
       onQuickAdd={readOnly ? undefined : onQuickAdd}
       // Done takes no new work: a plus there would name a column the create
       // path does not honour.
       canAddTo={(status) => status !== 'done'}
-      quickAddHint="Enter to add"
+      // The hint names what the write lands against, the way Requests says
+      // "Adds to Acme Ltd". It does not repeat the keyboard hint, which the
+      // composer already prints beside its own Add button.
+      quickAddHint="Lands in this column, unassigned"
       onItemClick={(item) => onOpenTask(item.id)}
     />
   )
