@@ -48,7 +48,7 @@ import { notifyOrgContacts, notifyTeamMember } from '@/lib/notifications'
 import { dispatchDomainEvent } from '@/lib/events'
 import { NextRequest } from 'next/server'
 
-import { POST as createRequest } from '@/app/api/admin/requests/route'
+import { GET as listRequests, POST as createRequest } from '@/app/api/admin/requests/route'
 import { PATCH as bulkPatch, POST as bulkCreate } from '@/app/api/admin/requests/bulk/route'
 import { GET as stepsList, POST as stepCreate } from '@/app/api/admin/requests/[id]/steps/route'
 import { DELETE as stepDelete } from '@/app/api/admin/requests/[id]/steps/[stepId]/route'
@@ -57,6 +57,7 @@ import { GET as timeEntriesList } from '@/app/api/admin/requests/[id]/time-entri
 import { GET as filesList } from '@/app/api/admin/requests/[id]/files/route'
 import { GET as callsList } from '@/app/api/admin/requests/[id]/calls/route'
 import { GET as voiceNotesList } from '@/app/api/admin/requests/[id]/voice-notes/route'
+import { GET as blockersList, POST as blockerCreate } from '@/app/api/admin/requests/[id]/blockers/route'
 import { POST as nest } from '@/app/api/admin/requests/[id]/nest/route'
 
 // ---------------------------------------------------------------------------
@@ -574,6 +575,18 @@ describe('request sub-routes resolve the owning request', () => {
     { name: 'files GET', call: (id) => filesList(req(`/api/admin/requests/${id}/files`), params(id)) },
     { name: 'calls GET', call: (id) => callsList(req(`/api/admin/requests/${id}/calls`), params(id)) },
     { name: 'voice notes GET', call: (id) => voiceNotesList(req(`/api/admin/requests/${id}/voice-notes`), params(id)) },
+    // A blocker names an internal task or another client's request, so the
+    // read is as much a leak as the write. Both ends are guarded in
+    // lib/blockers-server.ts; this only asserts the near end, which is the one
+    // this sweep exists to watch.
+    { name: 'blockers GET', call: (id) => blockersList(req(`/api/admin/requests/${id}/blockers`), params(id)) },
+    {
+      name: 'blockers POST',
+      call: (id) => blockerCreate(
+        jsonReq(`/api/admin/requests/${id}/blockers`, 'POST', { blockerType: 'task', blockerId: 'task-1' }),
+        params(id),
+      ),
+    },
   ]
 
   for (const c of cases) {
@@ -734,5 +747,156 @@ describe('POST /api/admin/requests/[id]/nest', () => {
       params('req-b'),
     )
     expect(res.status).toBe(403)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/admin/requests: the blocker count over a whole page
+//
+// The rail fetches status=all&limit=500, and openBlockerCounts used to put
+// every id of that page into one IN clause. D1 caps bound parameters at 100
+// per statement, so the list, the board, the workload and the timeline all
+// 500ed together on any workspace with more than a hundred requests.
+// ---------------------------------------------------------------------------
+describe('GET /api/admin/requests', () => {
+  it('counts blockers over more ids than one D1 statement can bind', async () => {
+    unrestricted()
+    const rows = Array.from({ length: 150 }, (_, i) => ({
+      id: `req-${i}`,
+      orgId: 'org-a',
+      title: `Request ${i}`,
+      status: 'in_progress',
+    }))
+    const { handle, queries } = makeDb([rows])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await listRequests(req('/api/admin/requests?status=all&limit=500'))
+    expect(res.status).toBe(200)
+    const json = await res.json() as { requests: Array<{ id: string; blockedByCount: number }> }
+    expect(json.requests).toHaveLength(150)
+    expect(json.requests[0].blockedByCount).toBe(0)
+
+    // Nothing this route builds may exceed the cap, participants and blockers
+    // alike. Before the chunk this was one statement with 151 placeholders.
+    const selects = queries.filter((q) => q.calls[0].method === 'select')
+    for (const select of selects) {
+      expect(collect(select, 'where').params.length).toBeLessThanOrEqual(100)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/admin/requests/[id]/blockers: the FAR end of every link
+//
+// guardSubject proves the caller may open the request in the path. It says
+// nothing about what that request is waiting on, and a full admin may legally
+// link two clients together, so the far end is a second question with its own
+// answer. A row outside the caller's scope is kept, so the link can still be
+// removed, and stripped of everything that names a client.
+// ---------------------------------------------------------------------------
+describe('GET /api/admin/requests/[id]/blockers', () => {
+  type Row = {
+    linkId: string
+    otherTitle: string
+    otherStatus: string
+    otherRef: string | null
+    otherOrgName: string | null
+  }
+
+  const link = (id: string, type: string, subjectId: string) => ({ id, type, subjectId })
+
+  async function read(id: string): Promise<Row[]> {
+    const res = await blockersList(req(`/api/admin/requests/${id}/blockers`), params(id))
+    expect(res.status).toBe(200)
+    const json = await res.json() as { blockedBy: Row[] }
+    return json.blockedBy
+  }
+
+  it('gives a scoped caller no title, reference or client name for a far end it may not open', async () => {
+    scopedTo(['org-a'])
+    const { handle } = makeDb([
+      [{ orgId: 'org-a' }],                    // guardSubject on the near end
+      [link('link-1', 'request', 'req-b')],    // what req-a waits on
+      [],                                      // what waits on req-a
+      [{
+        id: 'req-b',
+        title: 'Beta rebrand, phase two',
+        status: 'in_progress',
+        requestNumber: 42,
+        orgId: 'org-b',
+        orgName: 'Beta Ltd',
+      }],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const [row] = await read('req-a')
+    // Kept, because an unremovable link is worse than a redacted one.
+    expect(row.linkId).toBe('link-1')
+    expect(row.otherTitle).toBe("Another client's work")
+    expect(row.otherTitle).not.toContain('Beta')
+    expect(row.otherRef).toBeNull()
+    expect(row.otherOrgName).toBeNull()
+    // The status is not identifying, and the open count reads it.
+    expect(row.otherStatus).toBe('in_progress')
+  })
+
+  it('leaves a far end inside the scope whole', async () => {
+    scopedTo(['org-a', 'org-b'])
+    const { handle } = makeDb([
+      [{ orgId: 'org-a' }],
+      [link('link-1', 'request', 'req-b')],
+      [],
+      [{
+        id: 'req-b',
+        title: 'Beta rebrand, phase two',
+        status: 'in_progress',
+        requestNumber: 42,
+        orgId: 'org-b',
+        orgName: 'Beta Ltd',
+      }],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const [row] = await read('req-a')
+    expect(row.otherTitle).toBe('Beta rebrand, phase two')
+    expect(row.otherRef).toBe('#042')
+    expect(row.otherOrgName).toBe('Beta Ltd')
+  })
+
+  it('leaves a client-less studio task whole, which every team member may reach', async () => {
+    scopedTo(['org-a'])
+    const { handle } = makeDb([
+      [{ orgId: 'org-a' }],
+      [link('link-1', 'task', 'task-1')],
+      [],
+      [{ id: 'task-1', title: 'Chase the hosting invoice', status: 'todo', orgId: null, orgName: null }],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const [row] = await read('req-a')
+    expect(row.otherTitle).toBe('Chase the hosting invoice')
+    expect(row.otherOrgName).toBeNull()
+  })
+
+  it('redacts nothing for an unrestricted caller', async () => {
+    unrestricted()
+    const { handle } = makeDb([
+      [{ orgId: 'org-a' }],
+      [link('link-1', 'request', 'req-b')],
+      [],
+      [{
+        id: 'req-b',
+        title: 'Beta rebrand, phase two',
+        status: 'in_progress',
+        requestNumber: 42,
+        orgId: 'org-b',
+        orgName: 'Beta Ltd',
+      }],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const [row] = await read('req-a')
+    expect(row.otherTitle).toBe('Beta rebrand, phase two')
+    expect(row.otherOrgName).toBe('Beta Ltd')
   })
 })

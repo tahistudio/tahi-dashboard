@@ -7,6 +7,7 @@ import { resolveAccessScoping } from '@/lib/access-scoping'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { emitRequestCreated } from '@/lib/request-status-effects'
 import { loadRequestParticipants } from '@/lib/request-participants'
+import { openBlockerCounts } from '@/lib/blockers-server'
 import { CREATABLE_STATUSES, isCreatableStatus } from '@/lib/request-vocabulary'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
@@ -117,10 +118,21 @@ export async function GET(req: NextRequest) {
     requests.map((r) => r.id),
   )
 
+  // Open blockers, which can be a task or another request. Not a correlated
+  // subquery like the two above it: the closed vocabulary differs per blocker
+  // type, and neither list belongs in SQL. This is admin-only data and the
+  // portal route has no equivalent, deliberately.
+  const blockedByCounts = await openBlockerCounts(
+    database as ReturnType<typeof import('drizzle-orm/d1').drizzle>,
+    'request',
+    requests.map((r) => r.id),
+  )
+
   return NextResponse.json({
     requests: requests.map((r) => ({
       ...r,
       participants: participantsByRequest.get(r.id) ?? [],
+      blockedByCount: blockedByCounts[r.id] ?? 0,
     })),
     page,
     limit,

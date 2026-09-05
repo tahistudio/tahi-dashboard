@@ -33,15 +33,11 @@ export interface TaskRequestOption {
   title: string
 }
 
-/** One row of `blockedBy` or `blocks` from GET .../dependencies. `depId` is
- *  the dependency row's own id, which is what DELETE takes; `taskId` is the
- *  OTHER task in the relationship. */
-export interface TaskDependencyRow {
-  depId: string
-  taskId: string
-  taskTitle: string
-  taskStatus: string
-}
+/** One row of `blockedBy` or `blocks` from GET .../blockers. A blocker is now
+ *  polymorphic (a task or a request at either end), so the shape lives beside
+ *  the rules in lib/blockers.ts rather than being declared twice. `linkId` is
+ *  the edge's own id, which is what DELETE takes; `other*` is the far end. */
+export type { BlockerRow } from '@/lib/blockers'
 
 /** A task template, as the header menu and the create dialog read it. */
 export interface TaskTemplateOption {

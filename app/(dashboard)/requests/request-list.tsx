@@ -7,7 +7,7 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import {
   Plus, LayoutList, Columns3, BarChart3,
-  AlertTriangle, ChevronDown, Inbox, RefreshCw,
+  AlertTriangle, ChevronDown, Inbox, RefreshCw, PauseCircle,
   Zap, Download,
   CheckSquare, Square, Users, Loader2, X, Sparkles,
   Palette, Code2, FileText, Compass, Briefcase, Bug, Megaphone, Tag,
@@ -68,8 +68,10 @@ import {
   DEFAULT_REQUEST_SORT,
   applyRequestViews,
   countSavedViews,
+  isRequestBlocked,
   type RequestsAudience,
 } from '@/lib/requests-views'
+import { blockedWarningLabel } from '@/lib/blockers'
 import {
   buildRequestsNarrowChips,
   hasRequestsUrlNarrow,
@@ -117,6 +119,15 @@ interface Request {
    *  Both list APIs return it; the kanban card and the timeline stack it
    *  as avatars. Empty when the request has no cast beyond its assignee. */
   participants?: RequestParticipant[] | null
+  /** Open blockers. Admin list only: the portal route never returns it, and
+   *  the client saved views never offer the Blocked cut (Decision 13). */
+  blockedByCount?: number
+}
+
+/** The blocked glyph's label, shared by its aria-label and its title so the
+ *  pointer and the screen reader are told the same thing. */
+function blockedGlyphLabel(count: number): string {
+  return `Blocked by ${count} item${count === 1 ? '' : 's'}`
 }
 
 /** Parse an org's tags JSON column into a clean string[]. */
@@ -392,6 +403,24 @@ function RequestMobileCard({
         )}
         {request.scopeFlagged && (
           <AlertTriangle size={13} aria-label="Scope flagged" style={{ color: 'var(--color-danger)', flexShrink: 0 }} />
+        )}
+        {/* A distinct glyph in a distinct ink. Scope creep is a warning about
+            what the work has become; a blocker is a statement that it cannot
+            move. One icon for both would be a lie. */}
+        {isRequestBlocked(request) && (
+          // The title sits on a wrapper because a lucide icon takes no title
+          // prop. The pointer gets the tooltip, the reader gets the label.
+          <span
+            className="inline-flex"
+            title={blockedGlyphLabel(request.blockedByCount ?? 0)}
+            style={{ flexShrink: 0 }}
+          >
+            <PauseCircle
+              size={13}
+              aria-label={blockedGlyphLabel(request.blockedByCount ?? 0)}
+              style={{ color: 'var(--color-warning)' }}
+            />
+          </span>
         )}
         {request.requestNumber != null && (
           <span data-private className="font-mono" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
@@ -1176,7 +1205,10 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
           : undefined,
         priority: toBoardPriority(r.priority),
         tags: tags.length > 0 ? tags : undefined,
-        warning: r.scopeFlagged ? 'Flagged for scope creep' : undefined,
+        // BoardItem.warning is one slot and both signals want it, so a
+        // request that is blocked AND flagged keeps both rather than
+        // silently losing one.
+        warning: blockedWarningLabel(r.blockedByCount ?? 0, !!r.scopeFlagged),
         client: showClientAvatar && r.orgId && r.orgName
           ? { id: r.orgId, name: r.orgName, avatarUrl: r.orgLogoUrl }
           : undefined,
@@ -1337,6 +1369,19 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
                 aria-label="Scope flagged"
                 style={{ color: 'var(--color-danger)', flexShrink: 0 }}
               />
+            )}
+            {isRequestBlocked(r) && (
+              <span
+                className="inline-flex"
+                title={blockedGlyphLabel(r.blockedByCount ?? 0)}
+                style={{ flexShrink: 0 }}
+              >
+                <PauseCircle
+                  size={13}
+                  aria-label={blockedGlyphLabel(r.blockedByCount ?? 0)}
+                  style={{ color: 'var(--color-warning)' }}
+                />
+              </span>
             )}
             {r.requestNumber != null && (
               <span data-private className="font-mono" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }}>

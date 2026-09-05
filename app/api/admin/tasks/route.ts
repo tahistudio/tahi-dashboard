@@ -10,6 +10,7 @@ import { isTaskLevel, type TaskLevel } from '@/lib/tasks-views'
 import { coerceTaskLinks, setTaskLevel } from '@/lib/task-consistency'
 import { requestOrgId } from '@/lib/task-access'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { openBlockerCounts } from '@/lib/blockers-server'
 
 // ── GET /api/admin/tasks ───────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -118,64 +119,51 @@ export async function GET(req: NextRequest) {
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(orderClause)
 
-  // Gather task IDs to batch-load subtask progress and dependencies
+  // Gather task IDs to batch-load subtask progress and blockers
   const taskIds = tasks.map(t => t.id)
 
   const subtaskCounts: Record<string, number> = {}
   const subtaskDoneCounts: Record<string, number> = {}
-  const dependenciesByTask: Record<string, Array<{ id: string; dependsOnTaskId: string }>> = {}
-  const blockedByCounts: Record<string, number> = {}
+  let blockedByCounts: Record<string, number> = {}
 
   if (taskIds.length > 0) {
     // Subtask progress: total count AND completed count in one grouped pass, so
     // rows can render "2/5" instead of a permanently-0 progress bar.
-    const subtaskRows = await drizzle
-      .select({
-        taskId: schema.taskSubtasks.taskId,
-        count: sql<number>`count(*)`.as('count'),
-        done: sql<number>`sum(case when ${schema.taskSubtasks.completed} = 1 then 1 else 0 end)`.as('done'),
-      })
-      .from(schema.taskSubtasks)
-      .where(inArray(schema.taskSubtasks.taskId, taskIds))
-      .groupBy(schema.taskSubtasks.taskId)
+    //
+    // Chunked, because the query above carries no limit: one id is one bound
+    // parameter and D1 caps a statement at 100, so a hundred-and-first task
+    // used to 500 the whole page. Same chunk size openBlockerCounts uses below.
+    const SUBTASK_ID_CHUNK = 90
+    for (let i = 0; i < taskIds.length; i += SUBTASK_ID_CHUNK) {
+      const subtaskRows = await drizzle
+        .select({
+          taskId: schema.taskSubtasks.taskId,
+          count: sql<number>`count(*)`.as('count'),
+          done: sql<number>`sum(case when ${schema.taskSubtasks.completed} = 1 then 1 else 0 end)`.as('done'),
+        })
+        .from(schema.taskSubtasks)
+        .where(inArray(schema.taskSubtasks.taskId, taskIds.slice(i, i + SUBTASK_ID_CHUNK)))
+        .groupBy(schema.taskSubtasks.taskId)
 
-    for (const row of subtaskRows) {
-      subtaskCounts[row.taskId] = Number(row.count) || 0
-      subtaskDoneCounts[row.taskId] = Number(row.done) || 0
-    }
-
-    // Dependencies, joined to the blocking task so we know which blockers are
-    // still open. blockedByCount = blockers that are not yet done.
-    const depRows = await drizzle
-      .select({
-        id: schema.taskDependencies.id,
-        taskId: schema.taskDependencies.taskId,
-        dependsOnTaskId: schema.taskDependencies.dependsOnTaskId,
-        dependsOnStatus: schema.tasks.status,
-      })
-      .from(schema.taskDependencies)
-      .leftJoin(schema.tasks, eq(schema.taskDependencies.dependsOnTaskId, schema.tasks.id))
-      .where(inArray(schema.taskDependencies.taskId, taskIds))
-
-    for (const dep of depRows) {
-      if (!dependenciesByTask[dep.taskId]) {
-        dependenciesByTask[dep.taskId] = []
-      }
-      dependenciesByTask[dep.taskId].push({
-        id: dep.id,
-        dependsOnTaskId: dep.dependsOnTaskId,
-      })
-      if (dep.dependsOnStatus !== 'done') {
-        blockedByCounts[dep.taskId] = (blockedByCounts[dep.taskId] ?? 0) + 1
+      for (const row of subtaskRows) {
+        subtaskCounts[row.taskId] = Number(row.count) || 0
+        subtaskDoneCounts[row.taskId] = Number(row.done) || 0
       }
     }
+
+    // Open blockers, which since 0088 can be a task OR a request. The closed
+    // vocabulary differs per type ('done' against 'delivered' / 'cancelled' /
+    // 'archived'), so neither list goes into SQL: openBlockerCounts answers
+    // both from lib/blockers.ts, which is the same answer the detail card and
+    // the requests list get. The old inline `dependsOnStatus !== 'done'`
+    // literal here is exactly what had drifted.
+    blockedByCounts = await openBlockerCounts(drizzle, 'task', taskIds)
   }
 
   const enrichedTasks = tasks.map(t => ({
     ...t,
     subtaskCount: subtaskCounts[t.id] ?? 0,
     subtaskDone: subtaskDoneCounts[t.id] ?? 0,
-    dependencies: dependenciesByTask[t.id] ?? [],
     blockedByCount: blockedByCounts[t.id] ?? 0,
   }))
 

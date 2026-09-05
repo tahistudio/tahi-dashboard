@@ -1,11 +1,14 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
+  filterMenuOptions,
   isCompleteDateValue,
+  menuQueryChange,
   openDateEditor,
   reduceDateEditor,
   resolveDateCommit,
   type DateEditorEvent,
   type DateEditorState,
+  type InlineMenuOption,
 } from '@/components/tahi/inline-field'
 
 // Vitest runs in the `node` environment here, so this covers the rules the Due
@@ -209,5 +212,79 @@ describe('the Due editing session', () => {
       draft: '2026-09-10',
       opened: '2026-09-10',
     })
+  })
+})
+
+// ── The menu's search box ────────────────────────────────────────────────────
+//
+// Both of these exist for the blocker picker, which searches the SERVER rather
+// than a list the page already holds. Neither can be shown through a render
+// (vitest runs in the node environment here and this repo has no jsdom), so
+// the two facts the picker depends on are pinned as pure functions, and the
+// component is a direct caller of both.
+
+describe('menuQueryChange', () => {
+  it('tells the caller about the keystroke and returns what the box now holds', () => {
+    const notify = vi.fn()
+    expect(menuQueryChange('desi', notify)).toBe('desi')
+    expect(notify).toHaveBeenCalledTimes(1)
+    expect(notify).toHaveBeenCalledWith('desi')
+  })
+
+  it('reports every keystroke, because a server search debounces at the caller', () => {
+    const notify = vi.fn()
+    for (const q of ['d', 'de', 'des']) menuQueryChange(q, notify)
+    expect(notify.mock.calls.map(c => c[0])).toEqual(['d', 'de', 'des'])
+  })
+
+  it('reports an emptied box rather than going quiet', () => {
+    const notify = vi.fn()
+    expect(menuQueryChange('', notify)).toBe('')
+    expect(notify).toHaveBeenCalledWith('')
+  })
+
+  it('is harmless without a caller, which is the four existing call sites', () => {
+    expect(() => menuQueryChange('anything')).not.toThrow()
+    expect(menuQueryChange('anything')).toBe('anything')
+  })
+})
+
+describe('filterMenuOptions', () => {
+  const options: InlineMenuOption[] = [
+    { value: 'a', label: 'Homepage hero' },
+    { value: 'b', label: 'Pricing table', keywords: 'Acme #042' },
+    { value: 'c', node: null, keywords: 'Nav rebuild' },
+    // What a server-searched option looks like: a rich node, no label, and
+    // nothing that repeats what the server matched on.
+    { value: 'd', node: null },
+  ]
+
+  it('returns everything when nothing has been typed', () => {
+    expect(filterMenuOptions(options, '').map(o => o.value)).toEqual(['a', 'b', 'c', 'd'])
+    expect(filterMenuOptions(options, '   ').map(o => o.value)).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  it('matches on the label and on the keywords, case insensitively', () => {
+    expect(filterMenuOptions(options, 'HERO').map(o => o.value)).toEqual(['a'])
+    expect(filterMenuOptions(options, 'acme').map(o => o.value)).toEqual(['b'])
+    expect(filterMenuOptions(options, '#042').map(o => o.value)).toEqual(['b'])
+    expect(filterMenuOptions(options, 'nav').map(o => o.value)).toEqual(['c'])
+  })
+
+  it('drops an option that matches nothing', () => {
+    expect(filterMenuOptions(options, 'nothing like this')).toEqual([])
+  })
+
+  it('skips the local pass entirely when the caller already filtered', () => {
+    // The whole point. A server-searched option carries a node and no label,
+    // so re-filtering here would throw away every row the server matched on a
+    // title, and the picker would look permanently empty.
+    expect(filterMenuOptions(options, 'HERO', true).map(o => o.value)).toEqual(['a', 'b', 'c', 'd'])
+    expect(filterMenuOptions(options, 'nothing like this', true)).toHaveLength(4)
+  })
+
+  it('defaults to filtering, so the existing call sites are untouched', () => {
+    expect(filterMenuOptions(options, 'hero', false).map(o => o.value)).toEqual(['a'])
+    expect(filterMenuOptions(options, 'hero').map(o => o.value)).toEqual(['a'])
   })
 })

@@ -34,6 +34,15 @@ vi.mock('@/db/d1', () => ({
     teamMembers: { id: 'id', clerkUserId: 'clerk_user_id' },
     taskSubtasks: { id: 'id', taskId: 'task_id', title: 'title', completed: 'completed', createdAt: 'created_at' },
     taskDependencies: { id: 'id', taskId: 'task_id', dependsOnTaskId: 'depends_on_task_id', createdAt: 'created_at' },
+    // Since 0088 the count comes from work_blockers through
+    // openBlockerCounts, which also reaches `requests` when a blocker is one.
+    // Both keys have to exist or the drizzle stub's column references are
+    // undefined at runtime.
+    workBlockers: {
+      id: 'id', blockedType: 'blocked_type', blockedId: 'blocked_id',
+      blockerType: 'blocker_type', blockerId: 'blocker_id', createdAt: 'created_at',
+    },
+    requests: { id: 'id', status: 'status' },
   },
 }))
 
@@ -70,11 +79,13 @@ describe('GET /api/admin/tasks enrichment', () => {
       [{ id: 't1', type: 'tahi_internal', orgId: null, title: 'A', status: 'todo', priority: 'standard' }],
       // 2) grouped subtask counts (total 3, done 1)
       [{ taskId: 't1', count: 3, done: 1 }],
-      // 3) dependency rows joined to blocking status (one open, one done)
+      // 3) work_blockers links for these tasks
       [
-        { id: 'd1', taskId: 't1', dependsOnTaskId: 't2', dependsOnStatus: 'todo' },
-        { id: 'd2', taskId: 't1', dependsOnTaskId: 't3', dependsOnStatus: 'done' },
+        { blockedId: 't1', blockerType: 'task', blockerId: 't2' },
+        { blockedId: 't1', blockerType: 'task', blockerId: 't3' },
       ],
+      // 4) the statuses of those blocking tasks (one open, one done)
+      [{ id: 't2', status: 'todo' }, { id: 't3', status: 'done' }],
     ]
     vi.mocked(db).mockResolvedValue(makeDrizzle(queue) as never)
 
@@ -90,11 +101,11 @@ describe('GET /api/admin/tasks enrichment', () => {
     expect(t.blockedByCount).toBe(1)
   })
 
-  it('defaults subtaskDone and blockedByCount to 0 with no subtasks or deps', async () => {
+  it('defaults subtaskDone and blockedByCount to 0 with no subtasks or blockers', async () => {
     const queue: unknown[] = [
       [{ id: 't1', type: 'tahi_internal', orgId: null, title: 'A', status: 'todo', priority: 'standard' }],
       [], // no subtasks
-      [], // no deps
+      [], // no blocker links, so no status lookup follows
     ]
     vi.mocked(db).mockResolvedValue(makeDrizzle(queue) as never)
 
@@ -102,6 +113,38 @@ describe('GET /api/admin/tasks enrichment', () => {
     const json = await res.json() as { tasks: Array<{ subtaskDone: number; blockedByCount: number }> }
     expect(json.tasks[0].subtaskDone).toBe(0)
     expect(json.tasks[0].blockedByCount).toBe(0)
+  })
+
+  it('counts a request blocker, with the request closed set rather than the task one', async () => {
+    const queue: unknown[] = [
+      [{ id: 't1', type: 'tahi_internal', orgId: null, title: 'A', status: 'todo', priority: 'standard' }],
+      [], // no subtasks
+      // Two request blockers. 'delivered' closes a request; it is not 'done',
+      // which is what the old inline literal would have counted as open.
+      [
+        { blockedId: 't1', blockerType: 'request', blockerId: 'r1' },
+        { blockedId: 't1', blockerType: 'request', blockerId: 'r2' },
+      ],
+      [{ id: 'r1', status: 'in_progress' }, { id: 'r2', status: 'delivered' }],
+    ]
+    vi.mocked(db).mockResolvedValue(makeDrizzle(queue) as never)
+
+    const res = await listTasks(new NextRequest('http://localhost/api/admin/tasks'))
+    const json = await res.json() as { tasks: Array<{ blockedByCount: number }> }
+    expect(json.tasks[0].blockedByCount).toBe(1)
+  })
+
+  it('drops the unread dependencies array it used to ship on every row', async () => {
+    const queue: unknown[] = [
+      [{ id: 't1', type: 'tahi_internal', orgId: null, title: 'A', status: 'todo', priority: 'standard' }],
+      [],
+      [],
+    ]
+    vi.mocked(db).mockResolvedValue(makeDrizzle(queue) as never)
+
+    const res = await listTasks(new NextRequest('http://localhost/api/admin/tasks'))
+    const json = await res.json() as { tasks: Array<Record<string, unknown>> }
+    expect(json.tasks[0]).not.toHaveProperty('dependencies')
   })
 })
 

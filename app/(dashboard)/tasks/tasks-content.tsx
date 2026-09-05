@@ -74,13 +74,14 @@ import { TasksWeek } from '@/components/tahi/tasks/tasks-week'
 import { TaskDetailPanel } from '@/components/tahi/tasks/task-detail-panel'
 import { NewTaskDialog, type NewTaskDraft } from '@/components/tahi/tasks/new-task-dialog'
 import type {
+  BlockerRow,
   TaskClientOption,
-  TaskDependencyRow,
   TaskPerson,
   TaskRequestOption,
   TaskSubtask,
   TaskTemplateOption,
 } from '@/components/tahi/tasks/task-types'
+import type { BlockerCandidate, BlockerSubjectType } from '@/lib/blockers'
 
 // AI wizard modal: only opened on click, so defer it out of the first paint.
 const AiTaskWizard = dynamic(
@@ -124,8 +125,12 @@ interface ProfilePayload { member?: { id: string } | null }
 interface SubtasksPayload {
   subtasks?: { id: string; title: string; completed: boolean | null }[]
 }
-interface DependenciesPayload {
-  blockedBy?: { depId: string; taskId: string; taskTitle: string | null; taskStatus: string | null }[]
+interface BlockersPayload {
+  blockedBy?: BlockerRow[]
+  blocks?: BlockerRow[]
+}
+interface BlockerCandidatesPayload {
+  candidates?: BlockerCandidate[]
 }
 
 /**
@@ -406,31 +411,34 @@ export function TasksContent() {
     void loadSubtasks(selectedTaskId)
   }, [selectedTaskId, loadSubtasks])
 
-  // ── Dependencies ───────────────────────────────────────────────────────────
+  // ── Blockers ───────────────────────────────────────────────────────────────
 
-  const depsKey = selectedTaskId ? `/api/admin/tasks/${selectedTaskId}/dependencies` : null
+  const depsKey = selectedTaskId ? `/api/admin/tasks/${selectedTaskId}/blockers` : null
   const { data: depsData, isLoading: depsLoading, mutate: mutateDeps } =
-    useSWR<DependenciesPayload>(depsKey)
+    useSWR<BlockersPayload>(depsKey)
 
-  const blockedBy = useMemo<TaskDependencyRow[] | undefined>(() => {
+  // No mapping any more. The server names an orphan honestly ("Deleted task",
+  // "Deleted request") rather than the panel inventing "Untitled task" for a
+  // row that is not untitled, it is gone.
+  const blockedBy = useMemo<readonly BlockerRow[] | undefined>(() => {
     if (!depsKey || depsLoading || !depsData) return undefined
-    // The route left-joins the blocking task, so both text columns come back
-    // nullable. A dependency on a row that has since gone is still a blocker
-    // the user has to be able to see and remove.
-    return (depsData.blockedBy ?? []).map(d => ({
-      depId: d.depId,
-      taskId: d.taskId,
-      taskTitle: d.taskTitle ?? 'Untitled task',
-      taskStatus: d.taskStatus ?? 'todo',
-    }))
+    return depsData.blockedBy ?? []
   }, [depsKey, depsLoading, depsData])
 
-  const blockerCandidates = useMemo(
-    () => tasks
-      .filter(t => t.id !== selectedTaskId && t.status !== 'done')
-      .map(t => ({ id: t.id, title: t.title })),
-    [tasks, selectedTaskId],
-  )
+  /**
+   * The picker searches the server rather than the rows this page happens to
+   * hold, so it can offer a paginated request or a task outside the current
+   * lens. Scoped the same way the two list routes are, which is why it is not
+   * GET /api/admin/search.
+   */
+  const handleSearchBlockers = useCallback(async (query: string): Promise<BlockerCandidate[]> => {
+    if (!selectedTaskId) return []
+    const params = new URLSearchParams({ q: query, excludeType: 'task', excludeId: selectedTaskId })
+    const res = await fetch(apiPath(`/api/admin/blockers/search?${params.toString()}`))
+    if (!res.ok) return []
+    const json = await res.json() as BlockerCandidatesPayload
+    return json.candidates ?? []
+  }, [selectedTaskId])
 
   // ── The pipeline ───────────────────────────────────────────────────────────
 
@@ -780,31 +788,35 @@ export function TasksContent() {
     void handleDeleteSubtask(taskId, subtaskId)
   }, [handleDeleteSubtask])
 
-  // ── Dependency writes ──────────────────────────────────────────────────────
+  // ── Blocker writes ─────────────────────────────────────────────────────────
 
-  // Rejects with the route's own message, which is how the panel tells a loop
-  // apart from a plain failure.
-  const handleAddBlocker = useCallback(async (taskId: string, blockerTaskId: string) => {
-    const res = await fetch(apiPath(`/api/admin/tasks/${taskId}/dependencies`), {
+  // Rejects with the route's own sentence, which is how the panel tells a loop
+  // from a duplicate from a plain failure without matching on substrings.
+  const handleAddBlocker = useCallback(async (
+    taskId: string,
+    blocker: { type: BlockerSubjectType; id: string },
+  ) => {
+    const res = await fetch(apiPath(`/api/admin/tasks/${taskId}/blockers`), {
       method: 'POST',
       headers: JSON_HEADERS,
-      body: JSON.stringify({ dependsOnTaskId: blockerTaskId }),
+      body: JSON.stringify({ blockerType: blocker.type, blockerId: blocker.id }),
     })
     if (!res.ok) throw new Error(await readError(res))
+    // Both, always: the card's list and the row's count must not disagree.
     await mutateDeps()
     void mutateTasks()
   }, [mutateDeps, mutateTasks])
 
-  const handleRemoveBlocker = useCallback(async (taskId: string, depId: string) => {
+  const handleRemoveBlocker = useCallback(async (taskId: string, linkId: string) => {
     try {
-      const res = await fetch(apiPath(`/api/admin/tasks/${taskId}/dependencies/${depId}`), {
+      const res = await fetch(apiPath(`/api/admin/tasks/${taskId}/blockers/${linkId}`), {
         method: 'DELETE',
       })
       if (!res.ok) throw new Error(await readError(res))
       await mutateDeps()
       void mutateTasks()
-    } catch {
-      showToast('Could not remove that blocker', 'error')
+    } catch (err) {
+      showToast(err instanceof Error && err.message ? err.message : 'Could not remove that blocker', 'error')
     }
   }, [mutateDeps, mutateTasks, showToast])
 
@@ -1003,7 +1015,7 @@ export function TasksContent() {
         requests={requestOptions}
         subtasks={selectedTaskId ? subtasksByTask[selectedTaskId] : undefined}
         blockedBy={blockedBy}
-        blockerCandidates={blockerCandidates}
+        onSearchBlockers={handleSearchBlockers}
         onPatch={handlePatch}
         onDelete={handleDelete}
         onDuplicate={handleDuplicate}

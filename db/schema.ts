@@ -894,6 +894,50 @@ export const taskDependencies = sqliteTable('task_dependencies', {
 ])
 
 // ============================================================
+// WORK BLOCKERS (polymorphic: task or request, both ends)
+// ============================================================
+
+/**
+ * "X cannot start until Y finishes", where X and Y are each a task or a
+ * request. Supersedes task_dependencies, which migration 0088 copies from and
+ * then leaves frozen for one release.
+ *
+ * There are no foreign keys, and there cannot be: a column cannot reference
+ * two tables. That is the price of the polymorphism, and it is paid on
+ * purpose, because the alternative is three tables and three copies of the
+ * cycle check. Two consequences follow, both handled deliberately:
+ *
+ *   1. Nothing cascades. The one hard delete in the codebase (DELETE
+ *      /api/admin/tasks/[id]) calls sweepBlockers first. Requests are
+ *      soft-deleted to 'archived', which is a closed status, so they stop
+ *      counting on their own.
+ *   2. A row can outlive its subject. Readers tolerate that: an orphan
+ *      renders as "Deleted task" and can still be unlinked, which is exactly
+ *      what the shipped Waiting on card already did.
+ *
+ * The unique index on all four key columns turns the old duplicate pre-read
+ * into a constraint.
+ */
+export const workBlockers = sqliteTable('work_blockers', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // 'task' | 'request'
+  blockedType: text('blocked_type').notNull(),
+  blockedId: text('blocked_id').notNull(),
+  // 'task' | 'request'
+  blockerType: text('blocker_type').notNull(),
+  blockerId: text('blocker_id').notNull(),
+  createdById: text('created_by_id'),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  index('idx_work_blockers_blocked').on(table.blockedType, table.blockedId),
+  index('idx_work_blockers_blocker').on(table.blockerType, table.blockerId),
+  uniqueIndex('idx_work_blockers_pair')
+    .on(table.blockedType, table.blockedId, table.blockerType, table.blockerId),
+])
+
+// ============================================================
 // TASK TEMPLATES (S17)
 // ============================================================
 

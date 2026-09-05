@@ -10,6 +10,7 @@ import { guardTask, loadTaskLinks, requestOrgId, resolveAssigneeType } from '@/l
 import { requireAccessToOrg } from '@/lib/require-access'
 import { isTaskLevel, type TaskLevel } from '@/lib/tasks-views'
 import { coerceTaskLinks, setTaskLevel } from '@/lib/task-consistency'
+import { sweepBlockers } from '@/lib/blockers-server'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -288,7 +289,14 @@ export async function DELETE(
   const denied = await guardTask(drizzle, userId, id)
   if (denied) return denied
 
-  // Subtasks and dependency rows cascade via their FK onDelete rules.
+  // No foreign keys on a polymorphic edge, so nothing cascades. This is the
+  // only hard delete in the codebase; requests archive instead, and archived is
+  // already a closed status. Both directions, or the far end keeps a count
+  // nothing on the page can explain.
+  await sweepBlockers(drizzle, { type: 'task', id })
+
+  // Checklist items still cascade via their FK onDelete rule. Blocker links no
+  // longer do, which is what the sweep above is for.
   await drizzle.delete(schema.tasks).where(eq(schema.tasks.id, id))
 
   return NextResponse.json({ success: true })

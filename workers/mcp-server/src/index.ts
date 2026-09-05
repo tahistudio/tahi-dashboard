@@ -227,6 +227,17 @@ function tool(name: string, description: string, properties: Record<string, unkn
   }
 }
 
+/**
+ * A blocker subject type to its path segment: 'task' to 'tasks', 'request' to
+ * 'requests'. Rejects anything else rather than building a URL that would
+ * 404 and read as "no such task".
+ */
+function blockerSegment(subjectType: string | undefined): string {
+  if (subjectType === 'task') return 'tasks'
+  if (subjectType === 'request') return 'requests'
+  throw new Error("subjectType must be 'task' or 'request'")
+}
+
 // ---------------------------------------------------------------------------
 // Tool definitions (60+ tools, matching stdio server)
 // ---------------------------------------------------------------------------
@@ -511,11 +522,31 @@ const TOOLS: ToolDef[] = [
     subId: prop('string', 'Subtask ID'),
     isCompleted: prop('boolean', 'Whether the subtask is completed'),
   }, ['taskId', 'subId', 'isCompleted']),
-  tool('add_task_dependency', 'Add a dependency to a task', {
+  tool('list_blockers', 'List what a task or request is blocked by, and what is waiting on it', {
+    subjectType: prop('string', "'task' or 'request'"),
+    subjectId: prop('string', 'The task or request ID'),
+  }, ['subjectType', 'subjectId']),
+  tool('add_blocker', 'Say that a task or request cannot start until another task or request finishes', {
+    subjectType: prop('string', "'task' or 'request': the thing that is blocked"),
+    subjectId: prop('string', 'ID of the thing that is blocked'),
+    blockerType: prop('string', "'task' or 'request': the thing it waits on"),
+    blockerId: prop('string', 'ID of the thing it waits on'),
+  }, ['subjectType', 'subjectId', 'blockerType', 'blockerId']),
+  tool('remove_blocker', 'Remove one blocker link', {
+    subjectType: prop('string', "'task' or 'request'"),
+    subjectId: prop('string', 'The blocked task or request ID'),
+    linkId: prop('string', 'The link ID from list_blockers'),
+  }, ['subjectType', 'subjectId', 'linkId']),
+  tool('search_blocker_candidates', 'Search open tasks and requests that could be used as a blocker', {
+    q: prop('string', 'Title text, or a request number like 042'),
+    excludeType: prop('string', "'task' or 'request' to leave out of the results"),
+    excludeId: prop('string', 'ID to leave out of the results'),
+  }, ['q']),
+  tool('add_task_dependency', 'Add a dependency to a task. Legacy. Prefer add_blocker / remove_blocker / list_blockers, which also accept a request.', {
     taskId: prop('string', 'Task ID'),
     dependsOnTaskId: prop('string', 'ID of the task this one depends on'),
   }, ['taskId', 'dependsOnTaskId']),
-  tool('remove_task_dependency', 'Remove a dependency from a task', {
+  tool('remove_task_dependency', 'Remove a dependency from a task. Legacy. Prefer add_blocker / remove_blocker / list_blockers, which also accept a request.', {
     taskId: prop('string', 'Task ID'),
     depId: prop('string', 'Dependency ID to remove'),
   }, ['taskId', 'depId']),
@@ -524,7 +555,7 @@ const TOOLS: ToolDef[] = [
     orgId: prop('string', 'Client organisation ID'),
     assigneeId: prop('string', 'Team member ID to assign'),
   }, ['templateId']),
-  tool('delete_task', 'Delete a task. Its subtasks and dependency links go with it.', {
+  tool('delete_task', 'Delete a task. Its checklist items cascade and its blocker links are swept.', {
     taskId: prop('string', 'Task ID'),
   }, ['taskId']),
   tool('bulk_update_tasks', 'Update many tasks at once. Only the fields you pass change.', {
@@ -534,7 +565,7 @@ const TOOLS: ToolDef[] = [
     assigneeId: prop('string', 'Team member ID, or an empty string to unassign'),
     dueDate: prop('string', 'Due date YYYY-MM-DD, or an empty string to clear it'),
   }, ['taskIds']),
-  tool('list_task_dependencies', 'List what a task is blocked by and what it blocks', {
+  tool('list_task_dependencies', 'List what a task is blocked by and what it blocks. Legacy. Prefer add_blocker / remove_blocker / list_blockers, which also accept a request.', {
     taskId: prop('string', 'Task ID'),
   }, ['taskId']),
   tool('delete_task_subtask', 'Delete a subtask', {
@@ -1825,6 +1856,30 @@ async function executeTool(
       return json(await apiWrite(`/api/admin/tasks/${s('taskId')}/subtasks`, token, 'POST', { title: s('title') }))
     case 'toggle_task_subtask':
       return json(await apiWrite(`/api/admin/tasks/${s('taskId')}/subtasks/${s('subId')}`, token, 'PATCH', { isCompleted: args.isCompleted }))
+    case 'list_blockers':
+      return json(await apiGet(`/api/admin/${blockerSegment(s('subjectType'))}/${s('subjectId')}/blockers`, token))
+    case 'add_blocker':
+      return json(await apiWrite(
+        `/api/admin/${blockerSegment(s('subjectType'))}/${s('subjectId')}/blockers`,
+        token,
+        'POST',
+        { blockerType: s('blockerType'), blockerId: s('blockerId') },
+      ))
+    case 'remove_blocker':
+      return json(await apiWrite(
+        `/api/admin/${blockerSegment(s('subjectType'))}/${s('subjectId')}/blockers/${s('linkId')}`,
+        token,
+        'DELETE',
+      ))
+    case 'search_blocker_candidates': {
+      const params: Record<string, string> = { q: s('q') ?? '' }
+      const excludeType = s('excludeType')
+      const excludeId = s('excludeId')
+      if (excludeType) params.excludeType = excludeType
+      if (excludeId) params.excludeId = excludeId
+      return json(await apiGet('/api/admin/blockers/search', token, params))
+    }
+    // The three below are legacy aliases over the same work_blockers rows.
     case 'add_task_dependency':
       return json(await apiWrite(`/api/admin/tasks/${s('taskId')}/dependencies`, token, 'POST', { dependsOnTaskId: s('dependsOnTaskId') }))
     case 'remove_task_dependency':

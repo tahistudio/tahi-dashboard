@@ -9,6 +9,7 @@ import {
   FileText, Image as ImageIcon, Download, Paperclip,
   Calendar, Upload, Plus, Trash2, ListChecks, DownloadCloud, ChevronDown, Eye,
   Sparkles, Wand2, X, Check, Lock, Archive, MessageSquare, PauseCircle, Ban, Tag,
+  Inbox,
 } from 'lucide-react'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import Link from 'next/link'
@@ -35,7 +36,16 @@ import { PeoplePanel, type Participant } from '@/components/tahi/people-panel'
 import { TimeCard } from '@/components/tahi/time-card'
 import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
 import { fetchSchedulePhaseOptions } from '@/lib/schedule-phases'
-import { CATEGORY_CONFIG, EDITABLE_STATUSES, REQUEST_STATUS_CONFIG } from '@/lib/status-config'
+import {
+  CATEGORY_CONFIG,
+  EDITABLE_STATUSES,
+  REQUEST_STATUS_CONFIG,
+  REQUEST_STATUS_LABELS,
+  REQUEST_STATUS_TONE,
+  TASK_STATUS_LABELS,
+  TASK_STATUS_TONE,
+} from '@/lib/status-config'
+import { isBlockerOpen, parseSubjectKey, subjectKey, type BlockerCandidate, type BlockerRow } from '@/lib/blockers'
 import { StatusChipSelect } from '@/components/tahi/status-chip-select'
 import { DeliverySpine, isPipelineStatus } from '@/components/tahi/requests/delivery-spine'
 import { SegmentedControl } from '@/components/tahi/segmented-control'
@@ -46,7 +56,7 @@ import {
 import { RequestActionsMenu } from '@/components/tahi/requests/request-actions-menu'
 import { ClientReviewBar } from '@/components/tahi/requests/client-review-bar'
 import {
-  InlineDateField, InlineMenuField, InlineNone, InlineNumberField,
+  InlineDateField, InlineMenuField, InlineNone, InlineNumberField, type InlineMenuOption,
 } from '@/components/tahi/inline-field'
 import {
   SidebarCard,
@@ -715,6 +725,15 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
     : `/api/portal/requests/${requestId}/files`
   const { data: filesData, mutate: mutateFiles } = useSWR<{ items: RequestFile[] }>(filesKey)
   const files = filesData?.items ?? []
+
+  // Open blockers, for the spine's amber chip. Same key the Blocked by card
+  // reads, so SWR serves both from one request and the chip and the card can
+  // never disagree. Null for a client, and there is no portal route to call
+  // anyway (Decision 13).
+  const { data: blockersData } = useSWR<RequestBlockersPayload>(
+    isAdmin ? requestBlockersKey(requestId) : null,
+  )
+  const openBlockerCount = countOpenBlockers(blockersData?.blockedBy)
 
   // Team members (admin only) for the assignee picker.
   const { data: teamMembersData } = useSWR<{ items: TeamMemberOption[] }>(
@@ -2050,6 +2069,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             busy={statusUpdating}
             eta={request.dueDate ? `Due ${formatDate(request.dueDate)}` : null}
             onPick={handleStatusChange}
+            blockedByCount={openBlockerCount}
           />
         )
       )}
@@ -2572,6 +2592,11 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         <div className="flex flex-col gap-4 md:self-start md:sticky md:top-4 lg:top-6 md:max-h-[calc(100vh_-_6rem)] lg:max-h-[calc(100vh_-_7rem)] md:overflow-y-auto md:overscroll-contain">
           {/* Time (admin only): live timer + manual log + recent entries */}
           {isAdmin && <TimeCard target={{ kind: 'request', id: requestId }} />}
+
+          {/* Blocked by (admin only, Decision 13). A blocker is a reason the
+              work is not moving, so it sits beside the time and the status
+              rather than below the checklists. */}
+          {isAdmin && <RequestBlockersCard requestId={requestId} canWrite={canWrite} />}
 
           {/* Calls: kickoff, scope review, mid-build check-ins. The ported
               rail puts Actions directly under Time, so a phone-width column
@@ -3594,6 +3619,311 @@ function DetailRow({
         {children}
       </dd>
     </div>
+  )
+}
+
+// ---- Blocked by --------------------------------------------------------------
+
+/** One expression for the key, so the card's fetch and the spine's count are
+ *  the same request rather than two that can disagree. */
+function requestBlockersKey(requestId: string): string {
+  return `/api/admin/requests/${requestId}/blockers`
+}
+
+interface RequestBlockersPayload {
+  blockedBy?: BlockerRow[]
+  blocks?: BlockerRow[]
+}
+
+/**
+ * Open ones only, which is what the list route counts and therefore what the
+ * glyph, the board warning and the Blocked saved view all read. The rows
+ * themselves still show a satisfied blocker so it can be unlinked; counting it
+ * would make this card disagree with the row it sits next to.
+ */
+function countOpenBlockers(rows: readonly BlockerRow[] | undefined): number {
+  return (rows ?? []).filter(r => isBlockerOpen(r.otherType, r.otherStatus)).length
+}
+
+/**
+ * The Blocked by card.
+ *
+ * Admin only, and gated twice on purpose (Decision 13): this render is behind
+ * `isAdmin`, AND the portal detail route returns no blocker data and there is
+ * no portal blockers route at all. A count on its own still leaks ("your
+ * request is stuck on three internal things"), so neither gate is decoration.
+ *
+ * Its own SWR key rather than a field on the detail payload: the card
+ * revalidates on its own writes and that payload is already large.
+ */
+function RequestBlockersCard({ requestId, canWrite }: { requestId: string; canWrite: boolean }) {
+  const { showToast } = useToast()
+  const { data, isLoading, mutate } = useSWR<RequestBlockersPayload>(requestBlockersKey(requestId))
+  const blockers = useMemo(() => data?.blockedBy ?? [], [data])
+  const openCount = countOpenBlockers(blockers)
+
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<readonly BlockerCandidate[]>([])
+  const [searching, setSearching] = useState(false)
+  const searchSeq = useRef(0)
+
+  // Debounced, and sequenced so a slow early response cannot land on top of a
+  // fast later one and repopulate the list with results for text nobody is
+  // looking at any more.
+  useEffect(() => {
+    const trimmed = query.trim()
+    if (!trimmed) {
+      searchSeq.current += 1
+      setResults([])
+      setSearching(false)
+      return
+    }
+
+    const seq = ++searchSeq.current
+    setSearching(true)
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ q: trimmed, excludeType: 'request', excludeId: requestId })
+      void fetch(apiPath(`/api/admin/blockers/search?${params.toString()}`))
+        .then(res => (res.ok ? res.json() as Promise<{ candidates?: BlockerCandidate[] }> : { candidates: [] }))
+        .then(json => { if (seq === searchSeq.current) setResults(json.candidates ?? []) })
+        .catch(() => { if (seq === searchSeq.current) setResults([]) })
+        .finally(() => { if (seq === searchSeq.current) setSearching(false) })
+    }, 250)
+
+    return () => window.clearTimeout(timer)
+  }, [query, requestId])
+
+  const linkedKeys = useMemo(
+    () => new Set(blockers.map(b => subjectKey(b.otherType, b.otherId))),
+    [blockers],
+  )
+
+  const options: InlineMenuOption[] = results
+    .filter(c => !(c.type === 'request' && c.id === requestId) && !linkedKeys.has(subjectKey(c.type, c.id)))
+    .map(c => ({
+      value: subjectKey(c.type, c.id),
+      keywords: [c.label, c.ref, c.orgName].filter(Boolean).join(' '),
+      node: (
+        <span className="inline-flex items-center" style={{ gap: '0.375rem', minWidth: 0 }}>
+          {c.type === 'request'
+            ? <Inbox size={11} aria-hidden style={{ flexShrink: 0, color: 'var(--color-text-subtle)' }} />
+            : <ListChecks size={11} aria-hidden style={{ flexShrink: 0, color: 'var(--color-text-subtle)' }} />}
+          {c.ref && (
+            <span style={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-subtle)' }}>
+              {c.ref}
+            </span>
+          )}
+          <span className="truncate" style={{ minWidth: 0 }}>{c.label}</span>
+          {c.orgName && (
+            <span className="truncate" style={{ minWidth: 0, color: 'var(--color-text-subtle)' }}>{c.orgName}</span>
+          )}
+        </span>
+      ),
+    }))
+
+  const emptyMessage = query.trim() === ''
+    ? 'Type to search tasks and requests'
+    : searching
+      ? 'Searching...'
+      : 'Nothing open matches that'
+
+  async function addBlocker(optionValue: string) {
+    const parsed = parseSubjectKey(optionValue)
+    if (!parsed) return
+    try {
+      const res = await fetch(apiPath(`/api/admin/requests/${requestId}/blockers`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blockerType: parsed.type, blockerId: parsed.id }),
+      })
+      if (!res.ok) {
+        // The route returns the exact sentence a human should read.
+        const body = await res.json().catch(() => null) as { error?: string } | null
+        throw new Error(body?.error ?? 'Could not add that blocker')
+      }
+      await mutate()
+    } catch (err) {
+      showToast(err instanceof Error && err.message ? err.message : 'Could not add that blocker', 'error')
+    }
+  }
+
+  async function removeBlocker(linkId: string, title: string) {
+    try {
+      const res = await fetch(apiPath(`/api/admin/requests/${requestId}/blockers/${linkId}`), {
+        method: 'DELETE',
+      })
+      if (!res.ok) throw new Error('failed')
+      await mutate()
+    } catch {
+      showToast(`Could not stop waiting on ${title}`, 'error')
+    }
+  }
+
+  // Nothing to show and nothing to do: an empty read-only card is noise on a
+  // rail that already runs past the fold.
+  if (!canWrite && blockers.length === 0) return null
+
+  return (
+    <SidebarCard
+      title="Blocked by"
+      icon={<AlertTriangle size={14} />}
+      count={openCount > 0 ? openCount : undefined}
+    >
+      {isLoading && blockers.length === 0 ? (
+        <div className="flex flex-col animate-pulse" style={{ gap: '0.375rem' }}>
+          {[0, 1].map(i => (
+            <div
+              key={i}
+              className="rounded"
+              style={{ height: '1rem', background: 'var(--color-bg-tertiary)' }}
+            />
+          ))}
+        </div>
+      ) : blockers.length === 0 ? (
+        <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
+          Nothing is holding this up.
+        </p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
+          {blockers.map(b => (
+            <div
+              key={b.linkId}
+              className="flex items-center"
+              style={{ gap: '0.5rem', padding: '0.25rem 0', fontSize: '0.78125rem' }}
+            >
+              <Badge
+                tone={b.otherType === 'request'
+                  ? (REQUEST_STATUS_TONE[b.otherStatus] ?? 'neutral')
+                  : (TASK_STATUS_TONE[b.otherStatus] ?? 'neutral')}
+                variant="soft"
+                size="sm"
+                leader="dot"
+              >
+                {b.otherType === 'request'
+                  ? (REQUEST_STATUS_LABELS[b.otherStatus] ?? b.otherStatus.replace(/_/g, ' '))
+                  : (TASK_STATUS_LABELS[b.otherStatus] ?? b.otherStatus.replace(/_/g, ' '))}
+              </Badge>
+              {b.otherType === 'request'
+                ? <Inbox size={11} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--color-text-subtle)' }} />
+                : <ListChecks size={11} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--color-text-subtle)' }} />}
+              {b.otherRef && (
+                <span
+                  style={{
+                    flexShrink: 0,
+                    fontSize: '0.71875rem',
+                    fontWeight: 600,
+                    fontVariantNumeric: 'tabular-nums',
+                    color: 'var(--color-text-subtle)',
+                  }}
+                >
+                  {b.otherRef}
+                </span>
+              )}
+              {/* Satisfied blockers read quieter, because the header count is
+                  open blockers only and a row list that outnumbers it has to
+                  explain itself. */}
+              <span
+                className="truncate"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontWeight: 600,
+                  color: isBlockerOpen(b.otherType, b.otherStatus)
+                    ? 'var(--color-text)'
+                    : 'var(--color-text-subtle)',
+                }}
+                title={b.otherOrgName ? `${b.otherTitle} (${b.otherOrgName})` : b.otherTitle}
+              >
+                {b.otherTitle}
+              </span>
+              {/* A task blocker opens the tasks slide-over through the same
+                  deep link the notifications use; a request blocker opens the
+                  request. */}
+              <Link
+                href={b.otherType === 'request' ? `/requests/${b.otherId}` : `/tasks?task=${b.otherId}`}
+                className="tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 min-h-11 md:min-h-6"
+                style={{
+                  padding: '0 0.4375rem',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'var(--color-bg)',
+                  fontSize: '0.6875rem',
+                  fontWeight: 600,
+                  color: 'var(--color-text-muted)',
+                  textDecoration: 'none',
+                  whiteSpace: 'nowrap',
+                  transition: 'border-color var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
+                }}
+                aria-label={`Open ${b.otherTitle}`}
+                onMouseEnter={e => {
+                  e.currentTarget.style.borderColor = 'var(--color-brand)'
+                  e.currentTarget.style.color = 'var(--color-link)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.borderColor = 'var(--color-border)'
+                  e.currentTarget.style.color = 'var(--color-text-muted)'
+                }}
+              >
+                Open
+              </Link>
+              {canWrite && (
+                <button
+                  type="button"
+                  className="tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 h-11 w-11 md:h-6 md:w-6"
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    borderRadius: 'var(--radius-sm)',
+                    color: 'var(--color-text-subtle)',
+                    cursor: 'pointer',
+                    transition: 'color var(--motion-quick) var(--ease-out), background-color var(--motion-quick) var(--ease-out)',
+                  }}
+                  aria-label={`Stop waiting on ${b.otherTitle}`}
+                  title="Remove blocker"
+                  onMouseEnter={e => {
+                    e.currentTarget.style.color = 'var(--color-danger)'
+                    e.currentTarget.style.background = 'var(--color-hover-tint)'
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.color = 'var(--color-text-subtle)'
+                    e.currentTarget.style.background = 'transparent'
+                  }}
+                  onClick={() => { void removeBlocker(b.linkId, b.otherTitle) }}
+                >
+                  <X size={13} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {canWrite && (
+        <div className="flex items-center" style={{ marginTop: blockers.length > 0 ? '0.375rem' : '0.5rem' }}>
+          <InlineMenuField
+            value="none"
+            options={options}
+            onChange={next => { void addBlocker(next) }}
+            renderValue={() => (
+              <span
+                className="inline-flex items-center"
+                style={{ gap: '0.375rem', color: 'var(--color-text-muted)', fontWeight: 600 }}
+              >
+                <Plus size={13} aria-hidden="true" />
+                Add blocker
+              </span>
+            )}
+            ariaLabel="Add a blocker"
+            searchable
+            serverFiltered
+            onQueryChange={setQuery}
+            searchPlaceholder="Search tasks and requests"
+            emptyMessage={emptyMessage}
+            width="18rem"
+          />
+        </div>
+      )}
+    </SidebarCard>
   )
 }
 
