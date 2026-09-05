@@ -1174,9 +1174,17 @@ test.describe('Tasks', () => {
       await dialog.getByRole('button', { name: /Draft with AI/ }).click()
 
       // The panel is a lazy chunk, so the first mount compiles and downloads.
+      // The dialog is NOT the panel: new-task-dialog.tsx renames its own shell
+      // to "Draft tasks with AI" the moment the view flips, so this locator
+      // goes visible while the chunk is still on the wire. Everything inside
+      // needs the same patient wait rather than the 5s default, which is what
+      // turned a cold run of this case red.
       const aiDialog = page.getByRole('dialog', { name: 'Draft tasks with AI' })
       await expect(aiDialog).toBeVisible({ timeout: 30_000 })
-      await expect(aiDialog.getByRole('progressbar', { name: 'Interview progress' })).toBeVisible()
+      await expect(aiDialog.getByRole('progressbar', { name: 'Interview progress' }))
+        .toBeVisible({ timeout: 30_000 })
+      // Once the progress line is mounted the rest of the panel is in the same
+      // render, so these two keep the default.
       await expect(aiDialog.getByRole('textbox', { name: 'Your answer' })).toBeVisible()
       await expect(aiDialog.getByRole('button', { name: 'Attach a brief' })).toBeVisible()
 
@@ -1198,6 +1206,11 @@ test.describe('Tasks', () => {
 
       const aiDialog = page.getByRole('dialog', { name: 'Draft tasks with AI' })
       await expect(aiDialog).toBeVisible({ timeout: 30_000 })
+      // The shell wears the panel's name before the lazy chunk lands, so the
+      // paperclip is what proves the panel itself is mounted. Reaching for the
+      // input underneath it first would be reaching into the shell.
+      await expect(aiDialog.getByRole('button', { name: 'Attach a brief' }))
+        .toBeVisible({ timeout: 30_000 })
       const fileInput = aiDialog.locator('input[type="file"]')
 
       // Over the ceiling: refused on size, in the browser, with the number in
