@@ -1,0 +1,36 @@
+# Overnight run, 2026-09-05 22:50 NZST to 08:00 NZST
+
+Liam's goal (verbatim intent): auto run till 8am, keep going and iterate. Go through every page and sub page, design it in Claude Design, implement it, run UI/UX agents and client agents. Wake up to a fully designed dashboard (every page) that works, including contracts, proposals, schedules, the works. He reviews tomorrow and next week, adds comments in Claude Design, then we iterate.
+
+Liam's answers before starting: deploy to PRODUCTION as today (every merge checked and smoke-tested); scope is EVERYTHING but triaged, client-facing first, then the most visited admin pages, then the rest, including messages, services, payment, the full sales stack; keep ticking pages off, do not rush; spawn agents, diversify load; port behaviour changes too but keep the data safe (pipeline, clients, contacts, invoices, finance, docs are real; tasks, requests, messages, time, calls are demo).
+
+## Loop per page (or page group)
+
+1. Read: a reader maps the live page (routes, data, states, dead ends) with file:line anchors.
+2. Design: a designer writes the page into the Claude Design project "Tahi dashboard" (57bf60cf) as its own module files (`<area>.jsx`, `<area>-kit.jsx`, `<area>-data.jsx`, `<area>.css`) using the DS bundle under `_ds/`, and returns the exact `app-shell.jsx` wiring for an integrator. Designers never edit `app-shell.jsx` or `Tahi App Shell.html` while another design is in flight; one integrator wires a batch.
+3. Critique: a render-and-critique agent screenshots the prototype and lists what is wrong; the designer fixes.
+4. Port: implementers in worktrees port the design to the repo behind the existing routes and APIs (keep every gate: requireAccessToOrg, requireFeature, getPortalAuth, requirePortalFeature), with reviewers (spec, quality, a11y and mobile) and a fix branch.
+5. Lead: merge, type-check, worker tsc, lint 0, vitest, build, migrations to staging and prod BEFORE deploy, push, wait for deploy, live smoke on portal.tahi.studio (admin tab, and the Tahi Test Client via View as Client), tick the page in this file.
+6. Client agents: after each portal batch, an agent walks the portal as the test client and files dead ends.
+
+## Triage
+
+Tier 1, client facing (portal): overview/home, requests list, request detail, new request, files (mini Drive with threads, CL.1), invoices list and detail (Pay now and How to pay), services showcase (CL.3), messages, notifications page (TP.4), account, onboarding, mobile bottom nav, offline page.
+Tier 2, most visited admin: overview home, requests, tasks, clients (in flight), invoices and billing, deals and leads, proposals, contracts, schedules, calls, time, team and capacity, settings and permissions, notifications.
+Tier 3, the rest: financial reports, reports, sales analytics, calculator, announcements, reviews, affiliates, content studio, sitemap, social, docs (locked, design only unless trivial), tracks, design-system page.
+
+## Status board (tick as landed; evidence in TASKS.md)
+
+- [ ] Tier 1 designed
+- [ ] Tier 1 ported and client-walked
+- [ ] Tier 2 designed
+- [ ] Tier 2 ported
+- [ ] Tier 3 designed
+- [ ] Tier 3 ported
+- [ ] Morning report written (docs/superpowers/plans/2026-09-06-morning-report.md)
+
+## Rules that stay on
+
+No em or en dashes. No any. Tokens not hex. Rem not px. No single-side borders. Hover, focus, 2.75rem targets. Every page keeps export const metadata. MCP parity for new API capability. Migrations additive and idempotent, mirrored in the migrate route, applied to both D1s before deploy. Never git add -A. Commit trailer: Co-Authored-By Claude Fable 5.1 plus Claude-Session.
+
+Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:00Z).
