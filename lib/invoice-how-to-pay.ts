@@ -71,9 +71,41 @@ export const DEFAULT_REFERENCE_HINT =
 /** The invoice columns a How to pay block is built from. */
 export interface HowToPayInvoice {
   id: string
+  /**
+   * Required, and required for a reason: the block is a demand for money, so
+   * every caller has to say out loud whether this bill is still owed. Making
+   * it optional would let a settled invoice through by omission.
+   */
+  status: string
   totalUsd: number
   currency: string | null
   dueDate: string | null
+  paidAt?: string | null
+}
+
+/**
+ * The invoice states that owe nothing.
+ *
+ * 'cancelled' is not a status this codebase writes (the columns are
+ * draft | sent | viewed | paid | overdue | written_off) but it is a status a
+ * Xero or Stripe import could hand us, and the cost of listing it is nil
+ * against the cost of quoting an account number under a voided bill.
+ */
+export const SETTLED_INVOICE_STATUSES: readonly string[] = ['paid', 'written_off', 'cancelled']
+
+/**
+ * Is this bill done with?
+ *
+ * `paidAt` is checked as well as the status because the two are written by
+ * different paths (the PATCH route sets both, a Stripe webhook sets paidAt
+ * first) and either one on its own means the client owes nothing.
+ */
+export function isInvoiceSettled(
+  invoice: { status?: string | null; paidAt?: string | null },
+): boolean {
+  const status = typeof invoice.status === 'string' ? invoice.status.trim().toLowerCase() : ''
+  if (SETTLED_INVOICE_STATUSES.includes(status)) return true
+  return typeof invoice.paidAt === 'string' && invoice.paidAt.trim() !== ''
 }
 
 /**
@@ -127,10 +159,20 @@ export function resolveInvoicePayUrl(
 /**
  * Build the block, or null when the client does not need one.
  *
- * Two conditions, both necessary: the org resolves to the Xero rail (a Stripe
- * client always gets a hosted page eventually, and a bank transfer against a
- * Stripe invoice would not reconcile), and there is no pay link yet (a link
- * beats a transfer every time, for both sides).
+ * Three conditions, all necessary:
+ *
+ *   the Xero rail   a Stripe client always gets a hosted page eventually, and
+ *                   a bank transfer against a Stripe invoice would not
+ *                   reconcile.
+ *   no pay link     a link beats a transfer every time, for both sides.
+ *   still owed      the one that is easy to forget. A Xero invoice that the
+ *                   client bank-transferred and Liam then marked paid here
+ *                   never gets an OnlineInvoiceUrl (it was never approved
+ *                   inside Xero), so the first two conditions stay true
+ *                   forever, and both portal projections return every
+ *                   non-draft invoice. Without this the settled row keeps
+ *                   telling the client the account number, the reference and
+ *                   the amount, under the words "How to pay".
  */
 export function buildHowToPay(input: {
   channel: InvoiceChannel
@@ -141,6 +183,7 @@ export function buildHowToPay(input: {
   const { channel, payUrl, invoice, bankDetails } = input
   if (channel !== 'xero') return null
   if (typeof payUrl === 'string' && payUrl.trim() !== '') return null
+  if (isInvoiceSettled(invoice)) return null
 
   const hint = bankDetails.referenceHint?.trim()
 
@@ -159,9 +202,9 @@ export function buildHowToPay(input: {
 /**
  * Does the block name somewhere to actually send the money?
  *
- * The projection always carries the block for a Xero invoice with no link, so
- * the portal can say "the studio will be in touch with payment details" rather
- * than nothing. An EMAIL is different: a "How to pay" heading over an amount
+ * The projection carries the block for every unpaid Xero invoice with no link,
+ * so the portal can say "the studio will be in touch with payment details"
+ * rather than nothing. An EMAIL is different: a "How to pay" heading over an amount
  * and a reference, with no account to pay into, reads as a broken template to
  * the person holding the bill. So the email renders the block only when this
  * is true and falls back to the plain portal CTA otherwise.

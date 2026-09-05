@@ -7,6 +7,7 @@ import { schema } from '@/db/d1'
 import { eq, and, desc, ne } from 'drizzle-orm'
 import {
   buildHowToPay,
+  isInvoiceSettled,
   readInvoicePayContext,
   resolveInvoicePayUrl,
 } from '@/lib/invoice-how-to-pay'
@@ -22,10 +23,13 @@ import {
 //              which rail issued it, and gating the Xero page on the org's
 //              nominal channel would leave a payable bill unpayable.
 //   howToPay   bank details, the reference and the amount, for a Xero-rail
-//              invoice with no link yet. That is the ORDINARY state of a
-//              pushed Xero invoice (it sits at DRAFT until Liam approves it),
-//              and without this block the client holds a real bill with
-//              nothing on the page to act on.
+//              invoice that is STILL OWED and has no link yet. That is the
+//              ORDINARY state of a pushed Xero invoice (it sits at DRAFT until
+//              Liam approves it), and without this block the client holds a
+//              real bill with nothing on the page to act on. It disappears the
+//              moment the bill is settled: this list returns every non-draft
+//              invoice, so a paid one would otherwise keep quoting an account
+//              number and a reference under the words "How to pay".
 //
 // Nothing studio-side rides along: no rail label, no Stripe or Xero id, no
 // reconciliation state. See lib/invoice-how-to-pay.ts.
@@ -129,9 +133,12 @@ export async function GET(req: NextRequest) {
   }
 
   // The pay-path reads are only worth making when at least one bill on this
-  // page has nothing to click. A client whose invoices all carry a hosted page
-  // pays no extra D1 round trips for a block they will never see.
-  const needsPayPath = items.some(row => !resolveInvoicePayUrl(row.payUrl, row.xeroPayUrl))
+  // page is still owed AND has nothing to click. A client whose invoices all
+  // carry a hosted page, or are all settled, pays no extra D1 round trips for
+  // a block they will never see.
+  const needsPayPath = items.some(row =>
+    !resolveInvoicePayUrl(row.payUrl, row.xeroPayUrl) && !isInvoiceSettled(row),
+  )
 
   let payContext: ReturnType<typeof readInvoicePayContext> | null = null
   if (needsPayPath) {
@@ -161,9 +168,11 @@ export async function GET(req: NextRequest) {
         payUrl,
         invoice: {
           id: row.id,
+          status: row.status,
           totalUsd: row.totalAmount,
           currency: row.currency,
           dueDate: row.dueDate,
+          paidAt: row.paidAt,
         },
         bankDetails: payContext.bankDetails,
       })

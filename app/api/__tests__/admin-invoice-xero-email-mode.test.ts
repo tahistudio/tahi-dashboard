@@ -21,7 +21,10 @@
  * Also pinned here: what the email carries. A pay page when either rail has
  * issued one, and otherwise the How to pay block with the studio's bank
  * details and the invoice reference, so a Xero client is never emailed a bill
- * with nothing to act on.
+ * with nothing to act on. And that a RESEND does not make Xero mail a second
+ * PDF: its Email endpoint has no idempotency key, and the call happens before
+ * the D1 write and the notification write, either of which can 500 after Xero
+ * has already delivered.
  *
  * The Xero client is mocked at lib/xero, so the three modes and the draft
  * fallback are exercised without a Xero tenant.
@@ -129,10 +132,12 @@ const CONTACTS = [
   { id: 'c-owner', email: 'owner@acme.test', name: 'Ana Owner', portalRole: 'admin', isPrimary: true },
 ]
 
-function settingsRows(mode: XeroEmailMode) {
+function settingsRows(mode: XeroEmailMode, bank: unknown = BANK) {
   return [
     { key: INVOICE_CHANNEL_SETTING_KEY, value: 'stripe' },
-    { key: BANK_DETAILS_SETTING_KEY, value: JSON.stringify(BANK) },
+    // `null` is the state every studio starts in: the key has no row until
+    // somebody fills in the Getting paid group on the settings page.
+    { key: BANK_DETAILS_SETTING_KEY, value: bank === null ? null : JSON.stringify(bank) },
     { key: XERO_EMAIL_MODE_SETTING_KEY, value: mode },
   ]
 }
@@ -141,15 +146,21 @@ function settingsRows(mode: XeroEmailMode) {
  * The reads this route makes, in order: the invoice (joined to the org), the
  * contacts, the settings. Everything after that is a write.
  */
-function primeDb(mode: XeroEmailMode, invoice: Record<string, unknown> = XERO_INVOICE) {
+function primeDb(
+  mode: XeroEmailMode,
+  invoice: Record<string, unknown> = XERO_INVOICE,
+  bank: unknown = BANK,
+) {
   vi.mocked(db).mockResolvedValue(
-    makeDb([[invoice], CONTACTS, settingsRows(mode)]) as never,
+    makeDb([[invoice], CONTACTS, settingsRows(mode, bank)]) as never,
   )
 }
 
 /** Xero answers the status read with this, and takes the Email call. */
-function xeroAt(status: string) {
-  vi.mocked(callXeroAPI).mockResolvedValue({ Invoices: [{ Status: status }] } as never)
+function xeroAt(status: string, sentToContact = false) {
+  vi.mocked(callXeroAPI).mockResolvedValue(
+    { Invoices: [{ Status: status, SentToContact: sentToContact }] } as never,
+  )
   vi.mocked(callXeroAPIOrThrow).mockResolvedValue({} as never)
 }
 
@@ -284,6 +295,52 @@ describe('POST send-email: invoicing.xeroEmailMode', () => {
   })
 })
 
+describe('POST send-email: a resend does not mail a second Xero PDF', () => {
+  // The Xero call happens BEFORE the D1 status write and the notification
+  // write, either of which can throw and 500 after Xero has already delivered.
+  // The operator retries an apparently failed send, and Xero's Email endpoint
+  // has no idempotency key.
+  const SENT_ALREADY = { ...XERO_INVOICE, status: 'sent', sentAt: '2026-09-05T01:00:00.000Z' }
+
+  it('stands the Xero send down once Xero and our own record both say it went', async () => {
+    xeroAt('AUTHORISED', true)
+    primeDb('both', SENT_ALREADY)
+
+    const body = await (await sendInvoiceEmail(post('inv-1042'), params('inv-1042'))).json() as SendBody
+
+    expect(vi.mocked(callXeroAPIOrThrow)).not.toHaveBeenCalled()
+    expect(body.xeroEmail).toBe('skipped')
+    expect(body.reason).toBe('Xero has already emailed this invoice')
+    // Ours still goes: re-sending our own template is what the button is for.
+    expect(vi.mocked(sendEmail)).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets the approve-then-resend flow send, because Xero has not mailed it', async () => {
+    // Pushed as a DRAFT, our template went out, Xero refused. Liam approves it
+    // in Xero and hits Resend: SentToContact is still false, so Xero's copy
+    // goes, which is the whole point of the draft fallback.
+    xeroAt('AUTHORISED', false)
+    primeDb('both', SENT_ALREADY)
+
+    const body = await (await sendInvoiceEmail(post('inv-1042'), params('inv-1042'))).json() as SendBody
+
+    expect(vi.mocked(callXeroAPIOrThrow)).toHaveBeenCalledTimes(1)
+    expect(body.xeroEmail).toBe('sent')
+  })
+
+  it('sends on a FIRST send even for an invoice Xero had already mailed', async () => {
+    // Imported from Xero, which emailed it before the dashboard knew about it.
+    // We have never sent it, so this is not a resend.
+    xeroAt('AUTHORISED', true)
+    primeDb('both')
+
+    const body = await (await sendInvoiceEmail(post('inv-1042'), params('inv-1042'))).json() as SendBody
+
+    expect(vi.mocked(callXeroAPIOrThrow)).toHaveBeenCalledTimes(1)
+    expect(body.xeroEmail).toBe('sent')
+  })
+})
+
 describe('POST send-email: what the client is handed', () => {
   it('passes the How to pay block when a Xero-rail invoice has no pay page', async () => {
     primeDb('dashboard')
@@ -318,6 +375,26 @@ describe('POST send-email: what the client is handed', () => {
     expect(el.props.paymentUrl).toBe('https://in.xero.com/abc')
     expect(el.props.howToPay).toBeUndefined()
     expect(body.payLink).toBe(true)
+    expect(body.bankDetails).toBe(false)
+  })
+
+  it('reports bankDetails false when the studio has published none', async () => {
+    // The configuration live today: invoicing.bankDetails has no row, so the
+    // block names nowhere to send the money and the email renders the plain
+    // portal CTA instead (hasBankDestination). Answering true here would tell
+    // Liam, and MCP send_invoice_email, that the client got account details
+    // they never saw.
+    primeDb('dashboard', XERO_INVOICE, null)
+
+    const body = await (await sendInvoiceEmail(post('inv-1042'), params('inv-1042'))).json() as SendBody
+
+    const el = vi.mocked(sendEmail).mock.calls[0][2] as unknown as {
+      props: { howToPay?: Record<string, unknown> }
+    }
+    // The block still travels (it carries the reference and the amount); it
+    // just names no destination, which is exactly what the flag reports.
+    expect(el.props.howToPay).toMatchObject({ reference: 'INV-1042' })
+    expect(el.props.howToPay).not.toHaveProperty('accountNumber')
     expect(body.bankDetails).toBe(false)
   })
 

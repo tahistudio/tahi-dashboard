@@ -10,7 +10,7 @@
  * for the same bill, so the shape is pinned here once rather than re-asserted
  * three times against three routes.
  *
- * The four rules that matter:
+ * The five rules that matter:
  *
  *   1. A link beats a transfer, whichever rail issued it. resolveInvoicePayUrl
  *      prefers Stripe's hosted page and falls back to Xero's online invoice,
@@ -18,10 +18,15 @@
  *   2. Only the Xero rail gets a block. A Stripe client always ends up with a
  *      hosted page, and a bank transfer against a Stripe invoice reconciles
  *      against nothing.
- *   3. The reference, the amount and the currency always exist, because they
+ *   3. Only a bill that is STILL OWED gets a block. A Xero invoice paid by
+ *      transfer and marked paid here never gets an OnlineInvoiceUrl, so rules
+ *      1 and 2 stay true forever, and both portal projections return every
+ *      non-draft invoice: without this the settled row goes on quoting an
+ *      account number under the words "How to pay".
+ *   4. The reference, the amount and the currency always exist, because they
  *      come off the invoice rather than off a setting. There is no state in
  *      which the client cannot quote the right reference for the right amount.
- *   4. Nothing studio-side is in the block. No rail label, no Xero id, no
+ *   5. Nothing studio-side is in the block. No rail label, no Xero id, no
  *      reconciliation state (Liam, 2026-09-06: "the client sees only what they
  *      need to act").
  */
@@ -29,8 +34,10 @@
 import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_REFERENCE_HINT,
+  SETTLED_INVOICE_STATUSES,
   buildHowToPay,
   hasBankDestination,
+  isInvoiceSettled,
   readInvoicePayContext,
   resolveInvoicePayUrl,
 } from '@/lib/invoice-how-to-pay'
@@ -42,9 +49,11 @@ import {
 
 const INVOICE = {
   id: 'inv-1042-9c31-4b77-8e05-6f1d2a94c7b3',
+  status: 'sent',
   totalUsd: 4312.5,
   currency: 'NZD',
   dueDate: '2026-09-30',
+  paidAt: null,
 }
 
 const BANK = {
@@ -129,6 +138,32 @@ describe('buildHowToPay', () => {
       .toBeNull()
   })
 
+  it('returns null once the bill is settled, however it was settled', () => {
+    // The failure this closes: the client bank-transfers INV-1042, Liam marks
+    // it paid here, and because the invoice was never approved inside Xero it
+    // still has no OnlineInvoiceUrl. Both portal projections return every
+    // non-draft invoice, so the settled row would go on telling the client the
+    // account number, the reference and the amount under "How to pay".
+    for (const status of SETTLED_INVOICE_STATUSES) {
+      expect(buildHowToPay({
+        channel: 'xero',
+        payUrl: null,
+        invoice: { ...INVOICE, status },
+        bankDetails: BANK,
+      })).toBeNull()
+    }
+  })
+
+  it('returns null on a paidAt with no matching status, because either means paid', () => {
+    // A Stripe webhook stamps paidAt before anything rewrites the status.
+    expect(buildHowToPay({
+      channel: 'xero',
+      payUrl: null,
+      invoice: { ...INVOICE, status: 'sent', paidAt: '2026-09-20T02:00:00.000Z' },
+      bankDetails: BANK,
+    })).toBeNull()
+  })
+
   it('still names the reference and the amount when the studio has published no bank details', () => {
     // A half-built settings page must not cost the client the one thing they
     // can always act on: the right reference for the right amount.
@@ -164,6 +199,29 @@ describe('buildHowToPay', () => {
       bankDetails: BANK,
     })!
     expect(block.currency).toBe('NZD')
+  })
+})
+
+describe('isInvoiceSettled', () => {
+  it('names the three states that owe nothing, whatever their case', () => {
+    expect(isInvoiceSettled({ status: 'paid' })).toBe(true)
+    expect(isInvoiceSettled({ status: 'written_off' })).toBe(true)
+    expect(isInvoiceSettled({ status: 'cancelled' })).toBe(true)
+    // Imports do not agree on case, and a mismatch here is a settled bill
+    // still asking to be paid.
+    expect(isInvoiceSettled({ status: ' PAID ' })).toBe(true)
+  })
+
+  it('leaves every state that still owes money alone', () => {
+    for (const status of ['draft', 'sent', 'viewed', 'overdue', '', undefined, null]) {
+      expect(isInvoiceSettled({ status })).toBe(false)
+    }
+  })
+
+  it('counts a paidAt on its own, and ignores an empty one', () => {
+    expect(isInvoiceSettled({ status: 'sent', paidAt: '2026-09-20T02:00:00.000Z' })).toBe(true)
+    expect(isInvoiceSettled({ status: 'sent', paidAt: '   ' })).toBe(false)
+    expect(isInvoiceSettled({ status: 'sent', paidAt: null })).toBe(false)
   })
 })
 

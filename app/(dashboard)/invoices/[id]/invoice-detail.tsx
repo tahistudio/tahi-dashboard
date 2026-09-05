@@ -120,28 +120,61 @@ interface PushbackOutcome {
 
 type ToastTone = 'success' | 'error' | 'info' | 'warning'
 
-/** One sentence for what happened, and the tone to say it in. */
-function pushbackToast(outcome: PushbackOutcome | undefined): { message: string; tone: ToastTone } {
+interface PushbackCopy {
+  /** The glance signal. Short on purpose: see below. */
+  toast: string
+  tone: ToastTone
+  /**
+   * The sentence that carries the REASON, or null when there is nothing to
+   * explain. Rendered persistently under the actions row rather than in the
+   * toast, because the toast clips: components/tahi/toast.tsx caps the surface
+   * at 22rem and renders the message on one nowrap line with an ellipsis, then
+   * dismisses it after 3.5s. "Marked paid here. Xero was not told: No Xero
+   * payment account code in settings" arrives as "Marked paid here. Xero was
+   * not to..." and then leaves, which loses exactly the half a human can act on.
+   */
+  detail: string | null
+}
+
+/** What happened, said twice: once at a glance, once in full. */
+function pushbackCopy(outcome: PushbackOutcome | undefined): PushbackCopy {
   // No rail to tell: a manual invoice that never reached Stripe or Xero. Not a
   // failure, and saying "and in Xero" would be a lie.
-  if (!outcome) return { message: 'Marked paid here.', tone: 'success' }
+  if (!outcome) return { toast: 'Marked paid.', tone: 'success', detail: null }
 
   const rail = outcome.rail === 'xero' ? 'Xero' : 'Stripe'
   const reason = outcome.reason?.trim()
 
   if (outcome.status === 'done') {
-    return { message: `Marked paid here and in ${rail}.`, tone: 'success' }
+    return { toast: `Marked paid in ${rail} too.`, tone: 'success', detail: null }
   }
   if (outcome.status === 'skipped') {
     return {
-      message: `Marked paid here. ${rail} was not told: ${reason ?? 'no reason given'}`,
+      toast: `Marked paid. ${rail} not told.`,
       tone: 'info',
+      detail: `Marked paid here. ${rail} was not told: ${reason ?? 'no reason given'}`,
     }
   }
   return {
-    message: `Marked paid here. ${rail} did not record the payment: ${reason ?? 'no reason given'}`,
+    toast: `Marked paid. ${rail} not updated.`,
     tone: 'warning',
+    detail: `Marked paid here. ${rail} did not record the payment: ${reason ?? 'no reason given'}`,
   }
+}
+
+/**
+ * Ink for a persistent outcome line, by tone.
+ *
+ * The badge inks rather than --color-warning / --color-success: those are
+ * indicator colours (#fb923c reads at roughly 2.2:1 on the page, #4ade80 at
+ * 1.6:1) and this is a sentence somebody has to read. The badge tokens are the
+ * text-weight members of the same families and carry dark-mode overrides.
+ */
+const OUTCOME_INK: Record<ToastTone, string> = {
+  success: 'var(--badge-positive-text)',
+  info: 'var(--color-text-muted)',
+  warning: 'var(--badge-warning-text)',
+  error: 'var(--badge-danger-text)',
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -159,6 +192,9 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
   const { displayCurrency, formatNativeWithDisplay } = useDisplayCurrency()
   const { showToast } = useToast()
   const [patching, setPatching] = useState<string | null>(null)
+  // The rail's answer to a hand mark-paid, kept on the page. The toast says it
+  // at a glance and then goes; this is where the reason stays readable.
+  const [pushback, setPushback] = useState<{ message: string; tone: ToastTone } | null>(null)
 
   // Audience-correct source. A client is not allowed on the admin route (it
   // 403s them), so the client branch reads the org-scoped portal detail route,
@@ -189,6 +225,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
   const patchStatus = useCallback(async (newStatus: string) => {
     if (!invoice) return
     setPatching(newStatus)
+    setPushback(null)
     try {
       const paidAt = newStatus === 'paid' ? new Date().toISOString() : undefined
       const sentAt = newStatus === 'sent' ? new Date().toISOString() : undefined
@@ -209,8 +246,9 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
       if (!res.ok) throw new Error(payload.error ?? 'Could not update this invoice')
       await mutate()
       if (newStatus === 'paid') {
-        const { message, tone } = pushbackToast(payload.pushback)
-        showToast(message, tone)
+        const { toast, tone, detail } = pushbackCopy(payload.pushback)
+        showToast(toast, tone)
+        setPushback(detail ? { message: detail, tone } : null)
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Could not update this invoice', 'error')
@@ -599,6 +637,27 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
             />
           </div>
         )}
+
+        {/* What the rail did with the hand mark-paid, in full and in place.
+            The toast carries the same outcome at a glance and then leaves; this
+            wraps, stays, and is where the REASON lives ("No Xero payment
+            account code in settings", "Xero invoice is still a draft"). Without
+            it the dashboard says paid, Xero keeps chasing the client, and only
+            the audit log knows. Same <p role="status"> pattern as the send
+            result under the email button. */}
+        {isAdmin && pushback && (
+          <p
+            role="status"
+            style={{
+              margin: '0.875rem 0 0',
+              fontSize: '0.8125rem',
+              lineHeight: 1.5,
+              color: OUTCOME_INK[pushback.tone],
+            }}
+          >
+            {pushback.message}
+          </p>
+        )}
       </div>
 
       {/* Overdue-invoice chase draft (admin only, sent/overdue invoices) */}
@@ -833,36 +892,61 @@ interface SendEmailResult {
   message?: string
 }
 
+/** How well the send went, for the colour the sentence is said in. */
+type SendTone = 'ok' | 'partial' | 'error'
+
 /**
- * One sentence for what the client actually received.
+ * Ink per outcome. Amber and red are the badge inks rather than
+ * --color-warning / --color-danger-dot: those are indicator colours and this
+ * is a sentence to be read on the page background. Green stays the success
+ * token only where the whole send succeeded.
+ */
+const SEND_RESULT_INK: Record<SendTone, string> = {
+  ok: 'var(--badge-positive-text)',
+  partial: 'var(--badge-warning-text)',
+  error: 'var(--badge-danger-text)',
+}
+
+/**
+ * One sentence for what the client actually received, and how well it went.
  *
  * The Xero half is not decoration. With invoicing.xeroEmailMode set to 'xero'
  * the studio has handed the send to Xero, and Xero refuses to email a DRAFT,
  * which is where every dashboard-pushed invoice starts. Our template is the
  * fallback in that case, and if this line did not say so the studio would
  * believe Xero sent a PDF that Xero never sent.
+ *
+ * The failure clause is built INDEPENDENTLY of the success clause. A send in
+ * which Xero delivered cleanly and every one of our own emails bounced answers
+ * 200 with an empty sentTo (the route's "did anybody get it" check is satisfied
+ * by Xero), and folding "could not reach" inside `to.length > 0` dropped that
+ * entirely: the studio read "Xero emailed this invoice to the client." over a
+ * send where every billing contact we tried had failed.
  */
-function sendResultMessage(body: SendEmailResult): string {
+function sendResultMessage(body: SendEmailResult): { message: string; tone: SendTone } {
   const to = body.sentTo ?? []
   const failed = body.failedTo ?? []
 
-  const ours = to.length > 0
-    ? failed.length > 0
-      ? `Sent to ${to.join(', ')}. Could not reach ${failed.join(', ')}.`
-      : `Sent to ${to.join(', ')}.`
-    : ''
-
-  if (!body.xeroEmail) return ours || 'Sent.'
+  const parts: string[] = []
+  if (to.length > 0) parts.push(`Sent to ${to.join(', ')}.`)
+  if (failed.length > 0) parts.push(`Could not reach ${failed.join(', ')}.`)
 
   const reason = body.reason?.trim()
   if (body.xeroEmail === 'sent') {
     // In 'xero' mode ours never went, so there may be no recipient list at all.
-    return ours ? `${ours} Xero emailed its own copy too.` : 'Xero emailed this invoice to the client.'
+    parts.push(to.length > 0 ? 'Xero emailed its own copy too.' : 'Xero emailed this invoice to the client.')
+  } else if (body.xeroEmail === 'skipped') {
+    parts.push(`Xero did not send its own copy: ${reason ?? 'no reason given'}`)
+  } else if (body.xeroEmail === 'failed') {
+    parts.push(`Xero could not send its own copy: ${reason ?? 'no reason given'}`)
   }
-  const why = body.xeroEmail === 'skipped'
-    ? `Xero did not send its own copy: ${reason ?? 'no reason given'}`
-    : `Xero could not send its own copy: ${reason ?? 'no reason given'}`
-  return ours ? `${ours} ${why}` : why
+
+  // 'skipped' is not a fault: a Xero invoice still sitting at DRAFT is the
+  // ordinary state of a freshly pushed bill and our template covered it. A
+  // bounced address or a Xero call that broke is something to look at.
+  const tone: SendTone = failed.length > 0 || body.xeroEmail === 'failed' ? 'partial' : 'ok'
+
+  return { message: parts.length > 0 ? parts.join(' ') : 'Sent.', tone }
 }
 
 function SendInvoiceEmailButton({
@@ -877,7 +961,11 @@ function SendInvoiceEmailButton({
   onSent: () => void
 }) {
   const [sending, setSending] = useState(false)
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
+  // The tone is carried, not derived from the HTTP status. A 200 covers a
+  // partial outcome ("Xero could not send its own copy", every one of our
+  // addresses bounced), and painting those in --color-success said the send
+  // went fine while the words said a delivery failed.
+  const [result, setResult] = useState<{ tone: SendTone; message: string } | null>(null)
 
   const send = useCallback(async () => {
     setSending(true)
@@ -888,10 +976,10 @@ function SendInvoiceEmailButton({
       if (!res.ok) {
         throw new Error(body.message || body.error || `HTTP ${res.status}`)
       }
-      setResult({ ok: true, message: sendResultMessage(body) })
+      setResult(sendResultMessage(body))
       onSent()
     } catch (err) {
-      setResult({ ok: false, message: err instanceof Error ? err.message : 'Send failed' })
+      setResult({ tone: 'error', message: err instanceof Error ? err.message : 'Send failed' })
     } finally {
       setSending(false)
     }
@@ -933,7 +1021,7 @@ function SendInvoiceEmailButton({
             margin: 0,
             fontSize: '0.75rem',
             lineHeight: 1.5,
-            color: result.ok ? 'var(--color-success)' : 'var(--color-danger)',
+            color: SEND_RESULT_INK[result.tone],
           }}
         >
           {result.message}

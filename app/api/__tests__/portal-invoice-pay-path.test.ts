@@ -11,9 +11,13 @@
  *             link, and gating the Xero page on the org's nominal channel would
  *             leave a payable bill unpayable.
  *   howToPay  bank details, the reference, the amount and the due date, for a
- *             Xero-rail invoice with no link yet. That is where EVERY pushed
- *             Xero invoice starts (it sits at DRAFT until Liam approves it), so
- *             without this the client holds a real bill with nothing to act on.
+ *             Xero-rail invoice that is STILL OWED and has no link yet. That is
+ *             where EVERY pushed Xero invoice starts (it sits at DRAFT until
+ *             Liam approves it), so without this the client holds a real bill
+ *             with nothing to act on. It goes the moment the bill is settled:
+ *             both projections return every non-draft invoice, and a paid Xero
+ *             invoice never gets a link (it was never approved in Xero), so
+ *             nothing else would ever take the block away.
  *
  * And one rule over both: nothing studio-side rides along. No rail label, no
  * Stripe or Xero id, no reconciliation state. Liam, 2026-09-06: "the client
@@ -237,6 +241,38 @@ describe('GET /api/portal/invoices pay path', () => {
     expect(body.items[0].howToPay).toBeUndefined()
   })
 
+  it('builds no block for a Xero invoice that has already been paid', async () => {
+    // The ordinary end of the bank-transfer flow: the client pays, Liam marks
+    // it paid here, and the invoice never got a Xero link because it was never
+    // approved inside Xero. This list returns every non-draft invoice, so
+    // without the settled check the paid row keeps saying "How to pay
+    // 01-0242-0198765-00, reference INV-1042, $4,312.50".
+    const paid = { ...LIST_ROW, status: 'paid', paidAt: '2026-09-20T02:00:00.000Z' }
+    const { handle, entries } = makeDb([[paid], [{ invoiceChannel: 'xero' }], SETTINGS_ROWS])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (await portalInvoiceList(req('/api/portal/invoices'))).json() as {
+      items: Projected[]
+    }
+    expect(body.items[0].howToPay).toBeUndefined()
+    // And no settings round trip either: there was never a block to build.
+    expect(entries).toEqual(['select'])
+  })
+
+  it('still builds the block for the unpaid rows beside a settled one', async () => {
+    // One page, two bills. The settled row must lose its block without taking
+    // the outstanding row's block with it.
+    const paid = { ...LIST_ROW, id: 'inv-1041-aaaa', status: 'paid', paidAt: '2026-09-20T02:00:00.000Z' }
+    const { handle } = makeDb([[paid, LIST_ROW], [{ invoiceChannel: 'xero' }], SETTINGS_ROWS])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (await portalInvoiceList(req('/api/portal/invoices'))).json() as {
+      items: Projected[]
+    }
+    expect(body.items[0].howToPay).toBeUndefined()
+    expect(body.items[1].howToPay).toMatchObject({ reference: 'INV-1042' })
+  })
+
   it('leaks nothing studio-side: the row is exactly the client-facing fields', async () => {
     const { handle } = makeDb([[LIST_ROW], [{ invoiceChannel: 'xero' }], SETTINGS_ROWS])
     vi.mocked(db).mockResolvedValue(handle as never)
@@ -298,6 +334,22 @@ describe('GET /api/portal/invoices/[id] pay path', () => {
     ).json() as { invoice: Projected }
 
     expect(body.invoice.payUrl).toBe('https://in.xero.com/abc')
+    expect(body.invoice.howToPay).toBeUndefined()
+    // The invoice read and the items read, and no settings round trip between.
+    expect(entries).toEqual(['select', 'select'])
+  })
+
+  it('drops the block once the bill is settled, and reads no settings for it', async () => {
+    // Same failure as the list, one screen deeper: the client opens a receipt
+    // and is told the account number and the reference to pay it with.
+    const paid = { ...DETAIL_ROW, status: 'paid', paidAt: '2026-09-20T02:00:00.000Z' }
+    const { handle, entries } = makeDb([[paid], []])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (
+      await portalInvoiceDetail(req('/api/portal/invoices/inv-1042'), params('inv-1042'))
+    ).json() as { invoice: Projected }
+
     expect(body.invoice.howToPay).toBeUndefined()
     // The invoice read and the items read, and no settings round trip between.
     expect(entries).toEqual(['select', 'select'])

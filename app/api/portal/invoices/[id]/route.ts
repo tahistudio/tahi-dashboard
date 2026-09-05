@@ -7,6 +7,7 @@ import { schema } from '@/db/d1'
 import { and, eq, ne } from 'drizzle-orm'
 import {
   buildHowToPay,
+  isInvoiceSettled,
   readInvoicePayContext,
   resolveInvoicePayUrl,
 } from '@/lib/invoice-how-to-pay'
@@ -24,7 +25,9 @@ type Params = { params: Promise<{ id: string }> }
 // The pay path, same rules as the list route: `payUrl` is Stripe's hosted
 // page or, when there is none, Xero's own online invoice; `howToPay` carries
 // the bank details, the reference and the amount for a Xero-rail invoice that
-// has no link yet, which is where every pushed Xero invoice starts.
+// is still owed and has no link yet, which is where every pushed Xero invoice
+// starts. A settled bill carries neither, so the client is never told how to
+// pay something they have already paid.
 //
 // Tenancy: the org filter is part of the WHERE clause, not a post-check, so a
 // guessed id from another client is indistinguishable from a missing one (404).
@@ -110,11 +113,12 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { xeroPayUrl, orgInvoiceChannel, ...rest } = row
   const payUrl = resolveInvoicePayUrl(rest.payUrl, xeroPayUrl)
 
-  // Only when there is nothing to click. A bill with a hosted pay page needs
-  // no bank details, and reading the settings for one would be a round trip
-  // spent on a block that is never built.
+  // Only when the bill is still owed and there is nothing to click. A settled
+  // invoice needs no bank details and a bill with a hosted pay page needs none
+  // either, and reading the settings for one would be a round trip spent on a
+  // block that is never built.
   let howToPay = null
-  if (!payUrl) {
+  if (!payUrl && !isInvoiceSettled(rest)) {
     // The whole K/V table: a handful of studio rows, one query for the two
     // keys the block needs (the default rail and the bank details).
     const settingRows = await drizzle
@@ -127,9 +131,11 @@ export async function GET(req: NextRequest, { params }: Params) {
       payUrl,
       invoice: {
         id: rest.id,
+        status: rest.status,
         totalUsd: rest.totalUsd,
         currency: rest.currency,
         dueDate: rest.dueDate,
+        paidAt: rest.paidAt,
       },
       bankDetails: payContext.bankDetails,
     })

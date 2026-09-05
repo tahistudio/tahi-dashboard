@@ -330,7 +330,7 @@ export function DetailRow({ label, value, hero = false, first = false, mono = fa
   )
 }
 
-// ─── How to pay — bank transfer details, when there is no pay page ────────
+// ─── How to pay: bank transfer details, when there is no pay page ─────────
 //
 // A Xero-rail invoice has no pay link until Liam approves it inside Xero, and
 // the push holds every dashboard-raised invoice at DRAFT on purpose, so "no

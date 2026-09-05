@@ -285,6 +285,9 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
     payUrl: null,
     invoice: {
       id: INVOICE_ID,
+      // Outstanding, because the block only exists for a bill that is still
+      // owed: buildHowToPay refuses to build one for a settled invoice.
+      status: 'sent',
       totalUsd: 4312.5,
       currency: INVOICE_CURRENCY,
       dueDate: invoiceDueIso,

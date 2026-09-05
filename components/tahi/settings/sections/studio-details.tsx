@@ -16,6 +16,9 @@ import {
   XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY,
   parseBankDetails,
   resolveXeroEmailMode,
+  validateBankDetails,
+  validateXeroEmailMode,
+  validateXeroPaymentAccountCode,
   type InvoiceBankDetails,
 } from '@/lib/invoice-pay-settings'
 
@@ -143,6 +146,24 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
   }
 
   async function handleSave() {
+    // Checked BEFORE anything is written, and with the same pure validators the
+    // route runs, so the two can never disagree. The ten PATCHes go in
+    // parallel, so a 400 on one of the three validated keys would otherwise
+    // land after the other nine had already been stored: the form would show
+    // the validator's sentence over a card that was half saved, and the value
+    // still on screen would not be the value in the database.
+    const bankBlob = bankDetailsValue()
+    const preflight = [
+      validateBankDetails(bankBlob),
+      validateXeroPaymentAccountCode(xeroAccountCode.trim()),
+      validateXeroEmailMode(xeroEmailMode),
+    ].find((v) => !v.ok)
+    if (preflight && !preflight.ok) {
+      setSaved(false)
+      setSaveError(preflight.error)
+      return
+    }
+
     setSaving(true)
     setSaved(false)
     setSaveError(null)
@@ -155,7 +176,7 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
         saveKey('invoice_number_prefix', invoicePrefix.trim()),
         saveKey(INVOICE_CHANNEL_SETTING_KEY, invoiceChannel),
         saveKey('invoice_footer_note', invoiceFooter.trim()),
-        saveKey(BANK_DETAILS_SETTING_KEY, bankDetailsValue()),
+        saveKey(BANK_DETAILS_SETTING_KEY, bankBlob),
         saveKey(XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY, xeroAccountCode.trim()),
         saveKey(XERO_EMAIL_MODE_SETTING_KEY, xeroEmailMode),
       ])
@@ -280,6 +301,7 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               className="set-input"
               value={invoiceChannel}
               onChange={(e) => setInvoiceChannel(e.target.value)}
+              aria-describedby="studio-invoice-channel-help"
             >
               {INVOICE_CHANNELS.map((c) => (
                 <option key={c.value} value={c.value}>
@@ -288,6 +310,7 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               ))}
             </select>
             <small
+              id="studio-invoice-channel-help"
               style={{
                 display: 'block',
                 marginTop: 5,
@@ -368,9 +391,14 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               value={accountNumber}
               onChange={(e) => setAccountNumber(e.target.value)}
               placeholder="12-3456-7890123-00"
-              inputMode="numeric"
+              // No inputMode. inputMode="numeric" opens the iOS digit keypad,
+              // which has no dash and no space key, and the placeholder, the
+              // hint below and the server validator all accept both: the studio
+              // could only fill this field on a phone by pasting.
+              aria-describedby="studio-account-number-help"
             />
             <small
+              id="studio-account-number-help"
               style={{
                 display: 'block',
                 marginTop: 5,
@@ -389,8 +417,10 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               value={referenceHint}
               onChange={(e) => setReferenceHint(e.target.value)}
               placeholder="Please use the invoice number as the reference."
+              aria-describedby="studio-reference-hint-help"
             />
             <small
+              id="studio-reference-hint-help"
               style={{
                 display: 'block',
                 marginTop: 5,
@@ -409,8 +439,10 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               value={xeroAccountCode}
               onChange={(e) => setXeroAccountCode(e.target.value)}
               placeholder="090"
+              aria-describedby="studio-xero-account-code-help"
             />
             <small
+              id="studio-xero-account-code-help"
               style={{
                 display: 'block',
                 marginTop: 5,
@@ -429,6 +461,7 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               className="set-input"
               value={xeroEmailMode}
               onChange={(e) => setXeroEmailMode(e.target.value)}
+              aria-describedby="studio-xero-email-mode-help"
             >
               {XERO_EMAIL_MODE_OPTIONS.map((m) => (
                 <option key={m.value} value={m.value}>
@@ -437,6 +470,7 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               ))}
             </select>
             <small
+              id="studio-xero-email-mode-help"
               style={{
                 display: 'block',
                 marginTop: 5,

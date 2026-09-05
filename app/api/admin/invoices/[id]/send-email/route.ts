@@ -14,6 +14,7 @@ import { invoiceReference, selectBillingContacts, selectInvoiceRecipients } from
 import { stripeSecretKey } from '@/lib/stripe-key'
 import {
   buildHowToPay,
+  hasBankDestination,
   readInvoicePayContext,
   resolveInvoicePayUrl,
 } from '@/lib/invoice-how-to-pay'
@@ -76,9 +77,12 @@ async function resolvePayUrl(
 // list and the invoice detail, so a bell row carrying the amount would be a
 // disclosure followed by a 403 on the click.
 //
-// Idempotent on a resend: sentAt is stamped once (it means FIRST send, which
-// is what receivables aging reads), the status is only promoted out of
-// 'draft', and a second send raises no second bell row.
+// Idempotent on a resend, on every side that can be: sentAt is stamped once
+// (it means FIRST send, which is what receivables aging reads), the status is
+// only promoted out of 'draft', a second send raises no second bell row, and
+// the Xero send below refuses when Xero's own SentToContact flag says it has
+// already mailed an invoice we have already sent. OUR OWN template is the one
+// thing a resend does re-send, because re-sending it is what the button is for.
 //
 // ── The Xero rail ───────────────────────────────────────────────────────────
 //
@@ -226,6 +230,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     payUrl,
     invoice: {
       id: invoiceRow.id,
+      // Never settled by the time we get here (the 409 above turns a paid or
+      // written-off invoice away), but the block refuses to build for one, and
+      // saying so here is what makes that guarantee readable.
+      status: invoiceRow.status,
       totalUsd: invoiceRow.totalUsd,
       currency: invoiceRow.currency,
       dueDate: invoiceRow.dueDate,
@@ -233,15 +241,26 @@ export async function POST(req: NextRequest, { params }: Params) {
     bankDetails: payContext.bankDetails,
   })
 
+  // Has this invoice been sent before? Read once, used twice: it guards the
+  // Xero send against a resend below, and it decides the sentAt stamp and the
+  // bell row further down.
+  const alreadySent = !!invoiceRow.sentAt
+
   // Let Xero send its own copy, when the rail and the setting both say so.
   // Attempted BEFORE our own send because its outcome decides whether ours
   // goes at all: in 'xero' mode we stand down, unless Xero refuses (a draft
   // invoice, which is where every pushed bill starts), in which case our
   // template is the fallback rather than the client receiving nothing.
+  //
+  // `alreadySent` is passed so the Xero half is self-guarding: Xero's Email
+  // endpoint has no idempotency key, and this call happens before the D1 write
+  // and the notification write, so a retry after an apparent failure would mail
+  // the client a second PDF. emailInvoiceFromXero refuses when Xero's own
+  // SentToContact flag and our sentAt BOTH say it has gone already.
   const onXeroRail = payContext.channel === 'xero'
   const wantsXeroEmail = onXeroRail && payContext.xeroEmailMode !== 'dashboard'
   const xeroOutcome: XeroEmailOutcome | null = wantsXeroEmail
-    ? await emailInvoiceFromXero(invoiceRow.xeroInvoiceId)
+    ? await emailInvoiceFromXero(invoiceRow.xeroInvoiceId, { alreadySent })
     : null
 
   // Ours goes unless the setting handed the job to Xero AND Xero took it.
@@ -288,7 +307,6 @@ export async function POST(req: NextRequest, { params }: Params) {
   // aging and any future dunning read it), and 'viewed' / 'overdue' are states
   // this invoice has already earned, so only a draft is promoted.
   const now = new Date().toISOString()
-  const alreadySent = !!invoiceRow.sentAt
   await drizzle
     .update(schema.invoices)
     .set({
@@ -318,8 +336,13 @@ export async function POST(req: NextRequest, { params }: Params) {
     sentTo,
     failedTo: failed.map(f => f.email),
     payLink: !!payUrl,
-    // The client was given bank details instead of a button.
-    bankDetails: !!howToPay,
+    // The client was given bank details instead of a button. Reported off the
+    // SAME test the email renders on (hasBankDestination), not off "a block was
+    // built": until the studio fills in invoicing.bankDetails the block names
+    // nowhere to send the money, the email falls back to the plain portal CTA,
+    // and answering true here would tell the studio (and MCP send_invoice_email)
+    // that a client got account details they never saw.
+    bankDetails: hasBankDestination(howToPay),
     notified: !alreadySent,
     // Only on the Xero rail, and only what actually happened: 'sent' means
     // Xero emailed its own copy, 'skipped' means it would not (and ours went

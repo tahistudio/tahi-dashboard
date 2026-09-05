@@ -18,8 +18,12 @@
  * refusal is a reported skip that the caller answers by sending our template
  * instead.
  *
- * Injectable Xero calls, so the three modes and the draft fallback are pinned
- * by tests without a Xero tenant.
+ * The second rule: XERO'S EMAIL ENDPOINT IS NOT IDEMPOTENT. A retry after a
+ * request that appeared to fail is a second PDF in the client's inbox, so the
+ * status read doubles as the guard (see emailInvoiceFromXero).
+ *
+ * Injectable Xero calls, so the three modes, the draft fallback and the resend
+ * guard are pinned by tests without a Xero tenant.
  */
 
 import { callXeroAPI, callXeroAPIOrThrow, XeroAPIError } from '@/lib/xero'
@@ -35,7 +39,7 @@ export interface XeroEmailOutcome {
 
 /** The half of GET /Invoices/{id} this decision is made from. */
 interface XeroInvoiceStatusRead {
-  Invoices?: Array<{ Status?: string }>
+  Invoices?: Array<{ Status?: string; SentToContact?: boolean }>
 }
 
 export interface XeroInvoiceEmailDeps {
@@ -51,6 +55,20 @@ export function readXeroInvoiceStatus(payload: unknown): string | null {
   const invoice = (payload as XeroInvoiceStatusRead).Invoices?.[0]
   const status = invoice?.Status
   return typeof status === 'string' && status.trim() !== '' ? status.trim() : null
+}
+
+/**
+ * Has Xero already emailed this invoice to the contact?
+ *
+ * Xero sets SentToContact on the invoice the first time it mails it, and it is
+ * returned by the SAME GET the status comes from, so the send is self-guarding
+ * at no extra round trip. Absent or not a boolean reads as false: a missing
+ * flag must never be the reason a client is left without their bill.
+ */
+export function readXeroSentToContact(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object') return false
+  const invoice = (payload as XeroInvoiceStatusRead).Invoices?.[0]
+  return invoice?.SentToContact === true
 }
 
 /**
@@ -102,24 +120,58 @@ export const liveXeroInvoiceEmailDeps: XeroInvoiceEmailDeps = {
   },
 }
 
+export interface XeroInvoiceEmailOptions {
+  /**
+   * True when the dashboard has already stamped `sentAt` for this invoice, i.e.
+   * this POST is a RESEND rather than the first send. It is half of the
+   * idempotency guard below; see emailInvoiceFromXero.
+   */
+  alreadySent?: boolean
+  /** Injected for tests. Defaults to the real Xero calls. */
+  deps?: XeroInvoiceEmailDeps
+}
+
 /**
  * Ask Xero to email this invoice.
  *
  * Never throws. Every outcome is reported so the caller can decide whether to
  * send our own template instead, and so the studio is told what actually
  * reached the client rather than a bare success.
+ *
+ * ── Self-guarding on a resend ────────────────────────────────────────────
+ *
+ * POST /Invoices/{id}/Email has no idempotency key, so a second call is a
+ * second PDF in the client's inbox. The realistic path to one is not a
+ * double-click (the button disables while sending) but a RETRY after the
+ * request appeared to fail: the send route calls this before its D1 write and
+ * its notification write, either of which can throw and 500 after Xero has
+ * already delivered.
+ *
+ * The guard needs both halves to fire:
+ *
+ *   SentToContact   Xero's own record that it has mailed this invoice, read
+ *                   off the same GET the status comes from.
+ *   alreadySent     our record that this invoice has been sent before.
+ *
+ * Both, because either alone would refuse a legitimate send: an invoice
+ * imported from Xero that Xero had already emailed would never get our first
+ * send, and an invoice we emailed as a draft would never get Xero's copy after
+ * Liam approves it (which is exactly the approve-then-resend flow the draft
+ * fallback exists for, and where SentToContact is still false).
  */
 export async function emailInvoiceFromXero(
   xeroInvoiceId: string | null | undefined,
-  deps: XeroInvoiceEmailDeps = liveXeroInvoiceEmailDeps,
+  options: XeroInvoiceEmailOptions = {},
 ): Promise<XeroEmailOutcome> {
+  const deps = options.deps ?? liveXeroInvoiceEmailDeps
+
   if (typeof xeroInvoiceId !== 'string' || xeroInvoiceId.trim() === '') {
     return { status: 'skipped', reason: 'This invoice has never been pushed to Xero' }
   }
 
-  let status: string | null
+  let payload: unknown
   try {
-    status = readXeroInvoiceStatus(await deps.readInvoice(xeroInvoiceId))
+    payload = await deps.readInvoice(xeroInvoiceId)
   } catch (err) {
     return {
       status: 'failed',
@@ -127,8 +179,12 @@ export async function emailInvoiceFromXero(
     }
   }
 
-  const blocked = xeroEmailBlockReason(status)
+  const blocked = xeroEmailBlockReason(readXeroInvoiceStatus(payload))
   if (blocked) return { status: 'skipped', reason: blocked }
+
+  if (options.alreadySent && readXeroSentToContact(payload)) {
+    return { status: 'skipped', reason: 'Xero has already emailed this invoice' }
+  }
 
   try {
     await deps.emailInvoice(xeroInvoiceId)
