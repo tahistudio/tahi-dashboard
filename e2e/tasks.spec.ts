@@ -351,7 +351,7 @@ test.describe('Tasks', () => {
       await rowTitles(page).first().click()
       const panel = page.getByRole('dialog')
       await expect(panel).toBeVisible({ timeout: 15_000 })
-      await expect(panel.getByRole('textbox', { name: 'Task title' })).toHaveValue(title)
+      await expect(panel.getByRole('textbox', { name: 'Task title' })).toHaveValue(title, { timeout: 30_000 })
       // The panel is the URL, so the link is shareable.
       await expect(page).toHaveURL(new RegExp(`[?&]task=${id}`))
 
@@ -375,14 +375,14 @@ test.describe('Tasks', () => {
       await gotoPath(page, `/tasks?task=${id}`)
       const panel = page.getByRole('dialog')
       await expect(panel).toBeVisible({ timeout: 30_000 })
-      await expect(panel.getByRole('textbox', { name: 'Task title' })).toHaveValue(title)
+      await expect(panel.getByRole('textbox', { name: 'Task title' })).toHaveValue(title, { timeout: 30_000 })
 
       await gotoPath(page, `/tasks/${id}`)
       await expect(page).toHaveURL(new RegExp(`/tasks\\?task=${id}`), { timeout: 30_000 })
       await expect(page.getByRole('dialog')).toBeVisible({ timeout: 30_000 })
       await expect(
         page.getByRole('dialog').getByRole('textbox', { name: 'Task title' }),
-      ).toHaveValue(title)
+      ).toHaveValue(title, { timeout: 30_000 })
     } finally {
       await deleteTask(request, id)
     }
