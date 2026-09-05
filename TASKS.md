@@ -128,7 +128,7 @@ Decisions only Liam can make: ANSWERED.
 
 ## Tasks and requests polish (Liam, 2026-09-06 evening)
 
-- [ ] TP.1 - [Design first, then FE] **AI first-start bar.** The quick-add / "Draft with AI" entry bar as a reusable component (a first start for an AI request or task): quick type to add, or hand off to the AI wizard. Add to Tasks and Requests, and put it on the home page. Liam left a comment on it in Claude Design. Reuse the tasks quick-add and the AI wizard already shipped.
+- [~] TP.1 - DROPPED 2026-09-05. Liam changed his mind on the AI first-start bar ("get rid of the task suggestion field"); replaced by TP.5 predictive autofill.
 - [x] TP.2 - [FE] Removed the My week rail note ("My week always shows your own open plate..."), 7ffa602a. The inert filter controls already say it.
 - [ ] TP.3 - [Design first, then FE/BE] **My week: real week dates + multi-day allocation.** The planner shows the open task list against the actual dates of the week, and a long or big task or request can be placed into MULTIPLE days (spanned across the days it will take), not just dropped on one due date. Needs a design and probably a schema decision (a per-day allocation, distinct from the single due date). This extends the shipped My week strip.
 - [ ] TP.4 - [Design first, then FE] **Notifications page (not urgent).** An All notifications and Past notifications page: the full history behind the bell, simple list with read state. Design in Claude Design first. Low priority.
