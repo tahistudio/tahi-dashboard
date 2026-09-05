@@ -27,6 +27,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { useResource } from '@/lib/use-resource'
+import { ApiError } from '@/lib/swr-fetcher'
 import { apiPath } from '@/lib/api'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import {
@@ -695,7 +696,15 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   const { data: reviewData } = useResource<RequestsResp>(
     '/api/portal/requests?status=client_review&limit=200',
   )
-  const { data: invoicesData } = useResource<InvoicesResp>('/api/portal/invoices?status=all')
+  // The money routes turn a plain member seat away by design (only a workspace
+  // admin of the org may read invoices), and a feature-disabled workspace and
+  // an unlinked login 403 here too. Without this the card said "No invoices
+  // yet." to somebody whose org has plenty, and offered them a Pay button on a
+  // list it was never given. A 403 means "not yours to see", not "none".
+  const { data: invoicesData, error: invoicesError } = useResource<InvoicesResp>(
+    '/api/portal/invoices?status=all',
+  )
+  const invoicesDenied = invoicesError instanceof ApiError && invoicesError.status === 403
   const { data: subData } = useResource<SubscriptionResp>('/api/portal/subscription')
 
   // Retainer (TrackBoard) vs project (ProjectBoard): derived from the real
@@ -870,7 +879,12 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       muted: !nextDelivery,
       sub: nextDelivery ? nextDelivery.title : 'nothing scheduled',
     },
-    {
+  ]
+  // "Invoices due 0 / all settled" is a claim about money this seat is not
+  // allowed to see, so the tile goes rather than reassuring somebody wrongly.
+  // The strip is flex, so three tiles simply share the width.
+  if (!invoicesDenied) {
+    vitals.push({
       lbl: 'Invoices due',
       num: invDueDisplay,
       muted: unpaid.length === 0,
@@ -878,8 +892,8 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         unpaid.length === 0
           ? 'all settled'
           : `${unpaid.length} · ${nearestUnpaid ? dueLabel(nearestUnpaid.dueDate) : 'due soon'}`,
-    },
-  ]
+    })
+  }
 
   // ── hero ────────────────────────────────────────────────────────────────────
   const retainerNewItems: NewMenuItem[] = [{ ic: 'request', label: 'New request', go: () => go('requests') }]
@@ -1097,6 +1111,11 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       </Zone>
 
       <Zone label="Billing">
+        {/* A seat that may not read the org's invoices gets no invoices card at
+            all. Rendering it empty told them "No invoices yet." about bills
+            that exist, beside a Pay button for a list they were never served.
+            The plan card takes the full row in its place. */}
+        {!invoicesDenied && (
         <Card span={7} edge="warn">
           {/* The link goes to /invoices, so it says so. "Billing" pointed at a
               different page in the client's head (and at a real /billing route
@@ -1143,9 +1162,10 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
             <div className="ov-mini">No invoices yet.</div>
           )}
         </Card>
+        )}
 
         {isProject ? (
-          <Card span={5}>
+          <Card span={invoicesDenied ? 12 : 5}>
             {/* No "Details" link: /proposals redirects a client to /requests,
                 and this branch removed it from the client nav for that reason. */}
             <CardH ic="wallet" title="Your project" />
@@ -1180,7 +1200,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
             </div>
           </Card>
         ) : (
-          <Card span={5}>
+          <Card span={invoicesDenied ? 12 : 5}>
             <CardH ic="wallet" title="Your plan" link="Manage" onLink={() => go('plan')} />
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <span style={{ font: "700 20px 'Manrope',sans-serif", color: 'var(--text)' }}>

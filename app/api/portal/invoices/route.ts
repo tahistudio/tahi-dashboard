@@ -25,7 +25,10 @@ export async function GET(req: NextRequest) {
   }
 
   if (!orgId) {
-    return NextResponse.json({ error: 'No organisation found for this user' }, { status: 403 })
+    return NextResponse.json(
+      { error: 'No organisation found for this user', code: 'no_org' },
+      { status: 403 },
+    )
   }
 
   const url = new URL(req.url)
@@ -41,7 +44,9 @@ export async function GET(req: NextRequest) {
   // denied). A Tahi admin previewing Client view has no contact row in the
   // org, so impersonation is allowed through for this read.
   if (!impersonating && !(await isOrgAdmin(drizzle, orgId, userId))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    // The seat, named. Without the code every denial on this route read as the
+    // same bare Forbidden and /invoices told an org admin to go ask themselves.
+    return NextResponse.json({ error: 'Forbidden', code: 'not_org_admin' }, { status: 403 })
   }
 
   let items

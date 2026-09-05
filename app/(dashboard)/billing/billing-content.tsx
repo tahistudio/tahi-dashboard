@@ -3,12 +3,19 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
-import { CreditCard, ExternalLink, FileText, RefreshCw } from 'lucide-react'
+import { CreditCard, ExternalLink, FileText, RefreshCw, Lock } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { apiPath } from '@/lib/api'
 import { PageHeader } from '@/components/tahi/page-header'
+import { ApiError } from '@/lib/swr-fetcher'
+import {
+  portalAdminLabel,
+  portalMoneyDenial,
+  portalInvoiceDenialCopy,
+  type PortalPersonSummary,
+} from '@/lib/portal-admin-label'
 
 interface InvoiceRow {
   id: string
@@ -67,12 +74,29 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
 
   // Portal-only fetches. Keys are null for admins so SWR skips them;
   // the admin path renders <AdminBillingView /> before these values are used.
-  const { data: invoicesData, isLoading: invoicesLoading, mutate: mutateInvoices } = useSWR<{ items: InvoiceRow[] }>(
+  const { data: invoicesData, isLoading: invoicesLoading, error: invoicesError, mutate: mutateInvoices } = useSWR<{ items: InvoiceRow[] }>(
     !isAdmin ? '/api/portal/invoices?status=all' : null
   )
-  const { data: subData, isLoading: subLoading, mutate: mutateSub } = useSWR<{ subscription?: SubscriptionRow; billing?: PortalBilling }>(
+  const { data: subData, isLoading: subLoading, error: subError, mutate: mutateSub } = useSWR<{ subscription?: SubscriptionRow; billing?: PortalBilling }>(
     !isAdmin ? '/api/portal/subscription' : null
   )
+
+  // Both portal reads behind this page are money, and both turn a plain member
+  // seat away by design. Reaching /billing (the plan CTAs and the subscription
+  // notification link both land here) used to answer that with an empty page:
+  // no plan, no invoices, no reason. Same classifier and same sentences the
+  // /invoices page uses, so the two money surfaces cannot say different things
+  // to the same person.
+  const moneyError = invoicesError ?? subError
+  const denial = !isAdmin && moneyError instanceof ApiError && moneyError.status === 403
+    ? portalMoneyDenial(moneyError.info)
+    : null
+  const { data: peopleData } = useSWR<{ items?: PortalPersonSummary[] }>(
+    denial === 'member_seat' ? '/api/portal/people' : null,
+  )
+  const denialCopy = denial
+    ? portalInvoiceDenialCopy(denial, portalAdminLabel(peopleData?.items))
+    : null
 
   const invoices = invoicesData?.items ?? []
   const subscription = subData?.subscription ?? null
@@ -106,6 +130,23 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
   // Admin billing dashboard
   if (isAdmin) {
     return <AdminBillingView />
+  }
+
+  // Denied, not broken. Every hook above has already run, so this early return
+  // is order-safe.
+  if (denialCopy) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Billing" subtitle="Your plan and invoices." />
+        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl">
+          <EmptyState
+            icon={<Lock className="w-6 h-6" />}
+            title={denialCopy.title}
+            description={denialCopy.description}
+          />
+        </div>
+      </div>
+    )
   }
 
   return (

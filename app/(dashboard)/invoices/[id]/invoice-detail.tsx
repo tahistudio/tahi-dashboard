@@ -4,8 +4,17 @@ import { useState, useCallback, useEffect } from 'react'
 import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, RefreshCw, FileText, Sparkles, Send, X, CreditCard, Mail } from 'lucide-react'
+import { ArrowLeft, RefreshCw, FileText, Sparkles, Send, X, CreditCard, Mail, Lock } from 'lucide-react'
 import { Breadcrumb } from '@/components/tahi/breadcrumb'
+import { Card } from '@/components/tahi/card'
+import { EmptyState } from '@/components/tahi/empty-state'
+import { ApiError } from '@/lib/swr-fetcher'
+import {
+  portalAdminLabel,
+  portalMoneyDenial,
+  portalInvoiceDenialCopy,
+  type PortalPersonSummary,
+} from '@/lib/portal-admin-label'
 import { apiPath } from '@/lib/api'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { formatCurrency } from '@/lib/currency'
@@ -106,9 +115,25 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
   const { data, isLoading: loading, error: fetchError, mutate } = useSWR<{ invoice?: InvoiceRow; items?: LineItem[] }>(
     isAdmin ? `/api/admin/invoices/${invoiceId}` : `/api/portal/invoices/${invoiceId}`
   )
+  // A 403 on the CLIENT endpoint is a rule, not a failure. /api/portal/invoices
+  // and its [id] sibling turn a member seat away by design, and this page used
+  // to answer that with "Failed to load invoice." over a Retry that could never
+  // succeed. Classify the body instead: the same three denials the list page
+  // already explains, from the same helper, so the two pages cannot drift.
+  const denial = !isAdmin && fetchError instanceof ApiError && fetchError.status === 403
+    ? portalMoneyDenial(fetchError.info)
+    : null
+  // Who to ask, fetched only for the one denial whose copy names anybody.
+  const { data: peopleData } = useSWR<{ items?: PortalPersonSummary[] }>(
+    denial === 'member_seat' ? '/api/portal/people' : null,
+  )
+  const denialCopy = denial
+    ? portalInvoiceDenialCopy(denial, portalAdminLabel(peopleData?.items))
+    : null
+
   const invoice = data?.invoice ?? null
   const items = data?.items ?? []
-  const error = !!fetchError || (!loading && !data?.invoice)
+  const error = !denial && (!!fetchError || (!loading && !data?.invoice))
 
   const patchStatus = useCallback(async (newStatus: string) => {
     if (!invoice) return
@@ -141,6 +166,26 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
           <div style={{ height: 40, width: 200, borderRadius: '0.5rem', background: 'var(--color-bg-tertiary)', marginBottom: '1rem' }} className="animate-pulse" />
           <div style={{ height: 20, width: 120, borderRadius: '0.5rem', background: 'var(--color-bg-tertiary)' }} className="animate-pulse" />
         </div>
+      </div>
+    )
+  }
+
+  // Denied, not broken. SWR clears isLoading on an error, so this sits safely
+  // after the loading branch, and every hook above has already run.
+  if (denialCopy) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'flex-start' }}>
+        <Link href="/invoices" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem', color: 'var(--color-text-muted)', textDecoration: 'none' }}>
+          <ArrowLeft style={{ width: 14, height: 14 }} aria-hidden="true" />
+          Back to Invoices
+        </Link>
+        <Card padding="none" style={{ width: '100%' }}>
+          <EmptyState
+            icon={<Lock className="w-6 h-6" />}
+            title={denialCopy.title}
+            description={denialCopy.description}
+          />
+        </Card>
       </div>
     )
   }

@@ -202,7 +202,11 @@ describe('requirePortalFeature', () => {
     withRows([{ featureKey: 'requests', effect: 'deny' }])
     const denied = await requirePortalFeature(clientAuth, 'requests')
     expect(denied?.status).toBe(403)
-    expect(await denied?.json()).toEqual({ error: 'Forbidden' })
+    // The code is the whole point of the body: a portal 403 has several
+    // meanings and the client pages pick their sentence from it. Without
+    // 'feature_disabled' an org admin whose workspace has invoices switched
+    // off was told to go and ask themselves for an invoice.
+    expect(await denied?.json()).toEqual({ error: 'Forbidden', code: 'feature_disabled' })
   })
 
   it('cascades an ancestor deny to a child feature', async () => {
