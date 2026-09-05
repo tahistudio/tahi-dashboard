@@ -50,6 +50,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 03:25 NZST portal design: one of four designers hung for 70 minutes with no activity; stopped the run and resumed from cache (three designers' modules kept), so the fourth reruns, then the integrator and critic.
 
+- 03:50 NZST Clients port merged on main (list 0b9cd35a, detail 05b44b0c; 2621 tests, build green). Render check on the QA server running before the push. Sales design resumed in Claude Design.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - More sheet: the Track time row label is centred (the timer pill's sheet variant keeps its centred label) while every other row is left-aligned with its icon. Left-align it.
