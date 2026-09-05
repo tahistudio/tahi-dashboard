@@ -20,9 +20,9 @@ import { Badge, priorityTone } from '@/components/tahi/badge'
 import { Avatar } from '@/components/tahi/avatar'
 import { buildWeekGroups, formatHours, weekSummary, type PlannerGroup } from '@/lib/tasks-planner'
 import { taskPriorityLabel } from '@/lib/task-priorities'
-import { levelOf, type TaskRow } from '@/lib/tasks-views'
+import { levelOf, taskDayKey, type TaskRow } from '@/lib/tasks-views'
 import { LevelChip, RequestChip, TaskTick } from '@/components/tahi/tasks/task-chips'
-import type { TaskPerson } from '@/components/tahi/tasks/task-types'
+import type { TaskPerson, TaskRequestOption } from '@/components/tahi/tasks/task-types'
 
 export interface TasksWeekProps {
   /** The caller passes the WHOLE fetched set; this component filters it to
@@ -32,6 +32,10 @@ export interface TasksWeekProps {
    *  the empty state is the honest answer. */
   meId: string | null
   people: Readonly<Record<string, TaskPerson>>
+  /** Only so a linked row can print the repo's #042 reference instead of a
+   *  bare "Request". Optional and additive: leave it out and the chip falls
+   *  back to the unnumbered label. */
+  requests?: readonly TaskRequestOption[]
   /** Show the assignee avatar on a planned row. False for a teammate looking
    *  at their own plate, where it is noise. */
   showAssignee: boolean
@@ -215,6 +219,7 @@ export function TasksWeek({
   allRows,
   meId,
   people,
+  requests,
   showAssignee,
   readOnly,
   onPlan,
@@ -229,20 +234,22 @@ export function TasksWeek({
   // One clock for the whole render. Injected in tests, and stable per render
   // so the summary and the groups can never disagree by a millisecond.
   const clock = now ?? new Date()
-  const clockMs = clock.getTime()
+  // Both memos key on the day rather than on `clock`, which is a fresh Date on
+  // every render whenever `now` is left out: keying on the instant would make
+  // the dep change every render and buy nothing. buildWeekGroups and
+  // weekSummary only ever read the calendar day off this value, so the day key
+  // is its whole identity here, and the week rebuilds exactly at midnight.
+  const dayKey = taskDayKey(clock)
 
   const mine = React.useMemo(
     () => (meId ? allRows.filter(r => r.assigneeId === meId && r.status !== 'done') : []),
     [allRows, meId],
   )
 
-  // Both memos key on clockMs rather than on `clock` itself: a new Date on
-  // every render would rebuild the whole week on every render, and the
-  // milliseconds are the stable identity of the value that matters.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const groups = React.useMemo(() => buildWeekGroups(mine, clock), [mine, clockMs])
+  const groups = React.useMemo(() => buildWeekGroups(mine, clock), [mine, dayKey])
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const summary = React.useMemo(() => weekSummary(mine, clock), [mine, clockMs])
+  const summary = React.useMemo(() => weekSummary(mine, clock), [mine, dayKey])
 
   if (mine.length === 0) {
     return (
@@ -251,7 +258,7 @@ export function TasksWeek({
         <EmptyState
           icon={<CalendarDays className="w-6 h-6" />}
           title="A clear week"
-          description="Nothing open is assigned to you. Enjoy it, or pull something in from the list."
+          description="Nothing open is assigned to you. Enjoy it, or pull something in from All tasks."
         />
       </div>
     )
@@ -321,7 +328,11 @@ export function TasksWeek({
         <span className="tskw-chips">
           <LevelChip level={level} clientName={task.orgName} compact />
           {task.requestId && (
-            <RequestChip requestId={task.requestId} requestNumber={null} onOpen={onOpenRequest} />
+            <RequestChip
+              requestId={task.requestId}
+              requestNumber={requests?.find(r => r.id === task.requestId)?.requestNumber ?? null}
+              onOpen={onOpenRequest}
+            />
           )}
           <PriorityBadge priority={task.priority} />
           {task.estimatedHours != null && task.estimatedHours > 0 && (
@@ -359,7 +370,16 @@ export function TasksWeek({
           overKey === group.key && droppable ? 'is-over' : '',
         ].filter(Boolean).join(' ')}
         onDragOver={droppable ? e => { e.preventDefault(); setOverKey(group.key) } : undefined}
-        onDragLeave={droppable ? () => setOverKey(current => (current === group.key ? null : current)) : undefined}
+        // dragleave bubbles out of the rows and the drop zone inside the card,
+        // so an unguarded handler would clear the highlight and the next
+        // dragover would set it again: the brand outline strobes while the
+        // pointer crosses a populated day. Only a leave that actually left the
+        // card counts.
+        onDragLeave={droppable ? (e: React.DragEvent<HTMLElement>) => {
+          const next = e.relatedTarget
+          if (next instanceof Node && e.currentTarget.contains(next)) return
+          setOverKey(current => (current === group.key ? null : current))
+        } : undefined}
         onDrop={droppable ? e => { e.preventDefault(); handleDrop(group) } : undefined}
       >
         <div className="tskw-day-head">

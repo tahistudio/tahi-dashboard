@@ -108,7 +108,21 @@ export interface TaskDetailPanelProps {
   /** Candidates for the add-dependency picker: every other open task. */
   blockerCandidates: readonly { id: string; title: string }[]
 
-  /** One patch per edit. The shell makes it optimistic. */
+  /**
+   * One patch per edit. The shell makes it optimistic.
+   *
+   * Two keys the shell owes the API that this panel cannot carry, because
+   * `Partial<TaskRow>` has no field for either. Both are wiring work for the
+   * slice that mounts this panel, and both are silent data bugs if missed:
+   *
+   * - `type`. The Level control patches `{ type }` alongside `orgId` and
+   *   `requestId`, but PATCH /api/admin/tasks/[id] has no `type` in its body
+   *   allowlist, so changing Client to Tahi clears the links and leaves the
+   *   stored level untouched. The route needs `type`, validated through
+   *   `isTaskLevel`.
+   * - `assigneeType`. See the note on the Assignee row: the route already
+   *   accepts the key, and only ever writes it when it is present.
+   */
   onPatch: (taskId: string, patch: Partial<TaskRow>) => Promise<void>
   onDelete: (taskId: string) => Promise<void>
   onDuplicate: (taskId: string) => Promise<void>
@@ -468,21 +482,33 @@ export function TaskDetailPanel(props: TaskDetailPanelProps): React.ReactElement
         }}
       />
 
-      <PromoteDialog
-        open={confirm === 'promote' && !!task && !readOnly}
-        clientName={clientName}
-        onCancel={() => setConfirm(null)}
-        onConfirm={async input => {
-          if (!task) return
-          try {
-            await onPromote(task.id, input)
-            setConfirm(null)
-          } catch {
-            // Same rule as the delete confirm: the shell owns the message,
-            // and the dialog keeps the choices the user already made.
-          }
-        }}
-      />
+      {/* The promote confirm needs a stacking context of its own. A centred
+          <SlideOver> splits into a backdrop at z-index 60 and a frame at 70,
+          while the drawer's panel is also 70 and sits earlier in the DOM, so
+          the drawer would paint above the confirm's scrim: the confirm would
+          be modal by declaration and the drawer behind it would still take
+          clicks. At 375px the drawer is full width, so every tap outside the
+          centred panel would edit the task instead of dismissing. This
+          wrapper is a zero-height positioned box, which is enough to contain
+          both fixed layers and put them above 70. <ConfirmDialog> above needs
+          nothing of the sort: it is one z-70 element that is its own scrim. */}
+      <div style={{ position: 'relative', zIndex: 80 }}>
+        <PromoteDialog
+          open={confirm === 'promote' && !!task && !readOnly}
+          clientName={clientName}
+          onCancel={() => setConfirm(null)}
+          onConfirm={async input => {
+            if (!task) return
+            try {
+              await onPromote(task.id, input)
+              setConfirm(null)
+            } catch {
+              // Same rule as the delete confirm: the shell owns the message,
+              // and the dialog keeps the choices the user already made.
+            }
+          }}
+        />
+      </div>
     </>
   )
 }
@@ -1003,6 +1029,17 @@ function TaskDetailBody({
               searchable
               searchPlaceholder="Search people…"
               ariaLabel="Change assignee"
+              // WIRING CONTRACT, and the one thing on this surface that
+              // cannot be closed from inside this file. `tasks.assigneeType`
+              // is a real column and PATCH /api/admin/tasks/[id] routes the
+              // assignment notification off it, so a task last held by a
+              // contact keeps assignee_type='contact' after a reassignment to
+              // a team member and the notification is addressed to a contact
+              // id that is really a teamMembers.id: it reaches nobody. Slice
+              // 1's TaskRow carries no assigneeType, and this patch is pinned
+              // to Partial<TaskRow>, so the pair cannot travel from here.
+              // Slice 6's PATCH mapper MUST send assigneeType 'team_member'
+              // alongside a non-null assigneeId, and null when clearing.
               onChange={next => {
                 if (next === 'none') patch({ assigneeId: null })
                 else patch({ assigneeId: next })
@@ -1246,6 +1283,13 @@ const PROMOTE_SIZES: readonly { value: 'small_task' | 'large_task'; label: strin
  * a title and a description and nothing else, and it is not this slice's file
  * to widen. Everything else about it behaves the same, including standing
  * down the drawer's Escape through the shared overlay stack.
+ *
+ * It draws its own heading rather than passing `title`, because <SlideOver>
+ * hardcodes `id="slide-over-title"` on the heading it renders. Two open
+ * slide-overs would carry that id at once and the confirm's aria-labelledby
+ * would resolve to the drawer's heading, announcing this dialog as "Task".
+ * `ariaLabel` names it instead, and there stays exactly one slide-over-title
+ * in the document.
  */
 function PromoteDialog({
   open,
@@ -1275,10 +1319,35 @@ function PromoteDialog({
       onClose={onCancel}
       variant="center"
       maxWidth="27rem"
-      title="Create a request from this task?"
-      icon={<Inbox size={15} aria-hidden />}
+      ariaLabel="Create a request from this task"
     >
       <SlideOver.Body style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div className="flex items-center" style={{ gap: '0.625rem' }}>
+          <span
+            className="flex items-center justify-center flex-shrink-0"
+            style={{
+              width: '2rem',
+              height: '2rem',
+              borderRadius: 'var(--radius-leaf-sm)',
+              background: 'var(--color-brand-50)',
+              color: 'var(--color-brand)',
+            }}
+          >
+            <Inbox size={15} aria-hidden="true" />
+          </span>
+          <h2
+            style={{
+              margin: 0,
+              fontSize: 'var(--text-md)',
+              fontWeight: 600,
+              letterSpacing: '-0.005em',
+              color: 'var(--color-text)',
+            }}
+          >
+            Create a request from this task?
+          </h2>
+        </div>
+
         <p style={{ margin: 0, fontSize: '0.875rem', lineHeight: 1.55, color: 'var(--color-text-muted)' }}>
           A new request opens for {clientName} with this title and note. The task stays linked to it, so your own
           follow-ups keep living here.

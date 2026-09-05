@@ -166,12 +166,28 @@ function FieldGroup({
   hint?: string
   children: React.ReactNode
 }) {
+  // Half these fields are a SearchableSelect or a SegmentedControl, and
+  // neither primitive exposes an id to point a label at. A <label> with no
+  // htmlFor names no control and clicking it does nothing, so the caption is
+  // a plain <span> unless there is a native input to bind to. The pickers
+  // carry their own accessible name.
+  const captionStyle: React.CSSProperties = {
+    fontSize: '0.8125rem',
+    fontWeight: 600,
+    color: 'var(--color-text)',
+  }
+  const captionInner = (
+    <>
+      {label}
+      {required && <span style={{ color: 'var(--color-danger)', marginLeft: '0.125rem' }}>*</span>}
+    </>
+  )
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-      <label htmlFor={htmlFor} style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>
-        {label}
-        {required && <span style={{ color: 'var(--color-danger)', marginLeft: '0.125rem' }}>*</span>}
-      </label>
+      {htmlFor
+        ? <label htmlFor={htmlFor} style={captionStyle}>{captionInner}</label>
+        : <span style={captionStyle}>{captionInner}</span>}
       {children}
       {hint && (
         <p style={{ margin: 0, fontSize: '0.71875rem', fontWeight: 500, lineHeight: 1.45, color: 'var(--color-text-subtle)' }}>
@@ -313,226 +329,232 @@ export function NewTaskDialog({
     >
       <style>{DIALOG_CSS}</style>
 
-      <form
-        id="new-task-form"
-        onSubmit={e => { e.preventDefault(); void submit() }}
-        style={{ flex: 1, overflowY: 'auto', padding: '1.125rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}
-      >
-        {templates.length > 0 && (
-          <FieldGroup label="Start from a template">
-            <SearchableSelect
-              options={templates.map(t => ({
-                value: t.id,
-                label: t.name,
-                subtitle: t.subtasks.length > 0
-                  ? `${t.subtasks.length} subtask${t.subtasks.length === 1 ? '' : 's'}`
-                  : undefined,
-              }))}
-              value={templateId}
-              allowClear
-              placeholder="No template"
-              searchPlaceholder="Search templates..."
-              onChange={next => {
-                setTemplateId(next)
-                if (!next) return
-                const template = templates.find(t => t.id === next)
-                if (template) applyTemplate(template)
-              }}
-            />
-          </FieldGroup>
-        )}
-
-        <FieldGroup label="Level" hint={TASK_LEVEL_HINTS[links.level]}>
-          <SegmentedControl
-            value={links.level}
-            onChange={next => setLinks(current => setTaskLevel(current, next))}
-            role="radiogroup"
-            size="sm"
-            fill
-            ariaLabel="Level"
-            options={TASK_LEVELS.map(l => {
-              const Glyph = LEVEL_ICON[l.value]
-              return { value: l.value, label: l.label, title: l.hint, icon: <Glyph size={12} aria-hidden /> }
-            })}
-          />
-        </FieldGroup>
-
-        <div className="tskn-grid">
-          <FieldGroup
-            label="Client"
-            required={clientRequired}
-            hint={missingClient ? 'Pick a client, or set the level to Tahi.' : undefined}
-          >
-            <SearchableSelect
-              options={clients.map(c => ({ value: c.id, label: c.name }))}
-              value={links.orgId}
-              allowClear
-              placeholder="No client"
-              searchPlaceholder="Search clients..."
-              onChange={next => {
-                const linkedRequestOrgId = links.requestId
-                  ? requests.find(r => r.id === links.requestId)?.orgId ?? null
-                  : null
-                setLinks(current => setTaskClient(current, next, linkedRequestOrgId))
-              }}
-            />
-          </FieldGroup>
-
-          <FieldGroup label="Request">
-            <SearchableSelect
-              options={linkableRequests.map(r => ({
-                value: r.id,
-                label: `${requestRef(r.requestNumber)} ${r.title}`,
-              }))}
-              value={links.requestId}
-              allowClear
-              disabled={linkableRequests.length === 0}
-              placeholder="Not linked"
-              searchPlaceholder="Search requests..."
-              onChange={next => {
-                const picked = next ? requests.find(r => r.id === next) ?? null : null
-                setLinks(current => setTaskRequest(current, picked))
-              }}
-            />
-          </FieldGroup>
-        </div>
-
-        <FieldGroup label="Title" required htmlFor="new-task-title">
-          <input
-            id="new-task-title"
-            type="text"
-            className="tskn-input"
-            value={title}
-            autoFocus
-            maxLength={200}
-            required
-            placeholder="What needs doing?"
-            onChange={e => setTitle(e.target.value)}
-          />
-        </FieldGroup>
-
-        <FieldGroup label="Note" htmlFor="new-task-note">
-          <textarea
-            id="new-task-note"
-            className="tskn-textarea"
-            value={description}
-            placeholder="What good looks like, links, who to ask."
-            onChange={e => setDescription(e.target.value)}
-          />
-        </FieldGroup>
-
-        <FieldGroup label="Priority">
-          <SegmentedControl
-            value={priority}
-            onChange={setPriority}
-            role="radiogroup"
-            size="sm"
-            fill
-            ariaLabel="Priority"
-            options={TASK_PRIORITIES.map(p => ({ value: p, label: taskPriorityLabel(p) }))}
-          />
-        </FieldGroup>
-
-        <div className="tskn-grid">
-          <FieldGroup label="Due" htmlFor="new-task-due">
-            <input
-              id="new-task-due"
-              type="date"
-              className="tskn-input"
-              value={dueDate}
-              onChange={e => setDueDate(e.target.value)}
-            />
-          </FieldGroup>
-
-          <FieldGroup label="Estimate" htmlFor="new-task-estimate">
-            <input
-              id="new-task-estimate"
-              type="number"
-              inputMode="decimal"
-              min={0}
-              step={0.25}
-              className="tskn-input"
-              value={estimate}
-              placeholder="Hours"
-              onChange={e => setEstimate(e.target.value)}
-            />
-          </FieldGroup>
-        </div>
-
-        <FieldGroup label="Assignee">
-          <SearchableSelect
-            options={peopleList.map(p => ({ value: p.id, label: p.name }))}
-            value={assigneeId}
-            allowClear
-            placeholder="Unassigned"
-            searchPlaceholder="Search people..."
-            onChange={setAssigneeId}
-          />
-        </FieldGroup>
-
-        <FieldGroup label="Subtasks" htmlFor="new-task-subtask">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-            {subtasks.map((s, index) => (
-              <div key={`${index}-${s}`} className="flex items-center" style={{ gap: '0.375rem' }}>
-                <span
-                  className="truncate"
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    padding: '0.375rem 0.5rem',
-                    border: '1px solid var(--color-border-subtle)',
-                    borderRadius: 'var(--radius-md)',
-                    background: 'var(--color-bg-secondary)',
-                    fontSize: '0.8125rem',
-                    fontWeight: 500,
-                    color: 'var(--color-text)',
-                  }}
-                >
-                  {s}
-                </span>
-                <button
-                  type="button"
-                  className="tskn-x tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 h-11 w-11 md:h-8 md:w-8"
-                  aria-label={`Remove ${s}`}
-                  title="Remove subtask"
-                  onClick={() => setSubtasks(list => list.filter((_, i) => i !== index))}
-                >
-                  <X size={14} aria-hidden="true" />
-                </button>
-              </div>
-            ))}
-            <div className="flex items-center" style={{ gap: '0.375rem' }}>
-              <input
-                id="new-task-subtask"
-                type="text"
-                className="tskn-input"
-                value={subtaskDraft}
-                placeholder="Name a subtask, press Enter"
-                onChange={e => setSubtaskDraft(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') { e.preventDefault(); addSubtask() }
+      {/* The scroll region and the gutters are SlideOver.Body's job. The form
+          only owns its own rhythm, so this dialog keeps the same gutters as
+          every other one in the repo instead of drifting to its own. The
+          footer's submit reaches it by `form="new-task-form"`. */}
+      <SlideOver.Body>
+        <form
+          id="new-task-form"
+          onSubmit={e => { e.preventDefault(); void submit() }}
+          style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
+        >
+          {templates.length > 0 && (
+            <FieldGroup label="Start from a template">
+              <SearchableSelect
+                options={templates.map(t => ({
+                  value: t.id,
+                  label: t.name,
+                  subtitle: t.subtasks.length > 0
+                    ? `${t.subtasks.length} subtask${t.subtasks.length === 1 ? '' : 's'}`
+                    : undefined,
+                }))}
+                value={templateId}
+                allowClear
+                placeholder="No template"
+                searchPlaceholder="Search templates..."
+                onChange={next => {
+                  setTemplateId(next)
+                  if (!next) return
+                  const template = templates.find(t => t.id === next)
+                  if (template) applyTemplate(template)
                 }}
               />
-              <button
-                type="button"
-                className="tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 h-11 w-11 md:h-9 md:w-9"
-                aria-label="Add subtask"
-                title="Add subtask"
-                onClick={addSubtask}
-                style={{
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius-md)',
-                  background: 'var(--color-bg)',
-                  color: 'var(--color-text-muted)',
-                  cursor: 'pointer',
+            </FieldGroup>
+          )}
+
+          <FieldGroup label="Level" hint={TASK_LEVEL_HINTS[links.level]}>
+            <SegmentedControl
+              value={links.level}
+              onChange={next => setLinks(current => setTaskLevel(current, next))}
+              role="radiogroup"
+              size="sm"
+              fill
+              ariaLabel="Level"
+              options={TASK_LEVELS.map(l => {
+                const Glyph = LEVEL_ICON[l.value]
+                return { value: l.value, label: l.label, title: l.hint, icon: <Glyph size={12} aria-hidden /> }
+              })}
+            />
+          </FieldGroup>
+
+          <div className="tskn-grid">
+            <FieldGroup
+              label="Client"
+              required={clientRequired}
+              hint={missingClient ? 'Pick a client, or set the level to Tahi.' : undefined}
+            >
+              <SearchableSelect
+                options={clients.map(c => ({ value: c.id, label: c.name }))}
+                value={links.orgId}
+                allowClear
+                placeholder="No client"
+                searchPlaceholder="Search clients..."
+                onChange={next => {
+                  const linkedRequestOrgId = links.requestId
+                    ? requests.find(r => r.id === links.requestId)?.orgId ?? null
+                    : null
+                  setLinks(current => setTaskClient(current, next, linkedRequestOrgId))
                 }}
-              >
-                <Plus size={15} aria-hidden="true" />
-              </button>
-            </div>
+              />
+            </FieldGroup>
+
+            <FieldGroup label="Request">
+              <SearchableSelect
+                options={linkableRequests.map(r => ({
+                  value: r.id,
+                  label: `${requestRef(r.requestNumber)} ${r.title}`,
+                }))}
+                value={links.requestId}
+                allowClear
+                disabled={linkableRequests.length === 0}
+                placeholder="Not linked"
+                searchPlaceholder="Search requests..."
+                onChange={next => {
+                  const picked = next ? requests.find(r => r.id === next) ?? null : null
+                  setLinks(current => setTaskRequest(current, picked))
+                }}
+              />
+            </FieldGroup>
           </div>
-        </FieldGroup>
-      </form>
+
+          <FieldGroup label="Title" required htmlFor="new-task-title">
+            <input
+              id="new-task-title"
+              type="text"
+              className="tskn-input"
+              value={title}
+              autoFocus
+              maxLength={200}
+              required
+              placeholder="What needs doing?"
+              onChange={e => setTitle(e.target.value)}
+            />
+          </FieldGroup>
+
+          <FieldGroup label="Note" htmlFor="new-task-note">
+            <textarea
+              id="new-task-note"
+              className="tskn-textarea"
+              value={description}
+              placeholder="What good looks like, links, who to ask."
+              onChange={e => setDescription(e.target.value)}
+            />
+          </FieldGroup>
+
+          <FieldGroup label="Priority">
+            <SegmentedControl
+              value={priority}
+              onChange={setPriority}
+              role="radiogroup"
+              size="sm"
+              fill
+              ariaLabel="Priority"
+              options={TASK_PRIORITIES.map(p => ({ value: p, label: taskPriorityLabel(p) }))}
+            />
+          </FieldGroup>
+
+          <div className="tskn-grid">
+            <FieldGroup label="Due" htmlFor="new-task-due">
+              <input
+                id="new-task-due"
+                type="date"
+                className="tskn-input"
+                value={dueDate}
+                onChange={e => setDueDate(e.target.value)}
+              />
+            </FieldGroup>
+
+            <FieldGroup label="Estimate" htmlFor="new-task-estimate">
+              <input
+                id="new-task-estimate"
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step={0.25}
+                className="tskn-input"
+                value={estimate}
+                placeholder="Hours"
+                onChange={e => setEstimate(e.target.value)}
+              />
+            </FieldGroup>
+          </div>
+
+          <FieldGroup label="Assignee">
+            <SearchableSelect
+              options={peopleList.map(p => ({ value: p.id, label: p.name }))}
+              value={assigneeId}
+              allowClear
+              placeholder="Unassigned"
+              searchPlaceholder="Search people..."
+              onChange={setAssigneeId}
+            />
+          </FieldGroup>
+
+          <FieldGroup label="Subtasks" htmlFor="new-task-subtask">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+              {subtasks.map((s, index) => (
+                <div key={`${index}-${s}`} className="flex items-center" style={{ gap: '0.375rem' }}>
+                  <span
+                    className="truncate"
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      padding: '0.375rem 0.5rem',
+                      border: '1px solid var(--color-border-subtle)',
+                      borderRadius: 'var(--radius-md)',
+                      background: 'var(--color-bg-secondary)',
+                      fontSize: '0.8125rem',
+                      fontWeight: 500,
+                      color: 'var(--color-text)',
+                    }}
+                  >
+                    {s}
+                  </span>
+                  <button
+                    type="button"
+                    className="tskn-x tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 h-11 w-11 md:h-8 md:w-8"
+                    aria-label={`Remove ${s}`}
+                    title="Remove subtask"
+                    onClick={() => setSubtasks(list => list.filter((_, i) => i !== index))}
+                  >
+                    <X size={14} aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+              <div className="flex items-center" style={{ gap: '0.375rem' }}>
+                <input
+                  id="new-task-subtask"
+                  type="text"
+                  className="tskn-input"
+                  value={subtaskDraft}
+                  placeholder="Name a subtask, press Enter"
+                  onChange={e => setSubtaskDraft(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.preventDefault(); addSubtask() }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="tahi-focus-ring inline-flex items-center justify-center flex-shrink-0 h-11 w-11 md:h-9 md:w-9"
+                  aria-label="Add subtask"
+                  title="Add subtask"
+                  onClick={addSubtask}
+                  style={{
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text-muted)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Plus size={15} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          </FieldGroup>
+        </form>
+      </SlideOver.Body>
 
       <SlideOver.Footer style={{ justifyContent: 'flex-end' }}>
         <TahiButton
