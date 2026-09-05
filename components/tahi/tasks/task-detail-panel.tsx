@@ -160,8 +160,31 @@ function PersonInline({ person }: { person: TaskPerson }) {
  * One row of the Links or Details card: a fixed key column and the value hard
  * right. Same rhythm as the request detail's own rows, drawn here rather than
  * imported because that copy is local to a page component.
+ *
+ * `stack` puts the label above a full-width value instead. The Level control
+ * is three labelled buttons, which cannot share a 35rem panel with a 5.25rem
+ * key column at 375px without pushing the panel sideways.
  */
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+function DetailRow({
+  label,
+  stack = false,
+  children,
+}: {
+  label: string
+  stack?: boolean
+  children: React.ReactNode
+}) {
+  if (stack) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', padding: '0.375rem 0' }}>
+        <span style={{ fontSize: '0.78125rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>
+          {label}
+        </span>
+        <span style={{ display: 'block', minWidth: 0 }}>{children}</span>
+      </div>
+    )
+  }
+
   return (
     <div className="flex items-center" style={{ gap: '0.625rem', padding: '0.375rem 0', minHeight: '2.25rem' }}>
       <span
@@ -885,7 +908,7 @@ function TaskDetailBody({
 
         {/* 2. Links. */}
         <SidebarCard title="Links" icon={<Link2 size={14} />} bodyPadding="0.5rem 0.875rem 0.625rem">
-          <DetailRow label="Level">
+          <DetailRow label="Level" stack>
             {readOnly ? (
               <LevelChip level={level} clientName={clientName} />
             ) : (
@@ -894,6 +917,7 @@ function TaskDetailBody({
                 onChange={next => applyLinks(setTaskLevel(linkState, next))}
                 role="radiogroup"
                 size="sm"
+                fill
                 ariaLabel="Level"
                 options={TASK_LEVELS.map(l => {
                   const Glyph = LEVEL_ICON[l.value]
