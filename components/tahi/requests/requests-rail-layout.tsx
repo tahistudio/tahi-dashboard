@@ -439,7 +439,7 @@ export function RequestsRailLayout({
   // chips + narrowChips + (savedView ? 1 : 0).
   const allChips = React.useMemo<RailFilterChip[]>(
     () => [
-      ...chips.map(c => ({ key: c.key as string, dimension: c.dimension, label: c.label, dot: c.dot })),
+      ...chips.map(c => ({ key: c.key, dimension: c.dimension, label: c.label, dot: c.dot })),
       // A narrow chip carries no dot: none of its dimensions is a status.
       ...narrowChips.map(c => ({ key: `narrow-${c.key}`, dimension: c.dimension, label: c.label })),
     ],
