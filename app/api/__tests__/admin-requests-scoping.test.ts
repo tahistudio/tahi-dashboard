@@ -57,6 +57,7 @@ import { GET as timeEntriesList } from '@/app/api/admin/requests/[id]/time-entri
 import { GET as filesList } from '@/app/api/admin/requests/[id]/files/route'
 import { GET as callsList } from '@/app/api/admin/requests/[id]/calls/route'
 import { GET as voiceNotesList } from '@/app/api/admin/requests/[id]/voice-notes/route'
+import { GET as blockersList, POST as blockerCreate } from '@/app/api/admin/requests/[id]/blockers/route'
 import { POST as nest } from '@/app/api/admin/requests/[id]/nest/route'
 
 // ---------------------------------------------------------------------------
@@ -574,6 +575,18 @@ describe('request sub-routes resolve the owning request', () => {
     { name: 'files GET', call: (id) => filesList(req(`/api/admin/requests/${id}/files`), params(id)) },
     { name: 'calls GET', call: (id) => callsList(req(`/api/admin/requests/${id}/calls`), params(id)) },
     { name: 'voice notes GET', call: (id) => voiceNotesList(req(`/api/admin/requests/${id}/voice-notes`), params(id)) },
+    // A blocker names an internal task or another client's request, so the
+    // read is as much a leak as the write. Both ends are guarded in
+    // lib/blockers-server.ts; this only asserts the near end, which is the one
+    // this sweep exists to watch.
+    { name: 'blockers GET', call: (id) => blockersList(req(`/api/admin/requests/${id}/blockers`), params(id)) },
+    {
+      name: 'blockers POST',
+      call: (id) => blockerCreate(
+        jsonReq(`/api/admin/requests/${id}/blockers`, 'POST', { blockerType: 'task', blockerId: 'task-1' }),
+        params(id),
+      ),
+    },
   ]
 
   for (const c of cases) {

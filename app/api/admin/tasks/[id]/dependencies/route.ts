@@ -1,166 +1,71 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { schema } from '@/db/d1'
-import { eq, and } from 'drizzle-orm'
-import { guardTask } from '@/lib/task-access'
+import type { BlockerRow } from '@/lib/blockers'
+import { addBlocker, guardSubject, listBlockers } from '@/lib/blockers-server'
 
-// ── GET /api/admin/tasks/[id]/dependencies ─────────────────────────────────
-// Returns both "blocks" (tasks this task blocks) and "blockedBy" (tasks blocking this one)
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+/**
+ * Legacy alias over the polymorphic blocker routes.
+ *
+ * Kept for one release so the three shipped MCP tools (add_task_dependency,
+ * remove_task_dependency, list_task_dependencies) and any saved agent
+ * transcript keep working through the deploy window. It writes to
+ * work_blockers like everything else; task_dependencies is frozen.
+ *
+ * The response keeps the old field names AND adds the new ones, so an old
+ * reader is unbroken and a new one does not need a second shape. A blocker
+ * that is a request appears here too, with `type: 'request'`: hiding it would
+ * make this endpoint disagree with the count on the list route.
+ */
+type Params = { params: Promise<{ id: string }> }
+
+function legacyShape(rows: readonly BlockerRow[]) {
+  return rows.map(row => ({
+    depId: row.linkId,
+    taskId: row.otherId,
+    taskTitle: row.otherTitle,
+    taskStatus: row.otherStatus,
+    type: row.otherType,
+    ref: row.otherRef,
+  }))
+}
+
+export async function GET(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
-  if (!isTahiAdmin(orgId)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { id: taskId } = await params
+  const { id } = await params
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  const denied = await guardTask(drizzle, userId, taskId)
+  const subject = { type: 'task' as const, id }
+  const denied = await guardSubject(drizzle, userId, subject)
   if (denied) return denied
 
-  // "blockedBy": tasks that this task depends on (this task is blocked by them)
-  const blockedByRows = await drizzle
-    .select({
-      depId: schema.taskDependencies.id,
-      taskId: schema.taskDependencies.dependsOnTaskId,
-      taskTitle: schema.tasks.title,
-      taskStatus: schema.tasks.status,
-      createdAt: schema.taskDependencies.createdAt,
-    })
-    .from(schema.taskDependencies)
-    .leftJoin(schema.tasks, eq(schema.taskDependencies.dependsOnTaskId, schema.tasks.id))
-    .where(eq(schema.taskDependencies.taskId, taskId))
-
-  // "blocks": tasks that depend on this task (this task blocks them)
-  const blocksRows = await drizzle
-    .select({
-      depId: schema.taskDependencies.id,
-      taskId: schema.taskDependencies.taskId,
-      taskTitle: schema.tasks.title,
-      taskStatus: schema.tasks.status,
-      createdAt: schema.taskDependencies.createdAt,
-    })
-    .from(schema.taskDependencies)
-    .leftJoin(schema.tasks, eq(schema.taskDependencies.taskId, schema.tasks.id))
-    .where(eq(schema.taskDependencies.dependsOnTaskId, taskId))
-
+  const lists = await listBlockers(drizzle, subject)
   return NextResponse.json({
-    blockedBy: blockedByRows,
-    blocks: blocksRows,
+    blockedBy: legacyShape(lists.blockedBy),
+    blocks: legacyShape(lists.blocks),
   })
 }
 
-// ── POST /api/admin/tasks/[id]/dependencies ────────────────────────────────
-// Add a dependency: this task depends on another task
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function POST(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
-  if (!isTahiAdmin(orgId)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { id: taskId } = await params
-
-  const body = await req.json() as { dependsOnTaskId?: string }
-  const { dependsOnTaskId } = body
-
-  if (!dependsOnTaskId?.trim()) {
+  const { id } = await params
+  const body = (await req.json().catch(() => ({}))) as { dependsOnTaskId?: string }
+  if (!body.dependsOnTaskId?.trim()) {
     return NextResponse.json({ error: 'dependsOnTaskId is required' }, { status: 400 })
   }
 
-  if (dependsOnTaskId === taskId) {
-    return NextResponse.json({ error: 'A task cannot depend on itself' }, { status: 400 })
-  }
-
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // Both ends are guarded, not just checked for existence: linking a task
-  // you can see to one you cannot would leak the blocker's title straight
-  // back through the Waiting on card.
-  const denied = await guardTask(drizzle, userId, taskId)
-  if (denied) return denied
-
-  const dependencyDenied = await guardTask(drizzle, userId, dependsOnTaskId)
-  if (dependencyDenied) return dependencyDenied
-
-  // Check for duplicate dependency
-  const [existing] = await drizzle
-    .select({ id: schema.taskDependencies.id })
-    .from(schema.taskDependencies)
-    .where(
-      and(
-        eq(schema.taskDependencies.taskId, taskId),
-        eq(schema.taskDependencies.dependsOnTaskId, dependsOnTaskId)
-      )
-    )
-    .limit(1)
-
-  if (existing) {
-    return NextResponse.json({ error: 'Dependency already exists' }, { status: 409 })
-  }
-
-  // Check for circular dependency: if dependsOnTaskId already depends on taskId
-  // (directly or transitively), adding this would create a cycle
-  const hasCycle = await detectCycle(drizzle, dependsOnTaskId, taskId)
-  if (hasCycle) {
-    return NextResponse.json(
-      { error: 'Adding this dependency would create a circular dependency' },
-      { status: 400 }
-    )
-  }
-
-  const id = crypto.randomUUID()
-  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
-
-  await drizzle.insert(schema.taskDependencies).values({
-    id,
-    taskId,
-    dependsOnTaskId,
-    createdAt: now,
-  })
-
-  return NextResponse.json({ id }, { status: 201 })
-}
-
-/**
- * Detect if adding a dependency from `fromTaskId` -> (depends on) `toTaskId`
- * would create a cycle. We check if `toTaskId` can already reach `fromTaskId`
- * through existing dependency chains (BFS).
- */
-async function detectCycle(
-  drizzle: ReturnType<typeof import('drizzle-orm/d1').drizzle>,
-  startTaskId: string,
-  targetTaskId: string
-): Promise<boolean> {
-  const visited = new Set<string>()
-  const queue = [startTaskId]
-
-  while (queue.length > 0) {
-    const current = queue.shift()!
-    if (current === targetTaskId) return true
-    if (visited.has(current)) continue
-    visited.add(current)
-
-    // Find all tasks that `current` depends on
-    const deps = await drizzle
-      .select({ dependsOnTaskId: schema.taskDependencies.dependsOnTaskId })
-      .from(schema.taskDependencies)
-      .where(eq(schema.taskDependencies.taskId, current))
-
-    for (const dep of deps) {
-      if (!visited.has(dep.dependsOnTaskId)) {
-        queue.push(dep.dependsOnTaskId)
-      }
-    }
-  }
-
-  return false
+  return addBlocker(
+    drizzle,
+    userId,
+    { type: 'task', id },
+    { type: 'task', id: body.dependsOnTaskId },
+  )
 }
