@@ -2,17 +2,25 @@
  * lib/xero-sync.ts: the two Xero readers that decide what the dashboard
  * believes about a bill.
  *
- * Three things are pinned here, all of them from the 2026-09-06 invoice
- * channel assessment:
+ * Five things are pinned here, from the 2026-09-06 invoice channel assessment
+ * and the review of the first cut of this slice:
  *
  *   1. walkXeroPages actually walks. syncXeroPayments used to call /Invoices
  *      with no `page` parameter at all, so every local invoice past Xero's
- *      first 100 reported 'not_found_in_xero' forever.
+ *      first 100 reported 'not_found_in_xero' forever, and an incomplete walk
+ *      now surfaces as a warning instead of a clean success.
  *   2. Both readers UPDATE a row they have already seen. The importer used to
  *      `continue` on a known xeroInvoiceId, so an invoice imported while it was
  *      a Xero DRAFT stayed local 'draft' for good, and the portal hides drafts
  *      from the client.
- *   3. Neither reader touches a row billed on the other rail.
+ *   3. Neither reader ever moves a row BACKWARDS. The push route holds every
+ *      dashboard invoice at Xero DRAFT and push-back on a hand mark-paid is a
+ *      later slice, so Xero is knowingly stale: a nightly reader that trusted
+ *      it would walk a sent or paid invoice back to 'draft', hide it from the
+ *      client portal and null the paid date the revenue reports are keyed on.
+ *   4. Neither reader writes when nothing changed, so a quiet night does not
+ *      bump 100 updated_at stamps and report 100 updates.
+ *   5. Neither reader touches a row billed on the other rail.
  *
  * The fake D1 is the chainable recorder the route tests use: only the chain is
  * thenable, and every call is recorded so the values actually written can be
@@ -243,13 +251,76 @@ describe('syncXeroPayments', () => {
   it('leaves an overdue row overdue when Xero still says AUTHORISED', async () => {
     serveInvoicePages([[xeroInvoice({ Status: 'AUTHORISED' })]])
     const { handle, queries } = makeDb([
-      [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'overdue', source: 'xero' }],
+      [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'overdue', source: 'xero', sentAt: '2026-08-01T00:00:00.000Z' }],
     ])
 
     const outcome = await syncXeroPayments(handle as unknown as Db)
 
     expect(byEntry(queries, 'update')).toHaveLength(0)
     expect(outcome.body).toMatchObject({ updated: 0 })
+  })
+
+  it('leaves a sent invoice alone while Xero still holds it at DRAFT', async () => {
+    // The live workflow: the push route sends every dashboard invoice to Xero
+    // as Status DRAFT and nothing in the repo ever approves one, so Xero says
+    // DRAFT forever while the send-email route has already moved the local row
+    // to 'sent'. Writing that back would hide the invoice from the client
+    // portal, which filters status != 'draft'.
+    serveInvoicePages([[xeroInvoice({ Status: 'DRAFT' })]])
+    const { handle, queries } = makeDb([
+      [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'sent', source: 'xero', sentAt: '2026-08-01T00:00:00.000Z' }],
+    ])
+
+    const outcome = await syncXeroPayments(handle as unknown as Db)
+
+    expect(byEntry(queries, 'update')).toHaveLength(0)
+    expect(outcome.body).toMatchObject({ updated: 0 })
+    expect((outcome.body.results as Array<Record<string, unknown>>)[0]).toMatchObject({ status: 'no_change' })
+  })
+
+  it('leaves a hand-marked-paid invoice paid while Xero still holds it at DRAFT', async () => {
+    // Same invoice, one step later: paid by bank transfer and hand-marked paid
+    // (IC.1 stamps paid_at). Push-back is a later slice, so Xero never hears
+    // about it. Demoting to 'draft' here would both hide the invoice and null
+    // the paid date /financial-reports keys the revenue on.
+    serveInvoicePages([[xeroInvoice({ Status: 'DRAFT' })]])
+    const { handle, queries } = makeDb([
+      [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'paid', source: 'xero', paidAt: '2026-09-02T00:00:00.000Z' }],
+    ])
+
+    const outcome = await syncXeroPayments(handle as unknown as Db)
+
+    expect(byEntry(queries, 'update')).toHaveLength(0)
+    expect(outcome.body).toMatchObject({ updated: 0 })
+  })
+
+  it('stamps the first send date when Xero approves a draft', async () => {
+    serveInvoicePages([[xeroInvoice({ Status: 'AUTHORISED' })]])
+    const { handle, queries } = makeDb([
+      [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'draft', source: 'xero', sentAt: null }],
+    ])
+
+    await syncXeroPayments(handle as unknown as Db)
+
+    const set = argOf(byEntry(queries, 'update')[0], 'set') as Record<string, unknown>
+    expect(set.status).toBe('sent')
+    expect(typeof set.sentAt).toBe('string')
+  })
+
+  it('reports a lost Xero page as a warning instead of a clean success', async () => {
+    vi.mocked(callXeroAPI).mockImplementation(async (_method, endpoint) => {
+      const page = Number(/[?&]page=(\d+)/.exec(String(endpoint))?.[1] ?? '1')
+      if (page === 2) return null
+      return { Invoices: Array.from({ length: XERO_PAGE_SIZE }, (_, i) => xeroInvoice({ InvoiceID: `p1-${i}` })) } as never
+    })
+    const { handle } = makeDb([
+      [{ id: 'inv-1', xeroInvoiceId: 'missing', status: 'sent', source: 'xero' }],
+    ])
+
+    const outcome = await syncXeroPayments(handle as unknown as Db)
+
+    expect(outcome.body).toMatchObject({ partial: true, pagesRead: 1 })
+    expect(outcome.warning).toContain('Partial Xero read')
   })
 
   it('never touches an invoice billed on the Stripe rail', async () => {
@@ -266,17 +337,48 @@ describe('syncXeroPayments', () => {
     })
   })
 
-  it('unwinds the paid date when Xero says the invoice is owed again', async () => {
+  it('does not undo a paid invoice on a Xero AUTHORISED with a balance', async () => {
+    // Push-back is unbuilt, so a hand mark-paid never reaches Xero and a Xero
+    // AUTHORISED on a locally paid row means Xero is stale, not that the
+    // payment was unwound. Demoting here would null the paid date the revenue
+    // reports are keyed on.
     serveInvoicePages([[xeroInvoice({ Status: 'AUTHORISED', AmountDue: 1150 })]])
     const { handle, queries } = makeDb([
-      [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'paid', source: 'xero' }],
+      [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'paid', source: 'xero', paidAt: '2026-09-02T00:00:00.000Z' }],
+    ])
+
+    await syncXeroPayments(handle as unknown as Db)
+
+    expect(byEntry(queries, 'update')).toHaveLength(0)
+  })
+
+  it('writes off a paid invoice Xero voided without erasing the paid date', async () => {
+    // A write-off is not an unwind: the money may well have landed, and
+    // /financial-reports keys YTD revenue and the tax-year totals off paid_at.
+    serveInvoicePages([[xeroInvoice({ Status: 'VOIDED' })]])
+    const { handle, queries } = makeDb([
+      [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'paid', source: 'xero', paidAt: '2026-09-02T00:00:00.000Z' }],
     ])
 
     await syncXeroPayments(handle as unknown as Db)
 
     const set = argOf(byEntry(queries, 'update')[0], 'set') as Record<string, unknown>
-    expect(set.status).toBe('sent')
-    expect(set.paidAt).toBeNull()
+    expect(set.status).toBe('written_off')
+    expect(set).not.toHaveProperty('paidAt')
+  })
+
+  it('writes off a row Xero has deleted rather than leaving it payable forever', async () => {
+    // Nothing else can clear it: the importer never sees a deleted invoice
+    // again and this sync would report 'not_found_in_xero' every night.
+    serveInvoicePages([[xeroInvoice({ Status: 'DELETED' })]])
+    const { handle, queries } = makeDb([
+      [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'sent', source: 'xero' }],
+    ])
+
+    await syncXeroPayments(handle as unknown as Db)
+
+    const set = argOf(byEntry(queries, 'update')[0], 'set') as Record<string, unknown>
+    expect(set.status).toBe('written_off')
   })
 
   it('fails loudly when Xero cannot be read at all', async () => {
@@ -341,24 +443,105 @@ describe('importXeroInvoices', () => {
     expect(set.paidAt).toBe('2026-09-01T00:00:00.000Z')
   })
 
-  it('keeps a settled row settled without restamping the paid date as today', async () => {
-    serveImportPage([xeroInvoice({ Status: 'PAID', AmountDue: 0 })])
+  it('writes nothing at all when Xero and the local row already agree', async () => {
+    // A nightly run over an unchanged ledger used to rewrite up to 100 rows,
+    // bump every updated_at and report 100 updates.
+    serveImportPage([xeroInvoice({ Status: 'PAID', AmountDue: 0, FullyPaidOnDate: '2026-09-01' })])
     const { handle, queries } = makeDb([
-      [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'paid', source: 'xero' }],
+      [{
+        id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'paid', source: 'xero',
+        amountUsd: 1000, totalUsd: 1150, currency: 'NZD',
+        dueDate: '2026-08-15', paidAt: '2026-09-01T00:00:00.000Z', sentAt: '2026-08-01T00:00:00.000Z',
+      }],
+      ORGS,
+    ])
+
+    const outcome = await importXeroInvoices(handle as unknown as Db, 1)
+
+    expect(byEntry(queries, 'update')).toHaveLength(0)
+    expect(outcome.body).toMatchObject({ imported: 0, updated: 0, unchanged: 1 })
+    expect(outcome.count).toBe(0)
+  })
+
+  it('does not undo a paid invoice on a Xero AUTHORISED with a balance', async () => {
+    serveImportPage([xeroInvoice({ Status: 'AUTHORISED', AmountDue: 1150 })])
+    const { handle, queries } = makeDb([
+      [{
+        id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'paid', source: 'xero',
+        amountUsd: 1000, totalUsd: 1150, currency: 'NZD',
+        dueDate: '2026-08-15', paidAt: '2026-09-02T00:00:00.000Z',
+      }],
+      ORGS,
+    ])
+
+    await importXeroInvoices(handle as unknown as Db, 1)
+
+    expect(byEntry(queries, 'update')).toHaveLength(0)
+  })
+
+  it('leaves a sent invoice alone while Xero still holds it at DRAFT', async () => {
+    // The cron calls this reader with page 1 of DateString DESC, which is
+    // exactly where a freshly pushed invoice sits.
+    serveImportPage([xeroInvoice({ Status: 'DRAFT' })])
+    const { handle, queries } = makeDb([
+      [{
+        id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'sent', source: 'xero',
+        amountUsd: 1000, totalUsd: 1150, currency: 'NZD',
+        dueDate: '2026-08-15', sentAt: '2026-08-01T00:00:00.000Z',
+      }],
+      ORGS,
+    ])
+
+    const outcome = await importXeroInvoices(handle as unknown as Db, 1)
+
+    expect(byEntry(queries, 'update')).toHaveLength(0)
+    expect(outcome.body).toMatchObject({ updated: 0, unchanged: 1 })
+  })
+
+  it('leaves a hand-marked-paid invoice paid while Xero still holds it at DRAFT', async () => {
+    serveImportPage([xeroInvoice({ Status: 'DRAFT' })])
+    const { handle, queries } = makeDb([
+      [{
+        id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'paid', source: 'xero',
+        amountUsd: 1000, totalUsd: 1150, currency: 'NZD',
+        dueDate: '2026-08-15', paidAt: '2026-09-02T00:00:00.000Z',
+      }],
+      ORGS,
+    ])
+
+    await importXeroInvoices(handle as unknown as Db, 1)
+
+    expect(byEntry(queries, 'update')).toHaveLength(0)
+  })
+
+  it('keeps the paid date when Xero voids a settled invoice', async () => {
+    serveImportPage([xeroInvoice({ Status: 'VOIDED' })])
+    const { handle, queries } = makeDb([
+      [{
+        id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'paid', source: 'xero',
+        amountUsd: 1000, totalUsd: 1150, currency: 'NZD',
+        dueDate: '2026-08-15', paidAt: '2026-09-02T00:00:00.000Z',
+      }],
       ORGS,
     ])
 
     await importXeroInvoices(handle as unknown as Db, 1)
 
     const set = argOf(byEntry(queries, 'update')[0], 'set') as Record<string, unknown>
-    expect(set).not.toHaveProperty('status')
+    expect(set.status).toBe('written_off')
     expect(set).not.toHaveProperty('paidAt')
   })
 
-  it('unwinds the paid date when Xero puts a settled invoice back on the books', async () => {
-    serveImportPage([xeroInvoice({ Status: 'AUTHORISED', AmountDue: 1150 })])
+  it('does not null a local due date when the Xero payload has none', async () => {
+    // Xero DRAFTs commonly carry no DueDateString, and nothing else re-derives
+    // the date the receivables aging reads.
+    serveImportPage([xeroInvoice({ Status: 'AUTHORISED', DueDateString: undefined })])
     const { handle, queries } = makeDb([
-      [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'paid', source: 'xero' }],
+      [{
+        id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'draft', source: 'xero',
+        amountUsd: 1000, totalUsd: 1150, currency: 'NZD',
+        dueDate: '2026-08-15', sentAt: '2026-08-01T00:00:00.000Z',
+      }],
       ORGS,
     ])
 
@@ -366,7 +549,24 @@ describe('importXeroInvoices', () => {
 
     const set = argOf(byEntry(queries, 'update')[0], 'set') as Record<string, unknown>
     expect(set.status).toBe('sent')
-    expect(set.paidAt).toBeNull()
+    expect(set).not.toHaveProperty('dueDate')
+  })
+
+  it('stamps the first send date when Xero approves a draft', async () => {
+    serveImportPage([xeroInvoice({ Status: 'AUTHORISED' })])
+    const { handle, queries } = makeDb([
+      [{
+        id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'draft', source: 'xero',
+        amountUsd: 1000, totalUsd: 1150, currency: 'NZD', dueDate: '2026-08-15', sentAt: null,
+      }],
+      ORGS,
+    ])
+
+    await importXeroInvoices(handle as unknown as Db, 1)
+
+    const set = argOf(byEntry(queries, 'update')[0], 'set') as Record<string, unknown>
+    expect(set.status).toBe('sent')
+    expect(typeof set.sentAt).toBe('string')
   })
 
   it('never touches a known row billed on the Stripe rail', async () => {
@@ -411,17 +611,23 @@ describe('importXeroInvoices', () => {
     expect(outcome.body).toMatchObject({ imported: 0, skipped: 1 })
   })
 
-  it('rewrites nothing on a known row Xero has deleted', async () => {
+  it('writes off a known row Xero has deleted rather than leaving it payable', async () => {
+    // Leaving it alone would keep a 'sent' invoice in the client portal as
+    // payable forever, with no path able to clear it.
     serveImportPage([xeroInvoice({ Status: 'DELETED' })])
     const { handle, queries } = makeDb([
-      [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'sent', source: 'xero' }],
+      [{
+        id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'sent', source: 'xero',
+        amountUsd: 1000, totalUsd: 1150, currency: 'NZD', dueDate: '2026-08-15',
+      }],
       ORGS,
     ])
 
     const outcome = await importXeroInvoices(handle as unknown as Db, 1)
 
-    expect(byEntry(queries, 'update')).toHaveLength(0)
-    expect(outcome.body).toMatchObject({ imported: 0, updated: 0, skipped: 1 })
+    const set = argOf(byEntry(queries, 'update')[0], 'set') as Record<string, unknown>
+    expect(set.status).toBe('written_off')
+    expect(outcome.body).toMatchObject({ imported: 0, updated: 1, skipped: 0 })
   })
 
   it('reads a VOIDED invoice as written off rather than deleting it', async () => {

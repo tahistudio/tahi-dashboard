@@ -1,16 +1,18 @@
 /**
- * The two admin doors onto the Xero readers:
+ * The three admin doors onto the Xero readers:
  *
  *   POST /api/admin/integrations/xero/import-invoices
  *   POST /api/admin/integrations/xero/sync-payments
+ *   POST /api/admin/cron/sync-xero   (the nightly orchestrator over both)
  *
- * Both are thin: the reconciliation itself lives in lib/xero-sync.ts (tested
- * in lib/__tests__/xero-sync.test.ts against the same fake D1) so the daily
- * orchestrator cron can reuse it without an HTTP self-call. What is worth
- * pinning here is the wiring: these routes now WRITE to invoices they have
- * already seen rather than skipping them, so the admin gate and the feature
- * gate in front of them matter more than they did, and the import page number
- * has to reach the reader.
+ * The first two are thin: the reconciliation itself lives in lib/xero-sync.ts
+ * (tested in lib/__tests__/xero-sync.test.ts against the same fake D1) so the
+ * daily orchestrator cron can reuse it without an HTTP self-call. What is
+ * worth pinning here is the wiring: these routes now WRITE to invoices they
+ * have already seen rather than skipping them, so the admin gate and the
+ * feature gate in front of them matter more than they did, the import page
+ * number has to reach the reader, and a sub-sync that only saw half of Xero
+ * has to reach cron_runs as a failure rather than as a clean success.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -26,19 +28,29 @@ vi.mock('@/lib/db', () => ({ db: vi.fn().mockResolvedValue({}) }))
 vi.mock('@/lib/xero-sync', () => ({
   importXeroInvoices: vi.fn(),
   syncXeroPayments: vi.fn(),
+  syncXeroBalances: vi.fn(),
+  syncXeroPnl: vi.fn(),
 }))
+
+vi.mock('@/lib/xero', () => ({ getValidXeroToken: vi.fn() }))
+vi.mock('@/lib/cron-runs', () => ({ logCronRun: vi.fn() }))
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
-import { importXeroInvoices, syncXeroPayments } from '@/lib/xero-sync'
+import { importXeroInvoices, syncXeroPayments, syncXeroBalances, syncXeroPnl } from '@/lib/xero-sync'
+import { getValidXeroToken } from '@/lib/xero'
+import { logCronRun } from '@/lib/cron-runs'
 
 import { POST as importInvoices } from '@/app/api/admin/integrations/xero/import-invoices/route'
 import { POST as syncPayments } from '@/app/api/admin/integrations/xero/sync-payments/route'
+import { POST as syncXeroCron } from '@/app/api/admin/cron/sync-xero/route'
 
 function req(url: string) {
   return new NextRequest(`http://localhost:3000${url}`, { method: 'POST' })
 }
+
+const OK = { ok: true as const, status: 200, body: { success: true }, count: 0 }
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -50,6 +62,10 @@ beforeEach(() => {
   vi.mocked(syncXeroPayments).mockResolvedValue({
     ok: true, status: 200, body: { success: true, updated: 2, pagesRead: 3 }, count: 2,
   })
+  vi.mocked(syncXeroBalances).mockResolvedValue(OK)
+  vi.mocked(syncXeroPnl).mockResolvedValue(OK)
+  vi.mocked(getValidXeroToken).mockResolvedValue('token' as never)
+  vi.mocked(logCronRun).mockResolvedValue(undefined as never)
 })
 
 describe('POST /api/admin/integrations/xero/import-invoices', () => {
@@ -120,6 +136,65 @@ describe('POST /api/admin/integrations/xero/sync-payments', () => {
     )
 
     const res = await syncPayments(req('/api/admin/integrations/xero/sync-payments'))
+
+    expect(res.status).toBe(403)
+    expect(syncXeroPayments).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /api/admin/cron/sync-xero', () => {
+  interface Step { name: string; ok: boolean; error?: string; count?: number }
+
+  async function runCron(): Promise<Step[]> {
+    const res = await syncXeroCron(req('/api/admin/cron/sync-xero'))
+    const json = await res.json() as { steps: Step[] }
+    return json.steps
+  }
+
+  it('reports every step ok on a clean run', async () => {
+    const steps = await runCron()
+
+    expect(steps.map(s => s.name)).toEqual(['balances', 'payments', 'pnl', 'import-invoices'])
+    expect(steps.every(s => s.ok)).toBe(true)
+    expect(vi.mocked(logCronRun).mock.calls[0][2]).toBe('success')
+  })
+
+  it('marks a partial payment read as a failed step rather than a success', async () => {
+    // walkXeroPages lost a page to a Xero 429 or 5xx (callXeroAPI swallows
+    // both into a null), so every local invoice past the gap silently went
+    // unreconciled. Before this the step logged 'success' with no signal.
+    vi.mocked(syncXeroPayments).mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: { success: true, updated: 0, pagesRead: 2, truncated: false, partial: true },
+      count: 0,
+      warning: 'Partial Xero read: a page failed after 2 page(s), so invoices past that point were not reconciled',
+    })
+
+    const steps = await runCron()
+    const payments = steps.find(s => s.name === 'payments')
+
+    expect(payments?.ok).toBe(false)
+    expect(payments?.error).toContain('Partial Xero read')
+    // One bad step does not fail the whole run: the others still did work.
+    expect(vi.mocked(logCronRun).mock.calls[0][2]).toBe('success')
+  })
+
+  it('keeps a hard failure reported as the error it is', async () => {
+    vi.mocked(syncXeroPayments).mockResolvedValue({
+      ok: false, status: 500, body: { error: 'Failed to fetch invoices from Xero' }, error: 'Failed to fetch invoices from Xero',
+    })
+
+    const payments = (await runCron()).find(s => s.name === 'payments')
+
+    expect(payments?.ok).toBe(false)
+    expect(payments?.error).toBe('Failed to fetch invoices from Xero')
+  })
+
+  it('refuses a client org with no cron secret', async () => {
+    vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_client', orgId: 'org-a' } as never)
+
+    const res = await syncXeroCron(req('/api/admin/cron/sync-xero'))
 
     expect(res.status).toBe(403)
     expect(syncXeroPayments).not.toHaveBeenCalled()

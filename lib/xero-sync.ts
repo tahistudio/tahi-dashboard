@@ -18,7 +18,12 @@
 import { schema } from '@/db/d1'
 import { eq, sql, gte, isNotNull } from 'drizzle-orm'
 import { callXeroAPI, callXeroAPIOrThrow, XeroAPIError } from '@/lib/xero'
-import { mapXeroInvoiceStatus, reconcileXeroStatus, normaliseXeroDate } from '@/lib/xero-status'
+import {
+  mapXeroInvoiceStatus,
+  mapXeroInvoiceStatusForKnownRow,
+  resolveXeroStatusWrite,
+  normaliseXeroDate,
+} from '@/lib/xero-status'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -33,6 +38,15 @@ export interface SyncOutcome {
   status: number
   body: Record<string, unknown>
   error?: string
+  /**
+   * Set when the sync finished and wrote what it could, but did NOT see
+   * everything Xero holds: a page was lost mid-walk (callXeroAPI swallows a
+   * 429 or a 5xx into a null) or the page ceiling was hit. Every local row
+   * past the gap reports 'not_found_in_xero' and silently goes unreconciled,
+   * so the orchestrator marks the step not-ok and cron_runs shows it rather
+   * than logging a clean 'success' over a half-read ledger.
+   */
+  warning?: string
   count?: number
 }
 
@@ -276,6 +290,22 @@ export async function walkXeroPages<T>(
   return { rows, pagesRead, truncated, failed }
 }
 
+/**
+ * A one-line description of an incomplete walk, or undefined when the walk saw
+ * everything. Becomes SyncOutcome.warning, which the orchestrator turns into a
+ * not-ok step so a half-read ledger is visible in cron_runs instead of logging
+ * a clean 'success' while every row past the gap silently goes unreconciled.
+ */
+export function walkWarning(walk: XeroPageWalk<unknown>): string | undefined {
+  if (walk.failed) {
+    return `Partial Xero read: a page failed after ${walk.pagesRead} page(s), so invoices past that point were not reconciled`
+  }
+  if (walk.truncated) {
+    return `Partial Xero read: stopped at the ${XERO_MAX_PAGES} page ceiling, so invoices past ${XERO_MAX_PAGES * XERO_PAGE_SIZE} were not reconciled`
+  }
+  return undefined
+}
+
 // ---------------------------------------------------------------------------
 // Payment status sync
 // ---------------------------------------------------------------------------
@@ -307,6 +337,13 @@ interface XeroPaymentInvoicesResponse {
  * FullyPaidOnDate rather than "now", so a payment that landed last month stops
  * reporting as this month's revenue.
  *
+ * The write is forward-only (see NEVER_OVERWRITTEN_BY in lib/xero-status.ts):
+ * a dashboard-raised invoice sits at Xero DRAFT forever because the push route
+ * never approves it, so trusting Xero backwards would walk a sent or paid
+ * invoice back to 'draft' every night and hide it from the client portal.
+ * A row nothing would change is left alone entirely, so a quiet night does not
+ * bump updated_at on every invoice and report it as work done.
+ *
  * Only touches rows whose `source` is 'xero'. A Stripe-billed invoice that
  * happens to carry a xeroInvoiceId belongs to the Stripe rail.
  */
@@ -318,6 +355,8 @@ export async function syncXeroPayments(database: D1): Promise<SyncOutcome> {
         xeroInvoiceId: schema.invoices.xeroInvoiceId,
         status: schema.invoices.status,
         source: schema.invoices.source,
+        paidAt: schema.invoices.paidAt,
+        sentAt: schema.invoices.sentAt,
       })
       .from(schema.invoices)
       .where(isNotNull(schema.invoices.xeroInvoiceId))
@@ -359,10 +398,17 @@ export async function syncXeroPayments(database: D1): Promise<SyncOutcome> {
         continue
       }
 
-      const mapped = mapXeroInvoiceStatus(xeroInvoice.Status, xeroInvoice.AmountDue, xeroInvoice.FullyPaidOnDate)
-      const newStatus = reconcileXeroStatus(localInvoice.status, mapped)
+      const mapped = mapXeroInvoiceStatusForKnownRow(
+        xeroInvoice.Status,
+        xeroInvoice.AmountDue,
+        xeroInvoice.FullyPaidOnDate,
+      )
+      const write = resolveXeroStatusWrite(localInvoice, mapped, xeroInvoice.FullyPaidOnDate, now)
 
-      if (!newStatus) {
+      // Nothing Xero says would change this row: no status move it is allowed
+      // to make, no better paid date, no missing sent date. Do not bump
+      // updated_at for it, and do not report work that did not happen.
+      if (Object.keys(write).length === 0) {
         results.push({
           invoiceId: localInvoice.id,
           xeroInvoiceId: localInvoice.xeroInvoiceId,
@@ -372,22 +418,9 @@ export async function syncXeroPayments(database: D1): Promise<SyncOutcome> {
         continue
       }
 
-      const updates: Record<string, unknown> = {
-        status: newStatus,
-        updatedAt: now,
-      }
-
-      if (newStatus === 'paid') {
-        updates.paidAt = normaliseXeroDate(xeroInvoice.FullyPaidOnDate) ?? now
-      } else if (localInvoice.status === 'paid') {
-        // Payment unwound in Xero, so the stored paid date is no longer true
-        // and /financial-reports must stop counting it (IC.1).
-        updates.paidAt = null
-      }
-
       await database
         .update(schema.invoices)
-        .set(updates)
+        .set({ ...write, updatedAt: now })
         .where(eq(schema.invoices.id, localInvoice.id))
 
       updated++
@@ -396,10 +429,11 @@ export async function syncXeroPayments(database: D1): Promise<SyncOutcome> {
         invoiceId: localInvoice.id,
         xeroInvoiceId: localInvoice.xeroInvoiceId,
         previousStatus: localInvoice.status,
-        newStatus,
+        newStatus: write.status ?? localInvoice.status,
       })
     }
 
+    const warning = walkWarning(walk)
     const body = {
       success: true,
       synced: syncedInvoices.length,
@@ -409,7 +443,7 @@ export async function syncXeroPayments(database: D1): Promise<SyncOutcome> {
       partial: walk.failed,
       results,
     }
-    return { ok: true, status: 200, body, count: updated }
+    return { ok: true, status: 200, body, count: updated, warning }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { ok: false, status: 500, body: { error: msg }, error: msg }
@@ -703,8 +737,16 @@ interface XeroImportInvoicesResponse {
  * A row already known by xeroInvoiceId is UPDATED rather than skipped (that
  * skip is why a Xero invoice imported while it was a DRAFT stayed local
  * 'draft' forever, and the portal hides drafts from the client): status,
- * subtotal, total, currency, due date and paid date are all re-read from Xero.
- * Rows whose `source` is not 'xero' are never touched, whatever id they carry.
+ * subtotal, total, currency, due date, sent date and paid date are all re-read
+ * from Xero. Rows whose `source` is not 'xero' are never touched, whatever id
+ * they carry.
+ *
+ * Two things the update deliberately will not do. It only moves a row FORWARD
+ * (see NEVER_OVERWRITTEN_BY in lib/xero-status.ts), because a dashboard-raised
+ * invoice sits at Xero DRAFT forever and a backwards write would hide a paid
+ * invoice from the client portal every night. And it is a DIFF, so an
+ * unchanged invoice produces no UPDATE at all, no updated_at bump, and no
+ * inflated `updated` count on a run that did nothing.
  *
  * AmountDue has no column of its own, so it only feeds the status decision
  * (a zero balance on an AUTHORISED invoice with a paid date reads as paid).
@@ -720,12 +762,23 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
       return { ok: false, status: 502, body: { error: 'Failed to fetch invoices from Xero' }, error: 'Failed to fetch invoices from Xero' }
     }
 
+    // Every column the known-row branch either compares against or writes: the
+    // update is built as a DIFF, so a nightly run over an unchanged ledger
+    // writes nothing at all rather than rewriting 100 rows and bumping their
+    // updated_at (which made `updated` and the cron's count stop meaning
+    // "something changed").
     const existing = await database
       .select({
         id: schema.invoices.id,
         xeroInvoiceId: schema.invoices.xeroInvoiceId,
         status: schema.invoices.status,
         source: schema.invoices.source,
+        amountUsd: schema.invoices.amountUsd,
+        totalUsd: schema.invoices.totalUsd,
+        currency: schema.invoices.currency,
+        dueDate: schema.invoices.dueDate,
+        paidAt: schema.invoices.paidAt,
+        sentAt: schema.invoices.sentAt,
       })
       .from(schema.invoices)
       .where(sql`${schema.invoices.xeroInvoiceId} IS NOT NULL`)
@@ -742,19 +795,10 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
     let imported = 0
     let updated = 0
     let skipped = 0
+    let unchanged = 0
     const results: Array<{ invoiceNumber: string; status: string; orgMatch?: string }> = []
 
     for (const inv of data.Invoices) {
-      const localStatus = mapXeroInvoiceStatus(inv.Status, inv.AmountDue, inv.FullyPaidOnDate)
-
-      // DELETED (and anything unrecognised) has no dashboard status. There is
-      // nothing honest to create, and nothing to rewrite on a row we hold.
-      if (!localStatus) {
-        skipped++
-        results.push({ invoiceNumber: inv.InvoiceNumber, status: 'skipped_no_local_status' })
-        continue
-      }
-
       const known = existingByXeroId.get(inv.InvoiceID)
 
       if (known) {
@@ -765,29 +809,33 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
           continue
         }
 
-        const nextStatus = reconcileXeroStatus(known.status, localStatus)
+        const mapped = mapXeroInvoiceStatusForKnownRow(inv.Status, inv.AmountDue, inv.FullyPaidOnDate)
         const updates: Record<string, unknown> = {
-          amountUsd: inv.SubTotal,
-          totalUsd: inv.Total,
-          currency: inv.CurrencyCode ?? 'NZD',
-          dueDate: inv.DueDateString?.split('T')[0] ?? null,
-          updatedAt: now,
+          ...resolveXeroStatusWrite(known, mapped, inv.FullyPaidOnDate, now),
         }
-        if (nextStatus) updates.status = nextStatus
-        if (localStatus === 'paid') {
-          // Xero's settlement date, not "now". Only stamp over an existing
-          // paid date when Xero actually has one to give.
-          const paidAt = normaliseXeroDate(inv.FullyPaidOnDate)
-          if (paidAt || known.status !== 'paid') updates.paidAt = paidAt ?? now
-        } else if (known.status === 'paid') {
-          // Payment unwound in Xero: the stored paid date is no longer true.
-          updates.paidAt = null
+
+        // Money columns: only what actually differs, so an unchanged invoice
+        // produces an empty patch and no write at all.
+        if (typeof inv.SubTotal === 'number' && inv.SubTotal !== known.amountUsd) updates.amountUsd = inv.SubTotal
+        if (typeof inv.Total === 'number' && inv.Total !== known.totalUsd) updates.totalUsd = inv.Total
+        if (inv.CurrencyCode && inv.CurrencyCode !== known.currency) updates.currency = inv.CurrencyCode
+        // Only when Xero actually supplies one. A DRAFT often carries no due
+        // date, and writing that through would null a date the dashboard set.
+        if (inv.DueDateString) {
+          const dueDate = inv.DueDateString.split('T')[0]
+          if (dueDate !== known.dueDate) updates.dueDate = dueDate
+        }
+
+        if (Object.keys(updates).length === 0) {
+          unchanged++
+          results.push({ invoiceNumber: inv.InvoiceNumber, status: 'no_change' })
+          continue
         }
 
         try {
           await database
             .update(schema.invoices)
-            .set(updates)
+            .set({ ...updates, updatedAt: now })
             .where(eq(schema.invoices.id, known.id))
           updated++
           results.push({ invoiceNumber: inv.InvoiceNumber, status: 'updated' })
@@ -798,6 +846,17 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
             orgMatch: updateErr instanceof Error ? updateErr.message : 'Update failed',
           })
         }
+        continue
+      }
+
+      const localStatus = mapXeroInvoiceStatus(inv.Status, inv.AmountDue, inv.FullyPaidOnDate)
+
+      // DELETED (and anything unrecognised) has no dashboard status, so there
+      // is nothing honest to create. On a row we already hold it is handled
+      // above, where DELETED reads as a write-off rather than as silence.
+      if (!localStatus) {
+        skipped++
+        results.push({ invoiceNumber: inv.InvoiceNumber, status: 'skipped_no_local_status' })
         continue
       }
 
@@ -909,6 +968,7 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
       success: true,
       imported,
       updated,
+      unchanged,
       skipped,
       total: data.Invoices.length,
       page,

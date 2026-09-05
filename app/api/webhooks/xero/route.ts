@@ -2,7 +2,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { callXeroAPI } from '@/lib/xero'
-import { mapXeroInvoiceStatus, reconcileXeroStatus, normaliseXeroDate } from '@/lib/xero-status'
+import { mapXeroInvoiceStatusForKnownRow, resolveXeroStatusWrite } from '@/lib/xero-status'
 import { emitDomainEvent } from '@/lib/events'
 import { notifyAllAdmins } from '@/lib/notifications'
 
@@ -157,6 +157,11 @@ async function reconcilePayload(payload: XeroWebhookPayload): Promise<void> {
           id: schema.invoices.id,
           orgId: schema.invoices.orgId,
           status: schema.invoices.status,
+          // Which rail owns this bill, and the two stamps the shared resolver
+          // compares against before it writes either of them.
+          source: schema.invoices.source,
+          paidAt: schema.invoices.paidAt,
+          sentAt: schema.invoices.sentAt,
         })
         .from(schema.invoices)
         .where(eq(schema.invoices.xeroInvoiceId, xeroInvoiceId))
@@ -166,30 +171,29 @@ async function reconcilePayload(payload: XeroWebhookPayload): Promise<void> {
       // separate, admin-triggered flow; we never auto-create here.)
       if (!local) continue
 
+      // Same ownership rule as the importer and the payment sync: an invoice
+      // billed on the Stripe rail belongs to Stripe, whatever Xero id it is
+      // carrying. All three readers now agree on the mapping AND on who is
+      // allowed to write.
+      if (local.source !== 'xero') continue
+
       // One shared mapper (lib/xero-status.ts): this route, the importer and
       // the payment sync all read the same table, so the same Xero invoice can
       // no longer say two different things depending on who touched it last.
-      const mapped = mapXeroInvoiceStatus(inv.Status, inv.AmountDue, inv.FullyPaidOnDate)
-      const newStatus = reconcileXeroStatus(local.status, mapped)
-      const flippedToPaid = newStatus === 'paid' && local.status !== 'paid'
+      // The write is forward-only, so a stale Xero DRAFT cannot walk a sent or
+      // paid invoice backwards out of the client portal.
+      const mapped = mapXeroInvoiceStatusForKnownRow(inv.Status, inv.AmountDue, inv.FullyPaidOnDate)
+      const write = resolveXeroStatusWrite(local, mapped, inv.FullyPaidOnDate, now)
+      const flippedToPaid = write.status === 'paid' && local.status !== 'paid'
 
       const updates: Record<string, unknown> = {
+        ...write,
         lastReconciledAt: now,
         updatedAt: now,
       }
-      if (newStatus) updates.status = newStatus
       if (typeof inv.SubTotal === 'number') updates.amountUsd = inv.SubTotal
       if (typeof inv.Total === 'number') updates.totalUsd = inv.Total
       if (inv.CurrencyCode) updates.currency = inv.CurrencyCode
-      if (mapped === 'paid') {
-        // Xero's own settlement date, not "now": /financial-reports is keyed
-        // on paid_at, so a payment that landed last month belongs to last month.
-        const paidAt = normaliseXeroDate(inv.FullyPaidOnDate)
-        if (paidAt || local.status !== 'paid') updates.paidAt = paidAt ?? now
-      } else if (newStatus && local.status === 'paid') {
-        // Payment unwound in Xero: the stored paid date is no longer true.
-        updates.paidAt = null
-      }
 
       await database
         .update(schema.invoices)
