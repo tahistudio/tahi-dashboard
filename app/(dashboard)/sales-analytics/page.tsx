@@ -1,17 +1,14 @@
 import { redirect } from 'next/navigation'
 import { requirePageFeature } from '@/lib/page-guard'
-import { getViewAudience } from '@/lib/view-audience'
+import { getServerAuth } from '@/lib/server-auth'
 import { SalesAnalyticsContent } from './sales-analytics-content'
 
 export const metadata = { title: 'Sales analytics - Tahi Dashboard' }
 
 export default async function SalesAnalyticsPage() {
-  const { userId, isAdmin, isPreviewingClient } = await getViewAudience()
+  const { userId, orgId } = await getServerAuth()
   if (!userId) redirect('/sign-in')
-  // Studio-only surface. Client view (the tahi-impersonate-org cookie) leaves
-  // it the same way a real client does, so a preview cannot show one client
-  // another client's work. See lib/view-audience.ts.
-  if (!isAdmin || isPreviewingClient) redirect('/requests')
+  if (orgId !== process.env.NEXT_PUBLIC_TAHI_ORG_ID) redirect('/requests')
 
   await requirePageFeature('sales_analytics')
   return <SalesAnalyticsContent />

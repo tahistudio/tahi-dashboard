@@ -29,7 +29,7 @@ interface CurrencySwitcherProps {
 
 export function CurrencySwitcher({ variant = 'bar' }: CurrencySwitcherProps) {
   const sheet = variant === 'sheet'
-  const { displayCurrency, setDisplayCurrency, options, isPinned } = useDisplayCurrency()
+  const { displayCurrency, setDisplayCurrency, options } = useDisplayCurrency()
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
 
@@ -39,12 +39,6 @@ export function CurrencySwitcher({ variant = 'bar' }: CurrencySwitcherProps) {
     setDisplayCurrency(code)
     setOpen(false)
   }
-
-  // Client audiences (a real client, or the studio inside Client view) are
-  // pinned to their org's billing currency, so there is nothing to switch and
-  // a chip offering to re-denominate their invoices would be a lie. See
-  // lib/display-currency-context.tsx.
-  if (isPinned) return null
 
   return (
     <>

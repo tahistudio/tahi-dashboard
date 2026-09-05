@@ -1,4 +1,4 @@
-import { getViewAudience } from '@/lib/view-audience'
+import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { requirePageFeature } from '@/lib/page-guard'
 import { CapacityContent } from './capacity-content'
@@ -6,13 +6,11 @@ import { CapacityContent } from './capacity-content'
 export const metadata = { title: 'Capacity - Tahi Dashboard' }
 
 export default async function CapacityPage() {
-  const { userId, isAdmin, isPreviewingClient } = await getViewAudience()
+  const { userId, orgId } = await getServerAuth()
   if (!userId) redirect('/sign-in')
 
-  // Studio-only surface. Client view (the tahi-impersonate-org cookie) leaves
-  // it the same way a real client does, so a preview cannot show one client
-  // another client's work. See lib/view-audience.ts.
-  if (!isAdmin || isPreviewingClient) redirect('/overview')
+  const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
+  if (!isAdmin) redirect('/overview')
   // Granular permissions: a team member denied capacity is redirected.
   await requirePageFeature('capacity')
 

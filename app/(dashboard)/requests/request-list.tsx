@@ -179,19 +179,14 @@ const BOARD_STATUSES: readonly string[] = [
   'submitted', 'in_review', 'in_progress', 'client_review', 'on_hold', 'delivered',
 ]
 
-// `Triage` is the studio's word for its own intake job, not a state the client
-// tracks, so the badge is studio-only: a client reading it on their own board
-// learns nothing and is told about our queue. Same rule for the custom-column
-// path below.
-const boardColsFor = (showTriage: boolean): BoardViewColumn[] =>
-  BOARD_STATUSES.map(value => ({
-    id: value,
-    label: STATUS_CFG[value]?.label ?? value,
-    statusValue: value,
-    color: STATUS_CFG[value]?.dot ?? 'var(--color-border)',
-    // Everything landing in intake is waiting to be triaged.
-    ...(showTriage && value === 'submitted' ? TRIAGE_BADGE : {}),
-  }))
+const BOARD_COLS: BoardViewColumn[] = BOARD_STATUSES.map(value => ({
+  id: value,
+  label: STATUS_CFG[value]?.label ?? value,
+  statusValue: value,
+  color: STATUS_CFG[value]?.dot ?? 'var(--color-border)',
+  // Everything landing in intake is waiting to be triaged.
+  ...(value === 'submitted' ? TRIAGE_BADGE : {}),
+}))
 
 // Category chips on a card are icon-only and tinted, so the row reads at a
 // glance on a 16.5rem column. The label still reaches the user through the
@@ -699,8 +694,6 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
     kanbanColumnsKey,
   )
   const boardColumns = useMemo<BoardViewColumn[]>(() => {
-    // Studio audiences only: see boardColsFor above.
-    const showTriage = audience !== 'client'
     const cols = kanbanData?.columns
     if (cols && cols.length > 0) {
       return [...cols]
@@ -711,11 +704,11 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
           statusValue: c.statusValue,
           color: c.colour ?? `var(--status-${c.statusValue.replace(/_/g, '-')}-dot)`,
           // A client can rename their intake column; it is still triage.
-          ...(showTriage && c.statusValue === 'submitted' ? TRIAGE_BADGE : {}),
+          ...(c.statusValue === 'submitted' ? TRIAGE_BADGE : {}),
         }))
     }
-    return boardColsFor(showTriage)
-  }, [kanbanData, audience])
+    return BOARD_COLS
+  }, [kanbanData])
 
   // Main request list via SWR. The key encodes (endpoint, status tab) so each
   // tab caches independently; keepPreviousData shows the prior rows while a new

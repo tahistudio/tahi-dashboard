@@ -1,5 +1,5 @@
 import { Suspense } from 'react'
-import { getViewAudience } from '@/lib/view-audience'
+import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { requirePageFeature } from '@/lib/page-guard'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
@@ -15,12 +15,9 @@ export const metadata = { title: 'Tasks - Tahi Dashboard' }
  * somewhere it can actually use.
  */
 export default async function TasksPage() {
-  const { userId, isAdmin, isPreviewingClient } = await getViewAudience()
+  const { userId, orgId } = await getServerAuth()
   if (!userId) redirect('/sign-in')
-  // Studio-only surface. Client view (the tahi-impersonate-org cookie) leaves
-  // it the same way a real client does, so a preview cannot show one client
-  // another client's work. See lib/view-audience.ts.
-  if (!isAdmin || isPreviewingClient) redirect('/overview')
+  if (orgId !== process.env.NEXT_PUBLIC_TAHI_ORG_ID) redirect('/overview')
   await requirePageFeature('tasks')
   // TasksContent reads `?task=` through useSearchParams, which Next requires
   // to sit under a Suspense boundary. The Requests page mounts its shell the

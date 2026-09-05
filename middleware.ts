@@ -214,18 +214,9 @@ export default clerkMiddleware(async (auth, req) => {
     return NextResponse.redirect(url)
   }
 
-  // Client view (the tahi-impersonate-org cookie) is a PREVIEW of the portal,
-  // not an admin audience: while it is on, an operator must leave an admin-only
-  // route the same way the previewed client would. Every studio-only page
-  // resolves this in its own page.tsx via getViewAudience(); the check also
-  // lives here because the /clients tree (list, detail, brands, contacts) is the
-  // widest leak a preview can hit, one Back press from entering it, and one
-  // matcher covers the whole subtree.
-  const previewingClient = Boolean(req.cookies.get('tahi-impersonate-org')?.value)
-
-  // Client (or a Client-view preview) hitting an admin-only route → /requests
+  // Client hitting an admin-only route → send to /requests
   // Use req.nextUrl.clone() so Next.js adds the basePath (/dashboard) automatically
-  if (isAdminOnlyRoute(req) && (!isAdmin || previewingClient)) {
+  if (isAdminOnlyRoute(req) && !isAdmin) {
     const url = req.nextUrl.clone()
     url.pathname = '/requests'
     return NextResponse.redirect(url)
@@ -234,6 +225,7 @@ export default clerkMiddleware(async (auth, req) => {
   // Admin hitting a client-only route → send to /requests, unless they are
   // previewing the portal as a client (the impersonation cookie names the org
   // the portal routes answer for), in which case the client page renders.
+  const previewingClient = Boolean(req.cookies.get('tahi-impersonate-org')?.value)
   if (isClientOnlyRoute(req) && isAdmin && !previewingClient) {
     const url = req.nextUrl.clone()
     url.pathname = '/requests'

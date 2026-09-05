@@ -1,4 +1,4 @@
-import { getViewAudience } from '@/lib/view-audience'
+import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { requirePageFeature } from '@/lib/page-guard'
 import { AnnouncementsContent } from './announcements-content'
@@ -6,12 +6,9 @@ import { AnnouncementsContent } from './announcements-content'
 export const metadata = { title: 'Announcements - Tahi Dashboard' }
 
 export default async function AnnouncementsPage() {
-  const { userId, isAdmin, isPreviewingClient } = await getViewAudience()
+  const { userId, orgId } = await getServerAuth()
   if (!userId) redirect('/sign-in')
-  // Studio-only surface. Client view (the tahi-impersonate-org cookie) leaves
-  // it the same way a real client does, so a preview cannot show one client
-  // another client's work. See lib/view-audience.ts.
-  if (!isAdmin || isPreviewingClient) redirect('/requests')
+  if (orgId !== process.env.NEXT_PUBLIC_TAHI_ORG_ID) redirect('/requests')
   // Granular permissions: a team member denied announcements is redirected.
   await requirePageFeature('announcements')
 

@@ -1,4 +1,4 @@
-import { getViewAudience } from '@/lib/view-audience'
+import { getServerAuth } from '@/lib/server-auth'
 import { redirect } from 'next/navigation'
 import { requirePageFeature } from '@/lib/page-guard'
 import { ProposalDetail } from './proposal-detail'
@@ -6,12 +6,10 @@ import { ProposalDetail } from './proposal-detail'
 export const metadata = { title: 'Proposal — Tahi Dashboard' }
 
 export default async function ProposalPage({ params }: { params: Promise<{ id: string }> }) {
-  const { userId, isAdmin, isPreviewingClient } = await getViewAudience()
+  const { userId, orgId } = await getServerAuth()
   if (!userId) redirect('/sign-in')
-  // Studio-only surface. Client view (the tahi-impersonate-org cookie) leaves
-  // it the same way a real client does, so a preview cannot show one client
-  // another client's work. See lib/view-audience.ts.
-  if (!isAdmin || isPreviewingClient) redirect('/requests')
+  const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
+  if (!isAdmin) redirect('/requests')
   await requirePageFeature('proposals')
   const { id } = await params
   return <ProposalDetail proposalId={id} />
