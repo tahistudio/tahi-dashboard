@@ -1395,6 +1395,17 @@ const TOOLS: ToolDef[] = [
     docId: prop('string', 'Doc page ID'),
   }, ['docId']),
 
+  // ── Notifications ─────────────────────────────────────────────────────
+  tool('list_notifications', 'The notification feed behind the bell and the /notifications page, newest first, plus the true unread count. Rows are keyed on a Clerk USER id, not an org, so pass userId to read a particular person\'s feed (without it you read the service account, which has none). Optional: limit (max 100), cursor from a previous nextCursor, since / before as ISO instants, kind as a comma list (request, message, invoice, announcement, document, task, call, deal, system), unread true for unread only.', {
+    userId: prop('string', 'Clerk user id whose feed to read'),
+    limit: prop('number', 'Page size, 1 to 100 (default 20)'),
+    cursor: prop('string', 'Keyset cursor from a previous nextCursor'),
+    since: prop('string', 'ISO instant: only rows at or after it'),
+    before: prop('string', 'ISO instant: only rows before it'),
+    kind: prop('string', 'Comma-separated kinds to filter by'),
+    unread: prop('boolean', 'True for unread rows only'),
+  }),
+
   // ── Messaging ─────────────────────────────────────────────────────────
   tool('list_conversations', 'List all messaging conversations with unread counts'),
   tool('create_conversation', 'Create a new messaging conversation', {
@@ -2496,6 +2507,17 @@ async function executeTool(
     }
     case 'delete_doc':
       return json(await apiWrite(`/api/admin/docs/${s('docId')}`, token, 'DELETE'))
+
+    // ── Notifications ─────────────────────────────────────────────────
+    case 'list_notifications': {
+      const params: Record<string, string> = {}
+      for (const key of ['userId', 'cursor', 'since', 'before', 'kind'] as const) {
+        if (typeof args[key] === 'string' && args[key]) params[key] = args[key] as string
+      }
+      if (typeof args.limit === 'number') params.limit = String(args.limit)
+      if (args.unread === true) params.unread = 'true'
+      return json(await apiGet('/api/notifications', token, params))
+    }
 
     // ── Messaging ─────────────────────────────────────────────────────
     case 'list_conversations':

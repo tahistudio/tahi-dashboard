@@ -178,3 +178,166 @@ export function notificationHref(
     ? clientHref(entityType, entityId)
     : teamHref(entityType, entityId)
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Kinds: the plain vocabulary the /notifications page filters by.
+ *
+ * The 30 NotificationEventType values above are an internal vocabulary, and
+ * NotificationEntityType is nearly as long. Neither is something a client
+ * should meet in a filter row. A KIND is the handful of words a person would
+ * actually use ("Requests", "Replies", "Invoices"), and every entity folds
+ * into exactly one of them.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export type NotificationKind =
+  | 'request'
+  | 'message'
+  | 'invoice'
+  | 'announcement'
+  | 'document'
+  | 'task'
+  | 'call'
+  | 'deal'
+  | 'system'
+
+/** ShellIcon names, so a request row wears the glyph the rail wears. */
+export type NotificationKindIcon =
+  | 'requests' | 'messages' | 'invoices' | 'announcements'
+  | 'contracts' | 'tasks' | 'calls' | 'deals' | 'settings'
+
+export interface NotificationKindDef {
+  key: NotificationKind
+  label: string
+  icon: NotificationKindIcon
+  /** Drives the row icon's tint. */
+  tone: 'work' | 'talk' | 'money' | 'info' | 'muted'
+}
+
+export const NOTIFICATION_KINDS: Record<NotificationKind, NotificationKindDef> = {
+  request:      { key: 'request',      label: 'Requests',     icon: 'requests',      tone: 'work' },
+  message:      { key: 'message',      label: 'Replies',      icon: 'messages',      tone: 'talk' },
+  invoice:      { key: 'invoice',      label: 'Invoices',     icon: 'invoices',      tone: 'money' },
+  announcement: { key: 'announcement', label: 'Studio notes', icon: 'announcements', tone: 'info' },
+  document:     { key: 'document',     label: 'Documents',    icon: 'contracts',     tone: 'info' },
+  task:         { key: 'task',         label: 'Tasks',        icon: 'tasks',         tone: 'work' },
+  call:         { key: 'call',         label: 'Calls',        icon: 'calls',         tone: 'talk' },
+  deal:         { key: 'deal',         label: 'Sales',        icon: 'deals',         tone: 'money' },
+  system:       { key: 'system',       label: 'System',       icon: 'settings',      tone: 'muted' },
+}
+
+/** Which kinds get a filter chip, per audience. */
+export const CLIENT_NOTIFICATION_KINDS: readonly NotificationKind[] =
+  ['request', 'message', 'invoice', 'announcement', 'document']
+export const TEAM_NOTIFICATION_KINDS: readonly NotificationKind[] =
+  ['request', 'task', 'message', 'invoice', 'call', 'deal', 'system']
+
+export function notificationKindsFor(audience: NotificationAudience): NotificationKindDef[] {
+  const keys = audience === 'client' ? CLIENT_NOTIFICATION_KINDS : TEAM_NOTIFICATION_KINDS
+  return keys.map(k => NOTIFICATION_KINDS[k])
+}
+
+/**
+ * entityType -> kind. Everything folds in, so no row is unfilterable. The
+ * inverse is what the API turns `?kind=` into, so the two cannot drift.
+ */
+export const ENTITY_TYPES_FOR_KIND: Record<NotificationKind, NotificationEntityType[]> = {
+  request:      ['request'],
+  message:      ['message'],
+  invoice:      ['invoice'],
+  announcement: ['announcement'],
+  document:     ['contract', 'proposal', 'schedule'],
+  task:         ['task'],
+  call:         ['call'],
+  deal:         ['deal', 'lead', 'affiliate'],
+  system:       ['system', 'organisation', 'subscription', 'finance_anomaly', 'content_week', 'cron'],
+}
+
+const KIND_BY_ENTITY: Partial<Record<NotificationEntityType, NotificationKind>> = (() => {
+  const out: Partial<Record<NotificationEntityType, NotificationKind>> = {}
+  for (const kind of Object.keys(ENTITY_TYPES_FOR_KIND) as NotificationKind[]) {
+    for (const entity of ENTITY_TYPES_FOR_KIND[kind]) out[entity] = kind
+  }
+  return out
+})()
+
+/** The kind a row belongs to. Anything unrecognised lands in System. */
+export function notificationKind(entityType: string | null | undefined): NotificationKind {
+  if (!entityType) return 'system'
+  return KIND_BY_ENTITY[entityType as NotificationEntityType] ?? 'system'
+}
+
+export function isNotificationKind(value: string): value is NotificationKind {
+  return Object.prototype.hasOwnProperty.call(NOTIFICATION_KINDS, value)
+}
+
+/**
+ * The entity types a `?kind=a,b` filter expands to. Unknown kinds are dropped,
+ * so a bad param narrows to nothing rather than widening to everything.
+ */
+export function entityTypesForKinds(kinds: readonly string[]): NotificationEntityType[] {
+  const out = new Set<NotificationEntityType>()
+  for (const k of kinds) {
+    if (!isNotificationKind(k)) continue
+    for (const entity of ENTITY_TYPES_FOR_KIND[k]) out.add(entity)
+  }
+  return Array.from(out)
+}
+
+/**
+ * What the row's "Open ..." affordance says, per audience.
+ *
+ * This is the honest-deep-link half of the notifications page: when the
+ * resolver has no route for this audience the row must render as a statement,
+ * not as a link that bounces. Callers render a button only when this returns
+ * non-null.
+ */
+export interface NotificationDestination {
+  href: string
+  label: string
+}
+
+const DEST_LABELS: Partial<Record<NotificationEntityType, { detail: string; list: string }>> = {
+  request:         { detail: 'the request',       list: 'Requests' },
+  task:            { detail: 'the task',          list: 'Tasks' },
+  invoice:         { detail: 'the invoice',       list: 'Invoices' },
+  organisation:    { detail: 'the client',        list: 'Clients' },
+  contract:        { detail: 'the contract',      list: 'Contracts' },
+  proposal:        { detail: 'the proposal',      list: 'Proposals' },
+  deal:            { detail: 'the deal',          list: 'Deals' },
+  lead:            { detail: 'the lead',          list: 'Leads' },
+  schedule:        { detail: 'the schedule',      list: 'Schedules' },
+  message:         { detail: 'Requests',          list: 'Requests' },
+  call:            { detail: 'Calls',             list: 'Calls' },
+  announcement:    { detail: 'Announcements',     list: 'Announcements' },
+  subscription:    { detail: 'Billing',           list: 'Billing' },
+  affiliate:       { detail: 'Leads',             list: 'Leads' },
+  finance_anomaly: { detail: 'Financial reports', list: 'Financial reports' },
+  content_week:    { detail: 'Content studio',    list: 'Content studio' },
+  cron:            { detail: 'Crons',             list: 'Crons' },
+}
+
+/** Client-side overrides: the same entity reads differently in the portal. */
+const CLIENT_DEST_LABELS: Partial<Record<NotificationEntityType, string>> = {
+  invoice:      'Invoices',
+  organisation: 'your account',
+  announcement: 'Overview',
+  subscription: 'Billing',
+  message:      'Requests',
+}
+
+export function notificationDestination(
+  entityType: NotificationEntityType | string | null | undefined,
+  entityId: string | null | undefined,
+  audience: NotificationAudience = 'team',
+): NotificationDestination | null {
+  const entity = (entityType ?? null) as NotificationEntityType | null
+  const href = notificationHref(entity, entityId, audience)
+  if (!href || !entity) return null
+  if (audience === 'client') {
+    const override = CLIENT_DEST_LABELS[entity]
+    if (override) return { href, label: override }
+  }
+  const labels = DEST_LABELS[entity]
+  if (!labels) return { href, label: 'it' }
+  return { href, label: entityId ? labels.detail : labels.list }
+}
