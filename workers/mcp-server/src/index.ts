@@ -637,6 +637,8 @@ const TOOLS: ToolDef[] = [
     amount: prop('number', 'Updated amount'),
     dueDate: prop('string', 'Updated due date in YYYY-MM-DD format'),
     orgId: prop('string', 'Reassign invoice to a different client organisation ID'),
+    paidAt: prop('string', 'When the money actually landed, ISO 8601, or null to clear. Setting status paid stamps this for you if you omit it; pass it to backdate a bank transfer. /financial-reports counts revenue from this, not from status.'),
+    sentAt: prop('string', 'When the invoice went out, ISO 8601, or null to clear. Setting status sent stamps this for you if you omit it.'),
   }, ['invoiceId']),
   tool('send_invoice_email', 'Send an invoice to the client: emails every billing contact (portal admins + the primary contact) the invoice with a Stripe pay link and a portal deep link, marks the invoice sent, and raises the client bell row. Creating a draft invoice does NOT notify anyone; this is the send.', {
     invoiceId: prop('string', 'Invoice ID'),
