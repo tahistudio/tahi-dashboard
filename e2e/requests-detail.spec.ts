@@ -1,5 +1,19 @@
-import { test, expect, type Page } from '@playwright/test'
-import { primePage, filterChip } from './helpers'
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import {
+  primePage,
+  filterChip,
+  createTask,
+  deleteTask,
+  addBlocker,
+  removeBlocker,
+  listBlockers,
+  listRequests,
+  pickPipelineRequest,
+  railCardHead,
+  railCardBody,
+  expectCardCount,
+  type RequestSummary,
+} from './helpers'
 
 /**
  * Request detail: the alignment pass (audit findings D1 to D13).
@@ -92,6 +106,84 @@ async function portedDetailIsOn(page: Page): Promise<boolean> {
 
 function activityFilter(page: Page) {
   return page.getByRole('tablist', { name: 'Activity filter' })
+}
+
+/** Straight to one request, rather than through the list. A blocker case has
+ *  already chosen its row through the API and cannot take whichever the list
+ *  happens to sort first. */
+async function gotoRequest(page: Page, id: string): Promise<void> {
+  try {
+    await page.goto(`/requests/${id}`)
+  } catch (err) {
+    if (!String(err).includes('ERR_ABORTED')) throw err
+    await page.goto(`/requests/${id}`)
+  }
+  // Sixty seconds, not the list's twenty: on a cold dev server this is the
+  // first hit on /requests/[id] and the whole main element is empty until the
+  // route has compiled. Measured at over forty-five seconds once.
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 60_000 })
+}
+
+/** The bypass, plus the org to read as. `tahi-impersonate-org` is honoured on
+ *  portal GETs only (lib/server-auth.ts), which is exactly the read the leak
+ *  check needs and nothing more. Both cookies are sent together because a
+ *  Cookie header replaces the stored one rather than adding to it. */
+function portalCookie(orgId: string): string {
+  return `tahi-ship-studio=1; tahi-impersonate-org=${orgId}`
+}
+
+/**
+ * Every object key in a JSON payload, however deep.
+ *
+ * The leak check reads keys rather than raw text on purpose. A substring scan
+ * for "block" over the whole body scans arbitrary client-authored copy: the
+ * portal returns the title, the description and every client-visible message,
+ * and this dataset already holds "FAQ blocks", "hreflang-block" and "Block
+ * Scholes". It is also incomplete in the other direction, because a leak
+ * shaped as `{"waitingOn": 3}` carries the idea without carrying the word.
+ * Keys are the payload's own vocabulary and nobody's prose.
+ */
+function jsonKeys(value: unknown, into: string[] = []): string[] {
+  if (Array.isArray(value)) {
+    for (const item of value) jsonKeys(item, into)
+  } else if (value !== null && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      into.push(key)
+      jsonKeys(child, into)
+    }
+  }
+  return into
+}
+
+/**
+ * A request the portal actually serves.
+ *
+ * The admin list also holds internal requests and requests whose org has the
+ * requests feature turned off, and the portal answers 404 or 403 for both.
+ * Asserting "no blocker field" against a 404 body proves nothing, so the leak
+ * check picks a row it has watched come back as a 200.
+ *
+ * The two pipeline candidates are stepped over: this suite and
+ * e2e/requests-list.spec.ts are blocking those two in parallel workers, and a
+ * shared subject would make one case's cleanup another case's flake.
+ */
+async function pickPortalVisibleRequest(
+  request: APIRequestContext,
+): Promise<RequestSummary | null> {
+  const rows = await listRequests(request)
+  const reserved = new Set(
+    [pickPipelineRequest(rows, 0), pickPipelineRequest(rows, 1)]
+      .filter((r): r is RequestSummary => r !== null)
+      .map(r => r.id),
+  )
+  for (const row of rows) {
+    if (reserved.has(row.id)) continue
+    const res = await request.get(`/api/portal/requests/${row.id}`, {
+      headers: { Cookie: portalCookie(row.orgId) },
+    })
+    if (res.ok()) return row
+  }
+  return null
 }
 
 test.describe('Request detail', () => {
@@ -267,5 +359,139 @@ test.describe('Request detail', () => {
   test('the detail page fits its viewport in both projects', async ({ page }) => {
     test.skip(!(await openFirstRequest(page)), 'No requests in this dataset.')
     await expectNoHorizontalScroll(page)
+  })
+
+  // ── Blockers ───────────────────────────────────────────────────────────────
+
+  test('the Blocked by card lists a task, removing one drops the count, and Open lands on the task', async ({ page, request }) => {
+    // Two cold routes in one case, /requests/[id] and then /tasks, which on a
+    // dev server that has served neither is more than the file's 90s.
+    test.slow()
+
+    // Index 0 said out loud. This case writes `blockedBy` on the row, so no
+    // other file may block the same index (see pickPipelineRequest).
+    const target = pickPipelineRequest(await listRequests(request), 0)
+    test.skip(!target, 'No open, numbered, uniquely titled request in this dataset to block.')
+    if (!target) return
+
+    // Two more than whatever the row already carries, rather than a flat 2. A
+    // crashed run leaves an orphan link behind (its cleanup never got to run),
+    // and the next run then reads one too many and blames the feature. The
+    // count the list reports is the same open-blocker count the card prints.
+    //
+    // Two blockers rather than one, because the removal is half the card: the
+    // count has to follow it down on screen and the link has to leave the
+    // server, and a card with nothing left in it proves neither.
+    const base = target.blockedByCount ?? 0
+    const expected = base + 2
+
+    const stamp = Date.now()
+    const title = `Playwright request blocker ${stamp}`
+    const spareTitle = `Playwright spare blocker ${stamp}`
+    const taskId = await createTask(request, { title })
+    const spareId = await createTask(request, { title: spareTitle })
+    let linkId: string | null = null
+    let spareLinkId: string | null = null
+    try {
+      linkId = await addBlocker(request, { type: 'request', id: target.id }, { type: 'task', id: taskId })
+      spareLinkId = await addBlocker(request, { type: 'request', id: target.id }, { type: 'task', id: spareId })
+
+      await gotoRequest(page, target.id)
+
+      const head = railCardHead(page, 'Blocked by')
+      await expect(head).toBeVisible({ timeout: 45_000 })
+      await expectCardCount(head, 'Blocked by', expected)
+
+      // A task blocker wears the task vocabulary, and it carries no ref: only
+      // a request has a number.
+      const body = railCardBody(page, 'Blocked by')
+      await expect(body).toContainText('To Do')
+      await expect(body).toContainText(title)
+      await expect(body).toContainText(spareTitle)
+
+      // The spine takes an amber chip and does NOT grow a sixth node. Both
+      // halves, because the chip exists precisely so the pipeline does not
+      // have to invent a status that would then disagree with the real one.
+      const delivery = page.getByRole('region', { name: 'Delivery', exact: true })
+      await expect(delivery.getByText(`Blocked by ${expected}`, { exact: true })).toBeVisible()
+      await expect(delivery.getByRole('list', { name: 'Delivery steps' }).getByRole('listitem'))
+        .toHaveCount(5)
+
+      // The inverse of the picker, from the request's side. The task side has
+      // its own removal case; this one is the other door on the same table.
+      await body.getByRole('button', { name: `Stop waiting on ${spareTitle}` }).click()
+      await expectCardCount(head, 'Blocked by', expected - 1)
+      await expect(body).not.toContainText(spareTitle)
+      await expect.poll(
+        async () => (await listBlockers(request, { type: 'request', id: target.id }))
+          .blockedBy.some(b => b.otherId === spareId),
+        { message: 'the removal did not reach the server', timeout: 20_000 },
+      ).toBe(false)
+      spareLinkId = null
+
+      // The way in is the same deep link a notification uses, and it has to
+      // land on the panel rather than on a bare list.
+      await body.getByRole('link', { name: `Open ${title}` }).click()
+      await expect(page).toHaveURL(new RegExp(`/tasks\\?task=${taskId}`), { timeout: 45_000 })
+      await expect(page.getByRole('dialog')).toBeVisible({ timeout: 45_000 })
+      await expect(page.getByRole('dialog').getByRole('textbox', { name: 'Task title' }))
+        .toHaveValue(title, { timeout: 30_000 })
+    } finally {
+      if (spareLinkId) await removeBlocker(request, { type: 'request', id: target.id }, spareLinkId)
+      if (linkId) await removeBlocker(request, { type: 'request', id: target.id }, linkId)
+      await deleteTask(request, spareId)
+      await deleteTask(request, taskId)
+    }
+  })
+
+  test('a blocked request tells a client nothing about it', async ({ request }) => {
+    // The leak check, and the most important line in this file. A client must
+    // not learn that their request is stuck on three internal task titles, and
+    // must not learn the count either: a number alone still says it.
+    //
+    // This runs at the boundary rather than in the browser. The page is one
+    // component for two audiences and the card is gated on `isAdmin` at
+    // render, but the Ship Studio bypass pins the admin org for the whole
+    // browser context, so a spec cannot BE a client here. What it can do is
+    // read the portal endpoint as one: `tahi-impersonate-org` is honoured on
+    // portal GETs, which is the same door the studio's own client view uses.
+    const candidate = await pickPortalVisibleRequest(request)
+    test.skip(!candidate, 'No client-visible request in this dataset to check.')
+    if (!candidate) return
+
+    const title = `Playwright leak check ${Date.now()}`
+    const taskId = await createTask(request, { title })
+    let linkId: string | null = null
+    try {
+      linkId = await addBlocker(request, { type: 'request', id: candidate.id }, { type: 'task', id: taskId })
+
+      const res = await request.get(`/api/portal/requests/${candidate.id}`, {
+        headers: { Cookie: portalCookie(candidate.orgId) },
+      })
+      expect(res.ok(), 'the portal detail could not be read as the client').toBeTruthy()
+      const payload = await res.text()
+
+      // Not "no blockedByCount": no key that carries the idea under any name,
+      // which covers the `waitingOn` and `holdCount` shapes a redesign would
+      // reach for as well as the one the route has today.
+      const leaked = jsonKeys(JSON.parse(payload) as unknown)
+        .filter(key => /block|waiting|holdup|depend/i.test(key))
+      expect(leaked, 'the portal payload carries a blocker-shaped key').toEqual([])
+
+      // And the blocking task's own title is absent from the body, which is
+      // the exact string a client must never read. Raw text here rather than
+      // keys, because a leak would arrive as a value.
+      expect(payload, 'the portal payload carries a blocking task title').not.toContain(title)
+
+      // And there is no portal door to ask through either. 404, not 403: the
+      // route does not exist, which is the refusal Decision 13 describes.
+      const direct = await request.get(`/api/portal/requests/${candidate.id}/blockers`, {
+        headers: { Cookie: portalCookie(candidate.orgId) },
+      })
+      expect(direct.status(), 'a portal blockers route answered').toBe(404)
+    } finally {
+      if (linkId) await removeBlocker(request, { type: 'request', id: candidate.id }, linkId)
+      await deleteTask(request, taskId)
+    }
   })
 })
