@@ -12,8 +12,9 @@
  *     invoice_chase_sent activity, leaves invoice status untouched.
  *
  * The send is always an explicit human click (never automatic, never
- * chained from drafting). Requires RESEND_API_KEY. The from-address comes
- * from the settings key 'leads.replyFromEmail' (or a fallback default).
+ * chained from drafting). Requires RESEND_API_KEY. The from-address is
+ * emailFromAddress('Liam Miller'): one mailbox for the whole product,
+ * relabelled for a reply written in one person's voice.
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -21,6 +22,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { desc, eq } from 'drizzle-orm'
+import { emailFromAddress } from '@/lib/email'
 
 function invoiceNumber(id: string): string {
   return `INV-${id.slice(0, 6).toUpperCase()}`
@@ -108,14 +110,6 @@ export async function POST(req: NextRequest, { params }: Params) {
     subjectFallback = `Invoice ${invoiceNumber(invoice.id)}`
   }
 
-  // Resolve the from-address (settings → fallback)
-  const [fromSetting] = await database
-    .select({ value: schema.settings.value })
-    .from(schema.settings)
-    .where(eq(schema.settings.key, 'leads.replyFromEmail'))
-    .limit(1)
-  const fromEmail = fromSetting?.value?.trim() || 'liam@tahi.studio'
-
   const subject = (draft.finalSubject ?? draft.aiDraftSubject ?? '').trim() || subjectFallback
   const bodyText = (draft.finalBody ?? draft.aiDraftBody ?? '').trim()
   if (!bodyText) {
@@ -139,7 +133,12 @@ export async function POST(req: NextRequest, { params }: Params) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: `Liam Miller <${fromEmail}>`,
+        // One mailbox, decided in lib/email.ts, wearing the name of the
+        // person who wrote the reply. Built by hand from a settings value it
+        // produced "Liam Miller <Tahi Studio <...>>" the moment that value
+        // held a full lockup, and split the studio into two senders in a
+        // client's inbox the rest of the time.
+        from: emailFromAddress('Liam Miller'),
         to: [recipientEmail],
         subject,
         html: htmlBody,

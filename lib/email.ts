@@ -10,10 +10,12 @@ import type { ReactElement } from 'react'
  * The lockup every Tahi email is sent from when the Worker has no
  * RESEND_FROM_EMAIL set.
  *
- * Branded rather than bare on purpose: five routes hardcoded two different
- * addresses between them and this module fell back to a third, unnamed one, so
- * a client's inbox threaded the studio as three separate senders and the
- * "[REQ-n]" subject prefix could not group anything.
+ * Branded rather than bare on purpose: eight call sites decided a from address
+ * for themselves, four values between them, and this module fell back to a
+ * fifth, unnamed one, so a client's inbox threaded the studio as several
+ * separate senders and the "[REQ-n]" subject prefix could not group anything.
+ * Every send in the tree now asks this module, including the two written in
+ * one person's voice (they pass a display name, below).
  */
 const DEFAULT_FROM = 'Tahi Studio <business@tahi.studio>'
 

@@ -2,11 +2,11 @@
  * Trigger handler for "this contract was just fully signed".
  *
  * Builds a signed-state PDF via jsPDF (pure JS, runs cleanly on
- * Workers — see lib/contract-signed-pdf.ts) and emails it as an
+ * Workers, see lib/contract-signed-pdf.ts) and emails it as an
  * attachment to every signer + the contract creator. Audit-logs the
  * send so we can prove (and debug) what went out.
  *
- * Designed to run inside `ctx.waitUntil()` from the public sign route —
+ * Designed to run inside `ctx.waitUntil()` from the public sign route:
  * the signer's HTTP response should not block on PDF generation. Any
  * failure inside this function is caught and logged so a partially-failed
  * send never crashes the request. If the PDF build itself throws we
@@ -20,6 +20,7 @@ import { render as renderEmail } from '@react-email/render'
 import { ContractFullySignedEmail } from '@/emails/contract-fully-signed'
 import { buildSignedPdfBase64 } from '@/lib/contract-signed-pdf'
 import { publicUrl } from '@/lib/app-url'
+import { emailFromAddress } from '@/lib/email'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -29,8 +30,8 @@ interface RecipientPlan {
   wasSigner: boolean
 }
 
+/** The audit log's label for who sent, not an address. */
 const FROM_NAME = 'Liam Miller'
-const FROM_ADDRESS = 'Tahi Studio <business@tahi.studio>'
 
 /**
  * Send the fully-signed PDF + covering email to every signer and the
@@ -148,7 +149,7 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
     }
 
     if (!process.env.RESEND_API_KEY) {
-      console.error('[contract-fully-signed-emails] RESEND_API_KEY missing — skipping send')
+      console.error('[contract-fully-signed-emails] RESEND_API_KEY missing, skipping send')
       await writeAudit(database, contractId, recipients.map(r => r.email), 'skipped_no_resend_key')
       return
     }
@@ -213,7 +214,9 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
         }))
 
         const sendOpts: Parameters<typeof resend.emails.send>[0] = {
-          from: FROM_ADDRESS,
+          // The one from address, decided in lib/email.ts, so a client
+          // does not see the studio as two senders.
+          from: emailFromAddress(),
           to: r.email,
           subject: `Fully signed: ${doc.name}`,
           html,
