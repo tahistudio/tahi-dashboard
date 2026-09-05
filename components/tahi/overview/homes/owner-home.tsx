@@ -334,7 +334,7 @@ export function OwnerHome({ ctx }: { ctx: OverviewCtx }) {
       <Zone label="Work">
         <InTheStudio requests={ov?.recentRequests} loading={!ov} go={go} />
         <TodaysCalls go={go} />
-        <UnreadMessages go={go} />
+        <ClientReplies go={go} />
         <Worklog go={go} />
       </Zone>
 
@@ -1290,35 +1290,51 @@ function TodaysCalls({ go }: { go: (id: string) => void }) {
   )
 }
 
-interface Conversation {
+interface ReplyThread {
   id: string
-  orgName: string | null
-  participantNames: string[]
-  lastMessage: { body: string } | null
-  unreadCount: number
+  kind: 'conversation' | 'request'
+  threadTitle: string
+  clientName: string | null
+  lastSnippet: string
+  ago: string
+  to: string
 }
-function UnreadMessages({ go }: { go: (id: string) => void }) {
-  const { data } = useResource<{ conversations: Conversation[] }>('/api/admin/conversations?unread=1&limit=3')
-  const convs = data?.conversations ?? []
+
+/**
+ * Client replies sitting unanswered on the studio's request threads, from
+ * /api/admin/overview/replies-waiting: the threads this member is on (assignee
+ * or participant) whose LAST message came from a client contact.
+ *
+ * This card used to read "Unread messages" off /api/admin/conversations and
+ * send every row to /messages, which redirects while the standalone Messages
+ * surface is hidden, so the busiest card on the owner's home was a link to
+ * nowhere. Only kind 'request' rows render here: the same feed also carries
+ * standalone conversations whose `to` is /messages/{id}, and those have no page
+ * to open. Every row now lands on the request the reply was written on, which
+ * is where the studio answers it.
+ */
+function ClientReplies({ go }: { go: (id: string) => void }) {
+  const { data } = useResource<{ threads: ReplyThread[] }>('/api/admin/overview/replies-waiting?scope=me')
+  const threads = (data?.threads ?? []).filter(t => t.kind === 'request').slice(0, 3)
   return (
     <Card span={7}>
-      <CardH ic="msg" title="Unread messages" link="All messages" onLink={() => go('messages')} />
+      <CardH ic="msg" title="Client replies waiting" link="All requests" onLink={() => go('requests')} />
       {!data ? (
         <Shim h={90} />
-      ) : convs.length === 0 ? (
-        <EmptyLine>No unread messages.</EmptyLine>
+      ) : threads.length === 0 ? (
+        <EmptyLine>No client replies are waiting on you.</EmptyLine>
       ) : (
         <div className="ov-rows">
-          {convs.map(c => {
-            const name = c.orgName || c.participantNames[0] || 'Conversation'
+          {threads.map(t => {
+            const who = t.clientName || t.threadTitle
             return (
               <Row
-                key={c.id}
-                avText={initials(name)}
-                title={name}
-                sub={plainSnippet(c.lastMessage?.body) || 'New message'}
-                right={<span className="ov-chip brand">{c.unreadCount}</span>}
-                onClick={() => go('messages')}
+                key={t.id}
+                avText={initials(who)}
+                title={plainSnippet(t.lastSnippet) || t.threadTitle}
+                sub={[t.clientName, t.threadTitle].filter(Boolean).join(' · ')}
+                right={<span className="ov-mini">{t.ago}</span>}
+                onClick={() => go(t.to)}
               />
             )
           })}

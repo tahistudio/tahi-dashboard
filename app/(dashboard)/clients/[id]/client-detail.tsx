@@ -25,7 +25,6 @@ import {
   X,
   Plus,
   Layers,
-  MessageSquare,
   Clock,
   Activity,
   FileText,
@@ -202,7 +201,6 @@ const TABS = [
   { id: 'contracts',     label: 'Contracts',     icon: ScrollText },
   { id: 'contacts',      label: 'Contacts',      icon: Users },
   { id: 'calls',         label: 'Calls',         icon: Phone },
-  { id: 'messages',      label: 'Messages',      icon: MessageSquare },
   { id: 'brands',        label: 'Brands',        icon: Palette },
   { id: 'deals',         label: 'Deals',         icon: Handshake },
   { id: 'time',          label: 'Time',          icon: Clock },
@@ -466,9 +464,6 @@ export function ClientDetail({ clientId }: { clientId: string }) {
         )}
         {activeTab === 'calls' && (
           <DiscoveryCallsCard parentType="org" parentId={clientId} />
-        )}
-        {activeTab === 'messages' && (
-          <MessagesTab clientId={clientId} orgName={org.name} />
         )}
         {activeTab === 'brands' && (
           <BrandsTab clientId={clientId} />
@@ -2472,13 +2467,11 @@ function ContactsTab({
   contacts: Contact[]
   onUpdated: () => void
 }) {
-  const router = useRouter()
   const { showToast } = useToast()
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [form, setForm] = useState({ name: '', email: '', role: '', isPrimary: false })
-  const [startingDm, setStartingDm] = useState<string | null>(null)
   const [invites, setInvites] = useState<Record<string, InviteState>>({})
   const [copied, setCopied] = useState<string | null>(null)
 
@@ -2546,30 +2539,6 @@ function ContactsTab({
       window.setTimeout(() => setCopied(c => (c === contactId ? null : c)), 2000)
     } catch {
       showToast('Could not copy the link', 'error')
-    }
-  }
-
-  const handleStartDm = async (contact: Contact) => {
-    setStartingDm(contact.id)
-    try {
-      const res = await fetch(apiPath('/api/admin/conversations'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'direct',
-          name: contact.name,
-          orgId: clientId,
-          visibility: 'external',
-          participantIds: [{ id: contact.id, type: 'contact' }],
-        }),
-      })
-      if (res.ok) {
-        router.push('/messages')
-      }
-    } catch {
-      // silent
-    } finally {
-      setStartingDm(null)
     }
   }
 
@@ -2748,16 +2717,6 @@ function ContactsTab({
                       <span className={cn('w-1.5 h-1.5 rounded-full', contact.clerkUserId ? 'bg-emerald-400' : 'bg-[var(--color-border)]')} />
                       {contact.clerkUserId ? 'Portal access' : 'No portal access'}
                     </span>
-                    <button
-                      onClick={() => handleStartDm(contact)}
-                      disabled={startingDm === contact.id}
-                      className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full bg-[var(--color-brand-50)] text-[var(--color-brand)] hover:bg-[var(--color-brand-100)] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
-                      aria-label={`Message ${contact.name}`}
-                      style={{ minHeight: '1.375rem' }}
-                    >
-                      <MessageSquare className="w-3 h-3" aria-hidden="true" />
-                      {startingDm === contact.id ? 'Opening...' : 'Message'}
-                    </button>
                   </div>
 
                   {/* Invite to portal. This is the only in-product way to hand a
@@ -3872,31 +3831,6 @@ function CallRow({ call, onStatusChange }: { call: ScheduledCallRow; onStatusCha
           </select>
         </div>
       )}
-    </div>
-  )
-}
-
-// ── Messages tab ──────────────────────────────────────────────────────────────
-
-function MessagesTab({ orgName }: { clientId: string; orgName: string }) {
-  const router = useRouter()
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="font-semibold text-[var(--color-text)]">Messages</h2>
-        <TahiButton variant="primary" size="sm" onClick={() => router.push('/messages')}>
-          <MessageSquare className="w-3.5 h-3.5 mr-1.5" />
-          Open Messages
-        </TahiButton>
-      </div>
-
-      <EmptyState
-        variant="inline"
-        icon={<MessageSquare className="w-8 h-8" />}
-        title={`Conversations with ${orgName}`}
-        description="Open the messaging page to view and manage conversations with this client."
-      />
     </div>
   )
 }
