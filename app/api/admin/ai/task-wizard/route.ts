@@ -509,7 +509,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(response)
   } catch (err: unknown) {
-    console.error('Claude Haiku API error:', err)
+    // No log here: the deterministic fallback below covers every failure, and
+    // a console.error in a Worker route is both noise and a CLAUDE.md rule 5
+    // breach.
 
     // Check for rate limiting
     if (err instanceof Error && 'status' in err) {
