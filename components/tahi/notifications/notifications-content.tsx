@@ -347,6 +347,9 @@ export function NotificationsContent({
 
   const switchTab = useCallback((next: Tab) => {
     if (next === tab) return
+    // Straight to loading, not through a frame of "you are all caught up":
+    // clearing the rows before the read lands would flash the empty state.
+    setState('loading')
     setTab(next)
     setRows([])
     setCursor(null)
@@ -538,9 +541,12 @@ export function NotificationsContent({
         {/* The read-state lens and Clear stay in the toolbar, which never
             scrolls sideways; only the kind filters sit in the chip row. */}
         <div className="pa-bar">
+          {/* A group of pressed buttons rather than a tablist: there is one
+              list below, not two panels, and an incomplete tab pattern reads
+              worse to a screen reader than an honest toggle. */}
           <div
             className="pa-seg"
-            role="tablist"
+            role="group"
             aria-label="Notification history"
             style={{ ['--pa-seg-n' as string]: 2, ['--pa-seg-i' as string]: tab === 'past' ? 1 : 0 }}
           >
@@ -549,8 +555,7 @@ export function NotificationsContent({
               <button
                 key={t}
                 type="button"
-                role="tab"
-                aria-selected={tab === t}
+                aria-pressed={tab === t}
                 className={'pa-seg-b tahi-focus-ring' + (tab === t ? ' on' : '')}
                 onClick={() => switchTab(t)}
               >
