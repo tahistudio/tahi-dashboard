@@ -79,12 +79,20 @@ function dateFromKey(dayKey: string): Date {
   return new Date(year, month - 1, day)
 }
 
-/** 'Monday 8 Sep' for any day key, read back off the strip that day sits in
- *  rather than formatted a second time here. A keyboard move and a drop onto
- *  the same cell then word the toast identically. */
-function dayLabelFor(dayKey: string): string {
+/**
+ * 'Monday' for any day key, read back off the strip that day sits in rather
+ * than formatted a second time here. A keyboard nudge and a drop onto the
+ * same cell then word the toast identically.
+ *
+ * The weekday on its own, not the cell's 'Monday 8 Sep' label: the shell
+ * lowercases whatever name it is handed before it toasts it, which one word
+ * survives and a month abbreviation does not. That lowercasing is in a file
+ * this slice does not own, so the string is chosen to read correctly either
+ * way, and it matches what a drop on a day card already says.
+ */
+function dayNameFor(dayKey: string): string {
   const cell = buildWeekStrip([], dateFromKey(dayKey)).find(d => d.dayKey === dayKey)
-  return cell?.label ?? dayKey
+  return cell?.name ?? dayKey
 }
 
 const WEEK_CSS = `
@@ -487,14 +495,13 @@ export function TasksWeek({
     void onPlan(taskId, group.dueDate ?? null, group.name).catch(() => undefined)
   }
 
-  /** The day card a strip cell points at. A day already gone falls back to
-   *  Overdue and a day past Sunday to Later, because those are the cards that
-   *  actually hold those tasks. Empty string when there is no card to show. */
+  /** The day card a strip cell points at. A day past this Sunday falls back
+   *  to Later, because that is the card that actually holds those tasks, and
+   *  buildWeekGroups always emits it. Only ever asked about a day that has
+   *  not gone: a past cell takes neither a click nor a drop. */
   function dayCardKey(day: StripDay): string {
     const exact = groups.find(g => g.dueDate === day.dayKey)
-    if (exact) return exact.key
-    const fallback = day.isPast ? 'overdue' : 'later'
-    return groups.some(g => g.key === fallback) ? fallback : ''
+    return exact ? exact.key : 'later'
   }
 
   /** 600ms of the focus ring on a day card, so a drop or a keyboard jump says
@@ -508,7 +515,6 @@ export function TasksWeek({
 
   function revealDay(day: StripDay, focus: boolean) {
     const key = dayCardKey(day)
-    if (!key) return
     const card = dayRefs.current.get(key)
     if (!card) return
     card.scrollIntoView({ block: 'nearest' })
@@ -520,7 +526,9 @@ export function TasksWeek({
     if (!dragId || !day.droppable || readOnly) return
     const taskId = dragId
     endDrag()
-    void onPlan(taskId, day.dayKey, day.label).catch(() => undefined)
+    // day.name, not day.label, for the reason dayNameFor states: the toast
+    // this feeds is lowercased upstream, and one word survives that.
+    void onPlan(taskId, day.dayKey, day.name).catch(() => undefined)
     revealDay(day, false)
   }
 
@@ -544,8 +552,16 @@ export function TasksWeek({
       case 'End': e.preventDefault(); moveStripFocus(6); break
       case 'PageUp': e.preventDefault(); pageWeek(-1, index); break
       case 'PageDown': e.preventDefault(); pageWeek(1, index); break
+      // A day already gone is announced as unavailable, so it does nothing
+      // here either. Arrow, Home, End and the page keys stay live on it:
+      // moving across the strip is navigation, not the cell's action.
       case 'Enter':
-      case ' ': e.preventDefault(); revealDay(strip[index], true); break
+      case ' ': {
+        e.preventDefault()
+        const day = strip[index]
+        if (!day.isPast) revealDay(day, true)
+        break
+      }
       default: break
     }
   }
@@ -560,7 +576,7 @@ export function TasksWeek({
     }
     const base = task.dueDate ? task.dueDate.slice(0, 10) : dayKey
     const next = taskShiftedDayKey(dateFromKey(base), key === 'ArrowRight' ? 1 : -1)
-    void onPlan(task.id, next, dayLabelFor(next)).catch(() => undefined)
+    void onPlan(task.id, next, dayNameFor(next)).catch(() => undefined)
   }
 
   function renderRow(task: TaskRow) {
@@ -692,7 +708,11 @@ export function TasksWeek({
   function renderStrip() {
     // A bar on a week with nothing in it says nothing, so the track only
     // appears once something is planned. Inside such a week every cell keeps
-    // its track, empty or not, so the counts under them stay on one line.
+    // its track, empty or not, for two reasons: the counts under them stay on
+    // one line, and stripLoad reads hours first, so a day carrying two
+    // unestimated tasks scores 0 next to a day with an estimate. Hiding its
+    // track would read as an empty day while the count beneath said 2. An
+    // empty track next to a full one is the honest picture.
     const hasLoad = strip.some(d => d.count > 0)
 
     return (
@@ -719,7 +739,12 @@ export function TasksWeek({
             <button
               type="button"
               className="tskw-now tahi-focus-ring"
-              onClick={() => setWeekOffset(0)}
+              // This button unmounts itself the moment it does its job, so
+              // without a deliberate hand-off the focus it was holding falls
+              // to <body> and the next Tab restarts at the top of the page.
+              // The same flag PageUp and PageDown set lands it on the roving
+              // cell instead, which after a reset is today.
+              onClick={() => { refocusRef.current = true; setWeekOffset(0) }}
             >
               This week
             </button>
@@ -742,12 +767,14 @@ export function TasksWeek({
                 ].filter(Boolean).join(' ')}
                 title={day.label}
                 aria-label={`${day.label}, ${day.count} ${day.count === 1 ? 'task' : 'tasks'}`}
-                // Not disabled: a day that has gone still reads out, still
-                // takes the roving tabindex, and still jumps to Overdue.
+                // aria-disabled rather than disabled: a day that has gone
+                // still reads out and still takes the roving tabindex. It is
+                // announced as unavailable and it is, so it carries no click
+                // and no Enter either. Its cursor already says so.
                 aria-disabled={day.isPast ? true : undefined}
                 tabIndex={index === activeIndex ? 0 : -1}
                 onFocus={() => setStripIndex(index)}
-                onClick={() => revealDay(day, false)}
+                onClick={day.isPast ? undefined : () => revealDay(day, false)}
                 onKeyDown={e => handleCellKey(e, index)}
                 onDragOver={canDrop ? e => { e.preventDefault(); setOverKey(day.key) } : undefined}
                 // The same guard the day cards use: a leave into a child is
