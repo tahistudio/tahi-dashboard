@@ -21,9 +21,9 @@ Tier 3, the rest: financial reports, reports, sales analytics, calculator, annou
 
 ## Status board (tick as landed; evidence in TASKS.md)
 
-- [ ] Tier 1 designed
-- [ ] Tier 1 ported and client-walked
-- [ ] Tier 2 designed
+- [x] Tier 1 designed
+- [x] Tier 1 ported and client-walked (Files as Drive and client Messages need schema; follow-ups listed in TASKS PP.2 to PP.4)
+- [~] Tier 2 designed (Clients done and ported; sales stack designers still writing at 06:05)
 - [ ] Tier 2 ported
 - [ ] Tier 3 designed
 - [ ] Tier 3 ported
@@ -63,6 +63,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 - 05:18 NZST sales design: two of three designers done (pipeline, artifacts or ops), the third never produced a transcript and the run sat idle 26 minutes; stopped and resumed from cache so only the missing designer and the three critics run.
 
 - 05:40 NZST client walk report in (4 blockers, 8 important, 8 minor; saved). Fixer launched for the preview-fidelity blocker (admin pages inside Client view), client currency pinning, a branded not-found page, the TRIAGE leak, dark-mode rail contrast, banner copy. The rest sits inside the portal port slices or the morning list.
+
+- 06:05 NZST portal port merged (home, money, account; 2680 tests, build green), render-checked as a client at desktop, 375 and dark on the QA server (all pages render, no overflow, no page errors; the QA snapshot's own 500 on one portal read remains local), pushed and deploying. Prototype fixer restarted after a hung render.
 
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 

@@ -1,4 +1,4 @@
-# Morning report, Saturday 6 September 2026 (draft, finalised at 07:30 NZST)
+# Morning report, Sunday 6 September 2026 (draft, finalised at 07:30 NZST)
 
 Kia ora Liam. This is what happened between 22:50 last night and 07:30 this morning. Everything below marked LIVE is on portal.tahi.studio, passed type-check, lint, the full test suite and a build, and was smoke-tested in a browser after the deploy. Everything marked DESIGNED is in the Claude Design project "Tahi dashboard" for you to comment on.
 
