@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { buildWeekGroups, formatHours, weekSummary } from './tasks-planner'
-import type { TaskRow } from './tasks-views'
+import {
+  buildWeekGroups,
+  buildWeekStrip,
+  formatHours,
+  stripLoad,
+  stripRangeLabel,
+  weekSummary,
+} from './tasks-planner'
+import { taskShiftedDayKey, type TaskRow } from './tasks-views'
 
 const WEDNESDAY = new Date(2026, 8, 9, 9, 0, 0) // getDay() === 3
 const SUNDAY = new Date(2026, 8, 13, 9, 0, 0)   // getDay() === 0
@@ -24,6 +31,17 @@ function row(over: Partial<TaskRow> = {}): TaskRow {
     updatedAt: null,
     ...over,
   }
+}
+
+function taskOn(dueDate: string | null, estimatedHours: number | null = null): TaskRow {
+  return row({ dueDate, estimatedHours })
+}
+
+/** Shift a YYYY-MM-DD key by whole days. Built on the production date maths so
+ *  the paging assertion cannot drift from what the strip actually writes. */
+function shiftKey(dayKey: string, days: number): string {
+  const [year, month, day] = dayKey.split('-').map(Number)
+  return taskShiftedDayKey(new Date(year, month - 1, day), days)
 }
 
 describe('formatHours', () => {
@@ -105,5 +123,117 @@ describe('weekSummary', () => {
       WEDNESDAY,
     )
     expect(out).toEqual({ overdue: 1, today: 1, week: 2, estimatedHours: 6 })
+  })
+})
+
+describe('buildWeekStrip', () => {
+  it('always returns seven cells, whatever day it is', () => {
+    expect(buildWeekStrip([], WEDNESDAY)).toHaveLength(7)
+    expect(buildWeekStrip([], SUNDAY)).toHaveLength(7)
+  })
+
+  it('starts on Monday every time, so the strip does not slide under you', () => {
+    for (const now of [WEDNESDAY, SUNDAY]) {
+      const strip = buildWeekStrip([], now)
+      expect(strip[0].name).toBe('Monday')
+      expect(strip[6].name).toBe('Sunday')
+      expect(strip.map(d => d.letter)).toEqual(['M', 'T', 'W', 'T', 'F', 'S', 'S'])
+    }
+  })
+
+  it('marks exactly one cell as today, and only inside the current week', () => {
+    const thisWeek = buildWeekStrip([], WEDNESDAY)
+    expect(thisWeek.filter(d => d.isToday)).toHaveLength(1)
+    expect(buildWeekStrip([], WEDNESDAY, 1).some(d => d.isToday)).toBe(false)
+    expect(buildWeekStrip([], WEDNESDAY, -1).some(d => d.isToday)).toBe(false)
+  })
+
+  it('refuses a drop on a day that has already gone', () => {
+    const strip = buildWeekStrip([], WEDNESDAY)
+    const past = strip.filter(d => d.isPast)
+    expect(past.length).toBeGreaterThan(0)
+    expect(past.every(d => !d.droppable)).toBe(true)
+    expect(strip.filter(d => !d.isPast).every(d => d.droppable)).toBe(true)
+  })
+
+  it('counts a task on its own day and nowhere else', () => {
+    const strip = buildWeekStrip([taskOn('2026-09-10', 3)], WEDNESDAY)
+    const thursday = strip.find(d => d.dayKey === '2026-09-10')!
+    expect(thursday.count).toBe(1)
+    expect(thursday.estimatedHours).toBe(3)
+    expect(strip.filter(d => d.count > 0)).toHaveLength(1)
+  })
+
+  it('ignores undated work and anything outside the shown week', () => {
+    const strip = buildWeekStrip(
+      [taskOn(null), taskOn('2026-10-01'), taskOn('2025-01-01')],
+      WEDNESDAY,
+    )
+    expect(strip.every(d => d.count === 0)).toBe(true)
+  })
+
+  it('agrees with buildWeekGroups on every day they both cover', () => {
+    const rows = [
+      taskOn('2026-09-09', 2), taskOn('2026-09-10', 1.5),
+      taskOn('2026-09-10'), taskOn('2026-09-13', 4),
+    ]
+    const strip = buildWeekStrip(rows, WEDNESDAY)
+    const groups = buildWeekGroups(rows, WEDNESDAY)
+    for (const group of groups) {
+      if (!group.dueDate) continue
+      const cell = strip.find(d => d.dayKey === group.dueDate)
+      if (!cell) continue
+      expect(cell.count).toBe(group.tasks.length)
+      expect(cell.estimatedHours).toBeCloseTo(group.estimatedHours, 5)
+    }
+  })
+
+  it('splits the flat Overdue bucket back out per day', () => {
+    const rows = [taskOn('2026-09-07'), taskOn('2026-09-08'), taskOn('2026-09-08')]
+    const strip = buildWeekStrip(rows, WEDNESDAY)
+    expect(strip.find(d => d.dayKey === '2026-09-07')!.count).toBe(1)
+    expect(strip.find(d => d.dayKey === '2026-09-08')!.count).toBe(2)
+  })
+
+  it('pages a whole week at a time and writes the dates that page would plan', () => {
+    const here = buildWeekStrip([], WEDNESDAY)
+    const next = buildWeekStrip([], WEDNESDAY, 1)
+    expect(next[0].dayKey).toBe(shiftKey(here[0].dayKey, 7))
+    expect(next.every(d => d.droppable)).toBe(true)
+  })
+})
+
+describe('stripLoad', () => {
+  it('scales to the busiest day rather than an invented day length', () => {
+    const days = buildWeekStrip(
+      [taskOn('2026-09-09', 2), taskOn('2026-09-10', 4)],
+      WEDNESDAY,
+    )
+    const light = days.find(d => d.dayKey === '2026-09-09')!
+    const heavy = days.find(d => d.dayKey === '2026-09-10')!
+    expect(stripLoad(heavy, days)).toBe(1)
+    expect(stripLoad(light, days)).toBeCloseTo(0.5, 5)
+  })
+
+  it('falls back to counts when nothing carries an estimate', () => {
+    const days = buildWeekStrip([taskOn('2026-09-09'), taskOn('2026-09-10'), taskOn('2026-09-10')], WEDNESDAY)
+    expect(stripLoad(days.find(d => d.dayKey === '2026-09-10')!, days)).toBe(1)
+    expect(stripLoad(days.find(d => d.dayKey === '2026-09-09')!, days)).toBeCloseTo(0.5, 5)
+  })
+
+  it('is zero on an empty week rather than dividing by nothing', () => {
+    const days = buildWeekStrip([], WEDNESDAY)
+    expect(stripLoad(days[0], days)).toBe(0)
+  })
+})
+
+describe('stripRangeLabel', () => {
+  it('names one month once', () => {
+    expect(stripRangeLabel(buildWeekStrip([], WEDNESDAY))).toBe('7 to 13 Sep')
+  })
+
+  it('names both months when the week crosses one', () => {
+    const label = stripRangeLabel(buildWeekStrip([], new Date(2026, 8, 30)))
+    expect(label).toBe('28 Sep to 4 Oct')
   })
 })

@@ -2672,3 +2672,30 @@ html.reduce-motion *::after {
     border-bottom: none;
   }
 }
+
+/* ============================================================
+   TASKS: MY WEEK STRIP, SMALL SCREENS
+   ============================================================
+   Seven cells share the summary plate's inner width. At 375px that is about
+   41px each once the page and plate padding are taken out, so two lines give
+   way before the cell does: the count goes first, then the day number steps
+   down. Every cell keeps its 2.75rem height, and the grid is
+   repeat(7, minmax(0, 1fr)) so it can never push a horizontal scrollbar.
+
+   These live here rather than in the component's own <style> because they
+   are the one rule set that has to survive a viewport change independently
+   of it, and they are deliberately UNLAYERED and one step more specific than
+   the base rules: the component's <style> is unlayered too, so a layered
+   rule here would lose to it whatever its specificity. */
+@media (max-width: 26.5rem) {
+  .tskw-strip .tskw-cell-n {
+    display: none;
+  }
+  .tskw-strip .tskw-cell-num {
+    min-width: 1.375rem;
+    font-size: 0.75rem;
+  }
+  .tskw-strip .tskw-cells {
+    gap: 0.125rem;
+  }
+}
