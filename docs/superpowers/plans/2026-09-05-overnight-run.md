@@ -23,11 +23,11 @@ Tier 3, the rest: financial reports, reports, sales analytics, calculator, annou
 
 - [x] Tier 1 designed
 - [x] Tier 1 ported and client-walked (Files as Drive and client Messages need schema; follow-ups listed in TASKS PP.2 to PP.4)
-- [~] Tier 2 designed (Clients done and ported; sales stack designers still writing at 06:05)
-- [ ] Tier 2 ported
-- [ ] Tier 3 designed
-- [ ] Tier 3 ported
-- [ ] Morning report written (docs/superpowers/plans/2026-09-06-morning-report.md)
+- [x] Tier 2 designed (Clients ported; sales pipeline, sales artifacts and ops designed with previews, critics partly done, shell wiring pending)
+- [~] Tier 2 ported (Clients only; sales and ops ports next)
+- [ ] Tier 3 designed (not reached)
+- [ ] Tier 3 ported (not reached)
+- [x] Morning report written (docs/superpowers/plans/2026-09-06-morning-report.md)
 
 ## Rules that stay on
 
@@ -72,6 +72,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 - 06:25 NZST INCIDENT: the client-walk fix deploy (c14169bc) broke production: every signed-in page 500 (server-side exception), unauthenticated pages 404. All checks had passed. Reverted (4f905464, c96c8c2d) and redeployed within 12 minutes; production back on the portal-port tree. Diagnosis agent running; PP.5 stays open. Lesson recorded: a post-deploy health probe joins every deploy chain.
 
 - 06:35 NZST rollback deploy (c96c8c2d) verified in the browser: production back (Clients renders, 28 clients, no application error). Diagnosis saved: the dashboard layout called resolvePinnedCurrency from a use-client module on the server; fix is to move three pure helpers into lib/currency.ts. PP.5 re-lands today after a QA render check plus a post-deploy health probe. Sales design (third designer + critics) and the portal prototype fixer resumed at 06:22 and still running.
+
+- 07:26 NZST final tick: sales stack fully designed (pipeline, artifacts, ops) with one critic done (ops: all FIX) and two still running; portal prototype fixer still working after two restarts. Run closed; no new work after 07:30.
 
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
