@@ -2620,8 +2620,17 @@ html.reduce-motion *::after {
       up width. The Task cell declares container-name: tsk-task, so this is
       measured against the CELL, not the viewport: a wide window with a
       narrow Task column thins the chips too, which a media query could not
-      do. The level chip is deliberately absent, because it carries the
-      client avatar and is the one chip that never thins.
+      do. The level chip is deliberately absent: it carries the client NAME,
+      and a name whose icon vanished would read as a bare word with a slash
+      in front of it. It thins from the inside instead, ellipsing the client
+      inside its own max-width, so its icon and its level word always stay.
+      That only works because the span wrapping it in tasks-list.tsx carries
+      min-width: 0. Without it the wrapper's automatic minimum is the chip's
+      min-content, the chip's max-width: 100% resolves against that floor and
+      never clamps, and the chip overflows the Task cell instead of ellipsing.
+      Measured headless at the name's 7.5rem cap: the chip wants 204px, so
+      without the min-width it hangs out of a 192px cell, and with it the
+      chip clamps to 192px and the client name takes the whole loss.
    2. The Task cell is a size container, and a size container contributes
       nothing to the intrinsic width of its ancestors. DataTable wraps the
       first column's body in a flex row so the expand chevron can lead it,

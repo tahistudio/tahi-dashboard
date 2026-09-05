@@ -4,10 +4,10 @@
  * <TasksList>. The List view: the quick-add bar, the bulk bar when rows are
  * selected, and the table itself.
  *
- * Built on <DataTable> with expandedRowMode="rows", so a row's subtask panel
- * is real <tr>s in the same <tbody> and its columns line up with the parent's
- * for free. Below md the table is replaced by mobileCard, which is the one
- * layout DataTable mounts once it has measured the width.
+ * Built on <DataTable> with expandedRowMode="rows", so a row's checklist
+ * panel is real <tr>s in the same <tbody> and its columns line up with the
+ * parent's for free. Below md the table is replaced by mobileCard, which is
+ * the one layout DataTable mounts once it has measured the width.
  *
  * This component fetches nothing and stores nothing. Every mutation leaves
  * through a callback so the shell can make it optimistic in one place.
@@ -235,7 +235,13 @@ function TitleCell({
           flexShrink: 1,
         }}
       >
-        <span style={{ display: 'inline-flex', opacity: done ? 0.7 : 1 }}>
+        {/* minWidth 0 is load-bearing, not tidiness: without it this wrapper's
+            automatic minimum is the chip's min-content (icon, level word,
+            separator and the full 7.5rem of client name, 204px measured), the
+            chip's own maxWidth 100% resolves against that floor and never
+            clamps, and a Task cell at its own 12rem minimum gets an
+            overflowing chip instead of an ellipsed client name. */}
+        <span style={{ display: 'inline-flex', minWidth: 0, opacity: done ? 0.7 : 1 }}>
           <LevelChip level={levelOf(row)} clientName={row.orgName} />
         </span>
         {row.requestId && (
@@ -308,7 +314,7 @@ function PriorityCell({ priority }: { priority: string }) {
   )
 }
 
-// ── Subtask panel ───────────────────────────────────────────────────────────
+// ── Checklist panel ─────────────────────────────────────────────────────────
 
 /** One full-width cell under the parent row. The panel has no columns to line
  *  up with, so it spans them all and indents with padding, exactly as the
@@ -384,7 +390,7 @@ function SubtaskRow({
         {!readOnly && onRemove && (
           <button
             type="button"
-            aria-label={`Remove subtask ${subtask.title}`}
+            aria-label={`Remove checklist item ${subtask.title}`}
             className="tahi-focus-ring inline-flex items-center justify-center w-11 h-11 md:w-[1.625rem] md:h-[1.625rem]"
             onClick={e => { e.stopPropagation(); onRemove() }}
             style={{
@@ -483,13 +489,13 @@ function AddSubtaskRow({
     setSaving(true)
     try {
       await onAddSubtask(taskId, title)
-      // The field stays open and empty: naming three subtasks in a row is
-      // the normal case, and reopening it each time is three extra clicks.
+      // The field stays open and empty: naming three checklist items in a row
+      // is the normal case, and reopening it each time is three extra clicks.
       if (mountedRef.current) setDraft('')
     } catch {
       // The draft stays in the field on purpose, the same bargain the
       // quick-add strikes: retrying is one keypress, retyping is not.
-      if (mountedRef.current) showToast("Couldn't add the subtask", 'error')
+      if (mountedRef.current) showToast("Couldn't add the checklist item", 'error')
     } finally {
       savingRef.current = false
       if (mountedRef.current) setSaving(false)
@@ -512,8 +518,8 @@ function AddSubtaskRow({
             // freezes the text and keeps the caret exactly where it was.
             readOnly={saving}
             aria-busy={saving}
-            aria-label="New subtask"
-            placeholder="Name the subtask, press Enter"
+            aria-label="New checklist item"
+            placeholder="Name a checklist item, press Enter"
             className="tahi-focus-ring"
             onChange={e => setDraft(e.target.value)}
             onBlur={() => {
@@ -573,7 +579,7 @@ function AddSubtaskRow({
         }}
       >
         <Plus size={13} strokeWidth={2.4} aria-hidden="true" />
-        Add subtask
+        Add checklist item
       </button>
     </PanelRow>
   )
@@ -853,7 +859,7 @@ export function TasksList(props: TasksListProps): React.ReactElement {
     },
   ], [people, readOnly, onToggleDone, onOpenRequest, onStatusChange])
 
-  // ── Expanded subtask rows ─────────────────────────────────────────────────
+  // ── Expanded checklist rows ───────────────────────────────────────────────
 
   const renderSubtaskRows = React.useCallback((row: TaskRow, table: DataTableExpandedContext) => {
     // No entry yet AND a zero count is the empty case, not the loading one:
@@ -887,7 +893,7 @@ export function TasksList(props: TasksListProps): React.ReactElement {
                 color: 'var(--color-text-subtle)',
               }}
             >
-              No subtasks yet.
+              No checklist items yet.
             </span>
           </PanelRow>
         )}
@@ -986,7 +992,7 @@ export function TasksList(props: TasksListProps): React.ReactElement {
           expandedRowMode="rows"
           expandedIds={expandedIds}
           onExpandedChange={handleExpandedChange}
-          expandAllLabel="subtasks"
+          expandAllLabel="checklist items"
           mobileCard={renderMobileCard}
           empty={hasFilter ? (
             <TasksEmpty

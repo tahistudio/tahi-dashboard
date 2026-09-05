@@ -217,6 +217,12 @@ interface KanbanBoardProps {
    *  (the default) or "task". Drives the collapsed button, the textarea
    *  placeholder and its accessible name. */
   quickAddNoun?: string
+  /** What `item.subtasks` counts, in the singular and lower case: "subtask"
+   *  (the default, which is what the Requests board's sub-request rollup has
+   *  always read) or "checklist item" on the Tasks board. Drives the visible
+   *  label under the card's progress bar and the toggle's accessible name, so
+   *  a card and the list row beside it name the same thing the same way. */
+  rollupNoun?: string
   /** Click a checklist checkbox. */
   onToggleChecklist?: (itemId: string, checklistItemId: string) => void
   /** Click a card body (not the chips / checkboxes). */
@@ -362,6 +368,7 @@ export function KanbanBoard({
   canAddTo,
   quickAddHint,
   quickAddNoun = 'request',
+  rollupNoun = 'subtask',
   onToggleChecklist,
   onItemClick,
   onAssigneeClick,
@@ -544,6 +551,7 @@ export function KanbanBoard({
                   subtaskUrl={subtaskUrl?.(card) ?? null}
                   subtasksOpen={openSubtasks.has(card.id)}
                   onToggleSubtasks={toggleSubtasks}
+                  rollupNoun={rollupNoun}
                 />
               ))
             )}
@@ -1106,6 +1114,7 @@ function BoardCard({
   subtaskUrl = null,
   subtasksOpen = false,
   onToggleSubtasks,
+  rollupNoun = 'subtask',
 }: {
   item: BoardItem
   dragging?: boolean
@@ -1128,6 +1137,7 @@ function BoardCard({
   subtaskUrl?: string | null
   subtasksOpen?: boolean
   onToggleSubtasks?: (itemId: string) => void
+  rollupNoun?: string
 }) {
   const [checklistOpen, setChecklistOpen] = React.useState(false)
   const checklist = item.checklist ?? []
@@ -1302,6 +1312,7 @@ function BoardCard({
             url={subtaskUrl}
             open={subtasksOpen}
             onToggle={onToggleSubtasks}
+            noun={rollupNoun}
           />
         )}
 
@@ -1733,6 +1744,7 @@ function CardSubtasks({
   url,
   open,
   onToggle,
+  noun = 'subtask',
 }: {
   itemId: string
   reference?: string
@@ -1741,10 +1753,12 @@ function CardSubtasks({
   url: string | null
   open: boolean
   onToggle?: (itemId: string) => void
+  noun?: string
 }) {
   const ratio = total > 0 ? done / total : 0
   const tone = done >= total ? 'var(--status-delivered-dot)' : 'var(--color-brand)'
-  const label = `${done} of ${total} subtask${total === 1 ? '' : 's'}`
+  const plural = `${noun}${total === 1 ? '' : 's'}`
+  const label = `${done} of ${total} ${plural}`
   const expandable = !!url && !!onToggle
 
   const bar = (
@@ -1779,7 +1793,7 @@ function CardSubtasks({
           type="button"
           className="tahi-board-subs-bar tahi-focus-ring"
           aria-expanded={open}
-          aria-label={`${open ? 'Hide' : 'Show'} the ${total} subtask${total === 1 ? '' : 's'}${reference ? ` on ${reference}` : ''}`}
+          aria-label={`${open ? 'Hide' : 'Show'} the ${total} ${plural}${reference ? ` on ${reference}` : ''}`}
           draggable={false}
           // The card is the drag source. Without this, pressing the bar
           // and moving would drag the card instead of toggling.
