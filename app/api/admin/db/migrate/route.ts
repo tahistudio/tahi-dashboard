@@ -2011,6 +2011,15 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE organisations ADD COLUMN payment_terms text`,
     ],
   },
+  {
+    name: '0087',
+    description: 'tasks.estimated_hours plus assignee and due-date indexes',
+    statements: [
+      `ALTER TABLE tasks ADD COLUMN estimated_hours real`,
+      `CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

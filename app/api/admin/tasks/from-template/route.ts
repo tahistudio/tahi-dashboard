@@ -3,6 +3,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { requireAccessToOrg } from '@/lib/require-access'
+
+/** Task templates carry their own six-value priority enum (none, low,
+ *  medium, standard, high, urgent) while a task takes three. Mapping here is
+ *  what stops a "medium" template creating a task PATCH then refuses to
+ *  touch. */
+const TEMPLATE_PRIORITY_ALIASES: Record<string, string> = {
+  none: 'standard', low: 'standard', medium: 'standard',
+  standard: 'standard', high: 'high', urgent: 'urgent',
+}
 
 // ── POST /api/admin/tasks/from-template ────────────────────────────────────
 // Create a new task (and its subtasks) from a template
@@ -28,6 +38,13 @@ export async function POST(req: NextRequest) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
+  // Guarded on body.orgId being set, because requireAccessToOrg answers 404
+  // for a null target and a template with no client is the studio's own.
+  if (body.orgId) {
+    const denied = await requireAccessToOrg(drizzle, userId, body.orgId)
+    if (denied) return denied
+  }
+
   // Load the template
   const [template] = await drizzle
     .select()
@@ -49,6 +66,7 @@ export async function POST(req: NextRequest) {
 
   const taskId = crypto.randomUUID()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const priority = TEMPLATE_PRIORITY_ALIASES[template.defaultPriority] ?? 'standard'
 
   // Create the task from template fields
   await drizzle.insert(schema.tasks).values({
@@ -58,10 +76,14 @@ export async function POST(req: NextRequest) {
     title: template.name,
     description: template.description ?? null,
     status: 'todo',
-    priority: template.defaultPriority,
+    priority,
     assigneeId: body.assigneeId ?? null,
     assigneeType: body.assigneeId ? 'team_member' : null,
     dueDate: null,
+    // task_templates has carried an estimate all along and tasks gained the
+    // matching column in migration 0087, so the template's number is the one
+    // the detail's Estimate field and the My week total should start from.
+    estimatedHours: template.estimatedHours ?? null,
     createdById: userId,
     tags: '[]',
     trackId: body.trackId ?? null,

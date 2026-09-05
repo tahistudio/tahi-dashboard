@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
 import { Sparkles, Send, Loader2, Pencil, Check, ChevronDown } from 'lucide-react'
+import { useSWRConfig } from 'swr'
 import { apiPath } from '@/lib/api'
 import { SlideOver } from '@/components/tahi/slide-over'
 
@@ -45,6 +46,13 @@ interface AiTaskWizardProps {
    * action to hand the request's title/description/category to the wizard.
    */
   seed?: string
+  /**
+   * SWR keys to revalidate once the drafts have been created. Without this
+   * the caller's list keeps showing the state before the wizard ran, which
+   * is what made the request detail's Tasks panel look like the wizard had
+   * done nothing.
+   */
+  mutateKeys?: string[]
 }
 
 // ── Category and priority style maps ──────────────────────────────────────────
@@ -78,7 +86,8 @@ const INITIAL_MESSAGE: ChatMessage = {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
-export function AiTaskWizard({ open, onClose, onTasksCreated, context = {}, seed }: AiTaskWizardProps) {
+export function AiTaskWizard({ open, onClose, onTasksCreated, context = {}, seed, mutateKeys }: AiTaskWizardProps) {
+  const { mutate } = useSWRConfig()
   const [messages, setMessages] = useState<ChatMessage[]>([INITIAL_MESSAGE])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -216,27 +225,18 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {}, seed
     try {
       const results: boolean[] = []
       for (const task of latestTasks.tasks) {
-        // Map wizard priority to schema priority (standard | high | urgent)
-        let mappedPriority = 'standard'
-        if (task.priority === 'urgent') mappedPriority = 'urgent'
-        else if (task.priority === 'high') mappedPriority = 'high'
-
-        // Task type: client_task when org is set, tahi_internal otherwise
-        const taskType = context.orgId ? 'client_task' : 'tahi_internal'
-
-        // Append category and estimated hours as metadata in description
-        const descParts = [task.description]
-        if (task.category) descParts.push(`\nCategory: ${task.category}`)
-        if (task.estimatedHours) descParts.push(`Estimated hours: ${task.estimatedHours}`)
-
         const res = await fetch(apiPath('/api/admin/tasks'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          // Estimate is a column now, so it stops being prose. Category has no
+          // column on a task and stays in the note, which is where the studio
+          // reads it anyway.
           body: JSON.stringify({
             title: task.title,
-            description: descParts.join('\n'),
-            type: taskType,
-            priority: mappedPriority,
+            description: task.category ? `${task.description}\n\nCategory: ${task.category}` : task.description,
+            type: context.orgId ? 'internal_client_task' : 'tahi_internal',
+            priority: task.priority === 'urgent' ? 'urgent' : task.priority === 'high' ? 'high' : 'standard',
+            estimatedHours: task.estimatedHours ?? null,
             orgId: context.orgId ?? null,
             // Link the task back to the originating request when the wizard was
             // opened from a request detail page.
@@ -244,6 +244,10 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {}, seed
           }),
         })
         results.push(res.ok)
+      }
+
+      for (const key of mutateKeys ?? []) {
+        await mutate(key)
       }
 
       const allOk = results.every(Boolean)
@@ -270,7 +274,7 @@ export function AiTaskWizard({ open, onClose, onTasksCreated, context = {}, seed
     } finally {
       setCreating(false)
     }
-  }, [latestTasks, creating, context.orgId, context.requestId, onTasksCreated])
+  }, [latestTasks, creating, context.orgId, context.requestId, onTasksCreated, mutateKeys, mutate])
 
   if (!open) return null
 

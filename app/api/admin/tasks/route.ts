@@ -2,8 +2,14 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, inArray, sql, asc } from 'drizzle-orm'
+import { eq, desc, and, inArray, isNull, or, sql, asc } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
+import { isTaskPriority } from '@/lib/task-priorities'
+import { TASK_STATUSES } from '@/lib/status-config'
+import { isTaskLevel, type TaskLevel } from '@/lib/tasks-views'
+import { coerceTaskLinks, setTaskLevel } from '@/lib/task-consistency'
+import { requestOrgId } from '@/lib/task-access'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 // ── GET /api/admin/tasks ───────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -50,12 +56,17 @@ export async function GET(req: NextRequest) {
     conditions.push(eq(schema.tasks.assigneeId, assigneeId))
   }
 
-  // If scoping returned a specific set of org IDs, filter to those
+  // If scoping returned a specific set of org IDs, filter to those. Tasks
+  // with no client are the STUDIO'S OWN list, so a scoped member sees them
+  // too: SQL `IN` never matches NULL, and without the explicit isNull the
+  // whole Tahi-internal half of this surface silently vanished for anyone
+  // who is not a super admin.
   if (scopedOrgIds !== null) {
     if (scopedOrgIds.length === 0) {
-      return NextResponse.json({ tasks: [] })
+      conditions.push(isNull(schema.tasks.orgId))
+    } else {
+      conditions.push(or(inArray(schema.tasks.orgId, scopedOrgIds), isNull(schema.tasks.orgId))!)
     }
-    conditions.push(inArray(schema.tasks.orgId, scopedOrgIds))
   }
 
   if (status && status !== 'all') {
@@ -97,6 +108,7 @@ export async function GET(req: NextRequest) {
       position: schema.tasks.position,
       requestId: schema.tasks.requestId,
       scheduleRowId: schema.tasks.scheduleRowId,
+      estimatedHours: schema.tasks.estimatedHours,
       createdAt: schema.tasks.createdAt,
       updatedAt: schema.tasks.updatedAt,
       orgName: schema.organisations.name,
@@ -187,57 +199,123 @@ export async function POST(req: NextRequest) {
     assigneeId?: string | null
     assigneeType?: string | null
     dueDate?: string | null
+    estimatedHours?: number | null
     trackId?: string | null
     position?: number | null
     requestId?: string | null
+    scheduleRowId?: string | null
+    subtasks?: string[]
   }
 
-  const { title, description, priority, assigneeId, assigneeType, dueDate } = body
-
-  if (!title?.trim()) {
+  const title = body.title?.trim()
+  if (!title) {
     return NextResponse.json({ error: 'Title is required' }, { status: 400 })
   }
 
-  // Decision #046: tasks are always Tahi-internal; the only distinction
-  // is whether the work is for a client. Source of truth is `orgId` presence.
-  // Legacy `type` is still accepted from callers (MCP, old clients) but
-  // auto-derived when omitted. Both legacy client-flavoured types collapse
-  // to the single `client_task` value now.
-  const resolvedType: string = body.orgId
-    ? 'client_task'
-    : (body.type === 'client_task' || body.type === 'internal_client_task' ? 'client_task' : 'tahi_internal')
+  // The three-level model is live again. Decision #046 collapsed the UI to a
+  // binary; the Tasks port brings back Client / Internal / Tahi as the chips
+  // the studio actually thinks in, so the route stops flattening the middle
+  // value. `orgId` presence is still what decides when the caller says
+  // nothing.
+  const requestedLevel = isTaskLevel(body.type) ? body.type : null
 
-  // If the caller chose a client-flavoured type but didn't supply orgId,
-  // that's still an error \u2014 we need to know which client.
-  if (resolvedType === 'client_task' && !body.orgId) {
-    return NextResponse.json({ error: 'Client is required for a client task' }, { status: 400 })
+  // Normalise before validating: a form with nothing selected posts
+  // `priority: null`, which the insert below already reads as standard, so
+  // 400ing on it answered "Invalid priority" for a field left blank.
+  const priority = body.priority ?? 'standard'
+  if (!isTaskPriority(priority)) {
+    return NextResponse.json({ error: 'Invalid priority' }, { status: 400 })
+  }
+
+  const status = body.status ?? 'todo'
+  if (!TASK_STATUSES.some(s => s.value === status)) {
+    return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
   }
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  // A caller that names a request but no client is naming the client too:
+  // linking adopts the request's client (setTaskRequest). Without this the
+  // level derived to tahi_internal and coerceTaskLinks then dropped the very
+  // request the caller asked for, silently, with a 201. An explicit
+  // tahi_internal still means "no links", so it never reaches the lookup.
+  let clientOrgId = body.orgId ?? null
+  if (!clientOrgId && body.requestId && requestedLevel !== 'tahi_internal') {
+    clientOrgId = await requestOrgId(drizzle, body.requestId)
+    if (!clientOrgId) {
+      return NextResponse.json({ error: 'Request not found' }, { status: 404 })
+    }
+  }
+
+  const level: TaskLevel = requestedLevel ?? (clientOrgId ? 'client_task' : 'tahi_internal')
+
+  if (level !== 'tahi_internal' && !clientOrgId) {
+    return NextResponse.json({ error: 'Client is required for a client task' }, { status: 400 })
+  }
+
+  // The one place a task is built from parts rather than edited, so the link
+  // invariants are enforced here rather than trusted from the caller.
+  //
+  // setTaskLevel runs first because an explicit tahi_internal MEANS "drop the
+  // links", which coerceTaskLinks on its own would read the other way round
+  // (as a level to repair upwards). Starting from client_task makes the call a
+  // no-op whenever that is the level asked for.
+  const links = coerceTaskLinks(setTaskLevel(
+    { level: 'client_task', orgId: clientOrgId, requestId: body.requestId ?? null },
+    level,
+  ))
+
+  // Rule 11 on the client the task is being filed under, which the caller
+  // chose. from-template guards its own orgId the same way; without this the
+  // create door was the one that did not.
+  if (links.orgId) {
+    const denied = await requireAccessToOrg(drizzle, userId, links.orgId)
+    if (denied) return denied
+  }
 
   const id = crypto.randomUUID()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
 
   await drizzle.insert(schema.tasks).values({
     id,
-    type: resolvedType,
-    orgId: resolvedType === 'tahi_internal' ? null : (body.orgId ?? null),
-    title: title.trim(),
-    description: description ?? null,
-    status: 'todo',
-    priority: priority ?? 'standard',
-    assigneeId: assigneeId ?? null,
-    assigneeType: assigneeType ?? null,
-    dueDate: dueDate ?? null,
+    type: links.level,
+    orgId: links.orgId,
+    title,
+    description: body.description ?? null,
+    status,
+    priority,
+    assigneeId: body.assigneeId ?? null,
+    assigneeType: body.assigneeType ?? null,
+    dueDate: body.dueDate ?? null,
+    estimatedHours: body.estimatedHours ?? null,
+    completedAt: status === 'done' ? now : null,
     createdById: userId,
     tags: '[]',
     trackId: body.trackId ?? null,
     position: body.position ?? null,
-    requestId: body.requestId ?? null,
+    requestId: links.requestId,
+    scheduleRowId: body.scheduleRowId || null,
     createdAt: now,
     updatedAt: now,
   })
+
+  // The new-task dialog and the template picker both hand over titles here.
+  // Before the port this key was accepted on the wire and dropped on the
+  // floor, so a checklist typed at creation vanished without a word.
+  const subtaskTitles = Array.isArray(body.subtasks)
+    ? body.subtasks.map(t => (typeof t === 'string' ? t.trim() : '')).filter(Boolean)
+    : []
+
+  for (const subtaskTitle of subtaskTitles) {
+    await drizzle.insert(schema.taskSubtasks).values({
+      id: crypto.randomUUID(),
+      taskId: id,
+      title: subtaskTitle,
+      completed: false,
+      createdAt: now,
+    })
+  }
 
   return NextResponse.json({ id }, { status: 201 })
 }

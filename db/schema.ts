@@ -860,6 +860,9 @@ export const tasks = sqliteTable('tasks', {
   requestId: text('request_id').references(() => requests.id),
   // Delivery spine (#148): the schedule gantt row this task delivers.
   scheduleRowId: text('schedule_row_id').references(() => scheduleRows.id, { onDelete: 'set null' }),
+  // The prototype's `est`. Backs the detail's Estimate field, the My week
+  // "Estimated" stat and the per-day hours line (migration 0087).
+  estimatedHours: real('estimated_hours'),
   ...timestamps,
 }, (table) => [
   index('idx_tasks_org').on(table.orgId),
@@ -868,6 +871,10 @@ export const tasks = sqliteTable('tasks', {
   index('idx_tasks_track').on(table.trackId),
   index('idx_tasks_request').on(table.requestId),
   index('idx_tasks_schedule_row').on(table.scheduleRowId),
+  // ?assignee=me is the default lens for every teammate and for the
+  // teammate Overview home, and the planner sorts on the due date.
+  index('idx_tasks_assignee').on(table.assigneeId),
+  index('idx_tasks_due').on(table.dueDate),
 ])
 
 // ============================================================

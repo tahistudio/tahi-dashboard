@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
+import { guardTask } from '@/lib/task-access'
 
 // ── GET /api/admin/tasks/[id]/dependencies ─────────────────────────────────
 // Returns both "blocks" (tasks this task blocks) and "blockedBy" (tasks blocking this one)
@@ -10,7 +11,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -19,16 +20,8 @@ export async function GET(
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // Verify task exists
-  const [task] = await drizzle
-    .select({ id: schema.tasks.id })
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, taskId))
-    .limit(1)
-
-  if (!task) {
-    return NextResponse.json({ error: 'Task not found' }, { status: 404 })
-  }
+  const denied = await guardTask(drizzle, userId, taskId)
+  if (denied) return denied
 
   // "blockedBy": tasks that this task depends on (this task is blocked by them)
   const blockedByRows = await drizzle
@@ -68,7 +61,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -89,26 +82,14 @@ export async function POST(
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // Validate both tasks exist
-  const [task] = await drizzle
-    .select({ id: schema.tasks.id })
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, taskId))
-    .limit(1)
+  // Both ends are guarded, not just checked for existence: linking a task
+  // you can see to one you cannot would leak the blocker's title straight
+  // back through the Waiting on card.
+  const denied = await guardTask(drizzle, userId, taskId)
+  if (denied) return denied
 
-  if (!task) {
-    return NextResponse.json({ error: 'Task not found' }, { status: 404 })
-  }
-
-  const [dependsOnTask] = await drizzle
-    .select({ id: schema.tasks.id })
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, dependsOnTaskId))
-    .limit(1)
-
-  if (!dependsOnTask) {
-    return NextResponse.json({ error: 'Dependency task not found' }, { status: 404 })
-  }
+  const dependencyDenied = await guardTask(drizzle, userId, dependsOnTaskId)
+  if (dependencyDenied) return dependencyDenied
 
   // Check for duplicate dependency
   const [existing] = await drizzle
