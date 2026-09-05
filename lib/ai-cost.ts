@@ -1,10 +1,10 @@
 /**
- * AI cost tracking helpers — Phase I · Slice 9.
+ * AI cost tracking helpers. Phase I · Slice 9.
  *
  * Every AI call in the content pipeline should be wrapped via `recordCost`
  * so we can enforce the per-article $10 cap and aggregate spend by stage,
  * reviewer, provider, or post. The estimator uses public per-model rate
- * cards as of 2026-05; bump the constants below if pricing changes.
+ * cards as of 2026-09; bump the constants below if pricing changes.
  *
  * All amounts are stored as USD cents (integer) so we don't carry floats
  * through D1. 1 cent = 0.01 USD.
@@ -16,13 +16,19 @@ import { and, eq } from 'drizzle-orm'
 
 type Database = Awaited<ReturnType<typeof db>>
 
-// Rate cards in USD per 1M tokens (input / output). Last verified 2026-05.
+// Rate cards in USD per 1M tokens (input / output). Last verified 2026-09.
 // Replicate / Originality / Embedding rates are per-call or per-unit.
+//
+// The Opus and Sonnet rows were three times and one and a half times the real
+// published price, which inflated every content-studio total and tripped the
+// $10 draft cap early. `estimateCostCents` runs at insert time and the result
+// is stored, so correcting the card changes future rows only: history keeps
+// the number it was written with and cannot be rewritten from here.
 export const RATE_CARD = {
   anthropic: {
-    'claude-opus-4-7':       { in: 15.00, out: 75.00 },
-    'claude-opus-4-8':       { in: 15.00, out: 75.00 },  // assumed == 4.7 until confirmed
-    'claude-sonnet-5':       { in: 3.00,  out: 15.00 },  // Sonnet 5 (current)
+    'claude-opus-4-7':       { in: 5.00,  out: 25.00 },
+    'claude-opus-4-8':       { in: 5.00,  out: 25.00 },
+    'claude-sonnet-5':       { in: 2.00,  out: 10.00 },  // Sonnet 5 (current)
     'claude-sonnet-4-6':     { in: 3.00,  out: 15.00 },
     'claude-sonnet-4-7':     { in: 3.00,  out: 15.00 },  // forward-compat
     'claude-haiku-4-5':      { in: 1.00,  out: 5.00 },
@@ -44,7 +50,10 @@ export const RATE_CARD = {
 } as const
 
 export type Provider = keyof typeof RATE_CARD
-export type Scope = 'draft' | 'ideation' | 'backfill' | 'links' | 'health' | 'site_index' | 'sitemap'
+/** `wizard` is the AI task and request wizards. It is scoped separately from
+ *  the content pipeline so wizard spend can be read next to content spend
+ *  rather than hiding inside it. */
+export type Scope = 'draft' | 'ideation' | 'backfill' | 'links' | 'health' | 'site_index' | 'sitemap' | 'wizard'
 
 export interface CostInput {
   scope: Scope
@@ -107,12 +116,12 @@ export async function getDraftSpendCents(database: Database, draftId: string): P
   return rows.reduce((sum, r) => sum + (r.cents ?? 0), 0)
 }
 
-/** Per-article cap in USD cents. Hard ceiling — orchestrator halts if
+/** Per-article cap in USD cents. Hard ceiling: the orchestrator halts if
  *  the next stage would push past this. */
 export const DRAFT_COST_CAP_CENTS = 1000  // $10
 
 /** When the cap is hit, estimate what the unfinished stages would have
- *  cost so we can surface "this draft was halted at $9.42 — the
+ *  cost so we can surface "this draft was halted at $9.42, the
  *  remaining 4 reviewers would have added ~$0.18" in the UI. */
 export const ESTIMATED_STAGE_COSTS_CENTS: Record<string, number> = {
   // Research

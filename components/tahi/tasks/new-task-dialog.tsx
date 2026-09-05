@@ -13,13 +13,21 @@
  * checklist now actually land, which they never did before: the old dialog
  * dropped both.
  *
+ * The dialog has two views, exactly as the new request dialog does. The form
+ * is one. The other is the AI panel: describe the work, or drop in a brief,
+ * and the draft comes back into these same fields for a human to check. The
+ * panel is mounted lazily so the tasks page does not pay for it on first
+ * paint, and the whole document capability rides along with it.
+ *
  * Nothing here posts. The draft goes to `onCreate`, which is the shell's job,
  * so this file has no idea what an endpoint is.
  */
 
 import * as React from 'react'
-import { ListChecks, Plus, X } from 'lucide-react'
+import dynamic from 'next/dynamic'
+import { ChevronRight, ListChecks, Plus, Sparkles, X } from 'lucide-react'
 import { SlideOver } from '@/components/tahi/slide-over'
+import { useToast } from '@/components/tahi/toast'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
 import { SegmentedControl } from '@/components/tahi/segmented-control'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -34,6 +42,16 @@ import {
 import { TASK_LEVELS, TASK_LEVEL_HINTS, isTaskLevel, type TaskLevel } from '@/lib/tasks-views'
 import { checklistCountLabel, LEVEL_ICON } from '@/components/tahi/tasks/task-chips'
 import type { TaskTemplateOption } from '@/components/tahi/tasks/task-types'
+import type { TaskFields } from '@/lib/task-wizard-drafts'
+
+/** Lazy, so the tasks page keeps deferring the wizard the way its own header
+ *  menu already does. The panel is the drawer's body with no shell. */
+const AiTaskWizardPanel = dynamic(
+  () => import('@/components/tahi/ai-task-wizard').then(m => ({ default: m.AiTaskWizardPanel })),
+  { ssr: false },
+)
+
+type DialogView = 'form' | 'ai'
 
 export interface NewTaskDraft {
   title: string
@@ -65,6 +83,8 @@ export interface NewTaskDialogProps {
   templates: readonly TaskTemplateOption[]
   /** Rejecting keeps the dialog open with the draft intact. */
   onCreate: (draft: NewTaskDraft) => Promise<void>
+  /** Open straight into the AI panel. Optional, and nothing passes it today. */
+  defaultView?: DialogView
 }
 
 /** Templates carry a six-value enum; a task takes three. */
@@ -209,7 +229,13 @@ export function NewTaskDialog({
   requests,
   templates,
   onCreate,
+  defaultView = 'form',
 }: NewTaskDialogProps): React.ReactElement {
+  const { showToast } = useToast()
+  const [view, setView] = React.useState<DialogView>(defaultView)
+  /** Bumped every time the AI view is entered, so each visit is a fresh
+   *  conversation rather than the last one still on screen. */
+  const [aiSession, setAiSession] = React.useState(0)
   const [templateId, setTemplateId] = React.useState<string | null>(null)
   const [links, setLinks] = React.useState<TaskLinkState>({
     level: 'tahi_internal',
@@ -249,6 +275,7 @@ export function NewTaskDialog({
   React.useEffect(() => {
     if (!open) return
     const orgId = initialOrgId ?? null
+    setView(defaultView)
     setTemplateId(initialTemplateId ?? null)
     setLinks(coerceTaskLinks({
       level: orgId ? 'internal_client_task' : 'tahi_internal',
@@ -284,6 +311,43 @@ export function NewTaskDialog({
     if (!next) return
     setSubtasks(list => [...list, next])
     setSubtaskDraft('')
+  }
+
+  /**
+   * The wizard's draft, landing in the fields the form already owns. Nothing
+   * is written here: the human reads it, changes what they want, and presses
+   * Create, the same as every other way into this dialog.
+   */
+  function handleDraftToForm(fields: TaskFields) {
+    const picked = fields.requestId
+      ? requests.find(r => r.id === fields.requestId) ?? null
+      : null
+    // A request whose client disagrees with the named one is a contradiction,
+    // not a link. The client wins and the request is left for the human.
+    const linkedRequest = picked && (!fields.orgId || picked.orgId === fields.orgId) ? picked : null
+    setLinks(coerceTaskLinks({
+      level: fields.type,
+      orgId: fields.orgId ?? linkedRequest?.orgId ?? null,
+      requestId: linkedRequest?.id ?? null,
+    }))
+    setTitle(fields.title)
+    setDescription(fields.description ?? '')
+    setPriority(fields.priority)
+    setDueDate(fields.dueDate ?? '')
+    setAssigneeId(fields.assigneeId)
+    setEstimate(fields.estimatedHours != null ? String(fields.estimatedHours) : '')
+    setSubtasks(fields.subtasks)
+    setView('form')
+    showToast('Draft ready. Review it below.')
+  }
+
+  /** The level only travels to the wizard when someone actually chose it.
+   *  Left alone, a draft that names a client becomes Internal on its own. */
+  const derivedLevel: TaskLevel = links.orgId ? 'internal_client_task' : 'tahi_internal'
+  const wizardContext = {
+    ...(links.orgId ? { orgId: links.orgId } : {}),
+    ...(links.requestId ? { requestId: links.requestId } : {}),
+    ...(links.level !== derivedLevel ? { level: links.level } : {}),
   }
 
   async function submit() {
@@ -323,22 +387,42 @@ export function NewTaskDialog({
       onClose={onClose}
       variant="center"
       maxWidth="38.75rem"
-      title="New task"
-      subtitle="Studio work. A task can carry a client, a request, or neither."
-      icon={<ListChecks size={15} aria-hidden />}
+      // The whole body swaps between the form and the AI panel, which unmounts
+      // whatever held focus. Naming the view here is what pulls focus back in.
+      contentKey={view}
+      title={view === 'ai' ? 'Draft tasks with AI' : 'New task'}
+      subtitle={view === 'ai'
+        ? 'Describe the work, or drop in a brief. Nothing is created until you press Create.'
+        : 'Studio work. A task can carry a client, a request, or neither.'}
+      icon={view === 'ai' ? <Sparkles size={15} aria-hidden /> : <ListChecks size={15} aria-hidden />}
     >
       <style>{DIALOG_CSS}</style>
+
+      {view === 'ai' && (
+        <AiTaskWizardPanel
+          key={aiSession}
+          context={wizardContext}
+          clients={clients}
+          people={peopleList}
+          requests={requests}
+          onDraftToForm={handleDraftToForm}
+          onWriteItMyself={() => setView('form')}
+        />
+      )}
 
       {/* The scroll region and the gutters are SlideOver.Body's job. The form
           only owns its own rhythm, so this dialog keeps the same gutters as
           every other one in the repo instead of drifting to its own. The
           footer's submit reaches it by `form="new-task-form"`. */}
+      {view === 'form' && (
       <SlideOver.Body>
         <form
           id="new-task-form"
           onSubmit={e => { e.preventDefault(); void submit() }}
           style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
         >
+          <AiAssistCard onOpen={() => { setAiSession(s => s + 1); setView('ai') }} />
+
           {templates.length > 0 && (
             <FieldGroup label="Start from a template">
               <SearchableSelect
@@ -555,7 +639,9 @@ export function NewTaskDialog({
           </FieldGroup>
         </form>
       </SlideOver.Body>
+      )}
 
+      {view === 'form' && (
       <SlideOver.Footer style={{ justifyContent: 'flex-end' }}>
         <TahiButton
           variant="secondary"
@@ -578,6 +664,67 @@ export function NewTaskDialog({
           Create task
         </TahiButton>
       </SlideOver.Footer>
+      )}
     </SlideOver>
+  )
+}
+
+/** The card at the top of the form that hands over to the AI panel. It carries
+ *  the document capability with it, because the panel owns both ways in. */
+function AiAssistCard({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="tahi-focus-ring"
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'auto 1fr auto',
+        alignItems: 'center',
+        columnGap: '0.75rem',
+        width: '100%',
+        minHeight: '2.75rem',
+        padding: '0.75rem 0.875rem',
+        textAlign: 'left',
+        borderRadius: 'var(--radius-card)',
+        border: '1px solid var(--color-brand-100)',
+        background: 'var(--color-brand-50)',
+        cursor: 'pointer',
+        transition: 'border-color 0.15s, background 0.15s',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.borderColor = 'var(--color-brand)'
+        e.currentTarget.style.background = 'var(--color-brand-100)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.borderColor = 'var(--color-brand-100)'
+        e.currentTarget.style.background = 'var(--color-brand-50)'
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '2rem',
+          height: '2rem',
+          borderRadius: 'var(--radius-leaf-sm)',
+          background: 'var(--color-brand)',
+          color: 'var(--color-text-on-dark)',
+        }}
+      >
+        <Sparkles size={17} />
+      </span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-link)' }}>
+          Draft with AI
+        </span>
+        <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem', lineHeight: 1.4 }}>
+          Not sure how to break this up? Describe it, or drop in a brief.
+        </span>
+      </span>
+      <ChevronRight size={17} aria-hidden="true" style={{ color: 'var(--color-brand)' }} />
+    </button>
   )
 }
