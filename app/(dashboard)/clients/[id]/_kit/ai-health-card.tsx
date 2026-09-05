@@ -126,7 +126,7 @@ export function AiHealthCheckCard({ org, onUpdated }: { org: Organisation; onUpd
         {result && (
           <button
             onClick={dismiss}
-            className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+            className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.75rem] flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
             aria-label="Dismiss suggestion"
           >
             <X className="w-3.5 h-3.5" /> Dismiss

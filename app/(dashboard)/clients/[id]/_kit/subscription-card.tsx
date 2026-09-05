@@ -83,7 +83,7 @@ export function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { s
         {!editing ? (
           <button
             onClick={() => setEditing(true)}
-            className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors flex items-center gap-1"
+            className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.75rem] text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors flex items-center gap-1"
           >
             <Edit2 className="w-3 h-3" />
             Edit
@@ -92,14 +92,14 @@ export function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { s
           <div className="flex gap-2">
             <button
               onClick={() => { setEditing(false); setPlanType(subscription.planType) }}
-              className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.75rem] text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
             >
               Cancel
             </button>
             <button
               onClick={savePlan}
               disabled={saving}
-              className="text-xs text-[var(--color-brand)] font-medium disabled:opacity-50"
+              className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.75rem] text-xs text-[var(--color-brand)] font-medium disabled:opacity-50"
             >
               {saving ? 'Saving...' : 'Save'}
             </button>
@@ -114,7 +114,7 @@ export function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { s
           <select
             value={planType}
             onChange={e => setPlanType(e.target.value)}
-            className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
           >
             {PLAN_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
@@ -162,7 +162,7 @@ export function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { s
             {tracks.map(track => (
               <div key={track.id} className="flex items-center justify-between text-xs">
                 <span className="text-[var(--color-text-muted)] capitalize">{track.type} track</span>
-                <span className={track.currentRequestId ? 'text-amber-600' : 'text-emerald-600'}>
+                <span style={{ color: track.currentRequestId ? 'var(--color-warning)' : 'var(--color-brand)', fontWeight: 600 }}>
                   {track.currentRequestId ? 'Occupied' : 'Available'}
                 </span>
               </div>
@@ -197,7 +197,7 @@ function AddonToggleRow({
       type="button"
       onClick={onToggle}
       disabled={busy}
-      className="flex items-center justify-between w-full text-left transition-colors"
+      className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.75rem] flex items-center justify-between w-full text-left transition-colors"
       style={{
         padding: '0.25rem 0.375rem',
         marginLeft: '-0.375rem',
@@ -285,7 +285,7 @@ function BillingIntervalEditor({ subscription, onUpdated }: { subscription: Subs
               onClick={() => setSelected(interval)}
               onMouseEnter={() => setHoveredBtn(interval)}
               onMouseLeave={() => setHoveredBtn(null)}
-              className="flex-1 text-xs font-medium py-1.5 rounded-md transition-colors"
+              className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.875rem] flex-1 text-xs font-medium py-1.5 rounded-md transition-colors"
               style={{
                 background: isActive ? 'var(--color-brand)' : isHovered ? 'var(--color-bg-tertiary)' : 'transparent',
                 color: isActive ? '#ffffff' : 'var(--color-text-muted)',
@@ -333,7 +333,7 @@ function BillingIntervalEditor({ subscription, onUpdated }: { subscription: Subs
           disabled={saving}
           onMouseEnter={() => setHoveredBtn('save')}
           onMouseLeave={() => setHoveredBtn(null)}
-          className="w-full text-xs font-medium py-1.5 rounded-md transition-colors disabled:opacity-50"
+          className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.875rem] w-full text-xs font-medium py-1.5 rounded-md transition-colors disabled:opacity-50"
           style={{
             background: hoveredBtn === 'save' ? 'var(--color-brand-dark)' : 'var(--color-brand)',
             color: '#ffffff',
@@ -349,12 +349,27 @@ function BillingIntervalEditor({ subscription, onUpdated }: { subscription: Subs
 export function NoSubscriptionCard({ planType }: { planType: string | null }) {
   if (!planType || planType === 'none') return null
   return (
-    <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
-      <div className="flex gap-2">
-        <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+    <div
+      style={{
+        borderRadius: 'var(--radius-lg)',
+        border: '1px solid var(--color-warning)',
+        background: 'var(--color-warning-bg)',
+        padding: '0.875rem',
+      }}
+    >
+      <div className="flex" style={{ gap: '0.5rem' }}>
+        <AlertTriangle
+          className="w-4 h-4 flex-shrink-0 mt-0.5"
+          aria-hidden="true"
+          style={{ color: 'var(--color-warning)' }}
+        />
         <div>
-          <p className="text-sm font-medium text-amber-800">No active subscription</p>
-          <p className="text-xs text-amber-700 mt-0.5">Plan type is set but no subscription record exists.</p>
+          <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>
+            No active subscription
+          </p>
+          <p style={{ margin: '0.125rem 0 0', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+            A plan type is set on this client but no subscription row exists, so nothing is being billed.
+          </p>
         </div>
       </div>
     </div>

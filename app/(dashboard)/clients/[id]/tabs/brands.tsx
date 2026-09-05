@@ -11,6 +11,7 @@ import { Card } from '@/components/tahi/card'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { SkeletonList } from '@/components/tahi/skeletons'
 import { TahiButton } from '@/components/tahi/tahi-button'
+import { CountText, Grow, SubBar } from '../_kit/chrome'
 
 // ── Brands tab ────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,7 @@ export function BrandsTab({ clientId }: { clientId: string }) {
   const [formError, setFormError] = useState<string | null>(null)
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [brokenLogos, setBrokenLogos] = useState<Set<string>>(new Set())
 
   const { data, isLoading: loading, mutate: load } = useSWR<{ items: BrandRow[] }>(
     `/api/admin/brands?orgId=${clientId}`,
@@ -128,16 +130,21 @@ export function BrandsTab({ clientId }: { clientId: string }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="font-semibold text-[var(--color-text)]">Brands ({brands.length})</h2>
+      <SubBar style={{ marginBottom: '0.75rem' }}>
+        <CountText>
+          {brands.length === 0
+            ? 'One identity'
+            : `${brands.length} ${brands.length === 1 ? 'brand' : 'brands'}`}
+        </CountText>
+        <Grow />
         <TahiButton
           size="sm"
           onClick={() => { resetForm(); setShowCreate(true) }}
+          iconLeft={<Plus className="w-3.5 h-3.5" />}
         >
-          <Plus className="w-3.5 h-3.5 mr-1" />
-          Add Brand
+          Add a brand
         </TahiButton>
-      </div>
+      </SubBar>
 
       {/* Create / Edit form */}
       {(showCreate || editingId) && (
@@ -155,7 +162,7 @@ export function BrandsTab({ clientId }: { clientId: string }) {
                 value={formName}
                 onChange={e => setFormName(e.target.value)}
                 placeholder="Brand name"
-                className="w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+                className="tahi-focus-ring min-h-[2.75rem] md:min-h-[2.375rem] w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
                 style={{
                   padding: '0.5rem 0.75rem',
                   borderRadius: 'var(--radius-input)',
@@ -172,7 +179,7 @@ export function BrandsTab({ clientId }: { clientId: string }) {
                 value={formLogoUrl}
                 onChange={e => setFormLogoUrl(e.target.value)}
                 placeholder="https://..."
-                className="w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+                className="tahi-focus-ring min-h-[2.75rem] md:min-h-[2.375rem] w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
                 style={{
                   padding: '0.5rem 0.75rem',
                   borderRadius: 'var(--radius-input)',
@@ -189,7 +196,7 @@ export function BrandsTab({ clientId }: { clientId: string }) {
                 value={formWebsite}
                 onChange={e => setFormWebsite(e.target.value)}
                 placeholder="https://example.com"
-                className="w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+                className="tahi-focus-ring min-h-[2.75rem] md:min-h-[2.375rem] w-full text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
                 style={{
                   padding: '0.5rem 0.75rem',
                   borderRadius: 'var(--radius-input)',
@@ -221,7 +228,7 @@ export function BrandsTab({ clientId }: { clientId: string }) {
                   value={formColour}
                   onChange={e => setFormColour(e.target.value)}
                   placeholder="#5A824E"
-                  className="flex-1 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+                  className="tahi-focus-ring min-h-[2.75rem] md:min-h-[2.375rem] flex-1 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
                   style={{
                     padding: '0.5rem 0.75rem',
                     borderRadius: 'var(--radius-input)',
@@ -267,13 +274,15 @@ export function BrandsTab({ clientId }: { clientId: string }) {
             <Card key={brand.id} padding="sm">
               {/* Logo + name row */}
               <div className="flex items-start gap-3 mb-3">
-                {brand.logoUrl ? (
+                {brand.logoUrl && !brokenLogos.has(brand.id) ? (
+                  // A remote logo that 404s must fall back to the swatch, not
+                  // leave a hole: hiding the <img> alone left an empty tile.
                   <img
                     src={brand.logoUrl}
                     alt={`${brand.name} logo`}
                     className="flex-shrink-0 rounded-lg object-contain"
                     style={{ width: '2.5rem', height: '2.5rem', border: '1px solid var(--color-border-subtle)' }}
-                    onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                    onError={() => setBrokenLogos(prev => new Set(prev).add(brand.id))}
                   />
                 ) : (
                   <div
@@ -329,7 +338,7 @@ export function BrandsTab({ clientId }: { clientId: string }) {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => openEdit(brand)}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] transition-colors"
+                  className="tahi-focus-ring inline-flex items-center gap-1 min-h-[2.75rem] md:min-h-[1.5rem] text-xs font-medium text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] transition-colors"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem 0' }}
                 >
                   <Pencil className="w-3 h-3" />
@@ -338,7 +347,7 @@ export function BrandsTab({ clientId }: { clientId: string }) {
                 <button
                   onClick={() => handleDelete(brand.id)}
                   disabled={deletingId === brand.id}
-                  className="inline-flex items-center gap-1 text-xs font-medium transition-colors"
+                  className="tahi-focus-ring inline-flex items-center gap-1 min-h-[2.75rem] md:min-h-[1.5rem] text-xs font-medium transition-colors"
                   style={{
                     background: 'none',
                     border: 'none',

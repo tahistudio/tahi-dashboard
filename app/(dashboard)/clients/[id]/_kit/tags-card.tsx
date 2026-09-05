@@ -82,7 +82,7 @@ export function TagsCard({ org, onUpdated }: { org: Organisation; onUpdated: () 
           onChange={e => setNewTag(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') addTag() }}
           placeholder="Add a tag (e.g. enterprise)..."
-          className="flex-1 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
+          className="tahi-focus-ring min-h-[2.75rem] md:min-h-[2rem] flex-1 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-subtle)]"
           style={{
             padding: '0.375rem 0.5rem',
             borderRadius: 'var(--radius-input)',

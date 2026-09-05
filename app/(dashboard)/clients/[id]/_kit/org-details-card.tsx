@@ -57,7 +57,7 @@ export function AutoPill({
           type="button"
           onClick={onReenableAuto}
           disabled={reenabling}
-          className="text-[10px] underline hover:no-underline disabled:opacity-50"
+          className="tahi-focus-ring inline-flex items-center min-h-[2.75rem] md:min-h-[1rem] text-[10px] underline hover:no-underline disabled:opacity-50"
           style={{ color: 'var(--color-text-muted)' }}
           title="Clear manual override and let the system auto-derive this field from current signals"
         >
@@ -194,9 +194,9 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
   }
 
   const HEALTH_OPTIONS = [
-    { value: 'green', label: 'Green (healthy)', colour: 'bg-emerald-400' },
-    { value: 'amber', label: 'Amber (watch)', colour: 'bg-amber-400' },
-    { value: 'red',   label: 'Red (at risk)',  colour: 'bg-red-400' },
+    { value: 'green', label: 'Green (healthy)' },
+    { value: 'amber', label: 'Amber (watch)' },
+    { value: 'red',   label: 'Red (at risk)' },
   ]
 
   const STATUS_OPTIONS = ['prospect', 'active', 'paused', 'churned', 'archived']
@@ -212,14 +212,14 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
               onClick={runAutoDerive}
               disabled={autoDeriving}
               title="Re-derive billing model + retainer dates from current signals (Stripe subscription, MRR, paid invoices, billable hours, won deals). Manual overrides are preserved."
-              className="flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors disabled:opacity-50"
+              className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.75rem] flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors disabled:opacity-50"
             >
               <RefreshCw className={cn('w-3.5 h-3.5', autoDeriving && 'animate-spin')} />
               {autoDeriving ? 'Detecting...' : 'Auto-detect'}
             </button>
             <button
               onClick={() => setEditing(true)}
-              className="flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+              className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.75rem] flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
             >
               <Edit2 className="w-3.5 h-3.5" />
               Edit
@@ -229,14 +229,14 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
           <div className="flex gap-2">
             <button
               onClick={() => { setEditing(false); setForm({ name: org.name, website: org.website ?? '', industry: org.industry ?? '', status: org.status, healthStatus: org.healthStatus ?? 'green', healthNote: org.healthNote ?? '', billingModel: org.billingModel ?? 'none', customMrr: org.customMrr ? String(org.customMrr) : '', customMrrCurrency: org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD', defaultHourlyRate: org.defaultHourlyRate ? String(org.defaultHourlyRate) : '', preferredCurrency: org.preferredCurrency ?? 'NZD', retainerStartDate: org.retainerStartDate ?? '', retainerEndDate: org.retainerEndDate ?? '', invoiceChannel: org.invoiceChannel ?? '', paymentTerms: org.paymentTerms ?? '' }) }}
-              className="flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.75rem] flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
             >
               <X className="w-3.5 h-3.5" /> Cancel
             </button>
             <button
               onClick={save}
               disabled={saving}
-              className="flex items-center gap-1 text-sm text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] font-medium disabled:opacity-50"
+              className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.75rem] flex items-center gap-1 text-sm text-[var(--color-brand)] hover:text-[var(--color-brand-dark)] font-medium disabled:opacity-50"
             >
               <Check className="w-3.5 h-3.5" />
               {saving ? 'Saving…' : 'Save'}
@@ -253,7 +253,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
             <input
               value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
+              className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
             />
           </div>
           <div>
@@ -262,7 +262,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
               value={form.website}
               onChange={e => setForm(f => ({ ...f, website: e.target.value }))}
               placeholder="https://example.com"
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
+              className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
             />
           </div>
           <div>
@@ -271,7 +271,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
               value={form.industry}
               onChange={e => setForm(f => ({ ...f, industry: e.target.value }))}
               placeholder="e.g. SaaS, eCommerce"
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
+              className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:border-transparent"
             />
           </div>
           <div>
@@ -279,7 +279,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
             <select
               value={form.status}
               onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
             >
               {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -289,7 +289,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
             <select
               value={form.healthStatus}
               onChange={e => setForm(f => ({ ...f, healthStatus: e.target.value }))}
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
             >
               {HEALTH_OPTIONS.map(h => <option key={h.value} value={h.value}>{h.label}</option>)}
             </select>
@@ -301,7 +301,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
               onChange={e => setForm(f => ({ ...f, healthNote: e.target.value }))}
               rows={2}
               placeholder="Brief note about client health..."
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] resize-none"
+              className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] resize-none"
             />
           </div>
 
@@ -314,7 +314,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
             <select
               value={form.billingModel}
               onChange={e => setForm(f => ({ ...f, billingModel: e.target.value }))}
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
             >
               <option value="none">None</option>
               <option value="retainer">Retainer</option>
@@ -327,7 +327,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
             <select
               value={form.preferredCurrency}
               onChange={e => setForm(f => ({ ...f, preferredCurrency: e.target.value }))}
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
             >
               {['NZD', 'USD', 'GBP', 'EUR', 'AUD'].map(c => <option key={c} value={c}>{c}</option>)}
             </select>
@@ -337,7 +337,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
             <select
               value={form.invoiceChannel}
               onChange={e => setForm(f => ({ ...f, invoiceChannel: e.target.value }))}
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
             >
               <option value="">Studio default</option>
               {INVOICE_CHANNELS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
@@ -348,7 +348,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
             <select
               value={form.paymentTerms}
               onChange={e => setForm(f => ({ ...f, paymentTerms: e.target.value }))}
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
             >
               <option value="">Not set</option>
               {PAYMENT_TERMS.map(t => <option key={t} value={t}>{paymentTermsLabel(t)}</option>)}
@@ -367,12 +367,12 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
                   value={form.customMrr}
                   onChange={e => setForm(f => ({ ...f, customMrr: e.target.value }))}
                   placeholder="e.g. 3125"
-                  className="flex-1 px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                  className="flex-1 min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
                 />
                 <select
                   value={form.customMrrCurrency}
                   onChange={e => setForm(f => ({ ...f, customMrrCurrency: e.target.value }))}
-                  className="w-20 px-2 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                  className="w-20 min-h-[2.75rem] md:min-h-[2.25rem] px-2 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
                   title="Currency this client pays you in"
                 >
                   {['NZD', 'USD', 'GBP', 'EUR', 'AUD'].map(c => <option key={c} value={c}>{c}</option>)}
@@ -390,7 +390,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
                 value={form.defaultHourlyRate}
                 onChange={e => setForm(f => ({ ...f, defaultHourlyRate: e.target.value }))}
                 placeholder="e.g. 50"
-                className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
               />
             </div>
           )}
@@ -400,7 +400,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
               type="date"
               value={form.retainerStartDate}
               onChange={e => setForm(f => ({ ...f, retainerStartDate: e.target.value }))}
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
             />
           </div>
           <div>
@@ -411,7 +411,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
               type="date"
               value={form.retainerEndDate}
               onChange={e => setForm(f => ({ ...f, retainerEndDate: e.target.value }))}
-              className="w-full px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
             />
             {form.retainerEndDate && (
               <p className="text-xs mt-0.5" style={{ color: 'var(--color-warning)' }}>
@@ -561,7 +561,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
                 value={assignedPm ?? ''}
                 onChange={e => handlePmChange(e.target.value || null)}
                 disabled={pmLoading}
-                className="px-2 py-1 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+                className="min-h-[2.75rem] md:min-h-[2rem] px-2 py-1 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
               >
                 <option value="">No PM assigned</option>
                 {teamMembers.map(tm => (

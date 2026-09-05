@@ -53,14 +53,14 @@ export function InternalNotesCard({ org, onUpdated }: { org: Organisation; onUpd
         {!editing ? (
           <button
             onClick={() => setEditing(true)}
-            className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex-shrink-0"
+            className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.75rem] text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex-shrink-0"
           >
             Edit
           </button>
         ) : (
           <div className="flex gap-2 flex-shrink-0">
-            <button onClick={() => { setEditing(false); setNotes(org.internalNotes ?? '') }} className="text-xs text-[var(--color-text-muted)]">Cancel</button>
-            <button onClick={save} disabled={saving} className="text-xs text-[var(--color-brand)] font-medium disabled:opacity-50">
+            <button onClick={() => { setEditing(false); setNotes(org.internalNotes ?? '') }} className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.75rem] text-xs text-[var(--color-text-muted)]">Cancel</button>
+            <button onClick={save} disabled={saving} className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.75rem] text-xs text-[var(--color-brand)] font-medium disabled:opacity-50">
               {saving ? 'Saving…' : 'Save'}
             </button>
           </div>
@@ -74,7 +74,7 @@ export function InternalNotesCard({ org, onUpdated }: { org: Organisation; onUpd
           onChange={e => setNotes(e.target.value)}
           rows={4}
           placeholder="Private notes about this client..."
-          className="w-full px-3 py-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] resize-none"
+          className="w-full min-h-[5rem] px-3 py-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] resize-none"
           autoFocus
         />
       ) : (

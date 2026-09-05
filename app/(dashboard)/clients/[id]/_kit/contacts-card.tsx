@@ -14,16 +14,31 @@ import type { Contact } from './types'
 
 // ── Contacts card ──────────────────────────────────────────────────────────────
 
-export function ContactsCard({ contacts }: { contacts: Contact[] }) {
+export function ContactsCard({
+  contacts,
+  onManage,
+}: {
+  contacts: Contact[]
+  /** Opens the People tab, where adding and inviting actually happen. */
+  onManage?: () => void
+}) {
   return (
     <Card>
       <Card.Header style={{ marginBottom: 'var(--space-3)' }}>
         <Card.Title style={{ fontSize: 'var(--text-sm)' }}>Contacts</Card.Title>
-        <Card.Action>
-          <TahiButton variant="ghost" size="sm" iconLeft={<Plus className="w-3.5 h-3.5" />} aria-label="Add contact">
-            Add
-          </TahiButton>
-        </Card.Action>
+        {onManage && (
+          <Card.Action>
+            <TahiButton
+              variant="ghost"
+              size="sm"
+              iconLeft={<Plus className="w-3.5 h-3.5" />}
+              aria-label="Add a contact on the People tab"
+              onClick={onManage}
+            >
+              Add
+            </TahiButton>
+          </Card.Action>
+        )}
       </Card.Header>
 
       {contacts.length === 0 ? (
@@ -31,6 +46,9 @@ export function ContactsCard({ contacts }: { contacts: Contact[] }) {
           variant="inline"
           icon={<Users className="w-8 h-8" />}
           title="No contacts yet"
+          description="Nobody at this client can sign in until someone is added here."
+          ctaLabel={onManage ? 'Add a contact' : undefined}
+          onCtaClick={onManage}
         />
       ) : (
         <div className="flex flex-col gap-3">

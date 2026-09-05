@@ -12,6 +12,15 @@ export interface Contact {
   role: string | null
   isPrimary: boolean
   clerkUserId: string | null
+  /**
+   * The next three come back already: GET /api/admin/clients/[id] selects the
+   * whole contacts row. They were simply not declared, so the People tab could
+   * not show portal authority or when someone was last in.
+   * 'admin' administers the org's portal, 'member' sees their own scoped view.
+   */
+  portalRole?: string | null
+  phone?: string | null
+  lastLoginAt?: string | null
 }
 
 export interface Subscription {
@@ -85,3 +94,15 @@ export interface ClientData {
   tracks: Track[]
   recentRequests: Request[]
 }
+
+/** The nine doors on the client page. Also the value of the ?tab= param. */
+export type ClientTabId =
+  | 'overview'
+  | 'requests'
+  | 'invoices'
+  | 'files'
+  | 'people'
+  | 'papers'
+  | 'calls'
+  | 'money'
+  | 'settings'

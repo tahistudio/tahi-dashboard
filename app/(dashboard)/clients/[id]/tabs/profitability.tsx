@@ -10,6 +10,7 @@ import { DollarSign, Plus, Trash2 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { Badge } from '@/components/tahi/badge'
 import { Card } from '@/components/tahi/card'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { SkeletonList } from '@/components/tahi/skeletons'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -43,6 +44,9 @@ export interface ClientCostRow {
 }
 
 export function ProfitabilityTab({ clientId }: { clientId: string }) {
+  // Deleting a cost changes a margin number, so it asks first, through the
+  // design-system dialog rather than a browser confirm().
+  const [pendingDelete, setPendingDelete] = useState<ClientCostRow | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({
     description: '',
@@ -113,12 +117,15 @@ export function ProfitabilityTab({ clientId }: { clientId: string }) {
     }
   }
 
-  async function handleDelete(costId: string) {
-    if (!confirm('Delete this cost entry?')) return
+  async function handleDelete() {
+    const cost = pendingDelete
+    if (!cost) return
     try {
-      await fetch(apiPath(`/api/admin/clients/${clientId}/costs/${costId}`), { method: 'DELETE' })
+      await fetch(apiPath(`/api/admin/clients/${clientId}/costs/${cost.id}`), { method: 'DELETE' })
       await loadAll()
-    } catch { /* noop */ }
+    } finally {
+      setPendingDelete(null)
+    }
   }
 
   if (loading) {
@@ -204,7 +211,7 @@ export function ProfitabilityTab({ clientId }: { clientId: string }) {
                 value={form.description}
                 onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                 placeholder="e.g. Webflow Pro plan, designer subcontract"
-                className="w-full px-3 py-2 text-sm border rounded-lg"
+                className="tahi-focus-ring w-full min-h-[2.75rem] md:min-h-[2.375rem] px-3 py-2 text-sm border rounded-lg"
                 style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
               />
             </div>
@@ -215,7 +222,7 @@ export function ProfitabilityTab({ clientId }: { clientId: string }) {
                 step="0.01"
                 value={form.amount}
                 onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border rounded-lg"
+                className="tahi-focus-ring w-full min-h-[2.75rem] md:min-h-[2.375rem] px-3 py-2 text-sm border rounded-lg"
                 style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
               />
             </div>
@@ -224,7 +231,7 @@ export function ProfitabilityTab({ clientId }: { clientId: string }) {
               <select
                 value={form.currency}
                 onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border rounded-lg"
+                className="tahi-focus-ring w-full min-h-[2.75rem] md:min-h-[2.375rem] px-3 py-2 text-sm border rounded-lg"
                 style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
               >
                 {['NZD', 'USD', 'GBP', 'EUR', 'AUD'].map(c => <option key={c} value={c}>{c}</option>)}
@@ -235,7 +242,7 @@ export function ProfitabilityTab({ clientId }: { clientId: string }) {
               <select
                 value={form.category}
                 onChange={e => setForm(f => ({ ...f, category: e.target.value as ClientCostRow['category'] }))}
-                className="w-full px-3 py-2 text-sm border rounded-lg"
+                className="tahi-focus-ring w-full min-h-[2.75rem] md:min-h-[2.375rem] px-3 py-2 text-sm border rounded-lg"
                 style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
               >
                 <option value="contractor">Contractor</option>
@@ -250,7 +257,7 @@ export function ProfitabilityTab({ clientId }: { clientId: string }) {
                 type="date"
                 value={form.date}
                 onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border rounded-lg"
+                className="tahi-focus-ring w-full min-h-[2.75rem] md:min-h-[2.375rem] px-3 py-2 text-sm border rounded-lg"
                 style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)' }}
               />
             </div>
@@ -300,8 +307,22 @@ export function ProfitabilityTab({ clientId }: { clientId: string }) {
                   </td>
                   <td className="py-2 pr-3">{c.recurring && <Badge tone="brand" size="sm">Recurring</Badge>}</td>
                   <td className="py-2 pr-3 text-right">
-                    <button onClick={() => handleDelete(c.id)} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-danger)]">
-                      <Trash2 className="w-3.5 h-3.5" />
+                    <button
+                      type="button"
+                      onClick={() => setPendingDelete(c)}
+                      aria-label={`Delete the cost entry ${c.description}`}
+                      className="tahi-focus-ring inline-flex items-center justify-center min-h-[2.75rem] min-w-[2.75rem] md:min-h-[1.75rem] md:min-w-[1.75rem]"
+                      style={{
+                        border: 'none',
+                        background: 'none',
+                        borderRadius: 'var(--radius-sm)',
+                        color: 'var(--color-text-muted)',
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-danger)' }}
+                      onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                     </button>
                   </td>
                 </tr>
@@ -311,6 +332,17 @@ export function ProfitabilityTab({ clientId }: { clientId: string }) {
           </div>
         )}
       </Card>
+
+      <ConfirmDialog
+        open={pendingDelete != null}
+        title="Delete this cost entry?"
+        description={pendingDelete
+          ? `${pendingDelete.description} (${new Intl.NumberFormat('en-NZ', { style: 'currency', currency: pendingDelete.currency }).format(pendingDelete.amount)}) comes out of this client's cost total, so the margin above will change.`
+          : ''}
+        confirmLabel="Delete cost"
+        onConfirm={handleDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   )
 }
