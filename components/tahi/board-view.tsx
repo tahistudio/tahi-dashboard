@@ -522,6 +522,7 @@ export function BoardView({
             onQuickAdd={onQuickAdd}
             canAddTo={canAddTo}
             quickAddHint={quickAddHint}
+            rollupNoun="sub-request"
             onToggleChecklist={onToggleChecklist}
             onItemClick={onItemClick}
             onAssigneeClick={onAssigneeClick}
