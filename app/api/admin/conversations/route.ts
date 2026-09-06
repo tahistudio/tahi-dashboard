@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import { eq, desc, and, sql } from 'drizzle-orm'
 import { scopedOrgIds } from '@/lib/access-scope'
 import { isOrgInScope } from '../_scoping/org-scope'
+import { resolveOrgChannel } from '@/lib/org-channel'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -315,30 +316,54 @@ export async function POST(req: NextRequest) {
 
     const creatorParticipantId = teamMemberRows.length > 0 ? teamMemberRows[0].id : userId
 
-    const convId = crypto.randomUUID()
     const now = new Date().toISOString()
 
-    await database.insert(schema.conversations).values({
-      id: convId,
-      type,
-      name: name ?? null,
-      orgId: convOrgId ?? null,
-      requestId: requestId ?? null,
-      visibility,
-      createdById: userId,
-      createdAt: now,
-      updatedAt: now,
-    })
+    // AN ORG CHANNEL IS FIND-OR-CREATE, not create. There is exactly one
+    // standing line per client (migration 0092 puts a UNIQUE index on it), so
+    // a second call for a client that already has one would trip the
+    // constraint and answer 500. It goes through resolveOrgChannel instead,
+    // the same resolver /api/admin/messages and the portal use, and returns
+    // the existing room. The name and visibility the caller sent are ignored
+    // on this type: a standing line is named after its client and is always
+    // external, which is what makes it the room both audiences are reading.
+    let convId: string
+    if (type === 'org_channel' && convOrgId) {
+      const channelId = await resolveOrgChannel(database as unknown as D1, convOrgId, {
+        create: true,
+        createdById: userId,
+      })
+      if (!channelId) {
+        return NextResponse.json({ error: 'Could not resolve the org channel' }, { status: 409 })
+      }
+      convId = channelId
+    } else {
+      convId = crypto.randomUUID()
+      await database.insert(schema.conversations).values({
+        id: convId,
+        type,
+        name: name ?? null,
+        orgId: convOrgId ?? null,
+        requestId: requestId ?? null,
+        visibility,
+        createdById: userId,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
 
     // Add the creator as an admin participant
-    await database.insert(schema.conversationParticipants).values({
-      id: crypto.randomUUID(),
-      conversationId: convId,
-      participantId: creatorParticipantId,
-      participantType: 'team_member',
-      role: 'admin',
-      joinedAt: now,
-    })
+    try {
+      await database.insert(schema.conversationParticipants).values({
+        id: crypto.randomUUID(),
+        conversationId: convId,
+        participantId: creatorParticipantId,
+        participantType: 'team_member',
+        role: 'admin',
+        joinedAt: now,
+      })
+    } catch {
+      // Already in the room, on a channel that was found rather than created.
+    }
 
     // Add other participants, from either accepted shape.
     for (const seed of normaliseParticipantSeeds(participantIds ?? [])) {

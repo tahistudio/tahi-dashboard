@@ -42,11 +42,15 @@
 -- message after every page load; fixed at request-detail.tsx, and
 -- pickThreadConversationId in lib/request-thread.ts has been resolving them at
 -- READ time ever since). A UNIQUE index cannot be created over data that
--- already violates it, so statements 1 to 5 collapse the duplicates before
--- statement 6 tries. The collapse follows lib/request-thread.ts:96-108 exactly:
+-- already violates it, so statements 1 to 7 collapse the duplicates before the
+-- indexes are tried. The collapse follows lib/request-thread.ts:96-108 exactly:
 -- make every request thread external, REPOINT messages.conversation_id at the
 -- row that is kept rather than only deleting the strays, then delete the
--- strays and their participant rows.
+-- strays and their participant rows. Statement 6 repeats that collapse for ORG
+-- CHANNELS, keyed on org_id: POST /api/admin/conversations accepts
+-- type 'org_channel' with an arbitrary orgId and does no find-or-create, and
+-- the MCP create_conversation tool exposes it, so a second channel for one
+-- client is reachable today and would abort the unique index below.
 --
 -- The kept row is the oldest one (a NULL created_at sorts LAST, matching
 -- pickThreadConversationId), so it is the row the existing messages already
@@ -148,7 +152,56 @@ DELETE FROM conversations
    AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = conversations.id)
    AND NOT EXISTS (SELECT 1 FROM conversation_participants p WHERE p.conversation_id = conversations.id);
 
--- 6. One person per room, then the two room identities, then the read paths.
+-- 6. The SAME collapse for org channels, keyed on org_id instead of
+--    request_id. POST /api/admin/conversations has always accepted
+--    type 'org_channel' with an arbitrary orgId and no find-or-create, the
+--    old Messages page shipped a create form that offered it, and the MCP
+--    `create_conversation` tool still does, so two channels for one client are
+--    reachable today. A UNIQUE index cannot be created over that, and if
+--    idx_conversations_org_channel aborts then the two read-path indexes after
+--    it never run and the deploy is left half-migrated in exactly the order
+--    this file prescribes. POST /api/admin/conversations now routes
+--    org_channel through resolveOrgChannel, so the legacy path cannot mint a
+--    second one after this has run either.
+--
+--    Check before applying, on both databases:
+--      SELECT org_id, COUNT(*) FROM conversations
+--       WHERE type = 'org_channel' GROUP BY org_id HAVING COUNT(*) > 1;
+UPDATE messages
+   SET conversation_id = (
+     SELECT k.id FROM conversations k
+      WHERE k.type = 'org_channel'
+        AND k.org_id = (SELECT c.org_id FROM conversations c WHERE c.id = messages.conversation_id)
+      ORDER BY (k.created_at IS NULL), k.created_at ASC, k.id ASC
+      LIMIT 1)
+ WHERE conversation_id IN (
+   SELECT c.id FROM conversations c
+    WHERE c.type = 'org_channel'
+      AND c.org_id IS NOT NULL
+      AND c.id <> (SELECT k.id FROM conversations k
+                    WHERE k.type = 'org_channel' AND k.org_id = c.org_id
+                    ORDER BY (k.created_at IS NULL), k.created_at ASC, k.id ASC
+                    LIMIT 1));
+
+DELETE FROM conversation_participants
+ WHERE conversation_id IN (
+   SELECT c.id FROM conversations c
+    WHERE c.type = 'org_channel'
+      AND c.org_id IS NOT NULL
+      AND c.id <> (SELECT k.id FROM conversations k
+                    WHERE k.type = 'org_channel' AND k.org_id = c.org_id
+                    ORDER BY (k.created_at IS NULL), k.created_at ASC, k.id ASC
+                    LIMIT 1));
+
+DELETE FROM conversations
+ WHERE type = 'org_channel'
+   AND org_id IS NOT NULL
+   AND id <> (SELECT k.id FROM conversations k
+               WHERE k.type = 'org_channel' AND k.org_id = conversations.org_id
+               ORDER BY (k.created_at IS NULL), k.created_at ASC, k.id ASC
+               LIMIT 1);
+
+-- 7. One person per room, then the two room identities, then the read paths.
 DELETE FROM conversation_participants
  WHERE rowid NOT IN (
    SELECT MIN(rowid) FROM conversation_participants GROUP BY conversation_id, participant_id);
