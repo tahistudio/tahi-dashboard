@@ -1,5 +1,6 @@
 import { ClerkSignUp } from '@/components/tahi/clerk-mount'
-import { AuthShell, tahiClerkAppearance, TAHI_TRUST_AVATARS } from '@/components/tahi/auth-shell'
+import { AuthShell } from '@/components/tahi/auth-shell'
+import { tahiClerkAppearance, TAHI_TRUST_AVATARS } from '@/lib/auth-shell-config'
 
 export const metadata = {
   title: 'Create your workspace - Tahi Studio',

@@ -28,21 +28,13 @@ import * as React from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import { TahiStudioWordmark, LeafIcon } from '@/components/tahi/tahi-glyphs'
+import type { TrustAvatar } from '@/lib/auth-shell-config'
 
 interface Testimonial {
   quote: string
   initials: string
   name: string
   role: string
-}
-
-interface TrustAvatar {
-  /** Profile photo URL. Takes precedence over `bg`. */
-  src?: string
-  /** Background colour, used when there is no photo. */
-  bg?: string
-  /** Optional "+N" chip text; when set it renders as a count chip. */
-  more?: string
 }
 
 // One avatar in the trust stack: a "+N" chip, a profile photo, or a colour
@@ -325,15 +317,10 @@ export function AuthShell({
   )
 }
 
-// Trust avatar stack. Placeholder profile photos for now; swap for real client
-// faces/logos when available. The last entry is the "+N" count chip.
-export const TAHI_TRUST_AVATARS: TrustAvatar[] = [
-  { src: 'https://randomuser.me/api/portraits/men/32.jpg' },
-  { src: 'https://randomuser.me/api/portraits/women/44.jpg' },
-  { src: 'https://randomuser.me/api/portraits/men/75.jpg' },
-  { src: 'https://randomuser.me/api/portraits/women/68.jpg' },
-  { more: '+40' },
-]
+// TAHI_TRUST_AVATARS and tahiClerkAppearance moved to lib/auth-shell-config.ts.
+// The sign-in and sign-up pages are SERVER components, and a server file may
+// not import a value from a 'use client' module: it gets a client-reference
+// stub, not the data. See lib/__tests__/server-client-boundary.test.ts.
 
 // ──────────────────────────────────────────────────────────────────────
 // Scene + card CSS, scoped under .tahi-auth. Forest colours are hardcoded
@@ -493,19 +480,3 @@ const AUTH_CSS = `
 }
 `
 
-/**
- * Shared Clerk appearance preset for sign-in and sign-up. The full visual
- * theming lives in the scoped `.cl-*` CSS above; these keys set social-button
- * placement and hide Clerk's footer so our own switch link owns that row. The
- * per-step heading wording comes from ClerkProvider localization in
- * app/layout.tsx.
- */
-export const tahiClerkAppearance = {
-  layout: {
-    socialButtonsPlacement: 'top',
-    showOptionalFields: true,
-  },
-  elements: {
-    footer: 'hidden',
-  },
-} as const
