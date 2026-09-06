@@ -340,17 +340,30 @@ export function RailViewItem({
   active,
   onClick,
   touch,
+  icon,
+  disabled = false,
+  title,
 }: {
   label: string
-  count: number
+  /** null withholds the number: a count nobody has read yet is a guess. */
+  count: number | null
   active: boolean
   onClick: () => void
   touch: boolean
+  /** Leading glyph. The Notifications rail wears the kind's own icon here, so
+   *  a filter row and the rows it returns read as the same thing. */
+  icon?: React.ReactNode
+  /** A row with nothing behind it. Still announced, never pressable: a filter
+   *  that returns nothing should say so rather than take the click. */
+  disabled?: boolean
+  title?: string
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
+      title={title}
       className="tahi-focus-ring"
       aria-pressed={active}
       style={{
@@ -368,34 +381,49 @@ export function RailViewItem({
         fontWeight: 600,
         color: active ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
         textAlign: 'left',
-        cursor: 'pointer',
+        opacity: disabled ? 0.45 : 1,
+        cursor: disabled ? 'default' : 'pointer',
         transition: 'background-color var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
       }}
       onMouseEnter={e => {
-        if (active) return
+        if (active || disabled) return
         e.currentTarget.style.background = 'var(--color-bg-secondary)'
         e.currentTarget.style.color = 'var(--color-text)'
       }}
       onMouseLeave={e => {
-        if (active) return
+        if (active || disabled) return
         e.currentTarget.style.background = 'transparent'
         e.currentTarget.style.color = 'var(--color-text-muted)'
       }}
     >
+      {icon && (
+        <span
+          aria-hidden="true"
+          style={{
+            display: 'flex',
+            flexShrink: 0,
+            color: active ? 'var(--color-brand-dark)' : 'var(--color-text-subtle)',
+          }}
+        >
+          {icon}
+        </span>
+      )}
       <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {label}
       </span>
-      <span
-        style={{
-          flexShrink: 0,
-          fontSize: '0.6875rem',
-          fontVariantNumeric: 'tabular-nums',
-          color: active ? 'var(--color-brand-dark)' : 'var(--color-text-subtle)',
-          opacity: active ? 0.75 : 1,
-        }}
-      >
-        {count}
-      </span>
+      {count !== null && (
+        <span
+          style={{
+            flexShrink: 0,
+            fontSize: '0.6875rem',
+            fontVariantNumeric: 'tabular-nums',
+            color: active ? 'var(--color-brand-dark)' : 'var(--color-text-subtle)',
+            opacity: active ? 0.75 : 1,
+          }}
+        >
+          {count}
+        </span>
+      )}
     </button>
   )
 }

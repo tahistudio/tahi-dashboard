@@ -15,6 +15,13 @@
  *
  * The main column is `min-width: 0`, so a board or a timeline scrolls inside
  * it and the page header above keeps the same width in every view.
+ *
+ * Four slots are optional, because not every surface has all of them: the
+ * switcher, the search box, Save as default, and `trailing` (one action hard
+ * right of the count). Notifications is the surface that has views in the
+ * rail, no sort, no search its API can honour, no default to save, and one
+ * action of its own: Mark all as read. Every default keeps the Requests,
+ * Clients and Tasks readings exactly as they were.
  */
 
 import * as React from 'react'
@@ -86,19 +93,28 @@ export function FilterChip({ chip, onClear }: { chip: AnyFilterChip; onClear: ()
 export interface RailLayoutProps {
   /** The desktop rail contents. Rendered inside the 14.5rem aside. */
   rail: React.ReactNode
+  /** Accessible name for the rail and the sheet it folds into. A surface with
+   *  no sort must not claim one. */
+  railLabel?: string
+  sheetTitle?: string
   /** The same rail with 44px targets, rendered inside the mobile sheet. */
   railTouch: React.ReactNode
-  /** The view switcher, rendered first in the toolbar row. */
-  switcher: React.ReactNode
+  /** The view switcher, rendered first in the toolbar row. Optional: the
+   *  Notifications page has no desktop switcher (its views live in the rail)
+   *  and passes only the phone's segmented track. */
+  switcher?: React.ReactNode
   chips: readonly RailFilterChip[]
   onClearChip: (chip: RailFilterChip) => void
   onClearAll: () => void
   /** Put the view back to the saved default. Omitted when there is no saved
    *  default, or when the view already matches it. */
   onResetDefault?: () => void
-  query: string
-  onQueryChange: (next: string) => void
-  searchPlaceholder: string
+  /** Search is opt-in: the box renders only when there is a handler to take
+   *  it. A surface whose API cannot search must not draw a field that
+   *  silently searches one loaded page. */
+  query?: string
+  onQueryChange?: (next: string) => void
+  searchPlaceholder?: string
   /** Rows after the saved view, filters and search have been applied. */
   total: number
   /** Singular noun for the count, e.g. 'request' or 'task'. */
@@ -111,13 +127,19 @@ export interface RailLayoutProps {
    *  a saved view is active. */
   extraActiveCount?: number
   /** Rendered at the right of the chip row below lg, where the rail's own
-   *  foot is inside the sheet. Pass <SaveDefaultControl touch />. */
-  saveDefaultTouch: React.ReactNode
+   *  foot is inside the sheet. Pass <SaveDefaultControl touch />. Omitted on
+   *  a surface with no saved default to keep. */
+  saveDefaultTouch?: React.ReactNode
+  /** Sits after the count, hard right of the toolbar row: the one action the
+   *  list itself owns, e.g. Mark all as read. */
+  trailing?: React.ReactNode
   children: React.ReactNode
 }
 
 export function RailLayout({
   rail,
+  railLabel = 'Saved views, filters and sort',
+  sheetTitle = 'Filters and sort',
   railTouch,
   switcher,
   chips,
@@ -133,6 +155,7 @@ export function RailLayout({
   loading = false,
   extraActiveCount = 0,
   saveDefaultTouch,
+  trailing,
   children,
 }: RailLayoutProps) {
   const [sheetOpen, setSheetOpen] = React.useState(false)
@@ -144,7 +167,7 @@ export function RailLayout({
     <div className="flex" style={{ gap: '1.25rem' }}>
       <aside
         className="hidden lg:block"
-        aria-label="Saved views, filters and sort"
+        aria-label={railLabel}
         style={{ width: '14.5rem', flexShrink: 0 }}
       >
         {rail}
@@ -194,6 +217,7 @@ export function RailLayout({
 
           <div className="hidden lg:block" style={{ flex: 1, minWidth: 0 }} />
 
+          {onQueryChange && (
           <div
             className="tahi-input-group tahi-focus-within flex items-center h-11 lg:h-8"
             style={{
@@ -209,10 +233,10 @@ export function RailLayout({
           >
             <Search size={14} aria-hidden="true" style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
             <input
-              value={query}
+              value={query ?? ''}
               onChange={e => onQueryChange(e.target.value)}
               placeholder={searchPlaceholder}
-              aria-label={searchPlaceholder}
+              aria-label={searchPlaceholder ?? 'Search'}
               style={{
                 flex: 1,
                 minWidth: 0,
@@ -242,6 +266,7 @@ export function RailLayout({
               </button>
             )}
           </div>
+          )}
 
           <span
             aria-live="polite"
@@ -255,6 +280,8 @@ export function RailLayout({
           >
             {loading ? 'Loading' : countLabel}
           </span>
+
+          {trailing}
         </div>
 
         {/* Chips, plus Save as default below lg. Above it the rail's own foot
@@ -262,6 +289,7 @@ export function RailLayout({
             sheet, and a phone should not have to open a sheet to keep the
             view it has just set up. The row is here even with no chips at
             that width, which is exactly when it is only the save affordance. */}
+        {(anyChips || onResetDefault || saveDefaultTouch) && (
         <div
           className={anyChips || onResetDefault
             ? 'flex items-center flex-wrap'
@@ -306,10 +334,13 @@ export function RailLayout({
               Reset to default
             </button>
           )}
-          <div className="lg:hidden inline-flex items-center" style={{ marginLeft: 'auto' }}>
-            {saveDefaultTouch}
-          </div>
+          {saveDefaultTouch && (
+            <div className="lg:hidden inline-flex items-center" style={{ marginLeft: 'auto' }}>
+              {saveDefaultTouch}
+            </div>
+          )}
         </div>
+        )}
 
         {children}
       </div>
@@ -317,7 +348,7 @@ export function RailLayout({
       <SlideOver
         open={sheetOpen}
         onClose={() => setSheetOpen(false)}
-        title="Filters and sort"
+        title={sheetTitle}
         icon={<Filter size={15} />}
         maxWidth="22rem"
       >
