@@ -8,6 +8,7 @@ import { requireAccessToOrg } from '@/lib/require-access'
 import {
   createTimeEntry,
   timeEntryFailureResponse,
+  timeEntryLoggerJoin,
   validateTimeEntryDraft,
   type TimeEntryDraft,
 } from '@/lib/time-entries'
@@ -104,7 +105,7 @@ export async function GET(req: NextRequest) {
     .from(schema.timeEntries)
     .leftJoin(schema.organisations, eq(schema.timeEntries.orgId, schema.organisations.id))
     .leftJoin(schema.requests, eq(schema.timeEntries.requestId, schema.requests.id))
-    .leftJoin(schema.teamMembers, eq(schema.timeEntries.teamMemberId, schema.teamMembers.id))
+    .leftJoin(schema.teamMembers, timeEntryLoggerJoin())
     .where(whereClause)
     .orderBy(desc(schema.timeEntries.date))
     .limit(limit)

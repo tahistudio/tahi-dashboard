@@ -41,7 +41,7 @@ vi.mock('@/db/d1', () => ({
     activeTimers: { _table: 'activeTimers', id: 1, userId: 1, requestId: 1, taskId: 1, orgId: 1 },
     requests: { _table: 'requests', id: 1, orgId: 1, title: 1, requestNumber: 1 },
     tasks: { _table: 'tasks', id: 1, orgId: 1, requestId: 1, title: 1, type: 1 },
-    organisations: { _table: 'organisations', id: 1, name: 1 },
+    organisations: { _table: 'organisations', id: 1, name: 1, defaultHourlyRate: 1 },
     teamMembers: { _table: 'teamMembers', id: 1, clerkUserId: 1 },
     timeEntries: { _table: 'timeEntries' },
   },
@@ -226,6 +226,31 @@ describe('DELETE /api/admin/timers/[id]', () => {
     expect(state.inserts.filter(i => i.table === 'timeEntries')).toHaveLength(0)
     // The timer still stops, so the user is not left with a zombie.
     expect(state.deletes).toContain('activeTimers')
+  })
+
+  it('stamps the client default rate on the entry it logs', async () => {
+    // No timer UI collects a rate, so a tracked hour used to be stored with
+    // none at all and dropped out of the hourly export while the same hour
+    // typed into /time billed fine. Same rule as the manual URLs now.
+    state.rows.activeTimers = [timerRow({ taskId: 'task_old', orgId: 'org_client_b' })]
+    state.rows.tasks = [{ orgId: 'org_client_b', requestId: null }]
+    state.rows.teamMembers = [{ id: 'tm_1' }]
+    state.rows.organisations = [{ id: 'org_client_b', defaultHourlyRate: 180 }]
+
+    const res = await DELETE(makeDelete('timer_old'), params)
+    expect((await res.json() as { logged: boolean }).logged).toBe(true)
+    expect(state.inserts.find(i => i.table === 'timeEntries')?.values.hourlyRate).toBe(180)
+  })
+
+  it('stores no rate rather than zero when the client has no default', async () => {
+    state.rows.activeTimers = [timerRow({ taskId: 'task_old', orgId: 'org_client_b' })]
+    state.rows.tasks = [{ orgId: 'org_client_b', requestId: null }]
+    state.rows.teamMembers = [{ id: 'tm_1' }]
+    state.rows.organisations = [{ id: 'org_client_b', defaultHourlyRate: 0 }]
+
+    const res = await DELETE(makeDelete('timer_old'), params)
+    expect((await res.json() as { logged: boolean }).logged).toBe(true)
+    expect(state.inserts.find(i => i.table === 'timeEntries')?.values.hourlyRate).toBeNull()
   })
 
   it('discards without logging when asked to', async () => {

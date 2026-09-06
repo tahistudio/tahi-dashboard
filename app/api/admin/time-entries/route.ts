@@ -15,6 +15,11 @@
  *
  * Exactly one of requestId or taskId required. Admin only.
  *
+ * The entry is owned by the caller's team_members row unless the body names a
+ * teamMemberId, which is how the MCP tools and the service token log on
+ * someone's behalf. Either way the value stored is a team_members.id, never a
+ * Clerk user id.
+ *
  * A task with no client is still loggable. time_entries.org_id is NOT NULL,
  * so a studio (tahi_internal) task resolves its org the same way a stopped
  * timer does, through resolveTimerOrgId, rather than being refused.
@@ -35,7 +40,9 @@ import {
   createTimeEntry,
   deriveHoursAndDate,
   isTimeEntryFailure,
+  resolveLoggingTeamMemberId,
   timeEntryFailureResponse,
+  timeEntryLoggerJoin,
 } from '@/lib/time-entries'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -104,7 +111,7 @@ export async function GET(req: NextRequest) {
       createdAt: schema.timeEntries.createdAt,
     })
     .from(schema.timeEntries)
-    .leftJoin(schema.teamMembers, eq(schema.timeEntries.teamMemberId, schema.teamMembers.id))
+    .leftJoin(schema.teamMembers, timeEntryLoggerJoin())
     .where(taskId ? eq(schema.timeEntries.taskId, taskId) : eq(schema.timeEntries.requestId, requestId as string))
     .orderBy(desc(schema.timeEntries.date))
 
@@ -128,6 +135,7 @@ export async function POST(req: NextRequest) {
     notes?: string | null
     billable?: boolean
     hourlyRate?: number | null
+    teamMemberId?: string | null
   } | null
   if (!body) return NextResponse.json({ error: 'Body required' }, { status: 400 })
 
@@ -195,12 +203,24 @@ export async function POST(req: NextRequest) {
     if (denied) return denied
   }
 
+  // team_member_id points at team_members.id, and `userId` is a Clerk id.
+  // This route used to insert the Clerk id raw, so every entry logged from a
+  // request or task time card joined to no member and read as "Unknown" on
+  // /time while the live timer, which resolved first, read correctly. Same
+  // resolution for both now, and a caller who cannot be resolved is refused
+  // rather than written as an orphan.
+  const logger = await resolveLoggingTeamMemberId(drizzle, {
+    userId,
+    supplied: body.teamMemberId,
+  })
+  if (!logger.ok) return timeEntryFailureResponse(logger.failure)
+
   // One writer for both manual-entry URLs (lib/time-entries.ts). It also
   // resolves the rate: a rate on the body wins, else the client's
   // default_hourly_rate, else null. Never 0.
   const result = await createTimeEntry(drizzle, {
     orgId: entryOrgId,
-    teamMemberId: userId,
+    teamMemberId: logger.teamMemberId,
     requestId: targetRequestId,
     taskId: targetTaskId,
     hours,

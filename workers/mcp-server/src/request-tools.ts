@@ -171,6 +171,10 @@ export function requestToolCall(
           description: s('description'),
           billable: args.billable ?? true,
           teamMemberId: s('teamMemberId'),
+          // Omitted leaves the route on its own rule: the client's
+          // default_hourly_rate, else no rate. Sending undefined here is not
+          // the same as sending 0, which would bill the hours at nothing.
+          hourlyRate: typeof args.hourlyRate === 'number' ? args.hourlyRate : undefined,
         },
       }
     case 'list_request_files':

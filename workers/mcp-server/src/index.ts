@@ -435,12 +435,13 @@ const TOOLS: ToolDef[] = [
   tool('list_request_time_entries', 'List the time logged against one request, with who logged it', {
     requestId: prop('string', 'Request ID'),
   }, ['requestId']),
-  tool('log_request_time', 'Log time against a request. Defaults the team member to the calling identity when none is given.', {
+  tool('log_request_time', 'Log time against a request. Pass teamMemberId: this server calls with a service token, which is nobody on the roster, and an entry that points at no team member is refused rather than written.', {
     requestId: prop('string', 'Request ID'),
     hours: prop('number', 'Hours worked, must be greater than 0'),
     description: prop('string', 'What the time was spent on'),
     billable: prop('boolean', 'Whether the entry is billable (default true)'),
     teamMemberId: prop('string', 'Team member ID the entry belongs to'),
+    hourlyRate: prop('number', 'Rate per hour to store on the entry. Omit to use the default hourly rate on the client record, which is stored on the row so a later change to that default cannot re-price hours already logged.'),
   }, ['requestId', 'hours']),
   tool('list_request_files', 'List the files attached to one request, with uploader and size', {
     requestId: prop('string', 'Request ID'),
@@ -1770,6 +1771,7 @@ const TOOLS: ToolDef[] = [
     notes: prop('string', 'Notes'),
     billable: prop('boolean', 'Default true'),
     hourlyRate: prop('number', 'Override default rate'),
+    teamMemberId: prop('string', 'Team member the entry belongs to. Required from this server: the service token has no team member of its own, and an entry that points at nobody is refused rather than written.'),
   }),
 
   // ── Sitemap (Liam + Staci marketing-site planning library) ────────────

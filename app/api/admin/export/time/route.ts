@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, gte, lte, desc } from 'drizzle-orm'
+import { timeEntryLoggerJoin } from '@/lib/time-entries'
 
 // -- GET /api/admin/export/time --
 // Returns time entries as CSV.
@@ -44,7 +45,7 @@ export async function GET(req: NextRequest) {
       notes: schema.timeEntries.notes,
     })
     .from(schema.timeEntries)
-    .leftJoin(schema.teamMembers, eq(schema.timeEntries.teamMemberId, schema.teamMembers.id))
+    .leftJoin(schema.teamMembers, timeEntryLoggerJoin())
     .leftJoin(schema.organisations, eq(schema.timeEntries.orgId, schema.organisations.id))
     .leftJoin(schema.requests, eq(schema.timeEntries.requestId, schema.requests.id))
     .where(whereClause)

@@ -42,7 +42,8 @@
 
 import { NextResponse } from 'next/server'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { eq, or, type SQL } from 'drizzle-orm'
+import { resolveTeamMember } from '@/lib/team-identity'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -253,4 +254,91 @@ export function isTimeEntryFailure(
   value: { hours: number; date: string } | TimeEntryFailure,
 ): value is TimeEntryFailure {
   return 'error' in value
+}
+
+/**
+ * WHO LOGGED THE HOURS (the write side).
+ *
+ * `time_entries.team_member_id` has a foreign key to `team_members.id`, and
+ * the value an API route has in its hand is a CLERK user id. POST
+ * /api/admin/time-entries used to pass the Clerk id straight through, so every
+ * entry logged from the time card on a request or task joined to no member row
+ * and read as "Unknown" on /time. The live timer had always resolved it first
+ * (lib/timer-helpers.ts), which is why the same hours logged two ways came out
+ * owned by two different people.
+ *
+ * The resolution, in order:
+ *
+ *   1. An explicit `teamMemberId` that IS a `team_members.id` is kept. A
+ *      caller who names a member (the MCP tools, an admin logging on someone
+ *      else's behalf) has already decided.
+ *   2. An explicit id that turns out to be a Clerk id is resolved rather than
+ *      refused: it is the very mistake this function exists to stop, and the
+ *      person it names is unambiguous.
+ *   3. Otherwise the caller's own Clerk id, through `resolveTeamMember`, the
+ *      one place `team_members.clerk_user_id` is read.
+ *
+ * A failure is a 400, never a write. An entry pointing at nobody is worse than
+ * a refused one: the hours still count toward a client's burn, but no report
+ * can attribute them and the person who logged them has no way to notice.
+ */
+export async function resolveLoggingTeamMemberId(
+  drizzle: Drizzle,
+  input: { userId?: string | null; supplied?: string | null },
+): Promise<{ ok: true; teamMemberId: string } | { ok: false; failure: TimeEntryFailure }> {
+  const supplied = typeof input.supplied === 'string' ? input.supplied.trim() : ''
+
+  if (supplied) {
+    const [byId] = await drizzle
+      .select({ id: schema.teamMembers.id })
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.id, supplied))
+      .limit(1)
+    if (byId?.id) return { ok: true, teamMemberId: byId.id }
+
+    const [byClerkId] = await drizzle
+      .select({ id: schema.teamMembers.id })
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.clerkUserId, supplied))
+      .limit(1)
+    if (byClerkId?.id) return { ok: true, teamMemberId: byClerkId.id }
+
+    return {
+      ok: false,
+      failure: { status: 400, error: 'teamMemberId does not match a team member' },
+    }
+  }
+
+  const member = await resolveTeamMember(drizzle, input.userId ?? null)
+  if (member) return { ok: true, teamMemberId: member.id }
+
+  return {
+    ok: false,
+    failure: {
+      status: 400,
+      error: 'Your login is not linked to a team member, so the hours were not logged. Link the account on the Team page, or send an explicit teamMemberId.',
+    },
+  }
+}
+
+/**
+ * WHO LOGGED THE HOURS (the read side).
+ *
+ * The join condition every surface that names the logger uses, in one place so
+ * the fallback cannot end up half applied.
+ *
+ * Rows written before `resolveLoggingTeamMemberId` existed carry a Clerk user
+ * id in `team_member_id`. They are NOT rewritten: a backfill would be guessing
+ * at ids on a billing input. The join reaches them through
+ * `team_members.clerk_user_id` instead, so history stops reading "Unknown"
+ * without a migration touching a single row.
+ *
+ * Matching both columns is safe because they cannot collide: an id is a UUID
+ * this app mints, a Clerk user id is a `user_...` string Clerk mints.
+ */
+export function timeEntryLoggerJoin(): SQL | undefined {
+  return or(
+    eq(schema.timeEntries.teamMemberId, schema.teamMembers.id),
+    eq(schema.timeEntries.teamMemberId, schema.teamMembers.clerkUserId),
+  )
 }

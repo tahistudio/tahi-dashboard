@@ -1,9 +1,31 @@
+/**
+ * Time logged against one request.
+ *
+ * Both handlers go through lib/time-entries.ts rather than talking to the
+ * table themselves, so this URL cannot drift from the other two that write
+ * time (POST /api/admin/time and POST /api/admin/time-entries):
+ *
+ *   - the rate is resolved by the one rule (body rate wins, else the client's
+ *     default_hourly_rate, else null). This route never accepted a rate at
+ *     all, so every entry it wrote carried NULL and fell out of the hourly
+ *     Xero export as "no rate" even for clients who have a default.
+ *   - the logger is resolved to a team_members.id, never a Clerk user id.
+ *   - the read join reaches historical Clerk-id rows by clerk_user_id so they
+ *     stop reading "Unknown".
+ */
+
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import {
+  createTimeEntry,
+  resolveLoggingTeamMemberId,
+  timeEntryFailureResponse,
+  timeEntryLoggerJoin,
+} from '@/lib/time-entries'
 
 type Params = { params: Promise<{ id: string }> }
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -50,7 +72,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       createdAt: schema.timeEntries.createdAt,
     })
     .from(schema.timeEntries)
-    .leftJoin(schema.teamMembers, eq(schema.timeEntries.teamMemberId, schema.teamMembers.id))
+    .leftJoin(schema.teamMembers, timeEntryLoggerJoin())
     .where(eq(schema.timeEntries.requestId, requestId))
     .orderBy(desc(schema.timeEntries.date))
 
@@ -58,7 +80,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 }
 
 // POST /api/admin/requests/[id]/time-entries
-// Body: { hours, description?, billable? }
+// Body: { hours, description?, billable?, teamMemberId?, hourlyRate? }
 export async function POST(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
@@ -71,6 +93,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     description?: string
     billable?: boolean
     teamMemberId?: string
+    hourlyRate?: number | null
   }
 
   if (typeof body.hours !== 'number' || body.hours <= 0) {
@@ -94,36 +117,30 @@ export async function POST(req: NextRequest, { params }: Params) {
   const denied = await requireAccessToOrg(drizzle, userId, request.orgId)
   if (denied) return denied
 
-  // Find team member for the current user if not provided
-  let teamMemberId = body.teamMemberId
-  if (!teamMemberId && userId) {
-    const [member] = await drizzle
-      .select({ id: schema.teamMembers.id })
-      .from(schema.teamMembers)
-      .where(eq(schema.teamMembers.clerkUserId, userId))
-      .limit(1)
-    teamMemberId = member?.id
-  }
-
-  if (!teamMemberId) {
-    return NextResponse.json({ error: 'teamMemberId is required' }, { status: 400 })
-  }
-
-  const now = new Date().toISOString()
-  const id = crypto.randomUUID()
-
-  await drizzle.insert(schema.timeEntries).values({
-    id,
-    orgId: request.orgId,
-    requestId,
-    teamMemberId,
-    hours: body.hours,
-    billable: body.billable !== false,
-    notes: body.description ?? null,
-    date: now.split('T')[0],
-    createdAt: now,
-    updatedAt: now,
+  // A body teamMemberId wins (the MCP tool and the service token have no
+  // Clerk identity of their own); otherwise the caller's own row.
+  const logger = await resolveLoggingTeamMemberId(drizzle, {
+    userId,
+    supplied: body.teamMemberId,
   })
+  if (!logger.ok) return timeEntryFailureResponse(logger.failure)
 
-  return NextResponse.json({ id })
+  // The single writer stamps the rate. Entries from this URL used to carry
+  // NULL whatever the client's default was, so a request's hours silently
+  // dropped out of the hourly export while the same hours logged from /time
+  // billed fine.
+  const result = await createTimeEntry(drizzle, {
+    orgId: request.orgId,
+    teamMemberId: logger.teamMemberId,
+    requestId,
+    hours: body.hours,
+    date: new Date().toISOString().slice(0, 10),
+    notes: body.description ?? null,
+    billable: body.billable,
+    hourlyRate: body.hourlyRate,
+    source: 'manual',
+  })
+  if (!result.ok) return timeEntryFailureResponse(result.failure)
+
+  return NextResponse.json({ id: result.entry.id })
 }

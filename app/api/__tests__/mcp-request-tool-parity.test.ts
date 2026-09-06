@@ -130,6 +130,20 @@ describe('time logging', () => {
     expect(call('log_request_time', { requestId: 'r1', hours: 2, billable: false }).body)
       .toMatchObject({ billable: false })
   })
+
+  it('passes an explicit rate through, including a deliberate zero', () => {
+    expect(call('log_request_time', { requestId: 'r1', hours: 2, hourlyRate: 210 }).body)
+      .toMatchObject({ hourlyRate: 210 })
+    expect(call('log_request_time', { requestId: 'r1', hours: 2, hourlyRate: 0 }).body)
+      .toMatchObject({ hourlyRate: 0 })
+  })
+
+  it('sends no rate at all when none was given, so the client default applies', () => {
+    // Not null and not 0: either would be a decision the caller did not make,
+    // and 0 bills the hours at nothing.
+    expect(call('log_request_time', { requestId: 'r1', hours: 2 }).body?.hourlyRate)
+      .toBeUndefined()
+  })
 })
 
 describe('kanban columns', () => {

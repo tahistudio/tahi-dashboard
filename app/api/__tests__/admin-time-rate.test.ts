@@ -52,7 +52,7 @@ vi.mock('@/db/d1', () => ({
       hours: 1, hourlyRate: 1, billable: 1, notes: 1, date: 1,
       startedAt: 1, endedAt: 1, source: 1, createdAt: 1, updatedAt: 1,
     },
-    teamMembers: { _table: 'teamMembers', id: 1, name: 1, clerkUserId: 1, weeklyCapacityHours: 1 },
+    teamMembers: { _table: 'teamMembers', id: 1, name: 1, role: 1, clerkUserId: 1, weeklyCapacityHours: 1 },
     organisations: { _table: 'organisations', id: 1, name: 1, defaultHourlyRate: 1 },
   },
 }))
@@ -130,6 +130,10 @@ const BASE = {
 beforeEach(() => {
   state.rows = {}
   state.inserts = []
+  // POST /api/admin/time-entries owns the entry to the caller, so it resolves
+  // the Clerk id to a team_members row before writing. Ownership itself is
+  // covered in admin-time-entry-owner.test.ts; here it just has to succeed.
+  state.rows.teamMembers = [{ id: 'tm_1', clerkUserId: 'clerk_admin', name: 'Liam', role: 'admin' }]
   process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
 })
 
