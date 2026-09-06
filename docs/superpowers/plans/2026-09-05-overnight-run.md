@@ -97,6 +97,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 00:05 NZST (Mon) Claude Design MCP lost its scopes (needs /design-login by Liam): the proposals editor rework, the consistency pass, the invoices-studio wiring, the Services ladder and the Stalled flag are finished and staged on disk, not written. Local critic on the mirror: editor strong with a wiring bug; consistency pass regressed wide-table pages (rail costs columns). Local fix pass launched; write-back is TASKS DL.0 to DL.4. Repo streams unaffected.
 
+- 00:20 NZST (Mon) act-as-client built and reviewed (0641c8de), merges cleanly, queued behind the email allowlist. Cutover prep still in its allowlist fix and importer build.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - [x] More sheet Track time row left-aligned (17a490b2).
