@@ -7,7 +7,13 @@ import { render } from '@react-email/render'
 import { ProposalShareEmail } from '@/emails/proposal-share'
 import { publicUrl } from '@/lib/app-url'
 import { emailFromAddress } from '@/lib/email'
-import { deliverEmail } from '@/lib/email-delivery'
+import {
+  deliverEmail,
+  partitionRecipients,
+  recordEmailSuppressions,
+  resolveDeliveryPolicy,
+  resolveOrgRecipientScope,
+} from '@/lib/email-delivery'
 import { requireProposalAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -46,9 +52,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   const ccList = (Array.isArray(body.cc) ? body.cc : []).filter(r => r.email?.trim()).map(r => r.email.trim())
   const bccList = (Array.isArray(body.bcc) ? body.bcc : []).filter(r => r.email?.trim()).map(r => r.email.trim())
   const customSubject = body.subject?.trim() || null
-  if (!process.env.RESEND_API_KEY) {
-    return NextResponse.json({ error: 'Email service not configured' }, { status: 500 })
-  }
+
+  // No RESEND_API_KEY check here on purpose. deliverEmail filters and logs
+  // before it looks at the key, so a key-less environment still leaves an
+  // evidence trail for every address it would have withheld.
 
   const database = await db() as unknown as D1
 
@@ -81,8 +88,26 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
   const sent: string[] = []
   const failed: Array<{ email: string; error: string }> = []
-  // Recipients the delivery allowlist held back, reported rather than hidden.
-  const suppressed: string[] = []
+
+  // cc and bcc are filtered ONCE, not once per recipient: they do not change
+  // between iterations, so partitioning them inside the loop logged one
+  // withheld cc address as many times as there were recipients and reported it
+  // as many withheld sends. Recipients the allowlist held back are reported
+  // rather than hidden.
+  const policy = await resolveDeliveryPolicy()
+  const scope = await resolveOrgRecipientScope(proposal.orgId, policy)
+  const ccPart = partitionRecipients(ccList, policy, scope)
+  const bccPart = partitionRecipients(bccList, policy, scope)
+  const suppressed: string[] = [...ccPart.suppressed, ...bccPart.suppressed]
+  await recordEmailSuppressions(
+    suppressed,
+    {
+      template: 'proposal-share',
+      subject: customSubject ?? `Proposal from Tahi Studio: ${proposal.title}`,
+      orgId: proposal.orgId,
+    },
+    policy,
+  )
 
   for (const r of body.to) {
     if (!r.email?.trim()) continue
@@ -99,12 +124,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const outcome = await deliverEmail({
         from: emailFromAddress(),
         to: r.email,
-        cc: ccList,
-        bcc: bccList,
+        cc: ccPart.allowed,
+        bcc: bccPart.allowed,
         subject: customSubject ?? `Proposal from Tahi Studio: ${proposal.title}`,
         html,
         template: 'proposal-share',
         orgId: proposal.orgId,
+        policy,
       })
       suppressed.push(...outcome.suppressed)
       if (outcome.success) sent.push(r.email)

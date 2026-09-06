@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, asc } from 'drizzle-orm'
+import { guardOutboundAddress } from '@/lib/email-gate'
 
 export const dynamic = 'force-dynamic'
 
@@ -127,6 +128,26 @@ export async function POST(req: NextRequest) {
     .limit(1)
   if (existing) {
     return NextResponse.json({ error: 'That email is already on your roster' }, { status: 409 })
+  }
+
+  // CLERK IS A SECOND MAIL TRANSPORT. createOrganizationInvitation sends its
+  // own email, from Clerk, to whatever address a client admin typed into this
+  // form, so it never passes through lib/email-delivery.ts and the allowlist
+  // could not see it. That made this the shortest path in the product from an
+  // authenticated session to a real person's inbox while the studio believed
+  // the blackout was total. The same rule is asked here, scoped to this
+  // client's org so an exempted client's own people still come through, and a
+  // withheld address is logged before we answer.
+  const gate = await guardOutboundAddress(email, {
+    template: 'clerk-org-invite',
+    subject: 'Clerk invitation to a client workspace',
+    orgId,
+  })
+  if (!gate.allowed) {
+    return NextResponse.json({
+      error: 'Held back by the email allowlist',
+      message: `We cannot invite ${email} yet. ${gate.reason}`,
+    }, { status: 409 })
   }
 
   // Send the Clerk invitation FIRST. Only record the pending contact if it

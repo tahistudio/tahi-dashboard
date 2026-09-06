@@ -6,7 +6,11 @@ import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { publicUrl } from '@/lib/app-url'
 import { sendEmail } from '@/lib/email'
-import { partitionRecipients, resolveDeliveryPolicy } from '@/lib/email-delivery'
+import {
+  partitionRecipients,
+  resolveDeliveryPolicy,
+  resolveOrgRecipientScope,
+} from '@/lib/email-delivery'
 import { InvoiceSentEmail } from '@/emails/invoice-sent'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { requireFeature } from '@/lib/require-feature'
@@ -264,16 +268,31 @@ export async function POST(req: NextRequest, { params }: Params) {
   // and mails it itself, so lib/email-delivery.ts never sees it and cannot
   // filter it. Asking the same pure rule here is what stops "no client gets
   // mail until Liam says so" being true of our template and false of Xero's.
-  // If every billing contact would be withheld, Xero stands down as well.
   const deliveryPolicy = await resolveDeliveryPolicy()
+  const deliveryScope = await resolveOrgRecipientScope(invoiceRow.orgId, deliveryPolicy)
   const anyRecipientAllowed = partitionRecipients(
     recipients.map(r => r.email),
     deliveryPolicy,
-    invoiceRow.orgId,
+    deliveryScope,
   ).allowed.length > 0
 
+  // XERO IS AUTHORISED PER CLIENT, NOT PER ADDRESS, and that is the whole
+  // difference. This used to fire whenever ONE billing contact passed the
+  // gate, which is exactly what happens when Liam adds himself to a real
+  // client's billing contacts to test the template: our own send correctly
+  // reached only him, and Xero then mailed its PDF to the client's own stored
+  // address, the address the gate had just withheld us from. Since we cannot
+  // see or filter Xero's recipient, the only honest question is whether the
+  // policy authorises this CLIENT at all: mode 'all', or their org id on
+  // `email.allowedOrgIds`. Anything less and Xero stands down.
+  const orgAuthorisedForBlindTransports =
+    deliveryPolicy.mode === 'all'
+    || deliveryPolicy.allowedOrgIds.includes(invoiceRow.orgId.trim().toLowerCase())
+
   const onXeroRail = payContext.channel === 'xero'
-  const wantsXeroEmail = onXeroRail && payContext.xeroEmailMode !== 'dashboard' && anyRecipientAllowed
+  const wantsXeroEmail = onXeroRail
+    && payContext.xeroEmailMode !== 'dashboard'
+    && orgAuthorisedForBlindTransports
   const xeroOutcome: XeroEmailOutcome | null = wantsXeroEmail
     ? await emailInvoiceFromXero(invoiceRow.xeroInvoiceId, { alreadySent })
     : null

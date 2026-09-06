@@ -21,6 +21,7 @@ import { createElement } from 'react'
 import { eq, inArray } from 'drizzle-orm'
 import { schema } from '@/db/d1'
 import { sendEmail } from '@/lib/email'
+import { resolveDeliveryPolicy } from '@/lib/email-gate'
 import { isEventChannelEnabled } from '@/lib/notification-preferences'
 import { publicUrl } from '@/lib/app-url'
 import AnnouncementEmail, { type AnnouncementEmailType } from '@/emails/announcement'
@@ -134,6 +135,11 @@ export async function fanOutAnnouncementEmails(
   const subject = opts.title.trim()
   const BATCH = 20
   let emailed = 0
+  // Read the delivery policy ONCE for the whole fan-out. Each send used to
+  // resolve it for itself, so an announcement to 200 contacts spent 200 extra
+  // settings reads out of one Worker's subrequest budget before it wrote a
+  // single suppression row.
+  const policy = await resolveDeliveryPolicy()
   for (let i = 0; i < eligible.length; i += BATCH) {
     const slice = eligible.slice(i, i + BATCH)
     const results = await Promise.all(
@@ -142,6 +148,7 @@ export async function fanOutAnnouncementEmails(
           const res = await sendEmail(r.email, subject, emailReact, undefined, {
             template: 'announcement',
             orgId: r.orgId,
+            policy,
           })
           return res.success
         } catch (err) {

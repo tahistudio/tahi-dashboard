@@ -21,7 +21,7 @@ import { ContractFullySignedEmail } from '@/emails/contract-fully-signed'
 import { buildSignedPdfBase64 } from '@/lib/contract-signed-pdf'
 import { publicUrl } from '@/lib/app-url'
 import { emailFromAddress } from '@/lib/email'
-import { deliverEmail } from '@/lib/email-delivery'
+import { deliverEmail, resolveDeliveryPolicy } from '@/lib/email-delivery'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -205,6 +205,10 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
     const sent: string[] = []
     const failed: Array<{ email: string; error: string }> = []
     const suppressed: string[] = []
+    // Read once for the whole fan-out rather than once per recipient: the
+    // policy cannot change between two sends of the same contract, and each
+    // resolve is a settings read.
+    const policy = await resolveDeliveryPolicy()
 
     for (const r of recipients) {
       try {
@@ -228,6 +232,7 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
           html,
           template: 'contract-fully-signed',
           orgId: doc.orgId,
+          policy,
           ...(pdfBase64
             ? {
               attachments: [{

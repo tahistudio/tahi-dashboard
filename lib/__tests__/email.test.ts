@@ -34,12 +34,16 @@ vi.mock('@/db/d1', () => ({
 
 vi.mock('drizzle-orm', () => ({
   desc: (col: unknown) => ({ __op: 'desc', col }),
+  eq: (col: unknown, value: unknown) => ({ __op: 'eq', col, value }),
+  inArray: (col: unknown, values: unknown) => ({ __op: 'inArray', col, values }),
 }))
 
 vi.mock('@/lib/db', () => ({
   db: vi.fn(async () => ({
     select: () => ({
-      from: () => Promise.resolve([{ key: 'email.deliveryMode', value: 'all' }]),
+      from: () => ({
+        where: () => Promise.resolve([{ key: 'email.deliveryMode', value: 'all' }]),
+      }),
     }),
     insert: () => ({ values: () => Promise.resolve(undefined) }),
   })),

@@ -8,6 +8,12 @@ import { eq } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { createNotifications, type NotificationRecipient } from '@/lib/notifications'
 import { invoiceReference, selectBillingContacts } from '@/lib/invoice-billing'
+import {
+  partitionRecipients,
+  recordEmailSuppressions,
+  resolveDeliveryPolicy,
+  resolveOrgRecipientScope,
+} from '@/lib/email-delivery'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -108,15 +114,70 @@ export async function POST(req: NextRequest) {
 
   if (!org) return NextResponse.json({ error: 'Organisation not found' }, { status: 404 })
 
+  // The client's people, read once: the gate below needs them, and so does the
+  // bell at the end of a successful finalise.
+  const contacts = await database
+    .select({
+      id: schema.contacts.id,
+      email: schema.contacts.email,
+      name: schema.contacts.name,
+      portalRole: schema.contacts.portalRole,
+      isPrimary: schema.contacts.isPrimary,
+    })
+    .from(schema.contacts)
+    .where(eq(schema.contacts.orgId, org.id))
+
+  // STRIPE IS A SECOND MAIL TRANSPORT, and this route is where it is armed.
+  // The invoice is created with collection_method 'send_invoice' and then
+  // finalised, and a finalised send_invoice invoice is EMAILED TO THE CUSTOMER
+  // BY STRIPE whenever the account has "email finalised invoices" on. No code
+  // here is involved and lib/email-delivery.ts never sees an address, so the
+  // Xero hole was closed while the identical Stripe one stayed open, reachable
+  // from the invoice detail page, the list's bulk action and the
+  // create_stripe_invoice MCP tool.
+  //
+  // Refused rather than half-done. Creating the invoice with auto_advance
+  // false and skipping the finalize would leave a draft in Stripe with no
+  // hosted URL, which is a half state somebody has to clean up; answering 409
+  // before anything is created leaves Stripe exactly as it was. A suppression
+  // row per withheld billing contact is written first, so the hold is provable.
+  //
+  // ALL OR NOTHING, unlike our own template. Stripe mails the CUSTOMER, one
+  // address we do not choose per send, so "some contacts passed" is not a
+  // state it can honour. A client with no contact at all is refused too: we
+  // cannot show that whatever address Stripe holds is allowed.
+  const billingRecipients = selectBillingContacts(contacts)
+  const deliveryPolicy = await resolveDeliveryPolicy()
+  const deliveryScope = await resolveOrgRecipientScope(org.id, deliveryPolicy)
+  const billingPartition = partitionRecipients(
+    billingRecipients.map(c => c.email),
+    deliveryPolicy,
+    deliveryScope,
+  )
+  if (billingPartition.suppressed.length > 0 || billingRecipients.length === 0) {
+    await recordEmailSuppressions(
+      billingPartition.suppressed,
+      {
+        template: 'stripe-invoice',
+        subject: `Stripe would email invoice ${invoiceReference(invoice.id)} on finalise`,
+        orgId: invoice.orgId,
+      },
+      deliveryPolicy,
+    )
+    return NextResponse.json({
+      error: 'Held back by the email allowlist',
+      message: billingRecipients.length === 0
+        ? 'This client has no billing contact, so there is no address to check against the email delivery allowlist. Stripe emails a finalised invoice itself.'
+        : 'Stripe emails a finalised invoice itself, and this client is not on the email delivery allowlist. Settings > Studio details > Email delivery.',
+      suppressed: billingPartition.suppressed,
+    }, { status: 409 })
+  }
+
   try {
     // Create Stripe customer if needed
     let customerId = org.stripeCustomerId
     if (!customerId) {
-      const [contact] = await database
-        .select({ email: schema.contacts.email })
-        .from(schema.contacts)
-        .where(eq(schema.contacts.orgId, org.id))
-        .limit(1)
+      const contact = contacts[0]
 
       const customer = await stripePost('/customers', {
         name: org.name,
@@ -194,17 +255,7 @@ export async function POST(req: NextRequest) {
     // and only to the billing contacts: the portal denies a plain member seat
     // the invoice, so a bell row for them is a dead click.
     if (!alreadySent) {
-      const contacts = await database
-        .select({
-          id: schema.contacts.id,
-          email: schema.contacts.email,
-          name: schema.contacts.name,
-          portalRole: schema.contacts.portalRole,
-          isPrimary: schema.contacts.isPrimary,
-        })
-        .from(schema.contacts)
-        .where(eq(schema.contacts.orgId, invoice.orgId))
-      const notifyRecipients: NotificationRecipient[] = selectBillingContacts(contacts)
+      const notifyRecipients: NotificationRecipient[] = billingRecipients
         .map(c => ({ contactId: c.id }))
       await createNotifications(database, notifyRecipients, {
         type: 'invoice_created',

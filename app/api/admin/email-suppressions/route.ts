@@ -26,7 +26,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { resolvePermissions } from '@/lib/permissions'
 import { db } from '@/lib/db'
-import { clearEmailSuppressions, listEmailSuppressions } from '@/lib/email-delivery'
+import { clearEmailSuppressions, listEmailSuppressions } from '@/lib/email-gate'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 

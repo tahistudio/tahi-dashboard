@@ -59,7 +59,10 @@ vi.mock('@/lib/email-delivery', async (importOriginal) => ({
     mode: 'all',
     allowedDomains: ['tahi.studio'],
     allowedOrgIds: [],
+    allowedAddresses: [],
+    blockedAddresses: [],
   }),
+  resolveOrgRecipientScope: vi.fn(async (orgId: string | null) => ({ orgId })),
 }))
 
 vi.mock('@/lib/notifications', () => ({

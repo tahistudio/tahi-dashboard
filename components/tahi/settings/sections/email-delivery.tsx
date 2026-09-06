@@ -9,7 +9,7 @@
  * lives in Studio details next to the other things that decide what a client
  * receives.
  *
- * Three controls and a log:
+ * Five controls and a log:
  *   - the mode. Switching it to "Everyone" is the one change here that can put
  *     mail in a stranger's inbox, so it goes through the design system
  *     <ConfirmDialog> with the consequence written out. Switching BACK is
@@ -17,15 +17,23 @@
  *   - the allowed domains, entered as a comma-separated list and stored as
  *     JSON. Validated with the same pure validator the API route runs
  *     (lib/email-allowlist.ts), so the form and the server cannot disagree.
+ *   - the allowed addresses, exact mailboxes, which narrow the domain rule to
+ *     named people. Default: business@tahi.studio and nobody else.
+ *   - the never list, checked ahead of everything including "Everyone" mode.
  *   - the allowed organisation ids, the per-client exemption for a dummy or
- *     verified client on an outside domain.
+ *     verified client on an outside domain, scoped to that client's contacts.
  *   - the suppression log: the last 100 addresses the gate held back, revealed
  *     by the link on the row, with a Clear button behind its own confirm
  *     (clearing destroys the only evidence a send was withheld).
  *
- * Every value comes from GET /api/admin/settings, which fills all three keys in
+ * Every value comes from GET /api/admin/settings, which fills all five keys in
  * with their RESOLVED defaults, so an absent row reads as "Allowlist only,
- * tahi.studio" rather than as an empty box that looks like no restriction.
+ * business@tahi.studio" rather than as an empty box that looks like no
+ * restriction.
+ *
+ * SAVING IS SUPER ADMIN unless the write closes the gate. The route enforces
+ * that (see app/api/admin/settings), and a lesser seat gets the 403's sentence
+ * in the error line rather than a silent no-op.
  */
 
 import { useEffect, useState } from 'react'
@@ -34,15 +42,24 @@ import { useResource } from '@/lib/use-resource'
 import { apiPath } from '@/lib/api'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import {
+  ALLOWED_ADDRESSES_SETTING_KEY,
   ALLOWED_DOMAINS_SETTING_KEY,
   ALLOWED_ORG_IDS_SETTING_KEY,
+  BLOCKED_ADDRESSES_SETTING_KEY,
   DEFAULT_DELIVERY_MODE,
   DELIVERY_MODE_SETTING_KEY,
+  SUPPRESSION_REASON_BLOCKED,
+  SUPPRESSION_REASON_NOT_ALLOWED,
+  SUPPRESSION_REASON_UNPARSEABLE,
+  resolveAllowedAddresses,
   resolveAllowedDomains,
   resolveAllowedOrgIds,
+  resolveBlockedAddresses,
   resolveDeliveryMode,
+  validateAllowedAddresses,
   validateAllowedDomains,
   validateAllowedOrgIds,
+  validateBlockedAddresses,
   type DeliveryMode,
   type EmailSuppressionRow,
 } from '@/lib/email-allowlist'
@@ -84,9 +101,11 @@ function formatWhen(iso: string): string {
   return `${date} ${time}`
 }
 
-/** 'not_in_allowlist' reads as a sentence, not as a database value. */
+/** A stored reason reads as a sentence, not as a database value. */
 function reasonLabel(reason: string): string {
-  if (reason === 'not_in_allowlist') return 'Not on the allowlist'
+  if (reason === SUPPRESSION_REASON_NOT_ALLOWED) return 'Not on the allowlist'
+  if (reason === SUPPRESSION_REASON_BLOCKED) return 'On the never list'
+  if (reason === SUPPRESSION_REASON_UNPARSEABLE) return 'Not a single address'
   return reason.replace(/[._]/g, ' ')
 }
 
@@ -99,6 +118,8 @@ export function EmailDeliveryCard({ isAdmin }: { isAdmin?: boolean } = {}) {
   const [mode, setMode] = useState<DeliveryMode>(DEFAULT_DELIVERY_MODE)
   const [domains, setDomains] = useState('')
   const [orgIds, setOrgIds] = useState('')
+  const [addresses, setAddresses] = useState('')
+  const [blocked, setBlocked] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -118,6 +139,8 @@ export function EmailDeliveryCard({ isAdmin }: { isAdmin?: boolean } = {}) {
     setMode(resolveDeliveryMode(data.settings[DELIVERY_MODE_SETTING_KEY]))
     setDomains(resolveAllowedDomains(data.settings[ALLOWED_DOMAINS_SETTING_KEY]).join(', '))
     setOrgIds(resolveAllowedOrgIds(data.settings[ALLOWED_ORG_IDS_SETTING_KEY]).join(', '))
+    setAddresses(resolveAllowedAddresses(data.settings[ALLOWED_ADDRESSES_SETTING_KEY]).join(', '))
+    setBlocked(resolveBlockedAddresses(data.settings[BLOCKED_ADDRESSES_SETTING_KEY]).join(', '))
   }, [data])
 
   async function saveKey(key: string, value: string) {
@@ -142,8 +165,14 @@ export function EmailDeliveryCard({ isAdmin }: { isAdmin?: boolean } = {}) {
   async function persist(nextMode: DeliveryMode) {
     const domainsJson = listToJson(domains)
     const orgIdsJson = listToJson(orgIds)
-    const preflight = [validateAllowedDomains(domainsJson), validateAllowedOrgIds(orgIdsJson)]
-      .find((v) => !v.ok)
+    const addressesJson = listToJson(addresses)
+    const blockedJson = listToJson(blocked)
+    const preflight = [
+      validateAllowedDomains(domainsJson),
+      validateAllowedOrgIds(orgIdsJson),
+      validateAllowedAddresses(addressesJson),
+      validateBlockedAddresses(blockedJson),
+    ].find((v) => !v.ok)
     if (preflight && !preflight.ok) {
       setSaved(false)
       setSaveError(preflight.error)
@@ -158,6 +187,8 @@ export function EmailDeliveryCard({ isAdmin }: { isAdmin?: boolean } = {}) {
         saveKey(DELIVERY_MODE_SETTING_KEY, nextMode),
         saveKey(ALLOWED_DOMAINS_SETTING_KEY, domainsJson),
         saveKey(ALLOWED_ORG_IDS_SETTING_KEY, orgIdsJson),
+        saveKey(ALLOWED_ADDRESSES_SETTING_KEY, addressesJson),
+        saveKey(BLOCKED_ADDRESSES_SETTING_KEY, blockedJson),
       ])
       setMode(nextMode)
       setSaved(true)
@@ -195,6 +226,8 @@ export function EmailDeliveryCard({ isAdmin }: { isAdmin?: boolean } = {}) {
 
   const storedMode = resolveDeliveryMode(data?.settings?.[DELIVERY_MODE_SETTING_KEY])
   const storedDomains = resolveAllowedDomains(data?.settings?.[ALLOWED_DOMAINS_SETTING_KEY])
+  const storedAddresses = resolveAllowedAddresses(data?.settings?.[ALLOWED_ADDRESSES_SETTING_KEY])
+  const storedBlocked = resolveBlockedAddresses(data?.settings?.[BLOCKED_ADDRESSES_SETTING_KEY])
   const items = log?.items ?? []
 
   return (
@@ -226,8 +259,10 @@ export function EmailDeliveryCard({ isAdmin }: { isAdmin?: boolean } = {}) {
             {isLoading
               ? 'Reading the current setting...'
               : storedMode === 'all'
-                ? 'Everyone. This system can email any address, including real clients.'
-                : `Allowlist only. Mail goes to ${storedDomains.join(', ')} and to any client you have exempted by id. Everything else is held back and logged.`}
+                ? `Everyone. This system can email any address, including real clients. Only the never list still applies${storedBlocked.length > 0 ? ` (${storedBlocked.join(', ')})` : ''}.`
+                : storedAddresses.length > 0
+                  ? `Allowlist only. Mail goes to ${storedAddresses.join(', ')}, and to the contacts of any client you have exempted by id. Everything else is held back and logged.`
+                  : `Allowlist only. Mail goes to ${storedDomains.join(', ')} and to the contacts of any client you have exempted by id. Everything else is held back and logged.`}
           </small>
         </div>
         <button
@@ -294,6 +329,54 @@ export function EmailDeliveryCard({ isAdmin }: { isAdmin?: boolean } = {}) {
           </small>
         </div>
 
+        <div className="set-field">
+          <label htmlFor="email-allowed-addresses">Allowed addresses</label>
+          <input
+            id="email-allowed-addresses"
+            className="set-input"
+            value={addresses}
+            onChange={(e) => setAddresses(e.target.value)}
+            placeholder="business@tahi.studio"
+            aria-describedby="email-allowed-addresses-help"
+          />
+          <small
+            id="email-allowed-addresses-help"
+            style={{
+              display: 'block',
+              marginTop: 5,
+              color: 'var(--text-faint)',
+              font: '500 12px Manrope',
+            }}
+          >
+            Comma separated mailboxes. While this holds anything, an address must be on it
+            AND on an allowed domain. Empty it to fall back to the domain list alone.
+          </small>
+        </div>
+
+        <div className="set-field">
+          <label htmlFor="email-blocked-addresses">Never email</label>
+          <input
+            id="email-blocked-addresses"
+            className="set-input"
+            value={blocked}
+            onChange={(e) => setBlocked(e.target.value)}
+            placeholder="staci@tahi.studio, nathan@tahi.studio"
+            aria-describedby="email-blocked-addresses-help"
+          />
+          <small
+            id="email-blocked-addresses-help"
+            style={{
+              display: 'block',
+              marginTop: 5,
+              color: 'var(--text-faint)',
+              font: '500 12px Manrope',
+            }}
+          >
+            Checked before every other rule, including Everyone mode. A plus alias of a
+            listed mailbox is the same mailbox and is blocked too.
+          </small>
+        </div>
+
         <div className="set-field" style={{ gridColumn: '1 / -1' }}>
           <label htmlFor="email-allowed-orgs">Exempt client ids</label>
           <input
@@ -313,8 +396,9 @@ export function EmailDeliveryCard({ isAdmin }: { isAdmin?: boolean } = {}) {
               font: '500 12px Manrope',
             }}
           >
-            Comma separated organisation ids. Mail carrying one of these reaches the client
-            whatever their domain, so add an id only once you have checked what they will
+            Comma separated organisation ids. Mail reaches THAT CLIENT&apos;S OWN CONTACTS
+            whatever their domain, and nobody else: a cc to an outside address on the same
+            send is still held back. Add an id only once you have checked what they will
             receive.
           </small>
         </div>
@@ -354,8 +438,8 @@ export function EmailDeliveryCard({ isAdmin }: { isAdmin?: boolean } = {}) {
               <thead>
                 <tr>
                   <th>When</th>
-                  <th>To</th>
-                  <th>Email</th>
+                  <th>Held back from</th>
+                  <th>Which email</th>
                   <th>Why</th>
                 </tr>
               </thead>
@@ -381,10 +465,33 @@ export function EmailDeliveryCard({ isAdmin }: { isAdmin?: boolean } = {}) {
                   items.map((r) => (
                     <tr key={r.id}>
                       <td className="h-when">{formatWhen(r.createdAt)}</td>
-                      <td className="h-who" style={{ fontFamily: 'ui-monospace,monospace', fontSize: 12.5 }}>
+                      {/*
+                        h-addr, not h-who. The audit log hides h-who under 768px
+                        because there it is a redundant avatar; here the address
+                        is the only reason the table exists, and hiding it left a
+                        phone showing When / template / Why and nothing else.
+                        .hist-wrap already scrolls at 760px, so the column has
+                        somewhere to go.
+                      */}
+                      <td className="h-addr" style={{ fontFamily: 'ui-monospace,monospace', fontSize: 12.5 }}>
                         {r.to}
                       </td>
-                      <td className="h-change">{r.template ?? 'unspecified'}</td>
+                      <td className="h-change">
+                        {r.template ?? 'unspecified'}
+                        {r.subject && (
+                          <span
+                            style={{
+                              display: 'block',
+                              marginTop: 2,
+                              font: '500 11px Manrope,sans-serif',
+                              color: 'var(--text-faint)',
+                              whiteSpace: 'normal',
+                            }}
+                          >
+                            {r.subject}
+                          </span>
+                        )}
+                      </td>
                       <td className="h-reason">{reasonLabel(r.reason)}</td>
                     </tr>
                   ))
@@ -415,7 +522,7 @@ export function EmailDeliveryCard({ isAdmin }: { isAdmin?: boolean } = {}) {
         open={confirmOpen}
         title="Let this system email anyone?"
         description={
-          'On "Everyone" the allowlist stops applying and every email this dashboard sends goes to its real recipient: clients, prospects, contract signers and teammates, including staci@ and nathan@. Nothing is held back and nothing is logged as held back. Leave it on "Allowlist only" until you have checked what each of those people would receive.'
+          'On "Everyone" the allowlist stops applying and every email this dashboard sends goes to its real recipient: clients, prospects, contract signers and teammates. Nothing is held back and nothing is logged as held back, except the addresses on the never list, which are still refused. Leave it on "Allowlist only" until you have checked what each of those people would receive.'
         }
         confirmLabel="Email everyone"
         variant="danger"

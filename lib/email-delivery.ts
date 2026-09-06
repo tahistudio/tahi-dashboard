@@ -18,13 +18,14 @@
  * digest cron. "Nothing goes out yet" could only ever be an intention. It is
  * now a setting with a default, and the default is closed.
  *
- * THE RULE lives in lib/email-allowlist.ts, pure and re-exported from here. A
- * recipient is delivered to when EITHER its domain is in
- * `email.allowedDomains` (case-insensitive; plus aliases pass, they live in
- * the local part) OR the send carries an `orgId` listed in
- * `email.allowedOrgIds`. Everything else is withheld ONE ADDRESS AT A TIME: a
- * mixed To line delivers to the addresses that pass and withholds the rest
- * rather than failing whole. A send with nothing left never reaches Resend.
+ * THE RULE lives in lib/email-allowlist.ts, pure and re-exported from here.
+ * Four layers, in this order: `email.blockedAddresses` (never, ahead of
+ * everything), `email.deliveryMode`, `email.allowedOrgIds` (an exempt client,
+ * over that client's own contact addresses only), then `email.allowedAddresses`
+ * and `email.allowedDomains`, both of which must pass. Everything else is
+ * withheld ONE ADDRESS AT A TIME: a mixed To line delivers to the addresses
+ * that pass and withholds the rest rather than failing whole. A send with
+ * nothing left never reaches Resend.
  *
  * FAIL CLOSED. `email.deliveryMode` resolves to 'allowlist' when the row is
  * missing, empty, misspelled, or when the settings read itself throws. The
@@ -35,76 +36,56 @@
  * and counted back to the caller, so "did that reach them?" is answered by a
  * row rather than a shrug.
  *
- * NOTE ON SCOPE. This gate governs mail this platform hands to Resend. It is
- * not the only way a client can receive something: a Xero-rail invoice can be
- * emailed by Xero itself (lib/xero-invoice-email.ts), which never sees an
- * address because Xero holds the contact. The one caller of that path
- * (app/api/admin/invoices/[id]/send-email) asks the pure rule first and stands
- * Xero down when every recipient would be withheld.
+ * NOTE ON SCOPE. This gate governs mail this platform hands to Resend, which
+ * is not the only way a client can receive something. Three other transports
+ * send from their own systems and never show us an address, so each asks the
+ * same rule through lib/email-gate.ts before it acts:
+ *
+ *   - Xero emails a Xero-rail invoice (lib/xero-invoice-email.ts). It takes no
+ *     address at all, so app/api/admin/invoices/[id]/send-email lets it fire
+ *     only when the POLICY authorises that client, never because one billing
+ *     contact happens to be on tahi.studio.
+ *   - Stripe emails a finalised send_invoice bill.
+ *     app/api/admin/invoices/stripe-create refuses before creating one.
+ *   - Clerk emails its own organisation invitations. All three minting routes
+ *     (admin team invite, portal invites, portal people) call
+ *     guardOutboundAddress first.
+ *
+ * That is the whole set as of 2026-09-06. Mailerlite is named in CLAUDE.md as a
+ * mailing rail but app/api/admin/integrations/mailerlite is still a stub that
+ * posts nothing, and no HubSpot code in this tree sends mail. Both become a
+ * transport the day someone finishes them, and both should come through
+ * lib/email-gate.ts when they do.
  */
 
 import type { ReactElement } from 'react'
 import { Resend } from 'resend'
-import { desc } from 'drizzle-orm'
 
-import { db } from '@/lib/db'
-import { schema } from '@/db/d1'
 import { emailFromAddress } from '@/lib/email-from'
+import { partitionRecipients, type DeliveryPolicy } from '@/lib/email-allowlist'
 import {
-  ALLOWED_DOMAINS_SETTING_KEY,
-  ALLOWED_ORG_IDS_SETTING_KEY,
-  DELIVERY_MODE_SETTING_KEY,
-  SUPPRESSION_REASON_NOT_ALLOWED,
-  closedPolicy,
-  partitionRecipients,
-  resolveAllowedDomains,
-  resolveAllowedOrgIds,
-  resolveDeliveryMode,
-  type DeliveryPolicy,
-  type EmailSuppressionRow,
-} from '@/lib/email-allowlist'
+  recordEmailSuppressions,
+  resolveDeliveryPolicy,
+  resolveOrgRecipientScope,
+} from '@/lib/email-gate'
 
-// The rule travels with the door, so a caller never has to know it is two
-// modules. lib/email-allowlist.ts stays importable on its own by the settings
-// route and the 'use client' settings UI, neither of which may pull in a
-// Resend client or a D1 handle.
+// The rule and the log travel with the door, so a caller never has to know it
+// is three modules. lib/email-allowlist.ts stays importable on its own by the
+// settings route and the 'use client' settings UI (no D1, no SDK), and
+// lib/email-gate.ts stays importable by a transport we do not own (D1, still
+// no SDK).
 export * from '@/lib/email-allowlist'
-
-// ---------------------------------------------------------------------------
-// Reading the policy
-// ---------------------------------------------------------------------------
-
-interface SettingRow {
-  key: string
-  value: string | null
-}
-
-/**
- * The live policy, read from the settings table.
- *
- * Every failure path lands on the closed policy: no D1 binding, a thrown
- * query, a settings table that has not been created. The gate is only worth
- * having if the broken case is the safe case.
- */
-export async function resolveDeliveryPolicy(): Promise<DeliveryPolicy> {
-  try {
-    const database = await db()
-    const rows = (await database
-      .select({ key: schema.settings.key, value: schema.settings.value })
-      .from(schema.settings)) as SettingRow[]
-
-    const map = new Map<string, string | null>()
-    for (const row of rows) map.set(row.key, row.value)
-
-    return {
-      mode: resolveDeliveryMode(map.get(DELIVERY_MODE_SETTING_KEY)),
-      allowedDomains: resolveAllowedDomains(map.get(ALLOWED_DOMAINS_SETTING_KEY)),
-      allowedOrgIds: resolveAllowedOrgIds(map.get(ALLOWED_ORG_IDS_SETTING_KEY)),
-    }
-  } catch {
-    return closedPolicy()
-  }
-}
+export {
+  ALLOWLIST_HELD_BACK,
+  clearEmailSuppressions,
+  guardOutboundAddress,
+  listEmailSuppressions,
+  recordEmailSuppressions,
+  resolveDeliveryPolicy,
+  resolveOrgRecipientScope,
+  type OutboundAddressDecision,
+  type SuppressionContext,
+} from '@/lib/email-gate'
 
 // ---------------------------------------------------------------------------
 // The door
@@ -142,6 +123,15 @@ export interface EmailDeliveryRequest {
   template: string
   /** The client this send belongs to, when there is one. */
   orgId?: string | null
+  /**
+   * An already-resolved policy, for a caller sending in a loop.
+   *
+   * A fan-out (an announcement to every contact, a per-signer contract) calls
+   * this once per recipient, and resolving the policy is a settings read each
+   * time. Passing it costs one read for the whole fan-out. Leave it unset and
+   * the policy is read here, which is the right default for a single send.
+   */
+  policy?: DeliveryPolicy
 }
 
 export interface EmailDeliveryResult {
@@ -178,36 +168,6 @@ function asArray(value: string | string[] | undefined): string[] {
 }
 
 /**
- * Record every withheld address. Best-effort by design: if this write fails
- * the recipient is still withheld, because throwing (and so failing the
- * caller's whole send) makes nobody safer, and losing the log entry makes
- * nobody less safe.
- */
-async function recordSuppressions(
-  addresses: readonly string[],
-  req: EmailDeliveryRequest,
-): Promise<void> {
-  if (addresses.length === 0) return
-  try {
-    const database = await db()
-    const now = new Date().toISOString()
-    await database.insert(schema.emailSuppressions).values(
-      addresses.map(address => ({
-        id: crypto.randomUUID(),
-        createdAt: now,
-        to: address,
-        orgId: req.orgId ?? null,
-        template: req.template,
-        subject: req.subject,
-        reason: SUPPRESSION_REASON_NOT_ALLOWED,
-      })),
-    )
-  } catch {
-    // Swallowed on purpose. See the doc comment above.
-  }
-}
-
-/**
  * THE ONLY WAY OUT. Filter, record, then (if anything is left) send.
  *
  * The order matters. The filter and the log run BEFORE the API key is looked
@@ -216,20 +176,33 @@ async function recordSuppressions(
  * inbox.
  */
 export async function deliverEmail(req: EmailDeliveryRequest): Promise<EmailDeliveryResult> {
-  const policy = await resolveDeliveryPolicy()
+  const policy = req.policy ?? await resolveDeliveryPolicy()
+  // Who the send's client actually is, so an exempted org widens the gate for
+  // that client's own people and not for whoever else is cc'd on the line.
+  const scope = await resolveOrgRecipientScope(req.orgId, policy)
 
-  const to = partitionRecipients(asArray(req.to), policy, req.orgId)
-  const cc = partitionRecipients(asArray(req.cc), policy, req.orgId)
-  const bcc = partitionRecipients(asArray(req.bcc), policy, req.orgId)
+  const to = partitionRecipients(asArray(req.to), policy, scope)
+  const cc = partitionRecipients(asArray(req.cc), policy, scope)
+  const bcc = partitionRecipients(asArray(req.bcc), policy, scope)
 
   const suppressed = [...to.suppressed, ...cc.suppressed, ...bcc.suppressed]
   const delivered = [...to.allowed, ...cc.allowed, ...bcc.allowed]
 
-  await recordSuppressions(suppressed, req)
+  await recordEmailSuppressions(
+    suppressed,
+    { template: req.template, subject: req.subject, orgId: req.orgId ?? null },
+    policy,
+  )
 
   // Nothing addressable left. A cc-only send is not a send: Resend requires a
   // `to`, and a message whose only surviving recipients are cc or bcc is one
   // its intended reader was never going to get.
+  //
+  // `blocked` is the allowlist's answer specifically, which is why it is not
+  // simply "to.allowed is empty". Callers turn it into a 409 titled "Held back
+  // by the email allowlist", and a caller that passed [''] withheld nobody: it
+  // supplied nobody, and sending its operator to a settings page would be a
+  // lie about where the fix is.
   if (to.allowed.length === 0) {
     return {
       success: false,
@@ -239,7 +212,7 @@ export async function deliverEmail(req: EmailDeliveryRequest): Promise<EmailDeli
       delivered: [],
       suppressed,
       suppressedCount: suppressed.length,
-      blocked: true,
+      blocked: suppressed.length > 0,
     }
   }
 
@@ -314,25 +287,4 @@ export async function deliverEmail(req: EmailDeliveryRequest): Promise<EmailDeli
       blocked: false,
     }
   }
-}
-
-// ---------------------------------------------------------------------------
-// The log
-// ---------------------------------------------------------------------------
-
-/** The most recent suppressions, newest first. */
-export async function listEmailSuppressions(limit = 100): Promise<EmailSuppressionRow[]> {
-  const database = await db()
-  const rows = await database
-    .select()
-    .from(schema.emailSuppressions)
-    .orderBy(desc(schema.emailSuppressions.createdAt))
-    .limit(limit)
-  return rows as EmailSuppressionRow[]
-}
-
-/** Empty the log. Every row, no filter: this is the Clear button. */
-export async function clearEmailSuppressions(): Promise<void> {
-  const database = await db()
-  await database.delete(schema.emailSuppressions)
 }

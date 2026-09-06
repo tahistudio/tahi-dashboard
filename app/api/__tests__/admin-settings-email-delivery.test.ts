@@ -1,25 +1,34 @@
 /**
- * The three email delivery keys, GET and PATCH on /api/admin/settings.
+ * The five email delivery keys, GET and PATCH on /api/admin/settings.
  *
  * Contract:
- *   GET   answers all three, always, in their RESOLVED form. An absent
+ *   GET   answers all five, always, in their RESOLVED form. An absent
  *         `email.deliveryMode` row means the allowlist is ON, and a UI that
  *         showed an empty box there would read as "no restriction" when the
- *         truth is the exact opposite. The two lists come back re-serialised,
- *         so a reader sees the list the SENDER will apply and not the one
- *         somebody typed.
+ *         truth is the exact opposite. The lists come back re-serialised, so a
+ *         reader sees the list the SENDER will apply and not the one somebody
+ *         typed.
  *   PATCH refuses a value the sender could not act on, and accepts the empty
  *         value as the clear, which is safe precisely because clearing the
  *         mode turns the gate ON rather than off.
+ *
+ * AND WHO MAY WRITE THEM. Widening the gate is the most consequential write in
+ * this system and it was the least protected: isTahiAdmin alone, which every
+ * member of the Tahi Clerk org passes and so does the MCP service token, while
+ * DELETE /api/admin/email-suppressions (which only destroys evidence) was
+ * already super admin. The two were the wrong way round. Closing the gate
+ * stays open to any admin: nobody needs a second signature to make this system
+ * send less mail.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 type Row = Record<string, unknown>
 
-const state: { rows: Row[]; updates: Row[]; inserts: Row[] } = {
+const state: { rows: Row[]; updates: Row[]; inserts: Row[]; isSuperAdmin: boolean } = {
   rows: [],
   updates: [],
   inserts: [],
+  isSuperAdmin: true,
 }
 
 vi.mock('@/lib/server-auth', () => ({
@@ -37,6 +46,15 @@ vi.mock('@/db/d1', () => ({
 
 vi.mock('drizzle-orm', () => ({
   eq: (col: unknown, val: unknown) => ({ __op: 'eq', col, val }),
+}))
+
+vi.mock('@/lib/permissions', () => ({
+  resolvePermissions: vi.fn(async () => ({ isSuperAdmin: state.isSuperAdmin })),
+}))
+
+const auditRows: Row[] = []
+vi.mock('@/lib/audit', () => ({
+  logAudit: vi.fn(async (_db: unknown, entry: Row) => { auditRows.push(entry) }),
 }))
 
 function chain(result: Row[]) {
@@ -70,8 +88,10 @@ vi.mock('@/lib/db', () => ({
 import { GET, PATCH } from '@/app/api/admin/settings/route'
 import { NextRequest } from 'next/server'
 import {
+  ALLOWED_ADDRESSES_SETTING_KEY,
   ALLOWED_DOMAINS_SETTING_KEY,
   ALLOWED_ORG_IDS_SETTING_KEY,
+  BLOCKED_ADDRESSES_SETTING_KEY,
   DELIVERY_MODE_SETTING_KEY,
 } from '@/lib/email-allowlist'
 
@@ -98,6 +118,8 @@ beforeEach(() => {
   state.rows = []
   state.updates = []
   state.inserts = []
+  state.isSuperAdmin = true
+  auditRows.length = 0
 })
 
 describe('GET fills the delivery keys in with the closed default', () => {
@@ -106,6 +128,19 @@ describe('GET fills the delivery keys in with the closed default', () => {
     expect(s[DELIVERY_MODE_SETTING_KEY]).toBe('allowlist')
     expect(s[ALLOWED_DOMAINS_SETTING_KEY]).toBe('["tahi.studio"]')
     expect(s[ALLOWED_ORG_IDS_SETTING_KEY]).toBe('[]')
+  })
+
+  it('answers the address layers too, with Liam alone allowed and the two names blocked', async () => {
+    const s = await settings()
+    expect(s[ALLOWED_ADDRESSES_SETTING_KEY]).toBe('["business@tahi.studio"]')
+    expect(s[BLOCKED_ADDRESSES_SETTING_KEY])
+      .toBe('["staci@tahi.studio","nathan@tahi.studio"]')
+  })
+
+  it('reads a cleared never list as the two named people, not as an empty one', async () => {
+    state.rows = [{ key: BLOCKED_ADDRESSES_SETTING_KEY, value: null }]
+    expect((await settings())[BLOCKED_ADDRESSES_SETTING_KEY])
+      .toBe('["staci@tahi.studio","nathan@tahi.studio"]')
   })
 
   it('reads a cleared mode row as allowlist, not as an empty value', async () => {
@@ -192,7 +227,87 @@ describe('PATCH validates the delivery keys', () => {
     expect(await patchStatus({ key: ALLOWED_ORG_IDS_SETTING_KEY, value: '["org-a"]' })).toBe(200)
   })
 
+  it('refuses two addresses typed into one entry of an address list', async () => {
+    expect(await patchStatus({
+      key: ALLOWED_ADDRESSES_SETTING_KEY,
+      value: '["jo@acme.com, business@tahi.studio"]',
+    })).toBe(400)
+    expect(state.inserts).toHaveLength(0)
+  })
+
+  it('stores a valid address list', async () => {
+    expect(await patchStatus({
+      key: ALLOWED_ADDRESSES_SETTING_KEY,
+      value: '["business@tahi.studio"]',
+    })).toBe(200)
+  })
+
   it('leaves unrelated keys alone', async () => {
     expect(await patchStatus({ key: 'studio_legal_name', value: 'Tahi Studio Ltd' })).toBe(200)
+  })
+})
+
+describe('who may widen the gate', () => {
+  it('lets a super admin open it', async () => {
+    expect(await patchStatus({ key: DELIVERY_MODE_SETTING_KEY, value: 'all' })).toBe(200)
+    expect(state.inserts[0]).toMatchObject({ key: DELIVERY_MODE_SETTING_KEY, value: 'all' })
+  })
+
+  it('refuses a plain admin, and the MCP service token with it', async () => {
+    state.isSuperAdmin = false
+    expect(await patchStatus({ key: DELIVERY_MODE_SETTING_KEY, value: 'all' })).toBe(403)
+    expect(state.inserts).toHaveLength(0)
+    expect(state.updates).toHaveLength(0)
+  })
+
+  it('still lets a plain admin CLOSE it, and clear it', async () => {
+    state.isSuperAdmin = false
+    expect(await patchStatus({ key: DELIVERY_MODE_SETTING_KEY, value: 'allowlist' })).toBe(200)
+    expect(await patchStatus({ key: DELIVERY_MODE_SETTING_KEY, value: '' })).toBe(200)
+  })
+
+  it('refuses a plain admin widening a domain, an address list or an exemption', async () => {
+    state.isSuperAdmin = false
+    for (const key of [
+      ALLOWED_DOMAINS_SETTING_KEY,
+      ALLOWED_ORG_IDS_SETTING_KEY,
+      ALLOWED_ADDRESSES_SETTING_KEY,
+      BLOCKED_ADDRESSES_SETTING_KEY,
+    ]) {
+      expect(await patchStatus({ key, value: '[]' })).toBe(403)
+    }
+    expect(state.inserts).toHaveLength(0)
+  })
+
+  it('leaves every other setting admin-writable', async () => {
+    state.isSuperAdmin = false
+    expect(await patchStatus({ key: 'studio_legal_name', value: 'Tahi Studio Ltd' })).toBe(200)
+  })
+})
+
+describe('the audit trail', () => {
+  it('records every email.* change with its old value, its new value and the actor', async () => {
+    state.rows = [{ key: DELIVERY_MODE_SETTING_KEY, value: 'allowlist' }]
+    await patchStatus({ key: DELIVERY_MODE_SETTING_KEY, value: 'all' })
+
+    expect(auditRows).toHaveLength(1)
+    expect(auditRows[0]).toMatchObject({
+      action: 'settings.email_delivery_changed',
+      userId: 'user_admin',
+      entityType: 'setting',
+      entityId: DELIVERY_MODE_SETTING_KEY,
+      metadata: { key: DELIVERY_MODE_SETTING_KEY, from: 'allowlist', to: 'all' },
+    })
+  })
+
+  it('records nothing for a setting that is not the gate', async () => {
+    await patchStatus({ key: 'studio_legal_name', value: 'Tahi Studio Ltd' })
+    expect(auditRows).toHaveLength(0)
+  })
+
+  it('records nothing for a write it refused', async () => {
+    state.isSuperAdmin = false
+    await patchStatus({ key: DELIVERY_MODE_SETTING_KEY, value: 'all' })
+    expect(auditRows).toHaveLength(0)
   })
 })

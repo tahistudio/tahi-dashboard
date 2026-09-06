@@ -62,7 +62,10 @@ vi.mock('@/lib/email-delivery', async (importOriginal) => ({
     mode: 'all',
     allowedDomains: ['tahi.studio'],
     allowedOrgIds: [],
+    allowedAddresses: [],
+    blockedAddresses: [],
   }),
+  resolveOrgRecipientScope: vi.fn(async (orgId: string | null) => ({ orgId })),
 }))
 
 vi.mock('@/lib/notifications', () => ({
@@ -485,8 +488,11 @@ describe('POST /api/admin/invoices/stripe-create', () => {
     const invoice = { id: 'inv-1', orgId: 'org-a', currency: 'NZD', dueDate: '2026-09-30', sentAt: null, stripeInvoiceId: null }
     const org = [{ id: 'org-a', name: 'Acme', stripeCustomerId: 'cus_1' }]
     const items = [{ id: 'li-1', description: 'Retainer', quantity: 1, unitPriceUsd: 1500 }]
-    // invoice, org, line items, the update itself, then the contacts.
-    const { handle, queries } = makeDb([[invoice], org, items, [], CONTACTS])
+    // invoice, org, contacts, line items, then the update itself. The contacts
+    // are read early because the email allowlist has to be asked BEFORE
+    // anything is created in Stripe: finalising is a send, and Stripe emails
+    // the finalised invoice to the customer itself.
+    const { handle, queries } = makeDb([[invoice], org, CONTACTS, items, []])
     vi.mocked(db).mockResolvedValue(handle as never)
 
     const res = await stripeCreate(jsonReq('/api/admin/invoices/stripe-create', { invoiceId: 'inv-1' }))

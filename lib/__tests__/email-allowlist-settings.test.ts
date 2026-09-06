@@ -1,5 +1,5 @@
 /**
- * The three email delivery settings, at the door.
+ * The five email delivery settings, at the door.
  *
  * `settings` is untyped TEXT, so the shape has to be enforced here or not at
  * all, and the cost of a bad value is not cosmetic: a typo in
@@ -13,11 +13,15 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  ALLOWED_ADDRESSES_SETTING_KEY,
   ALLOWED_DOMAINS_SETTING_KEY,
   ALLOWED_ORG_IDS_SETTING_KEY,
+  BLOCKED_ADDRESSES_SETTING_KEY,
   DELIVERY_MODE_SETTING_KEY,
+  validateAllowedAddresses,
   validateAllowedDomains,
   validateAllowedOrgIds,
+  validateBlockedAddresses,
   validateDeliveryMode,
   validateEmailDeliverySetting,
 } from '@/lib/email-allowlist'
@@ -98,11 +102,44 @@ describe('email.allowedOrgIds', () => {
   })
 })
 
+describe('the two address lists', () => {
+  it('accepts a single mailbox per entry, and the clear', () => {
+    expect(validateAllowedAddresses('["business@tahi.studio"]').ok).toBe(true)
+    expect(validateAllowedAddresses('[]').ok).toBe(true)
+    expect(validateAllowedAddresses('').ok).toBe(true)
+    expect(validateBlockedAddresses('["staci@tahi.studio","nathan@tahi.studio"]').ok).toBe(true)
+  })
+
+  it('rejects a bare domain where a mailbox belongs', () => {
+    const res = validateAllowedAddresses('["tahi.studio"]')
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error).toContain(ALLOWED_ADDRESSES_SETTING_KEY)
+  })
+
+  it('rejects two addresses typed into one entry, which is the shape that used to fan out', () => {
+    expect(validateAllowedAddresses('["jo@acme.com, business@tahi.studio"]').ok).toBe(false)
+    expect(validateBlockedAddresses('["a@x.com; b@y.com"]').ok).toBe(false)
+  })
+
+  it('rejects a display-name form: a list holds addresses, not lockups', () => {
+    const res = validateBlockedAddresses('["Staci <staci@tahi.studio>"]')
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error).toContain(BLOCKED_ADDRESSES_SETTING_KEY)
+  })
+
+  it('rejects malformed JSON and a non-array', () => {
+    expect(validateAllowedAddresses('business@tahi.studio').ok).toBe(false)
+    expect(validateBlockedAddresses('{"a":1}').ok).toBe(false)
+  })
+})
+
 describe('the one entry point the settings route calls', () => {
   it('routes each key to its own validator', () => {
     expect(validateEmailDeliverySetting(DELIVERY_MODE_SETTING_KEY, 'nope').ok).toBe(false)
     expect(validateEmailDeliverySetting(ALLOWED_DOMAINS_SETTING_KEY, '["x@y.com"]').ok).toBe(false)
     expect(validateEmailDeliverySetting(ALLOWED_ORG_IDS_SETTING_KEY, '["a b"]').ok).toBe(false)
+    expect(validateEmailDeliverySetting(ALLOWED_ADDRESSES_SETTING_KEY, '["tahi.studio"]').ok).toBe(false)
+    expect(validateEmailDeliverySetting(BLOCKED_ADDRESSES_SETTING_KEY, '["a,b"]').ok).toBe(false)
   })
 
   it('passes any key it does not own, so the route can call it unconditionally', () => {

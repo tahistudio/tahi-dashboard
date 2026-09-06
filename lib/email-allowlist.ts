@@ -25,6 +25,23 @@
  * independent ways to put a message in someone's inbox, so "nothing goes out
  * yet" could only ever be an intention. It is now a setting with a default,
  * and the default is closed.
+ *
+ * FOUR LAYERS, NOT ONE. The first pass of this file was a domain rule alone,
+ * which could not say the thing Liam actually said. ["tahi.studio"] permits
+ * staci@ and nathan@, and a client submitting a request fans a studio email
+ * out to every teammate row, so the two people named as off limits were the
+ * two the rule delivered to. So, in the order isRecipientAllowed applies them:
+ *
+ *   1. `email.blockedAddresses`  never, whatever else is set. Default
+ *      staci@ and nathan@, alias-aware, checked ahead of mode 'all'.
+ *   2. `email.deliveryMode`      'allowlist' (default) or the deliberate 'all'.
+ *   3. `email.allowedOrgIds`     an exempt client, scoped to THAT CLIENT'S OWN
+ *      addresses (see RecipientScope) rather than to the whole send.
+ *   4. `email.allowedAddresses`  exact mailboxes, default ["business@tahi.studio"],
+ *      and `email.allowedDomains`, default ["tahi.studio"]. Both must pass.
+ *
+ * So the state on the day this was written is: one inbox, Liam's, receives
+ * anything at all.
  */
 
 // ---------------------------------------------------------------------------
@@ -40,11 +57,30 @@ export const ALLOWED_DOMAINS_SETTING_KEY = 'email.allowedDomains'
 /** JSON array of organisation ids whose mail is exempt from the domain rule. */
 export const ALLOWED_ORG_IDS_SETTING_KEY = 'email.allowedOrgIds'
 
+/**
+ * JSON array of exact mailboxes. When it holds anything, an address must be
+ * ON it as well as on an allowed domain, so the gate can be narrower than a
+ * whole domain. Default ["business@tahi.studio"]: Liam's own mailbox and
+ * nothing else, which is the state the blackout actually describes.
+ */
+export const ALLOWED_ADDRESSES_SETTING_KEY = 'email.allowedAddresses'
+
+/**
+ * JSON array of exact mailboxes that may never receive anything, checked
+ * before every other rule including mode 'all' and the org exemption. Default
+ * ["staci@tahi.studio", "nathan@tahi.studio"], the two people Liam named by
+ * hand. A domain list cannot express "everyone here except those two", which
+ * is why this exists as its own layer rather than as a narrower domain.
+ */
+export const BLOCKED_ADDRESSES_SETTING_KEY = 'email.blockedAddresses'
+
 /** Every key this module owns, for the settings route and for the tests. */
 export const EMAIL_DELIVERY_SETTING_KEYS = [
   DELIVERY_MODE_SETTING_KEY,
   ALLOWED_DOMAINS_SETTING_KEY,
   ALLOWED_ORG_IDS_SETTING_KEY,
+  ALLOWED_ADDRESSES_SETTING_KEY,
+  BLOCKED_ADDRESSES_SETTING_KEY,
 ] as const
 
 // ---------------------------------------------------------------------------
@@ -67,6 +103,32 @@ export const DEFAULT_DELIVERY_MODE: DeliveryMode = 'allowlist'
 
 /** The only domain that may receive mail until somebody widens it. */
 export const DEFAULT_ALLOWED_DOMAINS: readonly string[] = ['tahi.studio']
+
+/**
+ * The only mailbox that may receive mail until somebody widens it.
+ *
+ * A domain is not tight enough for what Liam actually asked for. "No teammate
+ * receives anything until I have verified it" is a statement about people, and
+ * tahi.studio holds several of them. Until this list is edited, exactly one
+ * inbox is reachable and it is the one doing the verifying.
+ *
+ * An explicitly stored `[]` is honoured and means "do not narrow by address,
+ * the domain list decides". An ABSENT or blank row is not the same thing: it
+ * falls back to this, because clearing a setting must close the gate rather
+ * than open it.
+ */
+export const DEFAULT_ALLOWED_ADDRESSES: readonly string[] = ['business@tahi.studio']
+
+/**
+ * Named by Liam, 2026-09-06: staci@ and nathan@ must not be emailed by this
+ * system. Held as its own list rather than left to the allowlist so that the
+ * guarantee survives somebody widening the domains, adding an address, or
+ * flipping the mode to 'all' in a hurry.
+ */
+export const DEFAULT_BLOCKED_ADDRESSES: readonly string[] = [
+  'staci@tahi.studio',
+  'nathan@tahi.studio',
+]
 
 export function isDeliveryMode(value: unknown): value is DeliveryMode {
   return typeof value === 'string' && DELIVERY_MODES.some(m => m.value === value)
@@ -136,6 +198,29 @@ export function resolveAllowedOrgIds(stored: unknown): string[] {
   return parseStringList(stored, [])
 }
 
+/**
+ * The exact mailboxes that may receive, alias-stripped and lower-cased.
+ *
+ * An absent or blank row falls back to DEFAULT_ALLOWED_ADDRESSES (closed). An
+ * explicitly stored `[]` is honoured and means "no address narrowing", which
+ * is the deliberate act of widening the gate back out to the domain list.
+ */
+export function resolveAllowedAddresses(stored: unknown): string[] {
+  return parseStringList(stored, DEFAULT_ALLOWED_ADDRESSES).map(addressKey)
+}
+
+/**
+ * The exact mailboxes that may never receive, alias-stripped and lower-cased.
+ *
+ * Falls back to DEFAULT_BLOCKED_ADDRESSES when the row is absent or blank, for
+ * the same reason the domains list falls back: a cleared row must not quietly
+ * drop the two names Liam gave. Storing `[]` on purpose does drop them, which
+ * is a decision somebody has to make in words.
+ */
+export function resolveBlockedAddresses(stored: unknown): string[] {
+  return parseStringList(stored, DEFAULT_BLOCKED_ADDRESSES).map(addressKey)
+}
+
 // ---------------------------------------------------------------------------
 // Validation, at the door
 // ---------------------------------------------------------------------------
@@ -203,6 +288,33 @@ export function validateAllowedDomains(value: unknown): SettingValidation {
   return { ok: true }
 }
 
+/**
+ * An address list holds addresses: one bare mailbox per entry, no display name
+ * lockup, no comma-separated pair. Strict here so the tolerant reader never has
+ * to guess, and so the box reads back the way it was typed.
+ */
+function validateAddressList(key: string, value: unknown): SettingValidation {
+  const parsed = validateStringArray(key, value)
+  if (!parsed.ok) return { ok: false, error: parsed.error }
+  for (const entry of parsed.items) {
+    if (/[<>]/.test(entry) || normaliseAddress(entry) === null) {
+      return {
+        ok: false,
+        error: `${key} entry "${entry}" is not a single bare email address. One mailbox per entry, no display name, e.g. business@tahi.studio.`,
+      }
+    }
+  }
+  return { ok: true }
+}
+
+export function validateAllowedAddresses(value: unknown): SettingValidation {
+  return validateAddressList(ALLOWED_ADDRESSES_SETTING_KEY, value)
+}
+
+export function validateBlockedAddresses(value: unknown): SettingValidation {
+  return validateAddressList(BLOCKED_ADDRESSES_SETTING_KEY, value)
+}
+
 export function validateAllowedOrgIds(value: unknown): SettingValidation {
   const parsed = validateStringArray(ALLOWED_ORG_IDS_SETTING_KEY, value)
   if (!parsed.ok) return { ok: false, error: parsed.error }
@@ -234,6 +346,10 @@ export function validateEmailDeliverySetting(key: string, value: unknown): Setti
       return validateAllowedDomains(value)
     case ALLOWED_ORG_IDS_SETTING_KEY:
       return validateAllowedOrgIds(value)
+    case ALLOWED_ADDRESSES_SETTING_KEY:
+      return validateAllowedAddresses(value)
+    case BLOCKED_ADDRESSES_SETTING_KEY:
+      return validateBlockedAddresses(value)
     default:
       return { ok: true }
   }
@@ -243,11 +359,15 @@ export function validateEmailDeliverySetting(key: string, value: unknown): Setti
 // The rule, as a pure function
 // ---------------------------------------------------------------------------
 
-/** The three settings, resolved. Pure input to the pure decision below. */
+/** The five settings, resolved. Pure input to the pure decision below. */
 export interface DeliveryPolicy {
   mode: DeliveryMode
   allowedDomains: string[]
   allowedOrgIds: string[]
+  /** Exact mailboxes. Empty means "do not narrow by address". */
+  allowedAddresses: string[]
+  /** Exact mailboxes that may never receive. Beats every other rule. */
+  blockedAddresses: string[]
 }
 
 /** The policy that applies when nothing could be read. The closed one. */
@@ -256,46 +376,133 @@ export function closedPolicy(): DeliveryPolicy {
     mode: DEFAULT_DELIVERY_MODE,
     allowedDomains: [...DEFAULT_ALLOWED_DOMAINS],
     allowedOrgIds: [],
+    allowedAddresses: [...DEFAULT_ALLOWED_ADDRESSES],
+    blockedAddresses: [...DEFAULT_BLOCKED_ADDRESSES],
   }
+}
+
+/**
+ * Which client this send belongs to, and who that client actually is.
+ *
+ * `orgAddresses` is the half that matters. The org exemption used to be read
+ * per SEND rather than per ADDRESS: any address at all was delivered as soon as
+ * the send carried an exempted org id, so cc'ing a stranger on a proposal for
+ * an exempted client mailed the stranger. An exemption is permission to write
+ * to THAT CLIENT, so the addresses it covers are that client's own.
+ */
+export interface RecipientScope {
+  orgId?: string | null
+  /** The exempt client's own addresses. Compared alias-stripped. */
+  orgAddresses?: readonly string[]
+}
+
+/**
+ * One address, unwrapped from a display name, lower-cased, or null.
+ *
+ * NULL IS THE ANSWER FOR ANYTHING THAT IS NOT EXACTLY ONE MAILBOX, and that is
+ * the point of this function rather than a convenience. A single string holding
+ * two addresses used to be judged on the text after its LAST '@' and then
+ * handed to Resend verbatim, which fanned it out to both: the preview route's
+ * own guard accepted "jo@acme.com, business@tahi.studio" because it ends with
+ * the right domain, and so did the gate. A comma, a semicolon, internal
+ * whitespace, a second '@' or a second angle bracket now all read as "not an
+ * address" and are withheld. It fails in the safe direction, and it costs one
+ * regex.
+ */
+export function normaliseAddress(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  if (trimmed === '') return null
+
+  // "Jo Bloggs <jo@acme.com>" is one address. "a@x.com, Jo <jo@y.com>" is two
+  // wearing the same coat, so anything address-shaped before the bracket, or a
+  // second bracket, or text after the closing one, is refused rather than read.
+  let bare = trimmed
+  const open = trimmed.indexOf('<')
+  if (open !== -1) {
+    if (!trimmed.endsWith('>')) return null
+    if (trimmed.lastIndexOf('<') !== open) return null
+    if (/[@,;<]/.test(trimmed.slice(0, open))) return null
+    bare = trimmed.slice(open + 1, -1).trim()
+  }
+
+  bare = bare.toLowerCase()
+  if (/[\s,;<>]/.test(bare)) return null
+  if ((bare.match(/@/g) ?? []).length !== 1) return null
+  const [local, domain] = bare.split('@')
+  if (!local || !domain) return null
+  if (!domain.includes('.') || domain.startsWith('.') || domain.endsWith('.')) return null
+  return bare
+}
+
+/**
+ * The form an exact-match list compares on: normalised, with the plus alias
+ * dropped. business+dummy@tahi.studio and business@tahi.studio are one
+ * mailbox, so an allowlist entry for either covers both, and a denylist entry
+ * for staci@ is not sidestepped by staci+test@.
+ *
+ * Falls back to the trimmed, lower-cased input when the address will not parse,
+ * so a comparison against it simply fails rather than throwing. Nothing
+ * unparseable ever reaches a send: isRecipientAllowed withholds it first.
+ */
+export function addressKey(address: string): string {
+  const bare = normaliseAddress(address) ?? address.trim().toLowerCase()
+  const at = bare.indexOf('@')
+  if (at <= 0) return bare
+  const local = bare.slice(0, at)
+  const plus = local.indexOf('+')
+  return plus === -1 ? bare : `${local.slice(0, plus)}${bare.slice(at)}`
 }
 
 /**
  * The domain of an address, lower-cased, or null when there isn't one.
  *
- * Accepts the display-name form ("Jo <jo@acme.com>") because a from address is
- * written that way and a caller may hand us a to address the same way. Splits
- * on the LAST '@', so a local part containing one cannot smuggle a different
- * domain past the check. A plus alias lives in the local part and is therefore
- * invisible here, which is the point: business+dummy@tahi.studio and
- * business@tahi.studio are the same domain and both pass.
+ * Delegates to normaliseAddress, so a string that is not exactly one mailbox
+ * has no domain at all and is therefore withheld.
  */
 export function recipientDomain(address: string): string | null {
-  const inAngles = address.match(/<([^>]*)>/)?.[1]
-  const bare = (inAngles ?? address).trim().toLowerCase()
-  const at = bare.lastIndexOf('@')
-  if (at <= 0 || at === bare.length - 1) return null
-  const domain = bare.slice(at + 1).trim()
-  return domain === '' ? null : domain
+  const bare = normaliseAddress(address)
+  if (!bare) return null
+  return bare.slice(bare.indexOf('@') + 1)
 }
 
 /**
  * Would this address receive the message? Pure, so the rule can be pinned by
  * tests and read by the Xero fallback without opening a database handle.
  *
- * An address we cannot parse is withheld. There is no reading of "not an
- * address" that should end in a send.
+ * The order is the argument:
+ *   1. anything that is not exactly one parseable mailbox is withheld;
+ *   2. the denylist, ahead of everything, mode 'all' included;
+ *   3. mode 'all', the deliberate open;
+ *   4. the org exemption, but only over that client's own addresses;
+ *   5. the address allowlist, when it holds anything;
+ *   6. the domain list.
  */
 export function isRecipientAllowed(
   address: string,
   policy: DeliveryPolicy,
-  orgId?: string | null,
+  scope?: RecipientScope | null,
 ): boolean {
+  const bare = normaliseAddress(address)
+  if (!bare) return false
+  const key = addressKey(bare)
+
+  if (policy.blockedAddresses.includes(key)) return false
   if (policy.mode === 'all') return true
-  const org = orgId?.trim().toLowerCase()
-  if (org && policy.allowedOrgIds.includes(org)) return true
-  const domain = recipientDomain(address)
-  if (!domain) return false
-  return policy.allowedDomains.includes(domain)
+
+  const org = scope?.orgId?.trim().toLowerCase()
+  if (org && policy.allowedOrgIds.includes(org)) {
+    for (const own of scope?.orgAddresses ?? []) {
+      if (addressKey(own) === key) return true
+    }
+    // Not one of that client's people, so fall through. An exempt org widens
+    // the gate for the client; it never widens it for whoever else is on the
+    // line.
+  }
+
+  if (policy.allowedAddresses.length > 0 && !policy.allowedAddresses.includes(key)) return false
+
+  return policy.allowedDomains.includes(bare.slice(bare.indexOf('@') + 1))
 }
 
 /**
@@ -307,14 +514,14 @@ export function isRecipientAllowed(
 export function partitionRecipients(
   addresses: readonly string[],
   policy: DeliveryPolicy,
-  orgId?: string | null,
+  scope?: RecipientScope | null,
 ): { allowed: string[]; suppressed: string[] } {
   const allowed: string[] = []
   const suppressed: string[] = []
   for (const raw of addresses) {
     const address = raw?.trim()
     if (!address) continue
-    if (isRecipientAllowed(address, policy, orgId)) allowed.push(address)
+    if (isRecipientAllowed(address, policy, scope)) allowed.push(address)
     else suppressed.push(address)
   }
   return { allowed, suppressed }
@@ -335,5 +542,23 @@ export interface EmailSuppressionRow {
   reason: string
 }
 
-/** The one reason a recipient is withheld today. Stored, not inferred. */
+/** Neither the address list nor the domain list covered them. */
 export const SUPPRESSION_REASON_NOT_ALLOWED = 'not_in_allowlist'
+
+/** On `email.blockedAddresses`. Named by hand, so it is never a near miss. */
+export const SUPPRESSION_REASON_BLOCKED = 'address_blocked'
+
+/** Not one parseable mailbox: a pair, a fragment, a comma-separated list. */
+export const SUPPRESSION_REASON_UNPARSEABLE = 'not_an_address'
+
+/**
+ * Why this one was withheld, so the log distinguishes "we have not opened
+ * delivery to them yet" from "somebody typed two addresses into one box" from
+ * "this person is on the never list". Pure, and only ever asked about an
+ * address isRecipientAllowed has already refused.
+ */
+export function suppressionReason(address: string, policy: DeliveryPolicy): string {
+  if (normaliseAddress(address) === null) return SUPPRESSION_REASON_UNPARSEABLE
+  if (policy.blockedAddresses.includes(addressKey(address))) return SUPPRESSION_REASON_BLOCKED
+  return SUPPRESSION_REASON_NOT_ALLOWED
+}

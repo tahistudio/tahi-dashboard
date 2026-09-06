@@ -34,7 +34,7 @@ vi.mock('@/lib/permissions', () => ({
   resolvePermissions: vi.fn(async () => ({ isSuperAdmin: state.isSuperAdmin })),
 }))
 
-vi.mock('@/lib/email-delivery', () => ({
+vi.mock('@/lib/email-gate', () => ({
   listEmailSuppressions: vi.fn(async () => {
     if (state.listThrows) throw new Error('no such table: email_suppressions')
     return state.rows
@@ -50,7 +50,7 @@ vi.mock('@/lib/db', () => ({ db: vi.fn().mockResolvedValue({}) }))
 import { NextRequest } from 'next/server'
 import { GET, DELETE } from '@/app/api/admin/email-suppressions/route'
 import { getRequestAuth } from '@/lib/server-auth'
-import { clearEmailSuppressions } from '@/lib/email-delivery'
+import { clearEmailSuppressions } from '@/lib/email-gate'
 
 const URL_ = 'http://localhost:3000/api/admin/email-suppressions'
 const getReq = () => new NextRequest(URL_)

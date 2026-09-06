@@ -189,13 +189,28 @@ describe('POST /api/admin/emails/preview', () => {
     expect(sendEmail).not.toHaveBeenCalled()
   })
 
-  it('accepts a @tahi.studio address in any case', async () => {
-    const res = await runFast(POST(makeRequest({ to: 'Staci@Tahi.Studio', only: ['welcome'] })))
+  it('accepts a @tahi.studio address in any case, and sends to it normalised', async () => {
+    const res = await runFast(POST(makeRequest({ to: 'Business@Tahi.Studio', only: ['welcome'] })))
     const json = (await res.json()) as PreviewResponse
 
     expect(res.status).toBe(200)
     expect(json.sent).toHaveLength(1)
-    expect(vi.mocked(sendEmail).mock.calls[0][0]).toBe('Staci@Tahi.Studio')
+    // The guard and the send now agree on one parsed address rather than on
+    // whatever string was typed, so the case is settled here rather than left
+    // for Resend.
+    expect(vi.mocked(sendEmail).mock.calls[0][0]).toBe('business@tahi.studio')
+  })
+
+  it('refuses two addresses typed into one box, even when it ends with the right domain', async () => {
+    // The old guard was endsWith on the raw string, and the gate then read the
+    // domain after the LAST '@', so this pair passed both and Resend fanned it
+    // out to the client.
+    const res = await POST(makeRequest({ to: 'jo@acme.com, business@tahi.studio', only: ['welcome'] }))
+    const json = (await res.json()) as PreviewResponse
+
+    expect(res.status).toBe(400)
+    expect(json.error).toContain('single')
+    expect(sendEmail).not.toHaveBeenCalled()
   })
 
   // ── The happy path ────────────────────────────────────────────────────────

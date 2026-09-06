@@ -1,6 +1,17 @@
 /**
  * ONE DOOR, AND NO SIDE DOOR.
  *
+ * Two invariants live here. The first is about Resend and is described below.
+ * The second is about CLERK, which is a mail transport nobody thought of as
+ * one: `createOrganizationInvitation` sends an invitation email from Clerk's
+ * own systems to whatever address it is handed, so lib/email-delivery.ts never
+ * sees it. Three routes mint those, and every one of them was a live path from
+ * an authenticated session to a real person's inbox while the studio believed
+ * the blackout was total. There is no way to funnel Clerk through the one
+ * door, so the rule is not an allowance list (which is how a choke point rots)
+ * but a requirement: a file that mints an invitation must also ask
+ * `guardOutboundAddress` from lib/email-gate.ts.
+ *
  * lib/email-delivery.ts applies the tahi.studio allowlist to every send. That
  * is worth nothing the moment a second file constructs its own Resend client
  * or POSTs to api.resend.com, and this is exactly what the tree looked like
@@ -126,5 +137,40 @@ describe('the Resend client lives in exactly one file', () => {
     const source = readFileSync(join(ROOT, THE_ONE_DOOR), 'utf8')
     expect(/new\s+Resend\s*\(/.test(source)).toBe(true)
     expect(/\.emails\s*\.\s*send\s*\(/.test(source)).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Clerk, the transport nobody counted
+// ---------------------------------------------------------------------------
+
+/** Minting an organisation invitation, or any Clerk invitation. */
+const MINTS_AN_INVITATION = /createOrganizationInvitation|\.invitations\s*\.\s*create/
+
+/** Having asked the delivery gate about the address first. */
+const ASKS_THE_GATE = /guardOutboundAddress/
+
+describe('a Clerk invitation is gated like any other email', () => {
+  const files = sourceFiles()
+
+  it('every file that mints one also asks guardOutboundAddress', () => {
+    const offenders: string[] = []
+    for (const file of files) {
+      const rel = relative(ROOT, file).split('/').join(sep)
+      if (TEST_FILES.has(rel) || rel.includes(`__tests__${sep}`)) continue
+      const source = readFileSync(file, 'utf8')
+      if (!MINTS_AN_INVITATION.test(source)) continue
+      if (!ASKS_THE_GATE.test(source)) offenders.push(rel)
+    }
+    expect(offenders).toEqual([])
+  })
+
+  it('finds the three known minting routes, so the rule is not passing on an empty set', () => {
+    const minting = files.filter((file) => {
+      const rel = relative(ROOT, file).split('/').join(sep)
+      if (TEST_FILES.has(rel) || rel.includes(`__tests__${sep}`)) return false
+      return MINTS_AN_INVITATION.test(readFileSync(file, 'utf8'))
+    })
+    expect(minting.length).toBeGreaterThanOrEqual(3)
   })
 })

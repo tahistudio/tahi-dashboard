@@ -46,7 +46,13 @@ vi.mock('@/lib/xero', async (importOriginal) => ({
 }))
 
 const policy = vi.hoisted(() => ({
-  value: { mode: 'allowlist', allowedDomains: ['tahi.studio'], allowedOrgIds: [] as string[] },
+  value: {
+    mode: 'allowlist',
+    allowedDomains: ['tahi.studio'],
+    allowedOrgIds: [] as string[],
+    allowedAddresses: [] as string[],
+    blockedAddresses: [] as string[],
+  },
 }))
 
 vi.mock('@/lib/email-delivery', async (importOriginal) => ({
@@ -138,7 +144,13 @@ interface SendBody {
 beforeEach(() => {
   vi.clearAllMocks()
   vi.stubEnv('NEXT_PUBLIC_TAHI_ORG_ID', 'org_tahi')
-  policy.value = { mode: 'allowlist', allowedDomains: ['tahi.studio'], allowedOrgIds: [] }
+  policy.value = {
+    mode: 'allowlist',
+    allowedDomains: ['tahi.studio'],
+    allowedOrgIds: [],
+    allowedAddresses: [],
+    blockedAddresses: [],
+  }
   vi.mocked(callXeroAPI).mockResolvedValue(
     { Invoices: [{ Status: 'AUTHORISED', SentToContact: false }] } as never,
   )
@@ -182,7 +194,13 @@ describe('a client nobody has allowlisted', () => {
 
 describe('a client whose org has been exempted', () => {
   it('lets both our email and Xero go', async () => {
-    policy.value = { mode: 'allowlist', allowedDomains: ['tahi.studio'], allowedOrgIds: ['org-a'] }
+    policy.value = {
+      mode: 'allowlist',
+      allowedDomains: ['tahi.studio'],
+      allowedOrgIds: ['org-a'],
+      allowedAddresses: [],
+      blockedAddresses: [],
+    }
     vi.mocked(sendEmail).mockResolvedValue({ success: true })
     primeDb(OUTSIDE_CONTACTS)
 
@@ -196,12 +214,46 @@ describe('a client whose org has been exempted', () => {
   })
 })
 
-describe('a billing contact on tahi.studio', () => {
-  it('goes out under the default policy, with no exemption needed', async () => {
+describe('a billing contact on tahi.studio, at a client nobody has allowlisted', () => {
+  /**
+   * The shape this exists for: Liam adds himself to a real client's billing
+   * contacts to check what the invoice email looks like.
+   *
+   * Our own template correctly reaches only him. XERO MUST NOT FIRE. Xero's
+   * Email endpoint takes no address, so it would mail the contact XERO holds,
+   * which is the client's own address, the exact address the gate has just
+   * withheld our template from. The stand-down is therefore keyed on whether
+   * the POLICY authorises this CLIENT (mode 'all' or the org exempted), never
+   * on whether one recipient in our list happened to pass.
+   *
+   * The previous spec pinned the opposite and called it correct.
+   */
+  it('sends our template and stands Xero down anyway', async () => {
     vi.mocked(sendEmail).mockResolvedValue({ success: true })
     primeDb([
       { id: 'c-liam', email: 'business@tahi.studio', name: 'Liam', portalRole: 'admin', isPrimary: true },
     ])
+
+    const res = await sendInvoiceEmail(post('inv-1042'), params('inv-1042'))
+
+    expect(res.status).toBe(200)
+    expect(vi.mocked(callXeroAPIOrThrow)).not.toHaveBeenCalled()
+    const body = await res.json() as SendBody
+    expect(body.sentTo).toEqual(['business@tahi.studio'])
+  })
+})
+
+describe('mode "all"', () => {
+  it('lets Xero send, because the policy authorises every client', async () => {
+    policy.value = {
+      mode: 'all',
+      allowedDomains: ['tahi.studio'],
+      allowedOrgIds: [],
+      allowedAddresses: [],
+      blockedAddresses: [],
+    }
+    vi.mocked(sendEmail).mockResolvedValue({ success: true })
+    primeDb(OUTSIDE_CONTACTS)
 
     const res = await sendInvoiceEmail(post('inv-1042'), params('inv-1042'))
 
@@ -212,7 +264,13 @@ describe('a billing contact on tahi.studio', () => {
 
 describe('a genuine send failure, with the allowlist satisfied', () => {
   it('is still a 502, not a 409: retrying is the right advice', async () => {
-    policy.value = { mode: 'all', allowedDomains: ['tahi.studio'], allowedOrgIds: [] }
+    policy.value = {
+      mode: 'all',
+      allowedDomains: ['tahi.studio'],
+      allowedOrgIds: [],
+      allowedAddresses: [],
+      blockedAddresses: [],
+    }
     vi.mocked(sendEmail).mockResolvedValue({ success: false, error: 'Resend down' })
     // 'dashboard' mode so Xero is never asked and the only outcome is ours.
     vi.mocked(db).mockResolvedValue(

@@ -45,8 +45,24 @@ vi.mock('@clerk/nextjs/server', () => ({
 
 vi.mock('drizzle-orm', () => {
   const stub = (...args: unknown[]) => ({ args })
-  return { eq: stub, and: stub }
+  return { eq: stub, and: stub, inArray: stub, desc: stub }
 })
+
+// The delivery allowlist, opened. This spec is about the contact row a second
+// seat later claims, not about who Clerk may write to; the gate on this route
+// has its own spec in app/api/__tests__/clerk-invite-allowlist.test.ts. Left
+// real, every fixture address here is an outside domain and every case would
+// answer 409.
+vi.mock('@/lib/email-gate', () => ({
+  resolveDeliveryPolicy: vi.fn().mockResolvedValue({
+    mode: 'all',
+    allowedDomains: [],
+    allowedOrgIds: [],
+    allowedAddresses: [],
+    blockedAddresses: [],
+  }),
+  guardOutboundAddress: vi.fn().mockResolvedValue({ allowed: true, reason: '' }),
+}))
 
 vi.mock('@/db/d1', () => ({
   schema: {

@@ -5,6 +5,8 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq } from 'drizzle-orm'
 
+import { guardOutboundAddress, resolveDeliveryPolicy } from '@/lib/email-gate'
+
 export const dynamic = 'force-dynamic'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -99,11 +101,34 @@ export async function POST(req: NextRequest) {
       .filter((e): e is string => !!e),
   )
 
+  // CLERK IS A SECOND MAIL TRANSPORT, and this route is the batch version of
+  // it: a client admin types addresses and Clerk emails every one of them from
+  // Clerk's own systems, so lib/email-delivery.ts never sees them. The same
+  // rule is asked per address, once against a policy read once, and a withheld
+  // address is logged to email_suppressions before this answers. Withheld is
+  // reported per address rather than failing the batch, because a list mixing
+  // one allowed colleague with three outsiders should still invite the one.
+  const policy = await resolveDeliveryPolicy()
+  const suppressed: string[] = []
+
   const clerk = await clerkClient()
   const results = await Promise.all(
     emails.map(async emailAddress => {
       if (alreadyIn.has(emailAddress.toLowerCase())) {
         return { email: emailAddress, invited: false, error: 'Already has access to this workspace' }
+      }
+      const gate = await guardOutboundAddress(
+        emailAddress,
+        {
+          template: 'clerk-org-invite',
+          subject: 'Clerk invitation to a client workspace',
+          orgId,
+        },
+        policy,
+      )
+      if (!gate.allowed) {
+        suppressed.push(emailAddress)
+        return { email: emailAddress, invited: false, withheld: true, error: gate.reason }
       }
       try {
         await clerk.organizations.createOrganizationInvitation({
@@ -120,6 +145,18 @@ export async function POST(req: NextRequest) {
   )
 
   const invitedEmails = results.filter(r => r.invited).map(r => r.email.toLowerCase())
+
+  // Nobody was invited and the allowlist is why. 409 rather than a 200 holding
+  // a list of failures, so the caller cannot read "results: []" as success.
+  if (invitedEmails.length === 0 && suppressed.length > 0) {
+    return NextResponse.json({
+      error: 'Held back by the email allowlist',
+      message: 'Clerk would email these invitations itself, and none of these addresses are on the delivery allowlist.',
+      results,
+      suppressed,
+      invited: 0,
+    }, { status: 409 })
+  }
   if (invitedEmails.length > 0) {
     try {
       const now = new Date().toISOString()
@@ -143,5 +180,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ results, invited: results.filter(r => r.invited).length })
+  return NextResponse.json({
+    results,
+    invited: results.filter(r => r.invited).length,
+    suppressed,
+  })
 }

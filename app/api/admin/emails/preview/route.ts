@@ -53,7 +53,7 @@
  *      because a super admin passes every feature gate by invariant
  *      (lib/require-feature.ts).
  *
- *   2. The destination must end `@tahi.studio`. The sample data names a
+ *   2. The destination must be ONE address ending `@tahi.studio`. The sample data names a
  *      plausible client and reads like real work, so a typo in `to` would put a
  *      fake invoice for a fake orchard in a real client's inbox. The domain
  *      check makes that impossible rather than unlikely.
@@ -81,6 +81,7 @@ import {
   summarisePreviews,
   type EmailPreview,
 } from '@/lib/email-previews'
+import { normaliseAddress } from '@/lib/email-allowlist'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -224,14 +225,21 @@ export async function POST(req: NextRequest) {
   }
 
   // Guard (2): never a client's inbox, whatever was typed.
-  if (!requested.toLowerCase().endsWith(ALLOWED_DOMAIN)) {
+  //
+  // Normalised FIRST. endsWith on the raw string was satisfied by
+  // "jo@acme.com, business@tahi.studio", which is two addresses in one box and
+  // used to be handed to Resend intact, so the guard read as a pass and the
+  // client got the preview. normaliseAddress answers null for anything that is
+  // not exactly one mailbox, which is the same rule the gate itself applies.
+  const normalised = normaliseAddress(requested)
+  if (!normalised || !normalised.endsWith(ALLOWED_DOMAIN)) {
     return NextResponse.json(
-      { error: `Previews can only be sent to a ${ALLOWED_DOMAIN} address.` },
+      { error: `Previews can only be sent to a single ${ALLOWED_DOMAIN} address.` },
       { status: 400 },
     )
   }
 
-  const to = requested
+  const to = normalised
   // When `to` was overridden, greet whoever owns that address rather than the
   // caller: the preview is being read in that inbox, not this one.
   const greetName = caller && caller.email.toLowerCase() === to.toLowerCase() ? caller.name : null

@@ -11,6 +11,7 @@
  */
 import type { ReactElement } from 'react'
 import { deliverEmail } from '@/lib/email-delivery'
+import type { DeliveryPolicy } from '@/lib/email-allowlist'
 
 export { emailFromAddress } from '@/lib/email-from'
 
@@ -26,6 +27,14 @@ export interface SendEmailContext {
   template?: string
   /** The client this send belongs to, when there is one. */
   orgId?: string | null
+  /**
+   * An already-resolved delivery policy, for a caller sending in a loop.
+   *
+   * The announcement fan-out mails one contact at a time in batches, so
+   * without this it paid a settings read per recipient. Read it once above the
+   * loop and hand it down.
+   */
+  policy?: DeliveryPolicy
 }
 
 export async function sendEmail(
@@ -51,6 +60,7 @@ export async function sendEmail(
     text,
     template: context?.template ?? 'unspecified',
     orgId: context?.orgId ?? null,
+    ...(context?.policy ? { policy: context.policy } : {}),
   })
 
   return {
