@@ -93,6 +93,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 23:40 NZST (Sun) Notifications rail and Messages merged (12d39eb4), 2872 tests, migration 0092 on both D1s after exports to .claude/backups, QA render clean for both audiences; deploying. Running: cutover prep, proposals editor and consistency design, invoices-studio shell integration with the Services and Stalled rules, act-as-client.
 
+- 23:50 NZST (Sun) Notifications rail and Messages LIVE (12d39eb4, health 200/307). Cutover prep: reconciliation done (ManyRequests 20 orgs, 44 clients, 329 requests, 20 invoices, 18 services, 3 brands; D1 59 orgs: 35 real, 10 dummy, 14 uncertain Stripe-import artefacts to MERGE not delete, decision for Liam), allowlist built and reviewed (blockers: Clerk invitations and Stripe are separate mail transports, a domain allowlist would still reach Staci and Nathan, PATCH settings gate too weak; fix agent running), importer build next.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - [x] More sheet Track time row left-aligned (17a490b2).
