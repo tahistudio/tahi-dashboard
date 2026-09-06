@@ -1983,9 +1983,25 @@ export const services = sqliteTable('services', {
   // The ManyRequests service id (migration 0093). The table is empty today, so
   // the import seeds all 18 source services and a request can name one.
   manyrequestsId: text('manyrequests_id'),
+  // ── Org scoping (migration 0097) ──────────────────────────────────────
+  // Who this catalogue row belongs to. NULL = a global row every client may
+  // see. Set = private to that one organisation, which is the only way a
+  // per-client retainer name ("Glasswall Custom Retainer") can be modelled
+  // without showing it to every other client. Deliberately NOT a foreign key,
+  // matching subscriptions.billedContactId: the ManyRequests import writes
+  // rows for organisations that may later be archived, and a cascade that
+  // silently deleted a priced catalogue row would be the wrong trade.
+  orgId: text('org_id'),
+  // 'public' | 'hidden'. The kill switch: a hidden row never reaches the
+  // portal even when it is global. Separate from showInCatalog, which is the
+  // older flag the ManyRequests import writes 0 into for all 18 source rows
+  // so nothing lands client-visible; the portal requires BOTH, so the answer
+  // to "can a client see this" fails closed on either one.
+  visibility: text('visibility').notNull().default('public'),
   ...timestamps,
 }, (table) => [
   uniqueIndex('idx_services_manyrequests').on(table.manyrequestsId),
+  index('idx_services_org').on(table.orgId),
 ])
 
 // ============================================================

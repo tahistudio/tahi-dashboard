@@ -2217,6 +2217,15 @@ const MIGRATIONS: Migration[] = [
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_number ON invoices(number)`,
     ],
   },
+  {
+    name: '0097',
+    description: 'services.org_id + services.visibility: the catalogue learns who it belongs to. GET /api/portal/services served every show_in_catalog = 1 row to every client because there was nothing on the table to scope by, which was survivable while the catalogue was eight generic lines the studio wrote itself and stops being survivable the moment the ManyRequests import runs: 18 source services land here, several named for the client they were priced for ("Glasswall Custom Retainer", "Elevate custom hourly"), and every client would read every other client\'s retainer name off their own Services page. org_id NULL = a global row every client may see, set = private to that one organisation, which is also the only way a per-client retainer can be modelled at all. visibility is the separate kill switch, \'public\' | \'hidden\', where a hidden row never reaches the portal even when it is global; it sits NEXT TO the older show_in_catalog flag rather than replacing it, because show_in_catalog is what lib/import/manyrequests/plan.ts writes 0 into for all 18 source rows on purpose, and the portal now requires BOTH so the answer to "can a client see this" fails closed on either one. No REFERENCES on org_id, matching subscriptions.billed_contact_id: the import writes rows for organisations that may later be archived, and a cascade that silently deleted a priced catalogue row is worse than a dangling id. No backfill, and that is the safe direction: every existing row stays global and public, so the live catalogue reads exactly as it does today. A private row is also \'refuse\' in the ManyRequests cleanup\'s ORG_SCOPED_TABLES: a per-client retainer is business data, and global rows carry org_id NULL so they never count against any organisation. Additive and idempotent; the duplicate-column error is swallowed upstream so re-runs are safe. The NOT NULL ADD COLUMN is legal only because it carries a constant DEFAULT. Apply BEFORE deploying the code that reads it, because Drizzle expands the studio services list (the one bare select on this table) into an explicit column list.',
+    statements: [
+      `ALTER TABLE services ADD COLUMN org_id text`,
+      `ALTER TABLE services ADD COLUMN visibility text NOT NULL DEFAULT 'public'`,
+      `CREATE INDEX IF NOT EXISTS idx_services_org ON services(org_id)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
