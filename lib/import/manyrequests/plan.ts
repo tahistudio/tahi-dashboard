@@ -505,7 +505,7 @@ export const ORG_NAME_MATCHES: Readonly<Record<string, string>> = {
   '3': 'Glasswall Solutions Ltd',
   '4': 'Greyhive',
   '5': 'Physitrack',
-  '6': 'DANTE MEDIA OU',
+  '6': 'DANTE MEDIA OÜ',
   '7': 'Telcom Networks Limited trading as Elevate',
   '10': 'BCS Consultancy',
   '17': 'Axis Creative',
@@ -1414,7 +1414,7 @@ const INVOICE_ITEM_UPDATABLE = ['manyrequestsId', 'description', 'quantity', 'un
  * refusal costs one manual reconciliation while a false negative costs a wrong
  * revenue number nobody notices.
  */
-export const INVOICE_DUPLICATE_WINDOW_DAYS = 45
+export const INVOICE_DUPLICATE_WINDOW_DAYS = 7
 
 /** Money equality at ledger precision. */
 function sameMoney(a: number | null, b: number | null): boolean {

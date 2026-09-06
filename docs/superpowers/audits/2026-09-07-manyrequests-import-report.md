@@ -24,6 +24,19 @@ STEP 5, AFTER CUTOVER: the import is ONE WAY. A second apply overwrites title, s
 CLEANUP runs after the import has landed and been eyeballed, never before. Its GET is now super-admin only too. A hard delete is refused if the organisation holds a single row in any protected table, and the dry run lists every table still holding rows so the residue is visible before anyone says yes.
 BOTH MCP TOOLS ANSWER 403 under the service token, by design; drive both endpoints from the dashboard as a super admin.
 
+## First dry run (7 Sep 2026, 08:45 NZST, from the MCP snapshot)
+
+The dashboard worker still has no ManyRequests token, so the run reads a SNAPSHOT: every list was pulled read-only through the ManyRequests MCP connector (20 organisations, 44 clients, 329 requests with briefs and the ten most recent comments each, 20 invoices with lines, 18 services, 3 brands, 10 subscriptions), assembled into one 906 KB file, sample-verified against live re-reads (934 field comparisons, 0 differences), parked in the studio bucket and named to the import route by key. The dry run answered in 1.4 seconds with no warnings and the mail probe unchanged (notifications 28 before and after, suppressions 3 before and after, mailSilent true).
+
+What it planned: team 2 inserts (Nathan Day as a task handler) and 2 updates (Liam and Staci get their ManyRequests ids); organisations 4 inserts (Blank Space Inc, Equip2, ISG, the kreative duo) and 14 updates that write only the ManyRequests id; contacts 41 inserts; brands 3; services 18; subscriptions 7; requests 88 inserts and 8 updates, with 233 held back only because their organisation had not been stamped yet in a dry run (a dry run cannot see its own organisation writes); messages the same way. The first sample request carried its brief (428 characters), its intake answers under formResponses._manyrequests, its organisation and a pending contact reference, so the detail reads landed.
+
+Two things had to be settled before the apply:
+
+1. The name map said "DANTE MEDIA OU" but the D1 organisation is "DANTE MEDIA OÜ" (the umlaut was lost in the reconciliation transcript). Fixed in the map, so Dante Media, its contact, its three subscriptions and its requests resolve.
+2. Invoices already in the ledger. Seven ManyRequests invoices are the same payments D1 already holds from the Stripe and Xero imports, matched on organisation, amount, currency and paid date within two days: Axis Creative INV-2025000006 and INV-2025000023 (Stripe, USD 1,500 each), Fluvial INV-2026000025, INV-2026000026 and INV-2026000027 (Stripe, USD 500 each), and Dante Media INV-2025000019 and INV-2025000021 (Xero, EUR 500 each). Those seven are left out of the import so the ledger is not doubled. The remaining 13 (Blank Space Inc 2, Dante Media July and August 2025, Fluvial April 2026 x2, Greyhive GBP 1,279.67 pending, ISG 2, Physitrack August to November 2025 x4) have no ledger twin and are imported. The duplicate window in the planner was 45 days, which paired adjacent months of the same retainer; it is now 7 days.
+
+FOR LIAM: Dante Media INV-2025000019 and INV-2025000021 are written off in Xero but ManyRequests shows them paid through the payment link on 18 Sep and 6 Oct 2025. The D1 rows keep the Xero status; if the payments are real, mark those two paid in Xero and re-sync, or say so and the dashboard rows can be flipped by hand.
+
 ## What the dry run must show before anyone trusts a count
 
 1. samples.requests[0].values.description is non-empty and formResponses._manyrequests.fields carries the intake answers; otherwise the detail reads are not landing and a named warning says which request and what shape came back.
