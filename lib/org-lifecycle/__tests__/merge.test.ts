@@ -112,6 +112,20 @@ describe('merge refusals', () => {
     expect(store.requests[0].orgId).toBe(SHELL)
   })
 
+  it('with keepSurvivorIds the survivor keeps its own external id, the shell value is recorded, and the rows still move', async () => {
+    seedPair({ stripeCustomerId: 'cus_shell' }, { stripeCustomerId: 'cus_surv' })
+    store.requests = [{ id: 'r1', orgId: SHELL }]
+
+    const plan = await runOrgMerge(db(), { shellId: SHELL, survivorId: SURVIVOR, dryRun: true, keepSurvivorIds: true })
+    const stripe = plan.externalIds.find((row) => row.field === 'stripe_customer_id')
+    expect(stripe).toMatchObject({ carried: false, shellValue: 'cus_shell', survivorValue: 'cus_surv' })
+    expect(stripe?.note).toContain('cus_shell')
+    expect(plan.tables.requests).toBe(1)
+    // And without the flag the very same pair is still refused.
+    await expect(runOrgMerge(db(), { shellId: SHELL, survivorId: SURVIVOR, dryRun: true }))
+      .rejects.toBeInstanceOf(OrgMergeRefusal)
+  })
+
   it('does not refuse when both sides hold the SAME external id', async () => {
     seedPair({ xeroContactId: 'xero_same' }, { xeroContactId: 'xero_same' })
     const plan = await runOrgMerge(db(), { shellId: SHELL, survivorId: SURVIVOR, dryRun: true })

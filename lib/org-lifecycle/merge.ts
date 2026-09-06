@@ -173,6 +173,15 @@ export interface OrgMergeInput {
   shellId: string
   survivorId: string
   dryRun: boolean
+  /**
+   * When both organisations carry a DIFFERENT value for one external id, the
+   * default is to refuse. With this flag the survivor keeps its own value and
+   * the shell's value is recorded in the plan (and the audit row) so the
+   * other system's key is not lost, just not adopted. For the case the founder
+   * named: one client, two Stripe customers, and he does not mind which one
+   * the organisation row points at.
+   */
+  keepSurvivorIds?: boolean
 }
 
 /**
@@ -218,8 +227,18 @@ export async function runOrgMerge(database: DB, input: OrgMergeInput): Promise<O
     const shellValue = (shell[field.key] as string | null) ?? null
     const survivorValue = (survivor[field.key] as string | null) ?? null
     if (shellValue && survivorValue && shellValue !== survivorValue) {
+      if (input.keepSurvivorIds) {
+        externalIds.push({
+          field: field.column,
+          shellValue,
+          survivorValue,
+          carried: false,
+          note: `Both hold a value; ${survivor.name} keeps ${survivorValue} and the shell's ${shellValue} is recorded here, not adopted.`,
+        })
+        continue
+      }
       refusals.push(
-        `Both organisations carry a different ${field.column} (${shell.name}: ${shellValue}, ${survivor.name}: ${survivorValue}). An external id is a join to somebody else's system and this never overwrites one. Clear the wrong one by hand first.`,
+        `Both organisations carry a different ${field.column} (${shell.name}: ${shellValue}, ${survivor.name}: ${survivorValue}). An external id is a join to somebody else's system and this never overwrites one. Clear the wrong one by hand first, or merge with keepSurvivorIds to keep the survivor's.`,
       )
       continue
     }

@@ -362,6 +362,7 @@ export const TOOLS: ToolDef[] = [
       clientId: prop('string', 'The SHELL organisation id: the duplicate that gets folded away and removed.'),
       into: prop('string', 'The SURVIVOR organisation id: the client that keeps everything.'),
       dryRun: prop('boolean', 'Plan only, write nothing. DEFAULT TRUE. Pass false only after the user has read the dry run and said yes.'),
+      keepSurvivorIds: prop('boolean', 'When both sides carry a DIFFERENT external id (Stripe customer, Xero contact, ManyRequests id, Clerk org), keep the survivor value instead of refusing; the shell value is recorded in the plan and the audit row, never adopted. DEFAULT FALSE.'),
     },
     ['clientId', 'into'],
   ),
@@ -2028,6 +2029,7 @@ async function executeTool(
       return json(await apiWrite(`/api/admin/clients/${clientId}/merge`, token, 'POST', {
         into: s('into'),
         dryRun: args.dryRun !== false,
+        keepSurvivorIds: args.keepSurvivorIds === true,
       }))
     }
     case 'delete_client': {

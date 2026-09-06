@@ -43,6 +43,8 @@ type Params = { params: Promise<{ id: string }> }
 interface MergeBody {
   into?: unknown
   dryRun?: unknown
+  /** Keep the survivor's external ids when both sides carry a different one. */
+  keepSurvivorIds?: unknown
 }
 
 export async function POST(req: NextRequest, { params }: Params) {
@@ -73,7 +75,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   const dryRun = body.dryRun !== false
 
   try {
-    const plan = await runOrgMerge(database, { shellId: id, survivorId: into, dryRun })
+    const keepSurvivorIds = body.keepSurvivorIds === true
+    const plan = await runOrgMerge(database, { shellId: id, survivorId: into, dryRun, keepSurvivorIds })
 
     if (!dryRun) {
       await logAudit(database, {
