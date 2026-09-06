@@ -10,21 +10,20 @@
  * from a client message (always external), and the client-facing send is gated
  * on the message not being internal before this template is ever constructed.
  */
-import { Body, Head, Html, Preview } from '@react-email/components'
 import {
-  DetailCard,
-  DetailRow,
+  EmailBody,
   EmailCard,
-  EmailEyebrow,
+  EmailDocument,
   EmailFooter,
-  EmailFootnote,
-  EmailHeader,
+  EmailHero,
   EmailHeading,
+  EmailKicker,
+  EmailNav,
   EmailParagraph,
-  EmailShell,
-  MessageBlock,
+  LedgerRow,
+  LedgerRows,
+  PersonQuote,
   PrimaryButton,
-  emailBodyStyle,
 } from './_components'
 
 interface NewMessageEmailProps {
@@ -52,48 +51,40 @@ export function NewMessageEmail({
   const reference = requestNumber ? `REQ-${requestNumber}` : null
 
   return (
-    <Html>
-      <Head />
-      <Preview>{`${fromName} replied on ${requestTitle}`}</Preview>
-      <Body style={emailBodyStyle}>
-        <EmailShell>
-          <EmailHeader eyebrow={toClient ? 'A reply on your request' : 'A client replied'} />
+    <EmailDocument preview={`${fromName} replied on ${requestTitle}`}>
+      <EmailCard>
+        <EmailNav label={reference ?? (toClient ? 'Client portal' : 'Inbox')} />
 
-          <EmailCard>
-            <EmailEyebrow>{toClient ? 'Request thread' : 'Inbox'}</EmailEyebrow>
-            <EmailHeading>
-              {fromName} <span style={{ color: '#5A824E' }}>replied</span>
-            </EmailHeading>
+        <EmailHero>
+          <EmailKicker>{toClient ? 'Request thread' : 'Inbox'}</EmailKicker>
+          <EmailHeading>{fromName} replied</EmailHeading>
+          <EmailParagraph>
+            {toClient
+              ? `Hi ${recipientName}, there is a new message on your request. Everything about this piece of work lives on one thread, so replying there keeps the whole story in one place.`
+              : `Hi ${recipientName}, ${fromName} has posted on a request thread and is waiting on the studio.`}
+          </EmailParagraph>
+        </EmailHero>
 
-            <EmailParagraph>
-              {toClient
-                ? `Hi ${recipientName}, there is a new message on your request. Everything about this piece of work lives on one thread, so replying there keeps the whole story in one place.`
-                : `Hi ${recipientName}, ${fromName} has posted on a request thread and is waiting on the studio.`}
-            </EmailParagraph>
+        <EmailBody>
+          <LedgerRows>
+            <LedgerRow label="Request" value={requestTitle} tone="brand" />
+            {reference ? <LedgerRow label="Reference" value={reference} mono /> : null}
+          </LedgerRows>
 
-            <DetailCard>
-              <DetailRow first label="Request" value={requestTitle} hero />
-              {reference && <DetailRow label="Reference" value={reference} mono />}
-              <DetailRow label="From" value={fromName} />
-            </DetailCard>
+          {message ? <PersonQuote name={fromName} quote={message} /> : null}
 
-            {message && <MessageBlock fromName={fromName} message={message} />}
+          <PrimaryButton href={requestUrl}>{toClient ? 'Open the thread' : 'Open the request'}</PrimaryButton>
 
-            <PrimaryButton href={requestUrl}>
-              {toClient ? 'Open the thread' : 'Open the request'}
-            </PrimaryButton>
+          <EmailParagraph variant="small">
+            {toClient
+              ? 'Reply on the thread rather than by email if you can. Files, feedback and approvals all stay attached to the request.'
+              : 'Replying on the thread marks the request as answered for the client.'}
+          </EmailParagraph>
+        </EmailBody>
+      </EmailCard>
 
-            <EmailFootnote>
-              {toClient
-                ? 'Reply on the thread rather than by email if you can. Files, feedback and approvals all stay attached to the request.'
-                : 'Replying on the thread marks the request as answered for the client.'}
-            </EmailFootnote>
-          </EmailCard>
-
-          <EmailFooter />
-        </EmailShell>
-      </Body>
-    </Html>
+      <EmailFooter audience={toClient ? 'client' : 'team'} />
+    </EmailDocument>
   )
 }
 

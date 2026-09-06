@@ -6,21 +6,20 @@
  * says "we need you". The CTA lands on the request thread, which is where the
  * approve and request-changes controls live.
  */
-import { Body, Head, Html, Preview } from '@react-email/components'
 import {
-  DetailCard,
-  DetailRow,
-  EmailBanner,
+  EmailBody,
   EmailCard,
-  EmailEyebrow,
+  EmailDocument,
   EmailFooter,
-  EmailFootnote,
-  EmailHeader,
+  EmailHero,
   EmailHeading,
+  EmailKicker,
+  EmailNav,
   EmailParagraph,
-  EmailShell,
+  LedgerRow,
+  LedgerRows,
   PrimaryButton,
-  emailBodyStyle,
+  SecondaryLink,
 } from './_components'
 
 interface RequestClientReviewEmailProps {
@@ -39,43 +38,38 @@ export function RequestClientReviewEmail({
   const reference = requestNumber ? `REQ-${requestNumber}` : null
 
   return (
-    <Html>
-      <Head />
-      <Preview>{`Ready for your review: ${requestTitle}`}</Preview>
-      <Body style={emailBodyStyle}>
-        <EmailShell>
-          <EmailHeader eyebrow="Ready for your review" />
+    <EmailDocument preview={`Ready for your review: ${requestTitle}`}>
+      <EmailCard>
+        <EmailNav label={reference ?? 'Client portal'} />
 
-          <EmailCard>
-            <EmailBanner kind="info">Waiting on you</EmailBanner>
-            <EmailEyebrow>Your review</EmailEyebrow>
-            <EmailHeading>
-              Your request is <span style={{ color: '#5A824E' }}>ready for your review</span>
-            </EmailHeading>
+        <EmailHero>
+          <EmailKicker>Ready for review</EmailKicker>
+          <EmailHeading>Your request is ready for review</EmailHeading>
+          <EmailParagraph>
+            Hi {recipientName}, we have finished this one and it is waiting on you. Open the
+            request to look it over, then either approve it or tell us what to change.
+          </EmailParagraph>
+        </EmailHero>
 
-            <EmailParagraph>
-              Hi {recipientName}, we have finished this one and it is waiting on you. Open the
-              request to look it over, then either approve it or tell us what to change.
-            </EmailParagraph>
+        <EmailBody>
+          <LedgerRows>
+            <LedgerRow label="Request" value={requestTitle} tone="brand" />
+            {reference ? <LedgerRow label="Reference" value={reference} mono /> : null}
+            <LedgerRow label="Next" value="Waiting on you" />
+          </LedgerRows>
 
-            <DetailCard>
-              <DetailRow first label="Request" value={requestTitle} hero />
-              {reference && <DetailRow label="Reference" value={reference} mono />}
-              <DetailRow label="Status" value="Ready for your review" />
-            </DetailCard>
+          <PrimaryButton href={reviewUrl}>Review and comment</PrimaryButton>
+          <SecondaryLink href={reviewUrl}>Approve as is</SecondaryLink>
 
-            <PrimaryButton href={reviewUrl}>Review this request</PrimaryButton>
+          <EmailParagraph variant="small">
+            Nothing moves on until you have looked. If it needs another pass, requesting
+            changes on the thread sends it straight back to us with your notes attached.
+          </EmailParagraph>
+        </EmailBody>
+      </EmailCard>
 
-            <EmailFootnote>
-              Nothing moves on until you have looked. If it needs another pass, requesting
-              changes on the thread sends it straight back to us with your notes attached.
-            </EmailFootnote>
-          </EmailCard>
-
-          <EmailFooter />
-        </EmailShell>
-      </Body>
-    </Html>
+      <EmailFooter audience="client" />
+    </EmailDocument>
   )
 }
 

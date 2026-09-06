@@ -7,21 +7,19 @@
  * Feeding one value to both rendered "Client: Jo" under a company label, or
  * "Client: there" when the contact row had no usable name.
  */
-import { Body, Head, Html, Preview } from '@react-email/components'
 import {
-  DetailCard,
-  DetailRow,
-  EmailBanner,
+  EmailBody,
   EmailCard,
-  EmailEyebrow,
+  EmailDocument,
   EmailFooter,
-  EmailFootnote,
-  EmailHeader,
+  EmailHero,
   EmailHeading,
+  EmailKicker,
+  EmailNav,
   EmailParagraph,
-  EmailShell,
+  LedgerRow,
+  LedgerRows,
   PrimaryButton,
-  emailBodyStyle,
 } from './_components'
 
 interface RequestDeliveredEmailProps {
@@ -43,48 +41,42 @@ export function RequestDeliveredEmail({
   requestUrl,
 }: RequestDeliveredEmailProps) {
   return (
-    <Html>
-      <Head />
-      <Preview>{`Delivered: ${requestTitle}`}</Preview>
-      <Body style={emailBodyStyle}>
-        <EmailShell>
-          <EmailHeader eyebrow="Your request is delivered" />
+    <EmailDocument preview={`Delivered: ${requestTitle}`}>
+      <EmailCard>
+        <EmailNav label="Client portal" />
 
-          <EmailCard>
-            <EmailBanner kind="success">Delivered</EmailBanner>
-            <EmailEyebrow>Request complete</EmailEyebrow>
-            <EmailHeading>
-              Your work is <span style={{ color: '#5A824E' }}>ready</span> for review
-            </EmailHeading>
+        <EmailHero>
+          <EmailKicker>Delivered</EmailKicker>
+          <EmailHeading>Your work is ready for review</EmailHeading>
+          <EmailParagraph>
+            Hi {recipientName}, the team has wrapped up your request and the deliverables are
+            waiting in the dashboard.
+          </EmailParagraph>
+        </EmailHero>
 
-            <EmailParagraph>
-              Hi {recipientName}, the team has wrapped up your request and the
-              deliverables are waiting in the dashboard.
-            </EmailParagraph>
+        <EmailBody>
+          <LedgerRows>
+            <LedgerRow label="Request" value={requestTitle} tone="brand" />
+            {clientName ? <LedgerRow label="Client" value={clientName} /> : null}
+            <LedgerRow label="Delivered" value={deliveredAt} />
+          </LedgerRows>
 
-            <DetailCard>
-              <DetailRow first label="Request" value={requestTitle} hero />
-              {clientName && <DetailRow label="Client" value={clientName} />}
-              <DetailRow label="Delivered" value={deliveredAt} />
-            </DetailCard>
+          <EmailParagraph variant="muted">
+            Take a look when you have a moment. If anything needs a tweak, leave a comment
+            on the thread or reply to this email and we will pick it up.
+          </EmailParagraph>
 
-            <EmailParagraph>
-              Take a look when you have a moment. If anything needs a tweak, leave a comment
-              on the thread or reply to this email and we will pick it up.
-            </EmailParagraph>
+          <PrimaryButton href={requestUrl}>View deliverables</PrimaryButton>
 
-            <PrimaryButton href={requestUrl}>View deliverables</PrimaryButton>
+          <EmailParagraph variant="small">
+            Tip: leaving feedback on the thread keeps everything in one place and helps the
+            team move quickly on the next iteration.
+          </EmailParagraph>
+        </EmailBody>
+      </EmailCard>
 
-            <EmailFootnote>
-              Tip: leaving feedback on the thread keeps everything in one place and helps the
-              team move quickly on the next iteration.
-            </EmailFootnote>
-          </EmailCard>
-
-          <EmailFooter />
-        </EmailShell>
-      </Body>
-    </Html>
+      <EmailFooter audience="client" />
+    </EmailDocument>
   )
 }
 
