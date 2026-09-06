@@ -3,14 +3,22 @@
 /**
  * <SubscriptionCard> and friends. Plan (written to both the org and the
  * subscription row), the Priority support and SEO add-on toggles, the billing
- * interval editor with its bundled add-ons, and the per-track occupancy list.
+ * interval editor with its bundled add-ons, the per-track occupancy list, and
+ * Remove plan for a subscription that was never billed.
+ *
+ * Remove is not cancel. Cancelling keeps the row for the books; removing
+ * deletes the subscription and its empty tracks and leaves the client on no
+ * plan, and the route refuses it the moment an invoice or a request depends
+ * on the subscription.
  */
 
 import { useState } from 'react'
-import { AlertTriangle, Edit2 } from 'lucide-react'
+import { AlertTriangle, Edit2, Trash2 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { Card } from '@/components/tahi/card'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { PlanBadge, StatusBadge } from '@/components/tahi/status-badge'
+import { useToast } from '@/components/tahi/toast'
 import { TrackMeter } from '@/components/tahi/track-meter'
 import {
   CYCLE_BUNDLED_ADDONS,
@@ -19,17 +27,51 @@ import {
   calculateBundledSavings,
   type BillingInterval,
 } from '@/lib/billing'
+import { PLAN_TYPES } from '@/lib/plan-type'
+import { getPlanLabel } from '@/lib/plan-utils'
 import type { Subscription, Track } from './types'
 
 // ── Subscription card ──────────────────────────────────────────────────────────
 
-export function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { subscription: Subscription; tracks: Track[]; orgId: string; onUpdated: () => void }) {
+export function SubscriptionCard({ subscription, tracks, orgId, orgName, onUpdated }: {
+  subscription: Subscription
+  tracks: Track[]
+  orgId: string
+  /** Named in the Remove plan confirmation so the dialog says whose plan goes. */
+  orgName?: string
+  onUpdated: () => void
+}) {
+  const { showToast } = useToast()
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [planType, setPlanType] = useState(subscription.planType)
   const [togglingAddon, setTogglingAddon] = useState<'priority' | 'seo' | null>(null)
+  const [removeOpen, setRemoveOpen] = useState(false)
+  const [removing, setRemoving] = useState(false)
 
-  const PLAN_OPTIONS = ['maintain', 'scale', 'tune', 'launch', 'hourly', 'custom']
+  const planLabel = getPlanLabel(subscription.planType)
+  const whose = orgName ?? 'this client'
+
+  const removePlan = async () => {
+    setRemoving(true)
+    try {
+      const res = await fetch(apiPath(`/api/admin/subscriptions/${subscription.id}`), { method: 'DELETE' })
+      if (!res.ok) {
+        // The route's one-line reason (invoices reference it, requests sit on
+        // its tracks) is the toast, not a generic failure.
+        const json = await res.json().catch(() => null) as { error?: string } | null
+        showToast(json?.error ?? 'The plan could not be removed. Please try again.', 'error')
+        return
+      }
+      showToast(`${planLabel} plan removed from ${whose}.`, 'success')
+      onUpdated()
+    } catch {
+      showToast('The plan could not be removed. Please try again.', 'error')
+    } finally {
+      setRemoving(false)
+      setRemoveOpen(false)
+    }
+  }
 
   const savePlan = async () => {
     setSaving(true)
@@ -116,7 +158,7 @@ export function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { s
             onChange={e => setPlanType(e.target.value)}
             className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
           >
-            {PLAN_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+            {PLAN_TYPES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
           </select>
         </div>
       ) : (
@@ -170,6 +212,32 @@ export function SubscriptionCard({ subscription, tracks, orgId, onUpdated }: { s
           </div>
         )}
       </div>
+
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={() => setRemoveOpen(true)}
+          disabled={removing}
+          className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.75rem] flex items-center gap-1 text-xs font-medium hover:underline transition-colors disabled:opacity-50"
+          style={{ color: 'var(--color-danger)', background: 'none', border: 'none', padding: 0, cursor: removing ? 'wait' : 'pointer' }}
+        >
+          <Trash2 className="w-3 h-3" aria-hidden="true" />
+          Remove plan
+        </button>
+        <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
+          For a plan that was never billed. Deletes the subscription and its empty tracks; cancelling keeps the record.
+        </p>
+      </div>
+
+      <ConfirmDialog
+        open={removeOpen}
+        variant="danger"
+        title={`Remove the ${planLabel} plan from ${whose}?`}
+        description={`This deletes the ${subscription.status} subscription and its empty tracks, and leaves ${whose} with no plan. It is refused if any invoice references the subscription or any request sits on its tracks. To keep the record for the books, cancel it instead.`}
+        confirmLabel="Remove plan"
+        onConfirm={removePlan}
+        onCancel={() => { if (!removing) setRemoveOpen(false) }}
+      />
     </Card>
   )
 }

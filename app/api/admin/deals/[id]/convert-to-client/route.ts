@@ -6,6 +6,7 @@ import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { dispatchDomainEvent } from '@/lib/events'
 import { denyIfDealOrgOutOfScope } from '../../_access'
+import { PLAN_TYPE_ERROR, isRetainerPlanType, normalisePlanType } from '@/lib/plan-type'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -134,10 +135,20 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
   }
 
-  // Determine plan type from engagement type
-  let planType = 'none'
-  if (deal.engagementType === 'retainer') {
-    planType = 'maintain'
+  // The plan is whatever the caller names, and nothing otherwise. This used to
+  // read a retainer deal as a Maintain plan and mint an active subscription
+  // for it, so a won Scale retainer, or one still being negotiated, landed as
+  // a Maintain client that was never billed. A deal carries no plan column
+  // (only engagementType), so there is nothing to infer from safely.
+  let body: { planType?: string | null } = {}
+  try {
+    body = await req.json() as { planType?: string | null }
+  } catch {
+    body = {}
+  }
+  const planType = normalisePlanType(body.planType)
+  if (planType === undefined) {
+    return NextResponse.json({ error: PLAN_TYPE_ERROR }, { status: 400 })
   }
 
   const now = new Date().toISOString()
@@ -179,27 +190,36 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }))
   )
 
-  // If retainer plan, provision a subscription and tracks
-  if (planType === 'maintain') {
+  // An explicitly named retainer plan comes with its subscription and tracks,
+  // the same shape POST /api/admin/clients provisions: Maintain is one small
+  // track, Scale is one small and one large.
+  if (isRetainerPlanType(planType)) {
     const subscriptionId = crypto.randomUUID()
     await database.insert(schema.subscriptions).values({
       id: subscriptionId,
       orgId: newOrgId,
-      planType: 'maintain',
+      planType,
       status: 'active',
       createdAt: now,
       updatedAt: now,
     })
 
-    await database.insert(schema.tracks).values({
-      id: crypto.randomUUID(),
-      subscriptionId,
-      type: 'small',
-      isPriorityTrack: false,
-      currentRequestId: null,
-      createdAt: now,
-      updatedAt: now,
-    })
+    const trackDefs: Array<{ type: 'small' | 'large' }> =
+      planType === 'scale'
+        ? [{ type: 'small' }, { type: 'large' }]
+        : [{ type: 'small' }]
+
+    for (const t of trackDefs) {
+      await database.insert(schema.tracks).values({
+        id: crypto.randomUUID(),
+        subscriptionId,
+        type: t.type,
+        isPriorityTrack: false,
+        currentRequestId: null,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
   }
 
   // Link the deal to the new org

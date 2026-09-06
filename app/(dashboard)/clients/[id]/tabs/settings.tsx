@@ -119,7 +119,7 @@ export function SettingsTab({
 
       <Section title="Subscription" description="The plan, its add-ons, and how often it is billed.">
         {subscription
-          ? <SubscriptionCard subscription={subscription} tracks={tracks} orgId={org.id} onUpdated={onUpdated} />
+          ? <SubscriptionCard subscription={subscription} tracks={tracks} orgId={org.id} orgName={org.name} onUpdated={onUpdated} />
           : <NoSubscriptionCard planType={org.planType} />}
       </Section>
 

@@ -14,6 +14,7 @@ import {
   resolveInvoiceChannel,
 } from '@/lib/invoice-channel'
 import { PAYMENT_TERMS, isPaymentTerms } from '@/lib/invoice-billing'
+import { PLAN_TYPE_ERROR, normalisePlanType } from '@/lib/plan-type'
 
 type BillingDb = Parameters<typeof applyBillingDerivation>[0]
 
@@ -327,6 +328,18 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         error: `paymentTerms must be one of ${PAYMENT_TERMS.join(', ')}, or null to leave it unset.`,
       }, { status: 400 })
     }
+  }
+  // The plan is a third closed vocabulary. null, '' and 'none' all clear it and
+  // are stored as the one 'none' spelling the column defaults to, so the list
+  // filter and the plan_type access scope keep matching with `=`. Clearing the
+  // plan here says nothing about a subscription row: removing one is
+  // DELETE /api/admin/subscriptions/[id], which clears this itself.
+  if ('planType' in body) {
+    const stored = normalisePlanType(body.planType)
+    if (stored === undefined) {
+      return NextResponse.json({ error: PLAN_TYPE_ERROR }, { status: 400 })
+    }
+    patch.planType = stored
   }
 
   await drizzle

@@ -215,7 +215,12 @@ type ToolDef = {
   }
 }
 
-function prop(type: string, description: string, extra?: Record<string, unknown>) {
+/**
+ * A JSON Schema property. `type` may be a list (['string', 'null']) for a
+ * field a caller clears by sending null, which a strict client refuses to
+ * send against a plain 'string'.
+ */
+function prop(type: string | string[], description: string, extra?: Record<string, unknown>) {
   return { type, description, ...extra }
 }
 
@@ -297,7 +302,7 @@ export const TOOLS: ToolDef[] = [
     name: prop('string', 'Client company name'),
     website: prop('string', 'Client website URL'),
     industry: prop('string', 'Industry sector'),
-    planType: prop('string', 'Plan type: maintain, scale, tune, launch, hourly, custom, none'),
+    planType: prop('string', 'Plan type: maintain, scale, tune, launch, hourly, custom, none. Omit for no plan; only maintain and scale create a subscription and tracks', { enum: ['maintain', 'scale', 'tune', 'launch', 'hourly', 'custom', 'none'] }),
     primaryContactEmail: prop('string', 'Primary contact email address. Triggers a real invite email, see sendInvite'),
     primaryContactName: prop('string', 'Primary contact full name'),
     sendInvite: prop('boolean', 'Email a portal invite link to primaryContactEmail (default true). Pass false to create the client without inviting anyone'),
@@ -306,7 +311,7 @@ export const TOOLS: ToolDef[] = [
     clientId: prop('string', 'Client organisation ID'),
     name: prop('string', 'Updated company name'),
     status: prop('string', 'Updated status'),
-    planType: prop('string', 'Updated plan type'),
+    planType: prop(['string', 'null'], 'Updated plan type: maintain, scale, tune, launch, hourly, custom, or null (or none) to clear the plan. Changes the label only; use delete_subscription to remove a subscription row', { enum: ['maintain', 'scale', 'tune', 'launch', 'hourly', 'custom', 'none', null] }),
     industry: prop('string', 'Updated industry'),
     website: prop('string', 'Updated website URL'),
     internalNotes: prop('string', 'Internal notes about the client'),
@@ -1422,6 +1427,9 @@ export const TOOLS: ToolDef[] = [
     subscriptionId: prop('string', 'Subscription ID'),
     newCycle: prop('string', 'New billing cycle: monthly, quarterly, annual'),
   }, ['subscriptionId', 'newCycle']),
+  tool('delete_subscription', 'Remove a plan the client never really had: deletes the subscription row and its empty tracks, and sets the organisation to no plan when no other active subscription remains. This is not cancellation (cancelling keeps the row for the books). Refused with the reason when any invoice references the subscription (cancel it instead) or when any request sits on one of its tracks (move the work off first).', {
+    subscriptionId: prop('string', 'Subscription ID'),
+  }, ['subscriptionId']),
 
   // ── Services catalogue ────────────────────────────────────────────────
   // A catalogue row is either GLOBAL (orgId null, every client sees it) or
@@ -2678,6 +2686,10 @@ async function executeTool(
     }
     case 'change_billing_cycle':
       return json(await apiWrite(`/api/admin/subscriptions/${s('subscriptionId')}/change-cycle`, token, 'POST', { newCycle: s('newCycle') }))
+    case 'delete_subscription':
+      // A 409 from the route (invoices reference it, requests on its tracks)
+      // surfaces as the tool error with the route's own sentence.
+      return json(await apiWrite(`/api/admin/subscriptions/${s('subscriptionId')}`, token, 'DELETE'))
 
     // ── Services catalogue ────────────────────────────────────────────
     case 'list_services': {

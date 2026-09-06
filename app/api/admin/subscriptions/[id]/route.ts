@@ -3,7 +3,11 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
+import type { DB } from '@/db/d1'
+import { requireAccessToOrg } from '@/lib/require-access'
+import { logAudit } from '@/lib/audit'
+import { NO_PLAN } from '@/lib/plan-type'
 import {
   calculateBundledSavings,
   calculateGst,
@@ -172,4 +176,131 @@ export async function PUT(req: NextRequest, { params }: Params) {
     .where(eq(schema.subscriptions.id, id))
 
   return NextResponse.json({ success: true })
+}
+
+function count(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`
+}
+
+// ── DELETE /api/admin/subscriptions/[id] ────────────────────────────────────
+// Removes a plan the client never really had: a subscription minted at client
+// creation or deal conversion that nothing was ever billed against. This is
+// not cancellation. Cancelling (PUT status) keeps the row for the books; this
+// deletes it, together with its tracks, and leaves the client on no plan when
+// no other active subscription remains.
+//
+// Two refusals, each with its reason in one sentence: an invoice that
+// references the subscription (invoices.subscription_id) means it was billed,
+// so cancel it instead; a request sitting on one of its tracks (either the
+// track's current request or any request whose track_id points at it) would be
+// orphaned, so move the work off first.
+export async function DELETE(req: NextRequest, { params }: Params) {
+  const { orgId, userId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  const featureDenied = await requireFeature({ userId, orgId }, 'billing')
+  if (featureDenied) return featureDenied
+
+  const { id } = await params
+  const database = await db()
+  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const [sub] = await drizzle
+    .select({
+      id: schema.subscriptions.id,
+      orgId: schema.subscriptions.orgId,
+      planType: schema.subscriptions.planType,
+      status: schema.subscriptions.status,
+    })
+    .from(schema.subscriptions)
+    .where(eq(schema.subscriptions.id, id))
+    .limit(1)
+
+  if (!sub) {
+    return NextResponse.json({ error: 'Subscription not found' }, { status: 404 })
+  }
+
+  // The verdict on the org comes before any verdict on its contents, so a
+  // scoped team member learns nothing about a client they cannot see.
+  const denied = await requireAccessToOrg(drizzle, userId, sub.orgId)
+  if (denied) return denied
+
+  const [invoiceRefs, trackRows] = await Promise.all([
+    drizzle
+      .select({ id: schema.invoices.id })
+      .from(schema.invoices)
+      .where(eq(schema.invoices.subscriptionId, id)),
+    drizzle
+      .select({ id: schema.tracks.id, currentRequestId: schema.tracks.currentRequestId })
+      .from(schema.tracks)
+      .where(eq(schema.tracks.subscriptionId, id)),
+  ])
+
+  if (invoiceRefs.length > 0) {
+    const n = invoiceRefs.length
+    return NextResponse.json({
+      error: `Cannot remove this plan: ${count(n, 'invoice')} ${n === 1 ? 'references' : 'reference'} it. Cancel the subscription instead so the invoices keep their plan.`,
+    }, { status: 409 })
+  }
+
+  const trackIds = trackRows.map(t => t.id)
+  const holding = new Set<string>()
+  for (const t of trackRows) {
+    if (t.currentRequestId) holding.add(t.currentRequestId)
+  }
+  if (trackIds.length > 0) {
+    const onTracks = await drizzle
+      .select({ id: schema.requests.id })
+      .from(schema.requests)
+      .where(inArray(schema.requests.trackId, trackIds))
+    for (const r of onTracks) holding.add(r.id)
+  }
+
+  if (holding.size > 0) {
+    const n = holding.size
+    return NextResponse.json({
+      error: `Cannot remove this plan: ${count(n, 'request')} ${n === 1 ? 'sits' : 'sit'} on its tracks. Move them off the tracks first.`,
+    }, { status: 409 })
+  }
+
+  // Tracks first, explicitly: the FK cascade would do it, but the row count
+  // is reported and audited, and D1 environments differ on foreign_keys.
+  if (trackIds.length > 0) {
+    await drizzle.delete(schema.tracks).where(eq(schema.tracks.subscriptionId, id))
+  }
+  await drizzle.delete(schema.subscriptions).where(eq(schema.subscriptions.id, id))
+
+  const remaining = await drizzle
+    .select({ id: schema.subscriptions.id })
+    .from(schema.subscriptions)
+    .where(and(
+      eq(schema.subscriptions.orgId, sub.orgId),
+      eq(schema.subscriptions.status, 'active'),
+    ))
+    .limit(1)
+
+  const planCleared = remaining.length === 0
+  if (planCleared) {
+    await drizzle
+      .update(schema.organisations)
+      .set({ planType: NO_PLAN, updatedAt: new Date().toISOString() })
+      .where(eq(schema.organisations.id, sub.orgId))
+  }
+
+  await logAudit(database as DB, {
+    action: 'subscription.removed',
+    userId,
+    entityType: 'subscription',
+    entityId: id,
+    metadata: {
+      orgId: sub.orgId,
+      planType: sub.planType,
+      status: sub.status,
+      tracksRemoved: trackIds.length,
+      planCleared,
+    },
+  })
+
+  return NextResponse.json({ success: true, tracksRemoved: trackIds.length, planCleared })
 }
