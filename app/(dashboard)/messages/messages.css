@@ -177,6 +177,11 @@
 .pfm-face.more { background: var(--color-bg-secondary); }
 
 .pfm-thread-body { flex: 1; min-height: 0; overflow-y: auto; padding: .875rem; display: flex; flex-direction: column; gap: .875rem; }
+/* The stream is wrapped so it can be a live region. It repeats the body's own
+   column and gap, so wrapping changes nothing about the spacing, and it hides
+   itself while empty rather than contributing a gap under the skeleton. */
+.pfm-stream { display: flex; flex-direction: column; gap: .875rem; }
+.pfm-stream:empty { display: none; }
 .pfm-day, .pfm-newline { display: flex; align-items: center; gap: .625rem; }
 .pfm-day::before, .pfm-day::after,
 .pfm-newline::before, .pfm-newline::after { content: ''; flex: 1; height: 1px; background: var(--color-border-subtle); }
