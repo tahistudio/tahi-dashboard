@@ -366,7 +366,11 @@ export function RailViewItem({
         fontFamily: 'inherit',
         fontSize: touch ? '0.84375rem' : '0.78125rem',
         fontWeight: 600,
-        color: active ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+        // brand-on-tint, not brand-dark: on the dark canvas the brand-50 wash
+        // is near-black and forest ink read 2.1:1, which made the SELECTED view
+        // the least readable row in the rail. The token flips lighter in .dark
+        // (6.8:1) and is unchanged in light. See globals.css.
+        color: active ? 'var(--color-brand-on-tint)' : 'var(--color-text-muted)',
         textAlign: 'left',
         cursor: 'pointer',
         transition: 'background-color var(--motion-quick) var(--ease-out), color var(--motion-quick) var(--ease-out)',
@@ -390,8 +394,10 @@ export function RailViewItem({
           flexShrink: 0,
           fontSize: '0.6875rem',
           fontVariantNumeric: 'tabular-nums',
-          color: active ? 'var(--color-brand-dark)' : 'var(--color-text-subtle)',
-          opacity: active ? 0.75 : 1,
+          color: active ? 'var(--color-brand-on-tint)' : 'var(--color-text-subtle)',
+          // 0.75 dropped the selected count to 3.7:1 in light and worse in
+          // dark; 0.85 keeps it recessive next to the label and clears AA.
+          opacity: active ? 0.85 : 1,
         }}
       >
         {count}

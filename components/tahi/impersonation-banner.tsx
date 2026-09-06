@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronDown, Check } from 'lucide-react'
 import { ShellIcon } from '@/components/tahi/shell-icons'
@@ -144,11 +144,25 @@ export function clearImpersonation() {
   notify()
 }
 
+export interface ImpersonationBannerProps {
+  /**
+   * `organisations.id` the tahi-impersonate-org cookie names, resolved
+   * server-side by the dashboard layout (lib/view-audience.ts). Null when the
+   * session is not previewing anyone.
+   */
+  serverPreviewOrgId?: string | null
+  /** That org's name, so a tab adopting the cookie can label the strip. */
+  serverPreviewOrgName?: string | null
+}
+
 /**
  * Banner shown when impersonating a client or team member.
  * Uses useSyncExternalStore for immediate reactivity.
  */
-export function ImpersonationBanner() {
+export function ImpersonationBanner({
+  serverPreviewOrgId = null,
+  serverPreviewOrgName = null,
+}: ImpersonationBannerProps = {}) {
   const router = useRouter()
   const impersonation = useSyncExternalStore(subscribe, getSnapshot, () => null)
 
@@ -157,6 +171,48 @@ export function ImpersonationBanner() {
     clearImpersonation()
     router.push(isTeamMember ? '/team' : '/clients')
   }, [router, impersonation])
+
+  // Entering or leaving Client view changes what the SERVER should render:
+  // the shell layout reads the tahi-impersonate-org cookie to pin the client's
+  // billing currency, and every studio-only page reads it to redirect the
+  // preview the way it redirects a real client (lib/view-audience.ts). Setting
+  // impersonation is a client-side state change, so the router cache would go
+  // on serving segments rendered for the previous audience until a hard reload.
+  // Refresh once per transition, never on mount (the first pass only records
+  // where we started).
+  const previewedOrgId = impersonation?.type === 'client' ? impersonation.orgId : null
+  const lastPreviewedOrgId = useRef<string | null | undefined>(undefined)
+  useEffect(() => {
+    if (lastPreviewedOrgId.current === undefined) {
+      // Seed from the server's reading too, so a tab that is about to adopt the
+      // cookie (below) does not count that as a transition and refresh a shell
+      // the server already rendered for the previewed audience.
+      lastPreviewedOrgId.current = previewedOrgId ?? serverPreviewOrgId ?? null
+      return
+    }
+    if (lastPreviewedOrgId.current === previewedOrgId) return
+    lastPreviewedOrgId.current = previewedOrgId
+    router.refresh()
+  }, [previewedOrgId, serverPreviewOrgId, router])
+
+  // Cookie / sessionStorage reconciliation. The preview signal the SERVER reads
+  // is a browser-wide cookie; this store is per-tab sessionStorage. A tab opened
+  // fresh while Client view is on (bookmark, second window, restored session)
+  // therefore carries the cookie without the store: the server redirects its
+  // studio-only pages and pins the previewed client's currency, while this
+  // banner, useImpersonation() and every client-side audience flag say "not
+  // previewing" - a tab with no explanation and no way out. Adopt the server's
+  // reading into this tab so the whole tab agrees and Exit preview is reachable.
+  // Once per org id: exiting clears the store first, so the stale prop of the
+  // render on its way out must not put the preview straight back.
+  const adoptedOrgId = useRef<string | null>(null)
+  useEffect(() => {
+    if (!serverPreviewOrgId) return
+    if (adoptedOrgId.current === serverPreviewOrgId) return
+    adoptedOrgId.current = serverPreviewOrgId
+    if (getSnapshot() !== null) return
+    setImpersonation({ orgId: serverPreviewOrgId, orgName: serverPreviewOrgName ?? 'this client' })
+  }, [serverPreviewOrgId, serverPreviewOrgName])
 
   if (!impersonation) return null
 
@@ -186,7 +242,7 @@ export function ImpersonationBanner() {
         </span>
       ) : (
         <span>
-          Viewing <ClientSwitcher currentOrgId={impersonation.orgId} label={displayName} color="#ffffff" /> . Read-only client view.
+          Viewing <ClientSwitcher currentOrgId={impersonation.orgId} label={displayName} color="#ffffff" />. Read-only client view.
         </span>
       )}
       <button className="imp-exit" onClick={handleExit}>Exit preview</button>

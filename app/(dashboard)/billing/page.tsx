@@ -1,4 +1,4 @@
-import { getServerAuth } from '@/lib/server-auth'
+import { getViewAudience } from '@/lib/view-audience'
 import { redirect } from 'next/navigation'
 import { requirePageFeature } from '@/lib/page-guard'
 import { BillingContent } from './billing-content'
@@ -6,9 +6,12 @@ import { BillingContent } from './billing-content'
 export const metadata = { title: 'Billing - Tahi Dashboard' }
 
 export default async function BillingPage() {
-  const { userId, orgId } = await getServerAuth()
+  const { userId, isAdmin, isPreviewingClient } = await getViewAudience()
   if (!userId) redirect('/sign-in')
-  const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
-  if (isAdmin) await requirePageFeature('billing')
-  return <BillingContent isAdmin={isAdmin} />
+  // Client view (the tahi-impersonate-org cookie) renders the CLIENT branch:
+  // the studio branch lists every client's plan and money, which is the last
+  // thing a preview of one client's portal should paint. See lib/view-audience.
+  const studio = isAdmin && !isPreviewingClient
+  if (studio) await requirePageFeature('billing')
+  return <BillingContent isAdmin={studio} />
 }

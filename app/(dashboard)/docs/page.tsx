@@ -1,4 +1,4 @@
-import { getServerAuth } from '@/lib/server-auth'
+import { getViewAudience } from '@/lib/view-audience'
 import { redirect } from 'next/navigation'
 import { requirePageFeature } from '@/lib/page-guard'
 import { DocsContent } from './docs-content'
@@ -6,8 +6,12 @@ import { DocsContent } from './docs-content'
 export const metadata = { title: 'Docs Hub - Tahi Dashboard' }
 
 export default async function DocsPage() {
-  const { orgId } = await getServerAuth()
-  if (orgId !== process.env.NEXT_PUBLIC_TAHI_ORG_ID) redirect('/requests')
+  const { userId, isAdmin, isPreviewingClient } = await getViewAudience()
+  if (!userId) redirect('/sign-in')
+  // Studio-only surface. Client view (the tahi-impersonate-org cookie) leaves
+  // it the same way a real client does, so a preview cannot show one client
+  // another client's work. See lib/view-audience.ts.
+  if (!isAdmin || isPreviewingClient) redirect('/requests')
   await requirePageFeature('docs')
   return <DocsContent />
 }

@@ -36,6 +36,7 @@ import { ShellIcon } from '@/components/tahi/shell-icons'
 import { TimerChip } from '@/components/tahi/timer-chip'
 import { BriefingTrigger } from '@/components/tahi/briefing-trigger'
 import { CurrencySwitcher } from '@/components/tahi/currency-switcher'
+import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { useBottomSheet } from '@/components/tahi/use-bottom-sheet'
 import { initialsOf } from '@/components/tahi/sidebar-user-card'
 import { usePrivateMode } from '@/components/tahi/private-mode-context'
@@ -67,6 +68,10 @@ export function TopBarMore({ showAsAdmin }: TopBarMoreProps) {
   const { privateMode, togglePrivateMode } = usePrivateMode()
   const { isSuperAdmin } = usePermissions()
   const { showToast } = useToast()
+  // A client audience is pinned to their own billing currency, so the sheet
+  // drops the row entirely rather than rendering a switcher that returns null
+  // under a Preferences heading.
+  const { isPinned: currencyPinned } = useDisplayCurrency()
 
   const [open, setOpen] = useState(false)
   const [imgError, setImgError] = useState(false)
@@ -166,7 +171,7 @@ export function TopBarMore({ showAsAdmin }: TopBarMoreProps) {
       ? <img src={imageUrl} alt="" onError={() => setImgError(true)} />
       : <>{initialsOf(fullName)}</>
 
-  const sections = buildMoreSections({ showAsAdmin, isSuperAdmin })
+  const sections = buildMoreSections({ showAsAdmin, isSuperAdmin, currencyPinned })
 
   function renderItem(id: MoreItemId): ReactNode {
     switch (id) {
