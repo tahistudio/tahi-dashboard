@@ -37,6 +37,27 @@ Two things had to be settled before the apply:
 
 FOR LIAM: Dante Media INV-2025000019 and INV-2025000021 are written off in Xero but ManyRequests shows them paid through the payment link on 18 Sep and 6 Oct 2025. The D1 rows keep the Xero status; if the payments are real, mark those two paid in Xero and re-sync, or say so and the dashboard rows can be flipped by hand.
 
+## APPLIED (7 Sep 2026, 09:05 to 09:35 NZST)
+
+The import ran on production from the MCP snapshot (R2 key imports/manyrequests/snapshot-2026-09-07T2015Z-inv13.json, the seven ledger-twin invoices left out), in stages, each verified before the next:
+
+1. team and organisations: Nathan Day inserted as a task handler with no Clerk link and no email; Liam and Staci stamped with their ManyRequests ids; 4 organisations inserted (Blank Space Inc, Equip2, ISG, the kreative duo), 15 stamped (name and every D1-native column untouched), Greyhive re-opened to active with its 20 hour balance, Dante Media active with 10 hours; SA Design's empty shell refused as intended.
+2. contacts, brands, services, subscriptions: 42 contacts inserted and 2 corrected (Andrew Stout's dead test address replaced by the real one), 44 stamped in all, 19 primaries, zero linked to any Clerk user; 3 brands; 18 services (all hidden from the catalogue); 10 subscriptions.
+3. requests, messages, invoices (one full run, 11 seconds): 321 requests inserted and 8 hand-typed Stride rows adopted, so all 329 ManyRequests requests are in (285 delivered, 29 cancelled per the closedAs ruling, 5 in progress, 5 submitted, 4 in client review, 1 on hold); 577 comments as messages (4 empty bodies and 1 by an unresolvable author "Daniel Nicholls" skipped); 13 invoices with 14 line items. Request 347 carries its brief, 3.9 KB of intake answers, its submitter, its assignee and its 8 comments.
+4. A repeat dry run afterwards reports every entity unchanged, so the import is idempotent.
+5. Cleanup: hard-deleted Beta Labs, Gamma Design, Lifecycle Test Co, Pp and the empty "Tahi Studio" scratch org (67 child rows). Wiped 22 seed and self-labelled test requests (including the two ZZ spine-test rows on Giant Group, the Physitrack "test" and St Stephen's "dsfsd"), 20 messages, 14 time entries, 2 tasks, 1 scheduled call. The two orphaned "Stride" rows were archived hand-typed copies of ManyRequests 339 and 340, so they went too.
+
+Mail probe: notifications and suppressions identical before and after every run; zero email_suppressions rows created during the window; the one notification created in the window is unrelated to the import (see the run log). Backup before the apply: .claude/backups/tahi-db-20260906T2036Z.sql.
+
+After: 58 organisations (19 archived), 333 requests (329 from ManyRequests, 3 hand-typed Stride rows that never had a twin, 2 Tahi Test Client rows, 1 archived smoke), 78 contacts, orphans 0.
+
+Refused by the cleanup, on purpose, for Liam:
+- Acme Corp and the "Tahi Studio" scratch org 4150d15f each hold a case_study_submissions row, a protected table. Both stay archived; delete the submission first if you want them gone.
+- The three "Evan Kwan" Stripe-import shells hold Physitrack's Stripe customer id (cus_Sm4dmnkwzZp2Zn). Merge them into Physitrack (b92b9f2f) by moving that Stripe id onto the real row, then delete; they stay archived until then.
+- The rest of the uncertain list from the reconciliation (Charles Bilash duplicate, Christian Burton, Mike Kentz and the other Stripe-import shells with real invoices) is unchanged: merge, never delete.
+
+Follow-ups filed: the request and invoice planners resolve a source organisation name only when the organisations list is loaded, so any entity-subset run must include "organisations" (harmless, it is idempotent) until needsOrgList is widened; the seven twin invoices are recorded above; the imported invoices have no number yet, the backfill fills them from their ManyRequests id when Liam applies it.
+
 ## What the dry run must show before anyone trusts a count
 
 1. samples.requests[0].values.description is non-empty and formResponses._manyrequests.fields carries the intake answers; otherwise the detail reads are not landing and a named warning says which request and what shape came back.
