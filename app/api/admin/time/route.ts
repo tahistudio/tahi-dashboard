@@ -5,6 +5,12 @@ import { schema } from '@/db/d1'
 import { eq, desc, and, gte, lte, sql } from 'drizzle-orm'
 import { scopedOrgIds } from '@/lib/access-scope'
 import { requireAccessToOrg } from '@/lib/require-access'
+import {
+  createTimeEntry,
+  timeEntryFailureResponse,
+  validateTimeEntryDraft,
+  type TimeEntryDraft,
+} from '@/lib/time-entries'
 import { orgColumnInScope } from '../_scoping/org-scope'
 
 // ── GET /api/admin/time ──────────────────────────────────────────────────────
@@ -86,6 +92,10 @@ export async function GET(req: NextRequest) {
       teamMemberId: schema.timeEntries.teamMemberId,
       teamMemberName: schema.teamMembers.name,
       hours: schema.timeEntries.hours,
+      // The rate the entry was LOGGED at, not the client's current default.
+      // Null is a real answer ("no rate"), which the /time Rate column shows
+      // as such rather than as a zero somebody could mistake for free work.
+      hourlyRate: schema.timeEntries.hourlyRate,
       billable: schema.timeEntries.billable,
       notes: schema.timeEntries.notes,
       date: schema.timeEntries.date,
@@ -123,14 +133,26 @@ export async function GET(req: NextRequest) {
 
 // ── POST /api/admin/time ─────────────────────────────────────────────────────
 // Creates a new time entry.
-// Body: { orgId, requestId?, teamMemberId, hours, notes?, billable?, date }
+// Body: { orgId, requestId?, teamMemberId, hours, notes?, billable?, date,
+//         hourlyRate? }
+//
+// Deliberately no taskId here. This route gates on the orgId the caller sends,
+// so accepting a task id would let a body pair its own org with another
+// client's task. Task time goes through POST /api/admin/time-entries, which
+// derives the org from the task itself.
+//
+// hourlyRate used to be read by nobody here, so the "Rate ($/hr)" field on the
+// /time Log time slide-over posted a number that never reached a column. The
+// write now goes through lib/time-entries.ts, the same module POST
+// /api/admin/time-entries uses, so a rate typed on either surface is stored,
+// and an omitted one falls back to the client's default_hourly_rate.
 export async function POST(req: NextRequest) {
   const { orgId: authOrgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(authOrgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const body = await req.json() as {
+  const body = await req.json().catch(() => null) as {
     orgId?: string
     requestId?: string
     teamMemberId?: string
@@ -138,23 +160,27 @@ export async function POST(req: NextRequest) {
     notes?: string
     billable?: boolean
     date?: string
+    hourlyRate?: number | null
+  } | null
+  if (!body) return NextResponse.json({ error: 'Body required' }, { status: 400 })
+
+  const draft: TimeEntryDraft = {
+    orgId: body.orgId,
+    teamMemberId: body.teamMemberId,
+    requestId: body.requestId ?? null,
+    hours: body.hours,
+    date: body.date,
+    notes: body.notes ?? null,
+    billable: body.billable,
+    hourlyRate: body.hourlyRate,
+    source: 'manual',
   }
 
-  if (!body.orgId) {
-    return NextResponse.json({ error: 'orgId is required' }, { status: 400 })
-  }
-  if (!body.teamMemberId) {
-    return NextResponse.json({ error: 'teamMemberId is required' }, { status: 400 })
-  }
-  if (typeof body.hours !== 'number' || body.hours <= 0) {
-    return NextResponse.json({ error: 'hours must be a positive number' }, { status: 400 })
-  }
-  if (!body.date) {
-    return NextResponse.json({ error: 'date is required' }, { status: 400 })
-  }
-
-  const now = new Date().toISOString()
-  const id = crypto.randomUUID()
+  // Field checks run before the database is touched: a body with no orgId has
+  // nothing for the access gate to gate on, and would otherwise come back
+  // "Not found" rather than naming the field that is missing.
+  const invalid = validateTimeEntryDraft(draft)
+  if (invalid) return timeEntryFailureResponse(invalid)
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -162,18 +188,8 @@ export async function POST(req: NextRequest) {
   const denied = await requireAccessToOrg(drizzle, userId, body.orgId)
   if (denied) return denied
 
-  await drizzle.insert(schema.timeEntries).values({
-    id,
-    orgId: body.orgId,
-    requestId: body.requestId ?? null,
-    teamMemberId: body.teamMemberId,
-    hours: body.hours,
-    billable: body.billable !== false,
-    notes: body.notes ?? null,
-    date: body.date,
-    createdAt: now,
-    updatedAt: now,
-  })
+  const result = await createTimeEntry(drizzle, draft)
+  if (!result.ok) return timeEntryFailureResponse(result.failure)
 
-  return NextResponse.json({ id })
+  return NextResponse.json({ id: result.entry.id })
 }

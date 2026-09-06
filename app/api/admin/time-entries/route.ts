@@ -31,6 +31,12 @@ import { eq, desc } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { resolveTimerOrgId } from '@/lib/timer-helpers'
 import { INTERNAL_ORG_ID } from '@/lib/internal-org'
+import {
+  createTimeEntry,
+  deriveHoursAndDate,
+  isTimeEntryFailure,
+  timeEntryFailureResponse,
+} from '@/lib/time-entries'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -131,23 +137,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Exactly one of requestId or taskId required' }, { status: 400 })
   }
 
-  // Derive hours + date from whatever combination was provided.
-  let hours = body.hours
+  // Derive hours + date from whatever combination was provided. Shared with
+  // POST /api/admin/time so the two manual-entry URLs cannot drift again.
   const startedAt = body.startedAt ?? null
   const endedAt = body.endedAt ?? null
-
-  if (hours === undefined && startedAt && endedAt) {
-    const ms = new Date(endedAt).getTime() - new Date(startedAt).getTime()
-    if (!Number.isFinite(ms) || ms <= 0) {
-      return NextResponse.json({ error: 'Invalid range : endedAt must be after startedAt' }, { status: 400 })
-    }
-    hours = Math.round((ms / 3600000) * 100) / 100
-  }
-  if (!hours || hours <= 0) {
-    return NextResponse.json({ error: 'hours (or a valid startedAt + endedAt range) required' }, { status: 400 })
-  }
-
-  const date = body.date ?? (startedAt ? startedAt.slice(0, 10) : new Date().toISOString().slice(0, 10))
+  const derived = deriveHoursAndDate({
+    hours: body.hours,
+    startedAt,
+    endedAt,
+    date: body.date,
+  })
+  if (isTimeEntryFailure(derived)) return timeEntryFailureResponse(derived)
+  const { hours, date } = derived
 
   // Look up orgId for the entry.
   const database = await db()
@@ -194,22 +195,24 @@ export async function POST(req: NextRequest) {
     if (denied) return denied
   }
 
-  const newId = crypto.randomUUID()
-  await drizzle.insert(schema.timeEntries).values({
-    id: newId,
+  // One writer for both manual-entry URLs (lib/time-entries.ts). It also
+  // resolves the rate: a rate on the body wins, else the client's
+  // default_hourly_rate, else null. Never 0.
+  const result = await createTimeEntry(drizzle, {
     orgId: entryOrgId,
+    teamMemberId: userId,
     requestId: targetRequestId,
     taskId: targetTaskId,
-    teamMemberId: userId,
     hours,
-    hourlyRate: body.hourlyRate ?? null,
-    billable: body.billable !== false, // default true
-    notes: body.notes ?? null,
     date,
-    startedAt: startedAt,
-    endedAt: endedAt,
+    notes: body.notes ?? null,
+    billable: body.billable,
+    hourlyRate: body.hourlyRate,
+    startedAt,
+    endedAt,
     source: 'manual',
   })
+  if (!result.ok) return timeEntryFailureResponse(result.failure)
 
-  return NextResponse.json({ id: newId, hours, date }, { status: 201 })
+  return NextResponse.json({ id: result.entry.id, hours, date }, { status: 201 })
 }

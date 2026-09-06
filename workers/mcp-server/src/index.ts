@@ -667,6 +667,7 @@ const TOOLS: ToolDef[] = [
     requestId: prop('string', 'Associated request ID'),
     notes: prop('string', 'Description of work done'),
     billable: prop('boolean', 'Whether the time is billable (default true)'),
+    hourlyRate: prop('number', 'Rate per hour to store on the entry. Omit to use the client\'s default hourly rate, which is stored on the row so a later change to that default cannot re-price hours already logged.'),
   }, ['orgId', 'teamMemberId', 'hours', 'date']),
 
   // ── Read: Team ────────────────────────────────────────────────────────
