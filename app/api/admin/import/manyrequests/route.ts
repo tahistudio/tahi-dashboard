@@ -89,7 +89,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { getCloudflareContext } from '@opennextjs/cloudflare'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { readSnapshotFromStorage, type SnapshotBucket } from '@/lib/import/manyrequests/snapshot-storage'
 import { requireFeature } from '@/lib/require-feature'
 import { resolvePermissions } from '@/lib/permissions'
 import { db } from '@/lib/db'
@@ -120,6 +122,8 @@ interface ImportBody {
   requestDetailLimit?: unknown
   requestDetailOffset?: unknown
   snapshot?: unknown
+  /** An R2 key under imports/manyrequests/ holding the same payload as `snapshot`. */
+  snapshotKey?: unknown
 }
 
 /**
@@ -211,7 +215,25 @@ export async function POST(req: NextRequest) {
   // The source: a snapshot in the body, or the live API behind the token. A
   // snapshot is checked BEFORE anything else so a malformed payload is one 400
   // naming the key path rather than nine entities of silent refusals.
-  const source = resolveSource(body.snapshot)
+  // A snapshot may also arrive by R2 key (lib/import/manyrequests/snapshot-storage.ts):
+  // the object is read server-side and then goes through the very same
+  // validator as a body snapshot. One source per call, never both.
+  if (body.snapshot !== undefined && body.snapshotKey !== undefined) {
+    return NextResponse.json({ error: 'Send either snapshot or snapshotKey, not both.' }, { status: 400 })
+  }
+  let snapshotValue: unknown = body.snapshot
+  let snapshotKey: string | null = null
+  if (body.snapshotKey !== undefined) {
+    const { env } = await getCloudflareContext({ async: true })
+    const bucket = (env as unknown as { STORAGE?: SnapshotBucket }).STORAGE ?? null
+    const read = await readSnapshotFromStorage(bucket, body.snapshotKey)
+    if (!read.ok) {
+      return NextResponse.json({ error: read.error }, { status: read.status })
+    }
+    snapshotValue = read.value
+    snapshotKey = String(body.snapshotKey)
+  }
+  const source = resolveSource(snapshotValue)
   if (!source.ok) {
     return NextResponse.json({ error: source.error }, { status: 400 })
   }
@@ -247,11 +269,11 @@ export async function POST(req: NextRequest) {
 
     // The audit row is written for an APPLY only: a dry run changes nothing and
     // an audit_log entry per preview would bury the one that matters.
-    if (!dryRun) await writeImportAudit(database, auth.userId, result, source)
+    if (!dryRun) await writeImportAudit(database, auth.userId, result, source, snapshotKey)
 
     return NextResponse.json(
       source.source === 'snapshot'
-        ? { ...result, source: 'snapshot', snapshotCounts: source.snapshotCounts }
+        ? { ...result, source: 'snapshot', snapshotCounts: source.snapshotCounts, snapshotKey }
         : { ...result, source: 'live' },
     )
   } catch (error) {
@@ -267,7 +289,7 @@ export async function POST(req: NextRequest) {
         userType: 'team_member',
         entityType: 'import',
         entityId: 'manyrequests',
-        metadata: { failed: true, error: message, entities, source: source.source },
+        metadata: { failed: true, error: message, entities, source: source.source, snapshotKey },
       })
     }
     return NextResponse.json({ error: message }, { status: 500 })
@@ -279,6 +301,7 @@ async function writeImportAudit(
   userId: string | null,
   result: Awaited<ReturnType<typeof runImport>>,
   source: Extract<ImportSourceChoice, { ok: true }>,
+  snapshotKey: string | null,
 ): Promise<void> {
   await logAudit(database, {
     action: 'manyrequests_import',
@@ -289,6 +312,7 @@ async function writeImportAudit(
     metadata: {
       source: source.source,
       snapshotCounts: source.snapshotCounts,
+      snapshotKey,
       entities: result.entities,
       mailProbeBefore: result.mailProbeBefore,
       mailProbeAfter: result.mailProbeAfter,
@@ -331,6 +355,6 @@ export async function GET(req: NextRequest) {
     },
     tokenConfigured: manyRequestsTokenFromEnv() !== null,
     snapshotKeys: SNAPSHOT_KEYS,
-    note: 'POST with {"dryRun":true} first. Nothing is written until dryRun is explicitly false. The source is one of two: set MANYREQUESTS_API_TOKEN on THIS worker (wrangler secret put; it is configured on the MCP worker, not here) for a live read, or POST a pre-fetched export as body.snapshot under the keys in snapshotKeys, in which case no token is needed and the live API is never touched.',
+    note: 'POST with {"dryRun":true} first. Nothing is written until dryRun is explicitly false. The source is one of two: set MANYREQUESTS_API_TOKEN on THIS worker (wrangler secret put; it is configured on the MCP worker, not here) for a live read, or POST a pre-fetched export as body.snapshot under the keys in snapshotKeys, in which case no token is needed and the live API is never touched. A large export can be parked in the studio bucket instead (wrangler r2 object put tahi-storage/imports/manyrequests/<name>.json --file snapshot.json --remote) and named as body.snapshotKey; the route reads it server-side and validates it the same way.',
   })
 }
