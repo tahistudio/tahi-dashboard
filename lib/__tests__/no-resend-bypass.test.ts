@@ -58,6 +58,8 @@ const THE_ONE_DOOR = join('lib', 'email-delivery.ts')
  */
 const TEST_FILES = new Set([
   join('lib', '__tests__', 'no-resend-bypass.test.ts'),
+  // The importer's own static no-mail guard, which lists the Resend host among the strings it bans.
+  join('lib', 'import', 'manyrequests', '__tests__', 'no-mail-imports.test.ts'),
   join('lib', '__tests__', 'email-delivery.test.ts'),
   join('lib', '__tests__', 'email.test.ts'),
 ])

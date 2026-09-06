@@ -1625,6 +1625,30 @@ const TOOLS: ToolDef[] = [
     name: prop('string', 'Migration name like "0012", "0013", or "all"'),
   }, ['name']),
 
+  // ── ManyRequests migration (import + cleanup) ───────────────────────
+  tool(
+    'import_manyrequests',
+    'ANSWERS 403 FORBIDDEN UNDER THIS SERVER\'S SERVICE TOKEN, ALWAYS, INCLUDING THE DRY RUN. The route requires super_admin and the MCP service identity resolves to admin, by design: an import that rewrites clients, requests and the ledger must be driven by a human. If you call this and get 403, that is the design, not a misconfiguration; do not retry and do not report a permissions bug. Tell the user to run it from the dashboard as a super admin. Documented here so the contract is discoverable: POST /api/admin/import/manyrequests imports the OLD ManyRequests dashboard into this one, DRY RUN BY DEFAULT (leave dryRun unset or true for the full plan per entity: toInsert, toUpdate, toDelete, unchanged, skipped with reasons, the first 20 sample rows, and every field-map entry with no D1 column). Every entity is idempotent on manyrequests_id, so a re-run is an update rather than a duplicate; migration 0093 must be applied first or there is no key. It is ONE WAY: title, status, priority, assignee, due date, description and contact email are overwritten from ManyRequests on every apply, so once the studio starts working requests in this dashboard the import must only be run with entities limited to messages. The import writes D1 directly and never calls an API route, so it cannot send an email, mint a Clerk invite or raise a notification: imported contacts get no clerkUserId and imported orgs get no clerkOrgId. Both modes return the suppression-log and notification counts read before and after the run; if mailSilent is false, stop and report it.',
+    {
+      dryRun: prop('boolean', 'Plan only, write nothing. DEFAULT TRUE. Pass false only after the user has seen the dry run and said yes.'),
+      entities: prop('array', 'Subset of entities to run, in dependency order: team, organisations, contacts, brands, services, subscriptions, requests, messages, invoices. Omit for all of them. team must precede messages or comment authors mis-attribute.', { items: { type: 'string' } }),
+      since: prop('string', 'ISO timestamp. Source rows created before it are skipped with a reason.'),
+      closedAs: prop('string', "What a ManyRequests 'Closed' request becomes: cancelled (default), delivered or archived. Closed is is_closed, NOT is_completed, and the roughly 34 rows that carry it read like finished or abandoned work, so this is a judgement call the user should make."),
+      requestDetailLimit: prop('number', 'Size of the per-request detail window (one upstream GET per request; there are 329). Walk them in windows of about 100 so each run finishes inside the edge request budget.'),
+      requestDetailOffset: prop('number', 'Where that window starts. Run offset 0, then 100, then 200, then 300. Every window is idempotent, so an overlapping or repeated window is an update rather than a duplicate.'),
+    },
+  ),
+  tool(
+    'cleanup_dummy_data',
+    'ANSWERS 403 FORBIDDEN UNDER THIS SERVER\'S SERVICE TOKEN, ALWAYS, INCLUDING THE DRY RUN. The route requires super_admin and the MCP service identity resolves to admin, by design: the destructive door needs a human behind it. If you call this and get 403, that is the design, not a misconfiguration; do not retry and do not report a permissions bug. Tell the user to run it from the dashboard as a super admin. Documented here so the contract is discoverable: POST /api/admin/import/cleanup archives or removes the seed and duplicate organisations left over from before the ManyRequests import, DRY RUN BY DEFAULT (leave dryRun unset or true to see exactly what would change, including a count for every table still holding rows for the organisation). Hard delete is REFUSED unless the organisation is on the ten-entry dummy allowlist (matched on both id prefix and exact name) AND holds no Xero contact id, no Stripe customer id, no ManyRequests id, no invoice, and no row in any table the policy protects (finance, pipeline, delivery artefacts, discovery_calls); every refusal comes back with its reason. Archive is reversible and is the right answer for anything uncertain. wipeDemo removes only rows with NO ManyRequests key. discovery_calls is never touched at all: the pre-call-digest cron mails real people off that table every ten minutes.',
+    {
+      dryRun: prop('boolean', 'Plan only, change nothing. DEFAULT TRUE.'),
+      archive: prop('array', 'Organisation ids to set to status archived. Reversible.', { items: { type: 'string' } }),
+      hardDelete: prop('array', 'Organisation ids to remove outright. Refused unless on the dummy allowlist with zero Xero, Stripe, ManyRequests and invoice links.', { items: { type: 'string' } }),
+      wipeDemo: prop('boolean', 'Also remove the seed requests, their messages, time entries, participants and reads, plus the tasks and scheduled calls on dummy organisations. Default false.'),
+    },
+  ),
+
   // ── Expense commitments (fixed-cost forecasting) ────────────────────
   tool('list_commitments', 'List all expense commitments (user-maintained fixed costs with cadence)'),
   tool('add_commitment', 'Add an expense commitment. Cadence: monthly | quarterly | annual | one_off. nextDueDate anchors non-monthly cadences.', {
@@ -2774,6 +2798,29 @@ async function executeTool(
       return json(await apiGet('/api/admin/db/migrate', token))
     case 'run_migration':
       return json(await apiWrite('/api/admin/db/migrate', token, 'POST', { name: s('name') }))
+
+    // ── ManyRequests migration ────────────────────────────────────────
+    // BOTH ROUTES ANSWER 403 UNDER THIS SERVER'S TOKEN and always will:
+    // lib/permissions.ts resolves SERVICE_USER_ID to 'admin' and never to
+    // 'super_admin', and both routes gate on isSuperAdmin. That is deliberate
+    // (an import that rewrites the ledger, and a hard delete, both want a human
+    // identity), so the tools are kept for discoverability with the 403 stated
+    // up front in each description rather than dropped or worked around here.
+    //
+    // dryRun defaults TRUE on both. `args.dryRun !== false` rather than
+    // `args.dryRun ?? true` so a caller that sends a string, a number or null
+    // still gets the safe answer.
+    case 'import_manyrequests':
+      return json(await apiWrite('/api/admin/import/manyrequests', token, 'POST', {
+        ...(args as Record<string, unknown>),
+        dryRun: args.dryRun !== false,
+      }))
+    case 'cleanup_dummy_data':
+      return json(await apiWrite('/api/admin/import/cleanup', token, 'POST', {
+        ...(args as Record<string, unknown>),
+        dryRun: args.dryRun !== false,
+        wipeDemo: args.wipeDemo === true,
+      }))
 
     // ── Expense commitments ────────────────────────────────────────
     case 'list_commitments':

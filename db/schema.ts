@@ -88,6 +88,17 @@ export const organisations = sqliteTable('organisations', {
   tracksMode: text('tracks_mode').default('auto'),
   customSmallTracks: integer('custom_small_tracks').default(0),
   customLargeTracks: integer('custom_large_tracks').default(0),
+  // The ManyRequests organization id this row was imported from (migration
+  // 0093). NULL on every row the importer has not touched, which is the whole
+  // table until it runs. It is the import's only idempotency key: without it a
+  // second run duplicates every org. See lib/import/manyrequests.
+  manyrequestsId: text('manyrequests_id'),
+  // The ManyRequests retainer hour bank (migration 0093), which has no other
+  // home in D1: tracks / customSmallTracks / customLargeTracks are a different
+  // model. Negative remaining means overdrawn, which several clients are.
+  // Written by the importer, read by nothing yet.
+  mrHoursRemaining: real('mr_hours_remaining'),
+  mrHoursPurchased: real('mr_hours_purchased'),
   ...timestamps,
 }, (table) => [
   index('idx_orgs_status').on(table.status),
@@ -96,6 +107,9 @@ export const organisations = sqliteTable('organisations', {
   // Non-null clerk_org_id must be unique (one D1 org per Clerk org). SQLite
   // treats NULLs as distinct, so unprovisioned orgs all sit at NULL happily.
   uniqueIndex('idx_orgs_clerk_org').on(table.clerkOrgId),
+  // Same NULLs-are-distinct trick: one D1 org per ManyRequests org, and the
+  // 59 rows that predate the import all stay NULL.
+  uniqueIndex('idx_orgs_manyrequests').on(table.manyrequestsId),
 ])
 
 // ============================================================
@@ -124,12 +138,18 @@ export const contacts = sqliteTable('contacts', {
   portalRole: text('portal_role').notNull().default('member'),
   phone: text('phone'),
   lastLoginAt: text('last_login_at'),
+  // The ManyRequests client id this row was imported from (migration 0093).
+  // The import NEVER writes clerkUserId: that is the one field that makes a
+  // notification resolve to a human, so leaving it NULL is what makes an
+  // imported contact provably invisible to the person it names.
+  manyrequestsId: text('manyrequests_id'),
   ...timestamps,
 }, (table) => [
   index('idx_contacts_org').on(table.orgId),
   index('idx_contacts_clerk').on(table.clerkUserId),
   index('idx_contacts_person').on(table.personId),
   index('idx_contacts_email').on(table.email),
+  uniqueIndex('idx_contacts_manyrequests').on(table.manyrequestsId),
 ])
 
 // ============================================================
@@ -203,10 +223,16 @@ export const teamMembers = sqliteTable('team_members', {
   department: text('department'),
   // S20: JSON array of role strings, e.g. ["CEO","Developer"]
   roles: text('roles').default('[]'),
+  // The ManyRequests team member id (migration 0093). Liam is 1, Staci 19,
+  // Nathan 83. Set so a comment author name resolved by the importer can be
+  // checked back against the source roster. clerkUserId is never written by
+  // the import; a team member links their own Clerk id on first sign-in.
+  manyrequestsId: text('manyrequests_id'),
   ...timestamps,
 }, (table) => [
   index('idx_team_members_clerk').on(table.clerkUserId),
   index('idx_team_members_person').on(table.personId),
+  uniqueIndex('idx_team_members_manyrequests').on(table.manyrequestsId),
 ])
 
 // ============================================================
@@ -391,11 +417,28 @@ export const subscriptions = sqliteTable('subscriptions', {
   discountPercent: real('discount_percent'),
   // ISO country code for GST logic (e.g. "NZ" for 15% GST)
   billingCountry: text('billing_country'),
+  // ── ManyRequests import (migration 0093) ──────────────────────────────
+  // The composite key (org id, service name, created_at): ManyRequests
+  // exposes no subscription id on the organization-services shape.
+  manyrequestsId: text('manyrequests_id'),
+  // The source service label, kept verbatim ("Glasswall Custom Retainer",
+  // "Elevate custom hourly"), because planType is a five-value vocabulary
+  // that cannot hold it. Keeping both makes the mapper's guess auditable.
+  mrServiceName: text('mr_service_name'),
+  // The retainer allowance per billing period. D1 had no hours concept on a
+  // subscription at all before the import.
+  hoursPerPeriod: real('hours_per_period'),
+  creditsPerPeriod: real('credits_per_period'),
+  // Which contact the plan is billed to. Deliberately NOT a foreign key:
+  // Glasswall's live retainer is billed to a soft-deleted ManyRequests
+  // client, and a FK would refuse the row that records that.
+  billedContactId: text('billed_contact_id'),
   ...timestamps,
 }, (table) => [
   index('idx_subs_org').on(table.orgId),
   index('idx_subs_status').on(table.status),
   index('idx_subs_stripe').on(table.stripeSubscriptionId),
+  uniqueIndex('idx_subscriptions_manyrequests').on(table.manyrequestsId),
 ])
 
 // ============================================================
@@ -476,9 +519,14 @@ export const requests = sqliteTable('requests', {
   // Delivery spine (#148): the schedule gantt row this request delivers.
   // Null = not mapped to a plan phase. One row -> many requests.
   scheduleRowId: text('schedule_row_id').references(() => scheduleRows.id, { onDelete: 'set null' }),
+  // The ManyRequests request id (migration 0093). Also written onto the 11
+  // hand-typed Stride rows that already duplicate ManyRequests 335 to 346, so
+  // the import ADOPTS them instead of inserting a second copy.
+  manyrequestsId: text('manyrequests_id'),
   ...timestamps,
 }, (table) => [
   index('idx_requests_org').on(table.orgId),
+  uniqueIndex('idx_requests_manyrequests').on(table.manyrequestsId),
   index('idx_requests_status').on(table.status),
   index('idx_requests_assignee').on(table.assigneeId),
   index('idx_requests_track').on(table.trackId),
@@ -701,9 +749,14 @@ export const messages = sqliteTable('messages', {
   isInternal: integer('is_internal', { mode: 'boolean' }).default(false),
   editedAt: text('edited_at'),
   deletedAt: text('deleted_at'),
+  // The ManyRequests comment key (migration 0093). ManyRequests exposes NO id
+  // on a comment (author name, content, is_internal, created_at only), so this
+  // is a derived composite: mr:comment:<requestId>:<createdAt>:<authorSlug>.
+  manyrequestsId: text('manyrequests_id'),
   ...timestamps,
 }, (table) => [
   index('idx_messages_request').on(table.requestId),
+  uniqueIndex('idx_messages_manyrequests').on(table.manyrequestsId),
   index('idx_messages_org').on(table.orgId),
   index('idx_messages_conversation').on(table.conversationId),
   // Every inbox read is "the newest visible message per request, newest
@@ -789,7 +842,10 @@ export const invoices = sqliteTable('invoices', {
   // instead. NULL means "Xero has not issued one yet", which is the normal
   // state of a draft and is never an error. See lib/xero-online-invoice.ts.
   xeroOnlineInvoiceUrl: text('xero_online_invoice_url'),
-  source: text('source').default('manual'), // 'manual' | 'xero' | 'stripe'
+  // 'manual' | 'xero' | 'stripe' | 'manyrequests'. The fourth value marks a
+  // HISTORICAL ledger row lifted from the old dashboard: it carries no Stripe
+  // or Xero object, is never pushed to a rail, and the reconcilers skip it.
+  source: text('source').default('manual'),
   // draft | sent | viewed | paid | overdue | written_off
   status: text('status').notNull().default('draft'),
   amountUsd: real('amount_usd').notNull(),
@@ -810,12 +866,18 @@ export const invoices = sqliteTable('invoices', {
   airwallexTxnId: text('airwallex_txn_id'),
   reconciliationStatus: text('reconciliation_status'),
   lastReconciledAt: text('last_reconciled_at'),
+  // The ManyRequests invoice NUMBER (migration 0093), e.g. "INV-2025000024":
+  // the number is the identifier on that API, there is no separate id. Never
+  // matched on organisation NAME, because three D1 organisations are literally
+  // named after ManyRequests invoice numbers from an earlier bad import.
+  manyrequestsId: text('manyrequests_id'),
   ...timestamps,
 }, (table) => [
   index('idx_invoices_org').on(table.orgId),
   index('idx_invoices_status').on(table.status),
   index('idx_invoices_recon_status').on(table.reconciliationStatus),
   index('idx_invoices_stripe').on(table.stripeInvoiceId),
+  uniqueIndex('idx_invoices_manyrequests').on(table.manyrequestsId),
 ])
 
 // ============================================================
@@ -829,8 +891,15 @@ export const invoiceItems = sqliteTable('invoice_items', {
   quantity: real('quantity').default(1),
   unitPriceUsd: real('unit_price_usd').notNull(),
   totalUsd: real('total_usd').notNull(),
+  // Positional ManyRequests key, "<invoiceNumber>#<lineIndex>" (migration
+  // 0093). NOT unique: ManyRequests exposes no line-item id, so a source
+  // invoice whose lines are reordered upstream would collide. Lines are
+  // reconciled against their parent instead (each position upserted, an
+  // imported line that vanished upstream deleted).
+  manyrequestsId: text('manyrequests_id'),
 }, (table) => [
   index('idx_invoice_items_invoice').on(table.invoiceId),
+  index('idx_invoice_items_manyrequests').on(table.manyrequestsId),
 ])
 
 // ============================================================
@@ -1874,8 +1943,13 @@ export const services = sqliteTable('services', {
   showInCatalog: integer('show_in_catalog').notNull().default(1),
   // service | topup | addon
   category: text('category'),
+  // The ManyRequests service id (migration 0093). The table is empty today, so
+  // the import seeds all 18 source services and a request can name one.
+  manyrequestsId: text('manyrequests_id'),
   ...timestamps,
-})
+}, (table) => [
+  uniqueIndex('idx_services_manyrequests').on(table.manyrequestsId),
+])
 
 // ============================================================
 // CRM: PIPELINE STAGES
@@ -2199,9 +2273,14 @@ export const brands = sqliteTable('brands', {
   website: text('website'),
   primaryColour: text('primary_colour'),
   notes: text('notes'),
+  // The ManyRequests brand id (migration 0093). This table, not the legacy
+  // organisations.brands JSON column, is the one a requests.brandId can point
+  // at, so the import writes here and leaves that column alone.
+  manyrequestsId: text('manyrequests_id'),
   ...timestamps,
 }, (table) => [
   index('idx_brands_org').on(table.orgId),
+  uniqueIndex('idx_brands_manyrequests').on(table.manyrequestsId),
 ])
 
 // ============================================================
