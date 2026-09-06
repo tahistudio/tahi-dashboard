@@ -145,7 +145,7 @@ Every surface that is not LIVE, with the behaviours that are missing. MVP blocki
 ### MVP blocking (14 surfaces, 26 days)
 
 **ManyRequests reconciliation, import and cutover** (`manyrequests-cutover`, PARTIAL, 4d). Blocked on one operator step, then a dry run, an apply and a verification pass.
-- The reconciliation inventory of both sides has not run (TASKS.md MC.1)
+- The read-only reconciliation ran on 7 Sep (TASKS.md MC.1 done; report docs/superpowers/audits/2026-09-07-manyrequests-import-report.md)
 - The idempotent importer is written but has never executed: it reads MANYREQUESTS_API_TOKEN from a dashboard worker secret that does not exist, and only Liam can set it (TASKS.md MC.3)
 - Dummy org archiving and e2e fixture cleanup are unstarted
 
