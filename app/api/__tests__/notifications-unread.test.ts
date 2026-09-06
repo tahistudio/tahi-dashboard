@@ -8,6 +8,9 @@
  *     scoped to the caller's own notifications,
  *   - the page can walk history: limit / cursor / since / before / kind /
  *     unread, all still scoped to the caller,
+ *   - the rail's counts are COUNTED too (?facets=true): per view and per kind,
+ *     around the window boundary, and never narrowed by the kind or unread
+ *     filter the reader is currently holding,
  *   - only a service-token caller may read on behalf of another user.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -23,9 +26,14 @@ const state: {
   updateWheres: Op[]
   limits: number[]
   orderBys: unknown[][]
+  /** One entry per grouped facet read, in call order: recent then past. */
+  facetPages: Row[][]
+  groupByWheres: Op[]
+  groupByCols: unknown[][]
 } = {
   page: [], countRows: [], countWheres: [], selectWheres: [],
   updateWheres: [], limits: [], orderBys: [],
+  facetPages: [], groupByWheres: [], groupByCols: [],
 }
 
 vi.mock('@/lib/server-auth', () => ({ getRequestAuth: vi.fn() }))
@@ -62,7 +70,16 @@ vi.mock('@/lib/db', () => ({
         where: (w: Op) => {
           if (projection) {
             state.countWheres.push(w)
-            return Promise.resolve(state.countRows)
+            // A projected read is either the unread tally (awaited straight
+            // away) or a facet read (which chains .groupBy). One object
+            // serves both.
+            return Object.assign(Promise.resolve(state.countRows), {
+              groupBy: (...cols: unknown[]) => {
+                state.groupByWheres.push(w)
+                state.groupByCols.push(cols)
+                return Promise.resolve(state.facetPages.shift() ?? [])
+              },
+            })
           }
           state.selectWheres.push(w)
           return {
@@ -136,6 +153,9 @@ function reset() {
   state.updateWheres = []
   state.limits = []
   state.orderBys = []
+  state.facetPages = []
+  state.groupByWheres = []
+  state.groupByCols = []
 }
 
 describe('GET /api/notifications', () => {
@@ -262,6 +282,105 @@ describe('GET /api/notifications', () => {
     expect(res.status).toBe(200)
     expect(whereHasEq(state.selectWheres[0], 'notifications.userId', 'user_2')).toBe(true)
     expect(whereHasEq(state.countWheres[0], 'notifications.userId', 'user_2')).toBe(true)
+  })
+})
+
+describe('GET /api/notifications?facets=true', () => {
+  beforeEach(reset)
+
+  interface Facets {
+    views: { all: number; unread: number; past: number }
+    kinds: {
+      all: Record<string, number>
+      unread: Record<string, number>
+      past: Record<string, number>
+    }
+  }
+
+  it('is absent unless asked for, so the bell pays nothing for it', async () => {
+    const res = await GET(makeGet())
+    const json = await res.json() as { facets?: Facets }
+    expect(json.facets).toBeUndefined()
+    expect(state.groupByWheres).toHaveLength(0)
+  })
+
+  it('folds entity types into kinds, per view', async () => {
+    state.facetPages = [
+      // recent: at or after the boundary
+      [
+        { entityType: 'request', read: false, n: 3 },
+        { entityType: 'request', read: true, n: 5 },
+        { entityType: 'contract', read: false, n: 2 },
+      ],
+      // past: before it
+      [{ entityType: 'invoice', read: true, n: 4 }],
+    ]
+    const res = await GET(makeGet('?facets=true&since=2026-08-07T00:00:00.000Z'))
+    const json = await res.json() as { facets: Facets }
+
+    expect(json.facets.views).toEqual({ all: 10, unread: 5, past: 4 })
+    // 'contract' is a document, and unread rows are a subset of all rows.
+    expect(json.facets.kinds.all.request).toBe(8)
+    expect(json.facets.kinds.all.document).toBe(2)
+    expect(json.facets.kinds.unread.request).toBe(3)
+    expect(json.facets.kinds.unread.document).toBe(2)
+    expect(json.facets.kinds.past.invoice).toBe(4)
+    // A kind with nothing behind it is zero, never missing: the rail greys
+    // those rows out rather than dropping them.
+    expect(json.facets.kinds.all.invoice).toBe(0)
+  })
+
+  it('counts around the boundary: at or after it, then before it', async () => {
+    state.facetPages = [[], []]
+    await GET(makeGet('?facets=true&since=2026-08-07T00:00:00.000Z'))
+    expect(state.groupByWheres).toHaveLength(2)
+    expect(whereOp(state.groupByWheres[0], 'gte', 'notifications.createdAt')?.val)
+      .toBe('2026-08-07T00:00:00.000Z')
+    expect(whereOp(state.groupByWheres[1], 'lt', 'notifications.createdAt')?.val)
+      .toBe('2026-08-07T00:00:00.000Z')
+    // Grouped by entity type and read, which is what the fold needs.
+    expect(state.groupByCols[0]).toEqual(['notifications.entityType', 'notifications.read'])
+  })
+
+  it('takes the Past view\'s boundary from `before`, so one read serves every view', async () => {
+    state.facetPages = [[], [{ entityType: 'request', read: false, n: 2 }]]
+    const res = await GET(makeGet('?facets=true&before=2026-08-07T00:00:00.000Z'))
+    const json = await res.json() as { facets: Facets }
+    expect(whereOp(state.groupByWheres[0], 'gte', 'notifications.createdAt')?.val)
+      .toBe('2026-08-07T00:00:00.000Z')
+    expect(json.facets.views.past).toBe(2)
+  })
+
+  it('reads one side only when there is no window to be either side of', async () => {
+    state.facetPages = [[{ entityType: 'request', read: false, n: 1 }]]
+    const res = await GET(makeGet('?facets=true'))
+    const json = await res.json() as { facets: Facets }
+    expect(state.groupByWheres).toHaveLength(1)
+    expect(json.facets.views).toEqual({ all: 1, unread: 1, past: 0 })
+  })
+
+  it('is never narrowed by the kind or unread filter the reader is holding', async () => {
+    // Otherwise pressing one kind would zero every other one under them, and
+    // the rail would disable the filters they were about to reach for.
+    state.facetPages = [[], []]
+    await GET(makeGet('?facets=true&since=2026-08-07T00:00:00.000Z&kind=invoice&unread=true'))
+    const where = state.groupByWheres[0]
+    expect(whereOp(where, 'inArray', 'notifications.entityType')).toBeUndefined()
+    expect(whereHasEq(where, 'notifications.read', false)).toBe(false)
+    // The page itself still is.
+    expect(whereHasEq(state.selectWheres[0], 'notifications.read', false)).toBe(true)
+  })
+
+  it('scopes the counts to the caller, and to the named user for a service token', async () => {
+    state.facetPages = [[], []]
+    await GET(makeGet('?facets=true&since=2026-08-07T00:00:00.000Z'))
+    expect(whereHasEq(state.groupByWheres[0], 'notifications.userId', 'user_1')).toBe(true)
+
+    reset()
+    vi.mocked(getRequestAuth).mockResolvedValue(auth({ userId: 'api-service', sessionId: null }))
+    state.facetPages = [[], []]
+    await GET(makeGet('?facets=true&since=2026-08-07T00:00:00.000Z&userId=user_2'))
+    expect(whereHasEq(state.groupByWheres[0], 'notifications.userId', 'user_2')).toBe(true)
   })
 })
 

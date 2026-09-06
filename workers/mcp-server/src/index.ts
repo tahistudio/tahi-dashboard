@@ -1404,6 +1404,7 @@ const TOOLS: ToolDef[] = [
     before: prop('string', 'ISO instant: only rows before it'),
     kind: prop('string', 'Comma-separated kinds to filter by'),
     unread: prop('boolean', 'True for unread rows only'),
+    facets: prop('boolean', 'True to add per-view (all, unread, past) and per-kind row totals, counted over the window rather than derived from the page'),
   }),
 
   // ── Messaging ─────────────────────────────────────────────────────────
@@ -2516,6 +2517,7 @@ async function executeTool(
       }
       if (typeof args.limit === 'number') params.limit = String(args.limit)
       if (args.unread === true) params.unread = 'true'
+      if (args.facets === true) params.facets = 'true'
       return json(await apiGet('/api/notifications', token, params))
     }
 

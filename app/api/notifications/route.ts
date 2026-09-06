@@ -2,8 +2,14 @@ import { getRequestAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, or, count, lt, gte, inArray } from 'drizzle-orm'
-import { entityTypesForKinds } from '@/lib/notification-links'
+import { eq, desc, and, or, count, lt, gte, inArray, isNull, notInArray, type SQL } from 'drizzle-orm'
+import {
+  buildNotificationFacets,
+  entityTypesForKinds,
+  kindsCoverUnmappedEntities,
+  MAPPED_NOTIFICATION_ENTITY_TYPES,
+  type NotificationFacetRow,
+} from '@/lib/notification-links'
 // One definition of the service identity, shared with every other gate that
 // special-cases it (lib/access-scope, lib/permissions).
 import { SERVICE_USER_ID } from '@/lib/team-identity'
@@ -43,6 +49,29 @@ function parseIso(raw: string | null): string | null {
   return Number.isNaN(t) ? null : new Date(t).toISOString()
 }
 
+/**
+ * The row predicate for a `?kind=a,b` list.
+ *
+ * System is the taxonomy's catch-all: lib/notification-links folds a NULL or
+ * unrecognised entity type into it, and the facet counts do the same, so the
+ * filter has to reach those rows too. A bare `entity_type IN (...)` matches
+ * neither (SQL NULL is not IN anything, and an unlisted type is not in the
+ * list), which would draw "System 4" on a row that returns nothing when
+ * pressed. Every other kind stays an exact membership test.
+ *
+ * An unrecognised kind expands to no entity types at all, which drizzle turns
+ * into `false`: a bad param narrows to nothing rather than widening.
+ */
+function kindPredicate(kinds: readonly string[]): SQL {
+  const typed = inArray(schema.notifications.entityType, entityTypesForKinds(kinds))
+  if (!kindsCoverUnmappedEntities(kinds)) return typed
+  return or(
+    typed,
+    isNull(schema.notifications.entityType),
+    notInArray(schema.notifications.entityType, [...MAPPED_NOTIFICATION_ENTITY_TYPES]),
+  )!
+}
+
 function parseLimit(raw: string | null): number {
   if (!raw) return PAGE_SIZE
   const n = Number.parseInt(raw, 10)
@@ -61,8 +90,17 @@ function parseLimit(raw: string | null): number {
 //   before=<iso>     only rows before this instant (the Past tab's window)
 //   kind=a,b         filter by plain kind (request, invoice, ...), expanded to
 //                    entity types by lib/notification-links.ts so the page and
-//                    the query can never disagree about what "Invoices" means
+//                    the query can never disagree about what "Invoices" means.
+//                    `system` additionally takes the rows with no entity type
+//                    or one the map has never heard of, which is where the
+//                    facet fold counts them
 //   unread=true      unread only
+//   facets=true      adds `facets`: row totals per view (All / Unread / Past)
+//                    and per kind within each of them, so the rail can put an
+//                    honest number on every row it draws and grey out the
+//                    kinds with nothing behind them. Two grouped counts, no
+//                    row bodies, and absent from the response unless asked
+//                    for, so the bell's read is untouched.
 //   userId=<id>      SERVICE TOKEN ONLY (see below)
 export async function GET(req: NextRequest) {
   const { userId, sessionId } = await getRequestAuth(req)
@@ -89,8 +127,8 @@ export async function GET(req: NextRequest) {
   const since = parseIso(params.get('since'))
   const before = parseIso(params.get('before'))
   const unreadOnly = params.get('unread') === 'true'
+  const wantsFacets = params.get('facets') === 'true'
   const kinds = (params.get('kind') ?? '').split(',').map(k => k.trim()).filter(Boolean)
-  const entityTypes = kinds.length ? entityTypesForKinds(kinds) : []
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -99,11 +137,7 @@ export async function GET(req: NextRequest) {
   if (since) filters.push(gte(schema.notifications.createdAt, since))
   if (before) filters.push(lt(schema.notifications.createdAt, before))
   if (unreadOnly) filters.push(eq(schema.notifications.read, false))
-  if (kinds.length) {
-    // An unrecognised kind expands to nothing, which must narrow to nothing
-    // rather than fall through to "every row".
-    filters.push(inArray(schema.notifications.entityType, entityTypes))
-  }
+  if (kinds.length) filters.push(kindPredicate(kinds))
   if (cursor) {
     filters.push(
       or(
@@ -142,11 +176,54 @@ export async function GET(req: NextRequest) {
       eq(schema.notifications.read, false),
     ))
 
+  // The rail's numbers. Counted, never derived from `items`: the page holds
+  // one page and the rail speaks for the whole window.
+  //
+  // The boundary is whichever window the caller named. The page sends `since`
+  // on All and Unread and `before` on Past, always the same instant, so one
+  // read answers all three views and switching view needs no refetch.
+  //
+  // Deliberately NOT narrowed by `kind` or `unread`: a kind's count has to say
+  // what pressing it would return, so selecting one cannot zero the others.
+  let facets: ReturnType<typeof buildNotificationFacets> | undefined
+  if (wantsFacets) {
+    const boundary = since ?? before
+    const facetSelect = {
+      entityType: schema.notifications.entityType,
+      read: schema.notifications.read,
+      n: count(),
+    }
+    const groupFacets = (side: 'recent' | 'past') => {
+      const facetFilters = [eq(schema.notifications.userId, subjectId)]
+      if (boundary) {
+        facetFilters.push(side === 'recent'
+          ? gte(schema.notifications.createdAt, boundary)
+          : lt(schema.notifications.createdAt, boundary))
+      }
+      return drizzle
+        .select(facetSelect)
+        .from(schema.notifications)
+        .where(and(...facetFilters))
+        .groupBy(schema.notifications.entityType, schema.notifications.read)
+    }
+    const [recentRows, pastRows] = await Promise.all([
+      groupFacets('recent'),
+      // With no boundary there is no "older than the window" side to count,
+      // and asking for one would re-count every row the recent side just did.
+      boundary ? groupFacets('past') : Promise.resolve([]),
+    ])
+    facets = buildNotificationFacets(
+      recentRows as NotificationFacetRow[],
+      pastRows as NotificationFacetRow[],
+    )
+  }
+
   return NextResponse.json({
     items,
     unreadCount: Number(unread?.n ?? 0),
     nextCursor,
     hasMore,
+    ...(facets ? { facets } : {}),
   })
 }
 
@@ -200,9 +277,9 @@ export async function PATCH(req: NextRequest) {
   if (body.all) {
     const filters = [eq(schema.notifications.userId, userId)]
     const kinds = Array.isArray(body.kinds) ? body.kinds.filter(k => typeof k === 'string') : []
-    if (kinds.length) {
-      filters.push(inArray(schema.notifications.entityType, entityTypesForKinds(kinds)))
-    }
+    // The same predicate the GET narrows by, so "Mark all as read" under a
+    // filter clears exactly the rows that filter shows.
+    if (kinds.length) filters.push(kindPredicate(kinds))
     const before = parseIso(body.before ?? null)
     if (before) filters.push(lt(schema.notifications.createdAt, before))
     await drizzle

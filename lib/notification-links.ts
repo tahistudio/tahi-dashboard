@@ -280,6 +280,25 @@ export function isNotificationKind(value: string): value is NotificationKind {
 }
 
 /**
+ * Every entity type the kind map knows, in one flat list.
+ *
+ * The System kind is the map's catch-all: notificationKind() folds a NULL or
+ * unrecognised entity type into it, so the facet count under System includes
+ * those rows. A filter built only from ENTITY_TYPES_FOR_KIND.system cannot
+ * return them (`entity_type IN (...)` never matches NULL, and never matches a
+ * type nobody listed), which would put a number on a row that comes back
+ * empty. The API pairs this list with `is null` to make the two sides agree.
+ */
+export const MAPPED_NOTIFICATION_ENTITY_TYPES: readonly NotificationEntityType[] =
+  Object.values(ENTITY_TYPES_FOR_KIND).flat()
+
+/** True when the filter has to reach rows the map has never heard of, which
+ *  is exactly when System is among the kinds asked for. */
+export function kindsCoverUnmappedEntities(kinds: readonly string[]): boolean {
+  return kinds.includes('system')
+}
+
+/**
  * The entity types a `?kind=a,b` filter expands to. Unknown kinds are dropped,
  * so a bad param narrows to nothing rather than widening to everything.
  */
@@ -290,6 +309,90 @@ export function entityTypesForKinds(kinds: readonly string[]): NotificationEntit
     for (const entity of ENTITY_TYPES_FOR_KIND[k]) out.add(entity)
   }
   return Array.from(out)
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Facets: the counts the /notifications rail puts beside every row.
+ *
+ * The rail shows a number on all three views and on every kind, and greys out
+ * a kind with nothing behind it. Counting the rows the page happens to have
+ * loaded cannot answer that: a kind that is real but absent from page one
+ * would read 0 and sit disabled, which is a filter the reader cannot press
+ * for rows that do exist.
+ *
+ * So the API counts them, and this is the pure fold from what SQL can group
+ * (entity type x read) to what the rail speaks (kind x view). It lives here
+ * beside the kind taxonomy so a new entity type folds into a count and into a
+ * filter chip in the same edit.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export type NotificationKindCounts = Record<NotificationKind, number>
+
+/** One `GROUP BY entity_type, read` row. `read` is nullable in the schema. */
+export interface NotificationFacetRow {
+  entityType: string | null
+  read: boolean | number | null
+  n: number
+}
+
+export interface NotificationFacets {
+  /** Row totals per view, over the same window the page pages under. */
+  views: { all: number; unread: number; past: number }
+  /** Row totals per kind, per view. Never narrowed by the kind filter itself,
+   *  so pressing a kind cannot zero every other one under the reader. */
+  kinds: { all: NotificationKindCounts; unread: NotificationKindCounts; past: NotificationKindCounts }
+}
+
+function emptyKindCounts(): NotificationKindCounts {
+  const out = {} as NotificationKindCounts
+  for (const key of Object.keys(NOTIFICATION_KINDS) as NotificationKind[]) out[key] = 0
+  return out
+}
+
+/**
+ * Unread means exactly what `?unread=true` returns, which is `read = 0`.
+ *
+ * `notifications.read` is nullable, and SQL's `read = 0` does not match NULL.
+ * Counting a NULL row as unread here would put a number on the Unread view
+ * that the Unread view could never show.
+ */
+function isUnreadFlag(read: boolean | number | null): boolean {
+  return read === false || read === 0
+}
+
+/**
+ * Fold the two grouped reads into the rail's numbers.
+ *
+ * @param recent rows at or after the window boundary (All and Unread)
+ * @param past   rows before it
+ */
+export function buildNotificationFacets(
+  recent: readonly NotificationFacetRow[],
+  past: readonly NotificationFacetRow[],
+): NotificationFacets {
+  const kinds = { all: emptyKindCounts(), unread: emptyKindCounts(), past: emptyKindCounts() }
+  const views = { all: 0, unread: 0, past: 0 }
+
+  for (const row of recent) {
+    const n = Number(row.n) || 0
+    if (n <= 0) continue
+    const kind = notificationKind(row.entityType)
+    kinds.all[kind] += n
+    views.all += n
+    if (isUnreadFlag(row.read)) {
+      kinds.unread[kind] += n
+      views.unread += n
+    }
+  }
+
+  for (const row of past) {
+    const n = Number(row.n) || 0
+    if (n <= 0) continue
+    kinds.past[notificationKind(row.entityType)] += n
+    views.past += n
+  }
+
+  return { views, kinds }
 }
 
 /**

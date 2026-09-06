@@ -37,13 +37,14 @@
    No horizontal or top padding: .dashboard-main owns the page gutters and
    .dashboard-page-inner owns the top offset for every page in the shell, so
    adding our own put this page ~2rem narrower and ~2.4rem lower than /requests
-   sitting beside it. Only the max-width, the centring and the tail are ours. */
-.pa-pad { max-width: 56rem; margin: 0 auto; padding: 0 0 3.5rem; }
+   sitting beside it. Only the column rhythm and the tail are ours.
 
-.pa-head { display: flex; align-items: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
-.pa-h1 { margin: 0; font: 700 1.5rem/1.15 var(--font-manrope, 'Manrope'), sans-serif; letter-spacing: -0.02em; color: var(--color-text); }
-.pa-sub { margin: .3125rem 0 0; font-size: .84375rem; font-weight: 500; line-height: 1.45; color: var(--color-text-muted); max-width: 38rem; }
-.pa-head-a { display: flex; gap: .5rem; flex-wrap: wrap; }
+   No max-width either, now that the views and kinds sit in a rail beside the
+   feed: the rail takes 14.5rem off the left and the main column is what is
+   left, exactly as on /requests and /tasks. The feed keeps its own measure
+   (see the notification list below). */
+.pa-pad { display: flex; flex-direction: column; gap: .875rem; padding: 0 0 3.5rem; }
+
 .pa-sep { display: inline-block; width: .1875rem; height: .1875rem; border-radius: 50%; background: currentColor; opacity: .45; flex-shrink: 0; }
 
 /* ---------- buttons ---------- */
@@ -79,6 +80,19 @@
   position: relative; display: inline-flex; padding: .1875rem;
   background: var(--color-bg-secondary); border: 1px solid var(--color-border-subtle); border-radius: .6875rem;
 }
+/* The phone's Views track. It stands in for the rail's Views group below the
+   rail breakpoint (64rem, the width <RailLayout> folds its aside at), and it
+   fills the row so three counted labels cannot push each other off a 375
+   screen. Hidden by a media query rather than a Tailwind `lg:hidden`, because
+   this stylesheet is unlayered and would win the display race against it. */
+.pa-seg-fill { display: flex; width: 100%; }
+/* The 2.75rem floor holds right up to the fold, past the 48rem block below
+   that tightens every other segmented track to 2.125rem. Between 48rem and
+   64rem this IS the view switcher (the rail is still folded and the Filters
+   sheet carries only the kinds), and a 768 tablet is a touch device. Two
+   classes, so it wins the cascade wherever the media query sits. */
+.pa-seg-fill .pa-seg-b { padding: 0 .5rem; min-height: 2.75rem; }
+@media (min-width: 64rem) { .pa-seg-fill { display: none; } }
 .pa-seg-pill {
   position: absolute; top: .1875rem; bottom: .1875rem; left: .1875rem;
   width: calc((100% - .375rem) / var(--pa-seg-n, 2));
@@ -98,34 +112,10 @@
 .pa-seg-b.on { color: var(--color-text); }
 .pa-seg-n { font-variant-numeric: tabular-nums; opacity: .6; font-weight: 600; }
 
-/* ---------- toolbar + chips ----------
-   The read-state lens and Clear live in the toolbar, which never scrolls
-   sideways; only the kind filters sit in the scrolling chip row. */
-.pa-bar { display: flex; align-items: center; gap: .625rem; row-gap: .5rem; flex-wrap: wrap; margin-bottom: .75rem; }
-.pa-bar-sp { flex: 1; }
-.pa-count { font-size: .78125rem; font-weight: 500; color: var(--color-text-subtle); font-variant-numeric: tabular-nums; }
-.pa-chips { display: flex; align-items: center; gap: .4375rem; overflow-x: auto; padding-bottom: .375rem; margin-bottom: .875rem; scrollbar-width: none; }
-.pa-chips::-webkit-scrollbar { display: none; }
-.pa-chip {
-  flex-shrink: 0; display: inline-flex; align-items: center; gap: .375rem;
-  min-height: 2.75rem; padding: 0 .8125rem;
-  border: 1px solid var(--color-border-subtle); border-radius: 999px;
-  background: var(--color-bg); color: var(--color-text-muted);
-  font-size: .75rem; font-weight: 600; cursor: pointer; white-space: nowrap;
-  transition: border-color .14s var(--pa-ease), color .14s var(--pa-ease), background .14s var(--pa-ease);
-}
-.pa-chip:hover { border-color: var(--color-border); color: var(--color-text); }
-.pa-chip.on { background: var(--color-text); border-color: var(--color-text); color: var(--color-bg); }
-.pa-chip-ic { display: flex; opacity: .75; }
-.pa-chip-n { font-variant-numeric: tabular-nums; opacity: .6; }
-.pa-clear {
-  flex-shrink: 0; border: none; background: none; color: var(--color-link);
-  font-size: .75rem; font-weight: 600; cursor: pointer; padding: .5rem .375rem;
-  border-radius: .375rem; min-height: 2.75rem;
-}
-.pa-clear:hover { background: var(--color-bg-secondary); }
-
-/* ---------- notification list ---------- */
+/* ---------- notification list ----------
+   One measure for everything in the main column, so a wide screen never
+   stretches a notification title to eighteen words a line. */
+.pa-nlist-wrap, .pa-empty, .pa-errcard, .pa-foot, .pa-endcap, .pa-loadnote, .pa-nprefs { max-width: 54rem; }
 .pa-nlist-wrap { display: flex; flex-direction: column; }
 .pa-ngroup + .pa-ngroup { margin-top: .5rem; }
 .pa-gh {
@@ -237,9 +227,29 @@ button.pa-nrow-main:hover .pa-nrow-dest svg { transform: translateX(.1875rem); }
 @keyframes pa-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 .pa-loadnote { margin: .75rem 0 0; text-align: center; font-size: .75rem; font-weight: 500; color: var(--color-text-subtle); }
 
+/* ---------- email preferences, at the end of the feed ----------
+   A phone has no rail to hold it, so the quiet link in the rail's foot becomes
+   a card here. Same media query as the Views track, same reason. */
+.pa-nprefs {
+  display: flex; align-items: center; gap: .75rem; width: 100%; margin-top: 1.25rem; padding: .75rem;
+  border: 1px solid var(--color-border-subtle); border-radius: .75rem;
+  background: var(--color-bg); color: inherit; text-align: left; cursor: pointer;
+  text-decoration: none; transition: border-color .14s var(--pa-ease);
+}
+.pa-nprefs:hover { border-color: var(--color-brand); }
+.pa-nprefs-ic {
+  display: flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; flex-shrink: 0;
+  border-radius: var(--pa-leaf); background: var(--color-bg-secondary); color: var(--color-text-muted);
+}
+.pa-nprefs-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .125rem; }
+.pa-nprefs-t b { font-size: .84375rem; font-weight: 600; color: var(--color-text); }
+.pa-nprefs-t small { font-size: .75rem; font-weight: 500; line-height: 1.45; color: var(--color-text-muted); }
+.pa-nprefs-go { display: flex; flex-shrink: 0; color: var(--color-text-subtle); }
+@media (min-width: 64rem) { .pa-nprefs { display: none; } }
+
 /* ---------- read-only lens (admin previewing the portal) ---------- */
 .pa-ro {
-  display: flex; align-items: center; gap: .5rem; margin-bottom: 1rem; padding: .625rem .75rem;
+  display: flex; align-items: center; gap: .5rem; padding: .625rem .75rem;
   border: 1px solid color-mix(in srgb, var(--pa-warn) 30%, transparent); border-radius: .625rem;
   background: color-mix(in srgb, var(--pa-warn) 10%, var(--color-bg)); color: var(--color-text);
   font-size: .78125rem; font-weight: 500;
@@ -249,11 +259,10 @@ button.pa-nrow-main:hover .pa-nrow-dest svg { transform: translateX(.1875rem); }
 /* ---------- 48rem and up ---------- */
 @media (min-width: 48rem) {
   .pa-pad { padding: 0 0 3rem; }
-  .pa-h1 { font-size: 1.5625rem; }
   .pa-btn { min-height: 2.25rem; padding: 0 .8125rem; }
+  /* The Views track is exempt: .pa-seg-fill keeps the 2.75rem target, because
+     below 64rem it is the only way to change view. */
   .pa-seg-b { min-height: 2.125rem; }
-  .pa-chip { min-height: 2rem; padding: 0 .6875rem; }
-  .pa-clear { min-height: 2rem; }
   /* The row is wide enough now for the timestamp to take its own column. */
   .pa-nrow-main { grid-template-columns: 2.25rem 1fr auto; grid-template-areas: 'ic t w'; gap: .75rem; }
   .pa-nrow-read { width: 2.25rem; height: 2.25rem; align-self: center; margin-top: 0; }

@@ -73,3 +73,4 @@ ds-bundle/
 .design-sync/learnings/
 .design-sync/compiled.css
 playwright.local.config.ts
+.claude/backups/

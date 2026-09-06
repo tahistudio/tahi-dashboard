@@ -5,10 +5,19 @@
  *
  * Ported from the Claude Design module portal-account.jsx (Notifications).
  * Companion stylesheet: app/(dashboard)/notifications/notifications.css (all
- * `.pa-*` classes).
+ * `.pa-*` classes). The frame is <RailLayout>, the same one Requests, Clients
+ * and Tasks stand on, so a filter rail reads identically everywhere.
  *
- * The three decisions that shape this page:
+ * The five decisions that shape this page:
  *
+ *  - VIEWS, NOT LENSES. All / Unread / Past are three mutually exclusive
+ *    rooms in the rail. The previous reading had a Past tab AND an unread
+ *    chip, which is four states drawn as two controls, and no way to tell
+ *    from the page which of them you were in.
+ *  - THE COUNTS ARE THE SERVER'S. `?facets=true` returns row totals per view
+ *    and per kind over the window, so a kind that is real but absent from
+ *    page one is not drawn as an empty, unpressable one. Counting the loaded
+ *    rows could only ever describe the loaded rows.
  *  - HONEST DEEP LINKS. lib/notification-links.ts returns null for a client on
  *    documents, tasks, calls and deals. Rather than render a link that bounces
  *    them, those rows are drawn as a statement ("Nothing to open yet") with no
@@ -16,8 +25,9 @@
  *  - OPENING A ROW MARKS IT READ, then navigates. Today only the request detail
  *    page clears the bell, so an invoice or announcement stays unread forever.
  *    Doing it on the row closes that hole without touching every destination.
- *  - COUNTS ARE WITHHELD until real rows land. A page that says "Requests 5"
- *    before the read returns is guessing.
+ *  - EMAIL PREFERENCES IS A DESTINATION, not a page action: the rail's foot on
+ *    a desk, and a card at the end of the feed on a phone, where the rail has
+ *    folded into the Filters sheet.
  *
  * Filters are by KIND, not by the 30 internal event types, which are a
  * vocabulary no client should meet.
@@ -25,16 +35,27 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { apiPath } from '@/lib/api'
 import { ShellIcon } from '@/components/tahi/shell-icons'
+import { PageHeader } from '@/components/tahi/page-header'
 import { useToast } from '@/components/tahi/toast'
 import { notifyNotificationsChanged } from '@/lib/notification-events'
+import { RailLayout } from '@/components/tahi/rail/rail-layout'
+import type { RailFilterChip } from '@/components/tahi/rail/rail-controls'
+import {
+  NotificationsRail,
+  NOTIFICATION_VIEWS,
+  type NotificationView,
+  type NotificationViewCounts,
+} from '@/components/tahi/notifications/notifications-rail'
 import {
   notificationKind,
   notificationKindsFor,
   notificationDestination,
   NOTIFICATION_KINDS,
   type NotificationAudience,
+  type NotificationFacets,
   type NotificationKind,
   type NotificationKindDef,
 } from '@/lib/notification-links'
@@ -52,12 +73,30 @@ export interface NotificationRow {
   createdAt: string
 }
 
-type Tab = 'all' | 'past'
 type LoadState = 'loading' | 'ready' | 'error'
 
-/** The All tab is the last thirty days; Past is everything older. */
+interface FeedResponse {
+  items?: NotificationRow[]
+  unreadCount?: number
+  nextCursor?: string | null
+  hasMore?: boolean
+  facets?: NotificationFacets
+}
+
+/** All and Unread are the last thirty days; Past is everything older. */
 const WINDOW_DAYS = 30
 const PAGE_SIZE = 20
+
+/**
+ * Email preferences, for both audiences.
+ *
+ * The studio reads it as the settings Notifications section; a client reads
+ * the same section as the Notifications room of their own account, because
+ * that section is `audience: 'both'` and sits in the Account group of
+ * components/tahi/settings/settings-shell.tsx. One destination, two readings,
+ * and no second route to keep in step.
+ */
+const PREFS_HREF = '/settings?section=notifications'
 
 // ─── Time ─────────────────────────────────────────────────────────────────────
 
@@ -204,6 +243,43 @@ function NotifRow({
   )
 }
 
+/** The phone's Views control. The rail is inside the Filters sheet below
+ *  1024px, and three one-word rooms do not deserve a trip into a sheet. */
+function ViewTrack({
+  view, counts, onChange,
+}: {
+  view: NotificationView
+  counts: NotificationViewCounts | null
+  onChange: (next: NotificationView) => void
+}) {
+  const index = NOTIFICATION_VIEWS.findIndex(v => v.key === view)
+  return (
+    <div
+      className="pa-seg pa-seg-fill"
+      role="group"
+      aria-label="Notification views"
+      style={{
+        ['--pa-seg-n' as string]: NOTIFICATION_VIEWS.length,
+        ['--pa-seg-i' as string]: index < 0 ? 0 : index,
+      }}
+    >
+      <span className="pa-seg-pill" aria-hidden="true" />
+      {NOTIFICATION_VIEWS.map(v => (
+        <button
+          key={v.key}
+          type="button"
+          aria-pressed={view === v.key}
+          className={'pa-seg-b tahi-focus-ring' + (view === v.key ? ' on' : '')}
+          onClick={() => onChange(v.key)}
+        >
+          {v.label}
+          {counts ? <span className="pa-seg-n">{counts[v.key]}</span> : null}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function NotificationsContent({
@@ -218,21 +294,16 @@ export function NotificationsContent({
   const router = useRouter()
   const { showToast } = useToast()
 
-  const [tab, setTab] = useState<Tab>('all')
+  const [view, setView] = useState<NotificationView>('all')
   const [state, setState] = useState<LoadState>('loading')
   const [rows, setRows] = useState<NotificationRow[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
+  const [facets, setFacets] = useState<NotificationFacets | null>(null)
   const [cursor, setCursor] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [kinds, setKinds] = useState<NotificationKind[]>([])
-  const [unreadOnly, setUnreadOnly] = useState(false)
   const [markingAll, setMarkingAll] = useState(false)
-  // True once any read has landed. The filter surface is gated on this rather
-  // than on `state === 'ready'`, because every filter change puts the page back
-  // into 'loading': unmounting the chips mid-read dropped the focus of whoever
-  // had just pressed one, and reset the chip row's scroll on a 375 screen.
-  const [everLoaded, setEverLoaded] = useState(false)
 
   // One "now" per read, stamped when the rows land, so every relative
   // timestamp on the page agrees with every other one instead of each row
@@ -242,37 +313,56 @@ export function NotificationsContent({
   // Frozen at mount so paging cannot walk over the boundary as the clock moves.
   const windowStart = useRef(new Date(Date.now() - WINDOW_DAYS * 86400000).toISOString())
 
+  // The counts are deliberately not narrowed by kind, so toggling a kind gets
+  // the same two numbers back and pays for a full GROUP BY over the reader's
+  // rows to hear them again. Only a moved boundary (a view change) or a read
+  // that came back empty-handed can change them, so only those ask.
+  const needFacets = useRef(true)
+
+  /** The window half this view reads, which is also the boundary the facet
+   *  counts are taken around. Past is everything older than it. */
+  const applyWindow = useCallback((q: URLSearchParams, forView: NotificationView) => {
+    if (forView === 'past') q.set('before', windowStart.current)
+    else q.set('since', windowStart.current)
+    if (forView === 'unread') q.set('unread', 'true')
+  }, [])
+
   const buildQuery = useCallback((next: string | null) => {
     const q = new URLSearchParams()
     q.set('limit', String(PAGE_SIZE))
     if (next) q.set('cursor', next)
-    if (tab === 'past') q.set('before', windowStart.current)
-    else q.set('since', windowStart.current)
+    applyWindow(q, view)
     if (kinds.length) q.set('kind', kinds.join(','))
-    if (unreadOnly) q.set('unread', 'true')
+    // Only the first page of a read pays for the counts, and only when the
+    // window boundary has moved under them. Paging older rows cannot change
+    // them, and neither can a kind toggle: the facets are never narrowed by
+    // kind, so a second read would return the numbers already on screen.
+    if (!next && needFacets.current) q.set('facets', 'true')
     return q.toString()
-  }, [tab, kinds, unreadOnly])
+  }, [applyWindow, view, kinds])
 
   const load = useCallback(async () => {
     setState('loading')
     try {
       const res = await fetch(apiPath(`/api/notifications?${buildQuery(null)}`))
       if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as {
-        items?: NotificationRow[]
-        unreadCount?: number
-        nextCursor?: string | null
-        hasMore?: boolean
-      }
+      const json = await res.json() as FeedResponse
       setNow(Date.now())
       setRows(json.items ?? [])
       setUnreadCount(json.unreadCount ?? 0)
+      if (json.facets) setFacets(json.facets)
+      needFacets.current = false
       setCursor(json.nextCursor ?? null)
       setHasMore(!!json.hasMore)
-      setEverLoaded(true)
       setState('ready')
     } catch {
       setRows([])
+      // The counts go with the rows. Leaving the last good ones up would put
+      // "37 notifications" and a rail full of numbers beside a card saying we
+      // could not read them, and the next attempt has to fetch them again
+      // anyway.
+      setFacets(null)
+      needFacets.current = true
       setState('error')
     }
   }, [buildQuery])
@@ -283,17 +373,33 @@ export function NotificationsContent({
   // fires the event itself on every read, and reloading on its own dispatch
   // would throw away the pages the reader has already loaded.
 
+  /** Re-take the counts without disturbing the rows on screen. One row of
+   *  body, two grouped counts. */
+  const refreshCounts = useCallback(async () => {
+    const q = new URLSearchParams()
+    q.set('limit', '1')
+    q.set('facets', 'true')
+    // The unfiltered window, so the rail can still say what the other kinds
+    // and the other views hold.
+    applyWindow(q, view === 'unread' ? 'all' : view)
+    try {
+      const res = await fetch(apiPath(`/api/notifications?${q.toString()}`))
+      if (!res.ok) return
+      const json = await res.json() as FeedResponse
+      setUnreadCount(json.unreadCount ?? 0)
+      if (json.facets) setFacets(json.facets)
+    } catch {
+      // The optimistic figures stand until the next read.
+    }
+  }, [applyWindow, view])
+
   const loadOlder = useCallback(async () => {
     if (!cursor || loadingMore) return
     setLoadingMore(true)
     try {
       const res = await fetch(apiPath(`/api/notifications?${buildQuery(cursor)}`))
       if (!res.ok) throw new Error('Failed')
-      const json = await res.json() as {
-        items?: NotificationRow[]
-        nextCursor?: string | null
-        hasMore?: boolean
-      }
+      const json = await res.json() as FeedResponse
       setRows(prev => {
         const seen = new Set(prev.map(r => r.id))
         return prev.concat((json.items ?? []).filter(r => !seen.has(r.id)))
@@ -309,8 +415,29 @@ export function NotificationsContent({
 
   const markRead = useCallback(async (id: string) => {
     if (readOnly) return
+    // The row stays where it is, even on the Unread view: pulling it out from
+    // under the cursor the moment it is read is how a list loses its place.
     setRows(prev => prev.map(r => r.id === id ? { ...r, read: true } : r))
+    // The bell's number is counted over the whole table, so it drops for any
+    // row, however old.
     setUnreadCount(prev => Math.max(0, prev - 1))
+    setFacets(prev => {
+      if (!prev) return prev
+      const row = rows.find(r => r.id === id)
+      if (!row || row.read) return prev
+      // The unread facet is taken from the RECENT side of the window boundary
+      // only, so a row older than it was never counted in that number and
+      // taking one off for it would leave the rail reading under the Unread
+      // view it describes. Past holds nothing but older rows and All / Unread
+      // nothing but newer ones, so the view is the exact test for the side.
+      if (view === 'past') return prev
+      const kind = notificationKind(row.entityType)
+      const unread = { ...prev.kinds.unread, [kind]: Math.max(0, (prev.kinds.unread[kind] ?? 0) - 1) }
+      return {
+        views: { ...prev.views, unread: Math.max(0, prev.views.unread - 1) },
+        kinds: { ...prev.kinds, unread },
+      }
+    })
     try {
       await fetch(apiPath('/api/notifications'), {
         method: 'PATCH',
@@ -321,7 +448,7 @@ export function NotificationsContent({
     } catch {
       // The row is already drawn read; a refresh corrects it either way.
     }
-  }, [readOnly])
+  }, [readOnly, rows, view])
 
   const openRow = useCallback((n: NotificationRow) => {
     const dest = notificationDestination(n.entityType, n.entityId, audience)
@@ -331,12 +458,16 @@ export function NotificationsContent({
 
   const markAll = useCallback(async () => {
     if (readOnly) return
-    // Narrowed to the lens the reader is actually looking through, so "Mark all
-    // as read" never silently empties rows they cannot see: by kind, and on the
-    // Past tab by the same `before` boundary the list itself is paging under.
-    const before = tab === 'past' ? windowStart.current : undefined
-    const narrowed = kinds.length > 0 || tab === 'past'
-    const clearing = rows.reduce((n, r) => (r.read ? n : n + 1), 0)
+    // Narrowed by kind, and on the Past view by the same `before` boundary the
+    // list itself is paging under, so a filtered pass clears what the reader
+    // can see rather than the inbox behind it.
+    //
+    // Un-narrowed on All or Unread it is the whole inbox, Past included: the
+    // PATCH takes `before` and has no `since`, and "all" there means all. The
+    // button's own title says so, the toast claims "All caught up" only in
+    // that branch, and the counts are re-read afterwards either way.
+    const before = view === 'past' ? windowStart.current : undefined
+    const narrowed = kinds.length > 0 || view === 'past'
     setMarkingAll(true)
     try {
       await fetch(apiPath('/api/notifications'), {
@@ -345,88 +476,105 @@ export function NotificationsContent({
         body: JSON.stringify({ all: true, kinds: kinds.length ? kinds : undefined, before }),
       })
       setRows(prev => prev.map(r => ({ ...r, read: true })))
-      // A narrowed pass leaves unread rows of other kinds, or newer than the
-      // Past window, standing. Claiming zero there would put this page and the
-      // bell (which counts the same table) at odds until a reload.
-      setUnreadCount(prev => (narrowed ? Math.max(0, prev - clearing) : 0))
       notifyNotificationsChanged()
       showToast(narrowed ? 'Marked those as read' : 'All caught up', 'success')
-      if (narrowed) {
-        // The server may have cleared rows this page never loaded, so take the
-        // true count rather than trusting the subtraction above.
-        try {
-          const res = await fetch(apiPath('/api/notifications?limit=1'))
-          if (res.ok) {
-            const json = await res.json() as { unreadCount?: number }
-            setUnreadCount(json.unreadCount ?? 0)
-          }
-        } catch {
-          // The optimistic figure stands until the next read.
-        }
-      }
+      // The server may have cleared rows this page never loaded, so take the
+      // true numbers rather than guessing at them. A narrowed pass leaves
+      // unread rows of other kinds standing, and claiming zero there would put
+      // this page and the bell (which counts the same table) at odds.
+      await refreshCounts()
     } catch {
       showToast('Could not mark those as read', 'error')
     } finally {
       setMarkingAll(false)
     }
-  }, [readOnly, kinds, tab, rows, showToast])
+  }, [readOnly, kinds, view, showToast, refreshCounts])
 
-  const switchTab = useCallback((next: Tab) => {
-    if (next === tab) return
+  const switchView = useCallback((next: NotificationView) => {
+    if (next === view) return
     // Straight to loading, not through a frame of "you are all caught up":
     // clearing the rows before the read lands would flash the empty state.
     setState('loading')
-    setTab(next)
+    // The boundary side moves with the view, so the counts come again.
+    needFacets.current = true
+    setView(next)
     setRows([])
     setCursor(null)
     setHasMore(false)
-  }, [tab])
+  }, [view])
 
   const toggleKind = useCallback((k: NotificationKind) => {
     setKinds(prev => prev.includes(k) ? prev.filter(x => x !== k) : prev.concat([k]))
   }, [])
 
-  const clearFilters = useCallback(() => { setKinds([]); setUnreadOnly(false) }, [])
+  const clearFilters = useCallback(() => { setKinds([]) }, [])
 
-  // Chips: the audience's kinds, plus any kind actually present in the loaded
-  // rows that is not on that list, so no row is unreachable by filter.
+  // The audience's kinds, plus any kind the server counted in this window that
+  // is not on that list, so no row is unreachable by filter. The day a
+  // client-visible document surface exists, the row comes back on its own.
   const kindDefs: NotificationKindDef[] = useMemo(() => {
     const base = notificationKindsFor(audience)
     const known = new Set(base.map(k => k.key))
+    if (!facets) return base
     const extra: NotificationKindDef[] = []
-    for (const r of rows) {
-      const k = notificationKind(r.entityType)
-      if (!known.has(k)) { known.add(k); extra.push(NOTIFICATION_KINDS[k]) }
+    for (const key of Object.keys(NOTIFICATION_KINDS) as NotificationKind[]) {
+      if (known.has(key)) continue
+      const seen = facets.kinds.all[key] + facets.kinds.past[key]
+      if (seen > 0) extra.push(NOTIFICATION_KINDS[key])
     }
     return base.concat(extra)
-  }, [audience, rows])
+  }, [audience, facets])
 
-  const counts = useMemo(() => {
-    const o: Partial<Record<NotificationKind, number>> = {}
-    for (const r of rows) {
-      const k = notificationKind(r.entityType)
-      o[k] = (o[k] ?? 0) + 1
-    }
-    return o
-  }, [rows])
+  const kindCounts = useMemo(
+    () => (facets ? facets.kinds[view] : null),
+    [facets, view],
+  )
+  const viewCounts: NotificationViewCounts | null = facets ? facets.views : null
 
   const groups = useMemo(() => {
     const out: { label: string; rows: NotificationRow[] }[] = []
     let cur: { label: string; rows: NotificationRow[] } | null = null
     for (const r of rows) {
-      const label = tab === 'past' ? monthLabel(r.createdAt) : dayLabel(r.createdAt, now)
+      const label = view === 'past' ? monthLabel(r.createdAt) : dayLabel(r.createdAt, now)
       if (!cur || cur.label !== label) { cur = { label, rows: [] }; out.push(cur) }
       cur.rows.push(r)
     }
     return out
-  }, [rows, tab, now])
+  }, [rows, view, now])
 
-  const anyFilter = kinds.length > 0 || unreadOnly
-  // Counts are still withheld until real rows land (a chip that reads
-  // "Requests 5" before the read returns is guessing), but the CHIPS themselves
-  // survive the re-read: pressing one used to unmount the whole row mid-fetch.
-  const countsKnown = state === 'ready'
-  const showFilters = state !== 'error' && everLoaded && (rows.length > 0 || anyFilter)
+  // The counted total for this lens, from the server rather than from the page
+  // in hand, so the count line and the sheet's "Show N" mean the same thing as
+  // the rail. The old page could only say "20+".
+  //
+  // Floored at the rows on screen, and only the Unread view ever needs it.
+  // Reading a row there does not remove it (pulling one out from under the
+  // cursor is how a list loses its place), so the unread count walks down while
+  // the rows stay put, and after an un-narrowed "Mark all as read" it is zero
+  // with twenty rows still drawn. "0 notifications" beside twenty of them, and
+  // "Show 0" on the sheet's own button, is the count describing a room the
+  // reader is not standing in. Never say fewer than what is rendered.
+  const total = useMemo(() => {
+    if (!kindCounts || !viewCounts) return rows.length
+    const counted = kinds.length
+      ? kinds.reduce((n, k) => n + (kindCounts[k] ?? 0), 0)
+      : viewCounts[view]
+    return view === 'unread' ? Math.max(counted, rows.length) : counted
+  }, [kindCounts, viewCounts, kinds, view, rows.length])
+
+  const chips: RailFilterChip[] = useMemo(
+    () => kinds.map(k => ({ key: `kind:${k}`, dimension: 'Kind', label: NOTIFICATION_KINDS[k].label })),
+    [kinds],
+  )
+
+  /** What "Mark all as read" is actually about to clear, said out loud: the
+   *  un-narrowed pass on All and Unread reaches past the thirty days on
+   *  screen, and a reader should not have to find that out afterwards. */
+  const markAllTitle = kinds.length > 0
+    ? 'Marks the kinds you have filtered to as read'
+    : view === 'past'
+      ? 'Marks everything older than thirty days as read'
+      : 'Marks every notification as read, including anything under Past'
+
   const sub = audience === 'client'
     ? 'Everything the studio has told you, newest first. The bell only holds the last few.'
     : 'Everything the studio has flagged for you, newest first. The bell only holds the last few.'
@@ -452,14 +600,31 @@ export function NotificationsContent({
         </button>
       </div>
     )
-  } else if (rows.length === 0 && anyFilter) {
+  } else if (rows.length === 0 && kinds.length > 0) {
     body = (
       <div className="pa-empty">
         <span className="pa-empty-ic"><ShellIcon n="bell" s={22} /></span>
-        <h2>Nothing matches those filters.</h2>
-        <p>Try another kind, or turn off unread only.</p>
+        <h2>Nothing matches those kinds.</h2>
+        <p>Try another kind, or clear the filters and start again.</p>
         <span className="pa-empty-a">
           <button type="button" className="pa-btn quiet tahi-focus-ring" onClick={clearFilters}>Clear filters</button>
+        </span>
+      </div>
+    )
+  } else if (rows.length === 0 && view === 'unread') {
+    body = (
+      <div className="pa-empty">
+        <span className="pa-empty-ic"><ShellIcon n="checks" s={22} /></span>
+        <h2>Nothing unread.</h2>
+        <p>Everything the studio has sent you has been read.</p>
+        <span className="pa-empty-a">
+          <button
+            type="button"
+            className="pa-btn quiet tahi-focus-ring"
+            onClick={() => switchView('all')}
+          >
+            Show everything
+          </button>
         </span>
       </div>
     )
@@ -475,7 +640,7 @@ export function NotificationsContent({
         </span>
         <h2>You are all caught up.</h2>
         <p>
-          {tab === 'past'
+          {view === 'past'
             ? 'Nothing older than thirty days yet. Anything that ages out of All lands here.'
             : audience === 'client'
               ? 'When the studio moves a request, replies, or sends an invoice, it lands here.'
@@ -531,13 +696,25 @@ export function NotificationsContent({
           </div>
         ) : (
           <p className="pa-endcap">
-            {tab === 'past'
+            {view === 'past'
               ? 'That is everything we have kept. Older than that, ask us and we will dig it out.'
               : 'That is the last thirty days. Anything older sits under Past.'}
           </p>
         )}
       </div>
     )
+  }
+
+  const railProps = {
+    view,
+    onViewChange: switchView,
+    viewCounts,
+    kindDefs,
+    kindCounts,
+    kinds,
+    onToggleKind: toggleKind,
+    onClearFilters: clearFilters,
+    prefsHref: PREFS_HREF,
   }
 
   return (
@@ -550,115 +727,53 @@ export function NotificationsContent({
           </div>
         )}
 
-        <div className="pa-head">
-          <div>
-            <h1 className="pa-h1">Notifications</h1>
-            <p className="pa-sub">{sub}</p>
-          </div>
-          <div className="pa-head-a">
-            <button
-              type="button"
-              className="pa-btn quiet tahi-focus-ring"
-              onClick={() => router.push('/settings?section=notifications')}
-            >
-              <span className="pa-btn-ic"><ShellIcon n="settings" s={15} /></span>
-              Email preferences
-            </button>
-          </div>
-        </div>
+        <PageHeader title="Notifications" subtitle={sub} />
 
-        {/* The read-state lens and Clear stay in the toolbar, which never
-            scrolls sideways; only the kind filters sit in the chip row. */}
-        <div className="pa-bar">
-          {/* A group of pressed buttons rather than a tablist: there is one
-              list below, not two panels, and an incomplete tab pattern reads
-              worse to a screen reader than an honest toggle. */}
-          <div
-            className="pa-seg"
-            role="group"
-            aria-label="Notification history"
-            style={{ ['--pa-seg-n' as string]: 2, ['--pa-seg-i' as string]: tab === 'past' ? 1 : 0 }}
-          >
-            <span className="pa-seg-pill" aria-hidden="true" />
-            {(['all', 'past'] as Tab[]).map(t => (
-              <button
-                key={t}
-                type="button"
-                aria-pressed={tab === t}
-                className={'pa-seg-b tahi-focus-ring' + (tab === t ? ' on' : '')}
-                onClick={() => switchTab(t)}
-              >
-                {t === 'all' ? 'All' : 'Past'}
-              </button>
-            ))}
-          </div>
-
-          <span className="pa-count" aria-live="polite">
-            {state === 'loading'
-              ? 'Loading'
-              : state === 'error'
-                ? 'Could not load'
-                : `${rows.length}${hasMore ? '+' : ''} ${rows.length === 1 && !hasMore ? 'notification' : 'notifications'}${unreadCount ? ` · ${unreadCount} unread in total` : ''}`}
-          </span>
-
-          {showFilters && (
-            <button
-              type="button"
-              className={'pa-chip tahi-focus-ring' + (unreadOnly ? ' on' : '')}
-              aria-pressed={unreadOnly}
-              onClick={() => setUnreadOnly(v => !v)}
-            >
-              <span className="pa-chip-ic"><ShellIcon n="bell" s={13} /></span>
-              Unread only
-            </button>
-          )}
-          {showFilters && anyFilter && (
-            <button type="button" className="pa-clear tahi-focus-ring" onClick={clearFilters}>Clear filters</button>
-          )}
-
-          <span className="pa-bar-sp" />
-
-          {showFilters && unreadCount > 0 && (
+        <RailLayout
+          rail={<NotificationsRail {...railProps} />}
+          railTouch={<NotificationsRail {...railProps} variant="sheet" touch />}
+          railLabel="Views and kinds"
+          sheetTitle="Filters"
+          switcher={<ViewTrack view={view} counts={viewCounts} onChange={switchView} />}
+          chips={chips}
+          onClearChip={chip => toggleKind(chip.key.slice('kind:'.length) as NotificationKind)}
+          onClearAll={clearFilters}
+          total={total}
+          itemNoun="notification"
+          loading={state === 'loading'}
+          // A failed read has no honest number to put in the aria-live count,
+          // and the stale one it would otherwise keep gets read out beside
+          // "We could not load your notifications".
+          countOverride={state === 'error' ? 'Could not load' : undefined}
+          trailing={unreadCount > 0 ? (
             <button
               type="button"
               className="pa-btn quiet tahi-focus-ring"
               onClick={() => { markAll().catch(() => {}) }}
-              disabled={readOnly || markingAll}
-              title={readOnly ? 'Read-only in client view' : undefined}
+              disabled={readOnly || markingAll || state !== 'ready'}
+              title={readOnly ? 'Read-only in client view' : markAllTitle}
             >
               <span className="pa-btn-ic"><ShellIcon n="checks" s={15} /></span>
               {markingAll ? 'Marking' : 'Mark all as read'}
             </button>
+          ) : undefined}
+        >
+          {body}
+
+          {/* A phone has no rail to hold Email preferences, so it lands at the
+              end of the feed instead. Hidden from lg up, where the rail's own
+              foot carries it. */}
+          {state === 'ready' && (
+            <Link href={PREFS_HREF} className="pa-nprefs tahi-focus-ring">
+              <span className="pa-nprefs-ic"><ShellIcon n="settings" s={16} /></span>
+              <span className="pa-nprefs-t">
+                <b>Email preferences</b>
+                <small>Choose what lands in your inbox and what stays in the bell.</small>
+              </span>
+              <span className="pa-nprefs-go"><ShellIcon n="arrow" s={16} /></span>
+            </Link>
           )}
-        </div>
-
-        {showFilters && (
-          <div className="pa-chips" role="group" aria-label="Filter by kind">
-            <button
-              type="button"
-              className={'pa-chip tahi-focus-ring' + (kinds.length === 0 ? ' on' : '')}
-              aria-pressed={kinds.length === 0}
-              onClick={() => setKinds([])}
-            >
-              All kinds
-            </button>
-            {kindDefs.map(k => (
-              <button
-                key={k.key}
-                type="button"
-                className={'pa-chip tahi-focus-ring' + (kinds.includes(k.key) ? ' on' : '')}
-                aria-pressed={kinds.includes(k.key)}
-                onClick={() => toggleKind(k.key)}
-              >
-                <span className="pa-chip-ic"><ShellIcon n={k.icon} s={13} /></span>
-                {k.label}
-                {countsKnown && counts[k.key] ? <span className="pa-chip-n">{counts[k.key]}</span> : null}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {body}
+        </RailLayout>
       </div>
     </div>
   )
