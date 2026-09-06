@@ -99,6 +99,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 00:20 NZST (Mon) act-as-client built and reviewed (0641c8de), merges cleanly, queued behind the email allowlist. Cutover prep still in its allowlist fix and importer build.
 
+- 00:55 NZST (Mon) email allowlist (df07ae62 + 04979c5c) and act-as-client (0641c8de) merged; 3122 tests, build green; migration 0094 (email_suppressions) on production, staging and the QA db; QA gates: policy defaults allowlist / business@tahi.studio only / staci and nathan blocked, pages 200, Client view bounces, preview write 403. Pushing and deploying.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - [x] More sheet Track time row left-aligned (17a490b2).
