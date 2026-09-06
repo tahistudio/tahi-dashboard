@@ -642,6 +642,19 @@ export const conversations = sqliteTable('conversations', {
 }, (table) => [
   index('idx_conversations_org').on(table.orgId),
   index('idx_conversations_request').on(table.requestId),
+  // One request thread per request, one standing channel per org. Both are
+  // resolved lazily by lib/org-channel.ts, and a lazy find-or-create races
+  // itself the moment two tabs post at once: without these the pre-hydration
+  // era left duplicate request_thread rows behind and a second Messages tab
+  // would mint a second org channel. Partial, because `direct` and `group`
+  // rows legitimately share a null request_id / repeat an org_id.
+  // Migration 0092 does the tidy that makes them creatable.
+  uniqueIndex('idx_conversations_request_thread')
+    .on(table.requestId)
+    .where(sql`type = 'request_thread'`),
+  uniqueIndex('idx_conversations_org_channel')
+    .on(table.orgId)
+    .where(sql`type = 'org_channel'`),
 ])
 
 // ============================================================
@@ -661,6 +674,11 @@ export const conversationParticipants = sqliteTable('conversation_participants',
 }, (table) => [
   index('idx_conv_participants_conv').on(table.conversationId),
   index('idx_conv_participants_participant').on(table.participantId, table.participantType),
+  // One row per person per room. The unread cursor is read with
+  // `participants.find(...)`, which silently picks whichever duplicate came
+  // back first, so a person added twice could carry two different lastReadAt
+  // values and the room's unread count would flip between them.
+  uniqueIndex('idx_conv_participants_unique').on(table.conversationId, table.participantId),
 ])
 
 // ============================================================
@@ -688,6 +706,11 @@ export const messages = sqliteTable('messages', {
   index('idx_messages_request').on(table.requestId),
   index('idx_messages_org').on(table.orgId),
   index('idx_messages_conversation').on(table.conversationId),
+  // Every inbox read is "the newest visible message per request, newest
+  // first" (lib/messages-store.ts). idx_messages_request alone left SQLite
+  // sorting each thread in memory once per request in the window.
+  index('idx_messages_request_created').on(table.requestId, table.createdAt),
+  index('idx_messages_conversation_created').on(table.conversationId, table.createdAt),
 ])
 
 // ============================================================

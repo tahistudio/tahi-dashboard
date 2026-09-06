@@ -228,6 +228,16 @@ function tool(name: string, description: string, properties: Record<string, unkn
 }
 
 /**
+ * A thread source to its path segment. Only the two stores the inbox knows
+ * about; anything else throws rather than building a URL that would 404 and
+ * read as "no such conversation".
+ */
+function messageSource(value: unknown): string {
+  if (value === 'channel' || value === 'request') return value
+  throw new Error("source must be 'channel' or 'request'")
+}
+
+/**
  * A blocker subject type to its path segment: 'task' to 'tasks', 'request' to
  * 'requests'. Rejects anything else rather than building a URL that would
  * 404 and read as "no such task".
@@ -1408,8 +1418,50 @@ const TOOLS: ToolDef[] = [
   }),
 
   // ── Messaging ─────────────────────────────────────────────────────────
-  tool('list_conversations', 'List all messaging conversations with unread counts'),
-  tool('create_conversation', 'Create a new messaging conversation', {
+  // The inbox is ONE surface over TWO stores: an org channel (the standing
+  // line with a client) and a request thread (the message stream that already
+  // lives on the request). A thread is addressed by a source + id PAIR, never
+  // by one id, because the two ids live in different tables.
+  tool('list_messages', 'Studio inbox: every client line and every request thread the caller is scoped to, with unread counts and last-message previews. Pass orgId to narrow to one client. Each row carries source ("channel" or "request") and id, which are what get_message_thread and post_message take. A client nobody has written to yet still gets a channel row, and its id is the organisations.id: the room is minted by the first post_message on it.', {
+    orgId: prop('string', 'Narrow to one client (organisations.id). Omit for every client in scope.'),
+  }),
+  tool('get_message_thread', 'Read one thread from the studio inbox, with attachments, voice notes and the read cursor. Studio view: internal notes ARE included.', {
+    source: prop('string', 'Which store: "channel" for a client standing line, "request" for a request thread'),
+    id: prop('string', 'conversations.id for a channel (or the organisations.id to open one), requests.id for a request thread'),
+  }, ['source', 'id']),
+  tool('post_message', 'Post to a thread as the studio. Set isInternal true for a note only the studio can see; anything else is sent to the client and emails them.', {
+    source: prop('string', 'Which store: "channel" or "request"'),
+    id: prop('string', 'conversations.id / organisations.id for a channel, requests.id for a request thread'),
+    body: prop('string', 'Message body (HTML or plain text; sanitised server side)'),
+    isInternal: prop('boolean', 'True for a studio-only note. Never reaches the client.'),
+    attachmentFileIds: { type: 'array', items: { type: 'string' }, description: 'files.id values already uploaded through /api/uploads/confirm' },
+  }, ['source', 'id', 'body']),
+  tool('mark_message_thread_read', 'Move the studio read cursor on one thread.', {
+    source: prop('string', 'Which store: "channel" or "request"'),
+    id: prop('string', 'conversations.id for a channel, requests.id for a request thread'),
+  }, ['source', 'id']),
+
+  // The portal_* twins answer the same questions AS A CLIENT: their org only,
+  // their brands only, no internal notes, no deleted rows. orgId is required
+  // because the service token has no client org of its own to resolve.
+  tool('portal_list_conversations', 'CLIENT VIEW of the inbox for one org: their standing line to the studio plus a thread for every request they can open. Internal notes and deleted messages are excluded, exactly as the portal would.', {
+    orgId: prop('string', 'The client organisation (organisations.id) to read as'),
+  }, ['orgId']),
+  tool('portal_get_conversation', 'CLIENT VIEW of one thread. Use source "channel" with id "new" for their studio line before it has been used.', {
+    orgId: prop('string', 'The client organisation to read as'),
+    source: prop('string', 'Which store: "channel" or "request"'),
+    id: prop('string', 'requests.id for a request thread; "new" for the studio line'),
+  }, ['orgId', 'source', 'id']),
+  tool('portal_send_message', 'Post to a client thread AS THE CLIENT. Always external: there is no internal option on this path. Emails the studio.', {
+    orgId: prop('string', 'The client organisation to post as'),
+    source: prop('string', 'Which store: "channel" or "request"'),
+    id: prop('string', 'requests.id for a request thread; "new" for the studio line'),
+    body: prop('string', 'Message body (HTML or plain text; sanitised server side)'),
+    attachmentFileIds: { type: 'array', items: { type: 'string' }, description: 'files.id values already uploaded through /api/uploads/confirm' },
+  }, ['orgId', 'source', 'id', 'body']),
+
+  tool('list_conversations', 'The raw conversations table with unread counts. Prefer list_messages, which is the surface the dashboard actually renders.'),
+  tool('create_conversation', 'Create a new messaging conversation. Type org_channel is FIND-OR-CREATE: there is exactly one standing line per client, so a second call for an org that already has one returns the existing room rather than a duplicate.', {
     type: prop('string', 'Conversation type: direct, group, org_channel, request_thread'),
     participantIds: { type: 'array', items: { type: 'string' }, description: 'Array of participant IDs' },
     name: prop('string', 'Conversation name (for group or channel types)'),
@@ -1782,6 +1834,13 @@ async function executeTool(
 ): Promise<string> {
   const json = (data: unknown) => JSON.stringify(data, null, 2)
   const s = (key: string) => args[key] ? String(args[key]) : undefined
+  /** A required string argument. Throws by name rather than building a URL
+   *  with 'undefined' in it, which 404s and reads as "no such row". */
+  const need = (key: string): string => {
+    const value = s(key)
+    if (!value) throw new Error(`${key} is required`)
+    return value
+  }
 
   // The request surface is a pure lookup, so it answers first and the switch
   // below never sees those names.
@@ -2522,6 +2581,47 @@ async function executeTool(
     }
 
     // ── Messaging ─────────────────────────────────────────────────────
+    case 'list_messages': {
+      const messageParams: Record<string, string> = {}
+      if (typeof args.orgId === 'string' && args.orgId) messageParams.orgId = args.orgId
+      return json(await apiGet('/api/admin/messages', token, messageParams))
+    }
+    case 'get_message_thread':
+      return json(await apiGet(`/api/admin/messages/${messageSource(args.source)}/${encodeURIComponent(need('id'))}`, token))
+    case 'post_message':
+      return json(await apiWrite(
+        `/api/admin/messages/${messageSource(args.source)}/${encodeURIComponent(need('id'))}`,
+        token, 'POST',
+        {
+          body: need('body'),
+          isInternal: args.isInternal === true,
+          attachmentFileIds: Array.isArray(args.attachmentFileIds) ? args.attachmentFileIds : [],
+        },
+      ))
+    case 'mark_message_thread_read':
+      return json(await apiWrite(
+        `/api/admin/messages/${messageSource(args.source)}/${encodeURIComponent(need('id'))}/read`,
+        token, 'POST',
+      ))
+
+    case 'portal_list_conversations':
+      return json(await apiGet('/api/portal/messages', token, { orgId: need('orgId') }))
+    case 'portal_get_conversation':
+      return json(await apiGet(
+        `/api/portal/messages/${messageSource(args.source)}/${encodeURIComponent(need('id'))}`,
+        token, { orgId: need('orgId') },
+      ))
+    case 'portal_send_message':
+      return json(await apiWrite(
+        `/api/portal/messages/${messageSource(args.source)}/${encodeURIComponent(need('id'))}`,
+        token, 'POST',
+        {
+          orgId: need('orgId'),
+          body: need('body'),
+          attachmentFileIds: Array.isArray(args.attachmentFileIds) ? args.attachmentFileIds : [],
+        },
+      ))
+
     case 'list_conversations':
       return json(await apiGet('/api/admin/conversations', token))
     case 'create_conversation':

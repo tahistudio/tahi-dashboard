@@ -161,6 +161,13 @@ export async function POST(
 
     let body: {
       content?: string
+      /**
+       * Alias for `content`. The worker MCP tool `send_message` has always
+       * posted `body`, so every call it made answered 400 "content is
+       * required" and no message was ever sent through it. Both names are
+       * read now rather than renaming one and breaking the other caller.
+       */
+      body?: string
       isInternal?: boolean
       voiceNote?: { storageKey?: string; durationSeconds?: number; mimeType?: string }
     }
@@ -170,7 +177,8 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
     }
 
-    if (!body.content?.trim()) {
+    const content = (body.content ?? body.body ?? '').trim()
+    if (!content) {
       return NextResponse.json({ error: 'content is required' }, { status: 400 })
     }
 
@@ -224,7 +232,7 @@ export async function POST(
       orgId: msgOrgId,
       authorId: participantId,
       authorType: 'team_member',
-      body: body.content.trim(),
+      body: content,
       isInternal: body.isInternal ?? false,
       createdAt: now,
       updatedAt: now,
@@ -260,7 +268,7 @@ export async function POST(
     ])
 
     // Process @mentions and create mention rows + notifications
-    const mentionedPeople = parseMentions(body.content.trim())
+    const mentionedPeople = parseMentions(content)
     if (mentionedPeople.length > 0) {
       const mentionRows = mentionedPeople.map(m => ({
         id: crypto.randomUUID(),
@@ -284,7 +292,7 @@ export async function POST(
           mentionedId: m.id,
           senderTeamMemberId: participantId,
           title: 'You were mentioned in a message',
-          body: body.content.trim().slice(0, 200),
+          body: content.slice(0, 200),
           entityType: 'message',
           entityId: conversationId,
         })
@@ -321,7 +329,7 @@ export async function POST(
       await createNotifications(database, recipients, {
         type: 'new_message',
         title: `New message in ${convName}`,
-        body: body.content.trim().slice(0, 200),
+        body: content.slice(0, 200),
         entityType: 'message',
         entityId: conversationId,
       })

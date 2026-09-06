@@ -43,20 +43,20 @@ export const FEATURE_TREE: ReadonlyArray<FeatureNode> = [
   { key: 'requests', label: 'Requests', description: 'Client work requests (submit, track, board).', parent: null, appliesTo: ['team', 'client'], route: '/requests' },
   { key: 'requests.board', label: 'Requests board', description: 'Kanban / timeline board view of requests.', parent: 'requests', appliesTo: ['team', 'client'] },
   { key: 'requests.bulk_actions', label: 'Requests bulk actions', description: 'Multi-select bulk status / assign / archive.', parent: 'requests', appliesTo: ['team'] },
-  // The standalone Messages page is hidden: app/(dashboard)/messages/page.tsx
-  // redirects both audiences away and the client channel is the request
-  // thread. The KEY is still live, though: the daily brief gates its "N client
-  // replies came in overnight" row on it (app/api/admin/overview/brief), so
-  // deleting the node would strand control of something that does render.
-  // It is marked unavailable and described by what it actually governs.
+  // One key, three enforcement points, which is the whole invariant: the nav
+  // entry (nav-model.tsx), the page (requirePageFeature in
+  // app/(dashboard)/messages/page.tsx) and the data (requireFeature on
+  // /api/admin/messages, requirePortalFeature on /api/portal/messages). It
+  // also still gates the daily brief's "N client replies came in overnight"
+  // row (app/api/admin/overview/brief), which is why the key survived the
+  // period when the page was hidden.
   {
     key: 'messages',
     label: 'Messages',
-    description: 'Client replies on the daily brief. The standalone Messages page is hidden; the request thread is the client channel.',
+    description: 'The inbox: a standing line between a client and the studio, plus a thread for every request. Off means the page is hidden, the route redirects and both APIs 403.',
     parent: null,
     appliesTo: ['team', 'client'],
     route: '/messages',
-    unavailable: 'The Messages page is hidden. This switch only governs the client-replies row on the daily brief.',
   },
   { key: 'files', label: 'Files', description: 'Client file browser (R2 uploads).', parent: null, appliesTo: ['client'], route: '/files' },
   { key: 'invoices', label: 'Invoices', description: 'Billing records.', parent: null, appliesTo: ['team', 'client'], route: '/invoices' },

@@ -29,9 +29,9 @@ describe('notificationHref, the request cases', () => {
     expect(notificationHref('task', 'task_1', 'team')).toBe('/tasks/task_1')
   })
 
-  it('never points either audience at the hidden Messages page', () => {
-    expect(notificationHref('message', 'conv_1', 'team')).toBe('/requests')
-    expect(notificationHref('message', 'conv_1', 'client')).toBe('/requests')
+  it('points both audiences at the Messages inbox, which is a real page again', () => {
+    expect(notificationHref('message', 'conv_1', 'team')).toBe('/messages')
+    expect(notificationHref('message', 'conv_1', 'client')).toBe('/messages')
   })
 })
 

@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import { eq, desc, and, sql } from 'drizzle-orm'
 import { scopedOrgIds } from '@/lib/access-scope'
 import { isOrgInScope } from '../_scoping/org-scope'
+import { resolveOrgChannel } from '@/lib/org-channel'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -185,6 +186,52 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ conversations: output })
 }
 
+/**
+ * Normalise whatever a caller sent as `participantIds` into rows this table
+ * can hold.
+ *
+ * Accepts `{ id, type }` and the flat `'team_member:<id>'` / `'contact:<id>'`
+ * form, tolerates the legacy `'team:<id>'` prefix, and DROPS anything else.
+ * Dropping matters: the old code turned an unrecognised entry into an insert
+ * with `participantId: undefined`, which is the failure that left orphan
+ * conversations behind. `org:<id>` was never a participant type at all, so it
+ * is dropped rather than guessed at.
+ */
+function normaliseParticipantSeeds(
+  raw: ReadonlyArray<{ id?: string; type?: string } | string>,
+): Array<{ id: string; type: 'team_member' | 'contact' }> {
+  const out: Array<{ id: string; type: 'team_member' | 'contact' }> = []
+  const seen = new Set<string>()
+  for (const entry of raw) {
+    let id: string | undefined
+    let type: string | undefined
+    if (typeof entry === 'string') {
+      const at = entry.indexOf(':')
+      if (at > 0) {
+        type = entry.slice(0, at)
+        id = entry.slice(at + 1)
+      } else {
+        id = entry
+        type = 'team_member'
+      }
+    } else if (entry && typeof entry === 'object') {
+      id = typeof entry.id === 'string' ? entry.id : undefined
+      type = typeof entry.type === 'string' ? entry.type : undefined
+    }
+    if (!id) continue
+    const resolved =
+      type === 'contact' ? 'contact'
+      : type === 'team_member' || type === 'team' || type === undefined ? 'team_member'
+      : null
+    if (!resolved) continue
+    const key = `${resolved}:${id}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ id, type: resolved })
+  }
+  return out
+}
+
 // ── POST /api/admin/conversations ───────────────────────────────────────────
 // Create a new conversation.
 // Body: { type, name?, orgId?, visibility, participantIds: [{id, type}] }
@@ -204,7 +251,19 @@ export async function POST(req: NextRequest) {
       orgId?: string
       requestId?: string
       visibility?: string
-      participantIds?: Array<{ id: string; type: string }>
+      /**
+       * Either `[{ id, type }]` or a flat `['team_member:<id>', ...]`.
+       *
+       * The flat form is what the hidden Messages page and the MCP
+       * `create_conversation` tool have always sent, and reading `p.id` off a
+       * string produced `participantId: undefined` on every extra
+       * participant: the conversation row and the creator row were already
+       * written by then, so the request 500'd and left an orphan behind
+       * (swept by migration 0092). Both shapes are normalised now, and an
+       * entry that resolves to nothing is DROPPED rather than inserted as a
+       * row nobody can be.
+       */
+      participantIds?: Array<{ id?: string; type?: string } | string>
     }
     try {
       body = await req.json()
@@ -257,45 +316,70 @@ export async function POST(req: NextRequest) {
 
     const creatorParticipantId = teamMemberRows.length > 0 ? teamMemberRows[0].id : userId
 
-    const convId = crypto.randomUUID()
     const now = new Date().toISOString()
 
-    await database.insert(schema.conversations).values({
-      id: convId,
-      type,
-      name: name ?? null,
-      orgId: convOrgId ?? null,
-      requestId: requestId ?? null,
-      visibility,
-      createdById: userId,
-      createdAt: now,
-      updatedAt: now,
-    })
+    // AN ORG CHANNEL IS FIND-OR-CREATE, not create. There is exactly one
+    // standing line per client (migration 0092 puts a UNIQUE index on it), so
+    // a second call for a client that already has one would trip the
+    // constraint and answer 500. It goes through resolveOrgChannel instead,
+    // the same resolver /api/admin/messages and the portal use, and returns
+    // the existing room. The name and visibility the caller sent are ignored
+    // on this type: a standing line is named after its client and is always
+    // external, which is what makes it the room both audiences are reading.
+    let convId: string
+    if (type === 'org_channel' && convOrgId) {
+      const channelId = await resolveOrgChannel(database as unknown as D1, convOrgId, {
+        create: true,
+        createdById: userId,
+      })
+      if (!channelId) {
+        return NextResponse.json({ error: 'Could not resolve the org channel' }, { status: 409 })
+      }
+      convId = channelId
+    } else {
+      convId = crypto.randomUUID()
+      await database.insert(schema.conversations).values({
+        id: convId,
+        type,
+        name: name ?? null,
+        orgId: convOrgId ?? null,
+        requestId: requestId ?? null,
+        visibility,
+        createdById: userId,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
 
     // Add the creator as an admin participant
-    await database.insert(schema.conversationParticipants).values({
-      id: crypto.randomUUID(),
-      conversationId: convId,
-      participantId: creatorParticipantId,
-      participantType: 'team_member',
-      role: 'admin',
-      joinedAt: now,
-    })
+    try {
+      await database.insert(schema.conversationParticipants).values({
+        id: crypto.randomUUID(),
+        conversationId: convId,
+        participantId: creatorParticipantId,
+        participantType: 'team_member',
+        role: 'admin',
+        joinedAt: now,
+      })
+    } catch {
+      // Already in the room, on a channel that was found rather than created.
+    }
 
-    // Add other participants
-    if (participantIds && participantIds.length > 0) {
-      for (const p of participantIds) {
-        // Skip if the participant is the creator
-        if (p.id === creatorParticipantId) continue
-
+    // Add other participants, from either accepted shape.
+    for (const seed of normaliseParticipantSeeds(participantIds ?? [])) {
+      if (seed.id === creatorParticipantId) continue
+      try {
         await database.insert(schema.conversationParticipants).values({
           id: crypto.randomUUID(),
           conversationId: convId,
-          participantId: p.id,
-          participantType: p.type === 'contact' ? 'contact' : 'team_member',
+          participantId: seed.id,
+          participantType: seed.type,
           role: 'member',
           joinedAt: now,
         })
+      } catch {
+        // The unique index added by migration 0092 caught the same person
+        // twice in one payload. They are in the room either way.
       }
     }
 

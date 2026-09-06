@@ -33,13 +33,15 @@ import {
 // ── Primary tab hrefs per audience ──────────────────────────────────────────
 // Admin: the 4 core workspace destinations.
 // Client: the 4 most-visited portal destinations.
-// '/messages' is dropped from both sets while messaging is hidden for V1
-// (see components/tahi/nav-model.tsx).
-const ADMIN_PRIMARY_HREFS = ['/overview', '/requests', '/tasks']
-const CLIENT_PRIMARY_HREFS = ['/overview', '/requests', '/files']
+// '/messages' is back in both sets: the inbox is a real page again, and it is
+// one of the two surfaces a client actually opens on a phone.
+const ADMIN_PRIMARY_HREFS = ['/overview', '/requests', '/tasks', '/messages']
+const CLIENT_PRIMARY_HREFS = ['/overview', '/requests', '/messages', '/files']
 
-// Fallback icon names used only when an item is absent from the filtered nav
-// (e.g. if features are eventually passed and gate a primary tab).
+// Fallback icon names, used only on the impersonation path where no feature
+// map is passed and the filtered nav is deliberately unfiltered. When a map IS
+// supplied, an href missing from it is a DENIED page, not a missing icon, and
+// the tab is dropped instead (see primaryTabs below).
 const ADMIN_FALLBACK_ICONS: Record<string, ShellIconName> = {
   '/overview': 'overview',
   '/requests': 'requests',
@@ -108,14 +110,25 @@ export function MobileBottomNav({ isAdmin = false, features, clientPortalRole }:
 
   const fallbackIcons = showAsAdmin ? ADMIN_FALLBACK_ICONS : CLIENT_FALLBACK_ICONS
   const primaryHrefs  = showAsAdmin ? ADMIN_PRIMARY_HREFS  : CLIENT_PRIMARY_HREFS
-  const primaryTabs   = primaryHrefs.map(href => {
-    const item = itemMap.get(href)
-    return {
-      href,
-      label: item?.label ?? href.slice(1),
-      icon:  (item?.icon ?? fallbackIcons[href] ?? 'overview') as ShellIconName,
-    }
-  })
+  // THE TAB BAR OBEYS THE SAME GATE AS THE RAIL. The hrefs above are a
+  // hardcoded shortlist, so mapping them unconditionally rendered a tab for a
+  // page the feature map had switched off: the rail hid it, requirePageFeature
+  // redirected it and both APIs answered 403, but the phone still offered a
+  // tab labelled "messages" that bounced. When a feature map was supplied, an
+  // href absent from the filtered nav is denied and is dropped. When it was
+  // not (the impersonation preview, which shows the client nav unfiltered),
+  // the fallback label and icon stand as before.
+  const gateTabs      = !!features && !isImpersonatingClient
+  const primaryTabs   = primaryHrefs
+    .filter(href => !gateTabs || itemMap.has(href))
+    .map(href => {
+      const item = itemMap.get(href)
+      return {
+        href,
+        label: item?.label ?? href.slice(1),
+        icon:  (item?.icon ?? fallbackIcons[href] ?? 'overview') as ShellIconName,
+      }
+    })
 
   const active     = (href: string) => isRouteActive(pathname, href)
   const closeSheet = useCallback(() => setSheetOpen(false), [])

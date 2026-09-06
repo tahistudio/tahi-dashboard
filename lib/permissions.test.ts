@@ -381,10 +381,10 @@ describe('filterNav - adminOnly gating (audit T1.18)', () => {
   })
 })
 
-describe('nav model - messaging hidden for V1', () => {
-  it('neither nav set carries a /messages item', () => {
-    expect(navHrefs(ADMIN_NAV)).not.toContain('/messages')
-    expect(navHrefs(CLIENT_NAV)).not.toContain('/messages')
+describe('nav model - messaging is live for both audiences', () => {
+  it('both nav sets carry a /messages item', () => {
+    expect(navHrefs(ADMIN_NAV)).toContain('/messages')
+    expect(navHrefs(CLIENT_NAV)).toContain('/messages')
   })
 
   it('the client nav keeps everything else', () => {
@@ -393,7 +393,7 @@ describe('nav model - messaging hidden for V1', () => {
       userEmail: null, canManagePermissions: false,
     }))
     expect(visible).toEqual([
-      '/overview', '/requests', '/notifications',
+      '/overview', '/requests', '/notifications', '/messages',
       '/files', '/services',
       '/invoices',
     ])
@@ -423,6 +423,11 @@ describe('client nav - no dead ends (Tier 1 item 10)', () => {
       // Rows are keyed on the caller's own Clerk user id, so the page and its
       // API are self-scoping: no org gate, nothing to bounce.
       '/notifications',
+      // One route, two branches: a client gets the client branch of
+      // app/(dashboard)/messages/page.tsx, never a redirect. It is gated on
+      // the 'messages' feature key, which is a deliberate hide rather than a
+      // dead end: the nav reads the same key, so off means the item is gone.
+      '/messages',
     ])
     for (const href of navHrefs(CLIENT_NAV)) {
       expect(CLIENT_RENDERABLE.has(href)).toBe(true)
