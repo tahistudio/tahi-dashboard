@@ -15,9 +15,16 @@
 import { schema } from '@/db/d1'
 import { sql } from 'drizzle-orm'
 import { importStripeInvoice, type StripeInvoiceLike } from '@/lib/stripe-import'
+import { findInvoiceTwin, isInvoiceRow, type InvoiceRowLike } from '@/lib/stripe-dedupe'
 import type { SyncOutcome } from '@/lib/xero-sync'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+/** The PaymentIntent as it arrives when expanded on the charge listing. */
+interface StripePaymentIntentRef {
+  id: string
+  invoice?: string | null
+}
 
 interface StripeCharge {
   id: string
@@ -26,7 +33,7 @@ interface StripeCharge {
   status: string
   description: string | null
   invoice: string | null
-  payment_intent: string | null
+  payment_intent: string | StripePaymentIntentRef | null
   customer: string | null
   receipt_email: string | null
   billing_details: { email: string | null; name: string | null } | null
@@ -35,6 +42,31 @@ interface StripeCharge {
   refunded: boolean
   statement_descriptor: string | null
   metadata: Record<string, string>
+}
+
+/** The PaymentIntent id, whether Stripe sent the id or the expanded object. */
+export function paymentIntentId(charge: Pick<StripeCharge, 'payment_intent'>): string | null {
+  const pi = charge.payment_intent
+  if (!pi) return null
+  return typeof pi === 'string' ? pi : pi.id
+}
+
+/**
+ * The Stripe invoice this charge settles, from EITHER place the link lives.
+ *
+ * THE BUG this exists for: a charge that settled through a PaymentIntent (every
+ * subscription payment, and every `py_` non-card charge) carries the invoice
+ * link on the PaymentIntent, and leaves `charge.invoice` null. The old guard
+ * read `charge.invoice` alone, so those charges looked like one-off payments
+ * and were imported a second time as their own invoice row, doubling the
+ * client's billed total. The listing now expands `data.payment_intent` so this
+ * can read both.
+ */
+export function chargeInvoiceLink(charge: Pick<StripeCharge, 'invoice' | 'payment_intent'>): string | null {
+  if (charge.invoice) return charge.invoice
+  const pi = charge.payment_intent
+  if (pi && typeof pi !== 'string' && pi.invoice) return pi.invoice
+  return null
 }
 
 /**
@@ -56,7 +88,9 @@ export async function importStripePayments(database: D1, stripeKey: string | und
     let pagesWalked = 0
 
     while (hasMore && pagesWalked < MAX_PAGES) {
-      let url = `https://api.stripe.com/v1/charges?limit=${PAGE_SIZE}`
+      // data.payment_intent is EXPANDED on purpose: it is the only place the
+      // invoice link lives for a subscription payment. See chargeInvoiceLink.
+      let url = `https://api.stripe.com/v1/charges?limit=${PAGE_SIZE}&expand[]=data.payment_intent`
       if (startingAfter) url += `&starting_after=${startingAfter}`
 
       const chargesRes = await fetch(url, {
@@ -77,11 +111,24 @@ export async function importStripePayments(database: D1, stripeKey: string | und
 
     const truncated = hasMore
 
-    const existing = await database
-      .select({ stripeInvoiceId: schema.invoices.stripeInvoiceId })
+    const existing = (await database
+      .select({
+        id: schema.invoices.id,
+        orgId: schema.invoices.orgId,
+        stripeInvoiceId: schema.invoices.stripeInvoiceId,
+        source: schema.invoices.source,
+        totalUsd: schema.invoices.totalUsd,
+        currency: schema.invoices.currency,
+        createdAt: schema.invoices.createdAt,
+      })
       .from(schema.invoices)
-      .where(sql`${schema.invoices.stripeInvoiceId} IS NOT NULL`)
+      .where(sql`${schema.invoices.stripeInvoiceId} IS NOT NULL`)) as InvoiceRowLike[]
     const existingIds = new Set(existing.map(e => e.stripeInvoiceId))
+    // The second net. Even if Stripe hands us a charge with no invoice link at
+    // all, money already sitting on a Stripe INVOICE row for the same client,
+    // amount, currency and date is that same money, and importing the charge
+    // would double the client's total.
+    const invoiceBackedRows = existing.filter(isInvoiceRow)
 
     const orgs = await database
       .select({ id: schema.organisations.id, name: schema.organisations.name, stripeCustomerId: schema.organisations.stripeCustomerId })
@@ -96,8 +143,12 @@ export async function importStripePayments(database: D1, stripeKey: string | und
     const seenPaymentIntents = new Set<string>()
 
     for (const charge of allCharges) {
-      if (charge.invoice) {
+      // Invoice-backed money is ALREADY the invoice row. Reads the link on the
+      // charge and on its PaymentIntent, because a subscription charge only
+      // carries it on the latter.
+      if (chargeInvoiceLink(charge)) {
         skipped++
+        results.push({ chargeId: charge.id, status: 'invoice_backed' })
         continue
       }
 
@@ -112,19 +163,36 @@ export async function importStripePayments(database: D1, stripeKey: string | und
         continue
       }
 
-      if (charge.payment_intent) {
-        if (seenPaymentIntents.has(charge.payment_intent)) {
+      const intentId = paymentIntentId(charge)
+      if (intentId) {
+        if (seenPaymentIntents.has(intentId)) {
           skipped++
           results.push({ chargeId: charge.id, status: 'duplicate_payment' })
           continue
         }
-        seenPaymentIntents.add(charge.payment_intent)
+        seenPaymentIntents.add(intentId)
       }
+
+      const chargeCreatedAt = new Date(charge.created * 1000).toISOString()
+      const chargeAmount = charge.amount / 100
+      const chargeCurrency = charge.currency.toUpperCase()
 
       let matchedOrgId: string | null = null
       if (charge.customer) {
         const org = orgByCustomerId.get(charge.customer)
         if (org) matchedOrgId = org.id
+      }
+
+      if (matchedOrgId) {
+        const twin = findInvoiceTwin(
+          { orgId: matchedOrgId, totalUsd: chargeAmount, currency: chargeCurrency, createdAt: chargeCreatedAt },
+          invoiceBackedRows,
+        )
+        if (twin) {
+          skipped++
+          results.push({ chargeId: charge.id, status: 'invoice_twin_exists' })
+          continue
+        }
       }
 
       const customerName = charge.billing_details?.name ?? charge.receipt_email ?? charge.description ?? 'Unknown'
@@ -152,8 +220,8 @@ export async function importStripePayments(database: D1, stripeKey: string | und
         }
       }
 
-      const amount = charge.amount / 100
-      const currency = charge.currency.toUpperCase()
+      const amount = chargeAmount
+      const currency = chargeCurrency
       const invoiceId = crypto.randomUUID()
       const desc = charge.description ?? charge.statement_descriptor ?? 'Stripe payment'
 
@@ -173,9 +241,9 @@ export async function importStripePayments(database: D1, stripeKey: string | und
           amountUsd: amount,
           totalUsd: amount,
           currency,
-          paidAt: new Date(charge.created * 1000).toISOString(),
+          paidAt: chargeCreatedAt,
           notes: `Stripe payment: ${desc}`,
-          createdAt: new Date(charge.created * 1000).toISOString(),
+          createdAt: chargeCreatedAt,
           updatedAt: now,
         })
 

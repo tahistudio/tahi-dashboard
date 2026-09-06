@@ -1641,6 +1641,9 @@ export const TOOLS: ToolDef[] = [
   tool('match_xero_contacts', 'List Xero contacts with suggested dashboard client matches'),
   tool('import_stripe_invoices', 'Import all invoices from Stripe into dashboard'),
   tool('import_stripe_payments', 'Import one-off Stripe payments (charges without invoices) as paid records'),
+  tool('dedupe_stripe_charge_twins', 'Remove the Stripe charge twins: a subscription payment imported twice, once as the Stripe invoice (in_...) and once as the charge that settled it (ch_.../py_...), which doubles the client\'s billed total. Pairs a charge row with an invoice row on the same client, amount, currency and a created date within three days. DEFAULTS TO A DRY RUN: it lists every pair with both ids, amounts, dates and notes and writes nothing unless you pass dryRun false. The apply is super-admin only, deletes the CHARGE row and its line items (never the invoice row), refuses any row a time entry or an AI reply draft points at, and writes one audit row with every id removed.', {
+    dryRun: prop('boolean', 'Preview only. Defaults to TRUE: pass false to actually delete the charge twins.'),
+  }),
   tool('create_stripe_invoice', 'Create a Stripe invoice from a local invoice and get payment link. Finalising is a send: Stripe emails the finalised invoice to the customer itself, so this answers 409 "Held back by the email allowlist" and creates nothing in Stripe unless every billing contact for the client is allowed. Check list_email_suppressions for the row it wrote.', {
     invoiceId: prop('string', 'Local invoice ID to create Stripe invoice from'),
   }, ['invoiceId']),
@@ -2887,6 +2890,10 @@ async function executeTool(
       return json(await apiWrite('/api/admin/integrations/stripe/import-invoices', token, 'POST'))
     case 'import_stripe_payments':
       return json(await apiWrite('/api/admin/integrations/stripe/import-payments', token, 'POST'))
+    case 'dedupe_stripe_charge_twins':
+      return json(await apiWrite('/api/admin/invoices/dedupe-stripe-charges', token, 'POST', {
+        dryRun: args.dryRun !== false,
+      }))
     case 'create_stripe_invoice':
       return json(await apiWrite('/api/admin/invoices/stripe-create', token, 'POST', args as Record<string, unknown>))
     case 'get_xero_branding_themes':
