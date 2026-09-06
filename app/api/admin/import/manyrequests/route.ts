@@ -29,6 +29,19 @@
  *   wrangler secret put MANYREQUESTS_API_TOKEN --env staging
  *   echo 'MANYREQUESTS_API_TOKEN="..."' >> .dev.vars       (local)
  *
+ * WHAT TO CHECK ON THE FIRST DRY RUN, IN THIS ORDER, BEFORE TRUSTING A COUNT:
+ *   1. samples.requests[0].values.description is non-empty and
+ *      formResponses._manyrequests.fields carries the intake answers. If the
+ *      briefs and comments are missing the detail reads are not landing;
+ *      warnings will name the request and the shape that came back.
+ *   2. skipped.organisations holds no "the name map expects a D1 organisation"
+ *      refusal. All 15 hand-mapped names must resolve or that client is
+ *      refused rather than duplicated.
+ *   3. skipped.invoices, for the possible-duplicate refusals against the Xero
+ *      and Stripe rows already in D1. Settle those by hand before running the
+ *      invoices entity at all.
+ *   4. warnings, for read failures and for the mail probe.
+ *
  * WALK REQUESTS IN WINDOWS. 329 sequential upstream GETs plus the D1 reads is
  * minutes of wall time against Cloudflare's ~100s edge budget, and every one is
  * a subrequest. Run requests and messages as
