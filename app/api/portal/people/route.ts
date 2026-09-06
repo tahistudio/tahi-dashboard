@@ -1,4 +1,5 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { isOrgAdmin, isPortalAdminContact } from '@/lib/portal-access'
 import { clerkClient } from '@clerk/nextjs/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -28,22 +29,14 @@ export const dynamic = 'force-dynamic'
  * org is rejected. A Tahi admin previewing Client view (impersonating) is
  * read-only and, having no client Clerk session, cannot send invitations
  * (mirrors /api/portal/invites).
+ *
+ * "Client admin" is lib/portal-access.ts isOrgAdmin: portalRole 'admin', or the
+ * org's primary contact, whose role column still reads the NOT NULL 'member'
+ * default on every workspace created before the creation paths started stamping
+ * a role. Reading portalRole alone left a fresh owner unable to invite anyone.
  */
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
-
-async function requireClientAdmin(
-  drizzle: Drizzle,
-  orgId: string,
-  userId: string,
-): Promise<boolean> {
-  const [contact] = await drizzle
-    .select({ portalRole: schema.contacts.portalRole })
-    .from(schema.contacts)
-    .where(and(eq(schema.contacts.orgId, orgId), eq(schema.contacts.clerkUserId, userId)))
-    .limit(1)
-  return contact?.portalRole === 'admin'
-}
 
 export async function GET(req: NextRequest) {
   const { orgId, userId } = await getPortalAuth(req)
@@ -99,7 +92,7 @@ export async function POST(req: NextRequest) {
   const database = await db()
   const drizzle = database as Drizzle
 
-  if (!(await requireClientAdmin(drizzle, orgId, userId))) {
+  if (!(await isOrgAdmin(drizzle, orgId, userId))) {
     return NextResponse.json(
       { error: 'Only workspace admins can invite teammates' },
       { status: 403 },
@@ -198,7 +191,7 @@ export async function PATCH(req: NextRequest) {
   const database = await db()
   const drizzle = database as Drizzle
 
-  if (!(await requireClientAdmin(drizzle, orgId, userId))) {
+  if (!(await isOrgAdmin(drizzle, orgId, userId))) {
     return NextResponse.json(
       { error: 'Only workspace admins can manage teammates' },
       { status: 403 },
@@ -214,6 +207,7 @@ export async function PATCH(req: NextRequest) {
     .select({
       id: schema.contacts.id,
       portalRole: schema.contacts.portalRole,
+      isPrimary: schema.contacts.isPrimary,
     })
     .from(schema.contacts)
     .where(and(eq(schema.contacts.orgId, orgId), eq(schema.contacts.id, body.id)))
@@ -226,11 +220,19 @@ export async function PATCH(req: NextRequest) {
   if (body.name?.trim()) updates.name = body.name.trim()
   if (body.portalRole === 'admin' || body.portalRole === 'member') {
     // Never demote the last admin: the org would lock itself out of settings.
-    if (target.portalRole === 'admin' && body.portalRole === 'member') {
-      const admins = await drizzle
-        .select({ id: schema.contacts.id })
+    // Counted through the same rule the gate above applies, not on portal_role
+    // alone. A `WHERE portal_role = 'admin'` count reads zero on a workspace
+    // whose owner is only an admin by virtue of being the primary contact,
+    // which would refuse a demotion the org is perfectly safe to make.
+    if (isPortalAdminContact(target) && body.portalRole === 'member') {
+      const roster = await drizzle
+        .select({
+          portalRole: schema.contacts.portalRole,
+          isPrimary: schema.contacts.isPrimary,
+        })
         .from(schema.contacts)
-        .where(and(eq(schema.contacts.orgId, orgId), eq(schema.contacts.portalRole, 'admin')))
+        .where(eq(schema.contacts.orgId, orgId))
+      const admins = roster.filter(isPortalAdminContact)
       if (admins.length <= 1) {
         return NextResponse.json(
           { error: 'Your workspace needs at least one admin' },
@@ -268,7 +270,7 @@ export async function DELETE(req: NextRequest) {
   const database = await db()
   const drizzle = database as Drizzle
 
-  if (!(await requireClientAdmin(drizzle, orgId, userId))) {
+  if (!(await isOrgAdmin(drizzle, orgId, userId))) {
     return NextResponse.json(
       { error: 'Only workspace admins can manage teammates' },
       { status: 403 },

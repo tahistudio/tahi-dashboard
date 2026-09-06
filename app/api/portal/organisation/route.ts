@@ -1,25 +1,16 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { isOrgAdmin } from '@/lib/portal-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { and, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-// Writes are client-admin only (contacts.portal_role === 'admin'), matching
-// the sibling /api/portal/brands and /api/portal/people write endpoints.
-async function requireClientAdmin(
-  drizzle: Drizzle,
-  orgId: string,
-  userId: string,
-): Promise<boolean> {
-  const [contact] = await drizzle
-    .select({ portalRole: schema.contacts.portalRole })
-    .from(schema.contacts)
-    .where(and(eq(schema.contacts.orgId, orgId), eq(schema.contacts.clerkUserId, userId)))
-    .limit(1)
-  return contact?.portalRole === 'admin'
-}
+// Writes are client-admin only, resolved by lib/portal-access.ts isOrgAdmin
+// (portalRole 'admin', or the org's primary contact whose role column still
+// reads the 'member' default). The sibling /api/portal/brands and
+// /api/portal/people write endpoints ask the same helper the same question.
 
 /**
  * Portal organisation settings. The signed-in client's own company identity.
@@ -83,7 +74,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   const databaseForGate = await db()
-  if (!(await requireClientAdmin(databaseForGate as Drizzle, orgId, userId))) {
+  if (!(await isOrgAdmin(databaseForGate as Drizzle, orgId, userId))) {
     return NextResponse.json(
       { error: 'Only workspace admins can update the organisation' },
       { status: 403 },

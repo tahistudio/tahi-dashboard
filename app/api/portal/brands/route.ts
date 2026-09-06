@@ -1,4 +1,5 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { isOrgAdmin } from '@/lib/portal-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -18,8 +19,10 @@ import { eq, and, asc } from 'drizzle-orm'
  * Scope: getPortalAuth resolves the caller to their D1 org; every query is
  * filtered by that orgId, so a client can only ever touch their own brands. The
  * Tahi admin org is rejected; a Tahi admin previewing Client view
- * (impersonating) is read-only. Writes require contacts.portalRole === 'admin',
- * mirroring the People invite gate; members get a read-only view.
+ * (impersonating) is read-only. Writes require workspace admin, resolved by
+ * lib/portal-access.ts isOrgAdmin (portalRole 'admin', or the org's primary
+ * contact whose role column still reads the 'member' default); members get a
+ * read-only view.
  *
  * TODO(brand-assets): multiple logos, full colour palettes, uploaded typefaces
  * and guideline PDFs need R2 storage + a brand_assets table. Today each brand
@@ -27,19 +30,6 @@ import { eq, and, asc } from 'drizzle-orm'
  */
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
-
-async function requireClientAdmin(
-  drizzle: Drizzle,
-  orgId: string,
-  userId: string,
-): Promise<boolean> {
-  const [contact] = await drizzle
-    .select({ portalRole: schema.contacts.portalRole })
-    .from(schema.contacts)
-    .where(and(eq(schema.contacts.orgId, orgId), eq(schema.contacts.clerkUserId, userId)))
-    .limit(1)
-  return contact?.portalRole === 'admin'
-}
 
 export async function GET(req: NextRequest) {
   const { orgId, userId } = await getPortalAuth(req)
@@ -78,7 +68,7 @@ export async function POST(req: NextRequest) {
   const database = await db()
   const drizzle = database as Drizzle
 
-  if (!(await requireClientAdmin(drizzle, orgId, userId))) {
+  if (!(await isOrgAdmin(drizzle, orgId, userId))) {
     return NextResponse.json({ error: 'Only workspace admins can manage brands' }, { status: 403 })
   }
 
@@ -125,7 +115,7 @@ export async function PATCH(req: NextRequest) {
   const database = await db()
   const drizzle = database as Drizzle
 
-  if (!(await requireClientAdmin(drizzle, orgId, userId))) {
+  if (!(await isOrgAdmin(drizzle, orgId, userId))) {
     return NextResponse.json({ error: 'Only workspace admins can manage brands' }, { status: 403 })
   }
 
@@ -190,7 +180,7 @@ export async function DELETE(req: NextRequest) {
   const database = await db()
   const drizzle = database as Drizzle
 
-  if (!(await requireClientAdmin(drizzle, orgId, userId))) {
+  if (!(await isOrgAdmin(drizzle, orgId, userId))) {
     return NextResponse.json({ error: 'Only workspace admins can manage brands' }, { status: 403 })
   }
 

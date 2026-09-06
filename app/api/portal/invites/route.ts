@@ -1,9 +1,10 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { isOrgAdmin } from '@/lib/portal-access'
 import { clerkClient } from '@clerk/nextjs/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { and, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 
 import { guardOutboundAddress, resolveDeliveryPolicy } from '@/lib/email-gate'
 
@@ -23,8 +24,10 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  * seat could add an outsider to the roster and, once the contact link claims
  * the row on first sign-in, hand them a full portal identity. The self-serve
  * onboarding step that calls this is run by the person who provisioned the
- * workspace, and all three creation paths now stamp that person portalRole
- * 'admin', so nobody legitimate loses the ability to invite.
+ * workspace; the creation paths now stamp that person portalRole 'admin', and
+ * lib/portal-access.ts covers the workspaces created before they did by reading
+ * the primary contact as an admin, so nobody legitimate loses the ability to
+ * invite.
  *
  * A successful invitation also writes the waiting `contacts` row, deny by
  * default (portalRole 'member', clerkUserId still null). That row is the thing
@@ -58,15 +61,13 @@ export async function POST(req: NextRequest) {
 
   const database = (await db()) as D1
 
-  // Workspace-admin gate, the same one POST /api/portal/people applies. Read
-  // through the caller's own contact row: a session with no linked contact is
-  // not an admin, so this is deny by default.
-  const [caller] = await database
-    .select({ portalRole: schema.contacts.portalRole })
-    .from(schema.contacts)
-    .where(and(eq(schema.contacts.orgId, orgId), eq(schema.contacts.clerkUserId, userId)))
-    .limit(1)
-  if (caller?.portalRole !== 'admin') {
+  // Workspace-admin gate, the same one POST /api/portal/people applies, asked
+  // of the same helper (lib/portal-access.ts). It reads through the caller's
+  // own contact row, so a session with no linked contact is not an admin: deny
+  // by default. It also honours the primary contact whose portal_role still
+  // reads the NOT NULL 'member' default, which is what lets a fresh owner
+  // invite their first colleague at all.
+  if (!(await isOrgAdmin(database, orgId, userId))) {
     return NextResponse.json(
       { error: 'Only workspace admins can invite teammates' },
       { status: 403 },
