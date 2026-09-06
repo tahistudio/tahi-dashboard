@@ -15,6 +15,7 @@
 import { schema } from '@/db/d1'
 import { eq, gte, inArray, sql, desc, count } from 'drizzle-orm'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
+import { owedStatusList } from '@/lib/invoice-status'
 import {
   aggregateCashNzd,
   computeRunwayMonths,
@@ -95,13 +96,17 @@ export async function computeCurrentMetrics(drizzle: D1, now: Date = new Date())
     runwayMonths = null
   }
 
-  // ── Owed (outstanding invoices: sent + overdue). Mirrors overview. ──
+  // ── Owed (issued and unpaid: OWED_STATUSES). Mirrors overview. ──
+  // Drafts are excluded by construction: a placeholder Liam raised in Xero for
+  // work that will be billed later is not money owed, and this figure is
+  // frozen into financial_snapshots, so a draft counted here would poison the
+  // month-over-month history too.
   let owedNzd: number | null = null
   try {
     const rows = await drizzle
       .select({ totalUsd: schema.invoices.totalUsd, currency: schema.invoices.currency })
       .from(schema.invoices)
-      .where(inArray(schema.invoices.status, ['sent', 'overdue']))
+      .where(inArray(schema.invoices.status, owedStatusList()))
     owedNzd = rows.reduce((sum, inv) => sum + toNzd(inv.totalUsd, inv.currency ?? 'USD', rateMap), 0)
   } catch {
     owedNzd = null

@@ -65,6 +65,9 @@ interface OverviewData {
     outstandingInvoicesNzd?: number
     outstandingInvoicesCount?: number
     overdueInvoicesCount?: number
+    /** Drafts, which are NOT in outstandingInvoicesNzd. See lib/invoice-status.ts. */
+    draftInvoicesNzd?: number
+    draftInvoicesCount?: number
     mrr?: number
   }
   mrrDeltaPct?: number | null
@@ -416,6 +419,8 @@ function VitalsStrip({
   ]
 
   const owed = kpis?.outstandingInvoicesNzd
+  const draftCount = kpis?.draftInvoicesCount ?? 0
+  const draftNzd = kpis?.draftInvoicesNzd ?? 0
 
   const items: VitalItem[] = [
     {
@@ -432,7 +437,19 @@ function VitalsStrip({
       bar: ar ? agedBar(ar) : undefined,
       sub:
         owed != null
-          ? `${kpis?.outstandingInvoicesCount ?? 0} invoices · ${kpis?.overdueInvoicesCount ?? 0} overdue`
+          ? (
+            <>
+              <span>{`${kpis?.outstandingInvoicesCount ?? 0} invoices · ${kpis?.overdueInvoicesCount ?? 0} overdue`}</span>
+              {/* Drafts on their own line, never inside the number above. A
+                  draft is a placeholder for money that will be owed later, or
+                  a test: visible to the studio, owed by nobody. */}
+              {draftCount > 0 && (
+                <span style={{ display: 'block' }}>
+                  {`${draftCount} ${draftCount === 1 ? 'draft' : 'drafts'}, ${moneyCompact(draftNzd)} not yet issued`}
+                </span>
+              )}
+            </>
+          )
           : 'not available',
     },
     {

@@ -142,6 +142,12 @@ interface SummaryResponse {
   }
   outstandingAr: number
   overdueCount: number
+  /**
+   * Invoices raised and NOT issued. Never inside outstandingAr or any arAging
+   * bucket: a draft is a placeholder for money that will be owed later.
+   * Optional so a cached payload from before the field existed still renders.
+   */
+  drafts?: { count: number; totalNzd: number }
   status: {
     cash: 'green' | 'amber' | 'red'
     mrr: 'green' | 'amber' | 'red'
@@ -694,6 +700,17 @@ export function FinancialReportsContent() {
               <ArBucket label="61 to 90 days" amount={data.arAging.days90} cur={data.primaryCurrency} toCur={toCur} tone="danger" />
               <ArBucket label="90+ days" amount={data.arAging.days90plus} cur={data.primaryCurrency} toCur={toCur} tone="danger" />
             </div>
+            {/* Drafts, beside the buckets and in none of them. The studio
+                raises them in Xero as placeholders and as tests, so they are
+                worth seeing; they are simply not receivable. */}
+            {data.drafts && data.drafts.count > 0 && (
+              <p style={{ marginTop: '1rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                {data.drafts.count} {data.drafts.count === 1 ? 'draft' : 'drafts'}
+                {', '}
+                {toCur(data.drafts.totalNzd, data.primaryCurrency)} not yet issued. Drafts are
+                excluded from every figure above.
+              </p>
+            )}
           </div>
         </Card>
       </div>

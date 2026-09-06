@@ -39,7 +39,8 @@ import { invoiceChannelLabel } from '@/lib/invoice-channel'
 import { paymentTermsLabel } from '@/lib/invoice-billing'
 import { Grow, InlineAction, SubBar, Tile, TileGrid } from '../_kit/chrome'
 import { MoneySums, sumByCurrency } from '../_kit/currency-sums'
-import { isInvoiceOverdue, OPEN_INVOICE_STATUSES } from '../_kit/needs'
+import { partitionInvoicesByStatus } from '@/lib/invoice-status'
+import { isInvoiceOverdue } from '../_kit/needs'
 import type { ClientTabId, Organisation } from '../_kit/types'
 
 export interface InvoiceRow {
@@ -88,9 +89,11 @@ export function InvoicesTab({
   const invoices = useMemo(() => data?.items ?? [], [data])
 
   const now = new Date()
-  const open = invoices.filter(r => OPEN_INVOICE_STATUSES.includes(r.status))
+  // One partition drives every tile, so Outstanding, Drafts and Paid cannot
+  // double-count a row or quietly drop one. Drafts are their own bucket: a
+  // placeholder raised in Xero is not outstanding money.
+  const { drafts, owed: open, paid } = partitionInvoicesByStatus(invoices)
   const overdue = invoices.filter(r => isInvoiceOverdue(r, now))
-  const paid = invoices.filter(r => r.status === 'paid')
 
   const fallbackCurrency = org.preferredCurrency ?? 'NZD'
   const channelLabel = invoiceChannelLabel(org.effectiveInvoiceChannel ?? org.invoiceChannel)
@@ -246,7 +249,22 @@ export function InvoicesTab({
         <Tile
           label="Outstanding"
           value={<MoneySums sums={sumByCurrency(open, fallbackCurrency)} fallback={fallbackCurrency} />}
-          hint={`${open.length} open${pageCaveat}`}
+          hint={
+            <>
+              <span>{`${open.length} open${pageCaveat}`}</span>
+              {/* Drafts get their own line, right where they used to be
+                  silently added into the number above. They are visible, and
+                  they are not owed. */}
+              {drafts.length > 0 && (
+                <span style={{ display: 'block', color: 'var(--color-text-subtle)' }}>
+                  {drafts.length} {drafts.length === 1 ? 'draft' : 'drafts'}
+                  {', '}
+                  <MoneySums sums={sumByCurrency(drafts, fallbackCurrency)} fallback={fallbackCurrency} />
+                  {' not yet issued'}
+                </span>
+              )}
+            </>
+          }
         />
         <Tile
           label="Overdue"

@@ -19,8 +19,9 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { and, eq, gte, sql } from 'drizzle-orm'
+import { and, eq, gte, inArray, sql } from 'drizzle-orm'
 import { buildRateMap, toNzd as toNzdHelper } from '@/lib/currency'
+import { draftStatusList, issuedStatusList, owedStatusList } from '@/lib/invoice-status'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -93,6 +94,7 @@ export async function GET(req: NextRequest) {
     dealStatsRows,
     ttpRows,
     cashConvInvoices,
+    draftInvoiceRows,
     hoursRows,
     pipelineOpenRows,
     recentInvoices,
@@ -159,12 +161,15 @@ export async function GET(req: NextRequest) {
         AND d.closed_at IS NOT NULL
         AND d.closed_at > datetime('now', '-90 days')
     `),
-    // outstanding AR — sent
+    // outstanding AR: everything issued and unpaid. This was `status = 'sent'`
+    // alone, which both dropped an invoice the client had opened ('viewed')
+    // and dropped every overdue one. Drafts never enter: a placeholder raised
+    // in Xero for later work is not receivable.
     database
       .select({ totalUsd: schema.invoices.totalUsd, dueDate: schema.invoices.dueDate })
       .from(schema.invoices)
-      .where(eq(schema.invoices.status, 'sent')),
-    // outstanding AR — overdue
+      .where(inArray(schema.invoices.status, owedStatusList())),
+    // outstanding AR: the overdue subset, for the AR traffic light
     database
       .select({ totalUsd: schema.invoices.totalUsd })
       .from(schema.invoices)
@@ -203,11 +208,12 @@ export async function GET(req: NextRequest) {
       WHERE cancelled_at IS NOT NULL
         AND cancelled_at >= ${monthStart}
     `),
-    // AR aging raw rows
+    // AR aging raw rows. Owed only: a draft has never been asked for, so it
+    // has no age and belongs in no bucket.
     database.all<{ totalUsd: number | null; currency: string; dueDate: string | null }>(sql`
       SELECT total_usd AS totalUsd, currency, due_date AS dueDate
       FROM invoices
-      WHERE status IN ('sent', 'overdue') AND paid_at IS NULL
+      WHERE ${inArray(schema.invoices.status, owedStatusList())} AND paid_at IS NULL
     `),
     // expense commitments
     database.all<{
@@ -324,11 +330,23 @@ export async function GET(req: NextRequest) {
         AND due_date IS NOT NULL
         AND paid_at > datetime('now', '-90 days')
     `),
-    // cash conversion (90d) — raw invoices bucketed in JS
+    // cash conversion (90d): raw invoices bucketed in JS.
+    // Issued only (owed or paid). This query had no status filter at all, so
+    // every draft raised in the window inflated the "invoiced" denominator and
+    // dragged the collected/invoiced ratio down against money nobody had been
+    // asked for. Voided rows are out for the same reason.
     database.all<{ amount: number; currency: string; createdAt: string | null; paidAt: string | null }>(sql`
       SELECT total_usd AS amount, currency, created_at AS createdAt, paid_at AS paidAt
       FROM invoices
-      WHERE created_at > datetime('now', '-90 days') OR paid_at > datetime('now', '-90 days')
+      WHERE ${inArray(schema.invoices.status, issuedStatusList())}
+        AND (created_at > datetime('now', '-90 days') OR paid_at > datetime('now', '-90 days'))
+    `),
+    // Drafts, on their own line. The studio still wants to see the
+    // placeholders it holds; they are simply not receivable.
+    database.all<{ amount: number; currency: string }>(sql`
+      SELECT total_usd AS amount, currency
+      FROM invoices
+      WHERE ${inArray(schema.invoices.status, draftStatusList())}
     `),
     // hours logged (90d)
     database.all<{ totalHours: number | null }>(sql`
@@ -698,6 +716,15 @@ export async function GET(req: NextRequest) {
     if (r.paidAt && new Date(r.paidAt).getTime() > ninetyDaysAgoMs) collected90 += nzd
   }
 
+  // Drafts: what the studio has raised and NOT issued. Reported beside AR, in
+  // no bucket and in no total above it. Currency-converted per row, like every
+  // other figure here.
+  const draftsNzd = draftInvoiceRows.reduce(
+    (s, r) => s + toNzd(Number(r.amount ?? 0), r.currency ?? 'NZD'),
+    0,
+  )
+  const drafts = { count: draftInvoiceRows.length, totalNzd: draftsNzd }
+
   // Hours logged + cost. Profit per logged hour = (revenue ÷ hours) once
   // we know revenue per client; for now compute the agency-wide number.
   const hoursLast90d = Number(hoursRows[0]?.totalHours ?? 0)
@@ -1001,6 +1028,8 @@ export async function GET(req: NextRequest) {
     },
     outstandingAr,
     overdueCount: overdueRows.length,
+    // Additive. Drafts sit beside AR, never inside outstandingAr or arAging.
+    drafts,
     status: {
       cash: statusFor('cash'),
       mrr: statusFor('mrr'),

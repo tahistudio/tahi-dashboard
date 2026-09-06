@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import { eq, ne, count, and, inArray, gte, lt, isNotNull, sql, desc } from 'drizzle-orm'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
 import { resolvePermissions, can } from '@/lib/permissions'
+import { draftStatusList, owedStatusList } from '@/lib/invoice-status'
 import {
   overnightCutoff,
   daysPastDue,
@@ -59,6 +60,7 @@ export async function GET(req: NextRequest) {
     recentRequests,
     paidInvoices,
     outstandingInvoiceRows,
+    draftInvoiceRows,
   ] = await Promise.all([
     // Active client orgs
     drizzle
@@ -117,7 +119,9 @@ export async function GET(req: NextRequest) {
         gte(schema.invoices.paidAt, sixMonthsAgoIso),
       )),
 
-    // Outstanding invoices (sent or overdue) - individual rows for currency conversion
+    // Outstanding invoices (issued and unpaid) - individual rows for currency
+    // conversion. Drafts are excluded by OWED_STATUSES: a draft is a
+    // placeholder for money that will be owed later, not money owed now.
     drizzle
       .select({
         totalUsd: schema.invoices.totalUsd,
@@ -126,7 +130,18 @@ export async function GET(req: NextRequest) {
         dueDate: schema.invoices.dueDate,
       })
       .from(schema.invoices)
-      .where(inArray(schema.invoices.status, ['sent', 'overdue'])),
+      .where(inArray(schema.invoices.status, owedStatusList())),
+
+    // Drafts, counted on their own so the Owed vital can say "3 drafts,
+    // NZ$4,200 not yet issued" underneath rather than folding them into the
+    // headline the way every reading of this table used to.
+    drizzle
+      .select({
+        totalUsd: schema.invoices.totalUsd,
+        currency: schema.invoices.currency,
+      })
+      .from(schema.invoices)
+      .where(inArray(schema.invoices.status, draftStatusList())),
   ])
 
   // Outstanding invoices total in NZD, plus counts for the Owed vital sub
@@ -140,6 +155,13 @@ export async function GET(req: NextRequest) {
     }
   }
   const outstandingInvoicesCount = outstandingInvoiceRows.length
+
+  // Drafts: their own figure, never added to the one above.
+  let draftInvoicesNzd = 0
+  for (const inv of draftInvoiceRows) {
+    draftInvoicesNzd += toNzd(inv.totalUsd, inv.currency ?? 'USD', rateMap)
+  }
+  const draftInvoicesCount = draftInvoiceRows.length
 
   // Aggregate paid invoices into monthly buckets (converted to NZD)
   const monthlyMap = new Map<string, number>()
@@ -270,7 +292,11 @@ export async function GET(req: NextRequest) {
   let arAging: ArAging | null = null
   if (canSeeInvoices) {
     try {
-      const sentInvoices = await drizzle
+      // Aging is a receivables view, so it reads the owed set, not 'sent'
+      // alone: an invoice the client has opened ('viewed') is still owed and
+      // still ages. A draft never enters, because nobody has been asked to pay
+      // it and it has no age.
+      const owedInvoices = await drizzle
         .select({
           totalUsd: schema.invoices.totalUsd,
           currency: schema.invoices.currency,
@@ -279,10 +305,10 @@ export async function GET(req: NextRequest) {
         })
         .from(schema.invoices)
         .leftJoin(schema.organisations, eq(schema.invoices.orgId, schema.organisations.id))
-        .where(eq(schema.invoices.status, 'sent'))
+        .where(inArray(schema.invoices.status, owedStatusList()))
 
       arAging = bucketArAging(
-        sentInvoices.map(inv => ({
+        owedInvoices.map(inv => ({
           amountNzd: toNzd(inv.totalUsd, inv.currency ?? 'USD', rateMap),
           daysPastDue: daysPastDue(inv.dueDate ?? null, now),
           clientName: inv.orgName ?? null,
@@ -440,6 +466,10 @@ export async function GET(req: NextRequest) {
             outstandingInvoicesNzd: Math.round(outstandingNzd),
             outstandingInvoicesCount,
             overdueInvoicesCount,
+            // Separate on purpose. A draft is visible to the studio and never
+            // part of outstandingInvoicesNzd.
+            draftInvoicesNzd: Math.round(draftInvoicesNzd),
+            draftInvoicesCount,
           }
         : {}),
       ...(canSeeMrr ? { mrr: Math.round(mrr) } : {}),

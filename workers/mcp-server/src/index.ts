@@ -280,7 +280,7 @@ export const TOOLS: ToolDef[] = [
   // ── Read: Overview & Reports ──────────────────────────────────────────
   tool('get_overview', 'Get dashboard overview: KPIs, recent requests, revenue summary'),
   tool('get_reports', 'Get aggregate reports: total clients, requests, billable hours, trends'),
-  tool('get_billing_summary', 'Get billing summary: revenue, outstanding invoices, trends'),
+  tool('get_billing_summary', 'Per-client billable and total hours for a month, with an indicative amount at the studio hourly rate. Reads time_entries only, never the invoices table, so no invoice status (draft included) can reach this figure.'),
   tool('get_response_time', 'Get response time report with averages and breakdowns'),
   tool('get_exchange_rates', 'Get cached exchange rates'),
   tool('refresh_exchange_rates', 'Refresh exchange rates from external provider'),
@@ -683,7 +683,7 @@ export const TOOLS: ToolDef[] = [
 
   // ── Read: Invoices ────────────────────────────────────────────────────
   tool('list_invoices', 'List all invoices with status, amount, client, dates and `number`, the real invoice number (for example INV-2026-0001). Use `number` whenever you name an invoice to a human: it is what the client quotes on a bank transfer, what their emailed copy prints and what the invoice is called in Xero. It is null on rows raised before invoice numbering existed and on imports with nothing to carry over, and those fall back to the first eight characters of the id in upper case.', {
-    status: prop('string', 'Filter by status (draft, sent, overdue, paid)'),
+    status: prop('string', 'Filter by status: draft, sent, viewed, overdue, paid, written_off. A DRAFT invoice is the studio working copy: it has not been issued, the client portal never returns one, and no money total (owed, outstanding, receivable, aging, revenue) counts it. Never describe a draft as money the client owes.'),
   }),
   tool('get_invoice', 'Get full detail for a specific invoice including line items and `number`, the real invoice number. Null means the row predates invoice numbering, in which case the reference everyone else sees is the first eight characters of the id in upper case.', {
     invoiceId: prop('string', 'Invoice ID'),
@@ -1625,7 +1625,7 @@ export const TOOLS: ToolDef[] = [
 
   // ── AI ────────────────────────────────────────────────────────────────
   // ── Financial / Xero ───────────────────────────────────────────────
-  tool('get_financial_health', 'Get financial health: invoice totals, pipeline projections, MRR, Xero P&L, bank balances'),
+  tool('get_financial_health', 'Get financial health: invoice totals, pipeline projections, MRR, Xero P&L, bank balances. Under `invoices`: totalInvoiced is what has actually been issued and is still live (paid plus outstanding), totalPaid is settled, totalOutstanding is issued and unpaid. `totalDrafts` and `draftCount` are reported separately and are inside NONE of the other figures, because a draft has not been issued to anyone. Written-off and voided rows are in neither totalInvoiced nor totalOutstanding. `count` is still every row in the table, drafts included.'),
   tool('import_xero_invoices', 'Import a page of ACCREC invoices from Xero into the dashboard with auto-match to clients. Invoices already imported are now UPDATED in place (status, subtotal, total, currency, due date, sent date, paid date) instead of skipped, so a status change made in Xero lands here. The update is a diff, so an unchanged invoice is reported as no_change and not rewritten. Status only ever moves forward: Xero cannot demote a sent or paid invoice back to draft, because a dashboard-raised invoice stays DRAFT in Xero until the push-back slice lands. Rows billed on another rail (source not xero) are never touched. Also captures Xero online invoice URL (the client pay link) for any invoice Xero has issued and the dashboard has not stored one for, capped at 25 extra fetches per run (a rotating window, so a row that can never yield a link cannot hold the budget) and reported as payLinks; a failure there leaves the link unset and does not fail the run. A stored link is cleared again when Xero stops serving it (voided, deleted, or back to draft), so the client is never handed a dead pay URL.'),
   tool('sync_xero_payments', 'Sync invoice payment statuses from Xero back to the dashboard. Pages through every Xero ACCREC invoice (100 per page, 50 page ceiling) rather than only the first page, updates every known row it has seen, and stamps the paid date from Xero FullyPaidOnDate. Status only ever moves forward, so a stale Xero DRAFT cannot walk a sent or paid invoice backwards. Returns pagesRead, truncated and partial: a truncated or partial read means invoices past the gap were not reconciled. Also captures the Xero online invoice URL (the client pay link) for approved or paid invoices that have none stored, capped at 25 extra fetches per run in a rotating window and reported as payLinks, and clears a stored link when Xero stops serving it (voided, deleted, or back to draft).'),
   tool('get_xero_profit_loss', 'Get Xero Profit and Loss report', {
@@ -1674,13 +1674,13 @@ export const TOOLS: ToolDef[] = [
   }, ['subject', 'title']),
 
   // ── Finance reporting (Phase 10) ──────────────────────────────────
-  tool('get_invoice_aging', 'Outstanding invoices grouped by aging bucket (current/30/60/90+ days), in NZD'),
+  tool('get_invoice_aging', 'Outstanding invoices grouped by aging bucket (current/30/60/90+ days), in NZD. `aging` and `summary` cover only issued and unpaid invoices (sent, viewed, overdue). Drafts are reported separately as `drafts` ({ count, totalNzd }) and are in no bucket and in no summary total: nobody has been asked to pay one, so it cannot age.'),
   tool('get_client_profitability', 'Detailed gross margin for one client (revenue, costs by category, monthly trend)', {
     clientId: prop('string', 'Client organisation ID'),
   }, ['clientId']),
   tool('list_client_profitability', 'Cross-client gross margin scorecard sorted by revenue desc'),
   tool('get_retainer_health', 'Per-retainer-client churn risk, MRR, recent activity, utilisation, upsell signals'),
-  tool('get_cash_flow_forecast', 'N-month forward cash flow projection (recurring MRR + weighted pipeline minus expenses)', {
+  tool('get_cash_flow_forecast', 'N-month forward cash flow projection (recurring MRR + weighted pipeline minus expenses). Built from subscriptions, deals and expense commitments; it does not read the invoices table at all, so no draft invoice can enter the projection.', {
     months: prop('number', 'Months to forecast (default 6, max 24)'),
   }),
   tool('get_utilization', 'Per-team-member billable hours / capacity utilisation over a rolling window', {

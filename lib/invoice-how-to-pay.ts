@@ -37,6 +37,13 @@ import {
   type InvoiceChannel,
 } from '@/lib/invoice-channel'
 import { invoiceReference } from '@/lib/invoice-billing'
+import {
+  PAID_STATUSES,
+  VOID_STATUSES,
+  isPaidInvoice,
+  isVoidInvoice,
+  normaliseInvoiceStatus,
+} from '@/lib/invoice-status'
 
 /**
  * The client-facing "How to pay" block.
@@ -92,14 +99,23 @@ export interface HowToPayInvoice {
 }
 
 /**
- * The invoice states that owe nothing.
+ * The invoice states that owe nothing: paid, plus every flavour of dead.
  *
- * 'cancelled' is not a status this codebase writes (the columns are
- * draft | sent | viewed | paid | overdue | written_off) but it is a status a
- * Xero or Stripe import could hand us, and the cost of listing it is nil
- * against the cost of quoting an account number under a voided bill.
+ * Derived from lib/invoice-status.ts rather than hand-listed, so this and the
+ * money aggregations share one reading of the column. That module names
+ * 'cancelled', 'void', 'voided' and 'refunded' alongside 'written_off' for the
+ * same reason this list always named 'cancelled': the codebase does not write
+ * them, but a Xero or Stripe import could hand us one, and the cost of naming
+ * them is nil against the cost of quoting an account number under a dead bill.
+ *
+ * Note what is NOT here: 'draft'. A draft owes nothing either, but it never
+ * reaches a client surface at all (both portal routes exclude it), and calling
+ * it "settled" would let a studio-side caller read a placeholder as paid.
  */
-export const SETTLED_INVOICE_STATUSES: readonly string[] = ['paid', 'written_off', 'cancelled']
+export const SETTLED_INVOICE_STATUSES: readonly string[] = [
+  ...PAID_STATUSES,
+  ...VOID_STATUSES,
+]
 
 /**
  * Is this bill done with?
@@ -111,8 +127,8 @@ export const SETTLED_INVOICE_STATUSES: readonly string[] = ['paid', 'written_off
 export function isInvoiceSettled(
   invoice: { status?: string | null; paidAt?: string | null },
 ): boolean {
-  const status = typeof invoice.status === 'string' ? invoice.status.trim().toLowerCase() : ''
-  if (SETTLED_INVOICE_STATUSES.includes(status)) return true
+  const status = normaliseInvoiceStatus(invoice.status)
+  if (isPaidInvoice(status) || isVoidInvoice(status)) return true
   return typeof invoice.paidAt === 'string' && invoice.paidAt.trim() !== ''
 }
 

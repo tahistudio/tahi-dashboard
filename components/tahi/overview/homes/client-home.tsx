@@ -50,6 +50,7 @@ import {
   requestRouteId,
   type HomeDestination,
 } from '@/lib/client-home-signals'
+import { isOwedInvoice } from '@/lib/invoice-status'
 import type { OverviewCtx } from '@/components/tahi/overview/ctx'
 import { portalStatusMeta, portalStageFraction, type PortalChipTone } from '@/lib/portal-status'
 import { WaitingOnYou, type WaitingItem } from '@/components/tahi/portal/home/waiting-on-you'
@@ -1037,7 +1038,10 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   }, [openReqs])
 
   // ── derived: invoices ───────────────────────────────────────────────────────
-  const unpaid = useMemo(() => invoices.filter(i => i.status === 'sent' || i.status === 'overdue'), [invoices])
+  // Owed only. /api/portal/invoices already refuses to hand a client a draft,
+  // and this second gate is the same rule said client-side, so a change to
+  // that route can never quietly turn a placeholder into a bill on the home.
+  const unpaid = useMemo(() => invoices.filter(i => isOwedInvoice(i.status)), [invoices])
   const nearestUnpaid = useMemo(() => {
     const dated = [...unpaid].sort(
       (a, b) => new Date(a.dueDate ?? a.createdAt).getTime() - new Date(b.dueDate ?? b.createdAt).getTime(),

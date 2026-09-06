@@ -17,6 +17,7 @@ import {
   type PortalPersonSummary,
 } from '@/lib/portal-admin-label'
 import { invoiceReference } from '@/lib/invoice-billing'
+import { isOwedInvoice } from '@/lib/invoice-status'
 
 interface InvoiceRow {
   id: string
@@ -61,8 +62,13 @@ function formatCurrency(amount: number, currency: string): string {
   }).format(amount)
 }
 
+/**
+ * Past due and still owed. A draft is never overdue: it has not been issued,
+ * so nobody has missed a deadline. Delegates the vocabulary to
+ * lib/invoice-status.ts so this page and the aggregations agree.
+ */
 function isOverdue(dueDate: string | null, status: string): boolean {
-  if (!dueDate || status === 'paid' || status === 'written_off') return false
+  if (!dueDate || !isOwedInvoice(status)) return false
   return new Date(dueDate + 'T23:59:59') < new Date()
 }
 
@@ -281,7 +287,7 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
                             {formatCurrency(inv.totalUsd ?? inv.totalAmount ?? 0, inv.currency)}
                           </td>
                           <td className="px-4 py-3">
-                            <InvoiceStatusBadge status={isOverdue(inv.dueDate, inv.status) && inv.status === 'sent' ? 'overdue' : inv.status} />
+                            <InvoiceStatusBadge status={isOverdue(inv.dueDate, inv.status) ? 'overdue' : inv.status} />
                           </td>
                           <td className="px-4 py-3 text-[var(--color-text-muted)]">
                             {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : '-'}
@@ -360,7 +366,7 @@ function AdminBillingView() {
               label="Outstanding"
               value={formatCurrency(
                 recentInvoices
-                  .filter(i => i.status === 'sent' || i.status === 'overdue' || (i.status === 'sent' && isOverdue(i.dueDate, i.status)))
+                  .filter(i => isOwedInvoice(i.status))
                   .reduce((s, i) => s + (i.totalUsd ?? i.totalAmount ?? 0), 0),
                 'NZD'
               )}
@@ -514,7 +520,7 @@ function AdminBillingView() {
                             {formatCurrency(inv.totalUsd ?? inv.totalAmount ?? 0, inv.currency)}
                           </td>
                           <td style={{ padding: '0.75rem 1rem' }}>
-                            <InvoiceStatusBadge status={isOverdue(inv.dueDate, inv.status) && inv.status === 'sent' ? 'overdue' : inv.status} />
+                            <InvoiceStatusBadge status={isOverdue(inv.dueDate, inv.status) ? 'overdue' : inv.status} />
                           </td>
                           <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>
                             {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : '-'}
