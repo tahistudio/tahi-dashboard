@@ -1645,6 +1645,9 @@ export const TOOLS: ToolDef[] = [
   tool('dedupe_stripe_charge_twins', 'Remove the Stripe charge twins: a subscription payment imported twice, once as the Stripe invoice (in_...) and once as the charge that settled it (ch_.../py_...), which doubles the client\'s billed total. Pairs a charge row with an invoice row on the same client, amount, currency and a created date within three days. DEFAULTS TO A DRY RUN: it lists every pair with both ids, amounts, dates and notes and writes nothing unless you pass dryRun false. The apply is super-admin only, deletes the CHARGE row and its line items (never the invoice row), refuses any row a time entry or an AI reply draft points at, and writes one audit row with every id removed.', {
     dryRun: prop('boolean', 'Preview only. Defaults to TRUE: pass false to actually delete the charge twins.'),
   }),
+  tool('dedupe_manyrequests_invoice_twins', 'Remove the ManyRequests ledger twins: a payment that sits in the dashboard twice, once as a ManyRequests import row (source manyrequests, carrying the ManyRequests key, the old invoice number and the line items) and once as the Stripe or Xero ledger row it was always on. The import guard could not see these because the ledger rows were on archived Stripe-import shell organisations at the time and only came across when those shells were merged into the real clients. Pairs on the same client, currency and total within half a cent, with a created or paid date within seven days, preferring a Stripe invoice row (in_) over a charge row (ch_/py_) and a paid row over an unpaid one, one to one, closest date winning. The LEDGER row survives: the apply carries the ManyRequests key onto it, the old invoice number when it has none, and the line items when it has none of its own, then deletes the ManyRequests row. DEFAULTS TO A DRY RUN: it lists every pair with both ids and exactly what would be carried, and writes nothing unless you pass dryRun false. The apply is super-admin only, refuses any row a time entry or an AI reply draft points at, writes one audit row with every id removed, and is idempotent (a second run finds nothing).', {
+    dryRun: prop('boolean', 'Preview only. Defaults to TRUE: pass false to actually fold the ManyRequests twins into their ledger rows.'),
+  }),
   tool('create_stripe_invoice', 'Create a Stripe invoice from a local invoice and get payment link. Finalising is a send: Stripe emails the finalised invoice to the customer itself, so this answers 409 "Held back by the email allowlist" and creates nothing in Stripe unless every billing contact for the client is allowed. Check list_email_suppressions for the row it wrote.', {
     invoiceId: prop('string', 'Local invoice ID to create Stripe invoice from'),
   }, ['invoiceId']),
@@ -2894,6 +2897,10 @@ async function executeTool(
       return json(await apiWrite('/api/admin/integrations/stripe/import-payments', token, 'POST'))
     case 'dedupe_stripe_charge_twins':
       return json(await apiWrite('/api/admin/invoices/dedupe-stripe-charges', token, 'POST', {
+        dryRun: args.dryRun !== false,
+      }))
+    case 'dedupe_manyrequests_invoice_twins':
+      return json(await apiWrite('/api/admin/invoices/dedupe-manyrequests-twins', token, 'POST', {
         dryRun: args.dryRun !== false,
       }))
     case 'create_stripe_invoice':
