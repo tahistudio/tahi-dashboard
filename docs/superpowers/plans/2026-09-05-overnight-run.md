@@ -91,6 +91,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 23:10 NZST (Sun) client-walk fix re-landed and LIVE (262c778b): health probe 200 and a browser-shaped unauthenticated fetch of /overview is a 307 to sign-in (the incident signature was a 404). Act-as-client build launched. Cutover prep (allowlist, reconciliation, importer) running.
 
+- 23:40 NZST (Sun) Notifications rail and Messages merged (12d39eb4), 2872 tests, migration 0092 on both D1s after exports to .claude/backups, QA render clean for both audiences; deploying. Running: cutover prep, proposals editor and consistency design, invoices-studio shell integration with the Services and Stalled rules, act-as-client.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - [x] More sheet Track time row left-aligned (17a490b2).
