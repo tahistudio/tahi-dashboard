@@ -353,6 +353,28 @@ export const TOOLS: ToolDef[] = [
     clientId: prop('string', 'Client organisation ID'),
     teamMemberId: prop('string', 'Team member ID to assign as PM'),
   }, ['clientId', 'teamMemberId']),
+
+  // ── Client lifecycle: merge + delete (both super admin only) ─────────
+  tool(
+    'merge_client',
+    'ANSWERS 403 FORBIDDEN UNDER THIS SERVER\'S SERVICE TOKEN, ALWAYS, INCLUDING THE DRY RUN. The route requires super_admin and the MCP service identity resolves to admin, by design: folding one client into another re-points a ledger and wants a human identity behind it. If you call this and get 403, that is the design, not a misconfiguration; do not retry and do not report a permissions bug. Tell the user to run it from the client\'s Settings tab, Danger zone, as a super admin. Documented here so the contract is discoverable: POST /api/admin/clients/{clientId}/merge folds clientId (THE SHELL, which is removed) into `into` (THE SURVIVOR, which keeps everything), DRY RUN BY DEFAULT. The dry run returns rows per org-scoped table, which of the four external ids (xero_contact_id, stripe_customer_id, manyrequests_id, clerk_org_id) would be carried, which organisation columns would be filled from the shell where the survivor is empty, and which contacts move versus fold into a survivor contact with the same email. NOTHING IS DESTROYED except the shell organisation row and a duplicate contact whose references are re-pointed onto the surviving person first. REFUSED with 400 and a sentence when: both sides are the same organisation, the survivor does not exist or is archived, the shell is protected, or BOTH sides carry a DIFFERENT non-null value for one external id (that field is named and never overwritten). A shell that no longer exists answers 404, so a repeated merge is safe. Sends no email of any kind.',
+    {
+      clientId: prop('string', 'The SHELL organisation id: the duplicate that gets folded away and removed.'),
+      into: prop('string', 'The SURVIVOR organisation id: the client that keeps everything.'),
+      dryRun: prop('boolean', 'Plan only, write nothing. DEFAULT TRUE. Pass false only after the user has read the dry run and said yes.'),
+    },
+    ['clientId', 'into'],
+  ),
+  tool(
+    'delete_client',
+    'ANSWERS 403 FORBIDDEN UNDER THIS SERVER\'S SERVICE TOKEN, ALWAYS, INCLUDING THE DRY RUN. The route requires super_admin and the MCP service identity resolves to admin, by design: an irreversible delete of a client and its invoices wants a human identity behind it. If you call this and get 403, that is the design, not a misconfiguration; do not retry and do not report a permissions bug. Tell the user to run it from the client\'s Settings tab, Danger zone, as a super admin. Documented here so the contract is discoverable: DELETE /api/admin/clients/{clientId} removes an organisation AND ALL ITS ORG-SCOPED ROWS INCLUDING ITS INVOICES, INVOICE ITEMS, SUBSCRIPTIONS AND TRACKS, DRY RUN BY DEFAULT. It exists for dummy rows carrying test invoices, which the import cleanup refuses over. confirmName must equal the organisation\'s current name EXACTLY or the route answers 400. It answers 409 and names what is wrong when the organisation carries a manyrequests_id (the import adopted it), a clerk_org_id (a real login exists), any contact with a clerk_user_id (a real person can sign in), any deal, lead, CRM activity, discovery call, contract, contract document, proposal, project schedule or project calculation (pipeline and sales artefacts are always real), or a paid invoice on a live Stripe or Xero rail while the organisation also holds a Xero contact id (a real ledger: merge it instead). A Stripe customer id alone is NOT a refusal, because a test-mode customer looks exactly like a live one, but the dry run prints it along with every invoice\'s rail id, amount and date. Archive is the reversible answer and is right for anything uncertain. Sends no email of any kind.',
+    {
+      clientId: prop('string', 'The organisation id to delete.'),
+      confirmName: prop('string', 'The organisation name, typed exactly as it is stored. A mismatch answers 400 and changes nothing.'),
+      dryRun: prop('boolean', 'Plan only, delete nothing. DEFAULT TRUE. Pass false only after the user has read the dry run, including the invoice list, and said yes.'),
+    },
+    ['clientId', 'confirmName'],
+  ),
   tool('send_welcome_email', 'Email a client a welcome message whose CTA is a live, claimable portal invite link. Goes to the primary contact only unless contactId or all is given. Following the link signs that person into this workspace, so treat it as granting access, not as marketing.', {
     clientId: prop('string', 'Client organisation ID'),
     contactId: prop('string', 'Send to exactly this contact instead of the primary one'),
@@ -1990,6 +2012,32 @@ async function executeTool(
     case 'update_client': {
       const { clientId, ...body } = args
       return json(await apiWrite(`/api/admin/clients/${clientId}`, token, 'PATCH', body))
+    }
+    // Both of these ANSWER 403 UNDER THIS SERVER'S TOKEN and always will, for
+    // the same reason the ManyRequests import and cleanup tools do:
+    // lib/permissions.ts resolves SERVICE_USER_ID to 'admin' and never to
+    // 'super_admin', and both routes gate on isSuperAdmin. Kept for
+    // discoverability with the 403 stated up front in each description.
+    //
+    // dryRun defaults TRUE on both, written as `!== false` so a caller that
+    // sends a string, a number or null still gets the safe answer.
+    case 'merge_client': {
+      const clientId = s('clientId')
+      if (!clientId) throw new Error('clientId is required')
+      if (!s('into')) throw new Error('into is required: the organisation that survives the merge')
+      return json(await apiWrite(`/api/admin/clients/${clientId}/merge`, token, 'POST', {
+        into: s('into'),
+        dryRun: args.dryRun !== false,
+      }))
+    }
+    case 'delete_client': {
+      const clientId = s('clientId')
+      if (!clientId) throw new Error('clientId is required')
+      if (!s('confirmName')) throw new Error('confirmName is required: the organisation name, typed exactly')
+      return json(await apiWrite(`/api/admin/clients/${clientId}`, token, 'DELETE', {
+        confirmName: s('confirmName'),
+        dryRun: args.dryRun !== false,
+      }))
     }
     case 'create_client_contact': {
       const { clientId, ...body } = args

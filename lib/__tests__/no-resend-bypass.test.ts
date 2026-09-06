@@ -60,6 +60,9 @@ const TEST_FILES = new Set([
   join('lib', '__tests__', 'no-resend-bypass.test.ts'),
   // The importer's own static no-mail guard, which lists the Resend host among the strings it bans.
   join('lib', 'import', 'manyrequests', '__tests__', 'no-mail-imports.test.ts'),
+  // The client merge / delete guard, same reason: it bans the Resend host by
+  // naming it, over the lib/org-lifecycle module graph.
+  join('lib', 'org-lifecycle', '__tests__', 'policy.test.ts'),
   join('lib', '__tests__', 'email-delivery.test.ts'),
   join('lib', '__tests__', 'email.test.ts'),
 ])

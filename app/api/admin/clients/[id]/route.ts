@@ -15,8 +15,19 @@ import {
 } from '@/lib/invoice-channel'
 import { PAYMENT_TERMS, isPaymentTerms } from '@/lib/invoice-billing'
 import { PLAN_TYPE_ERROR, normalisePlanType } from '@/lib/plan-type'
+import { resolvePermissions } from '@/lib/permissions'
+import { logAudit } from '@/lib/audit'
+import type { DB } from '@/db/d1'
+import {
+  OrgDeleteNameMismatch,
+  OrgDeleteRefusal,
+  OrgNotFoundForDelete,
+  runOrgDelete,
+} from '@/lib/org-lifecycle'
 
 type BillingDb = Parameters<typeof applyBillingDerivation>[0]
+type PermissionsDb = Parameters<typeof resolvePermissions>[0]
+type LifecycleDb = DB
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -403,4 +414,99 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   return NextResponse.json({ success: true })
+}
+
+// ── DELETE /api/admin/clients/[id] ───────────────────────────────────────────
+//
+// Remove an organisation and every row under it, INCLUDING its invoices,
+// invoice items, subscriptions and tracks. Super admin only, dry run by
+// default, and gated behind the organisation's exact name typed back.
+//
+// It is deliberately wider than the import cleanup's hard delete, which
+// refuses over a single invoice: the row this exists to clear is a dummy
+// "Acme Widgets Test" carrying six Stripe TEST invoices, and refusing over
+// finance data would leave it on the client list forever. The lock moves from
+// "does it hold finance data" to "is it a real client", and that question is
+// answered by six independent refusals, listed in lib/org-lifecycle/delete.ts.
+//
+// Body:
+//   confirmName  REQUIRED. Must equal the organisation's current name exactly.
+//   dryRun       boolean, DEFAULT TRUE. Returns the per-table counts and every
+//                invoice's rail id, amount and date before anything goes.
+//
+// 400 = the typed name does not match, or confirmName is missing.
+// 409 = a refusal: an imported client, a real login, a linked contact, a
+//       pipeline or sales row, or a real ledger. Merge is the answer instead.
+// 404 = no organisation with that id, which is also what a repeat delete gets.
+//
+// This route sends nothing.
+export async function DELETE(req: NextRequest, { params }: Params) {
+  const auth = await getRequestAuth(req)
+  if (!isTahiAdmin(auth.orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  const featureDenied = await requireFeature(auth, 'clients')
+  if (featureDenied) return featureDenied
+
+  const database = (await db()) as LifecycleDb
+
+  // Super admin only. This is the irreversible door.
+  const access = await resolvePermissions(database as unknown as PermissionsDb, auth)
+  if (!access.isSuperAdmin) {
+    return NextResponse.json({ error: 'Deleting a client is limited to super admins.' }, { status: 403 })
+  }
+
+  const { id } = await params
+  const body = (await req.json().catch(() => ({}))) as { confirmName?: unknown; dryRun?: unknown }
+  const confirmName = typeof body.confirmName === 'string' ? body.confirmName : ''
+  if (!confirmName.trim()) {
+    return NextResponse.json(
+      { error: 'confirmName is required: type the organisation name exactly as it is written.' },
+      { status: 400 },
+    )
+  }
+  const dryRun = body.dryRun !== false
+
+  try {
+    const plan = await runOrgDelete(database, { orgId: id, confirmName, dryRun })
+
+    if (!dryRun) {
+      await logAudit(database, {
+        action: 'client_delete',
+        userId: auth.userId,
+        userType: 'team_member',
+        entityType: 'organisation',
+        entityId: id,
+        metadata: {
+          org: plan.org,
+          tables: plan.tables,
+          invoices: plan.invoices.map(row => ({
+            id: row.id,
+            number: row.number,
+            status: row.status,
+            totalUsd: row.totalUsd,
+            currency: row.currency,
+            stripeInvoiceId: row.stripeInvoiceId,
+            xeroInvoiceId: row.xeroInvoiceId,
+          })),
+          stripeCustomerId: plan.stripeCustomerId,
+          applied: plan.applied,
+        },
+      })
+    }
+
+    return NextResponse.json(plan)
+  } catch (error) {
+    if (error instanceof OrgNotFoundForDelete) {
+      return NextResponse.json({ error: 'No organisation with that id.' }, { status: 404 })
+    }
+    if (error instanceof OrgDeleteNameMismatch) {
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
+    if (error instanceof OrgDeleteRefusal) {
+      return NextResponse.json({ error: error.message, refusals: error.refusals }, { status: 409 })
+    }
+    console.error('[clients/[id] DELETE] failed:', error)
+    return NextResponse.json({ error: 'Delete failed. Nothing further was changed.' }, { status: 500 })
+  }
 }

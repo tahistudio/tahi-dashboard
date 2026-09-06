@@ -29,6 +29,7 @@ import { Card } from '@/components/tahi/card'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { AiHealthCheckCard } from '../_kit/ai-health-card'
 import { InternalNotesCard } from '../_kit/internal-notes-card'
+import { LifecycleDangerZone } from '../_kit/lifecycle-danger'
 import { OrgDetailsCard } from '../_kit/org-details-card'
 import { NoSubscriptionCard, SubscriptionCard } from '../_kit/subscription-card'
 import { TagsCard } from '../_kit/tags-card'
@@ -215,7 +216,7 @@ export function SettingsTab({
           <span className="flex flex-col" style={{ gap: '0.125rem' }}>
             <span style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--color-text)' }}>Danger zone</span>
             <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-              Each of these asks first. Nothing here deletes anything.
+              Each of these asks first, and shows you what would change before it changes it.
             </span>
           </span>
           <ChevronDown
@@ -273,8 +274,11 @@ export function SettingsTab({
               </div>
 
               <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
-                There is no delete. A client is archived, never removed, so their invoices and requests stay in the books.
+                Archiving keeps everything. It is the right answer for a client who has simply finished.
               </p>
+
+              {/* Merge and delete. Renders nothing at all below super admin. */}
+              <LifecycleDangerZone org={org} />
             </div>
           </Card>
         )}
