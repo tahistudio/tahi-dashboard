@@ -21,6 +21,7 @@ import { apiPath } from '@/lib/api'
 import { getInitials } from '@/lib/utils'
 import { sourceBadge } from '@/lib/chart-colors'
 import { REQUEST_STATUS_CONFIG } from '@/lib/status-config'
+import { NO_PLAN, PLAN_TYPES } from '@/lib/plan-type'
 import { SidebarSection, SidebarCard as SharedSidebarCard } from '@/components/tahi/sidebar-card'
 import { DealSalesKit } from '@/components/tahi/deal-sales-kit'
 import { DiscoveryCallsCard } from '@/components/tahi/discovery-calls'
@@ -3377,6 +3378,11 @@ function ConvertToClientCard({ dealId, orgId, orgName, onConverted }: {
   const [converting, setConverting] = useState(false)
   const [result, setResult] = useState<{ orgId: string; orgName: string; created: boolean } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // The plan the new client starts on. No plan by default: the route used to
+  // guess Maintain from a retainer deal and mint a subscription nobody had
+  // bought, so the choice is explicit here and Maintain or Scale provision the
+  // subscription and its tracks.
+  const [planType, setPlanType] = useState<string>(NO_PLAN)
 
   // If the deal is already linked to an org, show the link
   const linkedOrgId = result?.orgId ?? orgId
@@ -3429,6 +3435,7 @@ function ConvertToClientCard({ dealId, orgId, orgName, onConverted }: {
       const res = await fetch(apiPath(`/api/admin/deals/${dealId}/convert-to-client`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planType }),
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: 'Failed to convert' }))
@@ -3462,6 +3469,35 @@ function ConvertToClientCard({ dealId, orgId, orgName, onConverted }: {
       </div>
       <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginBottom: '0.75rem' }}>
         This deal is closed-won. Create a client record to start managing their work.
+      </p>
+      <label
+        htmlFor="convert-plan-type"
+        className="block font-medium"
+        style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}
+      >
+        Plan
+      </label>
+      <select
+        id="convert-plan-type"
+        value={planType}
+        onChange={e => setPlanType(e.target.value)}
+        disabled={converting}
+        className="tahi-focus-ring w-full rounded-lg"
+        style={{
+          minHeight: '2.75rem',
+          padding: '0.375rem 0.75rem',
+          fontSize: '0.8125rem',
+          background: 'var(--color-bg)',
+          color: 'var(--color-text)',
+          border: '1px solid var(--color-border)',
+          marginBottom: '0.75rem',
+        }}
+      >
+        <option value={NO_PLAN}>No plan yet</option>
+        {PLAN_TYPES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+      </select>
+      <p style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginBottom: '0.75rem' }}>
+        Maintain and Scale create the subscription and its tracks. Anything else is a label until one is set up.
       </p>
       {error && (
         <p style={{ fontSize: '0.75rem', color: 'var(--color-danger, #f87171)', marginBottom: '0.5rem' }}>

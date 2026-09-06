@@ -13,9 +13,10 @@ import { Check, Edit2, Globe, RefreshCw, X } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { Card } from '@/components/tahi/card'
-import { HealthDot, StatusBadge } from '@/components/tahi/status-badge'
+import { HealthDot, PlanBadge, StatusBadge } from '@/components/tahi/status-badge'
 import { INVOICE_CHANNELS, invoiceChannelLabel } from '@/lib/invoice-channel'
 import { PAYMENT_TERMS, paymentTermsLabel } from '@/lib/invoice-billing'
+import { NO_PLAN, PLAN_TYPES } from '@/lib/plan-type'
 import { cn, formatDate } from '@/lib/utils'
 import type { Organisation } from './types'
 
@@ -153,6 +154,8 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
     status: org.status,
     healthStatus: org.healthStatus ?? 'green',
     healthNote: org.healthNote ?? '',
+    // NULL and 'none' both read as no plan; the select shows one option for it.
+    planType: org.planType ?? NO_PLAN,
     billingModel: org.billingModel ?? 'none',
     customMrr: org.customMrr ? String(org.customMrr) : '',
     customMrrCurrency: org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD',
@@ -228,7 +231,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
         ) : (
           <div className="flex gap-2">
             <button
-              onClick={() => { setEditing(false); setForm({ name: org.name, website: org.website ?? '', industry: org.industry ?? '', status: org.status, healthStatus: org.healthStatus ?? 'green', healthNote: org.healthNote ?? '', billingModel: org.billingModel ?? 'none', customMrr: org.customMrr ? String(org.customMrr) : '', customMrrCurrency: org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD', defaultHourlyRate: org.defaultHourlyRate ? String(org.defaultHourlyRate) : '', preferredCurrency: org.preferredCurrency ?? 'NZD', retainerStartDate: org.retainerStartDate ?? '', retainerEndDate: org.retainerEndDate ?? '', invoiceChannel: org.invoiceChannel ?? '', paymentTerms: org.paymentTerms ?? '' }) }}
+              onClick={() => { setEditing(false); setForm({ name: org.name, website: org.website ?? '', industry: org.industry ?? '', status: org.status, healthStatus: org.healthStatus ?? 'green', healthNote: org.healthNote ?? '', planType: org.planType ?? NO_PLAN, billingModel: org.billingModel ?? 'none', customMrr: org.customMrr ? String(org.customMrr) : '', customMrrCurrency: org.customMrrCurrency ?? org.preferredCurrency ?? 'NZD', defaultHourlyRate: org.defaultHourlyRate ? String(org.defaultHourlyRate) : '', preferredCurrency: org.preferredCurrency ?? 'NZD', retainerStartDate: org.retainerStartDate ?? '', retainerEndDate: org.retainerEndDate ?? '', invoiceChannel: org.invoiceChannel ?? '', paymentTerms: org.paymentTerms ?? '' }) }}
               className="tahi-focus-ring min-h-[2.75rem] md:min-h-[1.75rem] flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
             >
               <X className="w-3.5 h-3.5" /> Cancel
@@ -308,6 +311,20 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
           {/* Billing section */}
           <div className="col-span-2 border-t border-[var(--color-border-subtle)] pt-3 mt-1">
             <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-subtle)]">Billing</span>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Plan</label>
+            <select
+              value={form.planType}
+              onChange={e => setForm(f => ({ ...f, planType: e.target.value }))}
+              className="w-full min-h-[2.75rem] md:min-h-[2.25rem] px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            >
+              <option value={NO_PLAN}>No plan</option>
+              {PLAN_TYPES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </select>
+            <p className="mt-1 text-xs text-[var(--color-text-subtle)]">
+              The label lists and filters use. Only a subscription bills anything; removing one clears this for you.
+            </p>
           </div>
           <div>
             <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Billing model</label>
@@ -469,6 +486,10 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
             <dd className="text-[var(--color-text)]">
               {new Date(org.updatedAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
             </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Plan</dt>
+            <dd><PlanBadge plan={org.planType} /></dd>
           </div>
           <div>
             <dt className="text-xs text-[var(--color-text-muted)] mb-0.5">Billing model</dt>

@@ -12,6 +12,7 @@ import { INTERNAL_ORG_STATUS } from '@/lib/internal-org'
 import { createInvite, personaForPlanType } from '@/lib/onboarding-invites'
 import { sendEmail } from '@/lib/email'
 import { ClientInviteEmail } from '@/emails/client-invite'
+import { PLAN_TYPE_ERROR, isRetainerPlanType, normalisePlanType } from '@/lib/plan-type'
 
 // ── GET /api/admin/clients ──────────────────────────────────────────────────
 // Query params: ?status=active&plan=maintain&search=acme&page=1
@@ -142,10 +143,18 @@ export async function POST(req: NextRequest) {
     /** Opt out of the invite email the dialog promises. Defaults to sending. */
     sendInvite?: boolean
   }
-  const { name, website, industry, planType, primaryContactEmail, primaryContactName } = body
+  const { name, website, industry, primaryContactEmail, primaryContactName } = body
 
   if (!name?.trim()) {
     return NextResponse.json({ error: 'Client name is required' }, { status: 400 })
+  }
+
+  // A new client has no plan unless the caller names one. Omitted, null and ''
+  // all store the column's own 'none'; a slug outside the vocabulary is refused
+  // here rather than written where no list filter would ever match it.
+  const planType = normalisePlanType(body.planType)
+  if (planType === undefined) {
+    return NextResponse.json({ error: PLAN_TYPE_ERROR }, { status: 400 })
   }
 
   // Validate the address BEFORE anything is written, with the same shape the
@@ -181,7 +190,7 @@ export async function POST(req: NextRequest) {
       name: name.trim(),
       website: website?.trim() || null,
       industry: industry?.trim() || null,
-      planType: planType || null,
+      planType,
       status: 'active',
       healthStatus: 'green',
       preferredCurrency,
@@ -256,8 +265,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // If a retainer plan was selected, create a subscription + provision tracks
-  if (planType === 'maintain' || planType === 'scale') {
+  // Only an explicitly chosen retainer plan comes with a subscription row and
+  // its tracks. Every other plan is a label on the client until a subscription
+  // is created for it, and no plan at all is the default.
+  if (isRetainerPlanType(planType)) {
     const subscriptionId = crypto.randomUUID()
     await drizzle.insert(schema.subscriptions).values({
       id: subscriptionId,
@@ -318,7 +329,7 @@ export async function POST(req: NextRequest) {
     orgId: id,
     data: {
       name: name.trim(),
-      planType: planType || 'none',
+      planType,
       source: 'admin',
     },
   })
