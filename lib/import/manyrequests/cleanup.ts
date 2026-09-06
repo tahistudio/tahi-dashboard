@@ -162,6 +162,13 @@ export const ORG_SCOPED_TABLES: readonly OrgScopedTable[] = [
   { schemaKey: 'proposals', table: 'proposals', policy: 'refuse' },
   { schemaKey: 'contractDocuments', table: 'contract_documents', policy: 'refuse' },
   { schemaKey: 'projectCalculations', table: 'project_calculations', policy: 'refuse' },
+  // Catalogue rows private to one client (migration 0097). 'refuse', not
+  // 'delete': a private row is a priced retainer written for that client
+  // ("Glasswall Custom Retainer"), which is business data by the standing
+  // rule, and several of them arrive from ManyRequests carrying a source id.
+  // Global rows have org_id NULL, so they never count against any org and no
+  // ordinary cleanup is blocked by the studio's own catalogue.
+  { schemaKey: 'services', table: 'services', policy: 'refuse' },
   // Evidence rows for withheld mail (migration 0094). They belong to the org's
   // tree: a dummy org's suppressions name dummy addresses, and the dry run
   // still lists the table before anyone confirms a hard delete.

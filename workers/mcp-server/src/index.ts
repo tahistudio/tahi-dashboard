@@ -265,7 +265,13 @@ const mrListProps = {
   query: prop('object', 'Additional ManyRequests query params (filters, sort, etc.) passed through as-is'),
 }
 
-const TOOLS: ToolDef[] = [
+/**
+ * Exported so the tool schemas can be asserted from the root vitest run, which
+ * excludes `workers/**` but happily imports a file out of it (the request-tool
+ * parity spec does the same). A Workers module only requires the default
+ * export; extra named exports are inert at runtime.
+ */
+export const TOOLS: ToolDef[] = [
   // ── Read: Overview & Reports ──────────────────────────────────────────
   tool('get_overview', 'Get dashboard overview: KPIs, recent requests, revenue summary'),
   tool('get_reports', 'Get aggregate reports: total clients, requests, billable hours, trends'),
@@ -1396,6 +1402,40 @@ const TOOLS: ToolDef[] = [
     subscriptionId: prop('string', 'Subscription ID'),
     newCycle: prop('string', 'New billing cycle: monthly, quarterly, annual'),
   }, ['subscriptionId', 'newCycle']),
+
+  // ── Services catalogue ────────────────────────────────────────────────
+  // A catalogue row is either GLOBAL (orgId null, every client sees it) or
+  // PRIVATE to one organisation, and separately either public or hidden
+  // (migration 0097). Both are on create and update, because a row named for
+  // the client it was priced for is exactly what must not go out globally.
+  tool('list_services', "The studio's service catalogue. Without orgId this is the global rows plus every private row you are allowed to see; with orgId it narrows to the global rows plus that one client's. A row with orgId set is private to that client and no other client's portal will ever show it.", {
+    orgId: prop('string', "Client organisation id. Narrows to the global catalogue plus that client's private rows."),
+  }),
+  tool('create_service', 'Create a service catalogue row. Leave orgId off for a global row every client sees; set it to make the row private to that one client, which is the only way a per-client retainer name can exist without every other client reading it. visibility hidden keeps the row out of the client portal whoever it is for. price is in CENTS.', {
+    name: prop('string', 'Service name'),
+    description: prop('string', 'Description. The portal parses the first paragraph as the outcome, "- " lines as inclusions and a "Timeline:" line as the timeline.'),
+    price: prop('number', 'Price in CENTS, not dollars'),
+    currency: prop('string', 'ISO currency code, default NZD'),
+    isRecurring: prop('boolean', 'Recurring rather than one-off'),
+    recurringInterval: prop('string', 'month | year, when recurring'),
+    showInCatalog: prop('boolean', 'Published to the client catalogue at all (default true). The portal requires this AND visibility public.'),
+    category: prop('string', 'service | topup | addon'),
+    orgId: prop('string', 'Client organisation id to keep this row private to. Omit or null for a global row every client sees. A client id that does not exist is refused with 400.'),
+    visibility: prop('string', "public | hidden. Hidden never reaches the client portal, even when the row is global.", { enum: ['public', 'hidden'] }),
+  }, ['name']),
+  tool('update_service', 'Update a service catalogue row, including its audience. Pass orgId null to make a private row global again, or a client id to make it private to that client. visibility hidden pulls it from the portal without deleting it. price is in CENTS.', {
+    serviceId: prop('string', 'Service ID'),
+    name: prop('string', 'Service name'),
+    description: prop('string', 'Description'),
+    price: prop('number', 'Price in CENTS, not dollars'),
+    currency: prop('string', 'ISO currency code'),
+    isRecurring: prop('boolean', 'Recurring rather than one-off'),
+    recurringInterval: prop('string', 'month | year, when recurring'),
+    showInCatalog: prop('boolean', 'Published to the client catalogue at all'),
+    category: prop('string', 'service | topup | addon'),
+    orgId: prop('string', 'Client organisation id to keep this row private to. Pass null to make it global again.'),
+    visibility: prop('string', 'public | hidden', { enum: ['public', 'hidden'] }),
+  }, ['serviceId']),
 
   // ── Docs ──────────────────────────────────────────────────────────────
   tool('list_docs', 'List all knowledge hub documentation pages'),
@@ -2604,6 +2644,22 @@ async function executeTool(
     }
     case 'change_billing_cycle':
       return json(await apiWrite(`/api/admin/subscriptions/${s('subscriptionId')}/change-cycle`, token, 'POST', { newCycle: s('newCycle') }))
+
+    // ── Services catalogue ────────────────────────────────────────────
+    case 'list_services': {
+      const p: Record<string, string> = {}
+      if (s('orgId')) p.orgId = s('orgId')!
+      return json(await apiGet('/api/admin/services', token, p))
+    }
+    case 'create_service':
+      return json(await apiWrite('/api/admin/services', token, 'POST', args as Record<string, unknown>))
+    case 'update_service': {
+      // `orgId` is spread through as-is, including an explicit null, which is
+      // how a private row is handed back to everyone. Dropping it would make
+      // "make this global again" unsayable over MCP.
+      const { serviceId, ...body } = args
+      return json(await apiWrite(`/api/admin/services/${serviceId}`, token, 'PATCH', body))
+    }
 
     // ── Docs ──────────────────────────────────────────────────────────
     case 'list_docs':

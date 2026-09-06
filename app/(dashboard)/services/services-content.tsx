@@ -3,9 +3,12 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import {
-  ShoppingBag, Plus, RefreshCw, Tag, Loader2, Ticket, Trash2,
+  ShoppingBag, Plus, RefreshCw, Tag, Loader2, Ticket, Trash2, Pencil, Lock,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { Badge } from '@/components/tahi/badge'
+import { SearchableSelect } from '@/components/tahi/searchable-select'
+import { SegmentedControl } from '@/components/tahi/segmented-control'
 
 // ---- Types -------------------------------------------------------------------
 
@@ -19,9 +22,21 @@ interface ServiceItem {
   recurringInterval: string | null
   showInCatalog: number
   category: string | null
+  /** null = a global row every client sees. Set = private to that client. */
+  orgId: string | null
+  /** 'public' | 'hidden'. Hidden keeps the row out of the portal either way. */
+  visibility: string
   createdAt: string
   updatedAt: string
 }
+
+interface ClientOption {
+  id: string
+  name: string
+}
+
+/** Everyone, or one named client. The two states of the audience control. */
+type Audience = 'everyone' | 'client'
 
 interface CouponItem {
   code: string
@@ -59,7 +74,15 @@ const CATEGORY_LABELS: Record<string, string> = {
 export function AdminServicesContent() {
   const { data: servicesData, isLoading: loading, mutate: mutateServices } = useSWR<{ items: ServiceItem[] }>('/api/admin/services')
   const services = servicesData?.items ?? []
+  // The audience picker and the "Private to" badge both read this. Scoped to
+  // whatever the caller may see, because that is what /api/admin/clients
+  // already answers.
+  const { data: clientsData } = useSWR<{ organisations: ClientOption[] }>('/api/admin/clients')
+  const clients = clientsData?.organisations ?? []
+  const clientName = (id: string | null): string | null =>
+    id ? (clients.find(c => c.id === id)?.name ?? 'another client') : null
   const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState<ServiceItem | null>(null)
 
   return (
     <div className="space-y-6" style={{ maxWidth: '68.75rem' }}>
@@ -67,7 +90,7 @@ export function AdminServicesContent() {
         <div>
           <h1 className="text-2xl font-bold text-[var(--color-text)]">Services</h1>
           <p className="text-sm text-[var(--color-text-muted)] mt-1">
-            Manage your service catalogue. Clients see services marked as visible.
+            Manage your service catalogue. Every client sees a service unless you make it private to one of them, and hidden keeps it out of the portal either way.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -149,6 +172,7 @@ export function AdminServicesContent() {
                   <th className="text-left text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider hidden sm:table-cell" style={{ padding: '0.75rem 1rem' }}>Type</th>
                   <th className="text-left text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider hidden md:table-cell" style={{ padding: '0.75rem 1rem' }}>Category</th>
                   <th className="text-center text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider" style={{ padding: '0.75rem 1rem' }}>Visible</th>
+                  <th className="text-right text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider" style={{ padding: '0.75rem 1rem' }}><span className="sr-only">Edit</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -161,7 +185,14 @@ export function AdminServicesContent() {
                     }}
                   >
                     <td style={{ padding: '0.75rem 1rem' }}>
-                      <div className="font-medium text-[var(--color-text)]">{svc.name}</div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-[var(--color-text)]">{svc.name}</span>
+                        {svc.orgId && (
+                          <Badge tone="purple" variant="soft" size="sm">
+                            Private to {clientName(svc.orgId)}
+                          </Badge>
+                        )}
+                      </div>
                       {svc.description && (
                         <div className="text-xs text-[var(--color-text-muted)] mt-0.5 truncate" style={{ maxWidth: '20rem' }}>
                           {svc.description}
@@ -206,15 +237,38 @@ export function AdminServicesContent() {
                       )}
                     </td>
                     <td className="text-center" style={{ padding: '0.75rem 1rem' }}>
+                      {/* Both flags have to agree. The portal requires
+                          show_in_catalog AND visibility, so a dot that read
+                          only one of them would promise a client can see a row
+                          the other flag is holding back. */}
                       <span
                         className="inline-block w-2.5 h-2.5 rounded-full"
                         style={{
-                          background: svc.showInCatalog
+                          background: isShown(svc)
                             ? 'var(--color-success)'
                             : 'var(--color-border)',
                         }}
-                        title={svc.showInCatalog ? 'Visible to clients' : 'Hidden from clients'}
+                        title={isShown(svc)
+                          ? (svc.orgId ? `Shown to ${clientName(svc.orgId)}` : 'Shown to every client')
+                          : 'Hidden from the client portal'}
                       />
+                    </td>
+                    <td className="text-right" style={{ padding: '0.75rem 1rem' }}>
+                      <button
+                        onClick={() => setEditing(svc)}
+                        className="inline-flex items-center justify-center text-[var(--color-text-subtle)] hover:text-[var(--color-brand)] focus-visible:text-[var(--color-brand)] transition-colors tahi-focus-ring"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          minWidth: '2.75rem',
+                          minHeight: '2.75rem',
+                          borderRadius: 'var(--radius-button)',
+                        }}
+                        aria-label={`Edit ${svc.name}`}
+                      >
+                        <Pencil className="w-4 h-4" aria-hidden="true" />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -226,17 +280,28 @@ export function AdminServicesContent() {
 
       <CouponsSection />
 
-      {showForm && (
-        <CreateServiceDialog
-          onClose={() => setShowForm(false)}
-          onCreated={() => {
+      {(showForm || editing) && (
+        <ServiceDialog
+          service={editing}
+          clients={clients}
+          onClose={() => { setShowForm(false); setEditing(null) }}
+          onSaved={() => {
             setShowForm(false)
+            setEditing(null)
             void mutateServices()
           }}
         />
       )}
     </div>
   )
+}
+
+/**
+ * Can a client see this row at all. The portal requires show_in_catalog AND
+ * visibility = 'public' (migration 0097), so this has to require both too.
+ */
+function isShown(svc: ServiceItem): boolean {
+  return svc.showInCatalog === 1 && svc.visibility !== 'hidden'
 }
 
 // ---- Coupons Section ---------------------------------------------------------
@@ -600,71 +665,116 @@ function CreateCouponDialog({
   )
 }
 
-// ---- Create Service Dialog ---------------------------------------------------
+// ---- Service Dialog ----------------------------------------------------------
 
-function CreateServiceDialog({
+const AUDIENCE_OPTIONS = [
+  { value: 'everyone' as const, label: 'Everyone' },
+  { value: 'client' as const, label: 'One client' },
+]
+
+const VISIBILITY_OPTIONS = [
+  { value: 'public' as const, label: 'Shown' },
+  { value: 'hidden' as const, label: 'Hidden' },
+]
+
+/**
+ * Create or edit one catalogue row. `service` null means create.
+ *
+ * Two controls carry the CT.11 audience decision:
+ *
+ *   Audience    Everyone (org_id null) or one named client (org_id set). A
+ *               private row is the only way a per-client retainer name can
+ *               exist without every other client reading it off their portal.
+ *   Visibility  Shown or Hidden. This writes BOTH `visibility` and the older
+ *               `showInCatalog` flag, deliberately: the portal requires both,
+ *               so two separate switches in here would let the studio set one
+ *               to Shown and still watch the row not appear.
+ */
+function ServiceDialog({
+  service,
+  clients,
   onClose,
-  onCreated,
+  onSaved,
 }: {
+  service: ServiceItem | null
+  clients: ClientOption[]
   onClose: () => void
-  onCreated: () => void
+  onSaved: () => void
 }) {
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [priceStr, setPriceStr] = useState('')
-  const [currency, setCurrency] = useState('NZD')
-  const [isRecurring, setIsRecurring] = useState(false)
-  const [recurringInterval, setRecurringInterval] = useState('month')
-  const [showInCatalog, setShowInCatalog] = useState(true)
-  const [category, setCategory] = useState('')
-  const [creating, setCreating] = useState(false)
+  const editing = service !== null
+  const [name, setName] = useState(service?.name ?? '')
+  const [description, setDescription] = useState(service?.description ?? '')
+  const [priceStr, setPriceStr] = useState(service ? String(service.price / 100) : '')
+  const [currency, setCurrency] = useState(service?.currency ?? 'NZD')
+  const [isRecurring, setIsRecurring] = useState(service ? service.isRecurring === 1 : false)
+  const [recurringInterval, setRecurringInterval] = useState(service?.recurringInterval ?? 'month')
+  const [visibility, setVisibility] = useState<'public' | 'hidden'>(
+    service && !isShown(service) ? 'hidden' : 'public',
+  )
+  const [audience, setAudience] = useState<Audience>(service?.orgId ? 'client' : 'everyone')
+  const [audienceOrgId, setAudienceOrgId] = useState<string | null>(service?.orgId ?? null)
+  const [category, setCategory] = useState(service?.category ?? '')
+  const [saving, setSaving] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+
+  const clientOptions = clients.map(c => ({ value: c.id, label: c.name }))
 
   const handleSubmit = async () => {
     if (!name.trim()) {
       setErrorMsg('Name is required')
       return
     }
-    setCreating(true)
+    if (audience === 'client' && !audienceOrgId) {
+      setErrorMsg('Pick the client this service is private to, or set the audience back to Everyone')
+      return
+    }
+    setSaving(true)
     setErrorMsg('')
 
     const priceInCents = Math.round(parseFloat(priceStr || '0') * 100)
+    const shown = visibility === 'public'
 
     try {
-      const res = await fetch(apiPath('/api/admin/services'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          description: description.trim() || undefined,
-          price: priceInCents,
-          currency,
-          isRecurring,
-          recurringInterval: isRecurring ? recurringInterval : undefined,
-          showInCatalog,
-          category: category || undefined,
-        }),
-      })
+      const res = await fetch(
+        apiPath(editing ? `/api/admin/services/${service.id}` : '/api/admin/services'),
+        {
+          method: editing ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name.trim(),
+            description: description.trim() || null,
+            price: priceInCents,
+            currency,
+            isRecurring,
+            recurringInterval: isRecurring ? recurringInterval : null,
+            // One control, both flags. See the note above the component.
+            showInCatalog: shown,
+            visibility,
+            category: category || null,
+            orgId: audience === 'client' ? audienceOrgId : null,
+          }),
+        },
+      )
       if (!res.ok) {
         const data = (await res.json()) as { error?: string }
-        throw new Error(data.error ?? 'Failed to create service')
+        throw new Error(data.error ?? 'Failed to save service')
       }
-      onCreated()
+      onSaved()
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to create service')
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to save service')
     } finally {
-      setCreating(false)
+      setSaving(false)
     }
   }
 
   return (
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center"
-      style={{ background: 'rgba(0, 0, 0, 0.5)' }}
+      style={{ background: 'rgba(0, 0, 0, 0.5)', padding: '1rem' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
       role="dialog"
       aria-modal="true"
-      aria-labelledby="create-service-title"
+      aria-labelledby="service-dialog-title"
     >
       <div
         className="w-full max-w-md"
@@ -673,10 +783,12 @@ function CreateServiceDialog({
           borderRadius: 'var(--radius-card)',
           boxShadow: 'var(--shadow-lg)',
           padding: '1.5rem',
+          maxHeight: 'calc(100vh - 2rem)',
+          overflowY: 'auto',
         }}
       >
-        <h2 id="create-service-title" className="text-lg font-semibold text-[var(--color-text)] mb-4">
-          Create Service
+        <h2 id="service-dialog-title" className="text-lg font-semibold text-[var(--color-text)] mb-4">
+          {editing ? 'Edit Service' : 'Create Service'}
         </h2>
 
         <div className="space-y-4">
@@ -828,22 +940,60 @@ function CreateServiceDialog({
             </select>
           </div>
 
-          {/* Visible in catalog */}
-          <div className="flex items-center justify-between">
-            <label htmlFor="svc-visible" className="text-sm font-medium text-[var(--color-text)]">Show in client catalogue</label>
-            <button
-              id="svc-visible"
-              onClick={() => setShowInCatalog(!showInCatalog)}
-              className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
-              style={{ background: showInCatalog ? 'var(--color-brand)' : 'var(--color-border)' }}
-              role="switch"
-              aria-checked={showInCatalog}
-            >
-              <span
-                className="inline-block h-4 w-4 rounded-full bg-white transition-transform"
-                style={{ transform: showInCatalog ? 'translateX(1.375rem)' : 'translateX(0.25rem)' }}
-              />
-            </button>
+          {/* Audience: everyone, or one client */}
+          <div>
+            <span className="block text-sm font-medium text-[var(--color-text)] mb-1">Audience</span>
+            <SegmentedControl
+              value={audience}
+              onChange={setAudience}
+              options={AUDIENCE_OPTIONS}
+              ariaLabel="Who this service is for"
+              describedBy="svc-audience-help"
+              role="radiogroup"
+              size="sm"
+              fill
+            />
+            <p id="svc-audience-help" className="text-xs text-[var(--color-text-muted)] mt-1">
+              {audience === 'everyone'
+                ? 'Every client sees this on their Services page.'
+                : 'Only the client below sees it. Use this for a retainer named after them.'}
+            </p>
+            {audience === 'client' && (
+              <div className="mt-2">
+                <SearchableSelect
+                  options={clientOptions}
+                  value={audienceOrgId}
+                  onChange={setAudienceOrgId}
+                  placeholder="Select a client..."
+                  searchPlaceholder="Search clients..."
+                  emptyMessage="No clients found."
+                  allowClear
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Visibility */}
+          <div>
+            <span className="block text-sm font-medium text-[var(--color-text)] mb-1">Visibility</span>
+            <SegmentedControl
+              value={visibility}
+              onChange={setVisibility}
+              options={VISIBILITY_OPTIONS}
+              ariaLabel="Whether clients can see this service"
+              describedBy="svc-visibility-help"
+              role="radiogroup"
+              size="sm"
+              fill
+            />
+            <p id="svc-visibility-help" className="text-xs text-[var(--color-text-muted)] mt-1 flex items-start gap-1.5">
+              {visibility === 'hidden' && <Lock className="w-3.5 h-3.5 shrink-0 mt-0.5" aria-hidden="true" />}
+              <span>
+                {visibility === 'hidden'
+                  ? 'Kept out of the client portal entirely, whoever it is for.'
+                  : 'Published to the Services page of whoever the audience is.'}
+              </span>
+            </p>
           </div>
 
           {errorMsg && (
@@ -870,24 +1020,24 @@ function CreateServiceDialog({
           </button>
           <button
             onClick={handleSubmit}
-            disabled={creating}
+            disabled={saving}
             className="px-4 py-2 text-sm font-medium text-white transition-colors"
             style={{
               background: 'var(--color-brand)',
               borderRadius: 'var(--radius-button)',
               border: 'none',
-              cursor: creating ? 'not-allowed' : 'pointer',
-              opacity: creating ? 0.7 : 1,
+              cursor: saving ? 'not-allowed' : 'pointer',
+              opacity: saving ? 0.7 : 1,
               minHeight: '2.75rem',
             }}
           >
-            {creating ? (
+            {saving ? (
               <span className="flex items-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                Creating...
+                {editing ? 'Saving...' : 'Creating...'}
               </span>
             ) : (
-              'Create Service'
+              editing ? 'Save Service' : 'Create Service'
             )}
           </button>
         </div>
