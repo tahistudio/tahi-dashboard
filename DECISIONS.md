@@ -1207,3 +1207,26 @@ The `AiRequestWizard` React component now takes optional `wizardEndpoint` + `sub
 - The search palette modal uses a custom double-layer drop shadow for the extra "lifted off the page" feel, but the inner sections still respect the family.
 
 ---
+
+## #059 - A Client Can Be Merged or Deleted, Super Admin Only, Dry Run First
+
+**Date:** 2026-09-07
+
+**Decision:** Two irreversible operations join the client Settings danger zone, both gated on `resolvePermissions(...).isSuperAdmin` and both dry run by default.
+
+`POST /api/admin/clients/[id]/merge { into, dryRun }` folds a SHELL organisation into a SURVIVOR. Every org-scoped table is re-pointed, contacts move across or fold into a survivor contact with the same email (case-insensitively, with every contact-referencing column re-pointed onto the surviving person first), and the shell row is removed. The four external ids (`xero_contact_id`, `stripe_customer_id`, `manyrequests_id`, `clerk_org_id`) are carried ONLY into an empty field; two different non-null values refuse the merge and name the field.
+
+`DELETE /api/admin/clients/[id] { confirmName, dryRun }` removes an organisation and all its org-scoped rows INCLUDING its invoices, invoice items, subscriptions and tracks. It refuses over a `manyrequests_id`, a `clerk_org_id`, any contact with a `clerk_user_id`, any deal, lead, CRM activity, discovery call, contract, contract document, proposal, project schedule or project calculation, and over a paid invoice on a live rail while the org also holds a Xero contact id.
+
+**Rationale:** The ManyRequests import left duplicate and test organisations next to real ones, and the existing cleanup (Decision-era `POST /api/admin/import/cleanup`) could only archive them: it refuses over a single invoice, and the rows that need removing are precisely the ones carrying test invoices. Archiving hides a shell without giving the real client back their ledger, and it leaves the dummy row on every picker forever.
+
+So the lock MOVES rather than loosens. The cleanup asks "does it hold finance data"; this asks "is it a real client", and answers that with six independent refusals plus the organisation's exact name typed back. A Stripe customer id alone is deliberately NOT a refusal, because a test-mode customer is indistinguishable from a live one; the dry run prints it, and every invoice's rail id, amount and date, so the operator decides with the ledger in front of them.
+
+**Implications:**
+- `lib/org-lifecycle/refs.ts` re-exports `ORG_SCOPED_TABLES` from the import cleanup and adds `PARENT_KEYED_TABLES` (rows keyed on a request, task, conversation, message, invoice, subscription or brand) and `CONTACT_REFERENCE_COLUMNS`. Static tests re-derive the last two from `db/schema.ts`, so a new org-scoped table or a new column holding a `contacts.id` cannot be forgotten by either operation.
+- `audit_log.actor_id` is deliberately never re-pointed: the audit log is immutable, and a merge records what it did rather than rewriting what was already recorded.
+- Neither operation may ever reach a mailer. `lib/org-lifecycle/__tests__/policy.test.ts` walks the module graph and fails on any import that can send, invite or notify, mirroring the importer's own guard.
+- The MCP tools `merge_client` and `delete_client` exist for discoverability and answer 403 under the service token, exactly like `import_manyrequests` and `cleanup_dummy_data`: `SERVICE_USER_ID` resolves to `admin`, never `super_admin`.
+- Archive remains the reversible answer and stays the right one for anything uncertain.
+
+---
