@@ -31,6 +31,48 @@ export const DISPLAY_CURRENCIES = SUPPORTED_CURRENCIES.filter(c =>
 
 export type CurrencyCode = typeof SUPPORTED_CURRENCIES[number]['code']
 
+/**
+ * The currency every NZD-base amount in the app is already expressed in (plan
+ * rates, catalogue prices, `valueNzd` totals). Separate from the display
+ * PREFERENCE on purpose: that one is a choice, this one is a fact about the
+ * data, and only one of them may change.
+ */
+export const BASE_CURRENCY: CurrencyCode = 'NZD'
+
+/** Narrow a raw code (D1 `organisations.preferred_currency`) to a known one. */
+export function asCurrencyCode(raw: string | null | undefined): CurrencyCode | null {
+  if (!raw) return null
+  const match = SUPPORTED_CURRENCIES.find(c => c.code === raw.trim().toUpperCase())
+  return match ? (match.code as CurrencyCode) : null
+}
+
+/**
+ * Which currency the dashboard shell should pin, given the audience and the
+ * org's stored preference. Pure so the rule is testable without a render.
+ *
+ * - Studio session: null. Stored preference, nav switcher, conversions, all
+ *   unchanged.
+ * - Client audience (a real client, or the studio inside Client view): their
+ *   billed currency, falling back to the NZD base rather than to "unpinned".
+ *   The fallback matters: `organisations.preferred_currency` defaults to 'USD'
+ *   in the schema while every other read in the codebase falls back to 'NZD'
+ *   (`org.preferredCurrency ?? 'NZD'`), and an unreadable or missing row must
+ *   not leave a client's money floating on whatever this browser last chose.
+ *
+ * This lives here, in a server-safe module, and NOT in
+ * lib/display-currency-context.tsx: the dashboard layout is a server component
+ * and calls it, and a server module may never import a value from a
+ * 'use client' file. Next replaces every export of such a file with a stub
+ * that throws when called, which is what took production down on 2026-09-06.
+ */
+export function resolvePinnedCurrency(
+  preferred: string | null | undefined,
+  isClientAudience: boolean,
+): CurrencyCode | null {
+  if (!isClientAudience) return null
+  return asCurrencyCode(preferred) ?? BASE_CURRENCY
+}
+
 export interface ExchangeRate {
   currency: string
   rateToUsd: number
@@ -172,4 +214,46 @@ export function formatCurrencyWithCode(
   options: FormatCurrencyOptions = {},
 ): string {
   return `${formatCurrency(amount, currency, options)} ${currency}`
+}
+
+/**
+ * U+2248 ALMOST EQUAL TO, then U+00A0 NO-BREAK SPACE, so a converted figure
+ * can never wrap away from the marker that says it is an approximation. The
+ * second character is a hard space, not a plain one: check before editing.
+ */
+export const APPROX_MARKER = '≈ '
+
+/**
+ * How a PINNED session renders an amount that is stored in the NZD base.
+ *
+ * A pin names the currency a client is billed in. It does not turn an NZD-base
+ * figure (a plan rate, a catalogue price, a total) into a native one, so the
+ * client reads it converted into their own currency behind an approximate
+ * marker, and alone: `≈ US$882`.
+ *
+ * The two shapes this rejects, and why:
+ *  - `US$882` bare. States a price nobody charges as though it were the price,
+ *    on the same portal as an invoice row actually billed in US$.
+ *  - `NZ$1,500 ≈ US$882`. Two currencies in one figure. Roughly doubles the
+ *    width of every KPI tile, table cell and plan card on a client surface,
+ *    and 375px has no room for it.
+ *
+ * With no usable rate the conversion would be the identity, so the exact base
+ * figure is printed instead: the same number wearing the client's symbol would
+ * be a straight lie rather than an approximation.
+ */
+export function formatPinnedBaseAmount(
+  amountNzd: number,
+  pinned: CurrencyCode,
+  rates: ExchangeRate[],
+  ratesLoaded: boolean,
+  options: FormatCurrencyOptions = {},
+): string {
+  if (pinned === BASE_CURRENCY) return formatCurrency(amountNzd, BASE_CURRENCY, options)
+  const rated = ratesLoaded
+    && rates.some(r => r.currency === BASE_CURRENCY)
+    && rates.some(r => r.currency === pinned)
+  if (!rated) return formatCurrency(amountNzd, BASE_CURRENCY, options)
+  const converted = convertFromNzd(amountNzd, pinned, rates)
+  return `${APPROX_MARKER}${formatCurrency(converted, pinned, options)}`
 }
