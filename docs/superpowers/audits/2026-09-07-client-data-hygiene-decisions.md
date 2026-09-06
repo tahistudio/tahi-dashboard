@@ -28,3 +28,16 @@ Also asked: Xero draft invoices must not count as money owed anywhere (studio ho
 After: 52 organisations (16 archived), 66 contacts, 13 subscriptions, 130 invoices.
 
 Still open: Physitrack x the three Evan Kwan shells (merge refuses on two different Stripe customer ids; Liam says keep either, so the merge gains a keep-survivor option); the Stripe invoice-plus-charge twins (builder running: importer fix plus a dedupe endpoint); 6 orphan tracks whose subscriptions were removed earlier (need a cleanup pass); the Dante Media written-off invoices remain Liam's accounting call.
+
+## Shell merges applied 7 Sep 2026, 11:45 to 12:05 NZST (keepSurvivorIds, as Liam)
+
+- Physitrack absorbed six Evan Kwan Stripe shells (three empty, three holding 11 payment rows); the organisation keeps cus_UKbl1ofjkD5FU0, the shells' cus_Sm4dmnkwzZp2Zn is recorded in the audit rows.
+- DANTE MEDIA OÜ absorbed three Ali Okumusoglu Stripe shells (7 rows), carrying the Stripe customer.
+- ISG absorbed the shell named "INV-2025000008" (2 rows, USD 8,280: its two project fees), Blank Space Inc the shell "INV-2025000015" (2 rows, USD 750), Fluvial the shell "INV-2026000027" (4 rows: the April and May payments plus two later Stripe invoices 0CRPKIFR-0001 and 0002), Greyhive the "Steve Stuart" shell (1 unpaid row), AI Friction Labs the "Mike Kentz" shell (5 rows, notes say "Reassigned to AI Friction Labs").
+- No archived import shell with invoices remains.
+
+Consequence: 12 ManyRequests-imported invoices now sit next to their Stripe or Xero ledger twin at the same client (Blank Space 2, Dante Media 2, Fluvial 2, ISG 2, Physitrack 4), and the Stripe invoice-plus-charge twins moved with the shells. Two dedupe passes follow, dry run first: Stripe charge twins (endpoint deploying), then ManyRequests twins (builder running: the ledger row survives and takes over the ManyRequests id, number and line items).
+
+## Stripe charge twins removed (7 Sep 2026, 12:40 NZST)
+
+The dedupe endpoint (dry run, then apply as Liam) removed 9 charge rows that duplicated a Stripe invoice row for the same payment, with their 9 line items: Physitrack 5, Dante Media 2, AI Friction Labs 1, The Longevity Edit 1 (Christian Burton now shows one USD 2,500, as Liam said). The importer no longer produces them: it reads the invoice link through the payment intent. Next: the ManyRequests twins (12 rows) once that builder lands.

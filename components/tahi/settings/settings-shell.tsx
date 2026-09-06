@@ -9,6 +9,7 @@ import {
   Building2, FileText, Columns3, ClipboardList, Target, GitBranch, Sparkles,
   Plug, Webhook, Workflow, Clock, Bot, Users, CreditCard, Coins, PiggyBank,
   ScrollText, AlertTriangle, Palette, ChevronDown, Wallet, Shield,
+  Mail,
 } from 'lucide-react'
 import '@/app/(dashboard)/settings/settings.css'
 
@@ -36,6 +37,7 @@ import { PlansRetainersSection } from '@/components/tahi/settings/sections/plans
 import { ReservesSection } from '@/components/tahi/settings/sections/reserves'
 import { AuditLogSection } from '@/components/tahi/settings/sections/audit-log'
 import { DangerZoneSection } from '@/components/tahi/settings/sections/danger-zone'
+import { EmailDeliveryCard } from '@/components/tahi/settings/sections/email-delivery'
 import { BrandsSection } from '@/components/tahi/settings/sections/brands'
 import { OrgSettingsSection } from '@/components/tahi/settings/sections/org'
 import { PeopleSection } from '@/components/tahi/settings/sections/people'
@@ -45,6 +47,12 @@ import { SubscriptionSection } from '@/components/tahi/settings/sections/subscri
 type Audience = 'both' | 'admin' | 'client'
 
 type SectionComponent = React.ComponentType<{ isAdmin?: boolean; isClientAdmin?: boolean }>
+
+/** Email delivery gets its own door. It also stays at the foot of Studio
+ *  details, where it first shipped, so a saved link there keeps working. */
+function EmailDeliverySection({ isAdmin }: { isAdmin?: boolean }) {
+  return <EmailDeliveryCard isAdmin={isAdmin} />
+}
 
 interface SectionDef {
   id: string
@@ -88,6 +96,7 @@ const SECTIONS: SectionDef[] = [
   { id: 'automations', label: 'Automations', icon: Workflow, group: 'Automations & integrations', audience: 'admin', Component: AutomationsSection },
   { id: 'crons', label: 'Scheduled jobs', icon: Clock, group: 'Automations & integrations', audience: 'admin', superAdminOnly: true, Component: ScheduledJobsSection },
   { id: 'aicontext', label: 'AI context', icon: Bot, group: 'Automations & integrations', audience: 'admin', Component: AiContextSection },
+  { id: 'emaildelivery', label: 'Email delivery', icon: Mail, group: 'Automations & integrations', audience: 'admin', superAdminOnly: true, Component: EmailDeliverySection },
 
   { id: 'teamaccess', label: 'Team & access', icon: Shield, group: 'Team & access', audience: 'admin', superAdminOnly: true, Component: TeamAccessSection },
 
