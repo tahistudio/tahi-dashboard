@@ -6,6 +6,7 @@ import { schema } from '@/db/d1'
 import { sql, eq } from 'drizzle-orm'
 import { callXeroAPI } from '@/lib/xero'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
+import { isDraftInvoice, isOwedInvoice, isPaidInvoice } from '@/lib/invoice-status'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -38,16 +39,33 @@ export async function GET(req: NextRequest) {
     })
     .from(schema.invoices)
 
+  // `totalInvoiced` used to sum EVERY row, so a draft Liam raised in Xero as a
+  // placeholder for later work read as money already billed, and so did an
+  // invoice that had been written off. It is now what has actually been
+  // issued and is still live: owed plus paid. Drafts get their own pair of
+  // fields; voided rows are in neither, which is what "never collected"
+  // means.
   let totalInvoiced = 0
   let totalPaid = 0
   let totalOutstanding = 0
+  let totalDrafts = 0
+  let draftCount = 0
   const invoiceCount = allInvoices.length
 
   for (const inv of allInvoices) {
     const nzd = toNzd(inv.totalUsd, inv.currency ?? 'USD', rateMap)
-    totalInvoiced += nzd
-    if (inv.status === 'paid') totalPaid += nzd
-    if (inv.status === 'sent' || inv.status === 'overdue' || inv.status === 'viewed') totalOutstanding += nzd
+    if (isDraftInvoice(inv.status)) {
+      totalDrafts += nzd
+      draftCount += 1
+      continue
+    }
+    if (isPaidInvoice(inv.status)) {
+      totalPaid += nzd
+      totalInvoiced += nzd
+    } else if (isOwedInvoice(inv.status)) {
+      totalOutstanding += nzd
+      totalInvoiced += nzd
+    }
   }
 
   // 2. Pipeline projections (weighted by historical probability)
@@ -125,6 +143,9 @@ export async function GET(req: NextRequest) {
       totalPaid: Math.round(totalPaid),
       totalOutstanding: Math.round(totalOutstanding),
       count: invoiceCount,
+      // Additive fields. Drafts are never inside any figure above.
+      totalDrafts: Math.round(totalDrafts),
+      draftCount,
     },
     pipeline: {
       totalValue: pipelineTotal,

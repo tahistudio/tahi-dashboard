@@ -8,6 +8,7 @@ import { resolvePermissions, can, type ResolvedAccess } from '@/lib/permissions'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { BRIEF_FEATURES, briefCacheKeyForFingerprint, briefScopeFingerprint } from '@/lib/brief-cache-key'
 import { overnightCutoff, daysPastDue } from '@/lib/overview-aggregates'
+import { owedStatusList } from '@/lib/invoice-status'
 
 export const dynamic = 'force-dynamic'
 
@@ -101,7 +102,9 @@ export async function computeBrief(
   // ── URGENT: oldest overdue invoices (gated on invoices) ────────────────────
   if (canSeeInvoices && !denyAll) {
     try {
-      const conditions = [inArray(schema.invoices.status, ['sent', 'overdue'])]
+      // Issued and unpaid only: the brief nudges the client about money they
+      // owe, and a draft is not something anyone can be nudged about.
+      const conditions = [inArray(schema.invoices.status, owedStatusList())]
       if (allowedOrgs) conditions.push(inArray(schema.invoices.orgId, allowedOrgs))
       const rows = await drizzle
         .select({

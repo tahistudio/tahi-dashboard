@@ -13,6 +13,7 @@
  * because a claim the operator cannot verify is worse than silence.
  */
 
+import { OWED_STATUSES, isOwedInvoice } from '@/lib/invoice-status'
 import type { ClientTabId } from './types'
 
 export type NeedTone = 'danger' | 'warn' | 'info'
@@ -51,8 +52,14 @@ export interface NeedInvoice {
   createdAt?: string | null
 }
 
-/** Invoice statuses that still count as money out and not yet in. */
-export const OPEN_INVOICE_STATUSES = ['sent', 'viewed', 'overdue']
+/**
+ * Invoice statuses that still count as money out and not yet in.
+ *
+ * Re-exported from lib/invoice-status.ts rather than written out again, so
+ * this page and every server aggregation share one reading. A draft is not in
+ * it and never was: it is a placeholder the studio raised, not a bill.
+ */
+export const OPEN_INVOICE_STATUSES: readonly string[] = OWED_STATUSES
 
 /**
  * The one definition of an overdue invoice on this page.
@@ -60,11 +67,12 @@ export const OPEN_INVOICE_STATUSES = ['sent', 'viewed', 'overdue']
  * The strip, the Invoices tab badge and the Invoices table all call this, so
  * a row cannot read red in one place and neutral in another. `viewed` counts:
  * a client opening an invoice and not paying it is exactly the case the strip
- * exists for, and only the nightly job ever writes the `overdue` status.
+ * exists for, and only the nightly job ever writes the `overdue` status. A
+ * draft never does: nobody has been asked for the money.
  */
 export function isInvoiceOverdue(inv: Pick<NeedInvoice, 'status' | 'dueDate'>, now: Date): boolean {
+  if (!isOwedInvoice(inv.status)) return false
   if (inv.status === 'overdue') return true
-  if (inv.status !== 'sent' && inv.status !== 'viewed') return false
   const due = parse(inv.dueDate)
   return due != null && due < now
 }

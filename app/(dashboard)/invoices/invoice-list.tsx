@@ -34,6 +34,7 @@ import {
 import { useToast } from '@/components/tahi/toast'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { formatCurrency } from '@/lib/currency'
+import { isOwedInvoice, partitionInvoicesByStatus } from '@/lib/invoice-status'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { PageHeader } from '@/components/tahi/page-header'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
@@ -100,9 +101,15 @@ function formatDate(dateStr: string | null): string {
   } catch { return '--' }
 }
 
-/** A bill the client still owes, with somewhere to pay it. */
+/**
+ * A bill the client still owes, with somewhere to pay it.
+ *
+ * Owed, not merely "not settled": a DRAFT that happens to carry a Stripe URL
+ * from an earlier finalise attempt is not a bill anyone has been asked to pay,
+ * and a Pay now button on one would invite payment for work not yet billed.
+ */
 function isPayable(inv: Invoice): boolean {
-  return !!inv.payUrl && inv.status !== 'paid' && inv.status !== 'written_off'
+  return !!inv.payUrl && isOwedInvoice(inv.status)
 }
 
 // Height comes from the min-h-11 / md:min-h-9 utilities on the element so the
@@ -976,6 +983,30 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
     })
   }, [invoices, activeFilters, dateRange, search])
 
+  // Drafts, said out loud above the table. A draft is the studio's own working
+  // copy: Xero has not sent it, the portal hides it, and no money figure counts
+  // it. Showing the tally here is what makes that visible rather than silent.
+  // Grouped by billed currency, because one NZ dollar plus one US dollar is
+  // not two of anything.
+  // Not memoised: `invoices` is a fresh array each render (see the same note
+  // on filteredInvoices), so a useMemo here would recompute anyway over at
+  // most one page of rows.
+  const draftNote = (() => {
+    if (!isAdmin) return null
+    const { drafts } = partitionInvoicesByStatus(invoices)
+    if (drafts.length === 0) return null
+    const by = new Map<string, number>()
+    for (const d of drafts) {
+      const code = (d.currency ?? 'NZD').toUpperCase()
+      by.set(code, (by.get(code) ?? 0) + (d.totalAmount ?? 0))
+    }
+    const amounts = [...by.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([code, total]) => formatCurrency(total, code))
+      .join(' + ')
+    return `${drafts.length} ${drafts.length === 1 ? 'draft' : 'drafts'}, ${amounts} not yet issued`
+  })()
+
   const handleCreated = useCallback((invoiceId?: string) => {
     setShowCreate(false)
     if (invoiceId) {
@@ -1326,6 +1357,32 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
           )}
         </div>
       </div>
+
+      {/* Drafts, beside the book rather than inside it. Only ever rendered
+          for the studio: a draft never reaches a client surface. */}
+      {draftNote && (
+        <div
+          data-private
+          style={{
+            fontSize: '0.75rem',
+            color: 'var(--color-text-muted)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.375rem',
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              width: '0.375rem',
+              height: '0.375rem',
+              borderRadius: '9999px',
+              background: 'var(--color-text-subtle)',
+            }}
+          />
+          {draftNote}
+        </div>
+      )}
 
       {/* Table */}
       <Card padding="none">

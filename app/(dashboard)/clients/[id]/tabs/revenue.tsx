@@ -15,6 +15,7 @@ import useSWR from 'swr'
 import { apiPath } from '@/lib/api'
 import { Money } from '@/components/tahi/money'
 import { SkeletonList } from '@/components/tahi/skeletons'
+import { partitionInvoicesByStatus } from '@/lib/invoice-status'
 import { Tile, TileGrid } from '../_kit/chrome'
 import { MoneySums, sumByCurrency } from '../_kit/currency-sums'
 
@@ -24,9 +25,6 @@ export interface RevenueInvoice {
   currency: string | null
   status: string
 }
-
-/** Statuses that mean the money has been asked for and has not landed. */
-const OUTSTANDING_STATUSES = ['sent', 'viewed', 'overdue']
 
 export interface RevenueTimeEntry {
   id: string
@@ -71,12 +69,21 @@ export function RevenueTab({
   const invoices = data?.invoices ?? []
   const timeEntries = data?.timeEntries ?? []
 
-  const paidInvoices = invoices.filter(i => i.status === 'paid')
-  const outstandingInvoices = invoices.filter(i => OUTSTANDING_STATUSES.includes(i.status))
+  // "Total invoiced" used to sum EVERY row, so a draft raised in Xero as a
+  // placeholder for later work, and an invoice that had been written off, both
+  // counted as money billed. Invoiced is now what was actually issued and is
+  // still live: paid plus outstanding. Drafts get their own tile.
+  const {
+    paid: paidInvoices,
+    owed: outstandingInvoices,
+    drafts: draftInvoices,
+  } = partitionInvoicesByStatus(invoices)
+  const issuedInvoices = [...paidInvoices, ...outstandingInvoices]
 
-  const invoicedSums = sumByCurrency(invoices, currency)
+  const invoicedSums = sumByCurrency(issuedInvoices, currency)
   const paidSums = sumByCurrency(paidInvoices, currency)
   const outstandingSums = sumByCurrency(outstandingInvoices, currency)
+  const draftSums = sumByCurrency(draftInvoices, currency)
   // Lifetime value: what has been paid, plus what is still expected, each in
   // the currency it was billed in.
   const ltvSums = sumByCurrency([...paidInvoices, ...outstandingInvoices], currency)
@@ -93,7 +100,14 @@ export function RevenueTab({
       <Tile
         label="Total invoiced"
         value={<MoneySums sums={invoicedSums} fallback={currency} />}
-        hint={`${invoices.length} ${invoices.length === 1 ? 'invoice' : 'invoices'}`}
+        hint={`${issuedInvoices.length} ${issuedInvoices.length === 1 ? 'invoice' : 'invoices'} issued`}
+      />
+      <Tile
+        label="Drafts"
+        value={<MoneySums sums={draftSums} fallback={currency} />}
+        hint={draftInvoices.length > 0
+          ? `${draftInvoices.length} not yet issued`
+          : 'Nothing in draft'}
       />
       <Tile
         label="Total paid"

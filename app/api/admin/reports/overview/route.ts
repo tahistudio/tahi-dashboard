@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, ne, and, inArray, sql, count, sum } from 'drizzle-orm'
+import { owedStatusList } from '@/lib/invoice-status'
 
 // ── GET /api/admin/reports/overview ─────────────────────────────────────────
 // Return aggregate stats for the reports dashboard.
@@ -72,7 +73,9 @@ export async function GET(req: NextRequest) {
     database
       .select({ total: sum(schema.invoices.totalUsd) })
       .from(schema.invoices)
-      .where(inArray(schema.invoices.status, ['sent', 'overdue'])),
+      // Issued and unpaid. Drafts are excluded by OWED_STATUSES: a
+      // placeholder is not an outstanding invoice.
+      .where(inArray(schema.invoices.status, owedStatusList())),
     database
       .select({
         status: schema.requests.status,

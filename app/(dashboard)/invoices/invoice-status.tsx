@@ -12,6 +12,7 @@
  */
 
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
+import { isDraftInvoice, isPaidInvoice, isVoidInvoice } from '@/lib/invoice-status'
 
 /**
  * Status -> label + badge tone. paid=positive, overdue=danger, viewed=info,
@@ -32,24 +33,28 @@ export const INVOICE_STATUS_TONE: Record<string, { label: string; tone: BadgeTon
  *
  * A paid or written-off invoice is never overdue, whatever the date says: the
  * money has landed or the debt has been let go, and painting either of them
- * red would put a false chase on the page.
+ * red would put a false chase on the page. Neither is a DRAFT: it has not been
+ * issued, so its due date is a plan, not a deadline anyone has missed.
  */
 export function isInvoiceOverdue(dueDate: string | null, status: string): boolean {
-  if (!dueDate || status === 'paid' || status === 'written_off') return false
+  if (!dueDate) return false
+  if (isDraftInvoice(status) || isPaidInvoice(status) || isVoidInvoice(status)) return false
   return new Date(dueDate + 'T23:59:59') < new Date()
 }
 
 /**
  * The status to SHOW, which is not always the status stored.
  *
- * `overdue` is derived, never written: only a sent invoice past its due date
- * reads as overdue. A draft that has sat around is not overdue, because nobody
- * has been asked for the money yet.
+ * `overdue` is derived, never written: an OWED invoice past its due date reads
+ * as overdue. A draft that has sat around is not overdue, because nobody has
+ * been asked for the money yet, and isInvoiceOverdue already refuses it.
+ *
+ * `viewed` is included, unlike the old `status === 'sent'` guard: a client
+ * opening a bill and then not paying it is exactly the case a red pill is for,
+ * and it matches the client-page rule in clients/[id]/_kit/needs.ts.
  */
 export function effectiveInvoiceStatus(invoice: { status: string; dueDate: string | null }): string {
-  return isInvoiceOverdue(invoice.dueDate, invoice.status) && invoice.status === 'sent'
-    ? 'overdue'
-    : invoice.status
+  return isInvoiceOverdue(invoice.dueDate, invoice.status) ? 'overdue' : invoice.status
 }
 
 /** The one status pill for an invoice, on any surface. */

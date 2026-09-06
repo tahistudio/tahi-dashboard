@@ -23,6 +23,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, desc, eq } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { isDraftInvoice } from '@/lib/invoice-status'
 import { SONNET_MODEL } from '@/lib/ai-models'
 import { recordCost } from '@/lib/ai-cost'
 
@@ -288,7 +289,12 @@ export async function POST(
   if (invoices.length === 0) lines.push('None')
   for (const inv of invoices) {
     const amount = `${inv.currency ?? 'USD'} ${inv.totalUsd ?? 0}`
-    const paid = inv.paidAt ? `paid ${daysSince(inv.paidAt)}` : 'unpaid'
+    // A draft is NOT unpaid: it has never been issued, so calling it unpaid
+    // here had the model reading a placeholder as billing friction and
+    // scoring the client's health down for money nobody had asked for.
+    const paid = isDraftInvoice(inv.status)
+      ? 'draft, not issued to the client, owes nothing'
+      : inv.paidAt ? `paid ${daysSince(inv.paidAt)}` : 'unpaid'
     lines.push(`- ${amount} (${inv.status}, ${paid}) due ${inv.dueDate ?? 'none'}`)
   }
   lines.push('')

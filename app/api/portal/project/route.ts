@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, asc, desc, inArray } from 'drizzle-orm'
+import { owedStatusList } from '@/lib/invoice-status'
 
 export const dynamic = 'force-dynamic'
 
@@ -352,7 +353,9 @@ export async function GET(req: NextRequest) {
       .from(schema.invoices)
       .where(and(
         eq(schema.invoices.orgId, orgId),
-        inArray(schema.invoices.status, ['sent', 'overdue']),
+        // Owed only. A draft is invisible to the client everywhere else in
+        // the portal, so it must not set their Next invoice date either.
+        inArray(schema.invoices.status, owedStatusList()),
       ))
       .orderBy(asc(schema.invoices.dueDate))
       .limit(1)

@@ -3,9 +3,10 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
 import { resolvePermissions, can } from '@/lib/permissions'
+import { draftStatusList, owedStatusList } from '@/lib/invoice-status'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -52,7 +53,10 @@ export async function GET(req: NextRequest) {
 
   const rateMap = await getRateMap(drizzle)
 
-  // Query all sent invoices with org name
+  // Every OWED invoice: issued and unpaid, which is the whole of a receivables
+  // book. This read used to be `status = 'sent'` alone, which dropped an
+  // invoice the moment a client opened it ('viewed'). Drafts are excluded by
+  // construction: nobody has been asked to pay one, so it cannot age.
   const rows = await drizzle
     .select({
       id: schema.invoices.id,
@@ -63,7 +67,25 @@ export async function GET(req: NextRequest) {
     })
     .from(schema.invoices)
     .leftJoin(schema.organisations, eq(schema.invoices.orgId, schema.organisations.id))
-    .where(eq(schema.invoices.status, 'sent'))
+    .where(inArray(schema.invoices.status, owedStatusList()))
+
+  // Drafts, reported beside the buckets rather than inside one. The studio
+  // still wants to see the placeholders it has raised in Xero; they are simply
+  // not receivable, so they get their own line.
+  const draftRows = await drizzle
+    .select({
+      totalUsd: schema.invoices.totalUsd,
+      currency: schema.invoices.currency,
+    })
+    .from(schema.invoices)
+    .where(inArray(schema.invoices.status, draftStatusList()))
+
+  const drafts = {
+    count: draftRows.length,
+    totalNzd: Math.round(
+      draftRows.reduce((sum, r) => sum + toNzd(r.totalUsd, r.currency ?? 'USD', rateMap), 0),
+    ),
+  }
 
   const now = new Date()
 
@@ -124,6 +146,9 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     aging,
+    // `drafts` is additive: `aging` and `summary` keep the exact shape they
+    // had, and neither has ever included a draft.
+    drafts,
     summary: {
       totalOutstanding,
       invoiceCount: rows.length,
