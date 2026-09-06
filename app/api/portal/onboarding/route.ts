@@ -2,8 +2,10 @@ import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import type { DB } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { deriveOnboardingState } from '@/lib/onboarding-state'
+import { actingIdentity, recordActingWrite, refusePreviewWrite } from '@/lib/acting-as'
 
 /**
  * GET /api/portal/onboarding
@@ -105,13 +107,17 @@ export async function GET(req: NextRequest) {
  * Update onboarding step completion state.
  */
 export async function PATCH(req: NextRequest) {
-  const { orgId, impersonating } = await getPortalAuth(req)
+  const auth = await getPortalAuth(req)
+  const { orgId } = auth
   if (!orgId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  if (impersonating) {
-    return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
-  }
+  // OPEN in act mode. The onboarding blob records no actor at all, which is
+  // precisely why the audit row below is not optional here: without it there
+  // would be no trace that the studio ticked a client's first-run step.
+  const previewDenied = refusePreviewWrite(auth, { allowActing: true })
+  if (previewDenied) return previewDenied
+  const acting = actingIdentity(auth)
 
   const body = await req.json() as { step: string; completed: boolean }
   const { step, completed } = body
@@ -150,6 +156,14 @@ export async function PATCH(req: NextRequest) {
       updatedAt: new Date().toISOString(),
     })
     .where(eq(schema.organisations.id, orgId))
+
+  await recordActingWrite(drizzle as unknown as DB, acting, {
+    verb: 'onboarding.step_set',
+    entityType: 'organisation',
+    entityId: orgId,
+    route: 'PATCH /api/portal/onboarding',
+    extra: { step, completed },
+  })
 
   return NextResponse.json({ success: true, onboardingState: state })
 }

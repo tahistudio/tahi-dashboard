@@ -33,13 +33,59 @@ import { cookies, headers } from 'next/headers'
 import type { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
-import { IMPERSONATE_ORG_COOKIE, resolvePreviewOrgId } from '@/lib/preview-cookie'
+import { desc, eq } from 'drizzle-orm'
+import {
+  IMPERSONATE_MODE_COOKIE,
+  IMPERSONATE_ORG_COOKIE,
+  readPreviewMode,
+  resolvePreviewOrgId,
+} from '@/lib/preview-cookie'
+import { resolveActEligibility } from '@/lib/acting-eligibility'
 
 export interface RequestAuthResult {
   userId: string | null
   orgId: string | null
   sessionId: string | null
+}
+
+/**
+ * Who is standing in the client's shoes, while Act as client is armed.
+ *
+ * Every field names the STUDIO side of the write. There is deliberately no
+ * "the contact we are pretending to be": attributing a row to a named client
+ * person would forge that person, which is the exact thing this mode is built
+ * to avoid. `contactId` is carried for the audit metadata only (which seat the
+ * banner was pointed at) and must never become an author id.
+ */
+export interface ActingAsIdentity {
+  /** Clerk user id of the studio member acting. The audit row's actorId. */
+  adminUserId: string
+  /** Their `team_members.id`. The value written to authorId / submittedById. */
+  adminTeamMemberId: string
+  /** Their display name, for the notification bodies that name a human. */
+  adminName: string
+  /** D1 `organisations.id` being acted in (same value as auth.orgId). */
+  orgId: string
+  /** Seat the banner named, for audit context only. Never an author id. */
+  contactId: string | null
+}
+
+export type PortalAuthResult = RequestAuthResult & {
+  clerkOrgId: string | null
+  /**
+   * A Tahi session is looking through a client's lens. Stays TRUE in act mode:
+   * every hand-rolled `if (impersonating) 403` in the portal tree keeps
+   * refusing until that route is deliberately opened via lib/acting-as.ts.
+   */
+  impersonating: boolean
+  /**
+   * Act as client is armed AND proven: a super admin with a team_members row.
+   * The only flag a write route may open on. Optional so the ~15 route test
+   * suites that build a portal auth by hand keep compiling; absent means no.
+   */
+  canWriteAsClient?: boolean
+  /** Set exactly when canWriteAsClient is true. */
+  actingAs?: ActingAsIdentity | null
 }
 
 // --- Dev-only Ship Studio preview auto-auth ---------------------------------
@@ -167,6 +213,63 @@ export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResul
 }
 
 /**
+ * Prove the right to act as a client, or return null.
+ *
+ * Three things must all hold, and each is re-derived here on every acting
+ * request rather than trusted from the browser. The first two are
+ * `resolveActEligibility` (super_admin from the roles table, plus a
+ * `team_members` row to attribute the write to), shared with the route that
+ * arms the mode so the two can never disagree; the third is a resolvable
+ * preview org, already established by the caller.
+ *
+ * Fails CLOSED on any error: a D1 hiccup downgrades the session to the
+ * read-only preview it was before, which refuses every write.
+ */
+async function resolveActingIdentity(
+  userId: string | null,
+  clerkOrgId: string,
+  targetOrgId: string,
+): Promise<ActingAsIdentity | null> {
+  if (!userId) return null
+  try {
+    const database = await db()
+    const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+    const verdict = await resolveActEligibility(drizzle, userId, clerkOrgId)
+    if (!verdict.ok || !verdict.member) return null
+    const member = verdict.member
+
+    // The org's primary seat, for the audit metadata only: "this happened in
+    // the workspace whose main contact is X". The banner's own contact pick
+    // never reaches the server (it lives in sessionStorage), so primary-first
+    // is the closest honest answer. A missing row records "no named seat" and
+    // must never block the write or stand in as an author.
+    let contactId: string | null = null
+    try {
+      const [contact] = await drizzle
+        .select({ id: schema.contacts.id })
+        .from(schema.contacts)
+        .where(eq(schema.contacts.orgId, targetOrgId))
+        .orderBy(desc(schema.contacts.isPrimary))
+        .limit(1)
+      contactId = contact?.id ?? null
+    } catch {
+      contactId = null
+    }
+
+    return {
+      adminUserId: userId,
+      adminTeamMemberId: member.id,
+      adminName: member.name?.trim() || 'Tahi Studio',
+      orgId: targetOrgId,
+      contactId,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
  * Portal auth with Clerk-org -> D1-org resolution and admin "Client view"
  * impersonation.
  *
@@ -193,10 +296,17 @@ export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResul
  * cookie was "not previewing" to the shell (which rendered the studio, with
  * /clients reachable) and a preview of a non-existent org to every portal API
  * underneath it.
+ *
+ * ACT AS CLIENT. A second cookie (tahi-impersonate-mode) turns the lens into a
+ * hand. It grants nothing on its own: `resolveActingIdentity` below re-proves
+ * super_admin from the roles table and finds the acting person's team_members
+ * row on every request that could write. Reads skip it entirely, because no
+ * GET handler consumes the result. Crucially `impersonating` STAYS TRUE either
+ * way, so the ~21 routes that hand-roll `if (impersonating) 403` keep refusing
+ * until a route is deliberately opened through lib/acting-as.ts. Default deny
+ * survives the feature.
  */
-export async function getPortalAuth(
-  req: NextRequest,
-): Promise<RequestAuthResult & { clerkOrgId: string | null; impersonating: boolean }> {
+export async function getPortalAuth(req: NextRequest): Promise<PortalAuthResult> {
   const result = await getRequestAuth(req)
   const clerkOrgId = result.orgId
   const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
@@ -207,6 +317,31 @@ export async function getPortalAuth(
   if (clerkOrgId && tahiOrgId && clerkOrgId === tahiOrgId) {
     const target = resolvePreviewOrgId(true, req.cookies.get(IMPERSONATE_ORG_COOKIE)?.value)
     if (target) {
+      // Paid only when the browser asks to act AND the request could actually
+      // write. Nothing reads `actingAs` on a GET: `refusePreviewWrite` and
+      // `actingIdentity` are called from POST / PATCH / PUT handlers only, and
+      // the resolution is not free (resolvePermissions alone is a roster read,
+      // a roles join and two feature_visibility reads, then the seat select on
+      // top). The client overview fans out about ten portal GETs in parallel,
+      // so charging every one of them for an answer no reader consumes made
+      // simply LOOKING at a client in act mode cost roughly seventy queries.
+      // HEAD rides with GET because Next serves it from the GET handler.
+      const isRead = req.method === 'GET' || req.method === 'HEAD'
+      const wantsAct =
+        !isRead && readPreviewMode(req.cookies.get(IMPERSONATE_MODE_COOKIE)?.value) === 'act'
+      const actingAs = wantsAct
+        ? await resolveActingIdentity(result.userId, clerkOrgId, target)
+        : null
+      if (actingAs) {
+        return {
+          ...result,
+          orgId: target,
+          clerkOrgId,
+          impersonating: true,
+          canWriteAsClient: true,
+          actingAs,
+        }
+      }
       return { ...result, orgId: target, clerkOrgId, impersonating: true }
     }
     // Non-impersonating admin: leave orgId as the Tahi org so portal routes

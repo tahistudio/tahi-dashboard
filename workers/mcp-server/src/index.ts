@@ -703,6 +703,13 @@ const TOOLS: ToolDef[] = [
   tool('get_permission_history', 'The permission change trail (permission.* audit entries with actor and target names resolved). Optional page (50 per page).', {
     page: prop('number', 'Page number, default 1'),
   }),
+  tool('get_client_view_mode', "Report whether the caller's Client view is read-only ('view') or acting ('act'), which client it is pointed at, and whether the caller is entitled to act at all. Client view mode is a browser session cookie, so a service token asking this always reads 'view' with canAct false and the reason why: it has no roster row to attribute a write to.", {}),
+  tool('set_client_view_mode', "Arm or disarm Act as client for the CALLER'S OWN session. mode 'act' requires a super admin session that is already previewing a client; mode 'view' always succeeds and is the safe way to disarm. The mode lives in a browser cookie, so this cannot arm somebody else's browser, and the MCP service identity is not a super admin: over this connector 'act' is expected to answer 403, and the useful call is 'view'. To see what the studio has actually done inside client workspaces, use list_acting_as_audit.", {
+    mode: prop('string', "'act' to arm, 'view' to disarm"),
+  }, ['mode']),
+  tool('list_acting_as_audit', 'Every write a studio member made while acting as a client (acting_as_client.* audit entries, actor and target names resolved). This is the record Act as client exists to produce: what was filed, replied, approved or reordered inside a client workspace, by whom, and when. Optional page (50 per page).', {
+    page: prop('number', 'Page number, default 1'),
+  }),
   tool('set_team_access_scope', 'Set a team member\'s data scope rule: which clients they see. scopeType all_clients | plan_type (with planType) | specific_clients (with orgIds). role is the scoped role the rule applies under (project_manager | task_handler | viewer).', {
     teamMemberId: prop('string', 'Team member ID'),
     role: prop('string', 'project_manager | task_handler | viewer'),
@@ -2075,6 +2082,17 @@ async function executeTool(
     case 'get_permission_history': {
       const page = typeof args.page === 'number' ? args.page : 1
       return json(await apiGet(`/api/admin/audit?actionPrefix=permission.&resolveNames=1&page=${page}`, token))
+    }
+    case 'get_client_view_mode':
+      return json(await apiGet('/api/admin/impersonate/mode', token))
+    case 'set_client_view_mode':
+      return json(await apiWrite('/api/admin/impersonate/mode', token, 'POST', { mode: s('mode') }))
+    case 'list_acting_as_audit': {
+      // The action prefix, not the entity type: idx_audit_entity still answers
+      // "everything that happened to this request", and this answers
+      // "everything the studio did while standing in a client's shoes".
+      const page = typeof args.page === 'number' ? args.page : 1
+      return json(await apiGet(`/api/admin/audit?actionPrefix=acting_as_client.&resolveNames=1&page=${page}`, token))
     }
     case 'set_team_access_scope': {
       const { teamMemberId: scopeMemberId, ...scopeBody } = args

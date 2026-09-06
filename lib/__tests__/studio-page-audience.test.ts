@@ -162,6 +162,35 @@ describe('dashboard pages resolve the audience, not just the Clerk org', () => {
       .map(rel)
     expect(handRolled).toEqual([])
   })
+
+  it('nor the mode cookie Act as client rides on', () => {
+    // The mode decides whether a preview may WRITE into a client's workspace,
+    // so a second reader with its own idea of what counts is worse here than it
+    // was for the org cookie: two answers to "are writes real" means a write
+    // landing from a surface that believed it could not make one.
+    const handRolled = [
+      ...sourceFiles(join(REPO_ROOT, 'lib')),
+      ...sourceFiles(join(REPO_ROOT, 'app')),
+      ...sourceFiles(join(REPO_ROOT, 'components')),
+    ]
+      .filter((file) => /\.get\(('|")tahi-impersonate-mode\1\)/.test(readFileSync(file, 'utf8')))
+      .map(rel)
+    expect(handRolled).toEqual([])
+  })
+
+  it('every reader of the mode goes through lib/preview-cookie.ts', () => {
+    // Three readers now: the write path, the edge, and the shell that paints
+    // the strip. All three ask the same function what 'act' means.
+    for (const file of [
+      join(REPO_ROOT, 'lib', 'server-auth.ts'),
+      join(REPO_ROOT, 'middleware.ts'),
+      join(REPO_ROOT, 'app', '(dashboard)', 'layout.tsx'),
+    ]) {
+      const source = readFileSync(file, 'utf8')
+      expect(source).toContain('readPreviewMode')
+      expect(source).toContain("from '@/lib/preview-cookie'")
+    }
+  })
 })
 
 describe('middleware treats Client view as a client audience', () => {
@@ -193,6 +222,24 @@ describe('middleware treats Client view as a client audience', () => {
     const serverAuth = readFileSync(join(REPO_ROOT, 'lib', 'server-auth.ts'), 'utf8')
     expect(serverAuth).toContain("from '@/lib/preview-cookie'")
     expect(serverAuth).toContain('resolvePreviewOrgId(')
+  })
+
+  it('clears BOTH preview cookies on the way out', () => {
+    // Three places end a preview: this hatch, /api/admin/impersonate/exit, and
+    // the banner's Exit button. If any one of them dropped only the org cookie,
+    // the operator would return to the studio still armed, and the next client
+    // they previewed would be a writing session they never agreed to.
+    expect(middleware).toContain('IMPERSONATE_MODE_COOKIE')
+    const exitRoute = readFileSync(
+      join(REPO_ROOT, 'app', 'api', 'admin', 'impersonate', 'exit', 'route.ts'),
+      'utf8',
+    )
+    expect(exitRoute).toContain('IMPERSONATE_MODE_COOKIE')
+    const banner = readFileSync(
+      join(REPO_ROOT, 'components', 'tahi', 'impersonation-banner.tsx'),
+      'utf8',
+    )
+    expect(banner).toContain('clearImpersonateModeCookie')
   })
 
   it('keeps an escape hatch that needs no shell to render', () => {

@@ -2,12 +2,15 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { desc, eq, and, gte, lte, like, inArray } from 'drizzle-orm'
+import { desc, eq, and, gte, lte, inArray, sql } from 'drizzle-orm'
+import { AUDIT_LIKE_ESCAPE, escapeAuditLikePrefix } from '@/lib/audit'
 
 // ── GET /api/admin/audit ─────────────────────────────────────────────────────
 // Paginated audit log with optional filters:
 //   ?action=created            exact action match
-//   ?actionPrefix=permission.  action prefix match (e.g. all permission changes)
+//   ?actionPrefix=permission.  action prefix match (e.g. all permission changes).
+//                              Underscores are literal: acting_as_client. means
+//                              acting_as_client., not "acting" + any character.
 //   ?userId=&entityType=&dateFrom=&dateTo=&page=
 //   ?resolveNames=1            adds actorName + entityName per row (for the
 //                              Team & access change history and audit viewer)
@@ -34,9 +37,15 @@ export async function GET(req: NextRequest) {
 
   const conditions = []
   if (action) conditions.push(eq(schema.auditLog.action, action))
-  // LIKE prefix match; escape the SQL wildcard characters in the input.
+  // LIKE prefix match. The wildcards in the input are ESCAPED, not deleted:
+  // stripping `_` turned `acting_as_client.` into `actingasclient.` and made
+  // the Act as client trail unreadable through the only tool that reads it.
+  // See escapeAuditLikePrefix for the whole story.
   if (actionPrefix) {
-    conditions.push(like(schema.auditLog.action, actionPrefix.replace(/[%_]/g, '') + '%'))
+    const pattern = escapeAuditLikePrefix(actionPrefix) + '%'
+    conditions.push(
+      sql`${schema.auditLog.action} LIKE ${pattern} ESCAPE ${AUDIT_LIKE_ESCAPE}`,
+    )
   }
   if (userId) conditions.push(eq(schema.auditLog.actorId, userId))
   if (entityType) conditions.push(eq(schema.auditLog.entityType, entityType))

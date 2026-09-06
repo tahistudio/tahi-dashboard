@@ -1,4 +1,6 @@
 import { getViewAudience } from '@/lib/view-audience'
+import { cookies } from 'next/headers'
+import { IMPERSONATE_MODE_COOKIE, readPreviewMode, type PreviewMode } from '@/lib/preview-cookie'
 import { clerkClient } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
 import { AppSidebar } from '@/components/tahi/app-sidebar'
@@ -270,6 +272,19 @@ export default async function DashboardLayout({
   }
   const pinnedCurrency = resolvePinnedCurrency(currencyEvidence, currencyOrgKey !== null)
 
+  // Which mode the preview is in, read server-side for the same reason the org
+  // id is: a tab that carries the cookie without this tab's sessionStorage
+  // would otherwise paint the read-only strip over a session whose writes land.
+  // Only meaningful while a preview is actually resolvable.
+  let previewMode: PreviewMode = 'view'
+  if (isPreviewingClient) {
+    try {
+      previewMode = readPreviewMode((await cookies()).get(IMPERSONATE_MODE_COOKIE)?.value)
+    } catch {
+      previewMode = 'view'
+    }
+  }
+
   // Favicon (favicon_light_url / favicon_dark_url) is a platform-level Tahi
   // asset (super-admin only, same for every org) rather than per-client
   // branding, and our dark mode is class-based (not prefers-color-scheme), so a
@@ -308,6 +323,7 @@ export default async function DashboardLayout({
               <ImpersonationBanner
                 serverPreviewOrgId={previewOrgId}
                 serverPreviewOrgName={previewOrgName}
+                serverPreviewMode={previewMode}
               />
             )}
             <AnnouncementBanner />

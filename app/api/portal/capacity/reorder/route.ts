@@ -3,8 +3,10 @@ import { requirePortalFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import type { DB } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
 import { trackCanHandle } from '@/lib/plan-utils'
+import { actingIdentity, recordActingWrite, refusePreviewWrite } from '@/lib/acting-as'
 
 // ── PUT /api/portal/capacity/reorder ───────────────────────────────────────
 // Reorder the authenticated client's own queue, scoped to their org. Unlike the
@@ -19,16 +21,20 @@ import { trackCanHandle } from '@/lib/plan-utils'
 // clerkOrgId-provisioned clients), and we reject impersonating so a previewing
 // admin in Client view still cannot write to a real client's queue.
 export async function PUT(req: NextRequest) {
-  const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
+  const auth = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId } = auth
 
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'tracks')
   if (featureDenied) return featureDenied
-  if (impersonating) {
-    return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
-  }
+  // OPEN in act mode. Reordering somebody's queue on a call with them is the
+  // plainest case for the mode; no row carries an author, so the audit entry
+  // below is the only place the change is attributed.
+  const previewDenied = refusePreviewWrite(auth, { allowActing: true })
+  if (previewDenied) return previewDenied
+  const acting = actingIdentity(auth)
 
   const body = await req.json() as { trackId?: string; requestIds?: string[] }
   const { trackId, requestIds } = body
@@ -129,6 +135,14 @@ export async function PUT(req: NextRequest) {
         : { queueOrder: i, updatedAt: now })
       .where(eq(schema.requests.id, requestIds[i]))
   }
+
+  await recordActingWrite(drizzle as unknown as DB, acting, {
+    verb: 'queue.reordered',
+    entityType: 'organisation',
+    entityId: orgId,
+    route: 'PUT /api/portal/capacity/reorder',
+    extra: { trackId: trackId ?? null, isMove, requestIds },
+  })
 
   return NextResponse.json({ success: true })
 }

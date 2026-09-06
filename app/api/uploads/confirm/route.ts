@@ -2,8 +2,18 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import type { DB } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { resolveOwnerOrgForUpload } from '@/lib/upload-access'
+import { ACTING_AUDIT_PREFIX } from '@/lib/acting-as'
+import { resolveActEligibility } from '@/lib/acting-eligibility'
+import { logAuditStrict } from '@/lib/audit'
+import {
+  IMPERSONATE_MODE_COOKIE,
+  IMPERSONATE_ORG_COOKIE,
+  readPreviewMode,
+  resolvePreviewOrgId,
+} from '@/lib/preview-cookie'
 
 export const dynamic = 'force-dynamic'
 
@@ -134,6 +144,67 @@ export async function POST(req: NextRequest) {
       mimeType: body.mimeType ?? null,
       sizeBytes: body.sizeBytes ?? null,
     })
+
+    // This route is the one write path that already behaved like Act as
+    // client: it is admin-authenticated, it lets an admin name the owning org,
+    // and it has always stamped uploaded_by_type 'team_member'. So the file row
+    // needed no change at all, only the record that the upload was made from
+    // inside a client's own surface rather than from the studio side.
+    //
+    // The cookies are read through lib/preview-cookie.ts, the same rule
+    // everything else uses, and the org must match the previewed one: an admin
+    // uploading to a DIFFERENT client while a preview happens to be open is an
+    // ordinary studio upload and is not tagged as acting.
+    //
+    // The cookies are INTENT and nothing more, exactly as they are everywhere
+    // else. This route never reaches getPortalAuth (it is admin-authenticated
+    // by design, because the studio uploads to client orgs from the studio
+    // side too), so it asks lib/acting-eligibility.ts for the same proof
+    // getPortalAuth would have demanded: super_admin, plus a roster row to
+    // attribute the upload to. Without that, a Tahi admin who can never pass
+    // the act gate anywhere else could set the mode cookie by hand and mint
+    // `acting_as_client.*` rows for uploads they were already allowed to make,
+    // and the prefix would stop meaning one thing.
+    //
+    // The extra reads are paid only on the branch where both cookies already
+    // point at this org, which is rare: an ordinary studio upload spends
+    // nothing. A resolver hiccup fails closed to "not acting", so the file row
+    // (which already names the studio member honestly through
+    // uploaded_by_type) still lands.
+    const actingOrgId = isAdmin
+      ? resolvePreviewOrgId(true, req.cookies.get(IMPERSONATE_ORG_COOKIE)?.value)
+      : null
+    const cookiesSayActing =
+      actingOrgId === ownerOrgId &&
+      readPreviewMode(req.cookies.get(IMPERSONATE_MODE_COOKIE)?.value) === 'act'
+
+    let actingHere = false
+    if (cookiesSayActing) {
+      try {
+        const verdict = await resolveActEligibility(drizzle, userId, orgId)
+        actingHere = verdict.ok
+      } catch {
+        actingHere = false
+      }
+    }
+
+    if (actingHere) {
+      await logAuditStrict(drizzle as unknown as DB, {
+        action: `${ACTING_AUDIT_PREFIX}file.uploaded`,
+        userId,
+        userType: 'team_member',
+        entityType: 'file',
+        entityId: id,
+        metadata: {
+          mode: 'act',
+          route: 'POST /api/uploads/confirm',
+          orgId: ownerOrgId,
+          adminTeamMemberId: uploaderId,
+          requestId: body.requestId ?? null,
+          filename: body.filename,
+        },
+      })
+    }
 
     return NextResponse.json({ id }, { status: 201 })
   } catch (err) {

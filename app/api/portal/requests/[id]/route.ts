@@ -3,7 +3,9 @@ import { requirePortalFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import type { DB } from '@/db/d1'
 import { eq, and, asc, inArray, isNull } from 'drizzle-orm'
+import { actingByline, actingIdentity, recordActingWrite, refusePreviewWrite } from '@/lib/acting-as'
 import { notifyTeamMember } from '@/lib/notifications'
 import { dispatchDomainEvent } from '@/lib/events'
 import { chunkThreadIds } from '@/lib/request-thread'
@@ -216,16 +218,20 @@ export async function GET(req: NextRequest, { params }: Params) {
 // to delivered ("Approve & close"). Every other field and every other status
 // change stays studio-only; anything outside this whitelist is rejected.
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
+  const auth = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId } = auth
 
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'requests')
   if (featureDenied) return featureDenied
-  if (impersonating) {
-    return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
-  }
+  // OPEN in act mode. Same single transition as always (client_review ->
+  // delivered); the only difference is that an acting approval leaves an audit
+  // row saying the studio closed it, not the client.
+  const previewDenied = refusePreviewWrite(auth, { allowActing: true })
+  if (previewDenied) return previewDenied
+  const acting = actingIdentity(auth)
 
   const { id } = await params
 
@@ -277,6 +283,17 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     .set({ status: 'delivered', deliveredAt: now, updatedAt: now })
     .where(eq(schema.requests.id, id))
 
+  // Awaited ahead of the best-effort block below. The request is delivered
+  // either way; whether anyone can later tell who delivered it is not
+  // best-effort.
+  await recordActingWrite(drizzle as unknown as DB, acting, {
+    verb: 'request.approved',
+    entityType: 'request',
+    entityId: id,
+    route: 'PATCH /api/portal/requests/[id]',
+    extra: { from: 'client_review', to: 'delivered', title: request.title },
+  })
+
   // Best-effort: tell the assignee the client approved, and fire the domain
   // event so automations/webhooks see the same status change the studio path
   // emits. Neither should block the approval response.
@@ -284,8 +301,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (request.assigneeId) {
       await notifyTeamMember(drizzle, request.assigneeId, {
         type: 'request_status_changed',
-        title: `Client approved "${request.title}"`,
-        body: 'The client approved this delivery. It is now marked delivered.',
+        title: acting
+          ? `Approved for the client: "${request.title}"`
+          : `Client approved "${request.title}"`,
+        body: 'The client approved this delivery. It is now marked delivered.'
+          + actingByline(acting, 'recorded'),
         entityType: 'request',
         entityId: id,
       })

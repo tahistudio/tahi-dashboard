@@ -1,12 +1,21 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { ChevronDown, Check } from 'lucide-react'
 import { ShellIcon } from '@/components/tahi/shell-icons'
 import { Popover } from '@/components/tahi/popover'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
+import { usePermissions } from '@/components/tahi/permissions-context'
 import { apiPath } from '@/lib/api'
-import { IMPERSONATE_ORG_COOKIE, readPreviewOrgId } from '@/lib/preview-cookie'
+import {
+  ACT_MODE_VALUE,
+  IMPERSONATE_MODE_COOKIE,
+  IMPERSONATE_ORG_COOKIE,
+  readPreviewMode,
+  readPreviewOrgId,
+  type PreviewMode,
+} from '@/lib/preview-cookie'
 
 /** Access rule for a team member (mirrors the AccessRule shape from team page) */
 export interface TeamMemberAccessRule {
@@ -23,6 +32,15 @@ interface ClientImpersonationData {
   orgName: string
   contactId?: string
   contactName?: string
+  /**
+   * 'view' (default) is the read-only lens. 'act' means writes are real.
+   *
+   * Mirrors the tahi-impersonate-mode cookie the server actually reads, so the
+   * UI and the API cannot disagree about which strip to paint. Never the
+   * authority for anything: getPortalAuth re-proves the right to act on every
+   * request.
+   */
+  mode?: PreviewMode
 }
 
 interface TeamMemberImpersonationData {
@@ -58,6 +76,32 @@ function setImpersonateOrgCookie(orgId: string) {
 
 function clearImpersonateOrgCookie() {
   try { document.cookie = `${ORG_COOKIE}=; path=/; Max-Age=0; SameSite=Lax` } catch { /* no document */ }
+  clearImpersonateModeCookie()
+}
+
+/**
+ * Act as client is ARMED by the server (POST /api/admin/impersonate/mode, which
+ * checks super_admin), never from here. Disarming is local as well as remote,
+ * because putting the mode down must work even when the network does not: the
+ * cookie is only intent, and the server refuses to honour it for anyone who is
+ * not entitled anyway. Three places clear the org cookie (this file,
+ * middleware.ts, /api/admin/impersonate/exit) and all three now clear this one
+ * with it, or an operator returns to the studio still armed.
+ */
+function clearImpersonateModeCookie() {
+  try {
+    document.cookie = `${IMPERSONATE_MODE_COOKIE}=; path=/; Max-Age=0; SameSite=Lax`
+  } catch { /* no document */ }
+}
+
+/** What the SERVER would read for the mode, right now. */
+function readImpersonateModeCookie(): PreviewMode {
+  if (typeof document === 'undefined') return 'view'
+  for (const part of document.cookie.split(';')) {
+    const [name, ...rest] = part.trim().split('=')
+    if (name === IMPERSONATE_MODE_COOKIE) return readPreviewMode(rest.join('='))
+  }
+  return 'view'
 }
 
 /**
@@ -136,10 +180,71 @@ function notify() {
 
 /** Set client impersonation (call from client detail page) */
 export function setImpersonation(data: LegacyImpersonationData) {
-  const typed: ClientImpersonationData = { type: 'client', ...data }
+  // Always read-only to start with, including when switching clients from
+  // inside the banner. An armed mode must never ride across from one client to
+  // another: the operator agreed to act for THAT client, not for the next one.
+  const typed: ClientImpersonationData = { type: 'client', ...data, mode: 'view' }
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(typed))
   setImpersonateOrgCookie(data.orgId)
+  clearImpersonateModeCookie()
   notify()
+}
+
+/**
+ * Adopt what the SERVER already reads from this browser into a tab that has no
+ * store yet (a bookmark, a second window, a restored session).
+ *
+ * Store-only, and that is the whole point: it must touch no cookie. Routing
+ * this through setImpersonation, as it once did, cleared the mode cookie as a
+ * side effect, so merely opening a second tab silently disarmed Act as client
+ * for the whole browser and the first tab quietly followed it down. Failing
+ * safe is not the same as behaving predictably.
+ */
+function adoptServerPreview(orgId: string, orgName: string, mode: PreviewMode) {
+  const typed: ClientImpersonationData = { type: 'client', orgId, orgName, mode }
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(typed))
+  notify()
+}
+
+/**
+ * Record the mode this tab is in. Store-only: the cookie is the server's to
+ * set (arming) and is cleared separately (disarming), so this never invents a
+ * permission, it only keeps the strip honest about the answer the server gave.
+ */
+function setStoredMode(mode: PreviewMode) {
+  const current = getSnapshot()
+  if (current?.type !== 'client') return
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ ...current, mode }))
+  notify()
+}
+
+/**
+ * Ask the server to arm or disarm Act as client, and reload once it answers.
+ *
+ * The reload is not laziness. Read-only state reaches the page from three
+ * places at once (this per-tab store, server-rendered props on the portal
+ * surfaces, and the audience the shell layout resolved), and a half-refreshed
+ * page in this particular mode means a control that looks disabled while the
+ * route behind it writes, or the reverse. One reload, everything agrees.
+ */
+export async function requestClientViewMode(mode: PreviewMode): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(apiPath('/api/admin/impersonate/mode'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({})) as { error?: string }
+      return { ok: false, error: data.error ?? 'Could not change client view mode.' }
+    }
+    if (mode !== ACT_MODE_VALUE) clearImpersonateModeCookie()
+    setStoredMode(mode)
+    if (typeof window !== 'undefined') window.location.reload()
+    return { ok: true }
+  } catch {
+    return { ok: false, error: 'Could not reach the server.' }
+  }
 }
 
 /** Set team member impersonation (call from team page) */
@@ -171,6 +276,13 @@ export interface ImpersonationBannerProps {
   serverPreviewOrgId?: string | null
   /** That org's name, so a tab adopting the cookie can label the strip. */
   serverPreviewOrgName?: string | null
+  /**
+   * The mode the SERVER read from tahi-impersonate-mode. Same reason as the org
+   * id above: a fresh tab carries the cookie without this tab's store, and a
+   * strip that says "read-only" over a session whose writes are landing is the
+   * worst of the states this file exists to prevent.
+   */
+  serverPreviewMode?: PreviewMode
 }
 
 /**
@@ -180,15 +292,41 @@ export interface ImpersonationBannerProps {
 export function ImpersonationBanner({
   serverPreviewOrgId = null,
   serverPreviewOrgName = null,
+  serverPreviewMode = 'view',
 }: ImpersonationBannerProps = {}) {
   const router = useRouter()
+  const pathname = usePathname()
   const impersonation = useSyncExternalStore(subscribe, getSnapshot, () => null)
+  // Fail-closed by default (see PermissionsProvider's DEFAULT), and the server
+  // checks again on the route that arms the mode and on every write, so this
+  // only decides whether the control is worth painting.
+  const { isSuperAdmin } = usePermissions()
+  const [confirmActOpen, setConfirmActOpen] = useState(false)
+  const [modeError, setModeError] = useState<string | null>(null)
+  const [modeBusy, setModeBusy] = useState(false)
 
   const handleExit = useCallback(() => {
     const isTeamMember = impersonation?.type === 'team_member'
     clearImpersonation()
     router.push(isTeamMember ? '/team' : '/clients')
   }, [router, impersonation])
+
+  const enterActMode = useCallback(async () => {
+    setModeBusy(true)
+    setModeError(null)
+    const result = await requestClientViewMode(ACT_MODE_VALUE)
+    setConfirmActOpen(false)
+    setModeBusy(false)
+    if (!result.ok) setModeError(result.error ?? 'Could not switch to acting.')
+  }, [])
+
+  const leaveActMode = useCallback(async () => {
+    setModeBusy(true)
+    setModeError(null)
+    const result = await requestClientViewMode('view')
+    setModeBusy(false)
+    if (!result.ok) setModeError(result.error ?? 'Could not return to read-only.')
+  }, [])
 
   // Entering or leaving Client view changes what the SERVER should render:
   // the shell layout reads the tahi-impersonate-org cookie to pin the client's
@@ -229,8 +367,50 @@ export function ImpersonationBanner({
     if (adoptedOrgId.current === serverPreviewOrgId) return
     adoptedOrgId.current = serverPreviewOrgId
     if (getSnapshot() !== null) return
-    setImpersonation({ orgId: serverPreviewOrgId, orgName: serverPreviewOrgName ?? 'this client' })
-  }, [serverPreviewOrgId, serverPreviewOrgName])
+    // The server's mode comes across with it, so a second tab shows the acting
+    // strip rather than promising a read-only session that is not one.
+    adoptServerPreview(
+      serverPreviewOrgId,
+      serverPreviewOrgName ?? 'this client',
+      serverPreviewMode,
+    )
+  }, [serverPreviewOrgId, serverPreviewOrgName, serverPreviewMode])
+
+  // The same reconciliation for the mode alone, for the tab that already has a
+  // store: the mode can change in another tab, or be swept by the middleware
+  // when a preview ends. Keyed on the live cookie rather than the prop, which
+  // is one render behind and would fight the reload in requestClientViewMode.
+  //
+  // The mode lives in a cookie and the record lives in per-tab sessionStorage,
+  // so nothing notifies this tab when another one arms or disarms: no storage
+  // event fires for a cookie, and a client-side navigation does not remount
+  // the layout banner. Keyed on `storedMode` alone, a tab that already had a
+  // store would read the cookie once at mount and then paint the same strip
+  // for the rest of its life. Painting the green read-only strip over a
+  // browser that is armed is the worst thing this component can do, because
+  // the strip IS the safeguard, so the tab re-reads whenever it comes back to
+  // the front and whenever the route changes.
+  const [modeTick, setModeTick] = useState(0)
+  useEffect(() => {
+    const recheck = () => setModeTick(t => t + 1)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') recheck()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', recheck)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', recheck)
+    }
+  }, [])
+
+  const storedMode = impersonation?.type === 'client' ? (impersonation.mode ?? 'view') : null
+  useEffect(() => {
+    if (storedMode === null) return
+    const live = readImpersonateModeCookie()
+    if (live === storedMode) return
+    setStoredMode(live)
+  }, [storedMode, modeTick, pathname])
 
   // The same reconciliation, the other way. The preview can end somewhere this
   // tab's store never hears about: the ?exit-preview=1 escape hatch in the
@@ -263,25 +443,70 @@ export function ImpersonationBanner({
       : impersonation.orgName
   }
 
+  const acting = !isTeamMember && (impersonation.mode ?? 'view') === ACT_MODE_VALUE
+
   return (
-    <div className="imp-banner">
-      <span className="imp-eye">
-        <ShellIcon n="impersonate" s={15} />
-      </span>
-      {isTeamMember ? (
-        <span>
-          Viewing as <b>{displayName}</b>
-          {impersonation.accessRules.length > 0 && (
-            <> ({impersonation.accessRules[0].role.replace(/_/g, ' ')})</>
-          )}.
+    <>
+      {/* Act mode gets its own tone. The strip's entire promise in read-only is
+          "nothing you do here can happen"; once that stops being true it must
+          not keep looking like the state where it was. */}
+      <div className={acting ? 'imp-banner imp-acting' : 'imp-banner'}>
+        <span className="imp-eye">
+          {/* An eye for looking, a pencil for writing. */}
+          <ShellIcon n={acting ? 'content' : 'impersonate'} s={15} />
         </span>
-      ) : (
-        <span>
-          Viewing <ClientSwitcher currentOrgId={impersonation.orgId} label={displayName} color="#ffffff" />. Read-only client view.
-        </span>
-      )}
-      <button className="imp-exit" onClick={handleExit}>Exit preview</button>
-    </div>
+        {isTeamMember ? (
+          <span>
+            Viewing as <b>{displayName}</b>
+            {impersonation.accessRules.length > 0 && (
+              <> ({impersonation.accessRules[0].role.replace(/_/g, ' ')})</>
+            )}.
+          </span>
+        ) : acting ? (
+          <span>
+            Acting as <ClientSwitcher currentOrgId={impersonation.orgId} label={displayName} color="#ffffff" /> (you).
+            {' '}Everything you do here is recorded.
+          </span>
+        ) : (
+          <span>
+            Viewing <ClientSwitcher currentOrgId={impersonation.orgId} label={displayName} color="#ffffff" />. Read-only client view.
+          </span>
+        )}
+        {modeError && <span className="imp-mode-error" role="status">{modeError}</span>}
+        {!isTeamMember && isSuperAdmin && (
+          acting ? (
+            <button
+              type="button"
+              className="imp-mode"
+              onClick={() => { void leaveActMode() }}
+              disabled={modeBusy}
+            >
+              Back to read-only
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="imp-mode"
+              onClick={() => { setModeError(null); setConfirmActOpen(true) }}
+              disabled={modeBusy}
+            >
+              Act as client
+            </button>
+          )
+        )}
+        <button className="imp-exit" onClick={handleExit}>Exit preview</button>
+      </div>
+      <ConfirmDialog
+        open={confirmActOpen}
+        title="Act as this client?"
+        description={`Requests, replies, approvals and queue changes you make from here land in ${displayName}'s workspace for real, attributed to you and written to the audit log. The studio is notified exactly as it is for a real client write, and no email goes to the client. Invoices and payments stay read-only.`}
+        confirmLabel="Act as client"
+        cancelLabel="Stay read-only"
+        variant="warning"
+        onConfirm={enterActMode}
+        onCancel={() => setConfirmActOpen(false)}
+      />
+    </>
   )
 }
 
@@ -315,6 +540,9 @@ function ClientSwitcher({ currentOrgId, label, color }: { currentOrgId: string; 
   const switchTo = (id: string, name: string) => {
     setOpen(false)
     if (id === currentOrgId) return
+    // setImpersonation resets the mode to 'view' and drops the mode cookie, so
+    // switching clients always lands read-only. Consent to act was given for
+    // one client, not for whoever is next in this list.
     setImpersonation({ orgId: id, orgName: name })
     if (typeof window !== 'undefined') window.location.reload()
   }
@@ -390,6 +618,24 @@ export function useImpersonation() {
     isImpersonating: data !== null,
     /** True when impersonating a client (legacy "View as Client") */
     isImpersonatingClient: isClient,
+    /**
+     * Act as client is on: portal writes from this tab land for real.
+     *
+     * The flag write affordances should read is `previewIsReadOnly` below;
+     * this one is for the few places that need to say something different
+     * rather than merely enable something.
+     */
+    actingAsClient: isClient && ((data as ClientImpersonationData).mode ?? 'view') === ACT_MODE_VALUE,
+    /**
+     * The one flag a portal write control should gate on: previewing AND not
+     * acting. Spelled out here so a surface cannot accidentally keep gating on
+     * `isImpersonatingClient` alone and stay dead in act mode.
+     *
+     * Money is the deliberate exception and does NOT use this: the invoice and
+     * services surfaces stay read-only in both modes.
+     */
+    previewIsReadOnly:
+      isClient && ((data as ClientImpersonationData).mode ?? 'view') !== ACT_MODE_VALUE,
     /** True when impersonating a team member ("View as Team Member") */
     isImpersonatingTeamMember: isTeamMember,
     impersonatedOrgId: isClient ? (data as ClientImpersonationData).orgId : null,

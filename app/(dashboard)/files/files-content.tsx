@@ -27,6 +27,7 @@ import { PageHeader } from '@/components/tahi/page-header'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Badge } from '@/components/tahi/badge'
 import { useToast } from '@/components/tahi/toast'
+import { useImpersonation } from '@/components/tahi/impersonation-banner'
 
 // The portal list route caps `limit`; ask for a browser-sized page.
 const LIST_URL = '/api/portal/files?limit=100'
@@ -96,6 +97,15 @@ export function FilesContent() {
   const { data, error, isLoading, mutate } = useResource<{ items: PortalFile[] }>(LIST_URL)
   const [uploading, setUploading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  // /files is one of the two client-only routes the middleware deliberately
+  // lets a preview into, so an admin standing in a client's shoes can land
+  // here and upload. Their session is still `isTahiAdmin`, so the upload
+  // resolver would file the bytes under the TAHI org: the operator is told
+  // everything they do lands in the client's workspace, and the file would
+  // quietly not be there. Naming the previewed org is what a studio-side
+  // upload to a client already does; the resolver validates and access-scopes
+  // it, and ignores it entirely for a real client session.
+  const { impersonatedOrgId } = useImpersonation()
 
   const files = data?.items ?? []
   // SWR keeps the previous payload across a failed revalidation, so a failure
@@ -107,10 +117,13 @@ export function FilesContent() {
 
   const uploadOne = useCallback(async (file: File) => {
     const mime = file.type || 'application/octet-stream'
+    // Same org on both calls, or the confirm would write a files row whose
+    // key prefix belongs to a different org and the route would 403 it.
+    const target = impersonatedOrgId ? { orgId: impersonatedOrgId } : {}
     const presignRes = await fetch(apiPath('/api/uploads/presign'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename: file.name, mimeType: mime }),
+      body: JSON.stringify({ filename: file.name, mimeType: mime, ...target }),
     })
     if (!presignRes.ok) throw new Error('presign failed')
     const { uploadUrl, storageKey, fileId } = (await presignRes.json()) as PresignResponse
@@ -131,10 +144,11 @@ export function FilesContent() {
         filename: file.name,
         mimeType: mime,
         sizeBytes: file.size,
+        ...target,
       }),
     })
     if (!confirmRes.ok) throw new Error('confirm failed')
-  }, [])
+  }, [impersonatedOrgId])
 
   const handleFiles = useCallback(async (picked: FileList | null) => {
     if (!picked || picked.length === 0) return
