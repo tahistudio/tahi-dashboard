@@ -1,4 +1,5 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { isPortalAdminContact } from '@/lib/portal-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -34,13 +35,21 @@ export async function POST(req: NextRequest) {
 
   const drizzle = (await db()) as unknown as D1
 
-  // Client-admin gate (same rule as every portal write).
+  // Client-admin gate (same rule as every portal write, decided by
+  // lib/portal-access.ts so the primary contact of a workspace whose
+  // portal_role never moved off the 'member' default is not refused here).
+  // The row is read inline rather than through isOrgAdmin because the
+  // notification names the requester, so the select happens either way.
   const [contact] = await drizzle
-    .select({ portalRole: schema.contacts.portalRole, name: schema.contacts.name })
+    .select({
+      portalRole: schema.contacts.portalRole,
+      isPrimary: schema.contacts.isPrimary,
+      name: schema.contacts.name,
+    })
     .from(schema.contacts)
     .where(and(eq(schema.contacts.orgId, orgId), eq(schema.contacts.clerkUserId, userId)))
     .limit(1)
-  if (contact?.portalRole !== 'admin') {
+  if (!contact || !isPortalAdminContact(contact)) {
     return NextResponse.json({ error: 'Only workspace admins can request plan changes' }, { status: 403 })
   }
 

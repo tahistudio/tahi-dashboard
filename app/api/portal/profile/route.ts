@@ -1,4 +1,5 @@
 import { getPortalAuth } from '@/lib/server-auth'
+import { isPortalAdminContact } from '@/lib/portal-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -6,7 +7,15 @@ import { eq, and } from 'drizzle-orm'
 
 /**
  * GET /api/portal/profile
- * Returns the contact record for the current user within their org.
+ * Returns the contact record for the current user within their org, plus the
+ * workspace-admin verdict already made for them.
+ *
+ * `isAdmin` is the server's own answer, from the one helper every portal write
+ * route gates on (lib/portal-access.ts). The settings sub-nav used to re-derive
+ * it in the browser from `portalRole === 'admin'`, which reads false for the
+ * primary contact of any workspace whose role column still holds the NOT NULL
+ * 'member' default: the owner was shown no People section while the API behind
+ * it would have let them in. Clients must not have to guess this.
  */
 export async function GET(req: NextRequest) {
   const { orgId, userId } = await getPortalAuth(req)
@@ -35,14 +44,15 @@ export async function GET(req: NextRequest) {
     .limit(1)
 
   if (!contact) {
-    // Return basic info from Clerk user id
+    // No linked contact row: basic info only, and not an admin of anything.
     return NextResponse.json({
       contact: null,
       orgId,
+      isAdmin: false,
     })
   }
 
-  return NextResponse.json({ contact, orgId })
+  return NextResponse.json({ contact, orgId, isAdmin: isPortalAdminContact(contact) })
 }
 
 /**

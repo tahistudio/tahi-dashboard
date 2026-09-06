@@ -1,19 +1,36 @@
 /**
  * lib/portal-access.ts
  *
- * Client-portal workspace-admin gating for financial data. The owner's bar:
- * invoices, subscription amounts, and payment surfaces are visible only to
- * admins of their own org, never to plain member seats (e.g. a contractor
- * invited as a member).
+ * THE single answer to "is this client person an admin of their own
+ * workspace?". Every portal surface that separates the owner's bar from a
+ * plain member seat resolves it here, on both sides:
  *
- * The explicit signal is contacts.portalRole === 'admin', but that column is
- * NOT reliably populated for primary contacts: the admin client-create flow
- * (app/api/admin/clients) and the self-serve provision flow
- * (app/api/portal/provision) both insert the primary contact WITHOUT a
- * portalRole, so it defaults to 'member'. Only migration 0081 backfilled
- * existing rows to admin where is_primary = 1. To avoid locking a freshly
- * provisioned owner out of their own invoices, the org's primary contact is
- * treated as a workspace admin as a fallback. No contact row at all = denied.
+ *   read  - invoices, subscription amounts, payment surfaces
+ *           (app/api/portal/invoices, .../subscription, .../checkout,
+ *           .../billing/session, app/api/onboarding/complete), plus the nav
+ *           and the settings sub-nav via lib/permissions.ts
+ *   write - brands, organisation settings, the people roster, teammate
+ *           invites, and retainer change requests
+ *           (app/api/portal/brands, .../organisation, .../people,
+ *           .../invites, .../subscription/change-request)
+ *
+ * THE RULE. A contact is a workspace admin when contacts.portalRole is
+ * 'admin', or when they are the org's primary contact. The second clause is
+ * not generosity, it is the only thing that keeps a fresh owner working:
+ * `portal_role` is NOT NULL DEFAULT 'member' (db/schema.ts), and the flows that
+ * create a workspace owner historically inserted the row without naming a role,
+ * so the column reads 'member' for the person who owns the place. Migration
+ * 0081 backfilled existing rows to 'admin' where is_primary = 1, and the three
+ * creation paths patched since stamp 'admin' at insert time, but there is no
+ * "unset" value left to test for: an owner created before those fixes is
+ * indistinguishable from a member except by is_primary. Reading the column
+ * alone is what locked a fresh owner out of inviting teammates and editing
+ * their own org settings.
+ *
+ * The reach of the fallback is deliberately narrow. is_primary is one row per
+ * org, set by the studio and never by the person it names, so it cannot be
+ * self-granted; a contractor invited as a member is is_primary = 0 and stays
+ * denied. No contact row at all = denied.
  */
 
 import { schema } from '@/db/d1'
@@ -33,6 +50,18 @@ export function isPortalAdminContact(
   if (!contact) return false
   if (contact.portalRole === 'admin') return true
   return !!contact.isPrimary
+}
+
+/**
+ * The same decision expressed as the role the portal acts on, for callers that
+ * carry a role rather than a boolean (ResolvedAccess.portalRole, which drives
+ * the client nav). A missing contact row resolves to 'member', which every gate
+ * refuses.
+ */
+export function resolvePortalRole(
+  contact: PortalContactRoleRow | null | undefined,
+): 'admin' | 'member' {
+  return isPortalAdminContact(contact) ? 'admin' : 'member'
 }
 
 /**

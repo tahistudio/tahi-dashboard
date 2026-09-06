@@ -148,6 +148,8 @@ function isVisible(section: SectionDef, v: Visibility): boolean {
 }
 
 interface PortalProfileResponse {
+  /** The server's own workspace-admin verdict (lib/portal-access.ts). */
+  isAdmin?: boolean
   contact: {
     isPrimary?: boolean | number | null
     portalRole?: string | null
@@ -162,21 +164,24 @@ export function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
   // PermissionsProvider (no flash).
   const { isSuperAdmin, features } = usePermissions()
 
-  // Client-admin flag drives the client sub-nav gate (#6). The signal is
-  // contacts.portalRole === 'admin'; until the portal profile endpoint exposes
-  // it, we fall back to the primary-contact flag (the foundation backfilled
-  // portalRole = 'admin' where is_primary = 1, so they agree for current data).
-  // TODO: once GET /api/portal/profile returns portalRole, drop the isPrimary
-  // fallback below.
+  // Client-admin flag drives the client sub-nav gate (#6). GET
+  // /api/portal/profile now states the verdict outright (`isAdmin`), decided by
+  // the same helper the portal write routes gate on, so this reads it rather
+  // than re-deriving it. It used to test `portalRole === 'admin'` alone, which
+  // is false for the primary contact of any workspace whose role column still
+  // holds the NOT NULL 'member' default: the owner saw no People section while
+  // the API behind it would have let them in. The local fallback exists only
+  // for a payload from an older deploy that has no `isAdmin`, and it applies
+  // the identical rule (see lib/portal-access.ts).
   const { data: profile } = useResource<PortalProfileResponse>(
     isAdmin ? null : '/api/portal/profile',
   )
   const isClientAdmin = useMemo(() => {
     if (isAdmin) return false
+    if (typeof profile?.isAdmin === 'boolean') return profile.isAdmin
     const c = profile?.contact
     if (!c) return false
-    if (typeof c.portalRole === 'string') return c.portalRole === 'admin'
-    return !!c.isPrimary
+    return c.portalRole === 'admin' || !!c.isPrimary
   }, [isAdmin, profile])
 
   const visibility = useMemo<Visibility>(

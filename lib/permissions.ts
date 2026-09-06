@@ -37,7 +37,7 @@ import {
   hasAnyActiveRoleAssignment,
   resolveTeamMember,
 } from '@/lib/team-identity'
-import { isPortalAdminContact } from '@/lib/portal-access'
+import { resolvePortalRole } from '@/lib/portal-access'
 import {
   FEATURE_TREE,
   getFeatureNode,
@@ -112,7 +112,7 @@ export interface ResolvedAccess {
   /**
    * CLIENT AUDIENCE ONLY: which seat this person holds at their own org, read
    * from their `contacts` row with the same predicate the portal routes use
-   * (`isPortalAdminContact`, lib/portal-access.ts). It is the nav's half of the
+   * (`resolvePortalRole`, lib/portal-access.ts). It is the nav's half of the
    * financial gate: /api/portal/invoices 403s a member seat, so the client rail
    * must not offer them the item.
    *
@@ -357,7 +357,7 @@ export async function resolvePermissions(
           ))
           .limit(1)
         if (contact) {
-          portalRole = isPortalAdminContact(contact) ? 'admin' : 'member'
+          portalRole = resolvePortalRole(contact)
           const contactRows = await drizzle
             .select({ featureKey: schema.featureVisibility.featureKey, effect: schema.featureVisibility.effect })
             .from(schema.featureVisibility)
