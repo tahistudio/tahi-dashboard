@@ -1617,6 +1617,29 @@ const TOOLS: ToolDef[] = [
     name: prop('string', 'Migration name like "0012", "0013", or "all"'),
   }, ['name']),
 
+  // ── ManyRequests migration (import + cleanup) ───────────────────────
+  tool(
+    'import_manyrequests',
+    'Import the OLD ManyRequests dashboard into this one. DRY RUN BY DEFAULT: leave dryRun unset or true to get the full plan (per entity: toInsert, toUpdate, toDelete, unchanged, skipped with reasons, the first 20 sample rows, and every field-map entry with no D1 column) without writing anything. ALWAYS show the user the dry run and get an explicit yes before calling again with dryRun false. Every entity is idempotent on manyrequests_id, so a re-run is an update rather than a duplicate; migration 0093 must be applied first or there is no key and a second run WOULD duplicate. The import writes D1 directly and never calls an API route, so it cannot send an email, mint a Clerk invite or raise a notification: imported contacts get no clerkUserId and imported orgs get no clerkOrgId. Both modes return the suppression-log and notification counts read before and after the run; if mailSilent is false, stop and report it. Requires super_admin.',
+    {
+      dryRun: prop('boolean', 'Plan only, write nothing. DEFAULT TRUE. Pass false only after the user has seen the dry run and said yes.'),
+      entities: prop('array', 'Subset of entities to run, in dependency order: team, organisations, contacts, brands, services, subscriptions, requests, messages, invoices. Omit for all of them. team must precede messages or comment authors mis-attribute.', { items: { type: 'string' } }),
+      since: prop('string', 'ISO timestamp. Source rows created before it are skipped with a reason.'),
+      closedAs: prop('string', "What a ManyRequests 'Closed' request becomes: cancelled (default), delivered or archived. Closed is is_closed, NOT is_completed, and the roughly 34 rows that carry it read like finished or abandoned work, so this is a judgement call the user should make."),
+      requestDetailLimit: prop('number', 'Cap the per-request detail fetch (one GET per request; there are 329). Useful for a fast first dry run.'),
+    },
+  ),
+  tool(
+    'cleanup_dummy_data',
+    'Archive or remove the seed and duplicate organisations left over from before the ManyRequests import. DRY RUN BY DEFAULT: leave dryRun unset or true to see exactly what would change, including the child-row blast radius of every hard delete. ALWAYS show that to the user and get an explicit yes before calling with dryRun false. Hard delete is REFUSED unless the organisation is on the ten-entry dummy allowlist (matched on both id prefix and exact name) AND holds no Xero contact id, no Stripe customer id, no ManyRequests id and no invoice; every refusal comes back with its reason. Archive is reversible and is the right answer for anything uncertain. wipeDemo removes only rows with NO ManyRequests key. discovery_calls is never touched by this tool: the pre-call-digest cron mails real people off that table every ten minutes. Requires super_admin.',
+    {
+      dryRun: prop('boolean', 'Plan only, change nothing. DEFAULT TRUE.'),
+      archive: prop('array', 'Organisation ids to set to status archived. Reversible.', { items: { type: 'string' } }),
+      hardDelete: prop('array', 'Organisation ids to remove outright. Refused unless on the dummy allowlist with zero Xero, Stripe, ManyRequests and invoice links.', { items: { type: 'string' } }),
+      wipeDemo: prop('boolean', 'Also remove the seed requests, their messages, time entries, participants and reads, plus the tasks and scheduled calls on dummy organisations. Default false.'),
+    },
+  ),
+
   // ── Expense commitments (fixed-cost forecasting) ────────────────────
   tool('list_commitments', 'List all expense commitments (user-maintained fixed costs with cadence)'),
   tool('add_commitment', 'Add an expense commitment. Cadence: monthly | quarterly | annual | one_off. nextDueDate anchors non-monthly cadences.', {
@@ -2753,6 +2776,22 @@ async function executeTool(
       return json(await apiGet('/api/admin/db/migrate', token))
     case 'run_migration':
       return json(await apiWrite('/api/admin/db/migrate', token, 'POST', { name: s('name') }))
+
+    // ── ManyRequests migration ────────────────────────────────────────
+    // dryRun defaults TRUE on both. `args.dryRun !== false` rather than
+    // `args.dryRun ?? true` so a caller that sends a string, a number or null
+    // still gets the safe answer.
+    case 'import_manyrequests':
+      return json(await apiWrite('/api/admin/import/manyrequests', token, 'POST', {
+        ...(args as Record<string, unknown>),
+        dryRun: args.dryRun !== false,
+      }))
+    case 'cleanup_dummy_data':
+      return json(await apiWrite('/api/admin/import/cleanup', token, 'POST', {
+        ...(args as Record<string, unknown>),
+        dryRun: args.dryRun !== false,
+        wipeDemo: args.wipeDemo === true,
+      }))
 
     // ── Expense commitments ────────────────────────────────────────
     case 'list_commitments':
