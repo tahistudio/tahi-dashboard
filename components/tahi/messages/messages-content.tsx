@@ -34,7 +34,7 @@ import {
 } from '@/lib/messages-inbox'
 import { ConversationRail } from './conversation-rail'
 import { ThreadPane } from './thread-pane'
-import type { InboxPayload, StagedAttachment, ThreadMessageView, ThreadPayload } from './types'
+import type { InboxPayload, StagedAttachment, ThreadPayload } from './types'
 
 const NARROW_QUERY = '(max-width: 63.9375rem)'
 
@@ -63,6 +63,16 @@ export function MessagesContent({ audience, readOnly }: MessagesContentProps) {
 
   const [attachments, setAttachments] = React.useState<StagedAttachment[]>([])
   const [narrow, setNarrow] = React.useState(false)
+  /**
+   * Reply or internal note, held HERE rather than inside <MessageBox>.
+   *
+   * The mic lives in the composer's footer but records and uploads up here, so
+   * a mode owned by the composer was invisible to the voice-note write and
+   * every voice note went out as `isInternal: false`. A studio member on the
+   * amber tab, reading "The client will not see this", published to the client
+   * and emailed every contact at the org. One owner, both paths.
+   */
+  const [mode, setMode] = React.useState<'reply' | 'note'>('reply')
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return
@@ -75,7 +85,7 @@ export function MessagesContent({ audience, readOnly }: MessagesContentProps) {
 
   // ── the list ───────────────────────────────────────────────────────────────
 
-  const loadInbox = React.useCallback(async () => {
+  const loadInbox = React.useCallback(async (): Promise<InboxPayload | null> => {
     setListState(s => (s === 'ready' ? s : 'loading'))
     try {
       const url = orgFilter ? `${base}?orgId=${encodeURIComponent(orgFilter)}` : base
@@ -84,9 +94,11 @@ export function MessagesContent({ audience, readOnly }: MessagesContentProps) {
       const json = (await res.json()) as InboxPayload
       setInbox(json)
       setListState('ready')
+      return json
     } catch {
       setInbox(null)
       setListState('error')
+      return null
     }
   }, [base, orgFilter])
 
@@ -98,14 +110,6 @@ export function MessagesContent({ audience, readOnly }: MessagesContentProps) {
     [threads, lens, query],
   )
   const unread = totalUnread(threads)
-
-  // Desktop opens the first room by itself; a phone does not, because there
-  // the list is the page and taking it over unasked is a page nobody chose.
-  React.useEffect(() => {
-    if (narrow || selected || listState !== 'ready') return
-    const first = visible[0]
-    if (first) setSelected(first)
-  }, [narrow, selected, listState, visible])
 
   // ── one thread ─────────────────────────────────────────────────────────────
 
@@ -120,8 +124,13 @@ export function MessagesContent({ audience, readOnly }: MessagesContentProps) {
     [base, isClient, orgFilter],
   )
 
-  const loadThread = React.useCallback(async (t: InboxThread) => {
-    setThreadState('loading')
+  /**
+   * `quiet` re-reads an open room without flipping it back to the skeleton,
+   * which is what a background refresh wants: the messages already on screen
+   * stay on screen and are replaced when the newer ones land.
+   */
+  const loadThread = React.useCallback(async (t: InboxThread, quiet = false) => {
+    if (!quiet) setThreadState('loading')
     try {
       const res = await fetch(apiPath(threadPath(t)))
       if (!res.ok) throw new Error(String(res.status))
@@ -130,8 +139,13 @@ export function MessagesContent({ audience, readOnly }: MessagesContentProps) {
       setThreadState('ready')
       return json
     } catch {
-      setThread(null)
-      setThreadState('error')
+      // A quiet refresh that fails leaves what is on screen alone. Throwing
+      // the open room away because a background read blipped would be worse
+      // than showing messages a few seconds old.
+      if (!quiet) {
+        setThread(null)
+        setThreadState('error')
+      }
       return null
     }
   }, [threadPath])
@@ -139,6 +153,10 @@ export function MessagesContent({ audience, readOnly }: MessagesContentProps) {
   const openThread = React.useCallback(async (t: InboxThread) => {
     setSelected(t)
     setAttachments([])
+    // A new room starts on Reply. The tab is hidden on a thread that cannot
+    // carry a note, so a mode carried over from the last room would be an
+    // invisible setting waiting to surprise somebody on the way back.
+    setMode('reply')
     const json = await loadThread(t)
     if (!json) return
     // Capture the cursor BEFORE moving it, so the New line is drawn from what
@@ -154,6 +172,18 @@ export function MessagesContent({ audience, readOnly }: MessagesContentProps) {
       // The badge stays lit. That is the honest state: the cursor did not move.
     }
   }, [loadThread, threadPath, readOnly])
+
+  // Desktop opens the first room by itself; a phone does not, because there
+  // the list is the page and taking it over unasked is a page nobody chose.
+  //
+  // Through openThread, not setSelected: selecting a row without reading it
+  // left the rail highlighting a conversation while the pane still said "Pick
+  // a conversation", which is the first thing either audience saw on desktop.
+  React.useEffect(() => {
+    if (narrow || selected || listState !== 'ready') return
+    const first = visible[0]
+    if (first) void openThread(first)
+  }, [narrow, selected, listState, visible, openThread])
 
   // ── attachments, through the existing R2 flow ──────────────────────────────
 
@@ -246,6 +276,15 @@ export function MessagesContent({ audience, readOnly }: MessagesContentProps) {
   const chunks = React.useRef<Blob[]>([])
 
   const sendRef = React.useRef<((input: { body: string; isInternal: boolean; attachments: StagedAttachment[]; voice?: { storageKey: string; durationSeconds: number; mimeType: string } }) => Promise<boolean>) | null>(null)
+  /**
+   * The visibility the mic must honour, read through a ref because the
+   * MediaRecorder's onstop closure is created when recording STARTS and would
+   * otherwise carry whatever the mode was then rather than what the composer
+   * says now.
+   */
+  const canInternal = audience === 'studio' && !!thread?.thread.canInternal
+  const internalRef = React.useRef(false)
+  React.useEffect(() => { internalRef.current = canInternal && mode === 'note' }, [canInternal, mode])
 
   const uploadVoice = React.useCallback(async (blob: Blob, seconds: number, mimeType: string) => {
     try {
@@ -264,13 +303,14 @@ export function MessagesContent({ audience, readOnly }: MessagesContentProps) {
         body: blob,
       })
       if (!put.ok) throw new Error('upload')
+      const internal = internalRef.current
       const ok = await sendRef.current?.({
         body: '',
-        isInternal: false,
+        isInternal: internal,
         attachments: [],
         voice: { storageKey: presign.storageKey, durationSeconds: seconds, mimeType },
       })
-      if (ok) showToast('Voice note sent', 'success')
+      if (ok) showToast(internal ? 'Internal voice note added' : 'Voice note sent', 'success')
     } catch {
       showToast('That voice note did not send', 'error')
     }
@@ -333,10 +373,21 @@ export function MessagesContent({ audience, readOnly }: MessagesContentProps) {
       }
       setAttachments([])
       // Re-read rather than patching two lists by hand: the server owns the
-      // ordering, the preview and the unread arithmetic.
-      const fresh = await loadThread(t)
+      // ordering, the preview and the unread arithmetic. Quietly: the room is
+      // already on screen, a skeleton over it would be a lie, and keeping the
+      // stream mounted is what lets its live region announce the new message.
+      const fresh = await loadThread(t, true)
       if (fresh) setSeenCursor(fresh.lastReadAt)
-      void loadInbox()
+      const list = await loadInbox()
+      // A channel row addressed before it existed (the client's `channel:`
+      // placeholder, the studio's `channel:<orgId>` one) comes back from that
+      // re-read keyed on the conversation the write just minted. Without
+      // re-pointing, `selectedKey` matches nothing and the rail loses its
+      // highlight on the room the reader is standing in.
+      if (list && t.source === 'channel') {
+        const real = list.threads.find(x => x.source === 'channel' && x.orgId === t.orgId)
+        if (real && real.key !== t.key) setSelected(real)
+      }
       return true
     } catch {
       showToast('That did not send. Check your connection and try again.', 'error')
@@ -344,12 +395,41 @@ export function MessagesContent({ audience, readOnly }: MessagesContentProps) {
     }
   }, [selected, threadPath, showToast, loadThread, loadInbox])
 
-  sendRef.current = send
+  // Assigned in an effect, not in the render body: the mic reads this ref long
+  // after the commit, and writing a ref while rendering is a side effect.
+  React.useEffect(() => { sendRef.current = send }, [send])
 
-  const retryMessage = React.useCallback((m: ThreadMessageView) => {
-    if (!selected) return
-    void send({ body: m.body, isInternal: m.isInternal, attachments: [] })
-  }, [selected, send])
+  // ── coming back to the tab ─────────────────────────────────────────────────
+  //
+  // There is no socket and no poll, so without this the only thing that ever
+  // refreshed the inbox was the reader's own send: a chat surface that needed
+  // a page reload to show what the other side had written. Refetching when the
+  // tab is looked at again is the cheap, bounded version. `refreshing` makes
+  // overlapping loads impossible, so a fast tab-switch cannot stack requests.
+  const refreshing = React.useRef(false)
+  const refresh = React.useCallback(() => {
+    if (refreshing.current) return
+    refreshing.current = true
+    void (async () => {
+      try {
+        await loadInbox()
+        if (selected) await loadThread(selected, true)
+      } finally {
+        refreshing.current = false
+      }
+    })()
+  }, [loadInbox, loadThread, selected])
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh() }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [refresh])
 
   // ── frame ──────────────────────────────────────────────────────────────────
 
@@ -427,7 +507,8 @@ export function MessagesContent({ audience, readOnly }: MessagesContentProps) {
             onBack={() => { setSelected(null); setThread(null); setThreadState('idle') }}
             onRetryLoad={() => { if (selected) void loadThread(selected) }}
             onSend={send}
-            onRetryMessage={retryMessage}
+            mode={mode}
+            onModeChange={setMode}
             attachments={attachments}
             onPickFiles={pickFiles}
             onRemoveAttachment={removeAttachment}

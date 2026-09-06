@@ -16,7 +16,7 @@
  */
 
 import * as React from 'react'
-import { ArrowLeft, ExternalLink, Eye, Lock, MessageCircle, RefreshCw } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Lock, MessageCircle } from 'lucide-react'
 import Link from 'next/link'
 import { Avatar } from '@/components/tahi/avatar'
 import { apiPath } from '@/lib/api'
@@ -38,22 +38,30 @@ const STATUS_DOT: Readonly<Record<string, string>> = {
 const DAY_FORMAT = new Intl.DateTimeFormat('en-NZ', { weekday: 'long', day: 'numeric', month: 'short' })
 const TIME_FORMAT = new Intl.DateTimeFormat('en-NZ', { hour: 'numeric', minute: '2-digit' })
 
+/**
+ * The divider key and label are both LOCAL, matching the timestamps beside
+ * them. A UTC key rolls the day at noon in NZ, so this morning's messages sat
+ * under a "Yesterday" divider next to a 9:00 am stamp and one local day was
+ * cut in two at lunchtime. Same arithmetic as formatDay in
+ * components/tahi/message-thread.tsx.
+ */
 function dayKey(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
-  return d.toISOString().slice(0, 10)
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
 }
 
 function dayLabel(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
-  const today = new Date()
-  const key = d.toISOString().slice(0, 10)
-  if (key === today.toISOString().slice(0, 10)) return 'Today'
-  const yesterday = new Date(today.getTime() - 86_400_000)
-  if (key === yesterday.toISOString().slice(0, 10)) return 'Yesterday'
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const that = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const days = Math.round((today.getTime() - that.getTime()) / 86_400_000)
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Yesterday'
   return DAY_FORMAT.format(d)
 }
 
@@ -73,13 +81,15 @@ export interface ThreadPaneProps {
   onBack: () => void
   onRetryLoad: () => void
   onSend: (input: { body: string; isInternal: boolean; attachments: StagedAttachment[] }) => Promise<boolean>
-  onRetryMessage: (message: ThreadMessageView) => void
   attachments: StagedAttachment[]
   onPickFiles: (files: FileList | null) => void
   onRemoveAttachment: (key: string) => void
   onVoice: () => void
   recording: boolean
   clientName: string | null
+  /** Reply or internal note. Owned by the page so the mic can honour it too. */
+  mode: 'reply' | 'note'
+  onModeChange: (mode: 'reply' | 'note') => void
 }
 
 export function ThreadPane({
@@ -91,13 +101,14 @@ export function ThreadPane({
   onBack,
   onRetryLoad,
   onSend,
-  onRetryMessage,
   attachments,
   onPickFiles,
   onRemoveAttachment,
   onVoice,
   recording,
   clientName,
+  mode,
+  onModeChange,
 }: ThreadPaneProps) {
   const scroller = React.useRef<HTMLDivElement | null>(null)
   const messageCount = payload?.messages.length ?? 0
@@ -212,11 +223,29 @@ export function ThreadPane({
             </p>
           </div>
         )}
-        {state === 'ready' && <MessageStream messages={messages} seenCursor={seenCursor} onRetryMessage={onRetryMessage} />}
+        {/* A live region, so a reader on a screen reader hears a message that
+            lands after their own rather than discovering it by exploring.
+            Mounted WITH its messages rather than filled afterwards, so opening
+            a room does not read the whole room out: what gets announced is
+            what arrives while it is open. A quiet re-read (a send, or coming
+            back to the tab) keeps it mounted, which is what makes that work.
+            .pfm-stream repeats the body's column and gap, and hides itself
+            while empty so it costs no spacing. */}
+        {state === 'ready' && (
+          <div className="pfm-stream" role="log" aria-live="polite" aria-relevant="additions">
+            <MessageStream messages={messages} seenCursor={seenCursor} />
+          </div>
+        )}
       </div>
 
       <span className="pfm-hair" />
+      {/* Keyed on the room: the draft, and the reply / note tab with it, belong
+          to the conversation they were typed into. Without this a half-written
+          reply to one client was sitting in the box when the next one opened. */}
       <MessageBox
+        key={thread.key}
+        mode={mode}
+        onModeChange={onModeChange}
         canPost={thread.canPost}
         canInternal={thread.canInternal && audience === 'studio'}
         placeholder={thread.source === 'channel'
@@ -262,11 +291,9 @@ function PeopleStack({ people }: { people: ThreadPayload['people'] }) {
 function MessageStream({
   messages,
   seenCursor,
-  onRetryMessage,
 }: {
   messages: readonly ThreadMessageView[]
   seenCursor: string | null
-  onRetryMessage: (m: ThreadMessageView) => void
 }) {
   const nodes: React.ReactNode[] = []
   let lastDay = ''
@@ -288,13 +315,13 @@ function MessageStream({
       newLineDrawn = true
       nodes.push(<div key={`new-${m.id}`} className="pfm-newline"><span>New</span></div>)
     }
-    nodes.push(<Bubble key={m.id} m={m} onRetry={onRetryMessage} />)
+    nodes.push(<Bubble key={m.id} m={m} />)
   }
 
   return <>{nodes}</>
 }
 
-function Bubble({ m, onRetry }: { m: ThreadMessageView; onRetry: (m: ThreadMessageView) => void }) {
+function Bubble({ m }: { m: ThreadMessageView }) {
   const classes = [
     'pfm-msg',
     m.isOwn ? 'own' : 'other',
@@ -311,8 +338,6 @@ function Bubble({ m, onRetry }: { m: ThreadMessageView; onRetry: (m: ThreadMessa
           {m.isInternal && (
             <span className="pfm-msg-int"><Lock size={10} aria-hidden="true" />Internal</span>
           )}
-          {m.pending && <span><Eye size={11} aria-hidden="true" /> Sending</span>}
-          {m.failed && <span style={{ color: 'var(--color-danger)' }}>Not sent</span>}
         </div>
         {m.body.trim() && (
           <div
@@ -351,12 +376,6 @@ function Bubble({ m, onRetry }: { m: ThreadMessageView; onRetry: (m: ThreadMessa
               </a>
             ))}
           </div>
-        )}
-        {m.failed && (
-          <button type="button" className="pfm-btn small tahi-focus-ring" onClick={() => onRetry(m)}>
-            <RefreshCw size={13} aria-hidden="true" />
-            Try again
-          </button>
         )}
       </div>
     </div>

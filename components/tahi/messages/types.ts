@@ -33,10 +33,6 @@ export interface ThreadMessageView {
   isOwn: boolean
   files: ThreadFile[]
   voiceNote: { url: string; durationSeconds: number | null } | null
-  /** Client only, never on the wire: an optimistic row that has not landed. */
-  pending?: boolean
-  /** Client only: the send failed and the row offers Try again. */
-  failed?: boolean
 }
 
 export interface ThreadHead {

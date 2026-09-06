@@ -15,6 +15,11 @@
  * the browser. A client route has no field that could carry `isInternal`, so
  * there is nothing for a forged request to set either.
  *
+ * `mode` is a CONTROLLED prop rather than local state. The mic sits in this
+ * footer but records and uploads in the page above, so a mode kept privately
+ * here was invisible to the voice-note write: a note recorded on the amber tab
+ * went out to the client. One owner, one answer, both paths.
+ *
  * Read-only is a real state, not a disabled button: an admin previewing a
  * client's portal sees the note that says so.
  */
@@ -26,6 +31,9 @@ import type { StagedAttachment } from './types'
 export interface MessageBoxProps {
   canPost: boolean
   canInternal: boolean
+  /** Owned by the page, so the mic writes the same visibility this tab shows. */
+  mode: 'reply' | 'note'
+  onModeChange: (mode: 'reply' | 'note') => void
   placeholder: string
   hint: string
   readOnlyNote: string
@@ -40,6 +48,8 @@ export interface MessageBoxProps {
 export function MessageBox({
   canPost,
   canInternal,
+  mode,
+  onModeChange,
   placeholder,
   hint,
   readOnlyNote,
@@ -51,17 +61,20 @@ export function MessageBox({
   onSend,
 }: MessageBoxProps) {
   const [value, setValue] = React.useState('')
-  const [mode, setMode] = React.useState<'reply' | 'note'>('reply')
   const [sending, setSending] = React.useState(false)
   const fileInput = React.useRef<HTMLInputElement | null>(null)
 
   const internal = canInternal && mode === 'note'
   const busy = attachments.some(a => a.busy)
+  // A file whose upload failed carries no id, so it would be dropped by the
+  // filter below and sent past in silence while its chip sat in the tray. Send
+  // is held until it is retried or removed instead.
+  const broken = attachments.some(a => a.error)
   const ready = attachments.filter(a => a.fileId)
   const has = value.trim().length > 0 || ready.length > 0
 
   const send = React.useCallback(async () => {
-    if (!has || sending || busy) return
+    if (!has || sending || busy || broken) return
     setSending(true)
     try {
       const ok = await onSend({ body: toParagraphs(value), isInternal: internal, attachments: ready })
@@ -69,7 +82,7 @@ export function MessageBox({
     } finally {
       setSending(false)
     }
-  }, [has, sending, busy, onSend, value, internal, ready])
+  }, [has, sending, busy, broken, onSend, value, internal, ready])
 
   if (!canPost) {
     return (
@@ -90,7 +103,7 @@ export function MessageBox({
             type="button"
             className={mode === 'reply' ? 'pfm-comp-tab on tahi-focus-ring' : 'pfm-comp-tab tahi-focus-ring'}
             aria-pressed={mode === 'reply'}
-            onClick={() => setMode('reply')}
+            onClick={() => onModeChange('reply')}
           >
             <MessageCircle size={14} aria-hidden="true" />
             Reply to the client
@@ -99,7 +112,7 @@ export function MessageBox({
             type="button"
             className={mode === 'note' ? 'pfm-comp-tab note on tahi-focus-ring' : 'pfm-comp-tab note tahi-focus-ring'}
             aria-pressed={mode === 'note'}
-            onClick={() => setMode('note')}
+            onClick={() => onModeChange('note')}
           >
             <Lock size={13} aria-hidden="true" />
             Internal note
@@ -172,8 +185,12 @@ export function MessageBox({
             type="button"
             className={recording ? 'pfm-icon-btn recording tahi-focus-ring' : 'pfm-icon-btn tahi-focus-ring'}
             onClick={onVoice}
-            aria-label={recording ? 'Stop recording' : 'Record a voice note'}
-            title={recording ? 'Stop recording' : 'Record a voice note'}
+            aria-label={recording
+              ? 'Stop recording'
+              : internal ? 'Record an internal voice note' : 'Record a voice note'}
+            title={recording
+              ? 'Stop recording'
+              : internal ? 'Record an internal voice note' : 'Record a voice note'}
           >
             <Mic size={17} aria-hidden="true" />
             {recording && <span className="pfm-rec-dot" aria-hidden="true" />}
@@ -183,7 +200,7 @@ export function MessageBox({
           type="button"
           className="pfm-send tahi-focus-ring"
           onClick={() => void send()}
-          disabled={!has || sending || busy}
+          disabled={!has || sending || busy || broken}
         >
           {internal ? <Lock size={15} aria-hidden="true" /> : <Send size={15} aria-hidden="true" />}
           {internal ? 'Add note' : sending ? 'Sending' : 'Send'}
