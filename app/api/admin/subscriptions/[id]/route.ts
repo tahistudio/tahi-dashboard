@@ -212,6 +212,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
       orgId: schema.subscriptions.orgId,
       planType: schema.subscriptions.planType,
       status: schema.subscriptions.status,
+      manyrequestsId: schema.subscriptions.manyrequestsId,
     })
     .from(schema.subscriptions)
     .where(eq(schema.subscriptions.id, id))
@@ -219,6 +220,14 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   if (!sub) {
     return NextResponse.json({ error: 'Subscription not found' }, { status: 404 })
+  }
+  if (sub.manyrequestsId) {
+    // Imported plans are the client's billing history, and the invoices that
+    // belong to them predate invoices.subscription_id, so the invoice check
+    // below cannot see them. Cancelling keeps the history; removing loses it.
+    return NextResponse.json({
+      error: 'Cannot remove this plan: it came across from ManyRequests and is part of this client history. Cancel the subscription instead.',
+    }, { status: 409 })
   }
 
   // The verdict on the org comes before any verdict on its contents, so a

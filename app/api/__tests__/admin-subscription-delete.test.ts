@@ -160,6 +160,15 @@ describe('DELETE /api/admin/subscriptions/[id]', () => {
     expect(state.deletes).toHaveLength(0)
   })
 
+  it('refuses a plan that came across from ManyRequests, because it is the client history', async () => {
+    state.sub = { id: 'sub-1', orgId: 'org-1', planType: 'hourly', status: 'active', manyrequestsId: '3:Glasswall Custom Retainer' }
+    const res = await DELETE(req(), { params: Promise.resolve({ id: 'sub-1' }) })
+    expect(res.status).toBe(409)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toContain('ManyRequests')
+    expect(state.deletes).toHaveLength(0)
+  })
+
   it('refuses when an invoice references the subscription, and deletes nothing', async () => {
     state.invoices = [{ id: 'inv-1' }, { id: 'inv-2' }]
     const res = await DELETE(req(), ctx)

@@ -257,6 +257,17 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (role !== (contact.role ?? null)) { updateData.role = role; changes.role = { before: contact.role, after: role } }
   }
   if (typeof body.isPrimary === 'boolean' && body.isPrimary !== Boolean(contact.isPrimary)) {
+    if (body.isPrimary === false) {
+      // The invoices and the invite address hang off the primary flag, so an
+      // organisation with people always keeps one. Promote someone else first.
+      const siblings = await listSiblingContacts(drizzle, contact)
+      if (isOnlyPrimary(contact, siblings)) {
+        return NextResponse.json({
+          error: `${contact.name} is the only primary contact here; make someone else primary first.`,
+          code: 'only_primary',
+        }, { status: 409 })
+      }
+    }
     updateData.isPrimary = body.isPrimary
     changes.isPrimary = { before: Boolean(contact.isPrimary), after: body.isPrimary }
   }

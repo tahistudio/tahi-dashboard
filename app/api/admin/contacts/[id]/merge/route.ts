@@ -86,7 +86,13 @@ export async function POST(req: NextRequest, { params }: Params) {
   const fills: Record<string, unknown> = {}
   if (!survivor.phone && duplicate.phone) fills.phone = duplicate.phone
   if (!survivor.role && duplicate.role) fills.role = duplicate.role
-  if (!survivor.clerkUserId && duplicate.clerkUserId) fills.clerkUserId = duplicate.clerkUserId
+  if (!survivor.clerkUserId && duplicate.clerkUserId) {
+    fills.clerkUserId = duplicate.clerkUserId
+    // A login owns its mailbox: the survivor must describe the address the
+    // person actually signs in with, which is the state PATCH refuses to
+    // create any other way.
+    if (duplicate.email && duplicate.email !== survivor.email) fills.email = duplicate.email
+  }
   if (!survivor.lastLoginAt && duplicate.lastLoginAt) fills.lastLoginAt = duplicate.lastLoginAt
   if (!survivor.personId && duplicate.personId) fills.personId = duplicate.personId
   if (!survivor.manyrequestsId && duplicate.manyrequestsId) fills.manyrequestsId = duplicate.manyrequestsId

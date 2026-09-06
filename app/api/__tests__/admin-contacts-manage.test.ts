@@ -312,6 +312,16 @@ describe('PATCH /api/admin/contacts/[id]', () => {
     expect(promote.where.params).toEqual(['c_2'])
   })
 
+  it('refuses to demote the only primary while the organisation still has people', async () => {
+    world.contacts = [contact({ id: 'c_1', isPrimary: true }), contact({ id: 'c_2', email: 'bob@acme.com', name: 'Bob' })]
+
+    const res = await PATCH(req('PATCH', 'c_1', { isPrimary: false }), params('c_1'))
+    expect(res.status).toBe(409)
+    const body = await json(res)
+    expect(body.code).toBe('only_primary')
+    expect(captured.updates).toHaveLength(0)
+  })
+
   it('takes the permissions gate for a portal role change and writes the permission audit row', async () => {
     world.contacts = [contact({ id: 'c_1' })]
 
@@ -544,6 +554,18 @@ describe('POST /api/admin/contacts/[id]/merge', () => {
     expect(res.status).toBe(200)
     const survivor = captured.updates.find(u => u.table === 'contacts' && u.where.params[0] === 'c_keep')
     expect(survivor!.set).toMatchObject({ clerkUserId: 'user_jane', lastLoginAt: '2026-09-01T00:00:00Z' })
+  })
+
+  it('a carried login brings its own mailbox, so the survivor describes the address the person signs in with', async () => {
+    world.contacts = [
+      contact({ id: 'c_dup', email: 'jane.real@acme.com', clerkUserId: 'user_jane' }),
+      contact({ id: 'c_keep', email: 'jane@acme.com' }),
+    ]
+
+    const res = await merge(req('POST', 'c_dup', { into: 'c_keep' }, '/merge'), params('c_dup'))
+    expect(res.status).toBe(200)
+    const survivor = captured.updates.find(u => u.table === 'contacts' && u.where.params[0] === 'c_keep')
+    expect(survivor!.set).toMatchObject({ clerkUserId: 'user_jane', email: 'jane.real@acme.com' })
   })
 
   it('refuses two rows that sign in as different people', async () => {
