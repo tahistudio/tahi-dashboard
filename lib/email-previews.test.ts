@@ -247,11 +247,11 @@ describe('email preview variants', () => {
     const clientHtml = await render(client.react)
     const studioHtml = await render(studio.react)
 
-    expect(clientHtml).toContain('A reply on your request')
+    expect(clientHtml).toContain('Request thread')
     expect(clientHtml).toContain('Open the thread')
 
-    // The studio half: different eyebrow, different CTA, different footnote.
-    expect(studioHtml).toContain('A client replied')
+    // The studio half: different kicker, different CTA, different footnote.
+    expect(studioHtml).toContain('Inbox')
     expect(studioHtml).toContain('Open the request')
     expect(studioHtml).toContain('marks the request as answered for the client')
     expect(studioHtml).toContain('Ngaire Hutchins')

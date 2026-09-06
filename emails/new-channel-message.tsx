@@ -15,21 +15,20 @@
  * client-facing send is gated on `isInternal` being false before this template
  * is constructed at all.
  */
-import { Body, Head, Html, Preview } from '@react-email/components'
 import {
-  DetailCard,
-  DetailRow,
+  EmailBody,
   EmailCard,
-  EmailEyebrow,
+  EmailDocument,
   EmailFooter,
-  EmailFootnote,
-  EmailHeader,
+  EmailHero,
   EmailHeading,
+  EmailKicker,
+  EmailNav,
   EmailParagraph,
-  EmailShell,
-  MessageBlock,
+  LedgerRow,
+  LedgerRows,
+  PersonQuote,
   PrimaryButton,
-  emailBodyStyle,
 } from './_components'
 
 interface NewChannelMessageEmailProps {
@@ -55,45 +54,39 @@ export function NewChannelMessageEmail({
   const toClient = audience === 'client'
 
   return (
-    <Html>
-      <Head />
-      <Preview>{`${fromName} sent you a message`}</Preview>
-      <Body style={emailBodyStyle}>
-        <EmailShell>
-          <EmailHeader eyebrow={toClient ? 'A message from the studio' : 'A client wrote in'} />
+    <EmailDocument preview={`${fromName} sent you a message`}>
+      <EmailCard>
+        <EmailNav label={toClient ? 'Client portal' : orgName} />
 
-          <EmailCard>
-            <EmailEyebrow>{toClient ? 'Your studio line' : 'Inbox'}</EmailEyebrow>
-            <EmailHeading>
-              {fromName} <span style={{ color: '#5A824E' }}>wrote</span>
-            </EmailHeading>
+        <EmailHero>
+          <EmailKicker>{toClient ? 'Your studio line' : 'Inbox'}</EmailKicker>
+          <EmailHeading>{fromName} wrote</EmailHeading>
+          <EmailParagraph>
+            {toClient
+              ? `Hi ${recipientName}, there is a new message on your line to the studio. This is the thread for anything that is not about one particular request.`
+              : `Hi ${recipientName}, ${fromName} at ${orgName} has posted on their studio line and is waiting on us.`}
+          </EmailParagraph>
+        </EmailHero>
 
-            <EmailParagraph>
-              {toClient
-                ? `Hi ${recipientName}, there is a new message on your line to the studio. This is the thread for anything that is not about one particular request.`
-                : `Hi ${recipientName}, ${fromName} at ${orgName} has posted on their studio line and is waiting on us.`}
-            </EmailParagraph>
+        <EmailBody>
+          <LedgerRows>
+            <LedgerRow label={toClient ? 'Studio' : 'Client'} value={toClient ? 'Tahi Studio' : orgName} tone="brand" />
+          </LedgerRows>
 
-            <DetailCard>
-              <DetailRow first label={toClient ? 'Studio' : 'Client'} value={toClient ? 'Tahi Studio' : orgName} hero />
-              <DetailRow label="From" value={fromName} />
-            </DetailCard>
+          {message ? <PersonQuote name={fromName} quote={message} /> : null}
 
-            {message && <MessageBlock fromName={fromName} message={message} />}
+          <PrimaryButton href={messagesUrl}>Open Messages</PrimaryButton>
 
-            <PrimaryButton href={messagesUrl}>Open Messages</PrimaryButton>
+          <EmailParagraph variant="small">
+            {toClient
+              ? 'Replying in Messages keeps everything in one place. If it is about a specific piece of work, its own request thread is the better home for it.'
+              : 'Replying in Messages marks the line as answered for the client.'}
+          </EmailParagraph>
+        </EmailBody>
+      </EmailCard>
 
-            <EmailFootnote>
-              {toClient
-                ? 'Replying in Messages keeps everything in one place. If it is about a specific piece of work, its own request thread is the better home for it.'
-                : 'Replying in Messages marks the line as answered for the client.'}
-            </EmailFootnote>
-          </EmailCard>
-
-          <EmailFooter />
-        </EmailShell>
-      </Body>
-    </Html>
+      <EmailFooter audience={toClient ? 'client' : 'team'} />
+    </EmailDocument>
   )
 }
 
