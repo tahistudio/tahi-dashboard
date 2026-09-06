@@ -123,6 +123,12 @@ export interface RailLayoutProps {
   itemNounPlural?: string
   /** Shows a quiet loading word in place of the count on the first fetch. */
   loading?: boolean
+  /** Stands in for the count when the surface has no honest number to give,
+   *  e.g. 'Could not load' after a failed read. The count row is aria-live, so
+   *  a stale or zero total there is announced as fact beside an error card.
+   *  The sheet's primary button falls back to Close for the same reason:
+   *  "Show 0" is a claim the page cannot make. */
+  countOverride?: string
   /** Adds to the mobile Filters badge alongside the chip count, e.g. 1 when
    *  a saved view is active. */
   extraActiveCount?: number
@@ -153,6 +159,7 @@ export function RailLayout({
   itemNoun,
   itemNounPlural,
   loading = false,
+  countOverride,
   extraActiveCount = 0,
   saveDefaultTouch,
   trailing,
@@ -161,7 +168,8 @@ export function RailLayout({
   const [sheetOpen, setSheetOpen] = React.useState(false)
   const activeCount = chips.length + extraActiveCount
   const anyChips = chips.length > 0
-  const countLabel = `${total} ${total === 1 ? itemNoun : (itemNounPlural ?? `${itemNoun}s`)}`
+  const countLabel = countOverride
+    ?? `${total} ${total === 1 ? itemNoun : (itemNounPlural ?? `${itemNoun}s`)}`
 
   return (
     <div className="flex" style={{ gap: '1.25rem' }}>
@@ -321,9 +329,11 @@ export function RailLayout({
                 cursor: 'pointer',
                 transition: 'border-color 150ms ease, color 150ms ease',
               }}
+              // Brand ink on text is --color-link: --color-brand-dark has no
+              // `.dark` override and reads at roughly 2.2:1 on the dark card.
               onMouseEnter={e => {
                 e.currentTarget.style.borderColor = 'var(--color-brand)'
-                e.currentTarget.style.color = 'var(--color-brand-dark)'
+                e.currentTarget.style.color = 'var(--color-link)'
               }}
               onMouseLeave={e => {
                 e.currentTarget.style.borderColor = 'var(--color-border)'
@@ -364,7 +374,7 @@ export function RailLayout({
           </TahiButton>
           <div style={{ flex: 1 }} />
           <TahiButton variant="primary" size="md" style={{ minHeight: '2.75rem' }} onClick={() => setSheetOpen(false)}>
-            Show {total}
+            {countOverride ? 'Close' : `Show ${total}`}
           </TahiButton>
         </SlideOver.Footer>
       </SlideOver>

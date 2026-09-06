@@ -353,19 +353,29 @@ export function RailViewItem({
   /** Leading glyph. The Notifications rail wears the kind's own icon here, so
    *  a filter row and the rows it returns read as the same thing. */
   icon?: React.ReactNode
-  /** A row with nothing behind it. Still announced, never pressable: a filter
-   *  that returns nothing should say so rather than take the click. */
+  /** A row with nothing behind it. Still announced and still reachable, never
+   *  pressable: a filter that returns nothing should say so rather than take
+   *  the click.
+   *
+   *  `aria-disabled`, not the native attribute. `disabled` takes the row out
+   *  of the tab order altogether, so the reader the greying is FOR (the one
+   *  who cannot see it) is the one who never meets the row, and the whole
+   *  reason for drawing an empty filter rather than hiding it is that the
+   *  filter should still be findable. The click is dropped here instead. */
   disabled?: boolean
+  /** Why the row is empty. Shown on hover and folded into the accessible name
+   *  while disabled, because a `title` alone is not reliably announced. */
   title?: string
 }) {
   return (
     <button
       type="button"
-      onClick={onClick}
-      disabled={disabled}
+      onClick={() => { if (!disabled) onClick() }}
+      aria-disabled={disabled || undefined}
       title={title}
       className="tahi-focus-ring"
       aria-pressed={active}
+      aria-label={disabled && title ? `${label}. ${title}` : undefined}
       style={{
         display: 'flex',
         alignItems: 'center',
