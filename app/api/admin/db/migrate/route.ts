@@ -2063,6 +2063,63 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE invoices ADD COLUMN xero_online_invoice_url text`,
     ],
   },
+  {
+    name: '0092',
+    description: 'The Messages inbox: one room per request, one channel per org, and the two indexes the inbox reads on. Messaging ships as one inbox over two stores and no message row moves: the org channel is a real conversations row (type org_channel) whose messages carry conversation_id, while a request thread stays keyed on messages.request_id and its request_thread row exists only so the room has an identity. Both resolvers are lazy find-or-create, which races itself the moment two tabs post at once, so idx_conversations_request_thread and idx_conversations_org_channel are UNIQUE and PARTIAL (direct and group rows legitimately share a NULL request_id and repeat an org_id). Statements 1 to 6 are the tidy that makes those indexes creatable: production still carries duplicate request_thread rows from before the detail page hydrated conversationId, so every request thread is forced external, messages.conversation_id is REPOINTED at the oldest row rather than the strays merely deleted (lib/request-thread.ts:96-108), the strays and their participants go, and the orphan direct conversations left by the old Start-DM 500 are swept. Then one participant row per person per room, and (request_id, created_at) plus (conversation_id, created_at) so a thread is not sorted in memory once per row in the window. Additive: no column is added and no live surface reads a column that does not exist, so applying it ahead of the deploy is harmless. Idempotent: every CREATE is IF NOT EXISTS and each tidy statement is a no-op on a database it has already run against.',
+    statements: [
+      `UPDATE conversations SET visibility = 'external' WHERE type = 'request_thread' AND visibility <> 'external'`,
+      `UPDATE messages
+         SET conversation_id = (
+           SELECT k.id FROM conversations k
+            WHERE k.type = 'request_thread'
+              AND k.request_id = (SELECT c.request_id FROM conversations c WHERE c.id = messages.conversation_id)
+            ORDER BY (k.created_at IS NULL), k.created_at ASC, k.id ASC
+            LIMIT 1)
+       WHERE conversation_id IN (
+         SELECT c.id FROM conversations c
+          WHERE c.type = 'request_thread'
+            AND c.request_id IS NOT NULL
+            AND c.id <> (SELECT k.id FROM conversations k
+                          WHERE k.type = 'request_thread' AND k.request_id = c.request_id
+                          ORDER BY (k.created_at IS NULL), k.created_at ASC, k.id ASC
+                          LIMIT 1))`,
+      `DELETE FROM conversation_participants
+       WHERE conversation_id IN (
+         SELECT c.id FROM conversations c
+          WHERE c.type = 'request_thread'
+            AND c.request_id IS NOT NULL
+            AND c.id <> (SELECT k.id FROM conversations k
+                          WHERE k.type = 'request_thread' AND k.request_id = c.request_id
+                          ORDER BY (k.created_at IS NULL), k.created_at ASC, k.id ASC
+                          LIMIT 1))`,
+      `DELETE FROM conversations
+       WHERE type = 'request_thread'
+         AND request_id IS NOT NULL
+         AND id <> (SELECT k.id FROM conversations k
+                     WHERE k.type = 'request_thread' AND k.request_id = conversations.request_id
+                     ORDER BY (k.created_at IS NULL), k.created_at ASC, k.id ASC
+                     LIMIT 1)`,
+      `DELETE FROM conversation_participants
+       WHERE conversation_id IN (
+         SELECT c.id FROM conversations c
+          WHERE c.type = 'direct'
+            AND c.org_id IS NULL
+            AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id)
+            AND (SELECT COUNT(*) FROM conversation_participants p WHERE p.conversation_id = c.id) <= 1)`,
+      `DELETE FROM conversations
+       WHERE type = 'direct'
+         AND org_id IS NULL
+         AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = conversations.id)
+         AND NOT EXISTS (SELECT 1 FROM conversation_participants p WHERE p.conversation_id = conversations.id)`,
+      `DELETE FROM conversation_participants
+       WHERE rowid NOT IN (SELECT MIN(rowid) FROM conversation_participants GROUP BY conversation_id, participant_id)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_participants_unique ON conversation_participants(conversation_id, participant_id)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_request_thread ON conversations(request_id) WHERE type = 'request_thread'`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_org_channel ON conversations(org_id) WHERE type = 'org_channel'`,
+      `CREATE INDEX IF NOT EXISTS idx_messages_request_created ON messages(request_id, created_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
