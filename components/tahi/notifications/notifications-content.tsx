@@ -313,6 +313,12 @@ export function NotificationsContent({
   // Frozen at mount so paging cannot walk over the boundary as the clock moves.
   const windowStart = useRef(new Date(Date.now() - WINDOW_DAYS * 86400000).toISOString())
 
+  // The counts are deliberately not narrowed by kind, so toggling a kind gets
+  // the same two numbers back and pays for a full GROUP BY over the reader's
+  // rows to hear them again. Only a moved boundary (a view change) or a read
+  // that came back empty-handed can change them, so only those ask.
+  const needFacets = useRef(true)
+
   /** The window half this view reads, which is also the boundary the facet
    *  counts are taken around. Past is everything older than it. */
   const applyWindow = useCallback((q: URLSearchParams, forView: NotificationView) => {
@@ -327,9 +333,11 @@ export function NotificationsContent({
     if (next) q.set('cursor', next)
     applyWindow(q, view)
     if (kinds.length) q.set('kind', kinds.join(','))
-    // Only the first page of a read pays for the counts. Paging older rows
-    // cannot change them.
-    if (!next) q.set('facets', 'true')
+    // Only the first page of a read pays for the counts, and only when the
+    // window boundary has moved under them. Paging older rows cannot change
+    // them, and neither can a kind toggle: the facets are never narrowed by
+    // kind, so a second read would return the numbers already on screen.
+    if (!next && needFacets.current) q.set('facets', 'true')
     return q.toString()
   }, [applyWindow, view, kinds])
 
@@ -343,11 +351,18 @@ export function NotificationsContent({
       setRows(json.items ?? [])
       setUnreadCount(json.unreadCount ?? 0)
       if (json.facets) setFacets(json.facets)
+      needFacets.current = false
       setCursor(json.nextCursor ?? null)
       setHasMore(!!json.hasMore)
       setState('ready')
     } catch {
       setRows([])
+      // The counts go with the rows. Leaving the last good ones up would put
+      // "37 notifications" and a rail full of numbers beside a card saying we
+      // could not read them, and the next attempt has to fetch them again
+      // anyway.
+      setFacets(null)
+      needFacets.current = true
       setState('error')
     }
   }, [buildQuery])
@@ -403,11 +418,19 @@ export function NotificationsContent({
     // The row stays where it is, even on the Unread view: pulling it out from
     // under the cursor the moment it is read is how a list loses its place.
     setRows(prev => prev.map(r => r.id === id ? { ...r, read: true } : r))
+    // The bell's number is counted over the whole table, so it drops for any
+    // row, however old.
     setUnreadCount(prev => Math.max(0, prev - 1))
     setFacets(prev => {
       if (!prev) return prev
       const row = rows.find(r => r.id === id)
       if (!row || row.read) return prev
+      // The unread facet is taken from the RECENT side of the window boundary
+      // only, so a row older than it was never counted in that number and
+      // taking one off for it would leave the rail reading under the Unread
+      // view it describes. Past holds nothing but older rows and All / Unread
+      // nothing but newer ones, so the view is the exact test for the side.
+      if (view === 'past') return prev
       const kind = notificationKind(row.entityType)
       const unread = { ...prev.kinds.unread, [kind]: Math.max(0, (prev.kinds.unread[kind] ?? 0) - 1) }
       return {
@@ -425,7 +448,7 @@ export function NotificationsContent({
     } catch {
       // The row is already drawn read; a refresh corrects it either way.
     }
-  }, [readOnly, rows])
+  }, [readOnly, rows, view])
 
   const openRow = useCallback((n: NotificationRow) => {
     const dest = notificationDestination(n.entityType, n.entityId, audience)
@@ -435,9 +458,14 @@ export function NotificationsContent({
 
   const markAll = useCallback(async () => {
     if (readOnly) return
-    // Narrowed to the lens the reader is actually looking through, so "Mark all
-    // as read" never silently empties rows they cannot see: by kind, and on the
-    // Past view by the same `before` boundary the list itself is paging under.
+    // Narrowed by kind, and on the Past view by the same `before` boundary the
+    // list itself is paging under, so a filtered pass clears what the reader
+    // can see rather than the inbox behind it.
+    //
+    // Un-narrowed on All or Unread it is the whole inbox, Past included: the
+    // PATCH takes `before` and has no `since`, and "all" there means all. The
+    // button's own title says so, the toast claims "All caught up" only in
+    // that branch, and the counts are re-read afterwards either way.
     const before = view === 'past' ? windowStart.current : undefined
     const narrowed = kinds.length > 0 || view === 'past'
     setMarkingAll(true)
@@ -467,6 +495,8 @@ export function NotificationsContent({
     // Straight to loading, not through a frame of "you are all caught up":
     // clearing the rows before the read lands would flash the empty state.
     setState('loading')
+    // The boundary side moves with the view, so the counts come again.
+    needFacets.current = true
     setView(next)
     setRows([])
     setCursor(null)
@@ -516,21 +546,34 @@ export function NotificationsContent({
   // in hand, so the count line and the sheet's "Show N" mean the same thing as
   // the rail. The old page could only say "20+".
   //
-  // On the Unread view this drops by one each time a row is ticked while the
-  // row itself stays put, so the number can sit one under the rows on screen
-  // for a moment. That is the honest pair: the count is how many are unread,
-  // the list is what it loaded, and pulling a row out from under the cursor
-  // the instant it is read is the worse of the two behaviours.
+  // Floored at the rows on screen, and only the Unread view ever needs it.
+  // Reading a row there does not remove it (pulling one out from under the
+  // cursor is how a list loses its place), so the unread count walks down while
+  // the rows stay put, and after an un-narrowed "Mark all as read" it is zero
+  // with twenty rows still drawn. "0 notifications" beside twenty of them, and
+  // "Show 0" on the sheet's own button, is the count describing a room the
+  // reader is not standing in. Never say fewer than what is rendered.
   const total = useMemo(() => {
     if (!kindCounts || !viewCounts) return rows.length
-    if (!kinds.length) return viewCounts[view]
-    return kinds.reduce((n, k) => n + (kindCounts[k] ?? 0), 0)
+    const counted = kinds.length
+      ? kinds.reduce((n, k) => n + (kindCounts[k] ?? 0), 0)
+      : viewCounts[view]
+    return view === 'unread' ? Math.max(counted, rows.length) : counted
   }, [kindCounts, viewCounts, kinds, view, rows.length])
 
   const chips: RailFilterChip[] = useMemo(
     () => kinds.map(k => ({ key: `kind:${k}`, dimension: 'Kind', label: NOTIFICATION_KINDS[k].label })),
     [kinds],
   )
+
+  /** What "Mark all as read" is actually about to clear, said out loud: the
+   *  un-narrowed pass on All and Unread reaches past the thirty days on
+   *  screen, and a reader should not have to find that out afterwards. */
+  const markAllTitle = kinds.length > 0
+    ? 'Marks the kinds you have filtered to as read'
+    : view === 'past'
+      ? 'Marks everything older than thirty days as read'
+      : 'Marks every notification as read, including anything under Past'
 
   const sub = audience === 'client'
     ? 'Everything the studio has told you, newest first. The bell only holds the last few.'
@@ -698,13 +741,17 @@ export function NotificationsContent({
           total={total}
           itemNoun="notification"
           loading={state === 'loading'}
+          // A failed read has no honest number to put in the aria-live count,
+          // and the stale one it would otherwise keep gets read out beside
+          // "We could not load your notifications".
+          countOverride={state === 'error' ? 'Could not load' : undefined}
           trailing={unreadCount > 0 ? (
             <button
               type="button"
               className="pa-btn quiet tahi-focus-ring"
               onClick={() => { markAll().catch(() => {}) }}
               disabled={readOnly || markingAll || state !== 'ready'}
-              title={readOnly ? 'Read-only in client view' : undefined}
+              title={readOnly ? 'Read-only in client view' : markAllTitle}
             >
               <span className="pa-btn-ic"><ShellIcon n="checks" s={15} /></span>
               {markingAll ? 'Marking' : 'Mark all as read'}

@@ -9,6 +9,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildNotificationFacets,
+  kindsCoverUnmappedEntities,
+  MAPPED_NOTIFICATION_ENTITY_TYPES,
   notificationHref,
   type NotificationEntityType,
 } from '@/lib/notification-links'
@@ -207,5 +209,43 @@ describe('buildNotificationFacets', () => {
       [],
     )
     expect(facets.views).toEqual({ all: 0, unread: 0, past: 0 })
+  })
+})
+
+/**
+ * The count and the filter have to be able to return the same rows.
+ *
+ * notificationKind() folds a NULL or unrecognised entity type into System, so
+ * the System facet counts those rows. The API's `?kind=system` has to reach
+ * them too, or the rail draws a number that answers "Nothing matches those
+ * kinds" when it is pressed. These pin the two halves the route builds that
+ * predicate from: the flat list of everything the map does know, and the one
+ * kind that has to reach past it.
+ */
+describe('kind filter and kind counts agree', () => {
+  it('lists every mapped entity type once', () => {
+    const mapped = [...MAPPED_NOTIFICATION_ENTITY_TYPES]
+    expect(new Set(mapped).size).toBe(mapped.length)
+    for (const entity of ALL_ENTITIES) expect(mapped).toContain(entity)
+  })
+
+  it('only System reaches entity types the map does not list', () => {
+    expect(kindsCoverUnmappedEntities(['system'])).toBe(true)
+    expect(kindsCoverUnmappedEntities(['invoice', 'system'])).toBe(true)
+    expect(kindsCoverUnmappedEntities(['invoice', 'request'])).toBe(false)
+    expect(kindsCoverUnmappedEntities([])).toBe(false)
+  })
+
+  it('folds anything outside the map into the kind that reaches it', () => {
+    const facets = buildNotificationFacets(
+      [
+        { entityType: null, read: false, n: 2 },
+        { entityType: 'not-a-thing', read: false, n: 1 },
+      ],
+      [],
+    )
+    expect(facets.kinds.all.system).toBe(3)
+    expect([...MAPPED_NOTIFICATION_ENTITY_TYPES]).not.toContain('not-a-thing')
+    expect(kindsCoverUnmappedEntities(['system'])).toBe(true)
   })
 })

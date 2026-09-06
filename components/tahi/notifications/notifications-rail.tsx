@@ -16,9 +16,10 @@
  *    exclusive, so only one row is ever lit and the kinds underneath stay
  *    plain multi-select toggles. The old page had a Past tab AND an unread
  *    chip, which is four states drawn as two controls.
- *  - A KIND WITH NOTHING BEHIND IT IS DISABLED rather than hidden. Hiding it
+ *  - A KIND WITH NOTHING BEHIND IT IS GREYED rather than hidden. Hiding it
  *    would make the rail's own contents shift under the reader every time a
- *    row arrived; greying it says the filter exists and is empty. The counts
+ *    row arrived; greying it says the filter exists and is empty, and it stays
+ *    in the tab order so that statement reaches a keyboard too. The counts
  *    are the server's (`?facets=true`), never the loaded page's, so a kind
  *    that is real but absent from page one is not drawn as an empty one.
  */
@@ -37,10 +38,6 @@ export const NOTIFICATION_VIEWS: readonly { key: NotificationView; label: string
   { key: 'unread', label: 'Unread' },
   { key: 'past', label: 'Past' },
 ]
-
-export function isNotificationView(value: string): value is NotificationView {
-  return NOTIFICATION_VIEWS.some(v => v.key === value)
-}
 
 export type NotificationViewCounts = Record<NotificationView, number>
 
@@ -93,8 +90,11 @@ function footStyle(touch: boolean): React.CSSProperties {
   }
 }
 
+/** Brand ink on text is --color-link, never --color-brand-dark: brand-dark has
+ *  no `.dark` override, so it lands at roughly 2.2:1 on the dark rail surface.
+ *  --color-link is the same #425F39 in light and lifts to #93C98A in dark. */
 function hoverOn(e: React.MouseEvent<HTMLElement>) {
-  e.currentTarget.style.color = 'var(--color-brand-dark)'
+  e.currentTarget.style.color = 'var(--color-link)'
   e.currentTarget.style.background = 'var(--color-bg-secondary)'
 }
 

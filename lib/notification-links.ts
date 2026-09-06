@@ -280,6 +280,25 @@ export function isNotificationKind(value: string): value is NotificationKind {
 }
 
 /**
+ * Every entity type the kind map knows, in one flat list.
+ *
+ * The System kind is the map's catch-all: notificationKind() folds a NULL or
+ * unrecognised entity type into it, so the facet count under System includes
+ * those rows. A filter built only from ENTITY_TYPES_FOR_KIND.system cannot
+ * return them (`entity_type IN (...)` never matches NULL, and never matches a
+ * type nobody listed), which would put a number on a row that comes back
+ * empty. The API pairs this list with `is null` to make the two sides agree.
+ */
+export const MAPPED_NOTIFICATION_ENTITY_TYPES: readonly NotificationEntityType[] =
+  Object.values(ENTITY_TYPES_FOR_KIND).flat()
+
+/** True when the filter has to reach rows the map has never heard of, which
+ *  is exactly when System is among the kinds asked for. */
+export function kindsCoverUnmappedEntities(kinds: readonly string[]): boolean {
+  return kinds.includes('system')
+}
+
+/**
  * The entity types a `?kind=a,b` filter expands to. Unknown kinds are dropped,
  * so a bad param narrows to nothing rather than widening to everything.
  */

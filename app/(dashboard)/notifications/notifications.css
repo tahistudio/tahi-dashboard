@@ -86,7 +86,12 @@
    screen. Hidden by a media query rather than a Tailwind `lg:hidden`, because
    this stylesheet is unlayered and would win the display race against it. */
 .pa-seg-fill { display: flex; width: 100%; }
-.pa-seg-fill .pa-seg-b { padding: 0 .5rem; }
+/* The 2.75rem floor holds right up to the fold, past the 48rem block below
+   that tightens every other segmented track to 2.125rem. Between 48rem and
+   64rem this IS the view switcher (the rail is still folded and the Filters
+   sheet carries only the kinds), and a 768 tablet is a touch device. Two
+   classes, so it wins the cascade wherever the media query sits. */
+.pa-seg-fill .pa-seg-b { padding: 0 .5rem; min-height: 2.75rem; }
 @media (min-width: 64rem) { .pa-seg-fill { display: none; } }
 .pa-seg-pill {
   position: absolute; top: .1875rem; bottom: .1875rem; left: .1875rem;
@@ -255,6 +260,8 @@ button.pa-nrow-main:hover .pa-nrow-dest svg { transform: translateX(.1875rem); }
 @media (min-width: 48rem) {
   .pa-pad { padding: 0 0 3rem; }
   .pa-btn { min-height: 2.25rem; padding: 0 .8125rem; }
+  /* The Views track is exempt: .pa-seg-fill keeps the 2.75rem target, because
+     below 64rem it is the only way to change view. */
   .pa-seg-b { min-height: 2.125rem; }
   /* The row is wide enough now for the timestamp to take its own column. */
   .pa-nrow-main { grid-template-columns: 2.25rem 1fr auto; grid-template-areas: 'ic t w'; gap: .75rem; }
