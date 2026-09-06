@@ -20,14 +20,30 @@
  *   requestDetailLimit  number, caps the per-request detail fetch. A complete
  *             request export is one GET per request (329 of them).
  *   requestDetailOffset number, where that window starts.
+ *   snapshot  object, optional. A pre-fetched ManyRequests export under the
+ *             eight list keys (organizations, membersByOrg, brandsByOrg,
+ *             subscriptionsByOrg, clients, services, requests, invoices).
+ *             When present the run reads from it and never touches the live
+ *             API, so no token is needed on this worker. It is validated up
+ *             front: a bad snapshot is one 400 naming the key path, never a
+ *             partial run.
  *
- * STEP 0, BEFORE ANY OF THIS: the token. manyRequestsTokenFromEnv reads
- * MANYREQUESTS_API_TOKEN, which is configured on the MCP worker and NOT on the
- * dashboard worker this route runs in, so an unprepared first dry run answers
- * 400 "ManyRequests is not configured". Set it on this worker first:
- *   wrangler secret put MANYREQUESTS_API_TOKEN            (production)
- *   wrangler secret put MANYREQUESTS_API_TOKEN --env staging
- *   echo 'MANYREQUESTS_API_TOKEN="..."' >> .dev.vars       (local)
+ * STEP 0, BEFORE ANY OF THIS: the source. Either a token or a snapshot.
+ *   (a) The token. manyRequestsTokenFromEnv reads MANYREQUESTS_API_TOKEN,
+ *       which is configured on the MCP worker and NOT on the dashboard worker
+ *       this route runs in, so an unprepared first dry run answers 400
+ *       "ManyRequests is not configured". Set it on this worker first:
+ *         wrangler secret put MANYREQUESTS_API_TOKEN            (production)
+ *         wrangler secret put MANYREQUESTS_API_TOKEN --env staging
+ *         echo 'MANYREQUESTS_API_TOKEN="..."' >> .dev.vars       (local)
+ *   (b) The snapshot. Read the lists out of ManyRequests through the read-only
+ *       MCP connector, assemble them under the eight keys and POST them as
+ *       body.snapshot. The token check is skipped entirely in that mode. The
+ *       payload is a few megabytes: App Router route handlers carry no body
+ *       size cap (bodyParser.sizeLimit is a Pages Router setting and
+ *       serverActions.bodySizeLimit only governs Server Actions), the
+ *       middleware never reads a body, and this handler reads it exactly once
+ *       with req.json().
  *
  * WHAT TO CHECK ON THE FIRST DRY RUN, IN THIS ORDER, BEFORE TRUSTING A COUNT:
  *   1. samples.requests[0].values.description is non-empty and
@@ -81,13 +97,17 @@ import type { DB } from '@/db/d1'
 import { logAudit } from '@/lib/audit'
 import {
   createManyRequestsClient,
+  createSnapshotClient,
   IMPORT_ENTITY_ORDER,
   isImportEntity,
   manyRequestsTokenFromEnv,
   MANYREQUESTS_TOKEN_MISSING,
   runImport,
+  SNAPSHOT_KEYS,
+  validateSnapshotPayload,
   type ClosedRuling,
   type ImportEntity,
+  type ManyRequestsClient,
 } from '@/lib/import/manyrequests'
 
 type PermissionsDb = Parameters<typeof resolvePermissions>[0]
@@ -99,6 +119,36 @@ interface ImportBody {
   closedAs?: unknown
   requestDetailLimit?: unknown
   requestDetailOffset?: unknown
+  snapshot?: unknown
+}
+
+/**
+ * Where the run reads from. A snapshot in the body wins outright and the token
+ * is never consulted; otherwise it is today's live path, token and all. The
+ * client is built lazily so the live constructor stays inside the route's
+ * try, exactly where it was.
+ */
+type ImportSourceChoice =
+  | { ok: true; source: 'snapshot'; snapshotCounts: Record<string, number>; client: () => ManyRequestsClient }
+  | { ok: true; source: 'live'; snapshotCounts: null; client: () => ManyRequestsClient }
+  | { ok: false; error: string }
+
+function resolveSource(snapshot: unknown): ImportSourceChoice {
+  // Only an ABSENT key is "no snapshot". An explicit null is refused loudly
+  // rather than quietly falling through to a live run nobody asked for.
+  if (snapshot !== undefined) {
+    const checked = validateSnapshotPayload(snapshot)
+    if (!checked.ok) return { ok: false, error: `Snapshot refused: ${checked.reason}` }
+    return {
+      ok: true,
+      source: 'snapshot',
+      snapshotCounts: checked.counts,
+      client: () => createSnapshotClient(checked.snapshot),
+    }
+  }
+  const token = manyRequestsTokenFromEnv()
+  if (!token) return { ok: false, error: MANYREQUESTS_TOKEN_MISSING }
+  return { ok: true, source: 'live', snapshotCounts: null, client: () => createManyRequestsClient({ token }) }
 }
 
 function parseCount(value: unknown): number | null {
@@ -158,9 +208,12 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const token = manyRequestsTokenFromEnv()
-  if (!token) {
-    return NextResponse.json({ error: MANYREQUESTS_TOKEN_MISSING }, { status: 400 })
+  // The source: a snapshot in the body, or the live API behind the token. A
+  // snapshot is checked BEFORE anything else so a malformed payload is one 400
+  // naming the key path rather than nine entities of silent refusals.
+  const source = resolveSource(body.snapshot)
+  if (!source.ok) {
+    return NextResponse.json({ error: source.error }, { status: 400 })
   }
 
   const requestDetailLimit = parseCount(body.requestDetailLimit)
@@ -169,7 +222,7 @@ export async function POST(req: NextRequest) {
   try {
     const result = await runImport({
       database,
-      client: createManyRequestsClient({ token }),
+      client: source.client(),
       dryRun,
       entities,
       since: parseSince(body.since),
@@ -194,9 +247,13 @@ export async function POST(req: NextRequest) {
 
     // The audit row is written for an APPLY only: a dry run changes nothing and
     // an audit_log entry per preview would bury the one that matters.
-    if (!dryRun) await writeImportAudit(database, auth.userId, result)
+    if (!dryRun) await writeImportAudit(database, auth.userId, result, source)
 
-    return NextResponse.json(result)
+    return NextResponse.json(
+      source.source === 'snapshot'
+        ? { ...result, source: 'snapshot', snapshotCounts: source.snapshotCounts }
+        : { ...result, source: 'live' },
+    )
   } catch (error) {
     // runImport now returns a partial result rather than throwing on a per
     // entity failure, so reaching here means the run died before it could
@@ -210,7 +267,7 @@ export async function POST(req: NextRequest) {
         userType: 'team_member',
         entityType: 'import',
         entityId: 'manyrequests',
-        metadata: { failed: true, error: message, entities },
+        metadata: { failed: true, error: message, entities, source: source.source },
       })
     }
     return NextResponse.json({ error: message }, { status: 500 })
@@ -221,6 +278,7 @@ async function writeImportAudit(
   database: DB,
   userId: string | null,
   result: Awaited<ReturnType<typeof runImport>>,
+  source: Extract<ImportSourceChoice, { ok: true }>,
 ): Promise<void> {
   await logAudit(database, {
     action: 'manyrequests_import',
@@ -229,6 +287,8 @@ async function writeImportAudit(
     entityType: 'import',
     entityId: 'manyrequests',
     metadata: {
+      source: source.source,
+      snapshotCounts: source.snapshotCounts,
       entities: result.entities,
       mailProbeBefore: result.mailProbeBefore,
       mailProbeAfter: result.mailProbeAfter,
@@ -270,6 +330,7 @@ export async function GET(req: NextRequest) {
       requestDetailOffset: null,
     },
     tokenConfigured: manyRequestsTokenFromEnv() !== null,
-    note: 'POST with {"dryRun":true} first. Nothing is written until dryRun is explicitly false. Set MANYREQUESTS_API_TOKEN on THIS worker (wrangler secret put) before the first run; it is configured on the MCP worker, not here.',
+    snapshotKeys: SNAPSHOT_KEYS,
+    note: 'POST with {"dryRun":true} first. Nothing is written until dryRun is explicitly false. The source is one of two: set MANYREQUESTS_API_TOKEN on THIS worker (wrangler secret put; it is configured on the MCP worker, not here) for a live read, or POST a pre-fetched export as body.snapshot under the keys in snapshotKeys, in which case no token is needed and the live API is never touched.',
   })
 }
