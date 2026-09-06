@@ -8,6 +8,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  buildNotificationFacets,
   notificationHref,
   type NotificationEntityType,
 } from '@/lib/notification-links'
@@ -131,5 +132,80 @@ describe('notificationHref - shared guards', () => {
   it('returns null for a missing entity type on both maps', () => {
     expect(notificationHref(null, 'x', 'team')).toBeNull()
     expect(notificationHref(undefined, 'x', 'client')).toBeNull()
+  })
+})
+
+/**
+ * The /notifications rail puts a number beside all three views and every kind,
+ * and greys out a kind with nothing behind it. SQL can group by entity type
+ * and read; the rail speaks kinds and views. This is the fold between them,
+ * and it has to be exact: an off-by-one here is a filter the reader either
+ * cannot press or presses for nothing.
+ */
+describe('buildNotificationFacets', () => {
+  it('folds entity types into kinds and totals the views', () => {
+    const facets = buildNotificationFacets(
+      [
+        { entityType: 'request', read: false, n: 3 },
+        { entityType: 'request', read: true, n: 5 },
+        { entityType: 'proposal', read: true, n: 1 },
+        { entityType: 'schedule', read: false, n: 2 },
+      ],
+      [{ entityType: 'invoice', read: true, n: 4 }],
+    )
+    expect(facets.views).toEqual({ all: 11, unread: 5, past: 4 })
+    expect(facets.kinds.all.request).toBe(8)
+    // proposal and schedule are both Documents.
+    expect(facets.kinds.all.document).toBe(3)
+    expect(facets.kinds.unread.document).toBe(2)
+    expect(facets.kinds.past.invoice).toBe(4)
+  })
+
+  it('gives every kind a zero rather than leaving it out', () => {
+    const facets = buildNotificationFacets([], [])
+    expect(facets.kinds.all.request).toBe(0)
+    expect(facets.kinds.unread.system).toBe(0)
+    expect(facets.kinds.past.deal).toBe(0)
+    expect(facets.views).toEqual({ all: 0, unread: 0, past: 0 })
+  })
+
+  it('counts an unrecognised or missing entity type as System', () => {
+    const facets = buildNotificationFacets(
+      [
+        { entityType: null, read: false, n: 2 },
+        { entityType: 'not-a-thing', read: false, n: 1 },
+      ],
+      [],
+    )
+    expect(facets.kinds.all.system).toBe(3)
+    expect(facets.views.unread).toBe(3)
+  })
+
+  // `read` is nullable, and `?unread=true` filters on `read = 0`, which does
+  // not match NULL. Counting a NULL row as unread would put a number on the
+  // Unread view that the Unread view could never show.
+  it('does not count a NULL read flag as unread', () => {
+    const facets = buildNotificationFacets(
+      [
+        { entityType: 'request', read: null, n: 7 },
+        { entityType: 'request', read: 0, n: 2 },
+        { entityType: 'request', read: 1, n: 1 },
+      ],
+      [],
+    )
+    expect(facets.views.all).toBe(10)
+    expect(facets.views.unread).toBe(2)
+    expect(facets.kinds.unread.request).toBe(2)
+  })
+
+  it('ignores an empty or nonsensical tally', () => {
+    const facets = buildNotificationFacets(
+      [
+        { entityType: 'request', read: false, n: 0 },
+        { entityType: 'invoice', read: false, n: -3 },
+      ],
+      [],
+    )
+    expect(facets.views).toEqual({ all: 0, unread: 0, past: 0 })
   })
 })

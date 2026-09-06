@@ -3,7 +3,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, or, count, lt, gte, inArray } from 'drizzle-orm'
-import { entityTypesForKinds } from '@/lib/notification-links'
+import {
+  buildNotificationFacets,
+  entityTypesForKinds,
+  type NotificationFacetRow,
+} from '@/lib/notification-links'
 // One definition of the service identity, shared with every other gate that
 // special-cases it (lib/access-scope, lib/permissions).
 import { SERVICE_USER_ID } from '@/lib/team-identity'
@@ -63,6 +67,12 @@ function parseLimit(raw: string | null): number {
 //                    entity types by lib/notification-links.ts so the page and
 //                    the query can never disagree about what "Invoices" means
 //   unread=true      unread only
+//   facets=true      adds `facets`: row totals per view (All / Unread / Past)
+//                    and per kind within each of them, so the rail can put an
+//                    honest number on every row it draws and grey out the
+//                    kinds with nothing behind them. Two grouped counts, no
+//                    row bodies, and absent from the response unless asked
+//                    for, so the bell's read is untouched.
 //   userId=<id>      SERVICE TOKEN ONLY (see below)
 export async function GET(req: NextRequest) {
   const { userId, sessionId } = await getRequestAuth(req)
@@ -89,6 +99,7 @@ export async function GET(req: NextRequest) {
   const since = parseIso(params.get('since'))
   const before = parseIso(params.get('before'))
   const unreadOnly = params.get('unread') === 'true'
+  const wantsFacets = params.get('facets') === 'true'
   const kinds = (params.get('kind') ?? '').split(',').map(k => k.trim()).filter(Boolean)
   const entityTypes = kinds.length ? entityTypesForKinds(kinds) : []
 
@@ -142,11 +153,54 @@ export async function GET(req: NextRequest) {
       eq(schema.notifications.read, false),
     ))
 
+  // The rail's numbers. Counted, never derived from `items`: the page holds
+  // one page and the rail speaks for the whole window.
+  //
+  // The boundary is whichever window the caller named. The page sends `since`
+  // on All and Unread and `before` on Past, always the same instant, so one
+  // read answers all three views and switching view needs no refetch.
+  //
+  // Deliberately NOT narrowed by `kind` or `unread`: a kind's count has to say
+  // what pressing it would return, so selecting one cannot zero the others.
+  let facets: ReturnType<typeof buildNotificationFacets> | undefined
+  if (wantsFacets) {
+    const boundary = since ?? before
+    const facetSelect = {
+      entityType: schema.notifications.entityType,
+      read: schema.notifications.read,
+      n: count(),
+    }
+    const groupFacets = (side: 'recent' | 'past') => {
+      const facetFilters = [eq(schema.notifications.userId, subjectId)]
+      if (boundary) {
+        facetFilters.push(side === 'recent'
+          ? gte(schema.notifications.createdAt, boundary)
+          : lt(schema.notifications.createdAt, boundary))
+      }
+      return drizzle
+        .select(facetSelect)
+        .from(schema.notifications)
+        .where(and(...facetFilters))
+        .groupBy(schema.notifications.entityType, schema.notifications.read)
+    }
+    const [recentRows, pastRows] = await Promise.all([
+      groupFacets('recent'),
+      // With no boundary there is no "older than the window" side to count,
+      // and asking for one would re-count every row the recent side just did.
+      boundary ? groupFacets('past') : Promise.resolve([]),
+    ])
+    facets = buildNotificationFacets(
+      recentRows as NotificationFacetRow[],
+      pastRows as NotificationFacetRow[],
+    )
+  }
+
   return NextResponse.json({
     items,
     unreadCount: Number(unread?.n ?? 0),
     nextCursor,
     hasMore,
+    ...(facets ? { facets } : {}),
   })
 }
 
