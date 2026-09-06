@@ -222,4 +222,74 @@ describe('runImport', () => {
     })
     expect(result.entities.map((entity) => entity.entity)).toEqual(['organisations'])
   })
+
+  it('walks the request detail list in a WINDOW, not just from the front', async () => {
+    // Without an offset the apply had to succeed in one shot: there was no way
+    // to reach requests 200 to 329 without re-fetching the first 200, and 329
+    // sequential upstream GETs does not fit the edge request budget.
+    const client = fakeClient()
+    const list = Array.from({ length: 10 }, (_unused, index) => ({ id: index + 1, title: `r${index + 1}` }))
+    ;(client.listRequests as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue(list)
+    const detail = vi.fn((id: string) => Promise.resolve({ id: Number(id) }))
+    ;(client as unknown as { getRequest: unknown }).getRequest = detail
+
+    const result = await runImport({
+      database: fakeDb(),
+      client,
+      dryRun: true,
+      entities: ['requests'],
+      since: null,
+      closedAs: 'cancelled',
+      now: '2026-09-07T00:00:00.000Z',
+      requestDetailOffset: 4,
+      requestDetailLimit: 3,
+    })
+
+    expect(detail.mock.calls.map((call) => call[0])).toEqual(['5', '6', '7'])
+    expect(result.warnings.join(' ')).toContain('requestDetailOffset 7')
+  })
+
+  it('returns a PARTIAL result when an entity throws, instead of losing the whole run', async () => {
+    // The route writes the audit row off this result, so an apply that died
+    // halfway has to come back reportable rather than as an exception.
+    let reads = 0
+    const database = fakeDb() as unknown as { select: () => unknown }
+    const original = database.select
+    database.select = () => {
+      reads += 1
+      // Fail the snapshot re-read that happens after the first applied entity.
+      if (reads > 40) throw new Error('D1_ERROR: network connection lost')
+      return (original as () => unknown)()
+    }
+
+    const result = await runImport({
+      database: database as unknown as DB,
+      client: fakeClient(),
+      dryRun: false,
+      entities: ['team', 'organisations', 'contacts', 'brands', 'services', 'subscriptions', 'requests', 'messages', 'invoices'],
+      since: null,
+      closedAs: 'cancelled',
+      now: '2026-09-07T00:00:00.000Z',
+    })
+
+    expect(result.warnings.join(' ')).toContain('network connection lost')
+    expect(result.warnings.join(' ')).toContain('re-running resumes rather than duplicates')
+    // Something landed, and it is in the counts the audit row records.
+    expect(result.entities.length).toBeGreaterThan(0)
+  })
+
+  it('says which mail witnesses were live, so mailSilent is not read as two when it is one', async () => {
+    const result = await runImport({
+      database: fakeDb(),
+      client: fakeClient(),
+      dryRun: true,
+      entities: ['organisations'],
+      since: null,
+      closedAs: 'cancelled',
+      now: '2026-09-07T00:00:00.000Z',
+    })
+    // The double answers every count query, so both probes are live here.
+    expect(result.mailWitnesses.notifications).toBe('live')
+    expect(result.mailWitnesses.degraded).toBe(false)
+  })
 })

@@ -43,6 +43,7 @@ vi.mock('@/lib/import/manyrequests', async (importOriginal) => {
       mailProbeBefore: { suppressions: 2, notifications: 27 },
       mailProbeAfter: { suppressions: 2, notifications: 27 },
       mailSilent: true,
+      mailWitnesses: { notifications: 'live', suppressions: 'live', degraded: false },
       warnings: [],
     }),
   }
@@ -65,7 +66,14 @@ function makeRequest(body: Record<string, unknown>): NextRequest {
   })
 }
 
-type RunArgs = { dryRun: boolean; entities: string[]; since: string | null; closedAs: string; requestDetailLimit: number | null }
+type RunArgs = {
+  dryRun: boolean
+  entities: string[]
+  since: string | null
+  closedAs: string
+  requestDetailLimit: number | null
+  requestDetailOffset: number | null
+}
 
 describe('POST /api/admin/import/manyrequests', () => {
   beforeEach(() => {
@@ -198,6 +206,7 @@ describe('POST /api/admin/import/manyrequests', () => {
       mailProbeBefore: { suppressions: 2, notifications: 27 },
       mailProbeAfter: { suppressions: 2, notifications: 31 },
       mailSilent: false,
+      mailWitnesses: { notifications: 'live', suppressions: 'live', degraded: false },
       warnings: [],
     })
     const res = await POST(makeRequest({ dryRun: false }))
@@ -212,6 +221,48 @@ describe('POST /api/admin/import/manyrequests', () => {
     const json = await res.json() as { error: string }
     expect(json.error).toContain('404')
   })
+
+  it('still records an audit row when an APPLY dies, so a partial write is never untraceable', async () => {
+    vi.mocked(runImport).mockRejectedValue(new Error('D1_ERROR: too many SQL variables'))
+    const res = await POST(makeRequest({ dryRun: false }))
+    expect(res.status).toBe(500)
+    expect(logAudit).toHaveBeenCalledTimes(1)
+    const entry = vi.mocked(logAudit).mock.calls[0][1]
+    expect(entry.action).toBe('manyrequests_import')
+    expect(entry.metadata).toMatchObject({ failed: true })
+  })
+
+  it('writes no audit row when a DRY RUN dies, because a preview changed nothing', async () => {
+    vi.mocked(runImport).mockRejectedValue(new Error('boom'))
+    const res = await POST(makeRequest({ dryRun: true }))
+    expect(res.status).toBe(500)
+    expect(logAudit).not.toHaveBeenCalled()
+  })
+
+  it('passes the request detail window straight through so a long run can be walked', async () => {
+    await POST(makeRequest({ requestDetailOffset: 100, requestDetailLimit: 100 }))
+    const args = vi.mocked(runImport).mock.calls[0][0] as unknown as RunArgs
+    expect(args.requestDetailOffset).toBe(100)
+    expect(args.requestDetailLimit).toBe(100)
+  })
+
+  it('warns when only one mail witness was live', async () => {
+    vi.mocked(runImport).mockResolvedValue({
+      dryRun: true,
+      entities: [],
+      samples: {},
+      skipped: {},
+      unmapped: {},
+      mailProbeBefore: { suppressions: null, notifications: 27 },
+      mailProbeAfter: { suppressions: null, notifications: 27 },
+      mailSilent: true,
+      mailWitnesses: { notifications: 'live', suppressions: 'unavailable', degraded: true },
+      warnings: [],
+    })
+    const res = await POST(makeRequest({}))
+    const json = await res.json() as { warnings: string[] }
+    expect(json.warnings.join(' ')).toContain('MAIL PROBE DEGRADED')
+  })
 })
 
 describe('GET /api/admin/import/manyrequests', () => {
@@ -220,6 +271,7 @@ describe('GET /api/admin/import/manyrequests', () => {
     vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi', sessionId: 'sess_1' })
     vi.mocked(isTahiAdmin).mockImplementation((orgId: string | null) => orgId === 'org_tahi')
     vi.mocked(requireFeature).mockResolvedValue(null)
+    vi.mocked(resolvePermissions).mockResolvedValue({ isSuperAdmin: true } as unknown as Awaited<ReturnType<typeof resolvePermissions>>)
     vi.mocked(manyRequestsTokenFromEnv).mockReturnValue('token_123')
   })
 
@@ -236,6 +288,12 @@ describe('GET /api/admin/import/manyrequests', () => {
 
   it('refuses a caller outside the Tahi org', async () => {
     vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'u', orgId: 'org_client', sessionId: 's' })
+    const res = await GET(new NextRequest('http://localhost:3000/api/admin/import/manyrequests'))
+    expect(res.status).toBe(403)
+  })
+
+  it('refuses an admin who is not a super admin, so the credential state is not disclosed', async () => {
+    vi.mocked(resolvePermissions).mockResolvedValue({ isSuperAdmin: false } as unknown as Awaited<ReturnType<typeof resolvePermissions>>)
     const res = await GET(new NextRequest('http://localhost:3000/api/admin/import/manyrequests'))
     expect(res.status).toBe(403)
   })

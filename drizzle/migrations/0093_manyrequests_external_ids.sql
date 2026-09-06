@@ -79,11 +79,28 @@
 -- Apply the file directly with wrangler instead. wrangler.json carries both
 -- database ids (staging b91cd27f, production 3bfa4848), so the names below
 -- resolve without any extra flags:
+--   0. THE CREDENTIAL. MANYREQUESTS_API_TOKEN is configured on the MCP worker
+--      (workers/mcp-server) and NOT on the dashboard worker the import route
+--      runs in, so without this step the first dry run answers 400
+--      "ManyRequests is not configured" and nothing below is reached:
+--        wrangler secret put MANYREQUESTS_API_TOKEN --env staging
+--        wrangler secret put MANYREQUESTS_API_TOKEN
+--      and locally, one line in .dev.vars:
+--        MANYREQUESTS_API_TOKEN="..."
+--      GET /api/admin/import/manyrequests reports tokenConfigured, which is the
+--      cheapest way to check it landed. Failing closed is the right behaviour;
+--      the gap was only in these instructions.
 --   1. wrangler d1 execute tahi-db-staging --remote --file=drizzle/migrations/0093_manyrequests_external_ids.sql
 --   2. deploy, then POST /api/admin/import/manyrequests {"dryRun":true} and
 --      check every entity reports a plan instead of a "no such column" error
 --   3. wrangler d1 execute tahi-db --remote --file=drizzle/migrations/0093_manyrequests_external_ids.sql
 --   4. approve the production deploy, then run the same dry run
+--   5. walk requests and messages in windows so each run finishes inside the
+--      edge budget (329 upstream GETs is minutes of wall time):
+--        {"entities":["requests"],"requestDetailOffset":0,"requestDetailLimit":100}
+--      then offset 100, 200, 300, then the same four for ["messages"]. Every
+--      window is idempotent, so a repeated or overlapping window updates
+--      rather than duplicates.
 --
 -- POST /api/admin/db/migrate {"name":"0093"} is the after-the-fact fallback,
 -- usable once the deploy that carries the entry is live.

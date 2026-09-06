@@ -197,11 +197,22 @@ describe('html entities', () => {
   it('undoes what the API escapes', () => {
     expect(unescapeHtmlEntities('That&#039;s the brief')).toBe("That's the brief")
     expect(unescapeHtmlEntities('&quot;quoted&quot;')).toBe('"quoted"')
-    expect(unescapeHtmlEntities('a &lt; b &amp;&amp; c &gt; d')).toBe('a < b && c > d')
+    expect(unescapeHtmlEntities('&nbsp;spaced&nbsp;')).toBe(' spaced ')
   })
 
-  it('decodes &amp; last so a double-escaped tag stays literal', () => {
-    expect(unescapeHtmlEntities('&amp;lt;script&amp;gt;')).toBe('&lt;script&gt;')
+  it('never turns an escaped tag back into markup', () => {
+    // The whole point. An escaped tag in a five-year-old client comment is
+    // TEXT; decoding it and storing the result is how an old comment becomes a
+    // stored XSS against an admin reading /messages.
+    expect(unescapeHtmlEntities('&lt;img src=x onerror=alert(1)&gt;')).toBe('&lt;img src=x onerror=alert(1)&gt;')
+    expect(unescapeHtmlEntities('a &lt; b &amp;&amp; c &gt; d')).toBe('a &lt; b &amp;&amp; c &gt; d')
+    expect(unescapeHtmlEntities('&amp;lt;script&amp;gt;')).toBe('&amp;lt;script&amp;gt;')
+  })
+
+  it('refuses the numeric forms of the three markup characters too', () => {
+    expect(unescapeHtmlEntities('&#60;script&#62;')).toBe('&#60;script&#62;')
+    expect(unescapeHtmlEntities('&#x3c;script&#x3e;')).toBe('&#x3c;script&#x3e;')
+    expect(unescapeHtmlEntities('&#38;')).toBe('&#38;')
   })
 })
 

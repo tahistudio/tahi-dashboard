@@ -141,6 +141,7 @@ describe('GET /api/admin/import/cleanup', () => {
     vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi', sessionId: 'sess_1' })
     vi.mocked(isTahiAdmin).mockImplementation((orgId: string | null) => orgId === 'org_tahi')
     vi.mocked(requireFeature).mockResolvedValue(null)
+    vi.mocked(resolvePermissions).mockResolvedValue({ isSuperAdmin: true } as unknown as Awaited<ReturnType<typeof resolvePermissions>>)
   })
 
   it('publishes the hard-delete allowlist so a caller can see what is deletable at all', async () => {
@@ -154,6 +155,12 @@ describe('GET /api/admin/import/cleanup', () => {
 
   it('refuses a caller outside the Tahi org', async () => {
     vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'u', orgId: 'org_client', sessionId: 's' })
+    const res = await GET(new NextRequest('http://localhost:3000/api/admin/import/cleanup'))
+    expect(res.status).toBe(403)
+  })
+
+  it('refuses an admin who is not a super admin, so the allowlist stays undisclosed', async () => {
+    vi.mocked(resolvePermissions).mockResolvedValue({ isSuperAdmin: false } as unknown as Awaited<ReturnType<typeof resolvePermissions>>)
     const res = await GET(new NextRequest('http://localhost:3000/api/admin/import/cleanup'))
     expect(res.status).toBe(403)
   })

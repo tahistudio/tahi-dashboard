@@ -51,6 +51,39 @@ const FORBIDDEN_MODULES: readonly string[] = [
 const FORBIDDEN_PREFIXES: readonly string[] = ['@clerk', '@/app/', '@/emails']
 
 /**
+ * The two ROUTE files, which are the real entry points.
+ *
+ * The library guard alone covered lib/import/manyrequests and nothing else, so
+ * a future edit adding createNotifications, sendEmail or a Clerk invite to a
+ * route handler would have failed nothing. These are walked with a relaxed
+ * prefix rule: a route legitimately reads the session (lib/server-auth imports
+ * @clerk/nextjs/server) and legitimately lives under app/, so those two
+ * prefixes are dropped and replaced by a symbol scan for the mail and invite
+ * calls themselves.
+ */
+const ROUTE_ROOTS: readonly string[] = [
+  'app/api/admin/import/manyrequests/route.ts',
+  'app/api/admin/import/cleanup/route.ts',
+]
+
+const ROUTE_FORBIDDEN_PREFIXES: readonly string[] = ['@/emails']
+
+/**
+ * Identifiers that mean "this reached a person", scanned over the route graph
+ * because dropping the @clerk prefix there would otherwise let a Clerk
+ * invitation through.
+ */
+const ROUTE_FORBIDDEN_SYMBOLS: readonly string[] = [
+  'createNotifications',
+  'createNotification(',
+  'sendEmail',
+  'sendReactEmail',
+  'createInvitation',
+  'invitations.',
+  'api.resend.com',
+]
+
+/**
  * Strip comments so the guard reads CODE and not prose. Several files in this
  * directory explain the rule by naming the very modules and URLs the guard
  * forbids; a scanner that cannot tell a doc comment from a call would make
@@ -162,10 +195,13 @@ interface Violation {
   via: string[]
 }
 
-function walkGraph(): { visited: string[]; violations: Violation[] } {
+function walkGraph(
+  roots: readonly string[] = listSourceFiles(IMPORTER_DIR),
+  forbiddenPrefixes: readonly string[] = FORBIDDEN_PREFIXES,
+): { visited: string[]; violations: Violation[] } {
   const violations: Violation[] = []
   const visited = new Set<string>()
-  const queue: Array<{ file: string; via: string[] }> = listSourceFiles(IMPORTER_DIR).map((file) => ({
+  const queue: Array<{ file: string; via: string[] }> = roots.map((file) => ({
     file,
     via: [],
   }))
@@ -180,7 +216,7 @@ function walkGraph(): { visited: string[]; violations: Violation[] } {
     for (const specifier of importSpecifiers(source)) {
       const forbidden =
         FORBIDDEN_MODULES.includes(specifier) ||
-        FORBIDDEN_PREFIXES.some((prefix) => specifier.startsWith(prefix))
+        forbiddenPrefixes.some((prefix) => specifier.startsWith(prefix))
       if (forbidden) {
         violations.push({
           file: relative(REPO_ROOT, current.file).replace(/\\/g, '/'),
@@ -232,5 +268,42 @@ describe('the importer cannot reach a mailer', () => {
   it('makes no direct fetch to the Resend API', () => {
     const offenders = visited.filter((file) => stripComments(readFileSync(file, 'utf8')).includes('api.resend.com'))
     expect(offenders.map((file) => relative(REPO_ROOT, file).replace(/\\/g, '/'))).toEqual([])
+  })
+})
+
+describe('the two endpoints cannot reach a mailer either', () => {
+  const roots = ROUTE_ROOTS.map((path) => resolve(REPO_ROOT, path))
+  const { visited, violations } = walkGraph(roots, ROUTE_FORBIDDEN_PREFIXES)
+
+  it('walks a real graph rooted at the route files themselves', () => {
+    const names = visited.map((file) => relative(REPO_ROOT, file).replace(/\\/g, '/'))
+    for (const root of ROUTE_ROOTS) expect(names).toContain(root)
+    // And follows them into the auth and permission modules they actually use,
+    // which is the part the library-only walk never saw.
+    expect(names).toContain('lib/server-auth.ts')
+    expect(names).toContain('lib/permissions.ts')
+    expect(names).toContain('lib/audit.ts')
+    expect(names).toContain('lib/import/manyrequests/run.ts')
+  })
+
+  it('imports nothing that can send an email, mint an invite or raise a notification', () => {
+    const readable = violations.map((v) => `${v.file} imports ${v.specifier}${v.via.length ? ` (via ${v.via.join(' -> ')})` : ''}`)
+    expect(readable).toEqual([])
+  })
+
+  it('calls no mail, notification or invitation helper anywhere in the graph', () => {
+    // The prefix rule is relaxed here (a route legitimately reads the Clerk
+    // session and legitimately lives under app/), so the CALLS themselves are
+    // what is banned rather than the module they would come from.
+    const offenders: string[] = []
+    for (const file of visited) {
+      const source = stripComments(readFileSync(file, 'utf8'))
+      for (const symbol of ROUTE_FORBIDDEN_SYMBOLS) {
+        if (source.includes(symbol)) {
+          offenders.push(`${relative(REPO_ROOT, file).replace(/\\/g, '/')} mentions ${symbol}`)
+        }
+      }
+    }
+    expect(offenders).toEqual([])
   })
 })

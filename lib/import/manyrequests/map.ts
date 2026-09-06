@@ -106,27 +106,40 @@ export function normaliseNumber(value: unknown): number | null {
 
 /**
  * Undo the HTML entity escaping the ManyRequests API applies to comment
- * bodies: it returns `That&#039;s` and `&quot;`. Only the five XML entities
- * plus numeric references are decoded, and `&amp;` is decoded LAST so
- * `&amp;lt;` survives as the literal `&lt;` a person typed rather than
- * becoming a tag.
+ * bodies: it returns `That&#039;s` and `&quot;`.
+ *
+ * IT NEVER PRODUCES MARKUP. `&lt;`, `&gt;` and `&amp;` are left exactly as
+ * they arrived, and the numeric decoder refuses the three code points that
+ * would spell them (`&#60;`, `&#62;`, `&#38;` and their hex forms). An escaped
+ * `&lt;img src=x onerror=...&gt;` in a five-year-old client comment is TEXT and
+ * must stay text: turning it back into live markup and storing the result is
+ * how an old comment becomes a stored XSS against an admin reading /messages.
+ * The importer sanitises on the way in as well (plan.ts wraps every body in
+ * sanitizeRichText), so this is the belt to that pair of braces.
+ *
+ * The cost is that a client who genuinely typed `&lt;` sees `&lt;` rather than
+ * `<`, which the render-time escape then prints as the literal text they
+ * typed. That is the correct trade at an untrusted boundary.
  */
+const MARKUP_CODE_POINTS = new Set([0x26, 0x3c, 0x3e])
+
 export function unescapeHtmlEntities(input: string): string {
   return input
     .replace(/&#(\d+);/g, (_match, code: string) => {
       const point = Number(code)
-      return Number.isFinite(point) && point >= 0 && point <= 0x10ffff ? String.fromCodePoint(point) : _match
+      if (!Number.isFinite(point) || point < 0 || point > 0x10ffff) return _match
+      if (MARKUP_CODE_POINTS.has(point)) return _match
+      return String.fromCodePoint(point)
     })
     .replace(/&#x([0-9a-fA-F]+);/g, (_match, code: string) => {
       const point = Number.parseInt(code, 16)
-      return Number.isFinite(point) && point >= 0 && point <= 0x10ffff ? String.fromCodePoint(point) : _match
+      if (!Number.isFinite(point) || point < 0 || point > 0x10ffff) return _match
+      if (MARKUP_CODE_POINTS.has(point)) return _match
+      return String.fromCodePoint(point)
     })
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
 }
 
 // ── request status ───────────────────────────────────────────────────────────

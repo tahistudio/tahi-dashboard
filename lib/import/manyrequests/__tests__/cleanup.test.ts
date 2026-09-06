@@ -22,23 +22,64 @@ vi.mock('drizzle-orm', () => {
   return { eq: stub, and: stub, or: stub, inArray: stub, isNull: stub, sql: stub }
 })
 
+/**
+ * The double carries `id` and `orgId` on every table, because the hard delete
+ * is now driven by ORG_SCOPED_TABLES: a table with no orgId column on the
+ * schema in play is skipped, so a column-less double would silently exercise
+ * nothing at all.
+ */
+function fakeTable(name: string): { __table: string; id: string; orgId: string } {
+  return { __table: name, id: 'id', orgId: 'org_id' }
+}
+
 vi.mock('@/db/d1', () => ({
   schema: {
-    organisations: { __table: 'organisations' },
-    contacts: { __table: 'contacts' },
-    requests: { __table: 'requests' },
-    messages: { __table: 'messages' },
-    timeEntries: { __table: 'time_entries' },
-    tasks: { __table: 'tasks' },
-    taskSubtasks: { __table: 'task_subtasks' },
-    scheduledCalls: { __table: 'scheduled_calls' },
-    invoices: { __table: 'invoices' },
-    requestParticipants: { __table: 'request_participants' },
-    requestReads: { __table: 'request_reads' },
+    organisations: { __table: 'organisations', id: 'id', name: 'name' },
+    contacts: fakeTable('contacts'),
+    onboardingInvites: fakeTable('onboarding_invites'),
+    projects: fakeTable('projects'),
+    subscriptions: fakeTable('subscriptions'),
+    requests: fakeTable('requests'),
+    activeTimers: fakeTable('active_timers'),
+    conversations: fakeTable('conversations'),
+    conversationParticipants: { __table: 'conversation_participants', id: 'id', conversationId: 'conversation_id' },
+    messages: fakeTable('messages'),
+    files: fakeTable('files'),
+    invoices: fakeTable('invoices'),
+    timeEntries: fakeTable('time_entries'),
+    tasks: fakeTable('tasks'),
+    taskTemplates: fakeTable('task_templates'),
+    taskSubtasks: { __table: 'task_subtasks', id: 'id', taskId: 'task_id' },
+    clientCosts: fakeTable('client_costs'),
+    caseStudySubmissions: fakeTable('case_study_submissions'),
+    caseStudies: fakeTable('case_studies'),
+    teamMemberAccessOrgs: { __table: 'team_member_access_orgs', orgId: 'org_id' },
+    requestForms: fakeTable('request_forms'),
+    kanbanColumns: fakeTable('kanban_columns'),
+    contracts: fakeTable('contracts'),
+    discoveryCalls: fakeTable('discovery_calls'),
+    scheduledCalls: fakeTable('scheduled_calls'),
+    deals: fakeTable('deals'),
+    activities: fakeTable('activities'),
+    brands: fakeTable('brands'),
+    projectSchedules: fakeTable('project_schedules'),
+    proposals: fakeTable('proposals'),
+    contractDocuments: fakeTable('contract_documents'),
+    projectCalculations: fakeTable('project_calculations'),
+    requestParticipants: { __table: 'request_participants', id: 'id', requestId: 'request_id' },
+    requestReads: { __table: 'request_reads', id: 'id', requestId: 'request_id' },
   },
 }))
 
-import { runCleanup, matchesDummyAllowlist, isProtectedOrg, isDemoRequestTitle } from '../cleanup'
+import {
+  runCleanup,
+  matchesDummyAllowlist,
+  isProtectedOrg,
+  isDemoRequestTitle,
+  ORG_SCOPED_TABLES,
+} from '../cleanup'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { DB } from '@/db/d1'
 
 function tableName(table: unknown): string {
@@ -172,6 +213,89 @@ describe('POST cleanup: hard delete refusals', () => {
     // Dry run: reported, not done.
     expect(recorded.deletes).toEqual([])
     expect(plan.applied).toEqual({ archived: 0, orgsDeleted: 0, rowsDeleted: 0 })
+  })
+})
+
+describe('the org-scoped table list is derived from the schema, not from memory', () => {
+  /** Every sqliteTable in db/schema.ts that declares an org_id column. */
+  function orgScopedTablesInSchema(): string[] {
+    const source = readFileSync(resolve(__dirname, '..', '..', '..', '..', 'db', 'schema.ts'), 'utf8')
+    const pattern = /export const (\w+) = sqliteTable\(\s*'([^']+)'/g
+    const found: Array<{ table: string; start: number }> = []
+    let match = pattern.exec(source)
+    while (match !== null) {
+      found.push({ table: match[2], start: match.index })
+      match = pattern.exec(source)
+    }
+    const out: string[] = []
+    for (let index = 0; index < found.length; index++) {
+      const end = index + 1 < found.length ? found[index + 1].start : source.length
+      if (/orgId:\s*text\('org_id'\)/.test(source.slice(found[index].start, end))) out.push(found[index].table)
+    }
+    return out
+  }
+
+  it('names every table in db/schema.ts that carries org_id, so a new one cannot be forgotten', () => {
+    const listed = new Set(ORG_SCOPED_TABLES.map((entry) => entry.table))
+    const missing = orgScopedTablesInSchema().filter((table) => !listed.has(table))
+    // A new org-scoped table added to the schema and not to ORG_SCOPED_TABLES
+    // would be left pointing at an organisation that no longer exists: exactly
+    // the orphan state deleteOrgTree claims to prevent.
+    expect(missing).toEqual([])
+  })
+
+  it('lists nothing that is not actually org-scoped', () => {
+    const inSchema = new Set(orgScopedTablesInSchema())
+    expect(ORG_SCOPED_TABLES.filter((entry) => !inSchema.has(entry.table)).map((entry) => entry.table)).toEqual([])
+  })
+
+  it('never lets discovery_calls be deleted, because a cron mails real people off it', () => {
+    const discovery = ORG_SCOPED_TABLES.find((entry) => entry.table === 'discovery_calls')
+    expect(discovery?.policy).toBe('refuse')
+  })
+})
+
+describe('POST cleanup: the hard delete sweep', () => {
+  beforeEach(() => {
+    recorded.updates = []
+    recorded.deletes = []
+    tableRows = {}
+  })
+
+  const acmeId = 'd753f180-1111-2222-3333-444444444444'
+
+  it('refuses an organisation holding rows in a protected table, naming the table', async () => {
+    tableRows.organisations = [{ id: acmeId, name: 'Acme Corp', status: 'archived', xeroContactId: null, stripeCustomerId: null, manyrequestsId: null }]
+    tableRows.deals = [{ id: 'deal_1' }]
+    const plan = await runCleanup(fakeDb(), { dryRun: false, archive: [], hardDelete: [acmeId], wipeDemo: false })
+    expect(plan.hardDelete).toHaveLength(0)
+    expect(plan.refused[0].reason).toContain('deals')
+    expect(recorded.deletes).toEqual([])
+  })
+
+  it('reports every table still holding rows, not the six somebody remembered', async () => {
+    tableRows.organisations = [{ id: acmeId, name: 'Acme Corp', status: 'archived', xeroContactId: null, stripeCustomerId: null, manyrequestsId: null }]
+    tableRows.brands = [{ id: 'b1' }]
+    tableRows.conversations = [{ id: 'cv1' }]
+    tableRows.subscriptions = [{ id: 's1' }]
+    const plan = await runCleanup(fakeDb(), { dryRun: true, archive: [], hardDelete: [acmeId], wipeDemo: false })
+    expect(plan.hardDelete[0].children.brands).toBe(1)
+    expect(plan.hardDelete[0].children.conversations).toBe(1)
+    expect(plan.hardDelete[0].children.subscriptions).toBe(1)
+  })
+
+  it('deletes the org-scoped tables the old sweep left orphaned', async () => {
+    tableRows.organisations = [{ id: acmeId, name: 'Acme Corp', status: 'archived', xeroContactId: null, stripeCustomerId: null, manyrequestsId: null }]
+    tableRows.brands = [{ id: 'b1' }]
+    tableRows.conversations = [{ id: 'cv1' }]
+    tableRows.subscriptions = [{ id: 's1' }]
+    tableRows.files = [{ id: 'f1' }]
+    await runCleanup(fakeDb(), { dryRun: false, archive: [], hardDelete: [acmeId], wipeDemo: false })
+    for (const table of ['brands', 'conversations', 'subscriptions', 'files', 'organisations']) {
+      expect(recorded.deletes).toContain(table)
+    }
+    // And the conversation participants that hang off those conversations.
+    expect(recorded.deletes).toContain('conversation_participants')
   })
 })
 

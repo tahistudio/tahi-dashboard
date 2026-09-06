@@ -15,7 +15,9 @@ import {
   manyRequestsBaseUrlFromEnv,
   manyRequestsTokenFromEnv,
   ManyRequestsReadError,
+  ManyRequestsShapeError,
   MANYREQUESTS_DEFAULT_BASE_URL,
+  unwrapSingle,
 } from '../client'
 
 interface Call {
@@ -33,6 +35,20 @@ function recordingFetch(pages: unknown[]): { calls: Call[]; impl: (input: string
     const payload = pages[Math.min(index, pages.length - 1)]
     index += 1
     return Promise.resolve(new Response(JSON.stringify(payload), { status: 200 }))
+  }
+  return { calls, impl }
+}
+
+/** A fetch double that answers per URL, for the mixed list/detail cases. */
+function recordingFetchByUrl(reply: (url: string) => unknown): {
+  calls: Call[]
+  impl: (input: string, init?: RequestInit) => Promise<Response>
+} {
+  const calls: Call[] = []
+  const impl = (input: string, init?: RequestInit) => {
+    const headers = new Headers(init?.headers)
+    calls.push({ url: input, method: init?.method, auth: headers.get('Authorization') ?? undefined })
+    return Promise.resolve(new Response(JSON.stringify(reply(input)), { status: 200 }))
   }
   return { calls, impl }
 }
@@ -121,6 +137,34 @@ describe('reads', () => {
     await expect(client.listRequests()).rejects.toThrow(/404/)
   })
 
+  it('unwraps a single-resource envelope, so a detail read does not silently lose everything', () => {
+    expect(unwrapSingle({ data: { id: 347, title: 'x' } })).toEqual({ id: 347, title: 'x' })
+    // A list envelope and a bare row are both left alone.
+    expect(unwrapSingle({ data: [{ id: 1 }] })).toEqual({ data: [{ id: 1 }] })
+    expect(unwrapSingle({ id: 347 })).toEqual({ id: 347 })
+  })
+
+  it('reads a wrapped request detail rather than merging a stray data key', async () => {
+    const { impl } = recordingFetch([{ data: { id: 347, title: 'Custom Redirects', comments: [{ author: 'x' }] } }])
+    const client = createManyRequestsClient({ token: 't', fetchImpl: impl })
+    const detail = await client.getRequest('347')
+    expect(detail.title).toBe('Custom Redirects')
+    expect(Array.isArray(detail.comments)).toBe(true)
+  })
+
+  it('THROWS when the detail payload is not the row that was asked for, so the run warns', async () => {
+    // The failure this guards against is silent: a shape this client does not
+    // understand used to merge as `{...summary, data}` and every brief,
+    // comment, assignee and line item vanished while the count still read 329.
+    const { impl } = recordingFetch([{ data: [], has_more: false }])
+    const client = createManyRequestsClient({ token: 't', fetchImpl: impl })
+    await expect(client.getRequest('347')).rejects.toBeInstanceOf(ManyRequestsShapeError)
+
+    const wrong = recordingFetch([{ id: 999 }])
+    const client2 = createManyRequestsClient({ token: 't', fetchImpl: wrong.impl })
+    await expect(client2.getRequest('347')).rejects.toThrow(/asked for id 347 and got 999/)
+  })
+
   it('asks for the fields, comments and hours a request needs to be field complete', async () => {
     const { calls, impl } = recordingFetch([{ id: 347 }])
     const client = createManyRequestsClient({ token: 't', fetchImpl: impl })
@@ -137,7 +181,13 @@ describe('reads', () => {
   })
 
   it('makes GET requests and nothing else, on every method it exposes', async () => {
-    const { calls, impl } = recordingFetch([{ data: [], has_more: false }])
+    // Lists answer an empty envelope; the two detail reads answer the row that
+    // was asked for, because getOne now proves it got the right one.
+    const { calls, impl } = recordingFetchByUrl((url) => {
+      if (url.includes('/requests/1?') || url.endsWith('/requests/1')) return { id: 1 }
+      if (url.includes('/invoices/INV-1')) return { number: 'INV-1' }
+      return { data: [], has_more: false }
+    })
     const client = createManyRequestsClient({ token: 't', fetchImpl: impl })
     await client.listOrganizations()
     await client.listOrgMembers('3')

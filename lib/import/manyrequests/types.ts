@@ -311,5 +311,17 @@ export interface ImportResult {
    * suspect even though it reports success.
    */
   mailSilent: boolean
+  /**
+   * Which witnesses were actually live when mailSilent was decided. The
+   * suppression log ships with the sibling email-allowlist slice, so until that
+   * migration lands `suppressions` is 'unavailable' and mailSilent rests on the
+   * notification count alone. Stated here so a reader of `mailSilent: true`
+   * knows how many witnesses agreed rather than assuming two.
+   */
+  mailWitnesses: {
+    notifications: 'live'
+    suppressions: 'live' | 'unavailable'
+    degraded: boolean
+  }
   warnings: string[]
 }

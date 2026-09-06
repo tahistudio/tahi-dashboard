@@ -32,6 +32,8 @@ export {
   manyRequestsBaseUrlFromEnv,
   manyRequestsTokenFromEnv,
   ManyRequestsReadError,
+  ManyRequestsShapeError,
+  unwrapSingle,
   MANYREQUESTS_DEFAULT_BASE_URL,
   MANYREQUESTS_TOKEN_MISSING,
   type ManyRequestsClient,
@@ -59,33 +61,47 @@ export {
 } from './map'
 
 export {
-  CONTACT_EMAIL_REPLACEMENTS,
+  CONTACT_DEAD_EMAILS,
   DEFAULT_PLAN_OPTIONS,
   diffFields,
+  findLedgerTwin,
+  INVOICE_DUPLICATE_WINDOW_DAYS,
   MANYREQUESTS_TEAM,
   ORG_NAME_MATCHES,
   ORG_SKIP,
   PLAN_BUILDERS,
   projectPlan,
   sameValue,
+  UPDATABLE_BY_TABLE,
   type ImportSnapshot,
   type ImportSource,
   type PlanOptions,
 } from './plan'
 
-export { applyEntityPlan, countsFor, ENTITY_TABLE, readImportSnapshot, readMailProbe } from './upsert'
+export {
+  applyEntityPlan,
+  boundParamsPerRow,
+  countsFor,
+  ENTITY_TABLE,
+  insertBatchSize,
+  readImportSnapshot,
+  readMailProbe,
+} from './upsert'
 
-export { fetchImportSource, mailProbesAgree, runImport, SAMPLE_LIMIT, type RunImportOptions } from './run'
+export { fetchImportSource, mailProbesAgree, mailWitnesses, runImport, SAMPLE_LIMIT, type RunImportOptions } from './run'
 
 export {
+  applyWipeDemo,
   DEMO_REQUEST_TITLES,
   DUMMY_ORGS,
   isDemoRequestTitle,
   isProtectedOrg,
   matchesDummyAllowlist,
+  ORG_SCOPED_TABLES,
   planWipeDemo,
   PROTECTED_ORG_IDS,
   runCleanup,
+  type OrgScopedTable,
   type CleanupInput,
   type CleanupPlan,
 } from './cleanup'

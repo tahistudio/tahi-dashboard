@@ -8,11 +8,15 @@
  *
  *   archive     Sets organisations.status to 'archived'. Reversible, and the
  *               default answer for anything uncertain.
- *   hardDelete  Removes an organisation and its children. Refused unless the
- *               row is on the allowlist below AND holds no Xero contact, no
- *               Stripe customer and no invoice. Three independent locks,
+ *   hardDelete  Removes an organisation and EVERY table that carries its
+ *               org_id, from a list derived from db/schema.ts rather than from
+ *               memory (ORG_SCOPED_TABLES, kept honest by a static test).
+ *               Refused unless the row is on the allowlist below AND holds no
+ *               Xero contact, no Stripe customer, no invoice, and no row in any
+ *               table the policy marks 'refuse'. Four independent locks,
  *               because the standing rule is that clients, contacts, invoices
- *               and finance data are always real.
+ *               and finance data are always real, and because a partial sweep
+ *               leaves the orphan rows it claims to be preventing.
  *   wipeDemo    Removes the seed requests, messages, time entries, tasks and
  *               scheduled calls that carry no ManyRequests key and hang off a
  *               dummy org (or off no org at all). Pipeline, finance and CRM
@@ -28,8 +32,24 @@
  */
 
 import { and, eq, inArray, isNull } from 'drizzle-orm'
+import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core'
 import { schema } from '@/db/d1'
 import type { DB } from '@/db/d1'
+
+/**
+ * Ids per IN clause. D1 caps bound parameters at 100 per statement, which the
+ * repo already encodes three times (lib/blockers-server.ts,
+ * lib/delivery-aggregate.ts, lib/request-participants.ts all chunk at 90).
+ * Today's counts are far under it and this module worked by luck; it breaks the
+ * first time a dummy org or the demo sweep touches more than ~100 rows.
+ */
+const ID_CHUNK = 90
+
+function chunkIds(ids: readonly string[]): string[][] {
+  const out: string[][] = []
+  for (let index = 0; index < ids.length; index += ID_CHUNK) out.push(ids.slice(index, index + ID_CHUNK))
+  return out
+}
 
 /** A row the cleanup is allowed to hard-delete, identified twice over. */
 export interface DummyOrgEntry {
@@ -84,6 +104,107 @@ export const DEMO_REQUEST_TITLES: readonly string[] = [
 
 /** The self-labelled deletions, e.g. "ZZ spine-test request (delete me)". */
 export const DEMO_REQUEST_TITLE_PREFIXES: readonly string[] = ['zz ']
+
+/**
+ * EVERY table in db/schema.ts that carries org_id, and what a hard delete does
+ * about it. A static test re-derives this list from db/schema.ts and fails if a
+ * table is missing, so a new org-scoped table cannot be forgotten here.
+ *
+ *   'delete'  org-owned scaffolding with no independent value. Removed with
+ *             the organisation.
+ *   'refuse'  real business data (finance, pipeline, delivery artefacts) or a
+ *             table this slice must never touch. A single row in one of these
+ *             REFUSES the hard delete outright and names the table, because the
+ *             standing rule is that clients, contacts, invoices and finance
+ *             data are always real.
+ *
+ * discovery_calls is 'refuse' and not merely unlisted: the pre-call-digest cron
+ * runs unattended every ten minutes off that table and mails real people, so
+ * nothing here may create, move or remove a row in it.
+ */
+export type OrgScopedPolicy = 'delete' | 'refuse'
+
+export interface OrgScopedTable {
+  /** The key on the Drizzle schema object. */
+  schemaKey: string
+  /** The SQL table name, which is what a test derives from db/schema.ts. */
+  table: string
+  policy: OrgScopedPolicy
+}
+
+export const ORG_SCOPED_TABLES: readonly OrgScopedTable[] = [
+  { schemaKey: 'contacts', table: 'contacts', policy: 'delete' },
+  { schemaKey: 'onboardingInvites', table: 'onboarding_invites', policy: 'delete' },
+  { schemaKey: 'projects', table: 'projects', policy: 'refuse' },
+  { schemaKey: 'subscriptions', table: 'subscriptions', policy: 'delete' },
+  { schemaKey: 'requests', table: 'requests', policy: 'delete' },
+  { schemaKey: 'activeTimers', table: 'active_timers', policy: 'delete' },
+  { schemaKey: 'conversations', table: 'conversations', policy: 'delete' },
+  { schemaKey: 'messages', table: 'messages', policy: 'delete' },
+  { schemaKey: 'files', table: 'files', policy: 'delete' },
+  { schemaKey: 'invoices', table: 'invoices', policy: 'refuse' },
+  { schemaKey: 'timeEntries', table: 'time_entries', policy: 'delete' },
+  { schemaKey: 'tasks', table: 'tasks', policy: 'delete' },
+  { schemaKey: 'taskTemplates', table: 'task_templates', policy: 'delete' },
+  { schemaKey: 'clientCosts', table: 'client_costs', policy: 'refuse' },
+  { schemaKey: 'caseStudySubmissions', table: 'case_study_submissions', policy: 'refuse' },
+  { schemaKey: 'caseStudies', table: 'case_studies', policy: 'refuse' },
+  { schemaKey: 'teamMemberAccessOrgs', table: 'team_member_access_orgs', policy: 'delete' },
+  { schemaKey: 'requestForms', table: 'request_forms', policy: 'delete' },
+  { schemaKey: 'kanbanColumns', table: 'kanban_columns', policy: 'delete' },
+  { schemaKey: 'contracts', table: 'contracts', policy: 'refuse' },
+  { schemaKey: 'discoveryCalls', table: 'discovery_calls', policy: 'refuse' },
+  { schemaKey: 'scheduledCalls', table: 'scheduled_calls', policy: 'delete' },
+  { schemaKey: 'deals', table: 'deals', policy: 'refuse' },
+  { schemaKey: 'activities', table: 'activities', policy: 'refuse' },
+  { schemaKey: 'brands', table: 'brands', policy: 'delete' },
+  { schemaKey: 'projectSchedules', table: 'project_schedules', policy: 'refuse' },
+  { schemaKey: 'proposals', table: 'proposals', policy: 'refuse' },
+  { schemaKey: 'contractDocuments', table: 'contract_documents', policy: 'refuse' },
+  { schemaKey: 'projectCalculations', table: 'project_calculations', policy: 'refuse' },
+]
+
+interface OrgTableHandle {
+  table: SQLiteTable
+  orgColumn: SQLiteColumn
+}
+
+/**
+ * The Drizzle handle for one org-scoped table, or null when the schema in play
+ * does not carry it. Null is the honest answer under a unit-test double, whose
+ * schema is a plain object with no columns; the static test over db/schema.ts
+ * is what proves the real schema carries every entry.
+ *
+ * Only the org column is needed. team_member_access_orgs is a join table with
+ * no `id` at all, so counting and deleting both key on org_id.
+ */
+function orgTableHandle(schemaKey: string): OrgTableHandle | null {
+  const record = (schema as unknown as Record<string, Record<string, unknown> | undefined>)[schemaKey]
+  if (!record) return null
+  const orgColumn = record.orgId as SQLiteColumn | undefined
+  if (!orgColumn) return null
+  return { table: record as unknown as SQLiteTable, orgColumn }
+}
+
+/**
+ * Every table still holding rows for this organisation, so the dry run states
+ * the whole blast radius rather than the six tables somebody remembered. It is
+ * derived from ORG_SCOPED_TABLES, which a static test keeps in step with
+ * db/schema.ts, so a table added to the schema later cannot go unreported.
+ */
+async function countOrgChildren(database: DB, orgId: string): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {}
+  for (const entry of ORG_SCOPED_TABLES) {
+    const handle = orgTableHandle(entry.schemaKey)
+    if (!handle) continue
+    const rows = await database
+      .select({ orgId: handle.orgColumn })
+      .from(handle.table)
+      .where(eq(handle.orgColumn, orgId))
+    if (rows.length > 0) counts[entry.table] = rows.length
+  }
+  return counts
+}
 
 export function isProtectedOrg(orgId: string): boolean {
   if (PROTECTED_ORG_IDS.includes(orgId)) return true
@@ -261,6 +382,22 @@ export async function runCleanup(database: DB, input: CleanupInput): Promise<Cle
     }
 
     const children = await countOrgChildren(database, orgId)
+    // Nothing is orphaned and nothing real is destroyed: a single row in any
+    // table the policy marks 'refuse' (finance, pipeline, delivery artefacts,
+    // and discovery_calls which this endpoint may never touch at all) stops the
+    // delete and names the table, rather than leaving rows pointing at an
+    // organisation that no longer exists.
+    const blocking = ORG_SCOPED_TABLES.filter(
+      (entry) => entry.policy === 'refuse' && (children[entry.table] ?? 0) > 0,
+    )
+    if (blocking.length > 0) {
+      plan.refused.push({
+        orgId,
+        name: org.name,
+        reason: `Holds rows this endpoint will not delete: ${blocking.map((entry) => `${entry.table} (${children[entry.table]})`).join(', ')}. Finance, pipeline and delivery rows are always real, and discovery_calls is never touched at all. Re-point them at the surviving client and archive this shell instead.`,
+      })
+      continue
+    }
     plan.hardDelete.push({ orgId, name: org.name, children })
   }
 
@@ -292,25 +429,6 @@ export async function runCleanup(database: DB, input: CleanupInput): Promise<Cle
   return plan
 }
 
-async function countOrgChildren(database: DB, orgId: string): Promise<Record<string, number>> {
-  const [requests, contacts, messages, timeEntries, tasks, calls] = await Promise.all([
-    database.select({ id: schema.requests.id }).from(schema.requests).where(eq(schema.requests.orgId, orgId)),
-    database.select({ id: schema.contacts.id }).from(schema.contacts).where(eq(schema.contacts.orgId, orgId)),
-    database.select({ id: schema.messages.id }).from(schema.messages).where(eq(schema.messages.orgId, orgId)),
-    database.select({ id: schema.timeEntries.id }).from(schema.timeEntries).where(eq(schema.timeEntries.orgId, orgId)),
-    database.select({ id: schema.tasks.id }).from(schema.tasks).where(eq(schema.tasks.orgId, orgId)),
-    database.select({ id: schema.scheduledCalls.id }).from(schema.scheduledCalls).where(eq(schema.scheduledCalls.orgId, orgId)),
-  ])
-  return {
-    requests: requests.length,
-    contacts: contacts.length,
-    messages: messages.length,
-    time_entries: timeEntries.length,
-    tasks: tasks.length,
-    scheduled_calls: calls.length,
-  }
-}
-
 /**
  * Delete an organisation and everything hanging off it, children first.
  *
@@ -319,33 +437,56 @@ async function countOrgChildren(database: DB, orgId: string): Promise<Record<str
  * guarantee it per statement, so every child is removed explicitly. Getting
  * this wrong leaves orphan rows pointing at an org that no longer exists, which
  * is exactly the state two requests in the current database are already in.
+ *
+ * "Every child" means every table in ORG_SCOPED_TABLES marked 'delete', which
+ * is derived from db/schema.ts rather than from memory. The 'refuse' tables are
+ * never reached here: runCleanup refuses the whole delete before it gets this
+ * far if the organisation holds a single row in one of them.
  */
 async function deleteOrgTree(database: DB, orgId: string): Promise<number> {
   let deleted = 0
+
+  // Grandchildren first: rows keyed on a request, a task or a conversation
+  // rather than on the org, which the org_id sweep below cannot see.
   const requests = await database
     .select({ id: schema.requests.id })
     .from(schema.requests)
     .where(eq(schema.requests.orgId, orgId))
   const requestIds = requests.map((row) => row.id)
+  for (const chunk of chunkIds(requestIds)) {
+    await database.delete(schema.requestParticipants).where(inArray(schema.requestParticipants.requestId, chunk))
+    await database.delete(schema.requestReads).where(inArray(schema.requestReads.requestId, chunk))
+  }
 
-  if (requestIds.length > 0) {
-    await database.delete(schema.requestParticipants).where(inArray(schema.requestParticipants.requestId, requestIds))
-    await database.delete(schema.requestReads).where(inArray(schema.requestReads.requestId, requestIds))
-  }
-  await database.delete(schema.messages).where(eq(schema.messages.orgId, orgId))
-  await database.delete(schema.timeEntries).where(eq(schema.timeEntries.orgId, orgId))
   const tasks = await database.select({ id: schema.tasks.id }).from(schema.tasks).where(eq(schema.tasks.orgId, orgId))
-  if (tasks.length > 0) {
-    await database.delete(schema.taskSubtasks).where(inArray(schema.taskSubtasks.taskId, tasks.map((t) => t.id)))
-    await database.delete(schema.tasks).where(eq(schema.tasks.orgId, orgId))
-    deleted += tasks.length
+  for (const chunk of chunkIds(tasks.map((task) => task.id))) {
+    await database.delete(schema.taskSubtasks).where(inArray(schema.taskSubtasks.taskId, chunk))
   }
-  await database.delete(schema.scheduledCalls).where(eq(schema.scheduledCalls.orgId, orgId))
-  if (requestIds.length > 0) {
-    await database.delete(schema.requests).where(inArray(schema.requests.id, requestIds))
-    deleted += requestIds.length
+
+  const conversations = await database
+    .select({ id: schema.conversations.id })
+    .from(schema.conversations)
+    .where(eq(schema.conversations.orgId, orgId))
+  for (const chunk of chunkIds(conversations.map((row) => row.id))) {
+    await database
+      .delete(schema.conversationParticipants)
+      .where(inArray(schema.conversationParticipants.conversationId, chunk))
   }
-  await database.delete(schema.contacts).where(eq(schema.contacts.orgId, orgId))
+
+  // Then every org-scoped table the policy says may go.
+  for (const entry of ORG_SCOPED_TABLES) {
+    if (entry.policy !== 'delete') continue
+    const handle = orgTableHandle(entry.schemaKey)
+    if (!handle) continue
+    const rows = await database
+      .select({ orgId: handle.orgColumn })
+      .from(handle.table)
+      .where(eq(handle.orgColumn, orgId))
+    if (rows.length === 0) continue
+    await database.delete(handle.table).where(eq(handle.orgColumn, orgId))
+    deleted += rows.length
+  }
+
   await database.delete(schema.organisations).where(eq(schema.organisations.id, orgId))
   deleted += 1
   return deleted
@@ -392,12 +533,12 @@ export async function planWipeDemo(database: DB): Promise<WipeDemoPlan> {
   }
 
   const requestIds = wipe.requests.map((row) => row.id)
-  if (requestIds.length > 0) {
+  for (const chunk of chunkIds(requestIds)) {
     const [messages, timeEntries, participants, reads] = await Promise.all([
-      database.select({ id: schema.messages.id }).from(schema.messages).where(inArray(schema.messages.requestId, requestIds)),
-      database.select({ id: schema.timeEntries.id }).from(schema.timeEntries).where(inArray(schema.timeEntries.requestId, requestIds)),
-      database.select({ id: schema.requestParticipants.id }).from(schema.requestParticipants).where(inArray(schema.requestParticipants.requestId, requestIds)),
-      database.select({ id: schema.requestReads.id }).from(schema.requestReads).where(inArray(schema.requestReads.requestId, requestIds)),
+      database.select({ id: schema.messages.id }).from(schema.messages).where(inArray(schema.messages.requestId, chunk)),
+      database.select({ id: schema.timeEntries.id }).from(schema.timeEntries).where(inArray(schema.timeEntries.requestId, chunk)),
+      database.select({ id: schema.requestParticipants.id }).from(schema.requestParticipants).where(inArray(schema.requestParticipants.requestId, chunk)),
+      database.select({ id: schema.requestReads.id }).from(schema.requestReads).where(inArray(schema.requestReads.requestId, chunk)),
     ])
     wipe.messages += messages.length
     wipe.timeEntries += timeEntries.length
@@ -405,29 +546,28 @@ export async function planWipeDemo(database: DB): Promise<WipeDemoPlan> {
     wipe.requestReads += reads.length
   }
 
-  const dummyIds = [...dummyOrgIds]
-  if (dummyIds.length > 0) {
+  for (const chunk of chunkIds([...dummyOrgIds])) {
     const [orgMessages, orgTime, orgTasks, orgCalls] = await Promise.all([
       database
         .select({ id: schema.messages.id })
         .from(schema.messages)
-        .where(and(inArray(schema.messages.orgId, dummyIds), isNull(schema.messages.manyrequestsId))),
-      database.select({ id: schema.timeEntries.id }).from(schema.timeEntries).where(inArray(schema.timeEntries.orgId, dummyIds)),
+        .where(and(inArray(schema.messages.orgId, chunk), isNull(schema.messages.manyrequestsId))),
+      database.select({ id: schema.timeEntries.id }).from(schema.timeEntries).where(inArray(schema.timeEntries.orgId, chunk)),
       database
         .select({ id: schema.tasks.id, title: schema.tasks.title })
         .from(schema.tasks)
-        .where(inArray(schema.tasks.orgId, dummyIds)),
-      database.select({ id: schema.scheduledCalls.id }).from(schema.scheduledCalls).where(inArray(schema.scheduledCalls.orgId, dummyIds)),
+        .where(inArray(schema.tasks.orgId, chunk)),
+      database.select({ id: schema.scheduledCalls.id }).from(schema.scheduledCalls).where(inArray(schema.scheduledCalls.orgId, chunk)),
     ])
     wipe.messages += orgMessages.length
     wipe.timeEntries += orgTime.length
     wipe.tasks.push(...orgTasks)
     wipe.scheduledCalls += orgCalls.length
-    if (orgTasks.length > 0) {
+    for (const taskChunk of chunkIds(orgTasks.map((task) => task.id))) {
       const subtasks = await database
         .select({ id: schema.taskSubtasks.id })
         .from(schema.taskSubtasks)
-        .where(inArray(schema.taskSubtasks.taskId, orgTasks.map((task) => task.id)))
+        .where(inArray(schema.taskSubtasks.taskId, taskChunk))
       wipe.taskSubtasks += subtasks.length
     }
   }
@@ -435,42 +575,55 @@ export async function planWipeDemo(database: DB): Promise<WipeDemoPlan> {
   return wipe
 }
 
-async function applyWipeDemo(database: DB, wipe: WipeDemoPlan): Promise<number> {
+export async function applyWipeDemo(database: DB, wipe: WipeDemoPlan): Promise<number> {
   let deleted = 0
-  const requestIds = wipe.requests.map((row) => row.id)
   const taskIds = wipe.tasks.map((row) => row.id)
 
-  if (taskIds.length > 0) {
-    await database.delete(schema.taskSubtasks).where(inArray(schema.taskSubtasks.taskId, taskIds))
-    await database.delete(schema.tasks).where(inArray(schema.tasks.id, taskIds))
-    deleted += taskIds.length
+  for (const chunk of chunkIds(taskIds)) {
+    await database.delete(schema.taskSubtasks).where(inArray(schema.taskSubtasks.taskId, chunk))
+    await database.delete(schema.tasks).where(inArray(schema.tasks.id, chunk))
+    deleted += chunk.length
   }
 
-  if (requestIds.length > 0) {
-    await database.delete(schema.requestParticipants).where(inArray(schema.requestParticipants.requestId, requestIds))
-    await database.delete(schema.requestReads).where(inArray(schema.requestReads.requestId, requestIds))
-    await database.delete(schema.timeEntries).where(inArray(schema.timeEntries.requestId, requestIds))
+  // COUNT WHAT THE STATEMENT ACTUALLY REMOVES. The request delete is filtered
+  // by isNull(manyrequests_id), so a request the import has since adopted
+  // survives it. Counting the planned ids instead overstated the number and
+  // wrote the inflated figure into the audit row.
+  const plannedRequestIds = wipe.requests.map((row) => row.id)
+  const deletableRequestIds: string[] = []
+  for (const chunk of chunkIds(plannedRequestIds)) {
+    const rows = await database
+      .select({ id: schema.requests.id })
+      .from(schema.requests)
+      .where(and(inArray(schema.requests.id, chunk), isNull(schema.requests.manyrequestsId)))
+    deletableRequestIds.push(...rows.map((row) => row.id))
+  }
+
+  for (const chunk of chunkIds(plannedRequestIds)) {
+    await database.delete(schema.requestParticipants).where(inArray(schema.requestParticipants.requestId, chunk))
+    await database.delete(schema.requestReads).where(inArray(schema.requestReads.requestId, chunk))
+    await database.delete(schema.timeEntries).where(inArray(schema.timeEntries.requestId, chunk))
     // Only messages with no ManyRequests key: an imported comment on an adopted
     // request must survive even if the request itself is somehow in scope.
     await database
       .delete(schema.messages)
-      .where(and(inArray(schema.messages.requestId, requestIds), isNull(schema.messages.manyrequestsId)))
-    await database
-      .delete(schema.requests)
-      .where(and(inArray(schema.requests.id, requestIds), isNull(schema.requests.manyrequestsId)))
-    deleted += requestIds.length
+      .where(and(inArray(schema.messages.requestId, chunk), isNull(schema.messages.manyrequestsId)))
+  }
+  for (const chunk of chunkIds(deletableRequestIds)) {
+    await database.delete(schema.requests).where(inArray(schema.requests.id, chunk))
+    deleted += chunk.length
   }
 
   const orgs = await database
     .select({ id: schema.organisations.id, name: schema.organisations.name })
     .from(schema.organisations)
   const dummyIds = orgs.filter((org) => matchesDummyAllowlist(org) !== null).map((org) => org.id)
-  if (dummyIds.length > 0) {
+  for (const chunk of chunkIds(dummyIds)) {
     await database
       .delete(schema.messages)
-      .where(and(inArray(schema.messages.orgId, dummyIds), isNull(schema.messages.manyrequestsId)))
-    await database.delete(schema.timeEntries).where(inArray(schema.timeEntries.orgId, dummyIds))
-    await database.delete(schema.scheduledCalls).where(inArray(schema.scheduledCalls.orgId, dummyIds))
+      .where(and(inArray(schema.messages.orgId, chunk), isNull(schema.messages.manyrequestsId)))
+    await database.delete(schema.timeEntries).where(inArray(schema.timeEntries.orgId, chunk))
+    await database.delete(schema.scheduledCalls).where(inArray(schema.scheduledCalls.orgId, chunk))
   }
 
   return deleted

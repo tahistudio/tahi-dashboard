@@ -106,7 +106,13 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/** GET returns the allowlist so a caller can see what is deletable at all. */
+/**
+ * GET returns the allowlist so a caller can see what is deletable at all.
+ *
+ * Super-admin gated exactly like the POST. It discloses the ten-entry
+ * hard-delete allowlist with its id prefixes and names, which is introspection
+ * for an operation only a super admin can run.
+ */
 export async function GET(req: NextRequest) {
   const auth = await getRequestAuth(req)
   if (!isTahiAdmin(auth.orgId)) {
@@ -114,6 +120,12 @@ export async function GET(req: NextRequest) {
   }
   const featureDenied = await requireFeature(auth, 'settings')
   if (featureDenied) return featureDenied
+
+  const database = (await db()) as DB
+  const access = await resolvePermissions(database as unknown as PermissionsDb, auth)
+  if (!access.isSuperAdmin) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   return NextResponse.json({
     hardDeleteAllowlist: DUMMY_ORGS,

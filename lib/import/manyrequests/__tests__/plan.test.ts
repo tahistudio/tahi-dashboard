@@ -13,6 +13,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  INVOICE_DUPLICATE_WINDOW_DAYS,
   MANYREQUESTS_TEAM,
   PLAN_BUILDERS,
   diffFields,
@@ -21,6 +22,7 @@ import {
   type ImportSnapshot,
   type ImportSource,
   type PlanOptions,
+  type SnapshotInvoice,
 } from '../plan'
 import { IMPORT_ENTITY_ORDER, type EntityPlan } from '../types'
 
@@ -46,6 +48,28 @@ function emptySnapshot(): ImportSnapshot {
     invoices: [],
     invoiceItems: [],
   }
+}
+
+/**
+ * emptySnapshot plus the D1 organisations the hand-made name map points at.
+ *
+ * The org planner REFUSES rather than inserts when ORG_NAME_MATCHES names a D1
+ * organisation that is not there (a stale mapping must never quietly create a
+ * second, empty copy of a live client), so a whole-run fixture has to carry the
+ * rows the map expects. That is also what the real database looks like: all 15
+ * of those organisations exist in D1 today.
+ */
+function seededSnapshot(): ImportSnapshot {
+  const snapshot = emptySnapshot()
+  snapshot.orgs = [{
+    id: 'org_glasswall',
+    name: 'Glasswall Solutions Ltd',
+    status: 'active',
+    manyrequestsId: null,
+    mrHoursRemaining: null,
+    mrHoursPurchased: null,
+  }]
+  return snapshot
 }
 
 function source(): ImportSource {
@@ -266,6 +290,17 @@ describe('organisations', () => {
     expect(plan.toUpdate.find((row) => row.id === 'org_gw')?.changes.status).toBeUndefined()
   })
 
+  it('REFUSES rather than inserts when the name map points at a D1 row that is gone', () => {
+    // A stale mapping must never quietly create a second, empty copy of a live
+    // client while the real one keeps its Xero id, its MRR and its history.
+    const plan = PLAN_BUILDERS.organisations(source(), emptySnapshot(), OPTIONS)
+    const refused = plan.skipped.find((row) => row.manyrequestsId === '3')
+    expect(refused?.reason).toContain('Glasswall Solutions Ltd')
+    expect(plan.toInsert.some((row) => row.manyrequestsId === '3')).toBe(false)
+    // An org with no mapping at all is still created; only a STALE mapping refuses.
+    expect(plan.toInsert.some((row) => row.manyrequestsId === '18')).toBe(true)
+  })
+
   it('refuses the empty self-signup shell with a reason', () => {
     const plan = PLAN_BUILDERS.organisations(source(), emptySnapshot(), OPTIONS)
     const refused = plan.skipped.find((row) => row.manyrequestsId === '46')
@@ -282,7 +317,7 @@ describe('organisations', () => {
 
 describe('contacts', () => {
   it('never writes a clerkUserId on any planned contact', () => {
-    const { plans } = runAllPlans(emptySnapshot(), source())
+    const { plans } = runAllPlans(seededSnapshot(), source())
     const contacts = plans.find((plan) => plan.entity === 'contacts')
     expect(contacts?.toInsert.length).toBeGreaterThan(0)
     for (const row of contacts?.toInsert ?? []) {
@@ -294,7 +329,7 @@ describe('contacts', () => {
   })
 
   it('marks the owner as the portal admin and everyone else as a member', () => {
-    const { plans } = runAllPlans(emptySnapshot(), source())
+    const { plans } = runAllPlans(seededSnapshot(), source())
     const contacts = plans.find((plan) => plan.entity === 'contacts')
     const owner = contacts?.toInsert.find((row) => row.manyrequestsId === '20')
     const member = contacts?.toInsert.find((row) => row.manyrequestsId === '21')
@@ -304,10 +339,13 @@ describe('contacts', () => {
     expect(member?.values.isPrimary).toBe(false)
   })
 
-  it('replaces the fake Elevate address rather than leaving a live client unreachable', () => {
+  it('repairs the fake Elevate address on the D1 row instead of creating a second contact', () => {
+    // The production direction: the FAKE address lives in D1 and ManyRequests
+    // holds the real one. The source row must find the D1 row through the dead
+    // address and correct it, not insert alongside it.
     const src = source()
     src.organizations = [{ id: 7, name: 'Elevate', created_at: '2024-01-01T00:00:00Z', subscription_status: 'subscribed' }]
-    src.membersByOrg = { '7': [{ id: 58, name: 'Andrew Stout', email: 'andrew@test.com', is_owner: true }] }
+    src.membersByOrg = { '7': [{ id: 58, name: 'Andrew Stout', email: 'andrew.stout@elevate.uk', is_owner: true }] }
     const snapshot = emptySnapshot()
     snapshot.orgs = [{
       id: 'org_elevate',
@@ -317,9 +355,59 @@ describe('contacts', () => {
       mrHoursRemaining: null,
       mrHoursPurchased: null,
     }]
+    snapshot.contacts = [{
+      id: 'c_andrew',
+      orgId: 'org_elevate',
+      name: 'Andrew Stout',
+      email: 'andrew@test.com',
+      isPrimary: true,
+      portalRole: 'admin',
+      clerkUserId: null,
+      manyrequestsId: null,
+    }]
     const { plans } = runAllPlans(snapshot, src)
     const contacts = plans.find((plan) => plan.entity === 'contacts')
-    expect(contacts?.toInsert[0]?.values.email).toBe('andrew.stout@elevate.uk')
+    expect(contacts?.toInsert).toHaveLength(0)
+    const adopted = contacts?.toUpdate.find((row) => row.id === 'c_andrew')
+    expect(adopted?.changes.email).toBe('andrew.stout@elevate.uk')
+    expect(adopted?.changes.manyrequestsId).toBe('58')
+  })
+
+  it('refuses the second of two clients sharing one address instead of overwriting the first', () => {
+    const src = source()
+    src.organizations = [{ id: 7, name: 'Elevate', created_at: '2024-01-01T00:00:00Z', subscription_status: 'subscribed' }]
+    src.membersByOrg = {
+      '7': [
+        { id: 58, name: 'Andrew Stout', email: 'shared@elevate.uk', is_owner: true },
+        { id: 59, name: 'Andrew Stout (old)', email: 'shared@elevate.uk' },
+      ],
+    }
+    const snapshot = emptySnapshot()
+    snapshot.orgs = [{
+      id: 'org_elevate',
+      name: 'Telcom Networks Limited trading as Elevate',
+      status: 'active',
+      manyrequestsId: null,
+      mrHoursRemaining: null,
+      mrHoursPurchased: null,
+    }]
+    snapshot.contacts = [{
+      id: 'c_andrew',
+      orgId: 'org_elevate',
+      name: 'Andrew Stout',
+      email: 'shared@elevate.uk',
+      isPrimary: true,
+      portalRole: 'admin',
+      clerkUserId: null,
+      manyrequestsId: null,
+    }]
+    const { plans } = runAllPlans(snapshot, src)
+    const contacts = plans.find((plan) => plan.entity === 'contacts')
+    const updates = contacts?.toUpdate.filter((row) => row.id === 'c_andrew') ?? []
+    expect(updates).toHaveLength(1)
+    expect(updates[0].changes.manyrequestsId).toBe('58')
+    const refused = contacts?.skipped.find((row) => row.manyrequestsId === '59')
+    expect(refused?.reason).toContain('58')
   })
 
   it('never demotes a contact who is already the portal admin on this side', () => {
@@ -344,7 +432,7 @@ describe('contacts', () => {
 
 describe('requests', () => {
   it('maps the brief, the first assignee, the number and the status note', () => {
-    const { plans } = runAllPlans(emptySnapshot(), source())
+    const { plans } = runAllPlans(seededSnapshot(), source())
     const requests = plans.find((plan) => plan.entity === 'requests')
     const row = requests?.toInsert.find((entry) => entry.manyrequestsId === '347')
     expect(row?.values.title).toBe('Custom Redirects')
@@ -359,7 +447,7 @@ describe('requests', () => {
   })
 
   it('reports every Closed request as needing a ruling', () => {
-    const { plans } = runAllPlans(emptySnapshot(), source())
+    const { plans } = runAllPlans(seededSnapshot(), source())
     const requests = plans.find((plan) => plan.entity === 'requests')
     expect(requests?.unmapped.some((line) => line.includes('Old closed thing'))).toBe(true)
     expect(requests?.toInsert.find((row) => row.manyrequestsId === '340')?.values.status).toBe('cancelled')
@@ -393,6 +481,42 @@ describe('requests', () => {
     expect(adopted?.changes.status).toBe('in_progress')
   })
 
+  it('refuses the second of two source requests that share a title at one client', () => {
+    const src = source()
+    src.requests = [
+      { ...source().requests[0], id: 347, number: 347, title: 'Custom Redirects' },
+      { ...source().requests[0], id: 348, number: 348, title: 'Custom Redirects', comments: [] },
+    ]
+    const snapshot = emptySnapshot()
+    snapshot.orgs = [{ id: 'org_gw', name: 'Glasswall Solutions Ltd', status: 'active', manyrequestsId: '3', mrHoursRemaining: null, mrHoursPurchased: null }]
+    snapshot.requests = [{
+      id: 'req_hand_typed',
+      orgId: 'org_gw',
+      title: 'Custom Redirects',
+      status: 'submitted',
+      priority: 'standard',
+      assigneeId: null,
+      requestNumber: null,
+      dueDate: null,
+      deliveredAt: null,
+      estimatedHours: null,
+      brandId: null,
+      description: null,
+      formResponses: '{}',
+      submittedById: null,
+      submittedByType: null,
+      manyrequestsId: null,
+    }]
+    const plan = PLAN_BUILDERS.requests(src, snapshot, OPTIONS)
+    const updates = plan.toUpdate.filter((row) => row.id === 'req_hand_typed')
+    expect(updates).toHaveLength(1)
+    expect(updates[0].changes.manyrequestsId).toBe('347')
+    const refused = plan.skipped.find((row) => row.manyrequestsId === '348')
+    expect(refused?.reason).toContain('347')
+    // And it is NOT inserted either, which would double the board silently.
+    expect(plan.toInsert.some((row) => row.manyrequestsId === '348')).toBe(false)
+  })
+
   it('skips a request whose organisation cannot be resolved, with the reason', () => {
     const src = source()
     src.organizations = []
@@ -405,7 +529,7 @@ describe('requests', () => {
 
 describe('messages', () => {
   it('unescapes the body, keeps is_internal, and leaves conversationId null', () => {
-    const { plans } = runAllPlans(emptySnapshot(), source())
+    const { plans } = runAllPlans(seededSnapshot(), source())
     const messages = plans.find((plan) => plan.entity === 'messages')
     const nathan = messages?.toInsert.find((row) => row.label.includes('Nathan Day'))
     expect(nathan?.values.body).toBe("On it 'today'")
@@ -414,15 +538,42 @@ describe('messages', () => {
     expect(nathan?.values.conversationId).toBeNull()
   })
 
+  it('lands an HTML comment inert, so an old client paste cannot become stored XSS', () => {
+    const src = source()
+    src.requests = [{
+      ...source().requests[0],
+      comments: [
+        {
+          author: 'Sara Scerbo',
+          content: 'look &lt;img src=x onerror=alert(1)&gt; and <script>alert(2)</script>',
+          is_internal: false,
+          created_at: '2026-08-03T00:00:00Z',
+        },
+      ],
+      comments_total: 1,
+    }]
+    const { plans } = runAllPlans(seededSnapshot(), src)
+    const messages = plans.find((plan) => plan.entity === 'messages')
+    const body = String(messages?.toInsert[0]?.values.body ?? '')
+    // Nothing that reaches the renderer is markup: the escaped paste stayed
+    // escaped and the live <script> was dropped with its contents.
+    expect(body).not.toContain('<img')
+    expect(body).not.toContain('<script')
+    expect(body).not.toContain('alert(2)')
+    expect(body).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    // The words the client typed survive as text.
+    expect(body).toContain('look')
+  })
+
   it('resolves a client author to a contact, not to the studio', () => {
-    const { plans } = runAllPlans(emptySnapshot(), source())
+    const { plans } = runAllPlans(seededSnapshot(), source())
     const messages = plans.find((plan) => plan.entity === 'messages')
     const sara = messages?.toInsert.find((row) => row.label.includes('Sara Scerbo'))
     expect(sara?.values.authorType).toBe('contact')
   })
 
   it('skips an unresolvable author rather than attributing them to the wrong side', () => {
-    const { plans } = runAllPlans(emptySnapshot(), source())
+    const { plans } = runAllPlans(seededSnapshot(), source())
     const messages = plans.find((plan) => plan.entity === 'messages')
     const ghost = messages?.skipped.find((row) => row.label.includes('A Ghost'))
     expect(ghost?.reason).toContain('resolves to neither a team member nor a contact')
@@ -472,6 +623,7 @@ describe('invoices', () => {
       discountAmountUsd: 0,
       paidAt: null,
       source: 'manyrequests',
+      createdAt: '2025-12-27T00:00:00.000Z',
       manyrequestsId: 'INV-2025000024',
     }]
     snapshot.invoiceItems = [
@@ -484,13 +636,64 @@ describe('invoices', () => {
     expect(plan.toDelete[0].id).toBe('item_stale')
   })
 
+  it('REFUSES a source invoice that matches a Xero or Stripe row already in D1', () => {
+    // 124 invoices are already in D1 and manyrequests_id is NULL on every one,
+    // so the key can never collide and a blind insert would double the ledger.
+    const snapshot = emptySnapshot()
+    snapshot.orgs = [{ id: 'org_greyhive', name: 'Greyhive', status: 'active', manyrequestsId: '4', mrHoursRemaining: null, mrHoursPurchased: null }]
+    const twin: SnapshotInvoice = {
+      id: 'inv_xero_1',
+      orgId: 'org_greyhive',
+      status: 'paid',
+      currency: 'GBP',
+      amountUsd: 1150,
+      totalUsd: 1279.67,
+      taxAmountUsd: 0,
+      discountAmountUsd: 0,
+      paidAt: '2026-01-10T00:00:00.000Z',
+      source: 'xero',
+      createdAt: '2025-12-28T00:00:00.000Z',
+      manyrequestsId: null,
+    }
+    snapshot.invoices = [twin]
+    const plan = PLAN_BUILDERS.invoices(source(), snapshot, OPTIONS)
+    expect(plan.toInsert).toHaveLength(0)
+    const refused = plan.skipped.find((row) => row.manyrequestsId === 'INV-2025000024')
+    expect(refused?.reason).toContain('inv_xero_1')
+    expect(refused?.reason).toContain('xero')
+  })
+
+  it('inserts when the lookalike is outside the window or a different client', () => {
+    const snapshot = emptySnapshot()
+    snapshot.orgs = [
+      { id: 'org_greyhive', name: 'Greyhive', status: 'active', manyrequestsId: '4', mrHoursRemaining: null, mrHoursPurchased: null },
+      { id: 'org_other', name: 'Somebody Else', status: 'active', manyrequestsId: null, mrHoursRemaining: null, mrHoursPurchased: null },
+    ]
+    const far = new Date(Date.parse('2025-12-27T00:00:00Z') + (INVOICE_DUPLICATE_WINDOW_DAYS + 5) * 86400000).toISOString()
+    snapshot.invoices = [
+      {
+        id: 'inv_far', orgId: 'org_greyhive', status: 'paid', currency: 'GBP', amountUsd: 1150,
+        totalUsd: 1279.67, taxAmountUsd: 0, discountAmountUsd: 0, paidAt: null, source: 'xero',
+        createdAt: far, manyrequestsId: null,
+      },
+      {
+        id: 'inv_other_client', orgId: 'org_other', status: 'paid', currency: 'GBP', amountUsd: 1150,
+        totalUsd: 1279.67, taxAmountUsd: 0, discountAmountUsd: 0, paidAt: null, source: 'xero',
+        createdAt: '2025-12-27T00:00:00.000Z', manyrequestsId: null,
+      },
+    ]
+    const plan = PLAN_BUILDERS.invoices(source(), snapshot, OPTIONS)
+    expect(plan.toInsert.some((row) => row.manyrequestsId === 'INV-2025000024')).toBe(true)
+  })
+
   it('never deletes a hand-made line item, only an imported one', () => {
     const snapshot = emptySnapshot()
     snapshot.orgs = [{ id: 'org_greyhive', name: 'Greyhive', status: 'active', manyrequestsId: '4', mrHoursRemaining: null, mrHoursPurchased: null }]
     snapshot.invoices = [{
       id: 'inv_1', orgId: 'org_greyhive', status: 'sent', currency: 'GBP',
       amountUsd: 1150, totalUsd: 1279.67, taxAmountUsd: 0, discountAmountUsd: 0,
-      paidAt: null, source: 'manyrequests', manyrequestsId: 'INV-2025000024',
+      paidAt: null, source: 'manyrequests', createdAt: '2025-12-27T00:00:00.000Z',
+      manyrequestsId: 'INV-2025000024',
     }]
     snapshot.invoiceItems = [
       { id: 'item_hand', invoiceId: 'inv_1', description: 'Typed by hand', quantity: 1, unitPriceUsd: 5, totalUsd: 5, manyrequestsId: null },
@@ -502,7 +705,7 @@ describe('invoices', () => {
 
 describe('idempotence', () => {
   it('a second plan over the world the first would build inserts and updates nothing', () => {
-    const first = runAllPlans(emptySnapshot(), source())
+    const first = runAllPlans(seededSnapshot(), source())
     const firstWrites = first.plans.reduce(
       (total, plan) => total + plan.toInsert.length + plan.toUpdate.length,
       0,
@@ -518,7 +721,7 @@ describe('idempotence', () => {
   })
 
   it('a third run is still a no-op, so re-running is never cumulative', () => {
-    const first = runAllPlans(emptySnapshot(), source())
+    const first = runAllPlans(seededSnapshot(), source())
     const second = runAllPlans(first.snapshot, source())
     const third = runAllPlans(second.snapshot, source())
     const writes = third.plans.reduce((total, plan) => total + plan.toInsert.length + plan.toUpdate.length, 0)
@@ -528,7 +731,7 @@ describe('idempotence', () => {
 
 describe('every plan is inert', () => {
   it('plans nothing that carries a Clerk identity, on any entity', () => {
-    const { plans } = runAllPlans(emptySnapshot(), source())
+    const { plans } = runAllPlans(seededSnapshot(), source())
     for (const plan of plans) {
       for (const row of plan.toInsert) {
         expect(row.values.clerkOrgId ?? null).toBeNull()

@@ -36,9 +36,77 @@ import type {
   SnapshotTeamMember,
 } from './plan'
 
-/** Rows per multi-row INSERT. SQLite caps bound variables at 999 and the
- *  widest row here is a request at roughly 25 columns, so 20 leaves headroom. */
-const INSERT_BATCH = 20
+/**
+ * The bound-parameter ceiling for one statement.
+ *
+ * D1 caps bound parameters at 100 PER STATEMENT, not at SQLite's 999. The
+ * repo already encodes the same number three times (lib/blockers-server.ts,
+ * lib/delivery-aggregate.ts, lib/request-participants.ts all chunk at 90), and
+ * a multi-row insert multiplies: a fixed 20-row batch of 20-column requests
+ * binds roughly 420 parameters and throws on the FIRST statement of the first
+ * apply. Batches are therefore sized from the widest row actually being
+ * written, never from a constant.
+ */
+const MAX_BOUND_PARAMS = 90
+
+/**
+ * How many bound parameters one row of this table costs.
+ *
+ * Drizzle emits a value expression for EVERY column of the table on every row,
+ * not just the ones supplied: a column that is absent but carries a `default`
+ * or a `$defaultFn` (the uuid primary key, the timestamps) still becomes a
+ * bound parameter, and only a column with neither is inlined as `null`. So the
+ * cost is (columns supplied) + (columns with a default that were not).
+ *
+ * The column map is read off the table's own symbol rather than through
+ * getTableColumns, so a unit-test double that is a plain object degrades to
+ * the row width instead of throwing.
+ */
+export function boundParamsPerRow(table: object, rows: readonly Record<string, unknown>[]): number {
+  const widest = rows.reduce((max, row) => Math.max(max, Object.keys(row).length), 1)
+  const columns = tableColumnMap(table)
+  if (!columns) return widest
+
+  const supplied = new Set<string>()
+  for (const row of rows) for (const key of Object.keys(row)) supplied.add(key)
+
+  let count = 0
+  for (const [name, column] of Object.entries(columns)) {
+    if (supplied.has(name)) {
+      count += 1
+      continue
+    }
+    const meta = column as { default?: unknown; defaultFn?: unknown; onUpdateFn?: unknown }
+    if (meta.default !== undefined && meta.default !== null) count += 1
+    else if (typeof meta.defaultFn === 'function') count += 1
+    else if (typeof meta.onUpdateFn === 'function') count += 1
+  }
+  return Math.max(count, widest, 1)
+}
+
+/**
+ * Drizzle keeps the column map on `Symbol(drizzle:Columns)`. Matched on the
+ * exact suffix rather than on "contains Columns", because the same table also
+ * carries `Symbol(drizzle:ExtraConfigColumns)`. If Drizzle ever moves it, this
+ * returns null and the batch falls back to the row width, which is why
+ * __tests__/bound-params-real-schema.test.ts asserts against the real tables.
+ */
+function tableColumnMap(table: object): Record<string, unknown> | null {
+  for (const symbol of Object.getOwnPropertySymbols(table)) {
+    if (!String(symbol).endsWith(':Columns)')) continue
+    const value = (table as Record<symbol, unknown>)[symbol]
+    if (value && typeof value === 'object') return value as Record<string, unknown>
+  }
+  return null
+}
+
+/** Rows per multi-row INSERT, from the parameter cost of one row. */
+export function insertBatchSize(paramsPerRow: number): number {
+  return Math.max(1, Math.floor(MAX_BOUND_PARAMS / Math.max(1, paramsPerRow)))
+}
+
+/** Ids per IN clause. One bound parameter each, so the cap is the cap. */
+const ID_CHUNK = MAX_BOUND_PARAMS
 
 // ── the snapshot ─────────────────────────────────────────────────────────────
 
@@ -107,6 +175,9 @@ export async function readImportSnapshot(database: DB): Promise<ImportSnapshot> 
       id: schema.services.id,
       name: schema.services.name,
       manyrequestsId: schema.services.manyrequestsId,
+      // In the select because SERVICE_UPDATABLE diffs it. Leaving it out made
+      // every service with a description differ on every re-run forever.
+      description: schema.services.description,
       price: schema.services.price,
       currency: schema.services.currency,
       isRecurring: schema.services.isRecurring,
@@ -156,6 +227,9 @@ export async function readImportSnapshot(database: DB): Promise<ImportSnapshot> 
       discountAmountUsd: schema.invoices.discountAmountUsd,
       paidAt: schema.invoices.paidAt,
       source: schema.invoices.source,
+      // The overlap check reads it: a same-money row for the same client from
+      // the Xero or Stripe importer is only a twin if it is near in time.
+      createdAt: schema.invoices.createdAt,
       manyrequestsId: schema.invoices.manyrequestsId,
     }).from(schema.invoices),
     database.select({
@@ -317,7 +391,7 @@ export async function applyEntityPlan(database: DB, plan: EntityPlan): Promise<A
 
   for (const [tableName, rows] of ordered) {
     const table = tableFor(tableName)
-    const resolved: Array<Record<string, unknown>> = []
+    const resolved: Array<{ manyrequestsId: string; label: string; values: Record<string, unknown> }> = []
     for (const row of rows) {
       const values = await resolvePlaceholders(database, row.values)
       if ('__error' in values) {
@@ -328,53 +402,100 @@ export async function applyEntityPlan(database: DB, plan: EntityPlan): Promise<A
         })
         continue
       }
-      resolved.push(values)
+      resolved.push({ manyrequestsId: row.manyrequestsId, label: row.label, values })
     }
-    for (let offset = 0; offset < resolved.length; offset += INSERT_BATCH) {
-      const batch = resolved.slice(offset, offset + INSERT_BATCH)
-      if (batch.length === 0) continue
-      // Drizzle's typed insert cannot be expressed over a union of eleven
-      // tables without collapsing to `never`, so the values go in as records.
-      // The columns are produced by the planners in this same module graph and
-      // every one is checked by the schema at the D1 boundary.
-      await (database.insert(table) as unknown as {
-        values: (rows: Array<Record<string, unknown>>) => Promise<unknown>
-      }).values(batch)
-      outcome.inserted += batch.length
+    const batchSize = insertBatchSize(boundParamsPerRow(table, resolved.map((row) => row.values)))
+    for (let offset = 0; offset < resolved.length; offset += batchSize) {
+      const slice = resolved.slice(offset, offset + batchSize)
+      if (slice.length === 0) continue
+      const batch = slice.map((row) => row.values)
+      const labels = slice
+      try {
+        // Drizzle's typed insert cannot be expressed over a union of eleven
+        // tables without collapsing to `never`, so the values go in as records.
+        // The columns are produced by the planners in this same module graph and
+        // every one is checked by the schema at the D1 boundary.
+        await (database.insert(table) as unknown as {
+          values: (batchRows: Array<Record<string, unknown>>) => Promise<unknown>
+        }).values(batch)
+        outcome.inserted += batch.length
+      } catch (error) {
+        // ONE BAD BATCH IS NOT THE WHOLE RUN. A unique-index collision on
+        // manyrequests_id (two comments by one author in the same second) or a
+        // D1 timeout used to unwind out of runImport: the route answered 500,
+        // no audit row was written, and whatever had already applied stayed
+        // applied with no record of it. The import is idempotent, so a
+        // resumable partial run is recoverable; an unrecorded one is not.
+        const reason = describeWriteError(error)
+        for (const failed of labels) {
+          outcome.failures.push({
+            manyrequestsId: failed.manyrequestsId,
+            label: failed.label,
+            reason: `Insert into ${tableName} failed: ${reason}`,
+          })
+        }
+      }
     }
   }
 
   for (const row of plan.toUpdate) {
-    const table = tableFor(row.table ?? plan.table)
+    const tableName = row.table ?? plan.table
+    const table = tableFor(tableName)
     const changes = await resolvePlaceholders(database, row.changes)
     if ('__error' in changes) {
       outcome.failures.push({ manyrequestsId: row.manyrequestsId, label: row.label, reason: String(changes.__error) })
       continue
     }
-    await (database.update(table) as unknown as {
-      set: (values: Record<string, unknown>) => { where: (clause: unknown) => Promise<unknown> }
-    })
-      .set(changes)
-      .where(eq(idColumn(table), row.id))
-    outcome.updated += 1
+    try {
+      await (database.update(table) as unknown as {
+        set: (values: Record<string, unknown>) => { where: (clause: unknown) => Promise<unknown> }
+      })
+        .set(changes)
+        .where(eq(idColumn(table), row.id))
+      outcome.updated += 1
+    } catch (error) {
+      outcome.failures.push({
+        manyrequestsId: row.manyrequestsId,
+        label: row.label,
+        reason: `Update of ${tableName} ${row.id} failed: ${describeWriteError(error)}`,
+      })
+    }
   }
 
-  const deletesByTable = new Map<string, string[]>()
+  const deletesByTable = new Map<string, PlannedDeleteRow[]>()
   for (const row of plan.toDelete) {
     const list = deletesByTable.get(row.table) ?? []
-    list.push(row.id)
+    list.push(row)
     deletesByTable.set(row.table, list)
   }
-  for (const [tableName, ids] of deletesByTable) {
+  for (const [tableName, deletions] of deletesByTable) {
     const table = tableFor(tableName)
-    for (let offset = 0; offset < ids.length; offset += INSERT_BATCH) {
-      const batch = ids.slice(offset, offset + INSERT_BATCH)
-      await database.delete(table).where(inArray(idColumn(table), batch))
-      outcome.deleted += batch.length
+    for (let offset = 0; offset < deletions.length; offset += ID_CHUNK) {
+      const batch = deletions.slice(offset, offset + ID_CHUNK)
+      try {
+        await database.delete(table).where(inArray(idColumn(table), batch.map((row) => row.id)))
+        outcome.deleted += batch.length
+      } catch (error) {
+        const reason = describeWriteError(error)
+        for (const failed of batch) {
+          outcome.failures.push({
+            manyrequestsId: failed.manyrequestsId,
+            label: failed.label,
+            reason: `Delete from ${tableName} failed: ${reason}`,
+          })
+        }
+      }
     }
   }
 
   return outcome
+}
+
+type PlannedDeleteRow = EntityPlan['toDelete'][number]
+
+function describeWriteError(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return typeof error === 'string' ? error : 'unknown database error'
 }
 
 /** organisations before contacts, team_members before their roles, invoices

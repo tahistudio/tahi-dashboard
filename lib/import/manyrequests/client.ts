@@ -19,6 +19,15 @@
  * EVERY METHOD HERE IS A READ. There is no POST, PATCH or DELETE in this file
  * and there must never be one: the old system stays untouched until Liam has
  * cut over, and a write against it is not recoverable from this side.
+ *
+ * Lists and single resources unwrap DIFFERENTLY and both have to be handled.
+ * readPage takes `{data: [...]}` off a list; getOne takes `{data: {...}}` off a
+ * detail read and then proves the row is the one that was asked for. Skipping
+ * the second was the quietest failure available here: `{...summary, ...detail}`
+ * in run.ts would merge a stray `data` key, every brief, comment, assignee and
+ * line item would disappear, and the run would still report a full count of
+ * inserts with no warning at all. A mismatch now throws, which run.ts turns
+ * into a warning and a fall back to the list summary.
  */
 
 import type {
@@ -92,6 +101,62 @@ function readPage<T>(payload: unknown): { rows: T[]; hasMore: boolean } {
   return { rows, hasMore }
 }
 
+/**
+ * A single-resource read, unwrapped.
+ *
+ * The list endpoints are envelope-wrapped (`{data: [...]}`), and an API whose
+ * lists are data-wrapped almost always wraps its single resources the same way.
+ * Casting `{data: {...}}` straight to MrRequest was the quiet failure mode:
+ * `{...summary, ...detail}` in run.ts would then produce the list row plus a
+ * stray `data` key, and every brief, comment, assignee and line item would
+ * vanish while the run still reported a full count of inserts.
+ */
+export function unwrapSingle(payload: unknown): unknown {
+  if (!isRecord(payload)) return payload
+  const inner = payload.data
+  if (isRecord(inner)) return inner
+  return payload
+}
+
+/**
+ * Prove the payload is the row that was asked for.
+ *
+ * A detail read that comes back as something else (an envelope shape this
+ * client does not know, an error body served with a 200) must be LOUD. It is
+ * thrown, because run.ts guards every detail read: the throw becomes a warning
+ * on the result and the row falls back to its list summary, which is the
+ * difference between "no comments" and "the envelope was not unwrapped".
+ */
+export function assertIdentity(
+  payload: unknown,
+  path: string,
+  field: 'id' | 'number',
+  expected: string,
+): void {
+  if (!isRecord(payload)) {
+    throw new ManyRequestsShapeError(path, `expected an object, got ${Array.isArray(payload) ? 'an array' : typeof payload}`)
+  }
+  const actual = payload[field]
+  if (actual === undefined || actual === null) {
+    throw new ManyRequestsShapeError(
+      path,
+      `the detail payload carries no "${field}" (keys: ${Object.keys(payload).slice(0, 12).join(', ') || 'none'}). The envelope shape is not what this client expects, so the row would silently lose its brief, comments and assignees.`,
+    )
+  }
+  if (String(actual).trim() !== expected) {
+    throw new ManyRequestsShapeError(path, `asked for ${field} ${expected} and got ${String(actual)}`)
+  }
+}
+
+export class ManyRequestsShapeError extends Error {
+  readonly path: string
+  constructor(path: string, detail: string) {
+    super(`ManyRequests GET ${path} returned an unexpected shape: ${detail}`)
+    this.name = 'ManyRequestsShapeError'
+    this.path = path
+  }
+}
+
 export class ManyRequestsReadError extends Error {
   readonly status: number
   readonly path: string
@@ -106,6 +171,13 @@ export class ManyRequestsReadError extends Error {
 export interface ManyRequestsClient {
   /** Escape hatch for a path this client does not name. Read only. */
   get(path: string, params?: Record<string, string>): Promise<unknown>
+  /** A single resource, envelope unwrapped and checked against the id asked
+   *  for. Throws rather than returning a row that is not the one requested. */
+  getOne(
+    path: string,
+    identity: { field: 'id' | 'number'; expected: string },
+    params?: Record<string, string>,
+  ): Promise<unknown>
   listAll<T>(path: string, params?: Record<string, string>): Promise<T[]>
   listOrganizations(): Promise<MrOrganization[]>
   listOrgMembers(orgId: string): Promise<MrClient[]>
@@ -150,6 +222,16 @@ export function createManyRequestsClient(options: ManyRequestsClientOptions): Ma
     return text ? (JSON.parse(text) as unknown) : {}
   }
 
+  async function getOne(
+    path: string,
+    identity: { field: 'id' | 'number'; expected: string },
+    params?: Record<string, string>,
+  ): Promise<unknown> {
+    const payload = unwrapSingle(await get(path, params))
+    assertIdentity(payload, path, identity.field, identity.expected)
+    return payload
+  }
+
   async function listAll<T>(path: string, params?: Record<string, string>): Promise<T[]> {
     const out: T[] = []
     for (let page = 1; page <= maxPages; page++) {
@@ -166,6 +248,7 @@ export function createManyRequestsClient(options: ManyRequestsClientOptions): Ma
 
   return {
     get,
+    getOne,
     listAll,
     listOrganizations: () => listAll<MrOrganization>('/organizations'),
     listOrgMembers: (orgId: string) => listAll<MrClient>(`/organizations/${encodeURIComponent(orgId)}/members`),
@@ -179,11 +262,17 @@ export function createManyRequestsClient(options: ManyRequestsClientOptions): Ma
     // path answers 404 and the plan reports the read error instead of writing.
     listServices: () => listAll<MrService>('/services'),
     listInvoices: () => listAll<MrInvoice>('/invoices'),
-    getInvoice: async (number: string) => (await get(`/invoices/${encodeURIComponent(number)}`)) as MrInvoice,
+    // Both detail reads go through getOne, so an envelope this client does not
+    // understand fails LOUDLY as a warning on the run rather than quietly
+    // returning a row with no brief and no comments.
+    getInvoice: async (number: string) =>
+      (await getOne(`/invoices/${encodeURIComponent(number)}`, { field: 'number', expected: number })) as MrInvoice,
     listRequests: (params?: Record<string, string>) => listAll<MrRequest>('/requests', params),
     getRequest: async (id: string) =>
-      (await get(`/requests/${encodeURIComponent(id)}`, {
-        include: 'fields,comments,hours',
-      })) as MrRequest,
+      (await getOne(
+        `/requests/${encodeURIComponent(id)}`,
+        { field: 'id', expected: id },
+        { include: 'fields,comments,hours' },
+      )) as MrRequest,
   }
 }
