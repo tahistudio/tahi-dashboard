@@ -171,6 +171,16 @@ Decisions only Liam can make: ANSWERED.
 - [ ] AR.6 - [BE/FE] Editable preview: 'Act as client' mode for super admins so Liam can edit, submit and approve while previewing a client, with audit entries naming the admin acting on behalf of the org and a visible mode banner. Depends on the client-walk fix re-land (server-side audience).
 - [ ] AR.7 - [FE] Re-land the reverted client-walk fix (PP.5) with the diagnosis fix applied (move resolvePinnedCurrency, asCurrencyCode and BASE_CURRENCY into the server-safe lib/currency.ts), a QA render check before push and the post-deploy health probe.
 
+## ManyRequests cutover (Liam, 2026-09-06 22:40; renews 16 Sep, USD 1,548)
+
+- [ ] MC.0 - [BE] Email delivery allowlist (HARD RULE): one choke point for every outbound email; setting email.deliveryMode = allowlist (default) | all, allowed domains tahi.studio, allowed org ids (empty); suppressed sends logged with recipient, template and subject so Liam can review what would have gone out; settings UI row; tests; MCP parity. Ships and is verified BEFORE any import.
+- [ ] MC.1 - [BE] Reconcile ManyRequests against D1: inventory both sides (orgs, members, requests, comments, invoices, services, brands), classify every D1 org real or dummy, map fields, find every email or invite trigger the import must bypass, produce the import plan and the cleanup list. Read-only.
+- [ ] MC.2 - [BE] Idempotent import (external ids, migration for the columns, direct writes, no notifications, no invites, no emails): orgs, contacts, requests with comments as messages, invoices with items, services as subscriptions, brands; team members Staci (super admin) and Nathan (dev) as rows only. Dry run produces a plan; apply after a D1 backup.
+- [ ] MC.3 - [Ops] Backup production D1, run the import, verify counts and zero sends (suppression log), archive dummy orgs, hard-delete unambiguous e2e fixtures, keep Tahi Test Client, report with a restore path.
+- [ ] MC.4 - [Liam decision] Giant Group first access: allow their org in the email allowlist and invite when Liam says.
+- [ ] MC.5 - [Design then FE] Services page rule: show what they have, lower and higher plans, per-plan suggestions; upsell only near limits.
+- [ ] MC.6 - [FE/BE] Deals: Stalled becomes a flag on any stage (not a stage).
+
 ## Client library and catalogue (Liam, 2026-09-06)
 
 - [ ] CL.1 - [Design first, then FE/BE] **Files as a small Google Drive with threads.** Folders per client (Deliverables, Brand, References, Uploads), drag-and-drop uploads from the client, a comment thread per file (reuse the request thread composer and the messages table with a file target), versions optional. Liam: "i'd like to give them a small version of like google drive but with threads so they can upload docs for us there." Design in Claude Design alongside the Clients pages; the current /files page (list, upload, download) stays until then.
