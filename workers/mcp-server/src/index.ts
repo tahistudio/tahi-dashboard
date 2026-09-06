@@ -324,6 +324,26 @@ export const TOOLS: ToolDef[] = [
     email: prop('string', 'Contact email address'),
     role: prop('string', 'Contact role at the company'),
   }, ['clientId', 'name', 'email']),
+  tool('update_client_contact', 'Edit a client contact: name, email, phone, role (job title), isPrimary, portalRole. The email of a contact that signs in to the portal is refused (the login is the truth). Setting isPrimary true demotes the current primary. A portalRole change is an access change and is audit-logged.', {
+    contactId: prop('string', 'Contact ID'),
+    name: prop('string', 'Full name'),
+    email: prop('string', 'Email address. Refused when the contact has a portal login'),
+    phone: prop('string', 'Phone number, or an empty string to clear it'),
+    role: prop('string', 'Role or job title at the company, or an empty string to clear it'),
+    isPrimary: prop('boolean', 'Make this the primary contact (gets the invoices and the invite). Demotes the current primary'),
+    portalRole: prop('string', 'Portal role', { enum: ['admin', 'member'] }),
+  }, ['contactId']),
+  tool('list_contact_references', 'Everything that references a client contact, counted and named per table (requests, messages, files, tasks, checklist items, request participants, conversations, mentions, deals, activities, brands, billed subscriptions, permission overrides, calls), plus the blockers a delete would hit and the other contacts at the organisation a reassign or merge could name. Read this before delete_client_contact or merge_client_contacts.', {
+    contactId: prop('string', 'Contact ID'),
+  }, ['contactId']),
+  tool('delete_client_contact', 'Delete a client contact. Refused with the reason when the contact signs in to the portal, is the only primary contact at an organisation that has other people, or is referenced anywhere, unless reassignTo names another contact at the same organisation, in which case every reference (and the primary flag) moves to them first. Audit-logged with what moved.', {
+    contactId: prop('string', 'Contact ID to delete'),
+    reassignTo: prop('string', 'Another contact at the same organisation who takes over every reference'),
+  }, ['contactId']),
+  tool('merge_client_contacts', 'Merge a duplicate contact into another at the same organisation: every reference is re-pointed to the survivor, the survivor keeps its own fields and fills only what it is missing (phone, role, ManyRequests id), stays primary if either was, and the duplicate is deleted. Refused across organisations, and when both rows sign in as different people. Audit-logged with what moved.', {
+    contactId: prop('string', 'The duplicate contact ID (this row is deleted)'),
+    into: prop('string', 'The contact ID to keep'),
+  }, ['contactId', 'into']),
   tool('assign_client_pm', 'Assign a project manager to a client organisation', {
     clientId: prop('string', 'Client organisation ID'),
     teamMemberId: prop('string', 'Team member ID to assign as PM'),
@@ -1967,6 +1987,20 @@ async function executeTool(
       const { clientId, ...body } = args
       return json(await apiWrite(`/api/admin/clients/${clientId}/contacts`, token, 'POST', body))
     }
+    case 'update_client_contact': {
+      const { contactId, ...body } = args
+      return json(await apiWrite(`/api/admin/contacts/${contactId}`, token, 'PATCH', body))
+    }
+    case 'list_contact_references':
+      return json(await apiGet(`/api/admin/contacts/${s('contactId')}/references`, token))
+    case 'delete_client_contact':
+      return json(await apiWrite(`/api/admin/contacts/${s('contactId')}`, token, 'DELETE', {
+        reassignTo: s('reassignTo'),
+      }))
+    case 'merge_client_contacts':
+      return json(await apiWrite(`/api/admin/contacts/${s('contactId')}/merge`, token, 'POST', {
+        into: s('into'),
+      }))
     case 'assign_client_pm':
       return json(await apiWrite(`/api/admin/clients/${s('clientId')}/pm`, token, 'PUT', { teamMemberId: s('teamMemberId') }))
     case 'send_welcome_email':
