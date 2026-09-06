@@ -54,8 +54,10 @@ export const ADMIN_NAV: NavGroup[] = [
       // The page behind the bell. Self-scoping (rows are keyed on the caller's
       // Clerk user id), so it serves both audiences from one route.
       { label: 'Notifications', href: '/notifications', icon: 'bell' },
-      // Messages is hidden for V1: restore by re-adding the item here, in
-      // CLIENT_NAV, and in app/(dashboard)/messages/page.tsx.
+      // The studio inbox: every client's standing line and every request
+      // thread, over one reader (lib/messages-store.ts). Gated on the
+      // `messages` FEATURE_TREE key, the same one the client branch is.
+      { label: 'Messages', href: '/messages', icon: 'messages' },
     ],
   },
   {
@@ -131,7 +133,9 @@ export const CLIENT_NAV: NavGroup[] = [
       // The page behind the bell. Rows are keyed on the caller's own Clerk user
       // id, so the route needs no org gate and never bounces a client.
       { label: 'Notifications', href: '/notifications', icon: 'bell', clientVisible: true },
-      // Messages is hidden for V1 (see the ADMIN_NAV note above).
+      // Their line to the studio, plus a thread per request. Same page, same
+      // feature key, client branch (see app/(dashboard)/messages/page.tsx).
+      { label: 'Messages', href: '/messages', icon: 'messages', clientVisible: true },
     ],
   },
   {

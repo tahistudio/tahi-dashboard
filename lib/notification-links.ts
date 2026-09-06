@@ -94,14 +94,15 @@ function teamHref(
     case 'deal':         return entityId ? `/deals/${entityId}` : '/deals'
     case 'lead':         return entityId ? `/leads/${entityId}` : '/leads'
     case 'schedule':     return entityId ? `/schedules/${entityId}` : '/schedules'
-    // Comms ride request threads for both audiences. /messages redirects
-    // (an admin to /overview, a client to /requests), so pointing a bell row
-    // there was a notification that vanished on click. The resolver cannot do
-    // better than the list here: a 'message' notification carries the
-    // CONVERSATION id, never the request id. Replies on a request thread are
-    // already emitted as entityType 'request' and deep-link through the case
-    // above, so this branch only catches standalone conversations.
-    case 'message':      return '/requests'
+    // /messages is a real page again for both audiences (the studio inbox and
+    // the client's studio line), so a comms row lands there instead of on the
+    // request list. It stays a LIST link, not a deep link: a 'message'
+    // notification carries the CONVERSATION id, and the inbox addresses a
+    // thread by a (source, id) pair rather than by a conversation id alone.
+    // Replies on a request thread are emitted as entityType 'request' and
+    // deep-link through the case above, so this branch only ever catches the
+    // standing org channel.
+    case 'message':      return '/messages'
     case 'call':         return '/calls'
     case 'announcement': return '/announcements'
     case 'subscription': return '/billing'
@@ -139,8 +140,10 @@ function clientHref(
     case 'subscription': return '/billing'
     // Their own workspace: name, brands, people and plan all live in settings.
     case 'organisation': return '/settings'
-    // Client comms ride request threads; /messages redirects them to /requests.
-    case 'message':      return '/requests'
+    // The client's own line to the studio. Same reasoning as the team map: a
+    // list link, because the row carries a conversation id and the inbox keys
+    // on a (source, id) pair.
+    case 'message':      return '/messages'
     // Announcements render as banners on the portal home.
     case 'announcement': return '/overview'
     case 'task':
@@ -315,7 +318,7 @@ const DEST_LABELS: Partial<Record<NotificationEntityType, { detail: string; list
   deal:            { detail: 'the deal',          list: 'Deals' },
   lead:            { detail: 'the lead',          list: 'Leads' },
   schedule:        { detail: 'the schedule',      list: 'Schedules' },
-  message:         { detail: 'Requests',          list: 'Requests' },
+  message:         { detail: 'Messages',          list: 'Messages' },
   call:            { detail: 'Calls',             list: 'Calls' },
   announcement:    { detail: 'Announcements',     list: 'Announcements' },
   subscription:    { detail: 'Billing',           list: 'Billing' },
@@ -331,7 +334,7 @@ const CLIENT_DEST_LABELS: Partial<Record<NotificationEntityType, string>> = {
   organisation: 'your account',
   announcement: 'Overview',
   subscription: 'Billing',
-  message:      'Requests',
+  message:      'Messages',
 }
 
 export function notificationDestination(

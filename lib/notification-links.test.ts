@@ -16,6 +16,9 @@ import {
 // middleware does not bounce them). Kept explicit so widening it is a decision.
 const CLIENT_RENDERABLE = new Set([
   '/overview', '/requests', '/files', '/services', '/invoices', '/billing', '/settings',
+  // The inbox: one route, a client branch, no redirect (see
+  // app/(dashboard)/messages/page.tsx).
+  '/messages',
 ])
 
 const ALL_ENTITIES: NotificationEntityType[] = [
@@ -73,7 +76,7 @@ describe('notificationHref - client audience', () => {
 
   it('maps org, message and announcement onto surfaces a client can open', () => {
     expect(notificationHref('organisation', 'o1', 'client')).toBe('/settings')
-    expect(notificationHref('message', 'm1', 'client')).toBe('/requests')
+    expect(notificationHref('message', 'm1', 'client')).toBe('/messages')
     expect(notificationHref('announcement', 'a1', 'client')).toBe('/overview')
   })
 
@@ -97,26 +100,27 @@ describe('notificationHref - client audience', () => {
   })
 })
 
-describe('notificationHref - the hidden Messages surface', () => {
-  // /messages redirects (app/(dashboard)/messages/page.tsx bounces an admin to
-  // /overview and a client to /requests), so any row resolving there is a
-  // notification that vanishes on click. A message notification carries the
-  // CONVERSATION id, never the request id, so the resolver cannot deep-link it;
-  // request-thread replies already notify with entityType 'request' and get a
-  // real deep link from the case above. /requests is the honest floor: it is
-  // where every client thread lives, for both audiences.
-  it('sends a team message notification to the requests list, not /messages', () => {
-    expect(notificationHref('message', 'conv-1', 'team')).toBe('/requests')
-    expect(notificationHref('message', null, 'team')).toBe('/requests')
+describe('notificationHref - the Messages surface', () => {
+  // /messages is a real page again for both audiences (the studio inbox and
+  // the client's line to the studio), so a comms row lands there instead of on
+  // the request list. It stays a LIST link on purpose: a message notification
+  // carries the CONVERSATION id, and the inbox addresses a thread by a
+  // (source, id) pair, so there is nothing to deep-link to. Replies on a
+  // request thread still notify with entityType 'request' and get a real deep
+  // link from the request case.
+  it('sends a team message notification to the inbox', () => {
+    expect(notificationHref('message', 'conv-1', 'team')).toBe('/messages')
+    expect(notificationHref('message', null, 'team')).toBe('/messages')
   })
 
-  it('keeps the client message map on the requests list', () => {
-    expect(notificationHref('message', 'conv-1', 'client')).toBe('/requests')
+  it('sends a client message notification to their own studio line', () => {
+    expect(notificationHref('message', 'conv-1', 'client')).toBe('/messages')
   })
 
-  it('never resolves any entity, on either audience, to /messages', () => {
+  it('routes ONLY message rows there, so no other entity borrows the page', () => {
     for (const audience of ['team', 'client'] as const) {
       for (const entity of ALL_ENTITIES) {
+        if (entity === 'message') continue
         for (const id of ['x', null]) {
           const href = notificationHref(entity, id, audience)
           if (href === null) continue

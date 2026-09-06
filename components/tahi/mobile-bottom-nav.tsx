@@ -33,10 +33,10 @@ import {
 // ── Primary tab hrefs per audience ──────────────────────────────────────────
 // Admin: the 4 core workspace destinations.
 // Client: the 4 most-visited portal destinations.
-// '/messages' is dropped from both sets while messaging is hidden for V1
-// (see components/tahi/nav-model.tsx).
-const ADMIN_PRIMARY_HREFS = ['/overview', '/requests', '/tasks']
-const CLIENT_PRIMARY_HREFS = ['/overview', '/requests', '/files']
+// '/messages' is back in both sets: the inbox is a real page again, and it is
+// one of the two surfaces a client actually opens on a phone.
+const ADMIN_PRIMARY_HREFS = ['/overview', '/requests', '/tasks', '/messages']
+const CLIENT_PRIMARY_HREFS = ['/overview', '/requests', '/messages', '/files']
 
 // Fallback icon names used only when an item is absent from the filtered nav
 // (e.g. if features are eventually passed and gate a primary tab).
