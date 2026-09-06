@@ -6,6 +6,7 @@ import { ChevronDown, Check } from 'lucide-react'
 import { ShellIcon } from '@/components/tahi/shell-icons'
 import { Popover } from '@/components/tahi/popover'
 import { apiPath } from '@/lib/api'
+import { IMPERSONATE_ORG_COOKIE, readPreviewOrgId } from '@/lib/preview-cookie'
 
 /** Access rule for a team member (mirrors the AccessRule shape from team page) */
 export interface TeamMemberAccessRule {
@@ -46,7 +47,10 @@ const STORAGE_KEY = 'tahi-impersonate'
 // Cookie that carries the impersonated org to the server so portal GET
 // endpoints (via getPortalAuth) scope to the previewed client. Session cookie
 // (no Max-Age) so it dies on browser close; path=/ so it covers the basePath.
-const ORG_COOKIE = 'tahi-impersonate-org'
+// The name and the "does this value name an org" rule come from
+// lib/preview-cookie.ts, which the middleware and every server component read
+// too: one definition of previewing for the whole app.
+const ORG_COOKIE = IMPERSONATE_ORG_COOKIE
 
 function setImpersonateOrgCookie(orgId: string) {
   try { document.cookie = `${ORG_COOKIE}=${encodeURIComponent(orgId)}; path=/; SameSite=Lax` } catch { /* no document */ }
@@ -54,6 +58,20 @@ function setImpersonateOrgCookie(orgId: string) {
 
 function clearImpersonateOrgCookie() {
   try { document.cookie = `${ORG_COOKIE}=; path=/; Max-Age=0; SameSite=Lax` } catch { /* no document */ }
+}
+
+/**
+ * What the SERVER would read from this browser, right now. Not the React prop,
+ * which is one render behind: this is the live value, so it is safe to check
+ * in the same tick as a state change.
+ */
+function readImpersonateOrgCookie(): string | null {
+  if (typeof document === 'undefined') return null
+  for (const part of document.cookie.split(';')) {
+    const [name, ...rest] = part.trim().split('=')
+    if (name === ORG_COOKIE) return readPreviewOrgId(rest.join('='))
+  }
+  return null
 }
 
 // ---- Reactive sessionStorage store ----
@@ -213,6 +231,23 @@ export function ImpersonationBanner({
     if (getSnapshot() !== null) return
     setImpersonation({ orgId: serverPreviewOrgId, orgName: serverPreviewOrgName ?? 'this client' })
   }, [serverPreviewOrgId, serverPreviewOrgName])
+
+  // The same reconciliation, the other way. The preview can end somewhere this
+  // tab's store never hears about: the ?exit-preview=1 escape hatch in the
+  // middleware, GET /api/admin/impersonate/exit, another tab, a browser that
+  // dropped a session cookie. The tab would then keep showing the strip and
+  // reporting a preview through useImpersonation() while the server renders
+  // the studio, which is the confusing half of the state this whole file
+  // exists to keep honest.
+  //
+  // Keyed on document.cookie, not on the prop: the prop is one render behind,
+  // so entering Client view (store written, cookie written, refresh pending)
+  // would look exactly like this and undo itself.
+  useEffect(() => {
+    if (previewedOrgId === null) return
+    if (readImpersonateOrgCookie() !== null) return
+    clearImpersonation()
+  }, [previewedOrgId])
 
   if (!impersonation) return null
 
