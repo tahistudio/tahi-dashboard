@@ -85,6 +85,10 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 10:30 NZST sales, artifacts and ops wired into the Claude Design shell; Account and Notifications reworked per Liam; QA walk clean of errors with per-page FIX notes; fixers launched on all three modules; studio invoices and Services fix pass still running.
 
+- 11:40 NZST sales, artifacts and ops fix pass done; re-check SHIP across 18 surfaces. Studio invoices and Services fix pass still running; then the Finance wiring for studio invoices and a scratch-file cleanup.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - [x] More sheet Track time row left-aligned (17a490b2).
+- Prototype shell top bar at 375 still has 36px Search, Track time and currency controls; mirror the shipped More sheet in app-shell.jsx (studio mobile tab bar and More sheet are on the to-design list).
+- Deals: the Stalled stage sits last in STAGES as if it were a step; ordering is a product decision (Liam).
