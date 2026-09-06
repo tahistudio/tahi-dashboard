@@ -47,6 +47,21 @@ vi.mock('@/lib/access-scoping', async (importOriginal) => ({
 
 vi.mock('@/lib/email', () => ({ sendEmail: vi.fn().mockResolvedValue({ success: true }) }))
 
+// The delivery allowlist. Opened here on purpose: these cases are about the
+// Xero rail and the invoice email, not about who this platform may write to,
+// and every fixture address is an outside domain that the real (closed)
+// default would hold back. The gate has its own specs in
+// lib/__tests__/email-delivery.test.ts, and the Xero stand-down it forces on
+// this route is pinned in app/api/__tests__/invoice-email-allowlist.test.ts.
+vi.mock('@/lib/email-delivery', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/email-delivery')>()),
+  resolveDeliveryPolicy: vi.fn().mockResolvedValue({
+    mode: 'all',
+    allowedDomains: ['tahi.studio'],
+    allowedOrgIds: [],
+  }),
+}))
+
 vi.mock('@/lib/notifications', () => ({
   createNotifications: vi.fn().mockResolvedValue({ delivered: 0, skipped: 0 }),
 }))

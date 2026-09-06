@@ -15,6 +15,15 @@ import {
   isXeroEmailMode,
   validateInvoicePaySetting,
 } from '@/lib/invoice-pay-settings'
+import {
+  ALLOWED_DOMAINS_SETTING_KEY,
+  ALLOWED_ORG_IDS_SETTING_KEY,
+  DELIVERY_MODE_SETTING_KEY,
+  resolveAllowedDomains,
+  resolveAllowedOrgIds,
+  resolveDeliveryMode,
+  validateEmailDeliverySetting,
+} from '@/lib/email-allowlist'
 
 // -- GET /api/admin/settings --
 // Returns all settings as key-value pairs.
@@ -22,6 +31,11 @@ import {
 // `invoicing.defaultChannel` and `invoicing.xeroEmailMode` are filled in with
 // their studio defaults when no row holds a valid value, so a reader never has
 // to know that an absent row means Stripe, or means our own email.
+//
+// The three `email.*` keys are filled in the same way, and for a sharper
+// reason: an absent `email.deliveryMode` row means the allowlist is ON, and a
+// UI that showed an empty box there would read as "no restriction" when the
+// truth is the opposite.
 export async function GET(req: NextRequest) {
   const { orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
@@ -46,6 +60,17 @@ export async function GET(req: NextRequest) {
   if (!isXeroEmailMode(settings[XERO_EMAIL_MODE_SETTING_KEY])) {
     settings[XERO_EMAIL_MODE_SETTING_KEY] = DEFAULT_XERO_EMAIL_MODE
   }
+
+  // The delivery gate, always answered, always in its resolved form. The two
+  // lists come back as re-serialised JSON rather than the raw row so a caller
+  // reads the list the sender will actually apply, not the one somebody typed.
+  settings[DELIVERY_MODE_SETTING_KEY] = resolveDeliveryMode(settings[DELIVERY_MODE_SETTING_KEY])
+  settings[ALLOWED_DOMAINS_SETTING_KEY] = JSON.stringify(
+    resolveAllowedDomains(settings[ALLOWED_DOMAINS_SETTING_KEY]),
+  )
+  settings[ALLOWED_ORG_IDS_SETTING_KEY] = JSON.stringify(
+    resolveAllowedOrgIds(settings[ALLOWED_ORG_IDS_SETTING_KEY]),
+  )
 
   return NextResponse.json({ settings })
 }
@@ -92,6 +117,17 @@ export async function PATCH(req: NextRequest) {
   const payCheck = validateInvoicePaySetting(body.key.trim(), body.value)
   if (!payCheck.ok) {
     return NextResponse.json({ error: payCheck.error }, { status: 400 })
+  }
+
+  // The email delivery gate: which mode, which domains, which orgs. Checked
+  // here for the same reason the pay keys are, only harder: a typo in
+  // `email.allowedDomains` is not a cosmetic failure, it is the difference
+  // between a test email landing in a teammate's inbox and landing in a
+  // client's. An empty value is the clear on all three and stays allowed,
+  // because GET synthesises the CLOSED default for each of them.
+  const deliveryCheck = validateEmailDeliverySetting(body.key.trim(), body.value)
+  if (!deliveryCheck.ok) {
+    return NextResponse.json({ error: deliveryCheck.error }, { status: 400 })
   }
 
   const database = await db()

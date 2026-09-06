@@ -131,6 +131,8 @@ export async function POST(req: NextRequest) {
         budget: body.budget?.trim() || null,
         disciplines: body.disciplines?.trim() || null,
       }),
+      undefined,
+      { template: 'project-enquiry' },
     )
   } catch (err) {
     console.error('[enquiry] notification email failed', err)

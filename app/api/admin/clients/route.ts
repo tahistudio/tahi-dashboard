@@ -230,6 +230,8 @@ export async function POST(req: NextRequest) {
             boundEmail: invite.email,
             expiresAt: minted.expiresAt,
           }),
+          undefined,
+          { template: 'client-invite', orgId: id },
         )
         invite.emailed = outcome.success
         if (!outcome.success) invite.error = outcome.error ?? 'Failed to send'

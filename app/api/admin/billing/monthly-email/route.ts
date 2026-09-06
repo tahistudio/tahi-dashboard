@@ -5,11 +5,15 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, gte, lt } from 'drizzle-orm'
 import { emailFromAddress } from '@/lib/email'
+import { deliverEmail } from '@/lib/email-delivery'
 
 /**
  * POST /api/admin/billing/monthly-email
  * T224: Monthly billing email. Generates a per-client table of billable hours
- * and amounts for the prior month, and sends it via Resend.
+ * and amounts for the prior month, and sends it through the one delivery gate
+ * (lib/email-delivery.ts). The recipient is the studio's own mailbox, so the
+ * tahi.studio allowlist is a no-op here; routing it through the gate anyway is
+ * what keeps "there is no second way out" true rather than nearly true.
  *
  * Can be triggered by a Cloudflare Cron Trigger on the 1st of each month,
  * or manually from the admin dashboard.
@@ -129,25 +133,22 @@ export async function POST(req: NextRequest) {
     </div>
   `
 
-  // Send via Resend
+  // Out through the one door.
   const resendKey = process.env.RESEND_API_KEY
+  let emailSent = false
   if (resendKey && rows.length > 0) {
     try {
-      await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${resendKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: emailFromAddress(),
-          to: ['liam@tahi.studio'],
-          subject: `Monthly Billing Summary - ${monthLabel}`,
-          html: emailHtml,
-        }),
+      const outcome = await deliverEmail({
+        from: emailFromAddress(),
+        to: 'liam@tahi.studio',
+        subject: `Monthly Billing Summary - ${monthLabel}`,
+        html: emailHtml,
+        template: 'monthly-billing-summary',
       })
+      emailSent = outcome.success
     } catch {
-      // Email send failed silently
+      // A failed summary email must not fail the report the caller asked for.
+      // `emailSent` in the response is what tells them it did not go.
     }
   }
 
@@ -158,6 +159,6 @@ export async function POST(req: NextRequest) {
     totalHours: totalHours.toFixed(1),
     totalAmount: `$${totalAmount.toFixed(2)}`,
     rows,
-    emailSent: !!resendKey && rows.length > 0,
+    emailSent,
   })
 }

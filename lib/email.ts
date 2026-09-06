@@ -1,52 +1,31 @@
 /**
  * lib/email.ts
- * Resend email send helper.
- * Only sends if RESEND_API_KEY is set in the environment.
+ * The React-element send helper.
+ *
+ * It no longer talks to Resend. Every send now goes through the one door in
+ * lib/email-delivery.ts, which applies the tahi.studio allowlist, records what
+ * it withheld, and owns the only Resend client in the tree. This module is
+ * what it always was from a caller's point of view: "render this element and
+ * mail it", with the same signature it has had all along so the dozen call
+ * sites and their tests did not have to move.
  */
-import { Resend } from 'resend'
 import type { ReactElement } from 'react'
+import { deliverEmail } from '@/lib/email-delivery'
+
+export { emailFromAddress } from '@/lib/email-from'
 
 /**
- * The lockup every Tahi email is sent from when the Worker has no
- * RESEND_FROM_EMAIL set.
+ * What this send is and who it belongs to, for the suppression log.
  *
- * Branded rather than bare on purpose: eight call sites decided a from address
- * for themselves, four values between them, and this module fell back to a
- * fifth, unnamed one, so a client's inbox threaded the studio as several
- * separate senders and the "[REQ-n]" subject prefix could not group anything.
- * Every send in the tree now asks this module, including the two written in
- * one person's voice (they pass a display name, below).
+ * Optional because lib/notification-email.ts is owned by another slice and
+ * cannot be edited here; a send with no context is logged under 'unspecified'
+ * rather than refused.
  */
-const DEFAULT_FROM = 'Tahi Studio <business@tahi.studio>'
-
-/**
- * The from address for any send, from one place.
- *
- * The operator overrides it with RESEND_FROM_EMAIL, which should hold a
- * verified lockup such as 'Tahi Studio <notifications@tahi.studio>'.
- *
- * `displayName` re-labels the same mailbox for the handful of emails written in
- * one person's voice (a sales nudge is signed by a human, not by a studio).
- * The mailbox is taken out of the configured value rather than concatenated
- * with it, so an operator who sets a full lockup does not end up sending from
- * "Someone <Tahi Studio <notifications@tahi.studio>>".
- */
-export function emailFromAddress(displayName?: string): string {
-  const configured = process.env.RESEND_FROM_EMAIL?.trim()
-  const from = configured && configured.length > 0 ? configured : DEFAULT_FROM
-  if (!displayName?.trim()) return from
-  const mailbox = from.match(/<([^>]+)>/)?.[1]?.trim() ?? from
-  return `${displayName.trim()} <${mailbox}>`
-}
-
-let _resend: Resend | null = null
-
-function getResend(): Resend | null {
-  if (!process.env.RESEND_API_KEY) return null
-  if (!_resend) {
-    _resend = new Resend(process.env.RESEND_API_KEY)
-  }
-  return _resend
+export interface SendEmailContext {
+  /** Kebab-case template name, e.g. 'invoice-sent'. */
+  template?: string
+  /** The client this send belongs to, when there is one. */
+  orgId?: string | null
 }
 
 export async function sendEmail(
@@ -63,31 +42,20 @@ export async function sendEmail(
    * exception costs the whole message.
    */
   text?: string,
-): Promise<{ success: boolean; error?: string }> {
-  const resend = getResend()
-  if (!resend) {
-    return { success: false, error: 'RESEND_API_KEY not configured' }
-  }
+  context?: SendEmailContext,
+): Promise<{ success: boolean; error?: string; suppressedCount?: number }> {
+  const result = await deliverEmail({
+    to,
+    subject,
+    react,
+    text,
+    template: context?.template ?? 'unspecified',
+    orgId: context?.orgId ?? null,
+  })
 
-  const from = emailFromAddress()
-
-  try {
-    const { error } = await resend.emails.send({
-      from,
-      to: Array.isArray(to) ? to : [to],
-      subject,
-      react,
-      ...(text && text.trim() ? { text } : {}),
-    })
-
-    if (error) {
-      console.error('[email] Resend error:', error)
-      return { success: false, error: error.message }
-    }
-
-    return { success: true }
-  } catch (err) {
-    console.error('[email] Send failed:', err)
-    return { success: false, error: 'Failed to send email' }
+  return {
+    success: result.success,
+    ...(result.error ? { error: result.error } : {}),
+    ...(result.suppressedCount > 0 ? { suppressedCount: result.suppressedCount } : {}),
   }
 }

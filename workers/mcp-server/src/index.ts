@@ -1461,11 +1461,12 @@ const TOOLS: ToolDef[] = [
   tool('list_reviews', 'List all client reviews and testimonial submissions'),
 
   // ── Settings ──────────────────────────────────────────────────────────
-  tool('get_settings', 'Get all dashboard settings as a key/value map. invoicing.defaultChannel and invoicing.xeroEmailMode are always present, filled in with their studio defaults (stripe, dashboard) when no row holds a value.'),
-  tool('update_settings', 'Update a dashboard setting. Any key is accepted; four are validated and answer 400 with a sentence when the value is wrong: invoicing.defaultChannel (stripe | xero), invoicing.xeroEmailMode (dashboard | xero | both, who emails a Xero-rail invoice), invoicing.xeroPaymentAccountCode (a Xero bank account code, up to 10 letters, digits or dashes; a mark-paid records the payment against it), and invoicing.bankDetails (a JSON string with any of accountName, accountNumber, bankName, referenceHint, all strings; accountNumber may only hold digits, dashes and spaces). An empty value clears any of them.', {
+  tool('get_settings', 'Get all dashboard settings as a key/value map. invoicing.defaultChannel and invoicing.xeroEmailMode are always present, filled in with their studio defaults (stripe, dashboard) when no row holds a value. The three email delivery keys are always present too, in their RESOLVED form: email.deliveryMode ("allowlist" | "all", and an absent or malformed row reads as allowlist, so the gate is on), email.allowedDomains (a JSON array, ["tahi.studio"] when unset) and email.allowedOrgIds (a JSON array, [] when unset).'),
+  tool('update_settings', 'Update a dashboard setting. Any key is accepted; seven are validated and answer 400 with a sentence when the value is wrong: invoicing.defaultChannel (stripe | xero), invoicing.xeroEmailMode (dashboard | xero | both, who emails a Xero-rail invoice), invoicing.xeroPaymentAccountCode (a Xero bank account code, up to 10 letters, digits or dashes; a mark-paid records the payment against it), and invoicing.bankDetails (a JSON string with any of accountName, accountNumber, bankName, referenceHint, all strings; accountNumber may only hold digits, dashes and spaces), and the three email delivery keys: email.deliveryMode (allowlist | all), email.allowedDomains (a JSON array of bare domains) and email.allowedOrgIds (a JSON array of organisation ids). An empty value clears any of them, and clearing email.deliveryMode turns the allowlist ON rather than off, because the default is closed. DO NOT set email.deliveryMode to "all" for anyone unless they have asked for it in those words: it lets this system email any address, including real clients.', {
     key: prop('string', 'Setting key'),
     value: prop('string', 'Setting value'),
   }, ['key', 'value']),
+  tool('list_email_suppressions', 'List the last 100 recipients the email delivery allowlist held back, newest first. One row per withheld address: to, orgId, template, subject, reason and when. This is how you answer "did that email actually reach them?": an address that is not on the allowlist produces a row here and no send at all. Read-only; clearing the log is super-admin only and is deliberately not exposed as a tool.'),
 
   // ── AI ────────────────────────────────────────────────────────────────
   // ── Financial / Xero ───────────────────────────────────────────────
@@ -2556,6 +2557,8 @@ async function executeTool(
       return json(await apiGet('/api/admin/settings', token))
     case 'update_settings':
       return json(await apiWrite('/api/admin/settings', token, 'PATCH', args as Record<string, unknown>))
+    case 'list_email_suppressions':
+      return json(await apiGet('/api/admin/email-suppressions', token))
 
     // ── Financial / Xero ──────────────────────────────────────────────
     case 'get_financial_health':

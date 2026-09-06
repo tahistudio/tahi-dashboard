@@ -6,6 +6,7 @@ import { schema } from '@/db/d1'
 import { eq, desc } from 'drizzle-orm'
 import { logActivity } from '@/lib/deal-activity'
 import { emailFromAddress } from '@/lib/email'
+import { deliverEmail } from '@/lib/email-delivery'
 import { requireDealAccess } from '../../_access'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -100,31 +101,33 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       }
 
       if (process.env.RESEND_API_KEY) {
-        const res = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            // A nudge is written in one person's voice, so it keeps the display
-            // name and takes the mailbox from the one configured lockup. Built
-            // by hand it produced "Liam from Tahi Studio <Tahi Studio <...>>"
-            // the moment RESEND_FROM_EMAIL held a full lockup.
-            from: emailFromAddress('Liam from Tahi Studio'),
-            to: body.contactEmails,
-            subject: body.subject,
-            html: outgoingHtml,
-          }),
+        // Out through the one door (lib/email-delivery.ts). A nudge goes to a
+        // prospect at their own company, which is exactly the shape of address
+        // the tahi.studio allowlist exists to hold back until Liam has
+        // verified it, so this is the call site most likely to be stopped.
+        const outcome = await deliverEmail({
+          // A nudge is written in one person's voice, so it keeps the display
+          // name and takes the mailbox from the one configured lockup. Built
+          // by hand it produced "Liam from Tahi Studio <Tahi Studio <...>>"
+          // the moment RESEND_FROM_EMAIL held a full lockup.
+          from: emailFromAddress('Liam from Tahi Studio'),
+          to: body.contactEmails,
+          subject: body.subject,
+          html: outgoingHtml,
+          template: 'deal-nudge',
         })
 
-        if (!res.ok) {
-          const errText = await res.text()
+        if (!outcome.success) {
           await database.update(schema.dealNudges).set({
             status: 'failed',
             updatedAt: new Date().toISOString(),
           }).where(eq(schema.dealNudges.id, nudgeId))
-          return NextResponse.json({ id: nudgeId, status: 'failed', error: errText }, { status: 500 })
+          return NextResponse.json({
+            id: nudgeId,
+            status: 'failed',
+            error: outcome.error ?? 'Send failed',
+            suppressedCount: outcome.suppressedCount,
+          }, { status: outcome.blocked ? 409 : 500 })
         }
       }
 

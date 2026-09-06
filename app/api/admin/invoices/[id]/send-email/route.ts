@@ -6,6 +6,7 @@ import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { publicUrl } from '@/lib/app-url'
 import { sendEmail } from '@/lib/email'
+import { partitionRecipients, resolveDeliveryPolicy } from '@/lib/email-delivery'
 import { InvoiceSentEmail } from '@/emails/invoice-sent'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { requireFeature } from '@/lib/require-feature'
@@ -257,8 +258,22 @@ export async function POST(req: NextRequest, { params }: Params) {
   // and the notification write, so a retry after an apparent failure would mail
   // the client a second PDF. emailInvoiceFromXero refuses when Xero's own
   // SentToContact flag and our sentAt BOTH say it has gone already.
+  //
+  // THE DELIVERY ALLOWLIST REACHES THIS PATH TOO, and it has to be asked
+  // separately. Xero's Email endpoint takes no address: Xero holds the contact
+  // and mails it itself, so lib/email-delivery.ts never sees it and cannot
+  // filter it. Asking the same pure rule here is what stops "no client gets
+  // mail until Liam says so" being true of our template and false of Xero's.
+  // If every billing contact would be withheld, Xero stands down as well.
+  const deliveryPolicy = await resolveDeliveryPolicy()
+  const anyRecipientAllowed = partitionRecipients(
+    recipients.map(r => r.email),
+    deliveryPolicy,
+    invoiceRow.orgId,
+  ).allowed.length > 0
+
   const onXeroRail = payContext.channel === 'xero'
-  const wantsXeroEmail = onXeroRail && payContext.xeroEmailMode !== 'dashboard'
+  const wantsXeroEmail = onXeroRail && payContext.xeroEmailMode !== 'dashboard' && anyRecipientAllowed
   const xeroOutcome: XeroEmailOutcome | null = wantsXeroEmail
     ? await emailInvoiceFromXero(invoiceRow.xeroInvoiceId, { alreadySent })
     : null
@@ -285,6 +300,8 @@ export async function POST(req: NextRequest, { params }: Params) {
           paymentUrl: payUrl ?? undefined,
           howToPay: howToPay ?? undefined,
         }),
+        undefined,
+        { template: 'invoice-sent', orgId: invoiceRow.orgId },
       )
       return { email: r.email, ok: res.success, error: res.error }
     }))
@@ -297,6 +314,15 @@ export async function POST(req: NextRequest, { params }: Params) {
   // with a clean Xero send is the one case where an empty sentTo is a success,
   // so the check is "did anybody get it", not "did we send it".
   if (sentTo.length === 0 && xeroOutcome?.status !== 'sent') {
+    // 409, not 502, when the delivery allowlist is the reason. Nothing is
+    // broken and there is nothing to retry: the studio has not opened delivery
+    // to this client yet, and a 502 would send someone hunting an outage.
+    if (!anyRecipientAllowed) {
+      return NextResponse.json({
+        error: 'Held back by the email allowlist',
+        message: 'No billing contact for this client is on the email delivery allowlist. Settings > Studio details > Email delivery.',
+      }, { status: 409 })
+    }
     return NextResponse.json(
       { error: 'Failed to send email', message: failed[0]?.error ?? 'Unknown error' },
       { status: 502 },

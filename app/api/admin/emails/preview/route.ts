@@ -176,10 +176,11 @@ async function sendPreview(
 ): Promise<{ success: boolean; error?: string }> {
   const subject = `[PREVIEW] ${preview.subject}`
   const text = await plainTextAlternative(preview.react)
-  let result = await sendEmail(to, subject, preview.react, text)
+  const context = { template: `preview-${preview.template}` }
+  let result = await sendEmail(to, subject, preview.react, text, context)
   if (!result.success && isRateLimited(result.error)) {
     await sleep(RATE_LIMIT_BACKOFF_MS)
-    result = await sendEmail(to, subject, preview.react, text)
+    result = await sendEmail(to, subject, preview.react, text, context)
   }
   return result
 }

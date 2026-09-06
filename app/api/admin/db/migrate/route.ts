@@ -2063,6 +2063,23 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE invoices ADD COLUMN xero_online_invoice_url text`,
     ],
   },
+  {
+    name: '0094',
+    description: 'email_suppressions: the evidence half of the email delivery allowlist. lib/email-delivery.ts is the one door out of this platform and withholds any recipient whose domain is not in the settings key `email.allowedDomains` (default ["tahi.studio"]) unless the send carries an org id listed in `email.allowedOrgIds`. `email.deliveryMode` decides whether the rule applies and defaults to allowlist when the row is missing OR malformed, so the gate fails closed. One row per withheld recipient, written before the Resend key is even looked at, so a worker with no key still logs and the gate can be proved without mailing anyone. The column is to_address, not to, because TO is a SQLite keyword and the bare form does not parse here. org_id carries no REFERENCES: losing the evidence of a withheld send to a cascade would be the wrong trade. Additive and idempotent; re-running is safe, and a database without the table degrades to "nothing logged" rather than a 500, because both readers are new and the writer is inside a try/catch.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS email_suppressions (
+        id text PRIMARY KEY NOT NULL,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        to_address text NOT NULL,
+        org_id text,
+        template text,
+        subject text,
+        reason text NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_email_suppressions_created ON email_suppressions(created_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_email_suppressions_org ON email_suppressions(org_id)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

@@ -78,11 +78,14 @@ export async function fanOutAnnouncementEmails(
   if (orgIds.length === 0) return 0
 
   // 2) Load contacts for those orgs that have an email address.
-  let contacts: { id: string; email: string; clerkUserId: string | null }[] = []
+  let contacts: { id: string; orgId: string; email: string; clerkUserId: string | null }[] = []
   try {
     const rows = await database
       .select({
         id: schema.contacts.id,
+        // Carried into the delivery gate so a client whose org is on
+        // `email.allowedOrgIds` can be mailed even from an outside domain.
+        orgId: schema.contacts.orgId,
         email: schema.contacts.email,
         clerkUserId: schema.contacts.clerkUserId,
       })
@@ -109,7 +112,7 @@ export async function fanOutAnnouncementEmails(
     ctaUrl: publicUrl('/'),
   })
 
-  const eligible: { email: string }[] = []
+  const eligible: { email: string; orgId: string }[] = []
   for (const contact of contacts) {
     let allowed = true
     if (contact.clerkUserId) {
@@ -121,7 +124,7 @@ export async function fanOutAnnouncementEmails(
         'email',
       )
     }
-    if (allowed) eligible.push({ email: contact.email.trim() })
+    if (allowed) eligible.push({ email: contact.email.trim(), orgId: contact.orgId })
   }
 
   if (eligible.length === 0) return 0
@@ -136,7 +139,10 @@ export async function fanOutAnnouncementEmails(
     const results = await Promise.all(
       slice.map(async (r) => {
         try {
-          const res = await sendEmail(r.email, subject, emailReact)
+          const res = await sendEmail(r.email, subject, emailReact, undefined, {
+            template: 'announcement',
+            orgId: r.orgId,
+          })
           return res.success
         } catch (err) {
           console.error('[announcements] email send failed', err)

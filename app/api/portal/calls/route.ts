@@ -431,6 +431,8 @@ export async function POST(req: NextRequest) {
           meetingUrl: null,
           portalUrl: publicUrl('/overview'),
         }),
+        undefined,
+        { template: 'kickoff-booked', orgId },
       )
       emailed = result.success
     } catch (err) {

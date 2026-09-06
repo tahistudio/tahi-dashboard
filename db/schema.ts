@@ -1607,6 +1607,36 @@ export const settings = sqliteTable('settings', {
 })
 
 // ============================================================
+// EMAIL SUPPRESSIONS (what the delivery allowlist held back)
+// ============================================================
+
+// One row per recipient lib/email-delivery.ts refused to mail, so "did that
+// reach them?" is answerable with a row instead of a shrug. Written on every
+// filtered send, including in a worker with no RESEND_API_KEY, which is what
+// makes the gate verifiable without putting a message in anyone's inbox.
+//
+// The property is `to` because that is what the caller passed; the COLUMN is
+// `to_address` because TO is a SQLite keyword and the raw CREATE TABLE in
+// app/api/admin/db/migrate would not parse with a bare `to`.
+//
+// orgId is a plain string, not a foreign key: a suppression can name an
+// organisation that is later deleted, and losing the evidence of a withheld
+// send to a cascade would be exactly the wrong trade.
+export const emailSuppressions = sqliteTable('email_suppressions', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+  to: text('to_address').notNull(),
+  orgId: text('org_id'),
+  template: text('template'),
+  subject: text('subject'),
+  // not_in_allowlist. One value today, a column because there will be more.
+  reason: text('reason').notNull(),
+}, (table) => [
+  index('idx_email_suppressions_created').on(table.createdAt),
+  index('idx_email_suppressions_org').on(table.orgId),
+])
+
+// ============================================================
 // TEAM MEMBER ACCESS (Scoping rules)
 // ============================================================
 
