@@ -7,6 +7,7 @@ import {
   readPreviewMode,
   resolvePreviewOrgId,
 } from '@/lib/preview-cookie'
+import { resolveNoOrgRedirect } from '@/lib/workspace-choice'
 
 // Public routes : no auth needed. The app serves at the domain root (no
 // basePath), so a logged-out signer hitting /p/contract/<token> is never
@@ -206,19 +207,31 @@ export default clerkMiddleware(async (auth, req) => {
   const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
   const isAdmin = tahiOrgId && orgId === tahiOrgId
 
-  // Approved-client gate. A signed-in user with NO active org is a lead (e.g.
-  // someone who just signed up or submitted a project enquiry), not a
-  // provisioned client or teammate. Confine them to the onboarding flow; never
-  // let them reach the dashboard shell. Admins/teammates live in the Tahi org
-  // and clients have their own org, so both carry an orgId. Page routes only —
-  // API routes self-guard (portal routes already 403 a null/Tahi org), and the
-  // onboarding/welcome flow must stay reachable for a no-org lead.
-  const path = req.nextUrl.pathname
-  const inOnboarding = path.startsWith('/onboarding') || path.startsWith('/welcome')
-  if (!orgId && !inOnboarding && !path.startsWith('/api/')) {
-    const url = req.nextUrl.clone()
-    url.pathname = '/onboarding'
-    return NextResponse.redirect(url)
+  // No ACTIVE org: hand the session to /choose-workspace, never straight to
+  // onboarding.
+  //
+  // A Clerk session carries ONE active organisation, not a membership list, and
+  // a fresh sign-in has none set even when the person holds memberships. This
+  // gate used to read that empty orgId as "lead" and redirect to /onboarding,
+  // which sent a co-founder who had just accepted her studio invitation into
+  // the CLIENT onboarding flow (reproduced on production). The membership list
+  // only exists in the browser session, so the decision moves to the chooser
+  // page, which calls setActive and then comes back through here with an org.
+  // Genuinely org-less people still reach /onboarding: the chooser sends them
+  // (see lib/workspace-choice.ts).
+  //
+  // Page routes only. API routes self-guard (portal routes already 403 a
+  // null/Tahi org), and /onboarding, /welcome and the chooser itself stay
+  // reachable without an org.
+  if (!orgId) {
+    const target = resolveNoOrgRedirect(req.nextUrl.pathname, req.nextUrl.search)
+    if (target) {
+      const url = req.nextUrl.clone()
+      const [targetPath, targetQuery] = target.split('?')
+      url.pathname = targetPath
+      url.search = targetQuery ? `?${targetQuery}` : ''
+      return NextResponse.redirect(url)
+    }
   }
 
   // Escape hatch, first, before any gate can bounce it. Append ?exit-preview=1

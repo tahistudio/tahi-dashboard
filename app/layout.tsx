@@ -37,11 +37,19 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
+    // Both Clerk fallbacks route through /choose-workspace rather than straight
+    // to a destination. A session that has just been created has no ACTIVE
+    // Clerk organisation, even for someone who already accepted an organisation
+    // invitation, so landing on /overview or /onboarding decided the person's
+    // audience before anyone had looked at their memberships (a teammate was
+    // being sent into client onboarding). The chooser looks, calls setActive,
+    // then forwards. Mirrored in next.config.ts
+    // NEXT_PUBLIC_CLERK_SIGN_*_FALLBACK_REDIRECT_URL.
     <ClerkProvider
       signInUrl="/sign-in"
       signUpUrl="/sign-up"
-      signInFallbackRedirectUrl="/overview"
-      signUpFallbackRedirectUrl="/onboarding"
+      signInFallbackRedirectUrl="/choose-workspace?next=%2Foverview"
+      signUpFallbackRedirectUrl="/choose-workspace?next=%2Foverview"
       localization={{
         signUp: {
           start: {
