@@ -525,6 +525,22 @@ describe('requests', () => {
     expect(plan.toInsert).toHaveLength(0)
     expect(plan.skipped[0].reason).toContain('Could not resolve its organisation')
   })
+
+  it('resolves a request that names its organisation by the ManyRequests name once the D1 row is stamped', () => {
+    // The wire shape carries the source NAME only ("Glasswall"), and the D1 row
+    // is called something else ("Glasswall Solutions Ltd"). After the
+    // organisations entity has written manyrequests_id, the name must resolve
+    // through the source organisation's id rather than being refused.
+    const snapshot = seededSnapshot()
+    snapshot.orgs[0].manyrequestsId = '3'
+    const src = source()
+    src.requests = src.requests.map((request) => ({ ...request, organization: 'Glasswall' }))
+    const plan = PLAN_BUILDERS.requests(src, snapshot, OPTIONS)
+    const refused = plan.skipped.filter((row) => row.reason.includes('Could not resolve its organisation'))
+    expect(refused).toHaveLength(0)
+    expect(plan.toInsert.length + plan.toUpdate.length).toBeGreaterThan(0)
+    for (const row of plan.toInsert) expect(row.values.orgId).toBe('org_glasswall')
+  })
 })
 
 describe('messages', () => {

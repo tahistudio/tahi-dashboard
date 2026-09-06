@@ -1071,6 +1071,7 @@ export function planRequests(
     if (org.manyrequestsId) orgIdByKey.set(org.manyrequestsId, org.id)
     orgIdByName.set(org.name.trim().toLowerCase(), org.id)
   }
+  registerSourceOrgNames(source, orgIdByKey, orgIdByName)
 
   const brandIdByKey = new Map<string, string>()
   for (const brand of snapshot.brands) if (brand.manyrequestsId) brandIdByKey.set(brand.manyrequestsId, brand.id)
@@ -1490,6 +1491,7 @@ export function planInvoices(
     if (org.manyrequestsId) orgIdByKey.set(org.manyrequestsId, org.id)
     orgIdByName.set(org.name.trim().toLowerCase(), org.id)
   }
+  registerSourceOrgNames(source, orgIdByKey, orgIdByName)
 
   const byKey = indexByKey(snapshot.invoices)
   /** D1 invoices that already exist and could be the same charge, indexed by
@@ -1660,6 +1662,30 @@ export function planInvoices(
 }
 
 // ── assembly ─────────────────────────────────────────────────────────────────
+
+/**
+ * Requests and invoices name their organisation by its ManyRequests NAME only
+ * (the wire shape carries no id), and that name is not the D1 name for the
+ * hand-mapped clients ("Elevate" is "Telcom Networks Limited trading as
+ * Elevate" in D1). Once the organisations entity has stamped manyrequests_id,
+ * the source name resolves through the source organisation's own id, so the
+ * name index gains every source name whose organisation is already in D1.
+ * A D1 name that happens to equal a source name keeps winning, since it was
+ * registered first and the index only fills gaps.
+ */
+function registerSourceOrgNames(
+  source: ImportSource,
+  orgIdByKey: Map<string, string>,
+  orgIdByName: Map<string, string>,
+): void {
+  for (const org of source.organizations) {
+    const key = externalKey(org.id)
+    const name = typeof org.name === 'string' ? org.name.trim().toLowerCase() : ''
+    if (!key || !name) continue
+    const d1Id = orgIdByKey.get(key)
+    if (d1Id && !orgIdByName.has(name)) orgIdByName.set(name, d1Id)
+  }
+}
 
 export type PlanBuilder = (source: ImportSource, snapshot: ImportSnapshot, options: PlanOptions) => EntityPlan
 
