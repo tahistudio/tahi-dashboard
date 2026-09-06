@@ -22,13 +22,32 @@
  *
  * Disarming (`mode: 'view'`) is deliberately NOT gated. Whoever holds the
  * cookie may always put it down, exactly like the exit hatches next door.
+ *
+ * BEFORE THIS MODE IS ARMED IN A LIVE ENVIRONMENT, read this.
+ *
+ * Act mode adds no email path: every opened route notifies the STUDIO only
+ * (notifyAllAdmins and notifyRequestTeam resolve `team_members` rows and skip
+ * contact participants), the review and PATCH paths are bell-only, and the
+ * automation executor refuses send_email. Nothing here can put a message in a
+ * client's inbox. What it DOES do is make those studio sends reachable on
+ * demand for the first time: in the read-only preview every one of these
+ * writes answered 403, so no mail fired at all.
+ *
+ * That means the standing rule "no real teammate receives any mail until it is
+ * verified" rests on the send allowlist in the email layer, which is a
+ * different workstream. Do not arm this mode in an environment where that
+ * allowlist is not in place and RESEND_API_KEY is live.
+ *
+ * The same applies to `dispatchDomainEvent` on the request-created and review
+ * paths: it fires outgoing webhooks exactly as a real client write does. That
+ * channel is not new, but an acting write is the first way an operator can
+ * trigger it from inside a client's workspace on purpose.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
-import { resolvePermissions } from '@/lib/permissions'
-import { resolveTeamMember } from '@/lib/team-identity'
+import { resolveActEligibility, type ActEligibility } from '@/lib/acting-eligibility'
 import {
   ACT_MODE_VALUE,
   IMPERSONATE_MODE_COOKIE,
@@ -56,46 +75,18 @@ function disarm(res: NextResponse): NextResponse {
   return res
 }
 
-interface ActEligibility {
-  ok: boolean
-  reason: string | null
-}
-
 /**
- * May this session act as the client it is previewing? The same three
- * conditions lib/server-auth.ts re-checks on every write, asked once here so
- * the UI and the write path can never disagree about the answer.
+ * May this session act as the client it is previewing? The same two conditions
+ * lib/server-auth.ts re-checks on every acting write, asked through the same
+ * module (lib/acting-eligibility.ts) so the UI and the write path can never
+ * disagree about the answer.
  */
 async function eligibility(
   userId: string | null,
   clerkOrgId: string | null,
 ): Promise<ActEligibility> {
-  if (!userId || !clerkOrgId) {
-    return { ok: false, reason: 'Sign in as a Tahi Studio super admin.' }
-  }
   const database = await db()
-  const drizzle = database as Drizzle
-  const access = await resolvePermissions(
-    drizzle as unknown as Parameters<typeof resolvePermissions>[0],
-    { userId, orgId: clerkOrgId },
-  )
-  if (!access.isSuperAdmin) {
-    return {
-      ok: false,
-      reason: 'Acting as a client is limited to super admins.',
-    }
-  }
-  const member = await resolveTeamMember(drizzle, userId)
-  if (!member) {
-    return {
-      ok: false,
-      // The service token is the usual traveller down this branch: it is
-      // verified by TAHI_API_TOKEN and has no roster row by design, so it can
-      // never be the person an acting write is attributed to.
-      reason: 'Acting as a client needs a team member profile linked to your login.',
-    }
-  }
-  return { ok: true, reason: null }
+  return resolveActEligibility(database as Drizzle, userId, clerkOrgId)
 }
 
 /**

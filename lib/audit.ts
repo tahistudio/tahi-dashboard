@@ -52,6 +52,33 @@ export async function logAudit(database: DB, entry: AuditEntry): Promise<void> {
 }
 
 /**
+ * The character the `ESCAPE` clause names on every audit prefix filter.
+ *
+ * A backslash, because SQLite string literals do NOT process backslash escapes:
+ * `ESCAPE '\'` in the emitted SQL means exactly one backslash and needs no
+ * doubling at the database.
+ */
+export const AUDIT_LIKE_ESCAPE = '\\'
+
+/**
+ * Make an audit `action` prefix safe to drop into a LIKE pattern.
+ *
+ * ESCAPE, NEVER STRIP. The first version of this deleted `%` and `_` from the
+ * input, which silently rewrote the caller's question: `acting_as_client.`
+ * became `actingasclient.`, the query ran `LIKE 'actingasclient.%'`, and the
+ * entire Act as client trail read as empty through the one reader built for
+ * it. `permission.` worked only because it happens to carry no underscore.
+ *
+ * Escaping is also the only correct direction. `_` matches any single
+ * character and `%` matches any run, so leaving either raw would BROADEN a
+ * filter that exists to narrow. The escape character is escaped first, or a
+ * trailing backslash in the input would swallow the `%` this pattern appends.
+ */
+export function escapeAuditLikePrefix(prefix: string): string {
+  return prefix.replace(/[\\%_]/g, (m) => AUDIT_LIKE_ESCAPE + m)
+}
+
+/**
  * Record a system-sourced audit entry (no human actor). Thin wrapper over
  * logAudit that stamps actorId: null, actorType: 'system' so cron jobs,
  * webhooks, and background emailers don't have to hand-roll the insert.

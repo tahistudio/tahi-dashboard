@@ -40,8 +40,7 @@ import {
   readPreviewMode,
   resolvePreviewOrgId,
 } from '@/lib/preview-cookie'
-import { resolvePermissions } from '@/lib/permissions'
-import { resolveTeamMember } from '@/lib/team-identity'
+import { resolveActEligibility } from '@/lib/acting-eligibility'
 
 export interface RequestAuthResult {
   userId: string | null
@@ -216,14 +215,12 @@ export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResul
 /**
  * Prove the right to act as a client, or return null.
  *
- * Three things must all hold, and each is re-derived here on every request
- * rather than trusted from the browser:
- *   1. super_admin, from the roles table via resolvePermissions. Not a
- *      hardcoded list of email addresses: Liam and Staci hold the role as data
- *      (lib/permissions.ts SUPER_ADMIN_ROLE), so revoking it revokes this too.
- *   2. a `team_members` row linked to the Clerk user, because an acting write
- *      has to be attributable to a person on the roster. No row, no acting.
- *   3. a resolvable preview org, already established by the caller.
+ * Three things must all hold, and each is re-derived here on every acting
+ * request rather than trusted from the browser. The first two are
+ * `resolveActEligibility` (super_admin from the roles table, plus a
+ * `team_members` row to attribute the write to), shared with the route that
+ * arms the mode so the two can never disagree; the third is a resolvable
+ * preview org, already established by the caller.
  *
  * Fails CLOSED on any error: a D1 hiccup downgrades the session to the
  * read-only preview it was before, which refuses every write.
@@ -238,20 +235,9 @@ async function resolveActingIdentity(
     const database = await db()
     const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-    const access = await resolvePermissions(
-      drizzle as unknown as Parameters<typeof resolvePermissions>[0],
-      { userId, orgId: clerkOrgId },
-    )
-    if (!access.isSuperAdmin) return null
-
-    const member = await resolveTeamMember(drizzle, userId)
-    if (!member) return null
-
-    const [named] = await drizzle
-      .select({ name: schema.teamMembers.name })
-      .from(schema.teamMembers)
-      .where(eq(schema.teamMembers.id, member.id))
-      .limit(1)
+    const verdict = await resolveActEligibility(drizzle, userId, clerkOrgId)
+    if (!verdict.ok || !verdict.member) return null
+    const member = verdict.member
 
     // The org's primary seat, for the audit metadata only: "this happened in
     // the workspace whose main contact is X". The banner's own contact pick
@@ -274,7 +260,7 @@ async function resolveActingIdentity(
     return {
       adminUserId: userId,
       adminTeamMemberId: member.id,
-      adminName: named?.name?.trim() || 'Tahi Studio',
+      adminName: member.name?.trim() || 'Tahi Studio',
       orgId: targetOrgId,
       contactId,
     }
@@ -314,10 +300,11 @@ async function resolveActingIdentity(
  * ACT AS CLIENT. A second cookie (tahi-impersonate-mode) turns the lens into a
  * hand. It grants nothing on its own: `resolveActingIdentity` below re-proves
  * super_admin from the roles table and finds the acting person's team_members
- * row on every request. Crucially `impersonating` STAYS TRUE either way, so the
- * ~21 routes that hand-roll `if (impersonating) 403` keep refusing until a
- * route is deliberately opened through lib/acting-as.ts. Default deny survives
- * the feature.
+ * row on every request that could write. Reads skip it entirely, because no
+ * GET handler consumes the result. Crucially `impersonating` STAYS TRUE either
+ * way, so the ~21 routes that hand-roll `if (impersonating) 403` keep refusing
+ * until a route is deliberately opened through lib/acting-as.ts. Default deny
+ * survives the feature.
  */
 export async function getPortalAuth(req: NextRequest): Promise<PortalAuthResult> {
   const result = await getRequestAuth(req)
@@ -330,11 +317,18 @@ export async function getPortalAuth(req: NextRequest): Promise<PortalAuthResult>
   if (clerkOrgId && tahiOrgId && clerkOrgId === tahiOrgId) {
     const target = resolvePreviewOrgId(true, req.cookies.get(IMPERSONATE_ORG_COOKIE)?.value)
     if (target) {
+      // Paid only when the browser asks to act AND the request could actually
+      // write. Nothing reads `actingAs` on a GET: `refusePreviewWrite` and
+      // `actingIdentity` are called from POST / PATCH / PUT handlers only, and
+      // the resolution is not free (resolvePermissions alone is a roster read,
+      // a roles join and two feature_visibility reads, then the seat select on
+      // top). The client overview fans out about ten portal GETs in parallel,
+      // so charging every one of them for an answer no reader consumes made
+      // simply LOOKING at a client in act mode cost roughly seventy queries.
+      // HEAD rides with GET because Next serves it from the GET handler.
+      const isRead = req.method === 'GET' || req.method === 'HEAD'
       const wantsAct =
-        readPreviewMode(req.cookies.get(IMPERSONATE_MODE_COOKIE)?.value) === 'act'
-      // Two extra reads, paid only when the browser actually asks to act. A
-      // read-only preview is the overwhelming case and stays exactly as cheap
-      // as it was.
+        !isRead && readPreviewMode(req.cookies.get(IMPERSONATE_MODE_COOKIE)?.value) === 'act'
       const actingAs = wantsAct
         ? await resolveActingIdentity(result.userId, clerkOrgId, target)
         : null

@@ -101,6 +101,22 @@ export async function POST(req: NextRequest, { params }: Params) {
     const author = authorFor(acting, contact?.id ?? userId)
 
     const msgId = crypto.randomUUID()
+
+    // The record FIRST, against the id the insert below is about to use.
+    // Awaited and allowed to throw, and deliberately ahead of the write rather
+    // than behind it: a message posted into a client's thread by the studio
+    // must never exist without the row that says who did it, and ordering it
+    // last only guaranteed a loud failure AFTER the message had landed, which
+    // then invited a retry and a duplicate. This way a failed record leaves
+    // the thread untouched. No-op on the ordinary client path.
+    await recordActingWrite(drizzle as unknown as DB, acting, {
+      verb: 'message.posted',
+      entityType: 'request',
+      entityId: id,
+      route: 'POST /api/portal/requests/[id]/messages',
+      extra: { messageId: msgId, requestNumber: request.requestNumber },
+    })
+
     await drizzle.insert(schema.messages).values({
       id: msgId,
       requestId: id,
@@ -109,17 +125,6 @@ export async function POST(req: NextRequest, { params }: Params) {
       authorType: author.type,
       body: safeBody,
       isInternal: false,
-    })
-
-    // Awaited and allowed to throw, before the response and before the
-    // notification: a message posted into a client's thread by the studio must
-    // never exist without the row that says who did it.
-    await recordActingWrite(drizzle as unknown as DB, acting, {
-      verb: 'message.posted',
-      entityType: 'request',
-      entityId: id,
-      route: 'POST /api/portal/requests/[id]/messages',
-      extra: { messageId: msgId, requestNumber: request.requestNumber },
     })
 
     await drizzle

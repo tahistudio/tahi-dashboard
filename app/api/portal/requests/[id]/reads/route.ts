@@ -81,11 +81,28 @@ export async function POST(req: NextRequest, { params }: Params) {
     .limit(1)
 
   if (existing) {
+    // A touch, not an event. The request detail page posts here about two
+    // seconds after every mount, so recording each one would bury the trail
+    // this mode exists to produce under rows that changed nothing: open five
+    // requests twice and the acting log is nine tenths receipts. The receipt
+    // row itself already names the studio member honestly, and the audit row
+    // for the FIRST look is below.
     await drizzle
       .update(schema.requestReads)
       .set({ lastReadAt: now })
       .where(eq(schema.requestReads.id, existing.id))
   } else {
+    // The record first, then the receipt: same ordering as every other acting
+    // write, so a failed record leaves nothing behind. Only the first look at
+    // a request is worth a row.
+    await recordActingWrite(drizzle as unknown as DB, acting, {
+      verb: 'request.read',
+      entityType: 'request',
+      entityId: id,
+      route: 'POST /api/portal/requests/[id]/reads',
+      extra: { lastReadAt: now, first: true },
+    })
+
     await drizzle.insert(schema.requestReads).values({
       id: crypto.randomUUID(),
       requestId: id,
@@ -94,14 +111,6 @@ export async function POST(req: NextRequest, { params }: Params) {
       lastReadAt: now,
     })
   }
-
-  await recordActingWrite(drizzle as unknown as DB, acting, {
-    verb: 'request.read',
-    entityType: 'request',
-    entityId: id,
-    route: 'POST /api/portal/requests/[id]/reads',
-    extra: { lastReadAt: now },
-  })
 
   return NextResponse.json({ ok: true, lastReadAt: now })
 }

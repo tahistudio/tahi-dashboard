@@ -6,6 +6,7 @@ import type { DB } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { resolveOwnerOrgForUpload } from '@/lib/upload-access'
 import { ACTING_AUDIT_PREFIX } from '@/lib/acting-as'
+import { resolveActEligibility } from '@/lib/acting-eligibility'
 import { logAuditStrict } from '@/lib/audit'
 import {
   IMPERSONATE_MODE_COOKIE,
@@ -154,12 +155,38 @@ export async function POST(req: NextRequest) {
     // everything else uses, and the org must match the previewed one: an admin
     // uploading to a DIFFERENT client while a preview happens to be open is an
     // ordinary studio upload and is not tagged as acting.
+    //
+    // The cookies are INTENT and nothing more, exactly as they are everywhere
+    // else. This route never reaches getPortalAuth (it is admin-authenticated
+    // by design, because the studio uploads to client orgs from the studio
+    // side too), so it asks lib/acting-eligibility.ts for the same proof
+    // getPortalAuth would have demanded: super_admin, plus a roster row to
+    // attribute the upload to. Without that, a Tahi admin who can never pass
+    // the act gate anywhere else could set the mode cookie by hand and mint
+    // `acting_as_client.*` rows for uploads they were already allowed to make,
+    // and the prefix would stop meaning one thing.
+    //
+    // The extra reads are paid only on the branch where both cookies already
+    // point at this org, which is rare: an ordinary studio upload spends
+    // nothing. A resolver hiccup fails closed to "not acting", so the file row
+    // (which already names the studio member honestly through
+    // uploaded_by_type) still lands.
     const actingOrgId = isAdmin
       ? resolvePreviewOrgId(true, req.cookies.get(IMPERSONATE_ORG_COOKIE)?.value)
       : null
-    const actingHere =
+    const cookiesSayActing =
       actingOrgId === ownerOrgId &&
       readPreviewMode(req.cookies.get(IMPERSONATE_MODE_COOKIE)?.value) === 'act'
+
+    let actingHere = false
+    if (cookiesSayActing) {
+      try {
+        const verdict = await resolveActEligibility(drizzle, userId, orgId)
+        actingHere = verdict.ok
+      } catch {
+        actingHere = false
+      }
+    }
 
     if (actingHere) {
       await logAuditStrict(drizzle as unknown as DB, {

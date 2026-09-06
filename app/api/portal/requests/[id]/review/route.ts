@@ -110,6 +110,20 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const nextStatus = reviewDecisionToStatus(decision)
     const now = new Date().toISOString()
+    const messageId = crypto.randomUUID()
+
+    // The record FIRST, ahead of both writes below and against the message id
+    // they are about to use. Awaited and allowed to throw: recording it after
+    // the status had already moved guaranteed only a loud failure on a change
+    // that had already happened. Ordered this way, a failed record leaves the
+    // request exactly where the client left it. No-op for a real client.
+    await recordActingWrite(drizzle as unknown as DB, acting, {
+      verb: 'review.submitted',
+      entityType: 'request',
+      entityId: id,
+      route: 'POST /api/portal/requests/[id]/review',
+      extra: { decision, nextStatus, messageId, note: note?.trim() || null },
+    })
 
     await drizzle
       .update(schema.requests)
@@ -132,7 +146,6 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const author = authorFor(acting, contact?.id ?? userId)
 
-    const messageId = crypto.randomUUID()
     await drizzle.insert(schema.messages).values({
       id: messageId,
       requestId: id,
@@ -141,16 +154,6 @@ export async function POST(req: NextRequest, { params }: Params) {
       authorType: author.type,
       body: buildReviewMessageHtml(decision, note),
       isInternal: false,
-    })
-
-    // Before the response and outside the best-effort block below: the status
-    // has already moved, so the record of who moved it is not optional.
-    await recordActingWrite(drizzle as unknown as DB, acting, {
-      verb: 'review.submitted',
-      entityType: 'request',
-      entityId: id,
-      route: 'POST /api/portal/requests/[id]/review',
-      extra: { decision, nextStatus, messageId, note: note?.trim() || null },
     })
 
     // Best-effort side effects. Neither may fail the review itself.

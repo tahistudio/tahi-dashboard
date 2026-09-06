@@ -133,10 +133,21 @@ export interface ActingWriteRecord {
  *
  * AWAITED AND ALLOWED TO THROW, unlike the rest of the audit call sites and
  * unlike the best-effort notification blocks these routes wrap in try/catch.
- * The record is the entire reason this mode is safe to hand to a person: a
- * write that lands without one is the failure this feature exists to prevent,
- * so the caller must let the request fail rather than answer 201 to an
- * unrecorded change in someone else's workspace.
+ * The record is the entire reason this mode is safe to hand to a person, so
+ * the caller must let the request fail rather than answer 201 to an unrecorded
+ * change in someone else's workspace.
+ *
+ * WHAT THAT ACTUALLY GUARANTEES, since this is not a transaction and D1 gives
+ * these routes no way to make it one:
+ *   - Where the written row's id is generated in code (the request POST, the
+ *     message POST, the review POST, the first read receipt), this is called
+ *     BEFORE the mutation. A failed record therefore leaves the client's
+ *     workspace untouched, and the operator's retry is a clean retry rather
+ *     than a second request filed under the client's name.
+ *   - Where the mutation has no id to pre-generate (the two reorders, the
+ *     onboarding PATCH), it is called AFTER. There the honest description is
+ *     best-effort-with-a-loud-failure: the change has landed and the 500 says
+ *     the record did not. It is not atomic and must not be described as such.
  *
  * `actorId` is the acting person's CLERK user id, not their team_members id.
  * That is the convention every other logAudit call site uses, and the audit

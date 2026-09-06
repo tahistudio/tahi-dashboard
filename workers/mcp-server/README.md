@@ -146,7 +146,11 @@ useful from here.
 - `list_acting_as_audit` is the one worth reaching for. It reads the
   `acting_as_client.*` audit trail with actor and target names resolved: what
   the studio filed, replied, approved or reordered inside a client's workspace,
-  by whom, and when.
+  by whom, and when. It asks `/api/admin/audit?actionPrefix=acting_as_client.`,
+  and that endpoint treats underscores as literal characters (it escapes the
+  LIKE wildcards rather than deleting them). It briefly did the opposite, which
+  turned the prefix into `actingasclient.` and made this tool answer "nothing
+  happened" no matter what the studio had done.
 
 The reason `set_client_view_mode` cannot be made to work service-side is worth
 stating rather than treating as a gap. An acting write is only safe because it

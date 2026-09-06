@@ -51,6 +51,10 @@ const ACTION_FILTERS: [string, string][] = [
   ['permission.', 'Permissions'],
   ['subscription.', 'Subscriptions'],
   ['contract', 'Contracts'],
+  // Everything the studio did while standing inside a client's workspace. The
+  // underscores are literal at the endpoint (it escapes LIKE wildcards rather
+  // than deleting them), so this reads the acting trail and nothing else.
+  ['acting_as_client.', 'Acting as client'],
 ]
 
 function formatWhen(iso: string): string {

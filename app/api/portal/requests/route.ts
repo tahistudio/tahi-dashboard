@@ -481,11 +481,38 @@ export async function POST(req: NextRequest) {
   // Resolve the placement into a priority and a queue position before the
   // insert. Without a placement nothing changes: standard priority at the
   // column default, exactly as this route behaved before.
-  let priority = 'standard'
+  //
+  // Priority is settled here, ahead of the block that can touch other rows, so
+  // the acting record below has everything it needs and nothing in the
+  // client's workspace has moved yet when it is written.
+  const priority = placement && placement !== 'queue' ? 'high' : 'standard'
+
+  // The record FIRST, against the id the INSERT below is about to use, and
+  // ahead of everything that can touch the client's workspace: the front-of-
+  // queue branch below renumbers their other open requests, so this sits above
+  // that too. Awaited and allowed to throw. Recorded afterwards, as it was, a
+  // failed record returned a 500 on a request that HAD been created, which
+  // invited a retry and a duplicate under the client's name.
+  //
+  // The per-org request number is deliberately absent from this row: the
+  // INSERT assigns it atomically in a subquery, so it does not exist yet. The
+  // entity id and title are the durable handles, and the number is one join
+  // away in `requests`. No-op for an ordinary client submission.
+  await recordActingWrite(drizzle2 as unknown as DB, acting, {
+    verb: 'request.created',
+    entityType: 'request',
+    entityId: id,
+    route: 'POST /api/portal/requests',
+    extra: {
+      title: title.trim(),
+      category: category ?? 'development',
+      priority,
+      placement: placement ?? 'queue',
+    },
+  })
+
   let queueOrder = 0
   if (placement) {
-    priority = placement === 'queue' ? 'standard' : 'high'
-
     if (placement === 'queue') {
       const openRows = await drizzle2
         .select({ queueOrder: schema.requests.queueOrder })
@@ -585,18 +612,6 @@ export async function POST(req: NextRequest) {
   const clientName = org?.name ?? 'a client'
 
   const cleanTitle = title.trim()
-
-  // The record, before the response. Awaited and allowed to throw: an acting
-  // write that lands without its audit row is the failure this mode exists to
-  // prevent, so a 500 here is the right answer even though the request row is
-  // already in. No-op for an ordinary client submission.
-  await recordActingWrite(drizzle2 as unknown as DB, acting, {
-    verb: 'request.created',
-    entityType: 'request',
-    entityId: id,
-    route: 'POST /api/portal/requests',
-    extra: { requestNumber, title: cleanTitle, category: category ?? 'development', priority },
-  })
 
   await notifyAllAdmins(drizzle2, {
     type: 'request_created',

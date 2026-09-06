@@ -23,7 +23,9 @@ const state: {
   inserts: { table: unknown; row: Row }[]
   updateSets: Row[]
   runs: unknown[]
-} = { selectQueue: [], inserts: [], updateSets: [], runs: [] }
+  /** Simulate a D1 hiccup on the audit insert, to pin the write ordering. */
+  auditThrows: boolean
+} = { selectQueue: [], inserts: [], updateSets: [], runs: [], auditThrows: false }
 
 vi.mock('@/lib/server-auth', () => ({ getPortalAuth: vi.fn() }))
 vi.mock('@/lib/require-feature', () => ({
@@ -91,6 +93,9 @@ const database = {
   }),
   insert: (table: unknown) => ({
     values: (row: Row) => {
+      if (table === 'auditLog' && state.auditThrows) {
+        return Promise.reject(new Error('D1 unavailable'))
+      }
       state.inserts.push({ table, row })
       const result = Promise.resolve(undefined) as Promise<undefined> & {
         returning: () => Promise<Row[]>
@@ -200,6 +205,7 @@ beforeEach(() => {
   state.inserts = []
   state.updateSets = []
   state.runs = []
+  state.auditThrows = false
   process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
 })
 
@@ -257,6 +263,21 @@ describe('POST /api/portal/requests/[id]/messages', () => {
     expect(message.authorId).toBe('contact_bob')
     expect(auditRows()).toHaveLength(0)
   })
+
+  it('posts nothing into the thread when the record cannot be written', async () => {
+    // The record goes FIRST, against the id the insert is about to use.
+    // Recorded afterwards, a failed audit insert answered 500 on a message
+    // that was already in the client's thread, and the operator's retry sent
+    // it twice.
+    vi.mocked(getPortalAuth).mockResolvedValue(actingAuth())
+    state.selectQueue = [[OPEN_REQUEST], []]
+    state.auditThrows = true
+
+    await expect(messagesPost(jsonReq('POST', { body: '<p>on it</p>' }), ctx))
+      .resolves.toMatchObject({ status: 500 })
+
+    expect(state.inserts.filter(i => i.table === 'messages')).toHaveLength(0)
+  })
 })
 
 describe('POST /api/portal/requests/[id]/review', () => {
@@ -298,6 +319,32 @@ describe('POST /api/portal/requests/[id]/review', () => {
 
     expect(state.updateSets[0].status).toBe('in_progress')
     expect(meta(auditRows()[0]).decision).toBe('changes')
+  })
+
+  it('leaves the request where the client left it when the record fails', async () => {
+    // The record goes first, so a failed audit insert cannot leave a status
+    // that moved with nothing saying who moved it.
+    vi.mocked(getPortalAuth).mockResolvedValue(actingAuth())
+    state.selectQueue = [[OPEN_REQUEST], []]
+    state.auditThrows = true
+
+    const res = await reviewPost(jsonReq('POST', { decision: 'approve' }), ctx)
+    expect(res.status).toBe(500)
+
+    expect(state.updateSets).toHaveLength(0)
+    expect(state.inserts.filter(i => i.table === 'messages')).toHaveLength(0)
+  })
+
+  it('names the message id it is about to write in the record', async () => {
+    vi.mocked(getPortalAuth).mockResolvedValue(actingAuth())
+    state.selectQueue = [[OPEN_REQUEST], []]
+
+    const res = await reviewPost(jsonReq('POST', { decision: 'approve' }), ctx)
+    const body = await res.json() as { messageId: string }
+    const message = state.inserts.find(i => i.table === 'messages')!.row
+
+    expect(meta(auditRows()[0]).messageId).toBe(message.id)
+    expect(body.messageId).toBe(message.id)
   })
 })
 
@@ -364,6 +411,25 @@ describe('POST /api/portal/requests/[id]/reads', () => {
     const read = state.inserts.find(i => i.table === schema.requestReads)!.row
     expect(read.userType).toBe('contact')
     expect(read.userId).toBe('user_client')
+    expect(auditRows()).toHaveLength(0)
+  })
+
+  it('records the FIRST look only, not every touch of the same request', async () => {
+    // The request detail page posts here about two seconds after every mount,
+    // so recording each one would bury the trail this mode exists to produce
+    // under rows that changed nothing: open five requests twice and the acting
+    // log is nine tenths receipts. The receipt row already names the studio
+    // member honestly, and the touch is idempotent.
+    vi.mocked(getPortalAuth).mockResolvedValue(actingAuth())
+    state.selectQueue = [[{ id: 'r1' }], [{ id: 'read_existing' }]]
+
+    const res = await readsPost(jsonReq('POST'), ctx)
+    expect(res.status).toBe(200)
+
+    // The receipt was refreshed.
+    expect(state.updateSets).toHaveLength(1)
+    expect(state.updateSets[0].lastReadAt).toBeTruthy()
+    // And nothing was added to the acting trail.
     expect(auditRows()).toHaveLength(0)
   })
 })

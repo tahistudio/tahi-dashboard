@@ -20,7 +20,9 @@ const captured: {
   runArgs: CapturedSql[]
   selectResults: unknown[]
   inserts: { table: unknown; row: Record<string, unknown> }[]
-} = { runArgs: [], selectResults: [], inserts: [] }
+  /** Simulate a D1 hiccup on the audit insert, to prove the ordering. */
+  auditThrows: boolean
+} = { runArgs: [], selectResults: [], inserts: [], auditThrows: false }
 
 vi.mock('@/lib/server-auth', () => ({ getPortalAuth: vi.fn() }))
 vi.mock('@/lib/require-feature', () => ({
@@ -70,6 +72,9 @@ vi.mock('@/lib/db', () => {
       select: vi.fn(() => chain),
       insert: vi.fn((table: unknown) => ({
         values: (row: Record<string, unknown>) => {
+          if (table === 'auditLog' && captured.auditThrows) {
+            return Promise.reject(new Error('D1 unavailable'))
+          }
           captured.inserts.push({ table, row })
           return Promise.resolve(undefined)
         },
@@ -140,6 +145,7 @@ beforeEach(() => {
   captured.runArgs = []
   captured.selectResults = []
   captured.inserts = []
+  captured.auditThrows = false
   process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
 })
 
@@ -205,10 +211,45 @@ describe('POST /api/portal/requests attribution', () => {
     expect(rows[0].actorId).toBe('user_liam')
     expect(rows[0].entityType).toBe('request')
     const meta = JSON.parse(rows[0].metadata as string) as Record<string, unknown>
-    expect(meta.requestNumber).toBe(4)
     expect(meta.title).toBe('Filed on the call')
+    expect(meta.category).toBe('design')
     expect(meta.orgId).toBe('org_client')
+    expect(meta.placement).toBe('queue')
+    expect(meta.priority).toBe('standard')
+    // The per-org number is assigned by the INSERT's own subquery, so it does
+    // not exist when the record is written. The entity id is the handle.
+    expect(rows[0].entityId).toBe(captured.runArgs[0].values[0])
   })
+
+  it('writes the record BEFORE the request row', async () => {
+    // Ordering is the whole guarantee. Recorded afterwards, a failed audit
+    // insert returned a 500 on a request that had already landed in the
+    // client's workspace, and the operator's retry filed a duplicate under
+    // their name. This way a failed record leaves nothing behind.
+    vi.mocked(getPortalAuth).mockResolvedValue(actingAuth())
+    captured.selectResults = [[{ requestNumber: 4 }], [{ name: 'Acme' }]]
+
+    captured.auditThrows = true
+    await expect(POST(makeRequest({ title: 'Filed on the call' }))).rejects.toThrow()
+
+    // Nothing was inserted into `requests`: the INSERT never ran.
+    expect(captured.runArgs).toHaveLength(0)
+  })
+
+  it('leaves the client queue alone when the record fails on a top placement', async () => {
+    // 'top' renumbers every other open request in the org before the insert.
+    // The record therefore has to sit above that too, or a failed record could
+    // reshuffle a client's queue for a request that was never filed.
+    vi.mocked(getPortalAuth).mockResolvedValue(actingAuth())
+    captured.selectResults = [[{ requestNumber: 4 }], [{ name: 'Acme' }]]
+    captured.auditThrows = true
+
+    await expect(POST(makeRequest({ title: 'Urgent', placement: 'top' }))).rejects.toThrow()
+
+    // No UPDATE and no INSERT: `run` is the only path either takes.
+    expect(captured.runArgs).toHaveLength(0)
+  })
+
 
   it('refuses a read-only preview before touching anything', async () => {
     vi.mocked(getPortalAuth).mockResolvedValue(previewAuth())

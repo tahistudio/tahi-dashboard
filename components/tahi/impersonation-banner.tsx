@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { ChevronDown, Check } from 'lucide-react'
 import { ShellIcon } from '@/components/tahi/shell-icons'
 import { Popover } from '@/components/tahi/popover'
@@ -295,6 +295,7 @@ export function ImpersonationBanner({
   serverPreviewMode = 'view',
 }: ImpersonationBannerProps = {}) {
   const router = useRouter()
+  const pathname = usePathname()
   const impersonation = useSyncExternalStore(subscribe, getSnapshot, () => null)
   // Fail-closed by default (see PermissionsProvider's DEFAULT), and the server
   // checks again on the route that arms the mode and on every write, so this
@@ -379,13 +380,37 @@ export function ImpersonationBanner({
   // store: the mode can change in another tab, or be swept by the middleware
   // when a preview ends. Keyed on the live cookie rather than the prop, which
   // is one render behind and would fight the reload in requestClientViewMode.
+  //
+  // The mode lives in a cookie and the record lives in per-tab sessionStorage,
+  // so nothing notifies this tab when another one arms or disarms: no storage
+  // event fires for a cookie, and a client-side navigation does not remount
+  // the layout banner. Keyed on `storedMode` alone, a tab that already had a
+  // store would read the cookie once at mount and then paint the same strip
+  // for the rest of its life. Painting the green read-only strip over a
+  // browser that is armed is the worst thing this component can do, because
+  // the strip IS the safeguard, so the tab re-reads whenever it comes back to
+  // the front and whenever the route changes.
+  const [modeTick, setModeTick] = useState(0)
+  useEffect(() => {
+    const recheck = () => setModeTick(t => t + 1)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') recheck()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', recheck)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', recheck)
+    }
+  }, [])
+
   const storedMode = impersonation?.type === 'client' ? (impersonation.mode ?? 'view') : null
   useEffect(() => {
     if (storedMode === null) return
     const live = readImpersonateModeCookie()
     if (live === storedMode) return
     setStoredMode(live)
-  }, [storedMode])
+  }, [storedMode, modeTick, pathname])
 
   // The same reconciliation, the other way. The preview can end somewhere this
   // tab's store never hears about: the ?exit-preview=1 escape hatch in the

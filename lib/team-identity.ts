@@ -35,6 +35,16 @@ export interface TeamMemberIdentity {
   id: string
   /** Legacy `team_members.role` column: 'admin' | 'member'. */
   role: string | null
+  /**
+   * The person's display name, for the callers that have to NAME them rather
+   * than merely identify them (the Act as client byline and its audit row).
+   *
+   * Carried on the identity because it comes free with the row this lookup
+   * already reads: Act as client used to re-select it from `team_members` by
+   * the id it had just resolved, a second round trip on every acting request.
+   * Null when the roster row has no name.
+   */
+  name: string | null
 }
 
 /**
@@ -49,12 +59,18 @@ export async function resolveTeamMember(
   if (!userId || userId === SERVICE_USER_ID) return null
 
   const [member] = await database
-    .select({ id: schema.teamMembers.id, role: schema.teamMembers.role })
+    .select({
+      id: schema.teamMembers.id,
+      role: schema.teamMembers.role,
+      name: schema.teamMembers.name,
+    })
     .from(schema.teamMembers)
     .where(eq(schema.teamMembers.clerkUserId, userId))
     .limit(1)
 
-  return member ? { id: member.id, role: member.role ?? null } : null
+  return member
+    ? { id: member.id, role: member.role ?? null, name: member.name ?? null }
+    : null
 }
 
 /**

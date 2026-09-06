@@ -69,12 +69,18 @@ import { getPortalAuth } from '@/lib/server-auth'
 import { NextRequest } from 'next/server'
 import { IMPERSONATE_MODE_COOKIE, IMPERSONATE_ORG_COOKIE } from '@/lib/preview-cookie'
 
-/** A request carrying whichever preview cookies the case is about. */
-function req(cookies: Record<string, string>): NextRequest {
+/**
+ * A request carrying whichever preview cookies the case is about.
+ *
+ * POST by default, because that is the only shape act mode is resolved for:
+ * nothing reads `actingAs` on a GET, so getPortalAuth does not pay for one.
+ */
+function req(cookies: Record<string, string>, method = 'POST'): NextRequest {
   const jar = Object.entries(cookies)
     .map(([k, v]) => `${k}=${v}`)
     .join('; ')
   return new NextRequest('http://localhost:3000/api/portal/requests', {
+    method,
     headers: jar ? { cookie: jar } : {},
   })
 }
@@ -84,9 +90,14 @@ const actingCookies = {
   [IMPERSONATE_MODE_COOKIE]: 'act',
 }
 
-/** The two reads resolveActingIdentity makes: the member's name, then the seat. */
+/**
+ * The one read resolveActingIdentity still makes for itself: the org's primary
+ * seat, for the audit metadata. The acting person's NAME rides on the roster
+ * row `resolveTeamMember` already returned, rather than a second select
+ * against the id that lookup just resolved.
+ */
 function queueIdentityReads(name = 'Liam Miller', contactId: string | null = 'contact_1') {
-  selectQueue.push([{ name }])
+  resolveTeamMember.mockResolvedValue({ id: 'tm_liam', role: 'admin', name })
   selectQueue.push(contactId ? [{ id: contactId }] : [])
 }
 
@@ -97,7 +108,7 @@ describe('getPortalAuth: Act as client', () => {
     process.env.NEXT_PUBLIC_TAHI_ORG_ID = TAHI_ORG
     clerkAuth.mockResolvedValue({ userId: 'user_liam', orgId: TAHI_ORG, sessionId: 'sess_1' })
     resolvePermissions.mockResolvedValue({ isSuperAdmin: true })
-    resolveTeamMember.mockResolvedValue({ id: 'tm_liam', role: 'admin' })
+    resolveTeamMember.mockResolvedValue({ id: 'tm_liam', role: 'admin', name: 'Liam Miller' })
   })
 
   it('grants a super admin with a roster row, and keeps impersonating true', async () => {
@@ -154,13 +165,50 @@ describe('getPortalAuth: Act as client', () => {
   })
 
   it('does not even look for an identity in read-only preview', async () => {
-    // The two extra reads are paid only when the browser asks to act, so an
+    // The extra reads are paid only when the browser asks to act, so an
     // ordinary preview costs exactly what it did before this feature.
     const auth = await getPortalAuth(req({ [IMPERSONATE_ORG_COOKIE]: CLIENT_D1_ORG }))
     expect(auth.impersonating).toBe(true)
     expect(auth.canWriteAsClient).toBeUndefined()
     expect(resolvePermissions).not.toHaveBeenCalled()
     expect(resolveTeamMember).not.toHaveBeenCalled()
+  })
+
+  it('does not resolve an identity for a READ, armed or not', async () => {
+    // Nothing consumes `actingAs` on a GET: refusePreviewWrite and
+    // actingIdentity are only ever called from POST / PATCH / PUT handlers.
+    // Resolving anyway cost resolvePermissions (a roster read, a roles join
+    // and two feature_visibility reads) plus the seat select on EVERY portal
+    // read, and the client overview fires about ten of them in parallel, so
+    // merely looking at a client while armed ran roughly seventy queries that
+    // no reader consumed. HEAD rides with GET because Next serves it from the
+    // GET handler.
+    for (const method of ['GET', 'HEAD']) {
+      vi.clearAllMocks()
+      selectQueue.length = 0
+      resolvePermissions.mockResolvedValue({ isSuperAdmin: true })
+      resolveTeamMember.mockResolvedValue({ id: 'tm_liam', role: 'admin', name: 'Liam Miller' })
+
+      const auth = await getPortalAuth(req(actingCookies, method))
+
+      // Still a preview, still scoped to the client, still read-only.
+      expect(auth.impersonating).toBe(true)
+      expect(auth.orgId).toBe(CLIENT_D1_ORG)
+      expect(auth.canWriteAsClient).toBeUndefined()
+      expect(auth.actingAs).toBeUndefined()
+      expect(resolvePermissions).not.toHaveBeenCalled()
+      expect(resolveTeamMember).not.toHaveBeenCalled()
+    }
+  })
+
+  it('reads the acting name off the roster row rather than selecting it again', async () => {
+    // resolveTeamMember already returns the row; asking `team_members` for the
+    // name of the id it just resolved was a second round trip on every acting
+    // write. The only select left is the org's primary seat.
+    queueIdentityReads('Staci Bonnie')
+    const auth = await getPortalAuth(req(actingCookies))
+    expect(auth.actingAs?.adminName).toBe('Staci Bonnie')
+    expect(selectQueue).toHaveLength(0)
   })
 
   it('ignores a mode cookie with no preview to aim at', async () => {
@@ -174,7 +222,7 @@ describe('getPortalAuth: Act as client', () => {
     for (const junk of ['ACT', 'true', '1', 'acting', '']) {
       vi.clearAllMocks()
       resolvePermissions.mockResolvedValue({ isSuperAdmin: true })
-      resolveTeamMember.mockResolvedValue({ id: 'tm_liam', role: 'admin' })
+      resolveTeamMember.mockResolvedValue({ id: 'tm_liam', role: 'admin', name: 'Liam Miller' })
       const auth = await getPortalAuth(
         req({ [IMPERSONATE_ORG_COOKIE]: CLIENT_D1_ORG, [IMPERSONATE_MODE_COOKIE]: junk }),
       )
