@@ -39,10 +39,15 @@ import { PageHeader } from '@/components/tahi/page-header'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
 
 import { TahiButton } from '@/components/tahi/tahi-button'
-import { Badge, type BadgeTone } from '@/components/tahi/badge'
+import { type BadgeTone } from '@/components/tahi/badge'
 // Shared with the invoice detail page so the two surfaces cannot disagree
-// about what raised a bill.
+// about what raised a bill, or about what state it is in.
 import { SourceBadge } from './source-badge'
+import {
+  InvoiceStatusBadge,
+  effectiveInvoiceStatus,
+  isInvoiceOverdue,
+} from './invoice-status'
 import { Card } from '@/components/tahi/card'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { SlideOver } from '@/components/tahi/slide-over'
@@ -79,18 +84,6 @@ interface Invoice {
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-// Status -> badge tone. paid=positive, overdue=danger, viewed=info,
-// sent=warning, draft=neutral, written_off=neutral. Matches the
-// spec's mapping from INVOICE_STATUS_CONFIG.
-const STATUS_TONE: Record<string, { label: string; tone: BadgeTone }> = {
-  draft:        { label: 'Draft',       tone: 'neutral'  },
-  sent:         { label: 'Sent',        tone: 'warning'  },
-  viewed:       { label: 'Viewed',      tone: 'info'     },
-  overdue:      { label: 'Overdue',     tone: 'danger'   },
-  paid:         { label: 'Paid',        tone: 'positive' },
-  written_off:  { label: 'Written Off', tone: 'neutral'  },
-}
-
 const SUPPORTED_CURRENCIES = ['NZD', 'USD', 'AUD', 'GBP', 'EUR'] as const
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -105,15 +98,6 @@ function formatDate(dateStr: string | null): string {
     const d = new Date(dateStr.includes('T') ? dateStr : dateStr + 'T00:00:00')
     return d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
   } catch { return '--' }
-}
-
-function isOverdue(dueDate: string | null, status: string): boolean {
-  if (!dueDate || status === 'paid' || status === 'written_off') return false
-  return new Date(dueDate + 'T23:59:59') < new Date()
-}
-
-function effectiveStatus(inv: { status: string; dueDate: string | null }): string {
-  return isOverdue(inv.dueDate, inv.status) && inv.status === 'sent' ? 'overdue' : inv.status
 }
 
 /** A bill the client still owes, with somewhere to pay it. */
@@ -135,14 +119,6 @@ const PAY_LINK_STYLE: React.CSSProperties = {
   fontWeight: 600,
   textDecoration: 'none',
   whiteSpace: 'nowrap',
-}
-
-// ─── Status badge ─────────────────────────────────────────────────────────────
-
-function StatusBadge({ status, dueDate }: { status: string; dueDate: string | null }) {
-  const eff = effectiveStatus({ status, dueDate })
-  const cfg = STATUS_TONE[eff] ?? STATUS_TONE['draft']
-  return <Badge tone={cfg.tone} variant="soft" size="sm">{cfg.label}</Badge>
 }
 
 // ─── Client mobile card ───────────────────────────────────────────────────────
@@ -191,7 +167,7 @@ function InvoiceMobileCard({
         >
           {amountLabel}
         </Link>
-        <StatusBadge status={invoice.status} dueDate={invoice.dueDate} />
+        <InvoiceStatusBadge status={invoice.status} dueDate={invoice.dueDate} />
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', fontSize: '0.78125rem', color: 'var(--color-text-muted)' }}>
@@ -200,7 +176,7 @@ function InvoiceMobileCard({
         <span data-private style={{ color: 'var(--color-text-subtle)' }}>
           {invoiceReference(invoice.id, invoice.number)}
         </span>
-        <span style={{ color: isOverdue(invoice.dueDate, invoice.status) ? 'var(--color-danger)' : 'var(--color-text-muted)' }}>
+        <span style={{ color: isInvoiceOverdue(invoice.dueDate, invoice.status) ? 'var(--color-danger)' : 'var(--color-text-muted)' }}>
           Due {formatDate(invoice.dueDate)}
         </span>
         <span style={{ color: 'var(--color-text-subtle)' }}>Issued {formatDate(invoice.createdAt)}</span>
@@ -967,7 +943,7 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
     const q = search.trim().toLowerCase()
     return invoices.filter(inv => {
       // Compute effective status (overdue = sent + past due date)
-      const eff = effectiveStatus(inv)
+      const eff = effectiveInvoiceStatus(inv)
 
       // Status chip: empty = all
       if (statusSet.size > 0 && !statusSet.has(eff)) return false
@@ -1119,9 +1095,9 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
       key: 'status',
       header: 'Status',
       sortable: true,
-      sortValue: r => effectiveStatus(r),
+      sortValue: r => effectiveInvoiceStatus(r),
       width: '8rem',
-      render: r => <StatusBadge status={r.status} dueDate={r.dueDate} />,
+      render: r => <InvoiceStatusBadge status={r.status} dueDate={r.dueDate} />,
     })
 
     if (isAdmin) {
@@ -1144,7 +1120,7 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
       render: r => (
         <span style={{
           fontSize: '0.8125rem',
-          color: isOverdue(r.dueDate, r.status) ? 'var(--color-danger)' : 'var(--color-text-muted)',
+          color: isInvoiceOverdue(r.dueDate, r.status) ? 'var(--color-danger)' : 'var(--color-text-muted)',
         }}>
           {formatDate(r.dueDate)}
         </span>
