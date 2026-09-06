@@ -344,6 +344,10 @@ export async function GET(req: NextRequest, { params }: Params) {
       // "Source: Manual" on the detail page while the list badged it right.
       source: schema.invoices.source,
       status: schema.invoices.status,
+      // The real invoice number (migration 0096). NULL on anything raised
+      // before the column existed, so the detail page falls back to the short
+      // id through invoiceReference.
+      number: schema.invoices.number,
       amountUsd: schema.invoices.amountUsd,
       taxAmountUsd: schema.invoices.taxAmountUsd,
       discountAmountUsd: schema.invoices.discountAmountUsd,
@@ -396,6 +400,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     pushback?: boolean
   }
 
+  // `number` is deliberately NOT here. An invoice is numbered once, when it is
+  // raised (lib/invoice-number.ts) or when it is imported carrying the number
+  // its source gave it, and it is never renumbered: the client has the old
+  // number on their copy and Xero has it on theirs, so an edit here would
+  // silently break the match on both. The one door that ever writes it after
+  // creation is POST /api/admin/invoices/backfill-numbers, which only fills a
+  // NULL and never mints.
   const FIELDS = ['status', 'dueDate', 'notes', 'orgId', 'paidAt', 'sentAt'] as const
   if (!FIELDS.some(field => field in body)) {
     return NextResponse.json({ error: 'At least one field is required' }, { status: 400 })

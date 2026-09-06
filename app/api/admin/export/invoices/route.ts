@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, gte, lte, desc } from 'drizzle-orm'
+import { invoiceReference } from '@/lib/invoice-billing'
 
 // -- GET /api/admin/export/invoices --
 // Returns invoices as CSV.
@@ -36,6 +37,7 @@ export async function GET(req: NextRequest) {
   const items = await drizzle
     .select({
       id: schema.invoices.id,
+      number: schema.invoices.number,
       orgName: schema.organisations.name,
       status: schema.invoices.status,
       totalAmount: schema.invoices.totalUsd,
@@ -48,9 +50,14 @@ export async function GET(req: NextRequest) {
     .where(whereClause)
     .orderBy(desc(schema.invoices.createdAt))
 
-  const header = 'Invoice ID,Client,Status,Amount,Currency,Due Date,Created'
+  // Invoice Number leads, because that is the string an accountant matches
+  // against a bank statement or a Xero export. The raw id stays as the second
+  // column so a row can still be found in the dashboard, and the number falls
+  // back to the short id on anything raised before migration 0096.
+  const header = 'Invoice Number,Invoice ID,Client,Status,Amount,Currency,Due Date,Created'
   const rows = items.map((item) => {
     return [
+      csvEscape(invoiceReference(item.id, item.number)),
       item.id,
       csvEscape(item.orgName ?? ''),
       item.status,

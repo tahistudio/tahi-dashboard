@@ -208,6 +208,14 @@ const REQUEST_NUMBER = 42
 const REQUEST_TITLE = 'Spring campaign landing page refresh'
 
 const INVOICE_ID = 'inv-1042-9c31-4b77-8e05-6f1d2a94c7b3'
+/**
+ * The real invoice number (migration 0096), in the format the studio sequence
+ * mints: prefix, studio calendar year, zero-padded counter. Previewing the
+ * NUMBERED branch is the point: it is what every invoice raised from now on
+ * carries, and a preview still showing a UUID fragment would hide the one
+ * string the client is asked to quote on their transfer.
+ */
+const INVOICE_NUMBER = 'INV-2026-0042'
 const INVOICE_AMOUNT = '$4,312.50'
 const INVOICE_CURRENCY = 'NZD'
 
@@ -272,7 +280,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
   const origin = appOrigin()
 
   const requestUrl = `${origin}/requests/${REQUEST_ID}`
-  const invoiceRef = invoiceReference(INVOICE_ID)
+  const invoiceRef = invoiceReference(INVOICE_ID, INVOICE_NUMBER)
   const invoiceDueIso = isoFromNow(9)
   const overdueDueIso = isoFromNow(-12)
 
@@ -288,6 +296,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
     payUrl: null,
     invoice: {
       id: INVOICE_ID,
+      number: INVOICE_NUMBER,
       // Outstanding, because the block only exists for a bill that is still
       // owed: buildHowToPay refuses to build one for a settled invoice.
       status: 'sent',
@@ -566,6 +575,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
       react: createElement(InvoiceOverdueEmail, {
         clientName: firstName,
         invoiceId: INVOICE_ID,
+        invoiceNumber: INVOICE_NUMBER,
         amountFormatted: INVOICE_AMOUNT,
         currency: INVOICE_CURRENCY,
         dueDate: nzLongDate(overdueDueIso),
@@ -592,6 +602,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
       react: createElement(InvoiceOverdueEmail, {
         clientName: firstName,
         invoiceId: INVOICE_ID,
+        invoiceNumber: INVOICE_NUMBER,
         amountFormatted: INVOICE_AMOUNT,
         currency: INVOICE_CURRENCY,
         dueDate: nzLongDate(overdueDueIso),
@@ -616,6 +627,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
       react: createElement(InvoiceSentEmail, {
         clientName: firstName,
         invoiceId: INVOICE_ID,
+        invoiceNumber: INVOICE_NUMBER,
         amountFormatted: INVOICE_AMOUNT,
         currency: INVOICE_CURRENCY,
         dueDate: nzLongDate(invoiceDueIso),
@@ -643,6 +655,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
       react: createElement(InvoiceSentEmail, {
         clientName: firstName,
         invoiceId: INVOICE_ID,
+        invoiceNumber: INVOICE_NUMBER,
         amountFormatted: INVOICE_AMOUNT,
         currency: INVOICE_CURRENCY,
         dueDate: nzLongDate(invoiceDueIso),

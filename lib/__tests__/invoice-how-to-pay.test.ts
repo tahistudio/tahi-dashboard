@@ -181,6 +181,31 @@ describe('buildHowToPay', () => {
     expect(block.hint).toBe(DEFAULT_REFERENCE_HINT)
   })
 
+  it('makes the REFERENCE the real invoice number when the row has one', () => {
+    // The reference is the string the client types into their bank, so it has
+    // to be the same string Xero calls the bill and the same one their emailed
+    // copy prints. A UUID fragment reconciles against nothing.
+    const block = buildHowToPay({
+      channel: 'xero',
+      payUrl: null,
+      invoice: { ...INVOICE, number: 'INV-2026-0042' },
+      bankDetails: BANK,
+    })!
+    expect(block.reference).toBe('INV-2026-0042')
+  })
+
+  it('falls back to the short id for a row raised before invoice numbers existed', () => {
+    for (const number of [null, undefined, '   ']) {
+      const block = buildHowToPay({
+        channel: 'xero',
+        payUrl: null,
+        invoice: { ...INVOICE, number },
+        bankDetails: BANK,
+      })!
+      expect(block.reference).toBe('INV-1042')
+    }
+  })
+
   it('falls back to the default hint rather than omitting it', () => {
     const block = buildHowToPay({
       channel: 'xero',

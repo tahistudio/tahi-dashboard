@@ -871,6 +871,21 @@ export const invoices = sqliteTable('invoices', {
   // matched on organisation NAME, because three D1 organisations are literally
   // named after ManyRequests invoice numbers from an earlier bad import.
   manyrequestsId: text('manyrequests_id'),
+  // The human invoice number (migration 0096), e.g. "INV-2026-0001". This is
+  // the identifier the client quotes on a bank transfer and the one pushed to
+  // Xero as InvoiceNumber, so it is the studio's own sequence for anything
+  // raised here (lib/invoice-number.ts mints it from the settings prefix
+  // `invoice_number_prefix` and the counter `invoicing.numberSequence`).
+  //
+  // An IMPORTED invoice keeps the number its source already gave it: Xero's
+  // InvoiceNumber, Stripe's number when it has one. A row is never renumbered
+  // once written.
+  //
+  // NULL is a real state, not a bug: every row that predates the column stays
+  // NULL, and every reader falls back to the short id through
+  // invoiceReference(id, number). SQLite treats NULLs as DISTINCT in a unique
+  // index, so the whole history can stay NULL under the constraint below.
+  number: text('number'),
   ...timestamps,
 }, (table) => [
   index('idx_invoices_org').on(table.orgId),
@@ -878,6 +893,11 @@ export const invoices = sqliteTable('invoices', {
   index('idx_invoices_recon_status').on(table.reconciliationStatus),
   index('idx_invoices_stripe').on(table.stripeInvoiceId),
   uniqueIndex('idx_invoices_manyrequests').on(table.manyrequestsId),
+  // The guarantee. The counter hands out one value per caller
+  // (UPDATE ... RETURNING, a single atomic statement), and this is the backstop
+  // that makes a duplicate impossible rather than unlikely: a colliding insert
+  // fails and the caller mints again (lib/invoice-number.ts withInvoiceNumber).
+  uniqueIndex('idx_invoices_number').on(table.number),
 ])
 
 // ============================================================

@@ -164,6 +164,12 @@ export async function importStripePayments(database: D1, stripeKey: string | und
           stripeInvoiceId: charge.id,
           source: 'stripe',
           status: 'paid',
+          // No `number`, deliberately. This path imports Stripe CHARGES, not
+          // Stripe invoices, and a charge has no invoice number to carry over.
+          // Minting one from the studio sequence would be worse than leaving it
+          // NULL: it would put our number on money that was never billed under
+          // it. The row falls back to the short id like any pre-0096 row.
+
           amountUsd: amount,
           totalUsd: amount,
           currency,

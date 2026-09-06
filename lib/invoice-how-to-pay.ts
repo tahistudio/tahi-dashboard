@@ -72,6 +72,14 @@ export const DEFAULT_REFERENCE_HINT =
 export interface HowToPayInvoice {
   id: string
   /**
+   * invoices.number, the real invoice number, when the row carries one. This
+   * becomes the bank reference the client quotes, which is the whole reason
+   * the number exists: it is the string that has to match on their transfer,
+   * on their email and in Xero. NULL or absent falls back to the short id,
+   * unchanged from before migration 0096.
+   */
+  number?: string | null
+  /**
    * Required, and required for a reason: the block is a demand for money, so
    * every caller has to say out loud whether this bill is still owed. Making
    * it optional would let a settled invoice through by omission.
@@ -191,7 +199,7 @@ export function buildHowToPay(input: {
     ...(bankDetails.bankName ? { bankName: bankDetails.bankName } : {}),
     ...(bankDetails.accountName ? { accountName: bankDetails.accountName } : {}),
     ...(bankDetails.accountNumber ? { accountNumber: bankDetails.accountNumber } : {}),
-    reference: invoiceReference(invoice.id),
+    reference: invoiceReference(invoice.id, invoice.number),
     amount: invoice.totalUsd,
     currency: invoice.currency ?? 'NZD',
     dueDate: invoice.dueDate,

@@ -114,6 +114,7 @@ function ledger(over: Record<string, unknown> = {}) {
       notes: null,
       status: 'draft',
       xeroInvoiceId: null,
+      number: null,
       ...over,
     }],
     [{ id: 'org-a', name: 'Kowhai Ltd', xeroContactId: 'contact-1' }],
@@ -164,6 +165,49 @@ describe('POST /api/admin/invoices/xero-sync', () => {
       source: 'xero',
       xeroOnlineInvoiceUrl: null,
     })
+  })
+
+  it('sends OUR invoice number to Xero as the InvoiceNumber', async () => {
+    // Liam, 2026-09-06: "Tahi's own sequence pushed into Xero, we control it."
+    // This used to send a fourth, invented form of the identifier ("INV-" plus
+    // the first eight characters of the UUID), so the number in Xero matched
+    // neither the dashboard nor the reference the client was emailed.
+    const { handle } = makeDb(ledger({ number: 'INV-2026-0042' }))
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    await pushToXero(pushReq({ invoiceId: 'inv-1' }))
+
+    const [, , payload] = vi.mocked(callXeroAPIOrThrow).mock.calls.at(-1) as [string, string, Record<string, unknown>]
+    const pushed = (payload.Invoices as Array<Record<string, unknown>>)[0]
+    expect(pushed.InvoiceNumber).toBe('INV-2026-0042')
+  })
+
+  it('falls back to the short id for a row raised before invoice numbers existed', async () => {
+    const { handle } = makeDb(ledger({ number: null }))
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    await pushToXero(pushReq({ invoiceId: 'inv-1' }))
+
+    const [, , payload] = vi.mocked(callXeroAPIOrThrow).mock.calls.at(-1) as [string, string, Record<string, unknown>]
+    const pushed = (payload.Invoices as Array<Record<string, unknown>>)[0]
+    // Same string the portal, the emails and the bank reference use for this
+    // row, so all four still name the one document.
+    expect(pushed.InvoiceNumber).toBe('INV-1')
+  })
+
+  it('never renames an invoice Xero already holds', async () => {
+    // Xero refuses an InvoiceNumber change on a non-draft invoice, and
+    // renaming a bill the client already has is what the never-renumber rule
+    // forbids. The field is create-only.
+    const { handle } = makeDb(ledger({ xeroInvoiceId: 'xero-1', number: 'INV-2026-0042' }))
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    await pushToXero(pushReq({ invoiceId: 'inv-1' }))
+
+    const [, endpoint, payload] = vi.mocked(callXeroAPIOrThrow).mock.calls.at(-1) as [string, string, Record<string, unknown>]
+    expect(endpoint).toBe('/Invoices/xero-1')
+    const pushed = (payload.Invoices as Array<Record<string, unknown>>)[0]
+    expect(pushed.InvoiceNumber).toBeUndefined()
   })
 
   it('leaves the link null on a first push, which Xero has no link for yet', async () => {

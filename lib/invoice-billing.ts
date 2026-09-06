@@ -126,7 +126,22 @@ export function selectInvoiceRecipients(contacts: BillingContactRow[]): InvoiceR
   return out
 }
 
-/** Short, human invoice reference used in subjects, emails and the UI. */
-export function invoiceReference(invoiceId: string): string {
+/**
+ * The identifier a human uses for this invoice: subjects, emails, the portal,
+ * the bank reference, the Xero InvoiceNumber.
+ *
+ * The real number when the row has one (invoices.number, minted from the
+ * settings prefix for anything raised here, or carried over from Xero or
+ * Stripe on an import), otherwise the first eight characters of the id in
+ * upper case, exactly as every surface printed before migration 0096.
+ *
+ * The fallback is not a formality. Every invoice that predates the column is
+ * NULL and always will be: the backfill only fills the rows whose source
+ * number is recoverable, and none of them are ever renumbered. So both branches
+ * are live, and passing the number is what makes the reference on the client's
+ * email match the reference on their bank transfer and the number in Xero.
+ */
+export function invoiceReference(invoiceId: string, invoiceNumber?: string | null): string {
+  if (typeof invoiceNumber === 'string' && invoiceNumber.trim() !== '') return invoiceNumber.trim()
   return invoiceId.slice(0, 8).toUpperCase()
 }

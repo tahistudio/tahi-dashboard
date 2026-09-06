@@ -438,6 +438,32 @@ describe('importXeroInvoices', () => {
     })
   })
 
+  it('keeps the number Xero already gave a bill it imports', async () => {
+    // Xero named this invoice before we ever saw it and the client has already
+    // been sent that number, so the studio sequence must not touch it. The
+    // studio numbers what it RAISES; it never renumbers an import.
+    serveImportPage([xeroInvoice({ InvoiceID: 'xero-new', InvoiceNumber: 'INV-0431' })])
+    const { handle, queries } = makeDb([[], ORGS])
+
+    await importXeroInvoices(handle as unknown as Db, 1)
+
+    const values = argOf(byEntry(queries, 'insert')[0], 'values') as Record<string, unknown>
+    expect(values.number).toBe('INV-0431')
+    expect(values.xeroInvoiceId).toBe('xero-new')
+  })
+
+  it('leaves the number NULL rather than empty when Xero sends a blank one', async () => {
+    // SQLite treats NULLs as distinct in a unique index but empty strings as
+    // equal, so a second blank import would collide with the first.
+    serveImportPage([xeroInvoice({ InvoiceID: 'xero-new', InvoiceNumber: '   ' })])
+    const { handle, queries } = makeDb([[], ORGS])
+
+    await importXeroInvoices(handle as unknown as Db, 1)
+
+    const values = argOf(byEntry(queries, 'insert')[0], 'values') as Record<string, unknown>
+    expect(values.number).toBeNull()
+  })
+
   it('stamps the paid date from FullyPaidOnDate when a known row settles', async () => {
     serveImportPage([xeroInvoice({ Status: 'PAID', AmountDue: 0, FullyPaidOnDate: '2026-09-01' })])
     const { handle, queries } = makeDb([

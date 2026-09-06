@@ -16,7 +16,7 @@ import {
   INVOICE_CHANNEL_SETTING_KEY,
   invoiceChannelLabel,
 } from '@/lib/invoice-channel'
-import { paymentTermsLabel } from '@/lib/invoice-billing'
+import { invoiceReference, paymentTermsLabel } from '@/lib/invoice-billing'
 import {
   DEFAULT_INVOICE_CURRENCY,
   defaultCurrency,
@@ -58,6 +58,12 @@ interface Invoice {
   orgId: string
   orgName: string | null
   status: string
+  /**
+   * The real invoice number (migration 0096), e.g. INV-2026-0001. NULL on every
+   * row raised before the column existed and on imports with nothing to carry
+   * over, so it always goes through invoiceReference for the short-id fallback.
+   */
+  number?: string | null
   source: string | null
   // Admin projection only; the portal list withholds the integration ids.
   stripeInvoiceId?: string | null
@@ -189,6 +195,11 @@ function InvoiceMobileCard({
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', fontSize: '0.78125rem', color: 'var(--color-text-muted)' }}>
+        {/* The card leads on the amount, so the identifier rides here with the
+            dates. It is what the client quotes when they get in touch. */}
+        <span data-private style={{ color: 'var(--color-text-subtle)' }}>
+          {invoiceReference(invoice.id, invoice.number)}
+        </span>
         <span style={{ color: isOverdue(invoice.dueDate, invoice.status) ? 'var(--color-danger)' : 'var(--color-text-muted)' }}>
           Due {formatDate(invoice.dueDate)}
         </span>
@@ -979,7 +990,10 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
       if (q) {
         const name = (inv.orgName ?? '').toLowerCase()
         const id = inv.id.toLowerCase()
-        if (!name.includes(q) && !id.includes(q)) return false
+        // The number is what an operator actually types, and what a client
+        // quotes back over email, so it searches before the raw id does.
+        const reference = invoiceReference(inv.id, inv.number).toLowerCase()
+        if (!name.includes(q) && !id.includes(q) && !reference.includes(q)) return false
       }
 
       return true
@@ -1030,6 +1044,31 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
   // sorting through DataTable's internal state.
   const columns: DataTableColumn<Invoice>[] = useMemo(() => {
     const cols: DataTableColumn<Invoice>[] = []
+
+    // The identifier, first, for both audiences. Until now the list showed the
+    // amount as the only thing you could read a row by, so two bills for the
+    // same client at the same price were indistinguishable and neither matched
+    // anything the client had been sent.
+    cols.push({
+      key: 'number',
+      header: 'Invoice',
+      sortable: true,
+      sortValue: r => invoiceReference(r.id, r.number),
+      width: '10rem',
+      render: r => (
+        <span
+          data-private
+          style={{
+            fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+            fontSize: '0.78125rem',
+            color: 'var(--color-text)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {invoiceReference(r.id, r.number)}
+        </span>
+      ),
+    })
 
     if (isAdmin) {
       cols.push({

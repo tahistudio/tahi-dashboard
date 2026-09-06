@@ -6,6 +6,7 @@ import { eq, desc, and, inArray } from 'drizzle-orm'
 import { getOrgScope, requireAccessToOrg } from '@/lib/require-access'
 import { requireFeature } from '@/lib/require-feature'
 import { dispatchDomainEvent } from '@/lib/events'
+import { withInvoiceNumber } from '@/lib/invoice-number'
 
 // ── GET /api/admin/invoices ───────────────────────────────────────────────────
 // Returns paginated invoices with org name joined.
@@ -55,6 +56,10 @@ export async function GET(req: NextRequest) {
       orgId: schema.invoices.orgId,
       orgName: schema.organisations.name,
       status: schema.invoices.status,
+      // The real invoice number (migration 0096). NULL on every row raised
+      // before it existed and on every import with nothing to carry over, so
+      // the list falls back to the short id through invoiceReference.
+      number: schema.invoices.number,
       source: schema.invoices.source,
       stripeInvoiceId: schema.invoices.stripeInvoiceId,
       xeroInvoiceId: schema.invoices.xeroInvoiceId,
@@ -147,19 +152,29 @@ export async function POST(req: NextRequest) {
 
   const requestedSource = body.source ?? 'manual'
 
-  await drizzle.insert(schema.invoices).values({
-    id: invoiceId,
-    orgId: body.orgId,
-    subscriptionId: body.subscriptionId ?? null,
-    source: requestedSource,
-    status: 'draft',
-    amountUsd: totalAmount,
-    totalUsd: totalAmount,
-    currency,
-    dueDate: body.dueDate ?? null,
-    notes: body.notes ?? null,
-    createdAt: now,
-    updatedAt: now,
+  // This is the studio raising a bill, so the studio's own sequence numbers it
+  // (Liam, 2026-09-06). The insert runs inside withInvoiceNumber so a unique
+  // conflict on invoices.number mints a fresh one and retries rather than
+  // failing the invoice; a counter that cannot be reached at all writes the row
+  // unnumbered instead of refusing to bill. The line items are written after,
+  // on purpose: only the invoice row can collide, and a retry must not insert
+  // them twice.
+  const number = await withInvoiceNumber(drizzle, async (minted) => {
+    await drizzle.insert(schema.invoices).values({
+      id: invoiceId,
+      orgId: body.orgId as string,
+      subscriptionId: body.subscriptionId ?? null,
+      source: requestedSource,
+      status: 'draft',
+      number: minted,
+      amountUsd: totalAmount,
+      totalUsd: totalAmount,
+      currency,
+      dueDate: body.dueDate ?? null,
+      notes: body.notes ?? null,
+      createdAt: now,
+      updatedAt: now,
+    })
   })
 
   const itemRows = body.lineItems.map(item => ({
@@ -191,8 +206,13 @@ export async function POST(req: NextRequest) {
       currency,
       totalAmount,
       source: requestedSource,
+      number,
     },
   })
 
-  return NextResponse.json({ id: invoiceId })
+  // `number` comes back so the caller (the New Invoice slide-over, MCP
+  // create_invoice) can show what the bill is actually called without a second
+  // round trip. Null means the counter could not be reached and the row is
+  // unnumbered, which every reader handles by falling back to the short id.
+  return NextResponse.json({ id: invoiceId, number })
 }

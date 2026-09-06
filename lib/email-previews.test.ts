@@ -190,7 +190,12 @@ describe('email preview samples', () => {
   it('reads like the studio: the client, the request and NZD money appear', async () => {
     const invoice = await render(byKey.get('invoice-sent')!.react)
     expect(invoice).toContain('NZD')
-    expect(invoice).toContain('INV-1042')
+    // The REAL invoice number (migration 0096), not a UUID fragment. The
+    // preview used to render 'INV-1042', the first eight characters of the
+    // sample id, which is the one thing this email must never show a client
+    // now that the studio mints a number they can quote.
+    expect(invoice).toContain('INV-2026-0042')
+    expect(invoice).toContain('Invoice number')
 
     const thread = await render(byKey.get('new-message')!.react)
     expect(thread).toContain('Spring campaign landing page refresh')
@@ -305,8 +310,10 @@ describe('email preview variants', () => {
     expect(bank).toContain('Tahi Studio Ltd')
     expect(bank).toContain('01-0242-0198765-00')
     // The reference the client quotes on the transfer, and the sentence that
-    // tells them to. Without both, the payment lands unmatched.
-    expect(bank).toContain('INV-1042')
+    // tells them to. Without both, the payment lands unmatched. The reference
+    // is the invoice NUMBER, which is the same string Xero knows the bill by,
+    // so a transfer quoting it reconciles on both sides.
+    expect(bank).toContain('INV-2026-0042')
     expect(bank).toContain('so we can match your payment')
     // No pay page, so no Pay button lying about one.
     expect(bank).not.toContain('Pay invoice')
