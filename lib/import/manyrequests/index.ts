@@ -41,6 +41,14 @@ export {
 } from './client'
 
 export {
+  createSnapshotClient,
+  SNAPSHOT_KEYS,
+  validateSnapshotPayload,
+  type ManyRequestsSnapshotPayload,
+  type SnapshotValidation,
+} from './snapshot-client'
+
+export {
   buildFormResponses,
   commentKey,
   extractRequestBrief,
