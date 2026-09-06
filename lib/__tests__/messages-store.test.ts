@@ -411,4 +411,12 @@ describe('attachFilesToMessage', () => {
     expect(await attachFilesToMessage(fake.db, { messageId: 'm1', fileIds: [], orgId: 'org_1' })).toBe(0)
     expect(fake.updates).toHaveLength(0)
   })
+
+  it('only ever claims a file nobody has claimed', async () => {
+    // Without this, naming a file already hanging off somebody else's message
+    // in the same org re-parented it onto yours and silently stripped the
+    // attachment off theirs. Same tenant, still data loss.
+    await attachFilesToMessage(fake.db, { messageId: 'm1', fileIds: ['f1'], orgId: 'org_1', requestId: 'r1' })
+    expect(has(fake.updates[0].where ?? undefined, 'isNull', 'files.message_id')).toBe(true)
+  })
 })

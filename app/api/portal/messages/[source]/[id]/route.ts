@@ -164,7 +164,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     readThreadCursor(database, { source: resolved.source, id: resolved.id, viewer }),
     resolved.source === 'channel'
       ? threadPeople(database, { source: 'channel', conversationId: resolved.id, orgId })
-      : threadPeople(database, { source: 'request', requestId: resolved.id, orgId, assigneeId: resolved.assigneeId }),
+      : threadPeople(database, { source: 'request', requestId: resolved.id, orgId, assigneeId: resolved.assigneeId, brandId: resolved.brandId }),
   ])
 
   return NextResponse.json({ thread: head, people, messages, lastReadAt })

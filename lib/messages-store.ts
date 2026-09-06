@@ -682,6 +682,12 @@ export async function readThreadCursor(
  * message_id. Scoped to the owning org, and on a request thread to the request
  * as well, so nobody can smuggle another client's file id, or another
  * request's file, under their own message.
+ *
+ * ONLY AN UNCLAIMED FILE CAN BE CLAIMED. Without the message_id IS NULL clause
+ * a caller could name a file already hanging off somebody else's message in
+ * the same org and re-parent it onto their own, silently stripping the
+ * attachment from the original. Same tenant, but still data loss, and
+ * triggerable from the composer.
  */
 export async function attachFilesToMessage(
   database: DrizzleDB,
@@ -691,7 +697,11 @@ export async function attachFilesToMessage(
   if (ids.length === 0) return 0
   let stamped = 0
   for (const slice of chunkThreadIds(ids)) {
-    const conditions = [inArray(schema.files.id, slice), eq(schema.files.orgId, input.orgId)]
+    const conditions = [
+      inArray(schema.files.id, slice),
+      eq(schema.files.orgId, input.orgId),
+      isNull(schema.files.messageId),
+    ]
     if (input.requestId) conditions.push(eq(schema.files.requestId, input.requestId))
     await database.update(schema.files).set({ messageId: input.messageId }).where(and(...conditions))
     stamped += slice.length

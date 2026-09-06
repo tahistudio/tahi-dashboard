@@ -210,7 +210,15 @@ export async function orgChannelParticipants(
         schema.teamMemberAccessOrgs,
         eq(schema.teamMemberAccessOrgs.accessId, schema.teamMemberAccess.id),
       )
-      .where(eq(schema.teamMemberAccessOrgs.orgId, orgId)),
+      // The ROLE filter is the half that makes this the same list
+      // notifyRequestTeam builds. Without it every rule scoped to the org
+      // counted, so a `viewer` was seeded into the room, shown in the people
+      // stack and woken by every client post: the two audiences the comment
+      // above calls one list were genuinely different.
+      .where(and(
+        eq(schema.teamMemberAccess.role, 'project_manager'),
+        eq(schema.teamMemberAccessOrgs.orgId, orgId),
+      )),
   ])
 
   let teamIds = [...new Set(pmRows.map(r => r.pmId).filter((x): x is string => !!x))]
@@ -272,17 +280,62 @@ export async function syncConversationParticipants(
 }
 
 /**
+ * Narrow a set of contacts to the ones who can see this brand's work.
+ *
+ * The same rule as `contactsForBrand` in lib/notifications.ts and as the portal
+ * request list: no brand links at all means no scoping, so an ordinary single
+ * brand client is unaffected. It is reimplemented here rather than imported
+ * because lib/notifications.ts drags @react-email/render and every email
+ * template in with it, and this module is read by list routes.
+ */
+async function contactsOnBrand(
+  database: DrizzleDB,
+  contactIds: readonly string[],
+  brandId: string | null,
+): Promise<string[]> {
+  const ids = [...contactIds]
+  if (ids.length === 0) return ids
+  const links = await database
+    .select({
+      contactId: schema.brandContacts.contactId,
+      brandId: schema.brandContacts.brandId,
+    })
+    .from(schema.brandContacts)
+    .where(inArray(schema.brandContacts.contactId, ids))
+  if (links.length === 0) return ids
+
+  const brandsByContact = new Map<string, Set<string>>()
+  for (const link of links) {
+    if (!link.contactId || !link.brandId) continue
+    const set = brandsByContact.get(link.contactId) ?? new Set<string>()
+    set.add(link.brandId)
+    brandsByContact.set(link.contactId, set)
+  }
+  return ids.filter(id => {
+    const brands = brandsByContact.get(id)
+    if (!brands || brands.size === 0) return true
+    return brandId !== null && brands.has(brandId)
+  })
+}
+
+/**
  * The people the thread head shows, for either store.
  *
  * A request thread has no participant rows of its own to read (its messages
  * never needed any), so its people are the studio side of the request plus the
  * client's contacts, resolved the same way the channel's are.
+ *
+ * BRAND IS A CONFIDENTIALITY BOUNDARY ON A REQUEST, and this list is returned
+ * to the client, so the org contacts swept in on the 'request' source are held
+ * to the request's brand: the same narrowing the portal request list, the inbox
+ * list and the studio's email audience already apply. The CHANNEL source stays
+ * org wide, which is correct: a standing line belongs to the whole client.
  */
 export async function threadPeople(
   database: DrizzleDB,
   input:
     | { source: 'channel'; conversationId: string; orgId: string }
-    | { source: 'request'; requestId: string; orgId: string; assigneeId: string | null },
+    | { source: 'request'; requestId: string; orgId: string; assigneeId: string | null; brandId: string | null },
 ): Promise<Array<{ id: string; name: string; avatarUrl: string | null; side: 'team' | 'client' }>> {
   const teamIds = new Set<string>()
   const contactIds = new Set<string>()
@@ -321,7 +374,12 @@ export async function threadPeople(
       .select({ id: schema.contacts.id })
       .from(schema.contacts)
       .where(eq(schema.contacts.orgId, input.orgId))
-    for (const c of orgContacts) if (c.id) contactIds.add(c.id)
+    const onBrand = await contactsOnBrand(
+      database,
+      orgContacts.map(c => c.id).filter((id): id is string => !!id),
+      input.brandId,
+    )
+    for (const id of onBrand) contactIds.add(id)
   }
 
   const [teamRows, contactRows] = await Promise.all([
