@@ -2,36 +2,37 @@
  * <ContractSignEmail> — the "please sign this contract" email.
  *
  * Sent to a single signer with a unique sign URL bound to their token.
- * Visual language matches the proposal viewer + the rest of the email
- * suite via the shared `_components.tsx` primitives. One brand-green
- * accent word in the heading. No em or en dashes.
+ * Studio Ledger, Work family: nav band, kicker, H1, ledger rows, one
+ * primary button. No em or en dashes.
  */
 import { Body, Head, Html, Preview } from '@react-email/components'
 import {
-  DetailCard,
-  DetailRow,
-  EmailBanner,
+  Buttons,
+  EmailBody,
   EmailCard,
-  EmailEyebrow,
   EmailFooter,
-  EmailFootnote,
-  EmailHeader,
   EmailHeading,
+  EmailHero,
+  EmailKicker,
+  EmailNav,
   EmailParagraph,
   EmailShell,
-  MessageBlock,
+  LedgerRow,
+  LedgerRows,
   Mono,
+  NoteBox,
   PrimaryButton,
+  SignOff,
   emailBodyStyle,
 } from './_components'
 
 interface ContractSignEmailProps {
   signerName: string
-  signerRole: string                // 'tahi' | 'client' | 'other'
+  signerRole: string // 'tahi' | 'client' | 'other'
   contractName: string
-  contractType: string              // 'sow' | 'msa' | etc
+  contractType: string // 'sow' | 'msa' | etc
   signUrl: string
-  fromName: string                  // who is sending — e.g. "Liam Miller"
+  fromName: string // who is sending, e.g. "Liam Miller"
   customMessage?: string | null
 }
 
@@ -58,51 +59,51 @@ export function ContractSignEmail({
   const firstName = signerName.split(' ')[0] ?? signerName
 
   return (
-    <Html>
+    <Html lang="en">
       <Head />
       <Preview>{`${fromName} has shared a ${typeLabel.toLowerCase()} for your signature`}</Preview>
       <Body style={emailBodyStyle}>
         <EmailShell>
-          <EmailHeader eyebrow="A contract for your signature" />
-
           <EmailCard>
-            <EmailEyebrow>{typeLabel}</EmailEyebrow>
-            <EmailHeading>
-              {isInternal
-                ? <>Your <span style={{ color: '#5A824E' }}>signature</span> is needed</>
-                : <>Ready for your <span style={{ color: '#5A824E' }}>signature</span></>
-              }
-            </EmailHeading>
+            <EmailNav label="Sign" />
+            <EmailHero>
+              <EmailKicker>{typeLabel}</EmailKicker>
+              <EmailHeading>
+                {isInternal ? `Kia ora ${firstName}, your signature is needed.` : `Kia ora ${firstName}, ready for your signature.`}
+              </EmailHeading>
+              <EmailParagraph>
+                {isInternal
+                  ? `Please sign the ${typeLabel.toLowerCase()} below. The link is unique to you and the signing flow takes about a minute.`
+                  : `${fromName} has shared a ${typeLabel.toLowerCase()} with you for review and signature. Click through to read it in full and add your signature on the page.`}
+              </EmailParagraph>
+            </EmailHero>
+            <EmailBody>
+              <LedgerRows>
+                <LedgerRow label="Contract" value={contractName} tone="brand" />
+                <LedgerRow label="Type" value={typeLabel} />
+                <LedgerRow label="Signing as" value={signerName} />
+              </LedgerRows>
 
-            <EmailParagraph>Hi {firstName},</EmailParagraph>
-            <EmailParagraph>
-              {isInternal
-                ? `Please sign the ${typeLabel.toLowerCase()} below. The link is unique to you and the signing flow takes about a minute.`
-                : `${fromName} has shared a ${typeLabel.toLowerCase()} with you for review and signature. Click through to read it in full and add your signature on the page.`}
-            </EmailParagraph>
+              {customMessage ? (
+                <NoteBox tone="neutral" title={`A note from ${fromName}`}>
+                  {customMessage}
+                </NoteBox>
+              ) : null}
 
-            <DetailCard>
-              <DetailRow first label="Contract" value={contractName} hero />
-              <DetailRow label="Type" value={typeLabel} />
-              <DetailRow label="Signing as" value={signerName} />
-            </DetailCard>
+              <Buttons>
+                <PrimaryButton href={signUrl}>Review and sign</PrimaryButton>
+              </Buttons>
 
-            {customMessage && (
-              <MessageBlock fromName={fromName} message={customMessage} />
-            )}
-
-            <PrimaryButton href={signUrl}>Review and sign</PrimaryButton>
-
-            <EmailBanner kind="info">Confidential to the named recipient</EmailBanner>
-
-            <EmailFootnote framed>
-              Each signature is anchored to a tamper-evident <Mono>SHA-256</Mono> chain. Your
-              IP is hashed, never stored in plain text. The link is unique to you and expires
-              when the contract is fully signed or cancelled.
-            </EmailFootnote>
+              <EmailParagraph variant="small">
+                Confidential to the named recipient. Each signature is anchored to a tamper-evident{' '}
+                <Mono>SHA-256</Mono> chain, and your IP is hashed, never stored in plain text. The link
+                expires when the contract is fully signed or cancelled.
+              </EmailParagraph>
+            </EmailBody>
+            <SignOff name={fromName} />
           </EmailCard>
 
-          <EmailFooter />
+          <EmailFooter audience={isInternal ? 'team' : 'client'} />
         </EmailShell>
       </Body>
     </Html>
