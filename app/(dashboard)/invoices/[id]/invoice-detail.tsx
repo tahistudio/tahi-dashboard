@@ -21,6 +21,7 @@ import { useToast } from '@/components/tahi/toast'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { formatCurrency } from '@/lib/currency'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
+import { invoiceReference } from '@/lib/invoice-billing'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,12 @@ interface InvoiceRow {
   xeroOnlineInvoiceUrl?: string | null
   source: string | null
   status: string
+  /**
+   * The real invoice number (migration 0096). NULL on everything raised before
+   * it existed, so it is always read through invoiceReference, which falls back
+   * to the short id.
+   */
+  number?: string | null
   amountUsd: number
   taxAmountUsd: number | null
   discountAmountUsd: number | null
@@ -408,7 +415,14 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
             paddingTop: '1.25rem',
           }}
         >
-          <MetaField label="Invoice ID" value={invoice.id.slice(0, 8).toUpperCase()} isPrivate />
+          {/* The number when the row has one, the short id when it does not,
+              and the label says which so nobody quotes a UUID fragment to Xero
+              believing it is an invoice number. */}
+          <MetaField
+            label={invoice.number ? 'Invoice number' : 'Invoice ID'}
+            value={invoiceReference(invoice.id, invoice.number)}
+            isPrivate
+          />
           <MetaField label="Created" value={formatDate(invoice.createdAt)} />
           <MetaField label="Due Date" value={formatDate(invoice.dueDate)} highlight={isOverdue(invoice.dueDate, invoice.status)} />
           {invoice.sentAt && <MetaField label="Sent" value={formatDate(invoice.sentAt)} />}

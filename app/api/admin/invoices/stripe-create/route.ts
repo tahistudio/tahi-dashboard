@@ -61,6 +61,9 @@ export async function POST(req: NextRequest) {
     .select({
       id: schema.invoices.id,
       orgId: schema.invoices.orgId,
+      // Our invoice number, for the suppression record and the client's bell
+      // row, so both name the bill the same way the invoice email does.
+      number: schema.invoices.number,
       currency: schema.invoices.currency,
       dueDate: schema.invoices.dueDate,
       sentAt: schema.invoices.sentAt,
@@ -159,7 +162,7 @@ export async function POST(req: NextRequest) {
       billingPartition.suppressed,
       {
         template: 'stripe-invoice',
-        subject: `Stripe would email invoice ${invoiceReference(invoice.id)} on finalise`,
+        subject: `Stripe would email invoice ${invoiceReference(invoice.id, invoice.number)} on finalise`,
         orgId: invoice.orgId,
       },
       deliveryPolicy,
@@ -260,7 +263,7 @@ export async function POST(req: NextRequest) {
       await createNotifications(database, notifyRecipients, {
         type: 'invoice_created',
         title: 'Invoice ready to pay',
-        body: `Invoice ${invoiceReference(invoice.id)} is ready. You can pay it from your portal.`,
+        body: `Invoice ${invoiceReference(invoice.id, invoice.number)} is ready. You can pay it from your portal.`,
         entityType: 'invoice',
         entityId: invoice.id,
       })

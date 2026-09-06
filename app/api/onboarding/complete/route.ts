@@ -21,6 +21,7 @@ import {
   isInvoicedTerms,
   paymentTermsLabel,
 } from '@/lib/invoice-billing'
+import { withInvoiceNumber } from '@/lib/invoice-number'
 
 export const dynamic = 'force-dynamic'
 
@@ -170,6 +171,7 @@ async function recordInvoiceMe(
     : ` They were quoted in ${requested.toUpperCase()}, which an invoice cannot carry yet, so re-quote this in ${currency} before sending.`
 
   let invoiceId: string | null = null
+  let invoiceNumber: string | null = null
   if (plan) {
     const addon = body.addon === true
     const lines = [
@@ -187,18 +189,26 @@ async function recordInvoiceMe(
     const total = lines.reduce((sum, l) => sum + l.amount, 0)
 
     invoiceId = crypto.randomUUID()
-    await database.insert(schema.invoices).values({
-      id: invoiceId,
-      orgId,
-      source: 'manual',
-      status: 'draft',
-      amountUsd: total,
-      totalUsd: total,
-      currency,
-      dueDate: dueDateForTerms(now, terms),
-      notes: `Raised from onboarding: client chose to be invoiced (${paymentTermsLabel(terms)}).${requoteNote}`,
-      createdAt: now,
-      updatedAt: now,
+    // The second rail that raises a bill in the dashboard, so it is numbered
+    // from the same sequence as the New Invoice slide-over. The client is told
+    // about this invoice in the very next breath (the admin bell below quotes
+    // its reference), so a number minted a day later by the backfill would be a
+    // different string from the one the studio was first shown.
+    invoiceNumber = await withInvoiceNumber(database, async (minted) => {
+      await database.insert(schema.invoices).values({
+        id: invoiceId as string,
+        orgId,
+        source: 'manual',
+        status: 'draft',
+        number: minted,
+        amountUsd: total,
+        totalUsd: total,
+        currency,
+        dueDate: dueDateForTerms(now, terms),
+        notes: `Raised from onboarding: client chose to be invoiced (${paymentTermsLabel(terms)}).${requoteNote}`,
+        createdAt: now,
+        updatedAt: now,
+      })
     })
     await database.insert(schema.invoiceItems).values(lines.map(l => ({
       id: crypto.randomUUID(),
@@ -216,7 +226,7 @@ async function recordInvoiceMe(
     type: 'invoice_created',
     title: `${org.name} chose to be invoiced`,
     body: invoiceId
-      ? `${paymentTermsLabel(terms)} terms recorded. Draft invoice ${invoiceReference(invoiceId)} is waiting to be reviewed and sent.`
+      ? `${paymentTermsLabel(terms)} terms recorded. Draft invoice ${invoiceReference(invoiceId, invoiceNumber)} is waiting to be reviewed and sent.`
       : `${paymentTermsLabel(terms)} terms recorded at onboarding. No plan was selected, so raise their first invoice by hand.`,
     entityType: invoiceId ? 'invoice' : 'organisation',
     entityId: invoiceId ?? orgId,

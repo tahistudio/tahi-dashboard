@@ -28,6 +28,7 @@ import { and, desc, eq, sql } from 'drizzle-orm'
 import { loadAiContext } from '@/lib/ai-context'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { SONNET_MODEL } from '@/lib/ai-models'
+import { invoiceReference } from '@/lib/invoice-billing'
 
 export const dynamic = 'force-dynamic'
 
@@ -81,10 +82,6 @@ function parseDraft(text: string): ParsedDraft {
     subject: subjectMatch?.[1].trim() ?? null,
     body: bodyMatch?.[1].trim() ?? null,
   }
-}
-
-function invoiceNumber(id: string): string {
-  return `INV-${id.slice(0, 6).toUpperCase()}`
 }
 
 function daysOverdue(dueDate: string | null): number | null {
@@ -149,6 +146,11 @@ export async function POST(req: NextRequest, { params }: Params) {
       orgId: schema.invoices.orgId,
       orgName: schema.organisations.name,
       status: schema.invoices.status,
+      // The real invoice number, so the chase email names the bill the same
+      // way the invoice email did. This route used to invent its own third
+      // form ("INV-" + the first six characters of the UUID), which matched
+      // nothing the client had ever been sent.
+      number: schema.invoices.number,
       totalUsd: schema.invoices.totalUsd,
       currency: schema.invoices.currency,
       dueDate: schema.invoices.dueDate,
@@ -212,7 +214,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   })
 
   const lines: string[] = []
-  lines.push(`Invoice: ${invoiceNumber(invoice.id)}`)
+  lines.push(`Invoice: ${invoiceReference(invoice.id, invoice.number)}`)
   lines.push(`Client: ${invoice.orgName ?? 'the client'}`)
   lines.push(`Recipient: ${primaryContact.name} (${primaryContact.email})`)
   lines.push(`Amount due: ${amount} ${currency}`)
@@ -317,7 +319,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   await drizzle.insert(schema.activities).values({
     id: crypto.randomUUID(),
     type: 'invoice_chase_drafted',
-    title: `AI drafted an overdue-invoice chase (${invoiceNumber(invoice.id)})`,
+    title: `AI drafted an overdue-invoice chase (${invoiceReference(invoice.id, invoice.number)})`,
     description: 'Pending review - open the invoice to edit / send / dismiss.',
     orgId: invoice.orgId,
     contactId: primaryContact.id,

@@ -30,6 +30,7 @@ import {
   shouldClearOnlineInvoiceUrl,
   type OnlineInvoiceCandidate,
 } from '@/lib/xero-online-invoice'
+import { importedInvoiceNumber } from '@/lib/invoice-number'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -999,6 +1000,11 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
           xeroInvoiceId: inv.InvoiceID,
           source: 'xero',
           status: localStatus,
+          // Xero named this bill before we ever saw it, and the client has
+          // already been sent that number, so it is the number we keep
+          // (migration 0096). The studio sequence numbers what the studio
+          // RAISES; it never renumbers what it imports.
+          number: importedInvoiceNumber(inv.InvoiceNumber),
           amountUsd: inv.SubTotal,
           totalUsd: inv.Total,
           currency: inv.CurrencyCode ?? 'NZD',

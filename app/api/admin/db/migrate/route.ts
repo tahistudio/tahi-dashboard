@@ -2209,6 +2209,14 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_time_invoice ON time_entries(invoice_id)`,
     ],
   },
+  {
+    name: '0096',
+    description: 'invoices.number: the real, human invoice number, plus the unique index that makes it a guarantee. There was no invoice number in D1 at all. The settings row `invoice_number_prefix` has existed since the settings page was built and nothing read it, so every surface derived its own identifier and they disagreed: the portal and the emails printed id.slice(0,8) upper-cased, the two AI chase routes printed "INV-" + id.slice(0,6), and the Xero push sent a third form as InvoiceNumber, so a client quoting the reference off their email was quoting a string that matched nothing in Xero. The studio owns the sequence for anything raised here (Liam, 2026-09-06): lib/invoice-number.ts mints `<prefix>-<YYYY>-<NNNN>` from the prefix setting and a global counter in the settings row `invoicing.numberSequence`, and that number is what Xero is told. An invoice IMPORTED from Xero or Stripe keeps the number its source gave it, and no row is ever renumbered. The UNIQUE index is how uniqueness is guaranteed rather than hoped for: D1 has no SELECT FOR UPDATE, so the counter is bumped by one atomic UPDATE ... RETURNING (each concurrent caller already gets its own value) and a collision that survives that fails the INSERT instead of writing a duplicate, whereupon the caller mints again. SQLite treats NULLs as DISTINCT in a unique index, so every historical row stays NULL under the constraint and no backfill is forced; POST /api/admin/invoices/backfill-numbers fills only the rows whose source number is recoverable and refuses to invent one for the rest. The counter row needs no schema: it is created lazily with INSERT OR IGNORE on the first mint. Additive and idempotent; the duplicate-column error is swallowed upstream so re-runs are safe. Apply BEFORE deploying the code that reads it, because Drizzle expands the admin data export\'s bare select into an explicit column list.',
+    statements: [
+      `ALTER TABLE invoices ADD COLUMN number text`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_number ON invoices(number)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

@@ -79,6 +79,11 @@ export async function GET(req: NextRequest, { params }: Params) {
       // studio fact, and shipping it in the JSON left it one Network tab away
       // from a client even though nothing on the surface renders it.
       status: schema.invoices.status,
+      // The invoice number, which the client needs: it is the reference they
+      // quote on a bank transfer and the string on their emailed copy. NULL on
+      // anything raised before migration 0096, so the page falls back to the
+      // short id through invoiceReference.
+      number: schema.invoices.number,
       amountUsd: schema.invoices.amountUsd,
       taxAmountUsd: schema.invoices.taxAmountUsd,
       discountAmountUsd: schema.invoices.discountAmountUsd,
@@ -133,6 +138,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       payUrl,
       invoice: {
         id: rest.id,
+        number: rest.number,
         status: rest.status,
         totalUsd: rest.totalUsd,
         currency: rest.currency,

@@ -11,6 +11,8 @@ import {
   type HourlyExportOrg,
   type HourlyExportPlan,
 } from '@/lib/hourly-export'
+import { withInvoiceNumber } from '@/lib/invoice-number'
+import { invoiceReference } from '@/lib/invoice-billing'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -189,20 +191,28 @@ export async function POST(req: NextRequest) {
   for (const plan of plans) {
     const invoiceId = crypto.randomUUID()
     const invoiceNow = new Date().toISOString()
+    let invoiceNumber: string | null = null
 
     try {
-      await database.insert(schema.invoices).values({
-        id: invoiceId,
-        orgId: plan.orgId,
-        source: 'xero',
-        status: 'draft',
-        amountUsd: plan.amount,
-        totalUsd: plan.amount,
-        currency: plan.currency,
-        dueDate,
-        notes: `Auto-generated for ${monthLabel} billable hours`,
-        createdAt: invoiceNow,
-        updatedAt: invoiceNow,
+      // Raised here, so numbered here: this is the third dashboard rail that
+      // mints from the studio sequence, and the number below is what Xero is
+      // told the invoice is called. Only the invoice row is inside the retry;
+      // the lines and the time-entry stamp follow once it has landed.
+      invoiceNumber = await withInvoiceNumber(database, async (minted) => {
+        await database.insert(schema.invoices).values({
+          id: invoiceId,
+          orgId: plan.orgId,
+          source: 'xero',
+          status: 'draft',
+          number: minted,
+          amountUsd: plan.amount,
+          totalUsd: plan.amount,
+          currency: plan.currency,
+          dueDate,
+          notes: `Auto-generated for ${monthLabel} billable hours`,
+          createdAt: invoiceNow,
+          updatedAt: invoiceNow,
+        })
       })
 
       for (const line of plan.lines) {
@@ -243,6 +253,12 @@ export async function POST(req: NextRequest) {
           Type: 'ACCREC',
           Status: 'DRAFT',
           Contact: { ContactID: plan.xeroContactId },
+          // Our number, not Xero's. The studio owns the sequence, so the bill
+          // in Xero is called the same thing as the bill in the dashboard and
+          // the reference on the client's transfer. Falls back to the short id
+          // when the counter could not be reached, which is still a stable
+          // string both sides can be matched on.
+          InvoiceNumber: invoiceReference(invoiceId, invoiceNumber),
           DueDate: dueDate,
           CurrencyCode: plan.currency,
           LineAmountTypes: isNzd ? 'Exclusive' : 'NoTax',
@@ -270,6 +286,7 @@ export async function POST(req: NextRequest) {
     results.push({
       ...describePlan(plan),
       invoiceId,
+      invoiceNumber,
       status: 'created',
       xeroStatus,
     })

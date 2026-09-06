@@ -26,10 +26,7 @@ import { schema } from '@/db/d1'
 import { desc, eq } from 'drizzle-orm'
 import { emailFromAddress } from '@/lib/email'
 import { deliverEmail } from '@/lib/email-delivery'
-
-function invoiceNumber(id: string): string {
-  return `INV-${id.slice(0, 6).toUpperCase()}`
-}
+import { invoiceReference } from '@/lib/invoice-billing'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -72,6 +69,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   let lead: typeof schema.leads.$inferSelect | null = null
   let chaseOrgId: string | null = null
   let chaseContactId: string | null = null
+  // The bill's real number, resolved once and reused for the subject and the
+  // activity row. Both used to print "INV-" plus the first six characters of
+  // the UUID, a form that appeared nowhere else and matched nothing the client
+  // held.
+  let chaseReference: string | null = null
   let subjectFallback: string
 
   if (draft.leadId) {
@@ -90,7 +92,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   } else {
     // Invoice chase draft - recipient is the org's primary contact.
     const [invoice] = await database
-      .select({ id: schema.invoices.id, orgId: schema.invoices.orgId })
+      .select({
+        id: schema.invoices.id,
+        orgId: schema.invoices.orgId,
+        number: schema.invoices.number,
+      })
       .from(schema.invoices)
       .where(eq(schema.invoices.id, draft.invoiceId as string))
       .limit(1)
@@ -110,7 +116,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     recipientName = primaryContact.name
     chaseOrgId = invoice.orgId
     chaseContactId = primaryContact.id
-    subjectFallback = `Invoice ${invoiceNumber(invoice.id)}`
+    chaseReference = invoiceReference(invoice.id, invoice.number)
+    subjectFallback = `Invoice ${chaseReference}`
   }
 
   const subject = (draft.finalSubject ?? draft.aiDraftSubject ?? '').trim() || subjectFallback
@@ -221,7 +228,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     await database.insert(schema.activities).values({
       id: crypto.randomUUID(),
       type: 'invoice_chase_sent',
-      title: `Overdue-invoice chase sent to ${recipientEmail} (${invoiceNumber(draft.invoiceId)})`,
+      title: `Overdue-invoice chase sent to ${recipientEmail} (${chaseReference ?? invoiceReference(draft.invoiceId as string)})`,
       description: wasEdited
         ? `Liam edited the AI draft before sending.`
         : `AI draft sent as-is.`,

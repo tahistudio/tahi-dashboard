@@ -16,10 +16,13 @@ import {
   portalInvoiceDenialCopy,
   type PortalPersonSummary,
 } from '@/lib/portal-admin-label'
+import { invoiceReference } from '@/lib/invoice-billing'
 
 interface InvoiceRow {
   id: string
   status: string
+  /** The real invoice number (migration 0096). NULL falls back to the short id. */
+  number?: string | null
   amountUsd: number
   totalUsd: number
   totalAmount?: number
@@ -272,7 +275,7 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
                       {invoices.map(inv => (
                         <tr key={inv.id} className="border-b border-[var(--color-border-subtle)] last:border-0">
                           <td className="px-4 py-3 font-mono text-xs text-[var(--color-text)]">
-                            {inv.id.slice(0, 8).toUpperCase()}
+                            {invoiceReference(inv.id, inv.number)}
                           </td>
                           <td className="px-4 py-3 font-medium text-[var(--color-text)]">
                             {formatCurrency(inv.totalUsd ?? inv.totalAmount ?? 0, inv.currency)}
@@ -505,7 +508,7 @@ function AdminBillingView() {
                       {recentInvoices.map(inv => (
                         <tr key={inv.id} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
                           <td className="font-mono text-xs" style={{ padding: '0.75rem 1rem', color: 'var(--color-text)' }}>
-                            {inv.id.slice(0, 8).toUpperCase()}
+                            {invoiceReference(inv.id, inv.number)}
                           </td>
                           <td className="font-medium" style={{ padding: '0.75rem 1rem', color: 'var(--color-text)' }}>
                             {formatCurrency(inv.totalUsd ?? inv.totalAmount ?? 0, inv.currency)}

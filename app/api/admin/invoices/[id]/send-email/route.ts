@@ -129,6 +129,10 @@ export async function POST(req: NextRequest, { params }: Params) {
       id: schema.invoices.id,
       orgId: schema.invoices.orgId,
       status: schema.invoices.status,
+      // The invoice number. It is the email subject, the reference the client
+      // quotes on a bank transfer and the string in the How to pay block, so
+      // all three say the same thing.
+      number: schema.invoices.number,
       totalUsd: schema.invoices.totalUsd,
       currency: schema.invoices.currency,
       notes: schema.invoices.notes,
@@ -210,7 +214,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         .toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' })
     : 'On receipt'
 
-  const reference = invoiceReference(invoiceRow.id)
+  const reference = invoiceReference(invoiceRow.id, invoiceRow.number)
   // Client-openable deep link. /invoices/[id] renders from the portal API for
   // a client audience, so this no longer lands them on a 403.
   const invoiceUrl = publicUrl(`/invoices/${invoiceRow.id}`)
@@ -235,6 +239,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     payUrl,
     invoice: {
       id: invoiceRow.id,
+      number: invoiceRow.number,
       // Never settled by the time we get here (the 409 above turns a paid or
       // written-off invoice away), but the block refuses to build for one, and
       // saying so here is what makes that guarantee readable.
@@ -311,6 +316,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         createElement(InvoiceSentEmail, {
           clientName: r.name,
           invoiceId: invoiceRow.id,
+          invoiceNumber: invoiceRow.number,
           amountFormatted,
           currency,
           dueDate: dueDateDisplay,

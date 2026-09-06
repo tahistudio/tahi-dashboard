@@ -112,6 +112,10 @@ const SETTINGS_ROWS = [
 const LIST_ROW = {
   id: 'inv-1042-9c31-4b77-8e05-6f1d2a94c7b3',
   orgId: 'org-a',
+  // The real invoice number (migration 0096). Client-facing by definition:
+  // it is the reference on their transfer and the string on their emailed
+  // copy, unlike the Stripe and Xero ids this projection withholds.
+  number: 'INV-2026-0042',
   status: 'sent',
   totalAmount: 4312.5,
   currency: 'NZD',
@@ -132,6 +136,7 @@ const DETAIL_ROW = {
   projectId: null,
   subscriptionId: null,
   source: 'xero',
+  number: 'INV-2026-0042',
   status: 'sent',
   amountUsd: 4312.5,
   taxAmountUsd: 0,
@@ -191,7 +196,7 @@ describe('GET /api/portal/invoices pay path', () => {
       accountName: 'Tahi Studio Ltd',
       accountNumber: '01-0242-0198765-00',
       // The invoice number, which is what the client quotes on the transfer.
-      reference: 'INV-1042',
+      reference: 'INV-2026-0042',
       amount: 4312.5,
       currency: 'NZD',
       dueDate: '2026-09-30',
@@ -270,7 +275,7 @@ describe('GET /api/portal/invoices pay path', () => {
       items: Projected[]
     }
     expect(body.items[0].howToPay).toBeUndefined()
-    expect(body.items[1].howToPay).toMatchObject({ reference: 'INV-1042' })
+    expect(body.items[1].howToPay).toMatchObject({ reference: 'INV-2026-0042' })
   })
 
   it('leaks nothing studio-side: the row is exactly the client-facing fields', async () => {
@@ -287,6 +292,7 @@ describe('GET /api/portal/invoices pay path', () => {
       'dueDate',
       'howToPay',
       'id',
+      'number',
       'orgId',
       'paidAt',
       'payUrl',
@@ -316,7 +322,7 @@ describe('GET /api/portal/invoices/[id] pay path', () => {
       bankName: 'ANZ',
       accountName: 'Tahi Studio Ltd',
       accountNumber: '01-0242-0198765-00',
-      reference: 'INV-1042',
+      reference: 'INV-2026-0042',
       amount: 4312.5,
       currency: 'NZD',
       dueDate: '2026-09-30',

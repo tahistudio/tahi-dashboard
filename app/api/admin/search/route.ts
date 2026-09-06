@@ -163,6 +163,7 @@ export async function GET(req: NextRequest) {
 
     database.select({
       id: schema.invoices.id,
+      number: schema.invoices.number,
       stripeInvoiceId: schema.invoices.stripeInvoiceId,
       xeroInvoiceId: schema.invoices.xeroInvoiceId,
       status: schema.invoices.status,
@@ -170,6 +171,10 @@ export async function GET(req: NextRequest) {
       notes: schema.invoices.notes,
     }).from(schema.invoices).where(
       or(
+        // The number goes FIRST because it is the only one of these a human
+        // types: it is what the client quotes, what the email prints and what
+        // Xero shows. Searching an invoice used to mean knowing a Stripe id.
+        like(schema.invoices.number, needle),
         like(schema.invoices.notes, needle),
         like(schema.invoices.stripeInvoiceId, needle),
         like(schema.invoices.xeroInvoiceId, needle),
@@ -349,7 +354,9 @@ export async function GET(req: NextRequest) {
     invoice: fromResult(invoicesRes, r => ({
       type: 'invoice',
       id: r.id,
-      title: r.stripeInvoiceId
+      // The number when the row has one, then the rail ids, then the short id.
+      title: r.number
+        ?? r.stripeInvoiceId
         ?? r.xeroInvoiceId
         ?? `Invoice ${r.id.slice(0, 8)}`,
       sub: orgNameById.get(r.orgId),

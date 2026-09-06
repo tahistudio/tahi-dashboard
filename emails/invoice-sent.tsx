@@ -33,10 +33,18 @@ import {
   emailBodyStyle,
 } from './_components'
 import { hasBankDestination, type InvoiceHowToPay } from '@/lib/invoice-how-to-pay'
+import { invoiceReference } from '@/lib/invoice-billing'
 
 interface InvoiceSentEmailProps {
   clientName: string
   invoiceId: string
+  /**
+   * invoices.number, the real invoice number, when the row carries one. It is
+   * what the client quotes on a transfer and what Xero calls the same bill, so
+   * the email has to print it rather than a UUID fragment. Absent or null falls
+   * back to the short id, exactly as before migration 0096.
+   */
+  invoiceNumber?: string | null
   amountFormatted: string
   currency: string
   dueDate?: string
@@ -52,6 +60,7 @@ interface InvoiceSentEmailProps {
 export function InvoiceSentEmail({
   clientName,
   invoiceId,
+  invoiceNumber,
   amountFormatted,
   currency,
   dueDate,
@@ -60,7 +69,7 @@ export function InvoiceSentEmail({
   paymentUrl,
   howToPay,
 }: InvoiceSentEmailProps) {
-  const displayId = invoiceId.slice(0, 8).toUpperCase()
+  const displayId = invoiceReference(invoiceId, invoiceNumber)
   const firstName = clientName.split(' ')[0] ?? clientName
   // Three states, in order of what the client can do: pay it in one click,
   // pay it by transfer, or open it and wait for us. Only one is ever shown.
@@ -91,7 +100,7 @@ export function InvoiceSentEmail({
 
             <DetailCard>
               <DetailRow first label="Amount due" value={`${amountFormatted} ${currency}`} hero />
-              <DetailRow label="Invoice ID" value={displayId} mono />
+              <DetailRow label={invoiceNumber ? 'Invoice number' : 'Invoice ID'} value={displayId} mono />
               {dueDate && <DetailRow label="Due date" value={dueDate} />}
               {notes && <DetailRow label="Notes" value={notes} />}
             </DetailCard>

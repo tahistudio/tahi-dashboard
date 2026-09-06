@@ -80,6 +80,10 @@ export async function GET(req: NextRequest) {
         id: schema.invoices.id,
         orgId: schema.invoices.orgId,
         status: schema.invoices.status,
+        // The invoice number the client quotes on a transfer and reads on
+        // their email. Client-facing by definition, unlike the Stripe and Xero
+        // ids this projection withholds. NULL falls back to the short id.
+        number: schema.invoices.number,
         totalAmount: schema.invoices.totalUsd,
         currency: schema.invoices.currency,
         dueDate: schema.invoices.dueDate,
@@ -110,6 +114,10 @@ export async function GET(req: NextRequest) {
         id: schema.invoices.id,
         orgId: schema.invoices.orgId,
         status: schema.invoices.status,
+        // The invoice number the client quotes on a transfer and reads on
+        // their email. Client-facing by definition, unlike the Stripe and Xero
+        // ids this projection withholds. NULL falls back to the short id.
+        number: schema.invoices.number,
         totalAmount: schema.invoices.totalUsd,
         currency: schema.invoices.currency,
         dueDate: schema.invoices.dueDate,
@@ -168,6 +176,7 @@ export async function GET(req: NextRequest) {
         payUrl,
         invoice: {
           id: row.id,
+          number: row.number,
           status: row.status,
           totalUsd: row.totalAmount,
           currency: row.currency,

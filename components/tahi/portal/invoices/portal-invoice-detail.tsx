@@ -66,6 +66,13 @@ interface PortalInvoice {
   orgId: string
   orgName: string | null
   status: string
+  /**
+   * The real invoice number (migration 0096), when the row carries one. This
+   * is what the client quotes on a bank transfer and reads on their emailed
+   * copy, so it has to be the same string here. NULL on anything raised before
+   * the column existed, which invoiceReference resolves to the short id.
+   */
+  number?: string | null
   amountUsd: number
   taxAmountUsd: number
   discountAmountUsd: number
@@ -241,7 +248,7 @@ export function PortalInvoiceDetail({
     )
   }
 
-  const reference = invoiceReference(invoice.id)
+  const reference = invoiceReference(invoice.id, invoice.number)
   const state = portalInvoiceState(invoice)
   const stateCopy = PORTAL_INVOICE_STATE_COPY[state]
   const currency = invoice.currency ?? 'NZD'

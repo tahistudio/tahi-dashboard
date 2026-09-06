@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { callXeroAPI, callXeroAPIOrThrow, XeroAPIError } from '@/lib/xero'
+import { invoiceReference } from '@/lib/invoice-billing'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -102,6 +103,9 @@ export async function POST(req: NextRequest) {
           notes: schema.invoices.notes,
           status: schema.invoices.status,
           xeroInvoiceId: schema.invoices.xeroInvoiceId,
+          // The studio's own invoice number. It is what Xero is told this bill
+          // is called, so the two ledgers name the same document.
+          number: schema.invoices.number,
         })
         .from(schema.invoices)
         .where(eq(schema.invoices.id, invId))
@@ -216,7 +220,18 @@ export async function POST(req: NextRequest) {
       const endpoint = isUpdate ? `/Invoices/${xeroInvoiceId}` : '/Invoices'
 
       if (!isUpdate) {
-        xeroPayload.InvoiceNumber = `INV-${invId.slice(0, 8).toUpperCase()}`
+        // OUR number goes to Xero, not Xero's (Liam, 2026-09-06: "Tahi's own
+        // sequence pushed into Xero, we control it"). This used to be a fourth,
+        // invented form of the identifier: `INV-` plus the first eight
+        // characters of the UUID, which matched neither the reference the
+        // client was emailed nor anything a human could look up. Now it is
+        // invoices.number when the row has one, and the same short id the rest
+        // of the platform prints when it does not.
+        //
+        // Only on CREATE. Xero rejects a change of InvoiceNumber on an invoice
+        // that is no longer a draft, and renaming a bill the client already
+        // holds is exactly what the "never renumber" rule forbids.
+        xeroPayload.InvoiceNumber = invoiceReference(invId, invoice.number)
       }
 
       if (dryRun) {

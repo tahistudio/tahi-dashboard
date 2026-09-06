@@ -1,0 +1,64 @@
+-- Migration 0096: the real invoice number
+--
+--   invoices.number
+--     The human identifier for a bill, e.g. "INV-2026-0001". It is what the
+--     client quotes on a bank transfer, what goes to Xero as InvoiceNumber on
+--     a dashboard-raised invoice, and what every list, detail page and email
+--     prints instead of the first eight characters of a UUID.
+--
+-- Why this exists. There was no invoice number anywhere in D1. The studio
+-- settings have carried an `invoice_number_prefix` row since the settings page
+-- was built and NOTHING has ever read it: every surface derived an identifier
+-- on the fly instead, and they did not agree. The portal and the emails printed
+-- id.slice(0,8) upper-cased, the two AI chase routes printed
+-- "INV-" + id.slice(0,6), and the Xero push invented a third form,
+-- "INV-<id.slice(0,8)>", as the InvoiceNumber it sent. A client quoting the
+-- reference off their email was quoting a string that matched nothing in Xero.
+--
+-- WHO OWNS THE SEQUENCE. The studio (Liam, 2026-09-06: "Tahi's own sequence
+-- pushed into Xero, we control it"). An invoice raised in the dashboard is
+-- numbered here and that number is what Xero is told. An invoice IMPORTED from
+-- Xero or Stripe keeps the number its source already gave it, because
+-- renumbering a bill the client has already received is how a payment stops
+-- reconciling. No row is ever renumbered once it carries a number.
+--
+-- THE UNIQUE INDEX IS THE POINT. D1 has no SELECT ... FOR UPDATE and no
+-- transaction a route can hold open across an await, so uniqueness cannot be
+-- guaranteed by reading the counter and then writing. It is guaranteed by this
+-- constraint: the counter row is bumped with a single atomic
+-- UPDATE ... RETURNING (lib/invoice-number.ts), which already hands each
+-- concurrent caller its own value, and a collision that somehow survives that
+-- fails the INSERT rather than writing a duplicate. The caller mints again and
+-- retries.
+--
+-- SQLite treats NULLs as DISTINCT in a unique index, which is what makes this
+-- safe to apply to a populated table: every historical row stays NULL, any
+-- number of them, and no backfill is forced. POST /api/admin/invoices/
+-- backfill-numbers fills the rows whose source number is recoverable (the
+-- ManyRequests key, or the number the Xero and Stripe importers wrote into
+-- notes) and refuses to invent one for the rest.
+--
+-- ALTER TABLE ADD COLUMN cannot use IF NOT EXISTS in SQLite; the runtime runner
+-- (app/api/admin/db/migrate) swallows the "duplicate column name" error so
+-- re-running is safe. The index is IF NOT EXISTS in its own right.
+--
+-- MERGE ORDER. Apply this to staging and then production D1 BEFORE the code
+-- that references the column is deployed. Drizzle expands a bare .select() into
+-- an explicit column list from db/schema.ts, so from the moment the new schema
+-- ships the admin data export (app/api/admin/danger/export/route.ts) would fail
+-- with "no such column: number". The column is additive and nullable, so
+-- applying it ahead of the deploy is harmless to the running code.
+--   1. wrangler d1 execute tahi-db-staging --remote --file=drizzle/migrations/0096_invoice_number.sql
+--   2. deploy, then raise a draft invoice and check it comes back with a number
+--   3. wrangler d1 execute tahi-db --remote --file=drizzle/migrations/0096_invoice_number.sql
+--   4. approve the production deploy, then POST /api/admin/invoices/backfill-numbers
+--      (dryRun defaults to true) and read the plan before applying it
+--
+-- POST /api/admin/db/migrate {"name":"0096"} is the after-the-fact fallback,
+-- usable once the deploy that carries the entry is live.
+--
+-- The counter itself needs no migration: it is a settings row created lazily
+-- with INSERT OR IGNORE the first time a number is minted, so a database that
+-- has never raised an invoice carries no dead row.
+ALTER TABLE invoices ADD COLUMN number text;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_number ON invoices(number);

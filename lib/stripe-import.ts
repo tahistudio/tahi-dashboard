@@ -10,6 +10,7 @@
 
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { importedInvoiceNumber } from '@/lib/invoice-number'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -154,6 +155,13 @@ export async function importStripeInvoice(
     stripeHostedInvoiceUrl: inv.hosted_invoice_url ?? null,
     source: 'stripe',
     status: mapStripeStatus(inv.status),
+    // Stripe's own invoice number when it has finalised one, kept as-is
+    // (migration 0096). A Stripe DRAFT has no number, so those rows stay NULL
+    // and fall back to the short id, the same as every pre-0096 row. The
+    // studio sequence numbers what the studio raises; it never renumbers an
+    // import, because the client has already been shown Stripe's number on
+    // Stripe's own hosted page.
+    number: importedInvoiceNumber(inv.number),
     amountUsd: subtotal / 100,
     totalUsd: total / 100,
     currency: (inv.currency ?? 'nzd').toUpperCase(),

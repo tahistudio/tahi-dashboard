@@ -70,6 +70,13 @@ export interface PortalInvoiceRow {
   id: string
   orgId: string
   status: string
+  /**
+   * The real invoice number (migration 0096), when the row carries one. This
+   * is what the client quotes on a bank transfer and reads on their emailed
+   * copy, so it has to be the same string here. NULL on anything raised before
+   * the column existed, which invoiceReference resolves to the short id.
+   */
+  number?: string | null
   totalAmount: number
   currency: string | null
   dueDate: string | null
@@ -189,7 +196,7 @@ export function PortalInvoiceList({ preview = false }: { preview?: boolean }) {
       if (tab === 'paid' && isPortalInvoiceOpen(inv)) return false
       if (year !== 'all' && yearOf(inv.sentAt ?? inv.createdAt) !== year) return false
       if (query) {
-        const haystack = `${invoiceReference(inv.id)} ${portalInvoiceLabel(inv)}`.toLowerCase()
+        const haystack = `${invoiceReference(inv.id, inv.number)} ${portalInvoiceLabel(inv)}`.toLowerCase()
         if (!haystack.includes(query)) return false
       }
       return true
@@ -261,7 +268,7 @@ export function PortalInvoiceList({ preview = false }: { preview?: boolean }) {
               </span>
             )}
             sub={nextDue
-              ? `${invoiceReference(nextDue.id)}, ${portalDueLabel(nextDue).toLowerCase()}`
+              ? `${invoiceReference(nextDue.id, nextDue.number)}, ${portalDueLabel(nextDue).toLowerCase()}`
               : 'You are all square'}
           />
           <SummaryTile
@@ -300,7 +307,7 @@ export function PortalInvoiceList({ preview = false }: { preview?: boolean }) {
               style={{ textDecoration: 'none' }}
             >
               <TahiButton variant="secondary" size="md">
-                Open {invoiceReference(overdue[0].id)}
+                Open {invoiceReference(overdue[0].id, overdue[0].number)}
               </TahiButton>
             </Link>
           </div>
@@ -560,7 +567,7 @@ function InvoiceRow({
 }) {
   const state = portalInvoiceState(invoice)
   const copy = PORTAL_INVOICE_STATE_COPY[state]
-  const reference = invoiceReference(invoice.id)
+  const reference = invoiceReference(invoice.id, invoice.number)
   const overdue = state === 'overdue'
   const dueTone = overdue ? 'var(--color-danger)' : 'var(--color-text-muted)'
   // Null once the due date is far enough away to speak for itself, so the
