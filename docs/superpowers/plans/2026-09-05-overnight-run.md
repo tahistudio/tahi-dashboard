@@ -102,6 +102,7 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 - 00:55 NZST (Mon) email allowlist (df07ae62 + 04979c5c) and act-as-client (0641c8de) merged; 3122 tests, build green; migration 0094 (email_suppressions) on production, staging and the QA db; QA gates: policy defaults allowlist / business@tahi.studio only / staci and nathan blocked, pages 200, Client view bounces, preview write 403. Pushing and deploying.
 
 - 01:00 NZST (Mon) allowlist and act-as-client LIVE (14211d9d): production policy verified closed. Importer built (feat/manyrequests-import 10f72b31, migration 0093) and in review; it needs MANYREQUESTS_API_TOKEN on the dashboard worker, a production secret the agent may not set (classifier), so the import itself waits for Liam's 30-second operator step in the morning.
+- 01:05 NZST 7 Sep: heartbeat. Production settings read back email.deliveryMode allowlist, allowed business@tahi.studio, blocked staci@ and nathan@, domains tahi.studio, no org exemptions. Act-as-client smoke request archived (admin DELETE archives, no hard delete). Design fixer wf_4daf19cb-fa6 silent 35 minutes on a screenshot read; stopped and resumed from cache (task wgptjx5a5). Importer reviews wf_678e238a-2a2 still running (8 results). Spec coverage inventory started for the wrap-up.
 
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
