@@ -6,20 +6,23 @@
  * Deliberately short: when, how long, who with, one link back to the portal,
  * and a plain line about rescheduling.
  */
-import { Body, Head, Html, Preview } from '@react-email/components'
 import { formatSlotLong } from '@/lib/kickoff-slot'
 import {
-  DetailCard,
-  DetailRow,
+  Buttons,
+  EmailBody,
   EmailCard,
-  EmailEyebrow,
+  EmailDocument,
   EmailFooter,
-  EmailHeader,
+  EmailHero,
+  EmailKicker,
   EmailHeading,
+  EmailNav,
   EmailParagraph,
-  EmailShell,
+  Fact,
+  Facts,
+  LedgerRow,
+  LedgerRows,
   PrimaryButton,
-  emailBodyStyle,
 } from './_components'
 
 export interface KickoffBookedEmailProps {
@@ -58,42 +61,45 @@ export default function KickoffBookedEmail({
   const when = formatSlotLong(scheduledAt, { timeZone }) || scheduledAt
 
   return (
-    <Html>
-      <Head />
-      <Preview>{`Your kickoff call is booked: ${when}`}</Preview>
-      <Body style={emailBodyStyle}>
-        <EmailShell>
-          <EmailHeader eyebrow="Kickoff booked" />
+    <EmailDocument preview={`Your kickoff call is booked: ${when}`}>
+      <EmailCard>
+        <EmailNav label="Kickoff booked" />
+        <EmailHero>
+          <EmailKicker>Kickoff booked</EmailKicker>
+          <EmailHeading>Kia ora {contactFirstName}, your kickoff call is booked.</EmailHeading>
+          <EmailParagraph>
+            {hostName
+              ? `${hostName} will meet you to set direction for ${companyName}. No prep needed.`
+              : `We will meet you to set direction for ${companyName}. No prep needed.`}
+          </EmailParagraph>
+        </EmailHero>
+        <EmailBody>
+          <Facts>
+            <Fact label="When" value={when} />
+            <Fact label="How long" value={`${durationMinutes} minutes`} />
+          </Facts>
 
-          <EmailCard>
-            <EmailEyebrow>Kia ora {contactFirstName}</EmailEyebrow>
-            <EmailHeading>Your kickoff call is booked.</EmailHeading>
-            <EmailParagraph>
-              {hostName
-                ? `${hostName} will meet you to set direction for ${companyName}. No prep needed.`
-                : `We will meet you to set direction for ${companyName}. No prep needed.`}
-            </EmailParagraph>
+          {hostName ? (
+            <LedgerRows>
+              <LedgerRow label="With" value={hostName} />
+            </LedgerRows>
+          ) : null}
 
-            <DetailCard>
-              <DetailRow label="When" value={when} hero first />
-              <DetailRow label="How long" value={`${durationMinutes} minutes`} />
-              {hostName ? <DetailRow label="With" value={hostName} /> : null}
-            </DetailCard>
-
+          <Buttons>
             {meetingUrl ? (
               <PrimaryButton href={meetingUrl}>Join the call</PrimaryButton>
             ) : (
               <PrimaryButton href={portalUrl}>Open your studio</PrimaryButton>
             )}
+          </Buttons>
 
-            <EmailParagraph subtle>
-              Need a different time? Reply to this email and we will move it.
-            </EmailParagraph>
-          </EmailCard>
+          <EmailParagraph variant="small">
+            Need a different time? Reply to this email and we will move it.
+          </EmailParagraph>
+        </EmailBody>
+      </EmailCard>
 
-          <EmailFooter />
-        </EmailShell>
-      </Body>
-    </Html>
+      <EmailFooter audience="client" />
+    </EmailDocument>
   )
 }
