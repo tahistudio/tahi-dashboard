@@ -2200,6 +2200,15 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_email_suppressions_org ON email_suppressions(org_id)`,
     ],
   },
+  {
+    name: '0095',
+    description: 'time_entries.invoice_id + invoiced_at: the hourly export\'s only idempotency key. POST /api/admin/billing/xero-export selects billable entries in a month and raises a draft invoice per client; it wrote nothing back, so the same selection came out of a second run and August could be billed twice as two unrelated drafts. The export now takes only entries where invoice_id IS NULL and stamps every entry it bills in the same run, so a re-run answers "already exported" and creates nothing. No REFERENCES clause, matching time_entries.task_id: a cascade on the billing ledger would quietly unbill hours, and SQLite cannot add a foreign key to an existing table without rebuilding it. No backfill, so every existing entry reads as never exported, which is honest (the old export left no link) and means anything already invoiced by hand must be reconciled before the first live run over an old period. Additive and idempotent; the duplicate-column error is swallowed upstream so re-runs are safe.',
+    statements: [
+      `ALTER TABLE time_entries ADD COLUMN invoice_id text`,
+      `ALTER TABLE time_entries ADD COLUMN invoiced_at text`,
+      `CREATE INDEX IF NOT EXISTS idx_time_invoice ON time_entries(invoice_id)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

@@ -1539,9 +1539,9 @@ const TOOLS: ToolDef[] = [
   }),
   tool('get_xero_balance_sheet', 'Get Xero Balance Sheet report'),
   tool('get_xero_bank_summary', 'Get Xero bank account balances'),
-  tool('auto_generate_invoices', 'Auto-generate draft invoices for hourly clients from billable time entries', {
+  tool('auto_generate_invoices', 'Auto-generate draft invoices from billable time entries. Only clients whose billing model is hourly are eligible: retainer, project and unset clients come back in `skipped` with a reason, as do clients with an unbillable rate, an unsupported currency, or hours already exported on an earlier run. Each invoice is built in the client\'s own currency. DEFAULTS TO A DRY RUN: it returns the plan and writes nothing unless you pass dryRun false, and re-running a period that was already exported creates nothing.', {
     month: prop('string', 'Month to invoice (YYYY-MM), defaults to previous month'),
-    dryRun: prop('boolean', 'Preview only without creating invoices'),
+    dryRun: prop('boolean', 'Preview only. Defaults to TRUE: pass false to actually raise the invoices and push them to Xero.'),
   }),
   tool('match_xero_contacts', 'List Xero contacts with suggested dashboard client matches'),
   tool('import_stripe_invoices', 'Import all invoices from Stripe into dashboard'),

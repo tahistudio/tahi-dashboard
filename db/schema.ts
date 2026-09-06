@@ -928,12 +928,29 @@ export const timeEntries = sqliteTable('time_entries', {
   // get a subtle "⏱ tracked" label; manual entries don't).
   // 'manual' | 'live_timer' | 'imported'
   source: text('source').notNull().default('manual'),
+  // The invoice this entry has already been billed onto (migration 0095), and
+  // when the export stamped it. NULL is the normal state of unbilled time.
+  //
+  // This is the hourly export's ONLY idempotency key. POST
+  // /api/admin/billing/xero-export selects billable entries in a month; with
+  // nothing written back, running it twice for the same month billed the same
+  // hours twice, once per run, with no way to tell the two invoices apart. The
+  // export now takes only entries where invoice_id IS NULL and stamps every
+  // entry it bills, so a re-run reports "already exported" and creates nothing.
+  //
+  // No REFERENCES clause, deliberately, matching task_id above: a cascade or a
+  // constraint failure on the billing ledger would be a worse outcome than a
+  // dangling id, and SQLite cannot add a foreign key to an existing table
+  // without rebuilding it.
+  invoiceId: text('invoice_id'),
+  invoicedAt: text('invoiced_at'),
   ...timestamps,
 }, (table) => [
   index('idx_time_org').on(table.orgId),
   index('idx_time_member').on(table.teamMemberId),
   index('idx_time_request').on(table.requestId),
   index('idx_time_task').on(table.taskId),
+  index('idx_time_invoice').on(table.invoiceId),
 ])
 
 // ============================================================

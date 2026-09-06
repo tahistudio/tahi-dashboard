@@ -1,0 +1,59 @@
+-- Migration 0095: the hourly export's idempotency key
+--
+--   time_entries.invoice_id
+--     The invoice this entry has already been billed onto. NULL is the normal
+--     state of unbilled time and is what makes an entry a candidate.
+--   time_entries.invoiced_at
+--     ISO timestamp of the run that stamped it. Evidence, not a key.
+--
+-- Why this exists. POST /api/admin/billing/xero-export selects every billable
+-- time entry in a month and raises a draft invoice per client. It wrote nothing
+-- back to time_entries, so the selection was identical on the next run: calling
+-- it twice for August billed August twice, as two separate draft invoices with
+-- nothing on either row to say they were the same hours. The export now filters
+-- on invoice_id IS NULL and stamps every entry it bills inside the same run, so
+-- a second run for the same period reports "already exported" and creates
+-- nothing. Without this column the route has no way to be idempotent at all.
+--
+-- No REFERENCES clause, deliberately, matching time_entries.task_id. A cascade
+-- on the billing ledger (deleting an invoice silently unbilling its hours) is a
+-- worse outcome than a dangling id, and SQLite cannot add a real foreign key to
+-- an existing table without rebuilding it.
+--
+-- ALTER TABLE ADD COLUMN cannot use IF NOT EXISTS in SQLite; the runtime runner
+-- (app/api/admin/db/migrate) swallows the "duplicate column name" error so
+-- re-running is safe. The index is IF NOT EXISTS in its own right.
+--
+-- MERGE ORDER, NOT OPTIONAL. Apply this to staging and then production D1
+-- BEFORE the code that references the columns is deployed, not after. Drizzle
+-- expands a bare .select() into an explicit column list from db/schema.ts, so
+-- from the moment the new schema ships the admin data export
+-- (app/api/admin/danger/export/route.ts, the one bare select on this table)
+-- fails with "no such column: invoice_id", and the hourly export itself names
+-- the column in its WHERE. Every other reader of time_entries names its columns
+-- and survives either ordering. The columns are additive and nullable, so
+-- applying them AHEAD of the deploy is harmless to the running code.
+--
+-- The runtime runner (POST /api/admin/db/migrate) cannot go first: the "0095"
+-- entry lives in app/api/admin/db/migrate/route.ts and does not exist until
+-- that deploy lands, so calling it beforehand answers 400 Unknown migration.
+-- Apply the file directly with wrangler instead. wrangler.json carries both
+-- database ids (staging b91cd27f, production 3bfa4848), so the names below
+-- resolve without any extra flags:
+--   1. wrangler d1 execute tahi-db-staging --remote --file=drizzle/migrations/0095_time_entry_invoice_link.sql
+--   2. deploy, then POST /api/admin/billing/xero-export with {"dryRun":true}
+--      and check /api/admin/danger/export
+--   3. wrangler d1 execute tahi-db --remote --file=drizzle/migrations/0095_time_entry_invoice_link.sql
+--   4. approve the production deploy, then smoke the same two
+--
+-- POST /api/admin/db/migrate {"name":"0095"} is the after-the-fact fallback,
+-- usable once the deploy that carries the entry is live.
+--
+-- No backfill. Every existing entry stays NULL, which reads as "never
+-- exported". That is the honest state: the old export left no link, so there is
+-- no record of which historical hours it already billed. Anything invoiced
+-- before this migration must be reconciled by hand before the first live run
+-- over an old period, or those hours will be billed a second time.
+ALTER TABLE time_entries ADD COLUMN invoice_id text;
+ALTER TABLE time_entries ADD COLUMN invoiced_at text;
+CREATE INDEX IF NOT EXISTS idx_time_invoice ON time_entries(invoice_id);
