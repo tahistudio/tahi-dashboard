@@ -374,6 +374,38 @@ describe('GET /api/admin/messages', () => {
       orgIds: ['org_a'], audience: 'studio', brandIds: null,
     })
   })
+
+  it('offers a standing line for a client nobody has written to yet', async () => {
+    // The studio has no "New conversation" affordance anywhere, so without a
+    // synthetic row the org channel was READ-ONLY until the client opened it.
+    // The id is the ORG id: the thread route's channel branch falls through to
+    // the organisations lookup and mints the room on the first POST.
+    vi.mocked(scopedOrgIds).mockResolvedValue({ kind: 'some', orgIds: ['org_client'] })
+    mock.state.queues = { organisations: [[{ id: 'org_client' }]] }
+    const res = await adminList(get('/api/admin/messages'))
+    const json = (await res.json()) as { threads: Array<{ source: string; id: string; orgId: string; title: string }> }
+    expect(json.threads).toHaveLength(1)
+    expect(json.threads[0]).toMatchObject({
+      source: 'channel', id: 'org_client', orgId: 'org_client', title: 'Mahana Orchards',
+    })
+  })
+
+  it('does not double up a client that already has a channel row', async () => {
+    vi.mocked(scopedOrgIds).mockResolvedValue({ kind: 'some', orgIds: ['org_client'] })
+    vi.mocked(loadInboxThreads).mockResolvedValue({
+      threads: [{
+        key: 'channel:conv_1', source: 'channel', id: 'conv_1', title: 'Mahana Orchards',
+        requestNumber: null, status: null, orgId: 'org_client', orgName: 'Mahana Orchards',
+        lastMessage: null, unreadCount: 0, href: null, updatedAt: '2026-09-01T00:00:00.000Z',
+      }],
+      channelsByOrg: new Map(),
+    })
+    mock.state.queues = { organisations: [[{ id: 'org_client' }]] }
+    const res = await adminList(get('/api/admin/messages'))
+    const json = (await res.json()) as { threads: Array<{ id: string }> }
+    expect(json.threads).toHaveLength(1)
+    expect(json.threads[0].id).toBe('conv_1')
+  })
 })
 
 describe('/api/admin/messages/<source>/<id>', () => {

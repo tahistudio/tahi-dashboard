@@ -20,7 +20,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { and, eq, inArray, ne } from 'drizzle-orm'
+import { and, asc, eq, inArray, ne } from 'drizzle-orm'
 import { schema } from '@/db/d1'
 import { db } from '@/lib/db'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -83,10 +83,16 @@ export async function gateAdminMessages(req: NextRequest): Promise<AdminMessages
 }
 
 /**
- * The clients this caller may read, newest activity first, capped.
+ * The clients this caller may read, by name, capped.
  *
  * A restricted caller is narrowed in SQL rather than filtered afterwards, so
  * the cap is spent on clients they can actually see.
+ *
+ * THE ORDER BY IS NOT COSMETIC. Without it SQLite returned an arbitrary
+ * STORAGE-ORDER window, so past the cap the studio inbox omitted a different
+ * set of clients on every read, and the switcher is built from this same list,
+ * which made an omitted client unreachable from the UI entirely. Alphabetical
+ * is the order the switcher reads in anyway, and it is stable.
  */
 export async function inboxOrgIds(
   database: DrizzleDB,
@@ -105,6 +111,7 @@ export async function inboxOrgIds(
     .select({ id: schema.organisations.id })
     .from(schema.organisations)
     .where(and(...conditions))
+    .orderBy(asc(schema.organisations.name))
     .limit(STUDIO_ORG_CAP)
 
   // Re-tested against the scope after the read as well. The SQL narrowing

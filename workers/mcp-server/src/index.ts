@@ -1421,7 +1421,7 @@ const TOOLS: ToolDef[] = [
   // line with a client) and a request thread (the message stream that already
   // lives on the request). A thread is addressed by a source + id PAIR, never
   // by one id, because the two ids live in different tables.
-  tool('list_messages', 'Studio inbox: every client line and every request thread the caller is scoped to, with unread counts and last-message previews. Pass orgId to narrow to one client. Each row carries source ("channel" or "request") and id, which are what get_message_thread and post_message take.', {
+  tool('list_messages', 'Studio inbox: every client line and every request thread the caller is scoped to, with unread counts and last-message previews. Pass orgId to narrow to one client. Each row carries source ("channel" or "request") and id, which are what get_message_thread and post_message take. A client nobody has written to yet still gets a channel row, and its id is the organisations.id: the room is minted by the first post_message on it.', {
     orgId: prop('string', 'Narrow to one client (organisations.id). Omit for every client in scope.'),
   }),
   tool('get_message_thread', 'Read one thread from the studio inbox, with attachments, voice notes and the read cursor. Studio view: internal notes ARE included.', {
@@ -1460,7 +1460,7 @@ const TOOLS: ToolDef[] = [
   }, ['orgId', 'source', 'id', 'body']),
 
   tool('list_conversations', 'The raw conversations table with unread counts. Prefer list_messages, which is the surface the dashboard actually renders.'),
-  tool('create_conversation', 'Create a new messaging conversation', {
+  tool('create_conversation', 'Create a new messaging conversation. Type org_channel is FIND-OR-CREATE: there is exactly one standing line per client, so a second call for an org that already has one returns the existing room rather than a duplicate.', {
     type: prop('string', 'Conversation type: direct, group, org_channel, request_thread'),
     participantIds: { type: 'array', items: { type: 'string' }, description: 'Array of participant IDs' },
     name: prop('string', 'Conversation name (for group or channel types)'),
