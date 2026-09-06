@@ -100,9 +100,8 @@
       ],
       "status": "PARTIAL",
       "missing": [
-        "No Clerk svix webhook backfills contacts.clerkUserId, so a second seat depends on the sign-in linker (TASKS.md T1.4)",
-        "Write path portalRole gap: a fresh owner cannot invite teammates or edit org settings until portalRole is set (TASKS.md T1.14)",
-        "The studio lead shown to the client is hardcoded to Liam Miller (app/(onboarding)/onboarding/page.tsx:96)"
+        "Invoice-me preference and kickoff booking step in the invited onboarding flow (TASKS.md T1.4)",
+        "Operator: CLERK_WEBHOOK_SECRET on both workers and the endpoint registered in Clerk"
       ],
       "evidence": [
         "app/(onboarding)/onboarding/page.tsx:96",
@@ -110,11 +109,12 @@
         "TASKS.md:53"
       ],
       "mvp_required": true,
-      "est_days_remaining": 2,
+      "est_days_remaining": 1,
       "reason": "Webhook plus portalRole write path plus the hardcoded lead.",
       "scope_days": 5,
       "designed_in_claude_design": true,
-      "design_evidence": ".claude/qa/svclocal/portal-account.jsx:564 Welcome"
+      "design_evidence": ".claude/qa/svclocal/portal-account.jsx:564 Welcome",
+      "revised_2026_09_07_0600": "Clerk webhook links second-seat users to contacts (svix verified, replay safe); studio lead resolved from the org PM"
     },
     {
       "id": "client-home",
@@ -253,9 +253,8 @@
       ],
       "status": "PARTIAL",
       "missing": [
-        "The services table has no orgId, so every client sees every catalogue row once ManyRequests services are imported (TASKS.md CT.11)",
         "No order path: Liam has not decided whether ordering mints a request or a Stripe checkout (TASKS.md CT.11)",
-        "The plan ladder rule (show current plan, lower and higher, upsell only near limits) is designed but not ported (TASKS.md MC.5 and MR.7)"
+        "The plan ladder rule (current plan, lower and higher, upsell only near limits) is designed and in the write set but not ported (TASKS.md MC.5 and MR.7)"
       ],
       "evidence": [
         "app/api/portal/services/route.ts:20",
@@ -263,11 +262,12 @@
         "TASKS.md:181"
       ],
       "mvp_required": true,
-      "est_days_remaining": 3,
+      "est_days_remaining": 2,
       "reason": "Org scoping is a data leak that blocks the import, plus the designed showcase port.",
       "scope_days": 6,
       "designed_in_claude_design": true,
-      "design_evidence": ".claude/qa/svclocal/portal-money.jsx:1073 Services, plus .claude/qa/svc-ladder-patch.cjs"
+      "design_evidence": ".claude/qa/svclocal/portal-money.jsx:1073 Services, plus .claude/qa/svc-ladder-patch.cjs",
+      "revised_2026_09_07_0600": "CT.11 scoping: services carry org_id and visibility, the portal fails closed"
     },
     {
       "id": "client-invoices",
@@ -403,21 +403,19 @@
         "brands",
         "subscriptions"
       ],
-      "status": "PARTIAL",
-      "missing": [
-        "isClientAdmin still falls back to contact.isPrimary because GET /api/portal/profile does not return portalRole (components/tahi/settings/settings-shell.tsx:169)",
-        "Write path portalRole gap on brands, organisation, people and change request (TASKS.md T1.14)"
-      ],
+      "status": "LIVE",
+      "missing": [],
       "evidence": [
         "components/tahi/settings/settings-shell.tsx:169",
         "TASKS.md:53"
       ],
       "mvp_required": true,
-      "est_days_remaining": 1,
+      "est_days_remaining": 0,
       "reason": "One field on the profile route plus the write path role checks.",
       "scope_days": 5,
       "designed_in_claude_design": true,
-      "design_evidence": ".claude/qa/svclocal/portal-account.jsx:345 Account"
+      "design_evidence": ".claude/qa/svclocal/portal-account.jsx:345 Account",
+      "revised_2026_09_07_0600": "T1.14 one portal admin rule on every write path, profile returns isAdmin; AR.8 preview shows the portal as the primary contact"
     },
     {
       "id": "client-billing",
@@ -1524,8 +1522,7 @@
       ],
       "status": "PARTIAL",
       "missing": [
-        "The invoices table has no number column at all, so the list identifies an invoice by UUID or amount (db/schema.ts invoices, app/(dashboard)/invoices/invoice-list.tsx:981, TASKS.md CT.14)",
-        "The redesigned studio invoices module is designed and critiqued but not wired into the shell or ported (TASKS.md MR.6 and DL.3)"
+        "The redesigned studio invoices list module is designed and in the write set but not wired into the shell or ported (TASKS.md MR.6 and DL.3)"
       ],
       "evidence": [
         "app/(dashboard)/invoices/invoice-list.tsx:981",
@@ -1533,11 +1530,12 @@
         "TASKS.md:96"
       ],
       "mvp_required": true,
-      "est_days_remaining": 3,
+      "est_days_remaining": 1,
       "reason": "Real numbering from the settings prefix plus the designed list port.",
       "scope_days": 10,
       "designed_in_claude_design": true,
-      "design_evidence": ".claude/qa/inv/invoices_studio.jsx:504 Invoices"
+      "design_evidence": ".claude/qa/inv/invoices_studio.jsx:504 Invoices",
+      "revised_2026_09_07_0600": "CT.14 real invoice numbers from the settings prefix, unique, dry-run backfill of 93 rows waiting on Liam"
     },
     {
       "id": "studio-invoice-detail",
@@ -1559,20 +1557,19 @@
         "invoices",
         "invoice_items"
       ],
-      "status": "PARTIAL",
-      "missing": [
-        "Legacy pre v3 page: it never imports TahiButton, PageHeader, Badge or DataTable and hand rolls six raw buttons plus its own status colour map (app/(dashboard)/invoices/[id]/invoice-detail.tsx:73, TASKS.md T2.10)"
-      ],
+      "status": "LIVE",
+      "missing": [],
       "evidence": [
         "app/(dashboard)/invoices/[id]/invoice-detail.tsx:73",
         "TASKS.md:215"
       ],
       "mvp_required": true,
-      "est_days_remaining": 2,
+      "est_days_remaining": 0,
       "reason": "A composition swap onto the shared primitives; the design already exists.",
       "scope_days": 6,
       "designed_in_claude_design": true,
-      "design_evidence": ".claude/qa/inv/invoices_studio.jsx:241 InvoiceDetail"
+      "design_evidence": ".claude/qa/inv/invoices_studio.jsx:241 InvoiceDetail",
+      "revised_2026_09_07_0600": "T2.10 composed from the shared primitives, every action kept; invoice number as the title"
     },
     {
       "id": "invoicing-rails",
@@ -1596,22 +1593,20 @@
         "organisations.invoiceChannel",
         "settings"
       ],
-      "status": "PARTIAL",
-      "missing": [
-        "The hourly to invoice Xero export is unguarded: no idempotency, no billingModel filter, and a silent zero rate skip (TASKS.md CT.13 and IC.6)",
-        "Invoice numbers are not mirrored into Xero because there are none yet (TASKS.md IC.7)"
-      ],
+      "status": "LIVE",
+      "missing": [],
       "evidence": [
         "TASKS.md:114",
         "TASKS.md:115",
         "TASKS.md:112"
       ],
       "mvp_required": true,
-      "est_days_remaining": 2,
+      "est_days_remaining": 0,
       "reason": "One guarded export path; the channel per client and the pay links already landed.",
       "scope_days": 12,
       "designed_in_claude_design": false,
-      "design_evidence": "unknown, a backend rail with no page of its own"
+      "design_evidence": "unknown, a backend rail with no page of its own",
+      "revised_2026_09_07_0600": "CT.13 guarded hourly Xero export (idempotent, hourly-only, currency, named refusals, dry run); CT.14 invoice numbers mirrored into the Xero payload"
     },
     {
       "id": "studio-billing",
@@ -1667,23 +1662,20 @@
         "time_entries",
         "active_timers"
       ],
-      "status": "PARTIAL",
-      "missing": [
-        "POST /api/admin/time never reads hourlyRate, so the rate you type on /time is silently discarded, while /api/admin/time-entries does persist it (app/(dashboard)/time/time-list.tsx:135, TASKS.md CT.12)",
-        "There is no Rate column on the list",
-        "Two routes do the same job and have diverged"
-      ],
+      "status": "LIVE",
+      "missing": [],
       "evidence": [
         "app/(dashboard)/time/time-list.tsx:135",
         "app/api/admin/time-entries/route.ts:124",
         "TASKS.md:94"
       ],
       "mvp_required": true,
-      "est_days_remaining": 1,
+      "est_days_remaining": 0,
       "reason": "Unify the two routes and surface the rate.",
       "scope_days": 8,
       "designed_in_claude_design": true,
-      "design_evidence": ".claude/qa/svclocal/ops.jsx:61 Time"
+      "design_evidence": ".claude/qa/svclocal/ops.jsx:61 Time",
+      "revised_2026_09_07_0600": "CT.12 and the follow-ups: one writer, rate persisted with the org default, Rate column, logger always a team member"
     },
     {
       "id": "financial-reports",
@@ -1782,20 +1774,19 @@
       "tables": [
         "services"
       ],
-      "status": "PARTIAL",
-      "missing": [
-        "The services table has no orgId, so per client retainer names cannot be modelled at all (db/schema.ts services, TASKS.md CT.11)"
-      ],
+      "status": "LIVE",
+      "missing": [],
       "evidence": [
         "app/(dashboard)/services/services-content.tsx",
         "TASKS.md:93"
       ],
       "mvp_required": true,
-      "est_days_remaining": 1,
+      "est_days_remaining": 0,
       "reason": "The schema change is shared with the client catalogue; the editor itself is full CRUD.",
       "scope_days": 5,
       "designed_in_claude_design": true,
-      "design_evidence": ".claude/qa/svclocal/portal-money.jsx:1073, the client side of the same module"
+      "design_evidence": ".claude/qa/svclocal/portal-money.jsx:1073, the client side of the same module",
+      "revised_2026_09_07_0600": "CT.11 scoping: Audience and Visibility controls, Private to badge, MCP parity"
     },
     {
       "id": "content-studio",
@@ -2036,10 +2027,7 @@
       ],
       "status": "PARTIAL",
       "missing": [
-        "The read-only reconciliation ran on 7 Sep (TASKS.md MC.1 done; report docs/superpowers/audits/2026-09-07-manyrequests-import-report.md)",
-        "The idempotent importer is written but has never executed: it reads MANYREQUESTS_API_TOKEN from a dashboard worker secret that does not exist, and only Liam can set it (TASKS.md MC.3)",
-        "Dummy org archiving and e2e fixture cleanup are unstarted",
-        "Giant Group still needs an allowlist entry and an invite (TASKS.md MC.4)"
+        "Operator: MANYREQUESTS_API_TOKEN on the dashboard worker (staging and production), then the dry run, apply, verification and cleanup per the report"
       ],
       "evidence": [
         "TASKS.md:177",
@@ -2047,11 +2035,12 @@
         "TASKS.md:180"
       ],
       "mvp_required": true,
-      "est_days_remaining": 4,
+      "est_days_remaining": 3,
       "reason": "Blocked on one operator step, then a dry run, an apply and a verification pass.",
       "scope_days": 8,
       "designed_in_claude_design": false,
-      "design_evidence": "unknown"
+      "design_evidence": "unknown",
+      "revised_2026_09_07_0600": "Importer LIVE with migration 0093; reconciliation and runbook in the import report"
     },
     {
       "id": "mcp-parity",
@@ -2650,5 +2639,28 @@
     "Three LIVE surfaces have no written spec and are flagged MISSING_SPEC inside their missing list: contact and brand detail, capacity, and sitemap. None is MVP required.",
     "designed_in_claude_design is true only where a named module exists in the local mirror at .claude/qa/svclocal or in a staged directory. A nav label alone in the prototype shell was not treated as evidence, which is why calculator, affiliates, docs and content studio read false.",
     "The percentage denominators count surfaces, not effort. A LIVE 20 day surface and a LIVE 2 day surface each count once."
-  ]
+  ],
+  "totals_revised_2026_09_07_0600": {
+    "mvp": {
+      "surfaceCount": 24,
+      "live": 15,
+      "partial": 9,
+      "weightedSum": 19.5,
+      "percentByCount": 81.2,
+      "daysRemaining": 14,
+      "scopeDays": 225,
+      "percentByDays": 93.8
+    },
+    "full": {
+      "surfaceCount": 64,
+      "live": 28,
+      "partial": 32,
+      "weightedSum": 44.0,
+      "percentByCount": 68.8,
+      "daysRemaining": 114,
+      "scopeDays": 597,
+      "percentByDays": 80.9
+    },
+    "note": "Recomputed after the streams that landed between 02:00 and 06:00 NZST on 7 Sep; same method as the 02:00 totals"
+  }
 }
