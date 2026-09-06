@@ -38,6 +38,7 @@ import { TahiIconMark } from '@/components/tahi/tahi-glyphs'
 import { NotificationBell } from './notification-bell'
 import { BriefingTrigger } from './briefing-trigger'
 import { CurrencySwitcher } from './currency-switcher'
+import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { TimerChip } from './timer-chip'
 import { TopBarMore } from './top-bar-more'
 import { useImpersonation } from './impersonation-banner'
@@ -64,6 +65,7 @@ export function AppTopNav({ isAdmin, brandName, brandLogoUrl }: AppTopNavProps) 
   const [logoError, setLogoError] = useState(false)
   const pathname = usePathname()
   const { isImpersonatingClient } = useImpersonation()
+  const { isPinned: currencyPinned } = useDisplayCurrency()
 
   // Same derivation the rail and the bottom tabs use, so all three surfaces
   // agree on which audience the shell is currently dressed for.
@@ -174,7 +176,10 @@ export function AppTopNav({ isAdmin, brandName, brandLogoUrl }: AppTopNavProps) 
             preview, which is exactly whose notifications the bell should show,
             so it also picks the route map. */}
         <NotificationBell audience={showAsAdmin ? 'team' : 'client'} />
-        <div className="hidden md:flex"><CurrencySwitcher /></div>
+        {/* Client audiences are pinned to their own billing currency, so the
+            chip does not render at all: the wrapper goes with it, otherwise
+            the bar keeps a gap for a control that is not there. */}
+        {!currencyPinned && <div className="hidden md:flex"><CurrencySwitcher /></div>}
         <TopBarMore showAsAdmin={showAsAdmin} />
       </div>
 

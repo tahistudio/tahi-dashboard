@@ -1,4 +1,4 @@
-import { getServerAuth } from '@/lib/server-auth'
+import { getViewAudience } from '@/lib/view-audience'
 import { clerkClient } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
 import { AppSidebar } from '@/components/tahi/app-sidebar'
@@ -11,13 +11,21 @@ import { ToastProvider } from '@/components/tahi/toast'
 import { KeyboardShortcuts } from '@/components/tahi/keyboard-shortcuts'
 import { SidebarProvider } from '@/components/tahi/sidebar-context'
 import { SkipToContent } from '@/components/tahi/skip-to-content'
+// Two imports on purpose, and they must stay apart. This file is a SERVER
+// component: a component may cross the client boundary, a plain function may
+// not. Next replaces every export of a 'use client' module with a stub that
+// throws when the server calls it, so folding resolvePinnedCurrency back into
+// the display-currency-context import is a production outage with a green
+// type-check, a green lint and a green build. See lib/currency.ts and
+// lib/__tests__/server-client-boundary.test.ts.
 import { DisplayCurrencyProvider } from '@/lib/display-currency-context'
+import { resolvePinnedCurrency, type PinnedCurrencyEvidence } from '@/lib/currency'
 import { PermissionsProvider, type PermissionsValue } from '@/components/tahi/permissions-context'
 import { PrivateModeProvider } from '@/components/tahi/private-mode-context'
 import { SwrProvider } from '@/components/tahi/swr-provider'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { inArray } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import { resolvePermissions, featureMap, applyModuleGates, MODULE_SETTING_KEYS } from '@/lib/permissions'
 import { linkTeamMemberOnSignIn } from '@/lib/team-link-server'
 import { linkContactOnSignIn } from '@/lib/contact-link-server'
@@ -46,10 +54,8 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { userId, orgId } = await getServerAuth()
+  const { userId, orgId, isAdmin, isPreviewingClient, previewOrgId } = await getViewAudience()
   if (!userId) redirect('/sign-in')
-
-  const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
 
   // Onboarding-completion gate (the durable lock behind the middleware's no-org
   // redirect). A client may reach the dashboard ONLY once their onboarding is
@@ -180,6 +186,90 @@ export default async function DashboardLayout({
     brandVars['--brand-strong'] = strong
   }
 
+  // ── Client billing currency ─────────────────────────────────────────────
+  // A client surface is fixed, not steerable: the nav switcher is gone, because
+  // a client re-converting their own invoice only ever produces a number nobody
+  // will bill or pay. What the pin names is the currency this client is BILLED
+  // in, which is what their invoice totals are rendered in; NZD-base figures
+  // stay in the base (see formatPinnedBaseAmount in lib/currency.ts). Client
+  // audiences include the studio inside Client view, resolved from the
+  // impersonation cookie (previewOrgId).
+  //
+  // Two columns, because neither one alone is a decision.
+  // `organisations.preferred_currency` is `DEFAULT 'USD'` in the schema, so a
+  // row that nobody edited claims US dollars for a NZ client;
+  // `custom_mrr_currency` defaults to the NZD base, so a non-base value there
+  // is something a person typed into the client's Money card. The rule that
+  // weighs them is resolvePinnedCurrency, in lib/currency.ts, with the test.
+  //
+  // custom_mrr_currency rides along as a raw column: it was added by the ad-hoc
+  // migrate route rather than a Drizzle migration, so it is absent from
+  // db/schema.ts and every other reader reaches it through raw SQL too
+  // (app/api/admin/financial-reports/summary). Selecting it here keeps this to
+  // ONE round trip instead of two.
+  //
+  // This is the only read this layout adds, and it runs for client audiences
+  // only, so the studio's shell keeps the query count it had. One indexed
+  // equality: the preview key is an organisations.id (primary key), and a real
+  // client's is a CLERK org id (idx_orgs_clerk_org, unique). Deliberately NOT
+  // one OR across both columns, which would ask SQLite to consider two indexes
+  // for a value that can only ever match one of them. The legacy shape (a row
+  // whose primary key IS the Clerk org id) is a second query behind a miss,
+  // mirroring getPortalAuth, so it costs nothing once a client is linked.
+  //
+  // Fail-safe: any miss, and any D1 error, falls back to the NZD base
+  // (resolvePinnedCurrency), not to "unpinned", so a client's money never
+  // floats on a studio preference this browser happens to hold, and a database
+  // wobble degrades the shell rather than throwing it. The retry without the
+  // raw column is there so an environment that never ran the ad-hoc migration
+  // still names the previewed org in the Client-view banner.
+  const currencyOrgKey = isPreviewingClient ? previewOrgId : (!isAdmin ? orgId : null)
+  let currencyEvidence: PinnedCurrencyEvidence = {}
+  let previewOrgName: string | null = null
+  if (currencyOrgKey) {
+    const whereOrg = isPreviewingClient
+      ? eq(schema.organisations.id, currencyOrgKey)
+      : eq(schema.organisations.clerkOrgId, currencyOrgKey)
+    // `withMrrCurrency: false` selects the literal NULL in that column's place,
+    // so the retry is the same query and the same row shape, minus the one
+    // reference that could fail to resolve.
+    const readOrg = async (withMrrCurrency: boolean) => {
+      const database = await db()
+      const columns = {
+        name: schema.organisations.name,
+        preferredCurrency: schema.organisations.preferredCurrency,
+        customMrrCurrency: withMrrCurrency
+          ? sql<string | null>`custom_mrr_currency`.as('custom_mrr_currency')
+          : sql<string | null>`NULL`.as('custom_mrr_currency'),
+      }
+      let [row] = await database.select(columns).from(schema.organisations).where(whereOrg).limit(1)
+      if (!row && !isPreviewingClient) {
+        ;[row] = await database
+          .select(columns)
+          .from(schema.organisations)
+          .where(eq(schema.organisations.id, currencyOrgKey))
+          .limit(1)
+      }
+      return row
+    }
+    // With the raw column first, then without it. Two passes, not two copies
+    // of the query.
+    for (const withMrrCurrency of [true, false]) {
+      try {
+        const row = await readOrg(withMrrCurrency)
+        currencyEvidence = {
+          preferredCurrency: row?.preferredCurrency ?? null,
+          customMrrCurrency: row?.customMrrCurrency ?? null,
+        }
+        if (isPreviewingClient) previewOrgName = row?.name ?? null
+        break
+      } catch {
+        currencyEvidence = {}
+      }
+    }
+  }
+  const pinnedCurrency = resolvePinnedCurrency(currencyEvidence, currencyOrgKey !== null)
+
   // Favicon (favicon_light_url / favicon_dark_url) is a platform-level Tahi
   // asset (super-admin only, same for every org) rather than per-client
   // branding, and our dark mode is class-based (not prefers-color-scheme), so a
@@ -190,7 +280,7 @@ export default async function DashboardLayout({
   return (
     <SwrProvider>
     <ToastProvider>
-    <DisplayCurrencyProvider>
+    <DisplayCurrencyProvider pinned={pinnedCurrency}>
       <PermissionsProvider value={perms}>
       <PrivateModeProvider>
       <SidebarProvider>
@@ -209,7 +299,17 @@ export default async function DashboardLayout({
             brandLogoUrl={portalBrand.logoUrl}
           />
           <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-            {isAdmin && <ImpersonationBanner />}
+            {/* The preview signal is a browser-wide cookie; the banner's own
+                state is per-tab sessionStorage. Hand the server's reading to
+                every tab so a second tab opened while Client view is on still
+                shows the strip and its Exit preview, instead of silently
+                rendering redirects and a client's currency with no way out. */}
+            {isAdmin && (
+              <ImpersonationBanner
+                serverPreviewOrgId={previewOrgId}
+                serverPreviewOrgName={previewOrgName}
+              />
+            )}
             <AnnouncementBanner />
             <AppTopNav
               isAdmin={isAdmin}

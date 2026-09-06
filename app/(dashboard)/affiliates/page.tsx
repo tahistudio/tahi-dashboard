@@ -1,4 +1,4 @@
-import { getServerAuth } from '@/lib/server-auth'
+import { getViewAudience } from '@/lib/view-audience'
 import { redirect } from 'next/navigation'
 import { requirePageFeature } from '@/lib/page-guard'
 import { AffiliatesContent } from './affiliates-content'
@@ -6,10 +6,12 @@ import { AffiliatesContent } from './affiliates-content'
 export const metadata = { title: 'Affiliates - Tahi Dashboard' }
 
 export default async function AffiliatesPage() {
-  const { userId, orgId } = await getServerAuth()
+  const { userId, isAdmin, isPreviewingClient } = await getViewAudience()
   if (!userId) redirect('/sign-in')
-  const isAdmin = orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID
-  if (!isAdmin) redirect('/overview')
+  // Studio-only surface. Client view (the tahi-impersonate-org cookie) leaves
+  // it the same way a real client does, so a preview cannot show one client
+  // another client's work. See lib/view-audience.ts.
+  if (!isAdmin || isPreviewingClient) redirect('/overview')
   // Granular permissions: a team member denied affiliates is redirected.
   await requirePageFeature('affiliates')
   return <AffiliatesContent />

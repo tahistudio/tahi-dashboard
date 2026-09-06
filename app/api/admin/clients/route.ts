@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, like, or, and, ne, inArray, sql } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
+import { asCurrencyCode, BASE_CURRENCY } from '@/lib/currency'
 import { requireFeature } from '@/lib/require-feature'
 import { dispatchDomainEvent } from '@/lib/events'
 import { INTERNAL_ORG_STATUS } from '@/lib/internal-org'
@@ -136,6 +137,8 @@ export async function POST(req: NextRequest) {
   const body = await req.json() as {
     name?: string; website?: string; industry?: string; planType?: string
     primaryContactEmail?: string; primaryContactName?: string
+    /** The currency this client will be billed in. Defaults to the NZD base. */
+    preferredCurrency?: string
     /** Opt out of the invite email the dialog promises. Defaults to sending. */
     sendInvite?: boolean
   }
@@ -161,6 +164,16 @@ export async function POST(req: NextRequest) {
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 
+  // Write the currency EXPLICITLY. Omitting it left SQLite to apply the
+  // column's own `DEFAULT 'USD'` (drizzle/migrations/0000_equal_mojo.sql), so
+  // every client the studio ever made through this route carries a 'USD' that
+  // nobody chose and that nothing downstream can tell apart from a choice. A
+  // client shell reading that as "billed in US dollars" is how a NZ client
+  // comes to see their own money in the wrong currency, so the pin now refuses
+  // to trust it (lib/currency.ts). An unrecognised code falls back to the base
+  // rather than being written through unvalidated.
+  const preferredCurrency = asCurrencyCode(body.preferredCurrency) ?? BASE_CURRENCY
+
   await (database as ReturnType<typeof import('drizzle-orm/d1').drizzle>)
     .insert(schema.organisations)
     .values({
@@ -171,6 +184,7 @@ export async function POST(req: NextRequest) {
       planType: planType || null,
       status: 'active',
       healthStatus: 'green',
+      preferredCurrency,
       createdAt: now,
       updatedAt: now,
     })

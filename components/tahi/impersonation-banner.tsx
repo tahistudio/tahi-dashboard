@@ -1,11 +1,12 @@
 'use client'
 
-import { useCallback, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronDown, Check } from 'lucide-react'
 import { ShellIcon } from '@/components/tahi/shell-icons'
 import { Popover } from '@/components/tahi/popover'
 import { apiPath } from '@/lib/api'
+import { IMPERSONATE_ORG_COOKIE, readPreviewOrgId } from '@/lib/preview-cookie'
 
 /** Access rule for a team member (mirrors the AccessRule shape from team page) */
 export interface TeamMemberAccessRule {
@@ -46,7 +47,10 @@ const STORAGE_KEY = 'tahi-impersonate'
 // Cookie that carries the impersonated org to the server so portal GET
 // endpoints (via getPortalAuth) scope to the previewed client. Session cookie
 // (no Max-Age) so it dies on browser close; path=/ so it covers the basePath.
-const ORG_COOKIE = 'tahi-impersonate-org'
+// The name and the "does this value name an org" rule come from
+// lib/preview-cookie.ts, which the middleware and every server component read
+// too: one definition of previewing for the whole app.
+const ORG_COOKIE = IMPERSONATE_ORG_COOKIE
 
 function setImpersonateOrgCookie(orgId: string) {
   try { document.cookie = `${ORG_COOKIE}=${encodeURIComponent(orgId)}; path=/; SameSite=Lax` } catch { /* no document */ }
@@ -54,6 +58,20 @@ function setImpersonateOrgCookie(orgId: string) {
 
 function clearImpersonateOrgCookie() {
   try { document.cookie = `${ORG_COOKIE}=; path=/; Max-Age=0; SameSite=Lax` } catch { /* no document */ }
+}
+
+/**
+ * What the SERVER would read from this browser, right now. Not the React prop,
+ * which is one render behind: this is the live value, so it is safe to check
+ * in the same tick as a state change.
+ */
+function readImpersonateOrgCookie(): string | null {
+  if (typeof document === 'undefined') return null
+  for (const part of document.cookie.split(';')) {
+    const [name, ...rest] = part.trim().split('=')
+    if (name === ORG_COOKIE) return readPreviewOrgId(rest.join('='))
+  }
+  return null
 }
 
 // ---- Reactive sessionStorage store ----
@@ -144,11 +162,25 @@ export function clearImpersonation() {
   notify()
 }
 
+export interface ImpersonationBannerProps {
+  /**
+   * `organisations.id` the tahi-impersonate-org cookie names, resolved
+   * server-side by the dashboard layout (lib/view-audience.ts). Null when the
+   * session is not previewing anyone.
+   */
+  serverPreviewOrgId?: string | null
+  /** That org's name, so a tab adopting the cookie can label the strip. */
+  serverPreviewOrgName?: string | null
+}
+
 /**
  * Banner shown when impersonating a client or team member.
  * Uses useSyncExternalStore for immediate reactivity.
  */
-export function ImpersonationBanner() {
+export function ImpersonationBanner({
+  serverPreviewOrgId = null,
+  serverPreviewOrgName = null,
+}: ImpersonationBannerProps = {}) {
   const router = useRouter()
   const impersonation = useSyncExternalStore(subscribe, getSnapshot, () => null)
 
@@ -157,6 +189,65 @@ export function ImpersonationBanner() {
     clearImpersonation()
     router.push(isTeamMember ? '/team' : '/clients')
   }, [router, impersonation])
+
+  // Entering or leaving Client view changes what the SERVER should render:
+  // the shell layout reads the tahi-impersonate-org cookie to pin the client's
+  // billing currency, and every studio-only page reads it to redirect the
+  // preview the way it redirects a real client (lib/view-audience.ts). Setting
+  // impersonation is a client-side state change, so the router cache would go
+  // on serving segments rendered for the previous audience until a hard reload.
+  // Refresh once per transition, never on mount (the first pass only records
+  // where we started).
+  const previewedOrgId = impersonation?.type === 'client' ? impersonation.orgId : null
+  const lastPreviewedOrgId = useRef<string | null | undefined>(undefined)
+  useEffect(() => {
+    if (lastPreviewedOrgId.current === undefined) {
+      // Seed from the server's reading too, so a tab that is about to adopt the
+      // cookie (below) does not count that as a transition and refresh a shell
+      // the server already rendered for the previewed audience.
+      lastPreviewedOrgId.current = previewedOrgId ?? serverPreviewOrgId ?? null
+      return
+    }
+    if (lastPreviewedOrgId.current === previewedOrgId) return
+    lastPreviewedOrgId.current = previewedOrgId
+    router.refresh()
+  }, [previewedOrgId, serverPreviewOrgId, router])
+
+  // Cookie / sessionStorage reconciliation. The preview signal the SERVER reads
+  // is a browser-wide cookie; this store is per-tab sessionStorage. A tab opened
+  // fresh while Client view is on (bookmark, second window, restored session)
+  // therefore carries the cookie without the store: the server redirects its
+  // studio-only pages and pins the previewed client's currency, while this
+  // banner, useImpersonation() and every client-side audience flag say "not
+  // previewing" - a tab with no explanation and no way out. Adopt the server's
+  // reading into this tab so the whole tab agrees and Exit preview is reachable.
+  // Once per org id: exiting clears the store first, so the stale prop of the
+  // render on its way out must not put the preview straight back.
+  const adoptedOrgId = useRef<string | null>(null)
+  useEffect(() => {
+    if (!serverPreviewOrgId) return
+    if (adoptedOrgId.current === serverPreviewOrgId) return
+    adoptedOrgId.current = serverPreviewOrgId
+    if (getSnapshot() !== null) return
+    setImpersonation({ orgId: serverPreviewOrgId, orgName: serverPreviewOrgName ?? 'this client' })
+  }, [serverPreviewOrgId, serverPreviewOrgName])
+
+  // The same reconciliation, the other way. The preview can end somewhere this
+  // tab's store never hears about: the ?exit-preview=1 escape hatch in the
+  // middleware, GET /api/admin/impersonate/exit, another tab, a browser that
+  // dropped a session cookie. The tab would then keep showing the strip and
+  // reporting a preview through useImpersonation() while the server renders
+  // the studio, which is the confusing half of the state this whole file
+  // exists to keep honest.
+  //
+  // Keyed on document.cookie, not on the prop: the prop is one render behind,
+  // so entering Client view (store written, cookie written, refresh pending)
+  // would look exactly like this and undo itself.
+  useEffect(() => {
+    if (previewedOrgId === null) return
+    if (readImpersonateOrgCookie() !== null) return
+    clearImpersonation()
+  }, [previewedOrgId])
 
   if (!impersonation) return null
 
@@ -186,7 +277,7 @@ export function ImpersonationBanner() {
         </span>
       ) : (
         <span>
-          Viewing <ClientSwitcher currentOrgId={impersonation.orgId} label={displayName} color="#ffffff" /> . Read-only client view.
+          Viewing <ClientSwitcher currentOrgId={impersonation.orgId} label={displayName} color="#ffffff" />. Read-only client view.
         </span>
       )}
       <button className="imp-exit" onClick={handleExit}>Exit preview</button>

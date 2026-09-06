@@ -32,6 +32,13 @@ export interface MoreSheetContext {
   showAsAdmin: boolean
   /** Server-resolved super admin (usePermissions). Gates the preview controls. */
   isSuperAdmin: boolean
+  /**
+   * The display currency is fixed to the client's own billing currency
+   * (lib/display-currency-context.tsx). There is nothing to switch, so the row
+   * is dropped here rather than rendered as a control that answers nothing:
+   * the desktop bar drops the chip the same way.
+   */
+  currencyPinned?: boolean
 }
 
 /**
@@ -42,14 +49,20 @@ export interface MoreSheetContext {
  *    session that is not previewing the portal, mirroring the rail.
  *  - Private mode and Client view are super-admin only, mirroring the rail's
  *    account menu.
+ *  - The currency row goes away for a pinned (client-audience) session, which
+ *    has one currency and no choice to make.
  *  - Preferences and Account always render, because below md the sheet is the
  *    only place a phone can reach theme, settings or sign out.
  *  - Empty sections are dropped so the sheet never shows a bare heading.
  */
-export function buildMoreSections({ showAsAdmin, isSuperAdmin }: MoreSheetContext): MoreSection[] {
+export function buildMoreSections({
+  showAsAdmin,
+  isSuperAdmin,
+  currencyPinned = false,
+}: MoreSheetContext): MoreSection[] {
   const tools: MoreItemId[] = showAsAdmin ? ['timer', 'brief'] : []
 
-  const preferences: MoreItemId[] = ['currency', 'theme']
+  const preferences: MoreItemId[] = currencyPinned ? ['theme'] : ['currency', 'theme']
   if (isSuperAdmin) preferences.push('privateMode', 'clientView')
 
   const account: MoreItemId[] = ['settings', 'signOut']
