@@ -3,7 +3,7 @@ import { requirePortalFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, ne, inArray } from 'drizzle-orm'
+import { eq, desc, and, ne, inArray, isNull } from 'drizzle-orm'
 import { createNotifications, resolveParticipants } from '@/lib/notifications'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
@@ -85,14 +85,18 @@ export async function GET(
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  // Get messages - only non-internal
+  // Only non-internal, and only rows the studio has not retracted. The
+  // deletedAt filter used to be missing here while the request-thread reader
+  // had it (app/api/portal/requests/[id]/route.ts), so a message the studio
+  // deleted stayed visible to the client on this one route.
   const messages = await database
     .select()
     .from(schema.messages)
     .where(
       and(
         eq(schema.messages.conversationId, conversationId),
-        eq(schema.messages.isInternal, false)
+        eq(schema.messages.isInternal, false),
+        isNull(schema.messages.deletedAt)
       )
     )
     .orderBy(desc(schema.messages.createdAt))

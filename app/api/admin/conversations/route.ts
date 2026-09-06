@@ -185,6 +185,52 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ conversations: output })
 }
 
+/**
+ * Normalise whatever a caller sent as `participantIds` into rows this table
+ * can hold.
+ *
+ * Accepts `{ id, type }` and the flat `'team_member:<id>'` / `'contact:<id>'`
+ * form, tolerates the legacy `'team:<id>'` prefix, and DROPS anything else.
+ * Dropping matters: the old code turned an unrecognised entry into an insert
+ * with `participantId: undefined`, which is the failure that left orphan
+ * conversations behind. `org:<id>` was never a participant type at all, so it
+ * is dropped rather than guessed at.
+ */
+function normaliseParticipantSeeds(
+  raw: ReadonlyArray<{ id?: string; type?: string } | string>,
+): Array<{ id: string; type: 'team_member' | 'contact' }> {
+  const out: Array<{ id: string; type: 'team_member' | 'contact' }> = []
+  const seen = new Set<string>()
+  for (const entry of raw) {
+    let id: string | undefined
+    let type: string | undefined
+    if (typeof entry === 'string') {
+      const at = entry.indexOf(':')
+      if (at > 0) {
+        type = entry.slice(0, at)
+        id = entry.slice(at + 1)
+      } else {
+        id = entry
+        type = 'team_member'
+      }
+    } else if (entry && typeof entry === 'object') {
+      id = typeof entry.id === 'string' ? entry.id : undefined
+      type = typeof entry.type === 'string' ? entry.type : undefined
+    }
+    if (!id) continue
+    const resolved =
+      type === 'contact' ? 'contact'
+      : type === 'team_member' || type === 'team' || type === undefined ? 'team_member'
+      : null
+    if (!resolved) continue
+    const key = `${resolved}:${id}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ id, type: resolved })
+  }
+  return out
+}
+
 // ── POST /api/admin/conversations ───────────────────────────────────────────
 // Create a new conversation.
 // Body: { type, name?, orgId?, visibility, participantIds: [{id, type}] }
@@ -204,7 +250,19 @@ export async function POST(req: NextRequest) {
       orgId?: string
       requestId?: string
       visibility?: string
-      participantIds?: Array<{ id: string; type: string }>
+      /**
+       * Either `[{ id, type }]` or a flat `['team_member:<id>', ...]`.
+       *
+       * The flat form is what the hidden Messages page and the MCP
+       * `create_conversation` tool have always sent, and reading `p.id` off a
+       * string produced `participantId: undefined` on every extra
+       * participant: the conversation row and the creator row were already
+       * written by then, so the request 500'd and left an orphan behind
+       * (swept by migration 0092). Both shapes are normalised now, and an
+       * entry that resolves to nothing is DROPPED rather than inserted as a
+       * row nobody can be.
+       */
+      participantIds?: Array<{ id?: string; type?: string } | string>
     }
     try {
       body = await req.json()
@@ -282,20 +340,21 @@ export async function POST(req: NextRequest) {
       joinedAt: now,
     })
 
-    // Add other participants
-    if (participantIds && participantIds.length > 0) {
-      for (const p of participantIds) {
-        // Skip if the participant is the creator
-        if (p.id === creatorParticipantId) continue
-
+    // Add other participants, from either accepted shape.
+    for (const seed of normaliseParticipantSeeds(participantIds ?? [])) {
+      if (seed.id === creatorParticipantId) continue
+      try {
         await database.insert(schema.conversationParticipants).values({
           id: crypto.randomUUID(),
           conversationId: convId,
-          participantId: p.id,
-          participantType: p.type === 'contact' ? 'contact' : 'team_member',
+          participantId: seed.id,
+          participantType: seed.type,
           role: 'member',
           joinedAt: now,
         })
+      } catch {
+        // The unique index added by migration 0092 caught the same person
+        // twice in one payload. They are in the room either way.
       }
     }
 

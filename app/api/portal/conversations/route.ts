@@ -3,7 +3,7 @@ import { requirePortalFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, sql, inArray } from 'drizzle-orm'
+import { eq, desc, and, sql, inArray, isNull } from 'drizzle-orm'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
 // ── GET /api/portal/conversations ──────────────────────────────────────────
@@ -145,7 +145,9 @@ export async function GET(req: NextRequest) {
         if (nm) participantNames.push(nm)
       }
 
-      // Get last message (external only)
+      // Last message: external, and not one the studio has retracted. Without
+      // the deletedAt guard a deleted message kept driving the preview and the
+      // unread count on this list while the thread itself no longer showed it.
       const lastMessages = await database
         .select({
           id: schema.messages.id,
@@ -157,7 +159,8 @@ export async function GET(req: NextRequest) {
         .where(
           and(
             eq(schema.messages.conversationId, conv.id),
-            eq(schema.messages.isInternal, false)
+            eq(schema.messages.isInternal, false),
+            isNull(schema.messages.deletedAt)
           )
         )
         .orderBy(desc(schema.messages.createdAt))
@@ -178,7 +181,8 @@ export async function GET(req: NextRequest) {
             .where(
               and(
                 eq(schema.messages.conversationId, conv.id),
-                eq(schema.messages.isInternal, false)
+                eq(schema.messages.isInternal, false),
+                isNull(schema.messages.deletedAt)
               )
             )
           unreadCount = allMsgs.length
@@ -190,6 +194,7 @@ export async function GET(req: NextRequest) {
               and(
                 eq(schema.messages.conversationId, conv.id),
                 eq(schema.messages.isInternal, false),
+                isNull(schema.messages.deletedAt),
                 sql`${schema.messages.createdAt} > ${lastReadAt}`
               )
             )
