@@ -38,7 +38,8 @@ import {
   type RequestsFilters,
   type RequestsSnapshot,
   type RequestsSort,
-  type RequestsViewKey,
+  type RequestsViewKey,,
+  defaultSavedViewFor
 } from '@/lib/requests-views'
 import {
   RequestsRail,
@@ -244,7 +245,7 @@ export function useRequestsRailState({
   )
   const [storedSavedView, setStoredSavedView] = useUserPreference<string | null>(
     'requests.savedView',
-    null,
+    defaultSavedViewFor(audience),
     { validator: isSavedViewKey },
   )
   const [storedFilters, setStoredFilters] = useUserPreference<RequestsFilters>(

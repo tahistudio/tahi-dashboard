@@ -147,6 +147,16 @@ export const CLIENT_SAVED_VIEWS: readonly RequestsSavedView[] = [
   { key: 'delivered', label: 'Delivered',      test: r => r.status === 'delivered' },
 ]
 
+/** The saved view a person starts on before they have picked or saved one.
+ *  The team lands on All active: the whole list is 332 rows of mostly
+ *  delivered work, and the founder's rule is that nobody should read that by
+ *  default. Clients keep All requests, because their In progress view would
+ *  hide the Waiting on you rows they most need to see. An explicit choice of
+ *  All requests is stored as null and still wins over this fallback. */
+export function defaultSavedViewFor(audience: RequestsAudience): string | null {
+  return audience === 'client' ? null : 'active'
+}
+
 export function savedViewsFor(audience: RequestsAudience): readonly RequestsSavedView[] {
   if (audience === 'client') return CLIENT_SAVED_VIEWS
   return TEAM_SAVED_VIEWS.filter(v => v.key !== 'mine' || audience === 'team_member')
