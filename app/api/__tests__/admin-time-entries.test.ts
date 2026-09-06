@@ -39,7 +39,7 @@ vi.mock('@/db/d1', () => ({
     requests: { _table: 'requests', id: 1, orgId: 1 },
     tasks: { _table: 'tasks', id: 1, orgId: 1, requestId: 1, type: 1 },
     timeEntries: { _table: 'timeEntries', id: 1, date: 1 },
-    teamMembers: { _table: 'teamMembers', id: 1, clerkUserId: 1 },
+    teamMembers: { _table: 'teamMembers', id: 1, clerkUserId: 1, name: 1, role: 1 },
     // The shared writer (lib/time-entries.ts) reads the client's default
     // hourly rate when the body names none. Present here so this file
     // exercises the real path rather than the read-failed fallback.
@@ -102,6 +102,10 @@ function loggedEntry(): Row {
 beforeEach(() => {
   state.rows = {}
   state.inserts = []
+  // The caller is a linked team member. The route resolves the Clerk id to
+  // this row before it writes, because time_entries.team_member_id points at
+  // team_members.id; it used to store the Clerk id raw.
+  state.rows.teamMembers = [{ id: 'tm_liam', clerkUserId: 'clerk_admin', name: 'Liam', role: 'admin' }]
   process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
 })
 
@@ -112,6 +116,7 @@ describe('POST /api/admin/time-entries', () => {
     expect(res.status).toBe(201)
     expect(loggedEntry().orgId).toBe('org_client_a')
     expect(loggedEntry().taskId).toBe('task_client')
+    expect(loggedEntry().teamMemberId).toBe('tm_liam')
   })
 
   it('logs a studio task with no client instead of refusing it', async () => {

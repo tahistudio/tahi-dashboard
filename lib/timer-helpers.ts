@@ -8,6 +8,7 @@
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { INTERNAL_ORG_ID, ensureInternalOrg } from '@/lib/internal-org'
+import { resolveHourlyRate } from '@/lib/time-entries'
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 /**
@@ -207,6 +208,12 @@ export async function stopAndLogTimer(
     reason = 'no_team_member_row_for_user'
   } else {
     try {
+      // The same rate rule the two manual URLs use (lib/time-entries.ts): no
+      // timer UI collects a rate, so this is always the client's
+      // default_hourly_rate, else null. Never a silent 0. Stamped on the row
+      // rather than looked up at invoice time, so a later change to the
+      // client's default cannot re-price hours already tracked.
+      const hourlyRate = await resolveHourlyRate(drizzle, orgId, undefined)
       await drizzle.insert(schema.timeEntries).values({
         id: crypto.randomUUID(),
         orgId,
@@ -214,6 +221,7 @@ export async function stopAndLogTimer(
         taskId: timer.taskId ?? null,
         teamMemberId,
         hours,
+        hourlyRate,
         billable: true,
         notes: timer.notes ?? null,
         date,
