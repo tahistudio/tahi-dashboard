@@ -33,7 +33,7 @@ import { cookies, headers } from 'next/headers'
 import type { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { desc, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import {
   IMPERSONATE_MODE_COOKIE,
   IMPERSONATE_ORG_COOKIE,
@@ -41,6 +41,7 @@ import {
   resolvePreviewOrgId,
 } from '@/lib/preview-cookie'
 import { resolveActEligibility } from '@/lib/acting-eligibility'
+import { resolvePreviewContactId } from '@/lib/portal-identity'
 
 export interface RequestAuthResult {
   userId: string | null
@@ -66,7 +67,12 @@ export interface ActingAsIdentity {
   adminName: string
   /** D1 `organisations.id` being acted in (same value as auth.orgId). */
   orgId: string
-  /** Seat the banner named, for audit context only. Never an author id. */
+  /**
+   * The seat the preview is standing in (lib/portal-identity.ts), which is the
+   * same row the READ path answers as, so what the operator sees and what
+   * their write is recorded against are one person. Audit context only. Never
+   * an author id.
+   */
   contactId: string | null
 }
 
@@ -86,6 +92,25 @@ export type PortalAuthResult = RequestAuthResult & {
   canWriteAsClient?: boolean
   /** Set exactly when canWriteAsClient is true. */
   actingAs?: ActingAsIdentity | null
+  /**
+   * The `contacts.id` this session READS as, when that is not the caller's own
+   * login. Set only while a studio session previews a client, where `userId` is
+   * the operator's Clerk id and no client org has a row for it; null for an org
+   * with no contacts at all. Undefined for every real client session, which
+   * keeps resolving its own row by `clerkUserId` exactly as before.
+   *
+   * A READ identity, never an authorisation and never an author. Writes stay
+   * where they were: `refusePreviewWrite` refuses in read-only preview, and an
+   * acting write is attributed to the studio member through `actingAs`.
+   */
+  contactId?: string | null
+  /**
+   * True exactly when the identity above is a preview stand-in rather than the
+   * caller's own contact row, so a response can say so (the profile payload's
+   * `preview` flag) and a reader can tell "previewing an org with nobody in it"
+   * (true, contactId null) from "a real client with no linked row".
+   */
+  previewContact?: boolean
 }
 
 // --- Dev-only Ship Studio preview auto-auth ---------------------------------
@@ -213,6 +238,27 @@ export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResul
 }
 
 /**
+ * The contacts row a preview of `targetOrgId` answers as, or null.
+ *
+ * A thin wrapper so the chooser itself (lib/portal-identity.ts) stays free of
+ * lib/db.ts and can be called with any drizzle handle from a test or a route.
+ * Swallows a failed `db()` for the same reason the chooser swallows a failed
+ * select: a preview with no resolved seat is a worse preview, never a broken
+ * request.
+ */
+async function resolvePreviewSeat(targetOrgId: string): Promise<string | null> {
+  try {
+    const database = await db()
+    return await resolvePreviewContactId(
+      database as ReturnType<typeof import('drizzle-orm/d1').drizzle>,
+      targetOrgId,
+    )
+  } catch {
+    return null
+  }
+}
+
+/**
  * Prove the right to act as a client, or return null.
  *
  * Three things must all hold, and each is re-derived here on every acting
@@ -224,11 +270,20 @@ export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResul
  *
  * Fails CLOSED on any error: a D1 hiccup downgrades the session to the
  * read-only preview it was before, which refuses every write.
+ *
+ * `contactId` is the seat the preview is standing in, already resolved by the
+ * caller through lib/portal-identity.ts and passed in rather than selected
+ * again here. It is audit metadata only ("this happened in the workspace whose
+ * main contact is X"), and the same value the READ path answers as, so the row
+ * an operator sees and the row their write is recorded against are one seat.
+ * A null records "no named seat", never blocks the write, and never stands in
+ * as an author.
  */
 async function resolveActingIdentity(
   userId: string | null,
   clerkOrgId: string,
   targetOrgId: string,
+  contactId: string | null,
 ): Promise<ActingAsIdentity | null> {
   if (!userId) return null
   try {
@@ -238,24 +293,6 @@ async function resolveActingIdentity(
     const verdict = await resolveActEligibility(drizzle, userId, clerkOrgId)
     if (!verdict.ok || !verdict.member) return null
     const member = verdict.member
-
-    // The org's primary seat, for the audit metadata only: "this happened in
-    // the workspace whose main contact is X". The banner's own contact pick
-    // never reaches the server (it lives in sessionStorage), so primary-first
-    // is the closest honest answer. A missing row records "no named seat" and
-    // must never block the write or stand in as an author.
-    let contactId: string | null = null
-    try {
-      const [contact] = await drizzle
-        .select({ id: schema.contacts.id })
-        .from(schema.contacts)
-        .where(eq(schema.contacts.orgId, targetOrgId))
-        .orderBy(desc(schema.contacts.isPrimary))
-        .limit(1)
-      contactId = contact?.id ?? null
-    } catch {
-      contactId = null
-    }
 
     return {
       adminUserId: userId,
@@ -305,6 +342,14 @@ async function resolveActingIdentity(
  * way, so the ~21 routes that hand-roll `if (impersonating) 403` keep refusing
  * until a route is deliberately opened through lib/acting-as.ts. Default deny
  * survives the feature.
+ *
+ * PREVIEW IDENTITY. Both preview modes also carry `contactId`: the client
+ * person the preview is answering as, chosen by lib/portal-identity.ts. Only
+ * the ORG is swapped by a preview, so `userId` stays the operator's Clerk id,
+ * and every portal read that matched a contacts row on that id found nothing:
+ * the profile route answered `contact: null, isAdmin: false` and the portal
+ * hid People and Organisation from the person previewing it. This is identity
+ * for READS. It authorises nothing and it is never an author.
  */
 export async function getPortalAuth(req: NextRequest): Promise<PortalAuthResult> {
   const result = await getRequestAuth(req)
@@ -329,8 +374,20 @@ export async function getPortalAuth(req: NextRequest): Promise<PortalAuthResult>
       const isRead = req.method === 'GET' || req.method === 'HEAD'
       const wantsAct =
         !isRead && readPreviewMode(req.cookies.get(IMPERSONATE_MODE_COOKIE)?.value) === 'act'
+
+      // The seat the preview stands in, resolved for READS as well as writes.
+      // Without it every portal read matched the operator's own Clerk id
+      // against a client org that has no row for it, so the preview answered
+      // "no contact, not an admin" and hid People and Organisation from the
+      // very screen it exists to show. One indexed select on contacts by
+      // org, which is a different order of cost from the acting-identity
+      // resolution above it (a roster read, a roles join and two
+      // feature_visibility reads), and it is the whole reason the preview is
+      // truthful.
+      const contactId = await resolvePreviewSeat(target)
+
       const actingAs = wantsAct
-        ? await resolveActingIdentity(result.userId, clerkOrgId, target)
+        ? await resolveActingIdentity(result.userId, clerkOrgId, target, contactId)
         : null
       if (actingAs) {
         return {
@@ -338,11 +395,20 @@ export async function getPortalAuth(req: NextRequest): Promise<PortalAuthResult>
           orgId: target,
           clerkOrgId,
           impersonating: true,
+          contactId,
+          previewContact: true,
           canWriteAsClient: true,
           actingAs,
         }
       }
-      return { ...result, orgId: target, clerkOrgId, impersonating: true }
+      return {
+        ...result,
+        orgId: target,
+        clerkOrgId,
+        impersonating: true,
+        contactId,
+        previewContact: true,
+      }
     }
     // Non-impersonating admin: leave orgId as the Tahi org so portal routes
     // (which 403 the admin org) behave exactly as before.

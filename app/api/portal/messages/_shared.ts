@@ -24,9 +24,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getPortalAuth } from '@/lib/server-auth'
 import { requirePortalFeature } from '@/lib/require-feature'
+import { contactIdentityWhere } from '@/lib/portal-identity'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { and, eq } from 'drizzle-orm'
 import type { InboxViewer } from '@/lib/messages-store'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -63,7 +63,8 @@ export async function gatePortalMessages(
   req: NextRequest,
   opts: { write: boolean; serviceOrgId?: string | null } = { write: false },
 ): Promise<PortalMessagesGate> {
-  const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
+  const { orgId, userId, impersonating, clerkOrgId, contactId: previewContactId } =
+    await getPortalAuth(req)
   const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
 
   // MCP parity branch. Nothing else can reach it: 'api-service' is minted only
@@ -98,13 +99,21 @@ export async function gatePortalMessages(
   // be a contact at two client orgs on the same Clerk account, and an
   // unscoped lookup would pick whichever row came back first (CLAUDE.md
   // rule 12).
+  //
+  // In Client view the login is the operator's and matches nothing here, so
+  // the preview read the client's inbox as nobody: their own replies looked
+  // like somebody else's and the brand scope below opened to every brand.
+  // `previewContactId` (lib/portal-identity.ts) is the seat being previewed.
+  // Only READS are affected: a write in a preview is refused above, in both
+  // modes, before this runs.
+  //
+  // Never for the service token, whose org comes from `?orgId=` rather than
+  // from the preview cookie. A seat resolved for one org must not be applied
+  // to a lookup scoped to another, however unlikely the cookie is to be there.
   const [contact] = await database
     .select({ id: schema.contacts.id, name: schema.contacts.name })
     .from(schema.contacts)
-    .where(and(
-      eq(schema.contacts.clerkUserId, userId),
-      eq(schema.contacts.orgId, targetOrgId),
-    ))
+    .where(contactIdentityWhere(targetOrgId, userId, isService ? null : previewContactId))
     .limit(1)
 
   return {

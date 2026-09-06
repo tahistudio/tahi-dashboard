@@ -1,5 +1,6 @@
 import { getPortalAuth } from '@/lib/server-auth'
 import { requirePortalFeature } from '@/lib/require-feature'
+import { contactIdentityWhere } from '@/lib/portal-identity'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -14,7 +15,7 @@ type Params = { params: Promise<{ id: string }> }
 
 // ── GET /api/portal/requests/[id] ────────────────────────────────────────────
 export async function GET(req: NextRequest, { params }: Params) {
-  const { orgId, userId, clerkOrgId } = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId, contactId: previewContactId } = await getPortalAuth(req)
   if (!orgId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -68,11 +69,16 @@ export async function GET(req: NextRequest, { params }: Params) {
   // messages read as theirs (name + org), and so own-message detection works
   // against the stored contact id (portal messages store authorId = contact.id,
   // not the Clerk user id).
+  //
+  // Through lib/portal-identity.ts, which also puts the org on the lookup: the
+  // login alone could match a row at a different client org, and in Client view
+  // it matches nothing at all, so the preview rendered the previewed client's
+  // own messages as somebody else's.
   const [self] = userId
     ? await drizzle
         .select({ id: schema.contacts.id })
         .from(schema.contacts)
-        .where(eq(schema.contacts.clerkUserId, userId))
+        .where(contactIdentityWhere(orgId, userId, previewContactId))
         .limit(1)
     : [undefined]
   const selfContactId = self?.id ?? null

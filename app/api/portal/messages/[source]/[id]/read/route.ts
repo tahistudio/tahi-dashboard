@@ -48,7 +48,11 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ ok: true, lastReadAt })
   }
 
-  const scope = await loadClientScope(database, { clerkUserId: viewer.clerkUserId, orgId })
+  const scope = await loadClientScope(database, {
+    clerkUserId: viewer.clerkUserId,
+    orgId,
+    contactId: viewer.domainId,
+  })
   const request = await clientCanSeeRequest(database, { requestId: id, orgId, brandIds: scope.brandIds })
   if (!request) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
