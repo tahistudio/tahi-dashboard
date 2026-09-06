@@ -5,6 +5,14 @@
  * shows them: the plain text alternative (an HTML-only message is scored as
  * spam and is unreadable in a text-only client) and the single from address
  * every send inherits.
+ *
+ * sendEmail no longer talks to Resend: it hands the message to
+ * lib/email-delivery.ts, which applies the tahi.studio allowlist. The settings
+ * mock below stores `email.deliveryMode = all` so THIS spec stays about the
+ * payload and nothing else. The allowlist has its own spec
+ * (lib/__tests__/email-delivery.test.ts), and jo@acme.com would otherwise be
+ * held back on every case here, which is the correct behaviour and not what is
+ * being pinned in this file.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createElement } from 'react'
@@ -15,6 +23,30 @@ vi.mock('resend', () => ({
   Resend: class {
     emails = { send }
   },
+}))
+
+vi.mock('@/db/d1', () => ({
+  schema: {
+    settings: { key: 'settings.key', value: 'settings.value' },
+    emailSuppressions: { createdAt: 'email_suppressions.created_at' },
+  },
+}))
+
+vi.mock('drizzle-orm', () => ({
+  desc: (col: unknown) => ({ __op: 'desc', col }),
+  eq: (col: unknown, value: unknown) => ({ __op: 'eq', col, value }),
+  inArray: (col: unknown, values: unknown) => ({ __op: 'inArray', col, values }),
+}))
+
+vi.mock('@/lib/db', () => ({
+  db: vi.fn(async () => ({
+    select: () => ({
+      from: () => ({
+        where: () => Promise.resolve([{ key: 'email.deliveryMode', value: 'all' }]),
+      }),
+    }),
+    insert: () => ({ values: () => Promise.resolve(undefined) }),
+  })),
 }))
 
 import { emailFromAddress, sendEmail } from '@/lib/email'
@@ -34,7 +66,7 @@ const body = createElement('p', null, 'Your request is ready for your review.')
 
 beforeEach(() => {
   vi.clearAllMocks()
-  send.mockResolvedValue({ error: null })
+  send.mockResolvedValue({ data: { id: 'msg_1' }, error: null })
   vi.stubEnv('RESEND_API_KEY', 'test_key')
 })
 
@@ -108,7 +140,7 @@ describe('sendEmail, the recipients and the failure paths', () => {
   })
 
   it('reports a refusal rather than throwing', async () => {
-    send.mockResolvedValue({ error: { message: 'Too many requests' } })
+    send.mockResolvedValue({ data: null, error: { message: 'Too many requests' } })
     const res = await sendEmail('jo@acme.com', 'Delivered', body)
     expect(res).toEqual({ success: false, error: 'Too many requests' })
   })

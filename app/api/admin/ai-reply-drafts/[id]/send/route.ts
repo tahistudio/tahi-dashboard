@@ -1,8 +1,10 @@
 /**
  * POST /api/admin/ai-reply-drafts/[id]/send
  *
- * Fires the draft via Resend, flips status to 'sent', stamps sentAt
- * + resendMessageId, writes an activity.
+ * Fires the draft through the one delivery gate (lib/email-delivery.ts),
+ * flips status to 'sent', stamps sentAt, writes an activity. A recipient the
+ * tahi.studio allowlist holds back answers 409 with the reason and leaves the
+ * draft unsent, so the timeline never claims a reply that did not go.
  *
  * Handles two kinds of draft that share the ai_reply_drafts table:
  *   - Lead first-reply drafts (draft.leadId set): recipient = the lead,
@@ -23,6 +25,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { desc, eq } from 'drizzle-orm'
 import { emailFromAddress } from '@/lib/email'
+import { deliverEmail } from '@/lib/email-delivery'
 
 function invoiceNumber(id: string): string {
   return `INV-${id.slice(0, 6).toUpperCase()}`
@@ -123,39 +126,37 @@ export async function POST(req: NextRequest, { params }: Params) {
     .map(p => `<p>${p.replace(/\n/g, '<br>').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`)
     .join('\n')
 
-  // Fire Resend
+  // Out through the one door.
   let resendId: string | null = null
   try {
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        // One mailbox, decided in lib/email.ts, wearing the name of the
-        // person who wrote the reply. Built by hand from a settings value it
-        // produced "Liam Miller <Tahi Studio <...>>" the moment that value
-        // held a full lockup, and split the studio into two senders in a
-        // client's inbox the rest of the time.
-        from: emailFromAddress('Liam Miller'),
-        to: [recipientEmail],
-        subject,
-        html: htmlBody,
-        text: bodyText,
-      }),
+    const outcome = await deliverEmail({
+      // One mailbox, decided in lib/email-from.ts, wearing the name of the
+      // person who wrote the reply. Built by hand from a settings value it
+      // produced "Liam Miller <Tahi Studio <...>>" the moment that value
+      // held a full lockup, and split the studio into two senders in a
+      // client's inbox the rest of the time.
+      from: emailFromAddress('Liam Miller'),
+      to: recipientEmail,
+      subject,
+      html: htmlBody,
+      text: bodyText,
+      template: draft.leadId ? 'lead-reply' : 'invoice-chase',
+      orgId: chaseOrgId,
     })
-    const data = await res.json() as { id?: string; message?: string }
-    if (!res.ok) {
+    if (!outcome.success) {
+      // 409 rather than 502 when the allowlist is the reason: nothing is
+      // broken, the studio has simply not opened delivery to that address yet,
+      // and a 502 would read as an outage worth retrying.
       return NextResponse.json({
-        error: 'Resend send failed',
-        detail: data.message ?? `HTTP ${res.status}`,
-      }, { status: 502 })
+        error: outcome.blocked ? 'Held back by the email allowlist' : 'Send failed',
+        detail: outcome.error ?? 'Unknown error',
+        suppressedCount: outcome.suppressedCount,
+      }, { status: outcome.blocked ? 409 : 502 })
     }
-    resendId = data.id ?? null
+    resendId = outcome.messageId ?? null
   } catch (err) {
     return NextResponse.json({
-      error: 'Resend send failed',
+      error: 'Send failed',
       detail: err instanceof Error ? err.message : String(err),
     }, { status: 502 })
   }

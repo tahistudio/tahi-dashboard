@@ -6,6 +6,7 @@ import { schema } from '@/db/d1'
 import { eq, desc } from 'drizzle-orm'
 import { logActivity } from '@/lib/deal-activity'
 import { emailFromAddress } from '@/lib/email'
+import { deliverEmail } from '@/lib/email-delivery'
 import { requireDealAccess } from '../../_access'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -79,6 +80,16 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     updatedAt: now,
   })
 
+  // What the gate actually did, read on the success path too.
+  //
+  // This used to be dropped whenever ANY address survived: a list of three
+  // prospects and one tahi.studio address delivered to the one, reported
+  // success, and then wrote "Nudge sent to a@prospect.com, b@prospect.com" into
+  // the deal timeline, naming two people who received nothing. The timeline is
+  // built from `delivered` now, and `suppressed` comes back to the caller.
+  let delivered: string[] = [...body.contactEmails]
+  let suppressed: string[] = []
+
   // Send immediately if requested
   if (body.sendNow) {
     try {
@@ -99,33 +110,42 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         // Signature lookup failed — send without rather than block the nudge.
       }
 
-      if (process.env.RESEND_API_KEY) {
-        const res = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            // A nudge is written in one person's voice, so it keeps the display
-            // name and takes the mailbox from the one configured lockup. Built
-            // by hand it produced "Liam from Tahi Studio <Tahi Studio <...>>"
-            // the moment RESEND_FROM_EMAIL held a full lockup.
-            from: emailFromAddress('Liam from Tahi Studio'),
-            to: body.contactEmails,
-            subject: body.subject,
-            html: outgoingHtml,
-          }),
-        })
+      // Out through the one door (lib/email-delivery.ts). A nudge goes to a
+      // prospect at their own company, which is exactly the shape of address
+      // the allowlist exists to hold back until Liam has verified it, so this
+      // is the call site most likely to be stopped.
+      //
+      // NOT WRAPPED IN a RESEND_API_KEY check. deliverEmail filters and logs
+      // before it looks at the key, so a key-less environment still writes the
+      // suppression rows that make the blackout provable. Guarding the call
+      // threw that evidence away and marked the nudge sent.
+      const outcome = await deliverEmail({
+        // A nudge is written in one person's voice, so it keeps the display
+        // name and takes the mailbox from the one configured lockup. Built
+        // by hand it produced "Liam from Tahi Studio <Tahi Studio <...>>"
+        // the moment RESEND_FROM_EMAIL held a full lockup.
+        from: emailFromAddress('Liam from Tahi Studio'),
+        to: body.contactEmails,
+        subject: body.subject,
+        html: outgoingHtml,
+        template: 'deal-nudge',
+      })
 
-        if (!res.ok) {
-          const errText = await res.text()
-          await database.update(schema.dealNudges).set({
-            status: 'failed',
-            updatedAt: new Date().toISOString(),
-          }).where(eq(schema.dealNudges.id, nudgeId))
-          return NextResponse.json({ id: nudgeId, status: 'failed', error: errText }, { status: 500 })
-        }
+      delivered = outcome.delivered
+      suppressed = outcome.suppressed
+
+      if (!outcome.success) {
+        await database.update(schema.dealNudges).set({
+          status: 'failed',
+          updatedAt: new Date().toISOString(),
+        }).where(eq(schema.dealNudges.id, nudgeId))
+        return NextResponse.json({
+          id: nudgeId,
+          status: 'failed',
+          error: outcome.error ?? 'Send failed',
+          suppressed,
+          suppressedCount: outcome.suppressedCount,
+        }, { status: outcome.blocked ? 409 : 500 })
       }
 
       // Persist the final composed HTML (with signature) so the timeline /
@@ -149,8 +169,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
   }
 
-  // Log to timeline (status-informed).
-  const recipientPreview = body.contactEmails.slice(0, 2).join(', ') + (body.contactEmails.length > 2 ? `, +${body.contactEmails.length - 2}` : '')
+  // Log to timeline (status-informed). A sent nudge names only the addresses
+  // that were actually handed to Resend, so the deal history never claims a
+  // recipient the gate withheld; a draft or a scheduled one names who it is
+  // addressed to, because nothing has been decided about them yet.
+  const named = body.sendNow ? delivered : body.contactEmails
+  const recipientPreview = named.slice(0, 2).join(', ') + (named.length > 2 ? `, +${named.length - 2}` : '')
   await logActivity(database, {
     dealId,
     type: 'nudge_sent',
@@ -163,12 +187,16 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     metadata: {
       subject: body.subject,
       templateId: body.templateId ?? null,
-      recipients: body.contactEmails,
+      recipients: named,
+      ...(suppressed.length > 0 ? { suppressed } : {}),
       status,
       scheduledAt: body.scheduledAt ?? null,
     },
     createdById: userId ?? 'system',
   })
 
-  return NextResponse.json({ id: nudgeId, status }, { status: 201 })
+  return NextResponse.json(
+    { id: nudgeId, status, suppressed, suppressedCount: suppressed.length },
+    { status: 201 },
+  )
 }

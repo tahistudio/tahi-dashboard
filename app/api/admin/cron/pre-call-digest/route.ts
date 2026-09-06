@@ -27,10 +27,10 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, gte, lte, sql } from 'drizzle-orm'
 import { render } from '@react-email/render'
-import { Resend } from 'resend'
 import { PreCallDigestEmail, type PreCallDigestEmailProps } from '@/emails/pre-call-digest'
 import { publicUrl } from '@/lib/app-url'
 import { emailFromAddress } from '@/lib/email'
+import { deliverEmail } from '@/lib/email-delivery'
 import { logCronRun } from '@/lib/cron-runs'
 
 export const dynamic = 'force-dynamic'
@@ -123,7 +123,6 @@ export async function POST(req: NextRequest) {
 
   const toProcess = candidates.filter(c => !sentCallIds.has(c.id))
 
-  const resend = new Resend(apiKey)
   const results: Array<{ callId: string; status: 'sent' | 'skipped' | 'failed'; detail?: string }> = []
 
   for (const call of toProcess) {
@@ -253,12 +252,26 @@ export async function POST(req: NextRequest) {
       const html = await render(PreCallDigestEmail(props))
       const subject = `Pre-call: ${withName} in ~30 min`
 
-      await resend.emails.send({
+      // Through the one door, like everything else. The digest goes to the
+      // studio's own mailbox, so the allowlist is a no-op in practice; routing
+      // it here anyway is what keeps "no second way out" true rather than
+      // nearly true, and a recipient override typed with a client's address
+      // would be held back and logged instead of delivered.
+      const outcome = await deliverEmail({
         from: emailFromAddress(),
         to: [recipient],
         subject,
         html,
+        template: 'pre-call-digest',
       })
+      if (!outcome.success) {
+        results.push({
+          callId: call.id,
+          status: outcome.blocked ? 'skipped' : 'failed',
+          detail: outcome.error,
+        })
+        continue
+      }
 
       // Stamp activity for idempotency (description carries the call
       // id so the cron's dedup check works on the next tick).

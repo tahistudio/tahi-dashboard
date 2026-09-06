@@ -7,6 +7,13 @@ import { render } from '@react-email/render'
 import { ContractSignEmail } from '@/emails/contract-sign'
 import { publicUrl } from '@/lib/app-url'
 import { emailFromAddress } from '@/lib/email'
+import {
+  deliverEmail,
+  partitionRecipients,
+  recordEmailSuppressions,
+  resolveDeliveryPolicy,
+  resolveOrgRecipientScope,
+} from '@/lib/email-delivery'
 import { requireContractAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -23,7 +30,9 @@ function mintToken(): string {
 /**
  * POST /api/admin/contracts/[id]/email
  *
- * Sends per-signer "please sign" emails via Resend. Auto-mints a share
+ * Sends per-signer "please sign" emails through the one delivery gate in
+ * lib/email-delivery.ts, so the tahi.studio allowlist applies and a held-back
+ * signer comes back in `suppressed` instead of reading as sent. Auto-mints a share
  * token if the contract doesn't have one yet (so this endpoint also
  * covers the "I just want to send this" case in one click).
  *
@@ -48,9 +57,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   const bccList = (Array.isArray(body.bcc) ? body.bcc : []).filter(r => r.email?.trim()).map(r => r.email.trim())
   const customSubject = body.subject?.trim() || null
 
-  if (!process.env.RESEND_API_KEY) {
-    return NextResponse.json({ error: 'Email service not configured' }, { status: 500 })
-  }
+  // No RESEND_API_KEY check here on purpose. deliverEmail filters and logs
+  // before it looks at the key, so a key-less environment still leaves an
+  // evidence trail for every address it would have withheld, and it reports
+  // the missing key as the send error rather than as a 500 before anyone has
+  // asked the allowlist anything.
 
   const database = await db() as unknown as D1
   const now = new Date().toISOString()
@@ -62,6 +73,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   const [doc] = await database
     .select({
       id: schema.contractDocuments.id,
+      // Carried into the delivery gate so a client whose org is on
+      // `email.allowedOrgIds` can be mailed even from an outside domain.
+      orgId: schema.contractDocuments.orgId,
       type: schema.contractDocuments.type,
       name: schema.contractDocuments.name,
       status: schema.contractDocuments.status,
@@ -119,8 +133,31 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   const sent: Array<{ signerId: string; email: string }> = []
   const failed: Array<{ signerId: string; email: string; error: string }> = []
 
-  const { Resend } = await import('resend')
-  const resend = new Resend(process.env.RESEND_API_KEY)
+  // THE CC AND BCC LISTS ARE FILTERED ONCE, HERE, not once per signer.
+  // deliverEmail is called inside the loop below, and cc/bcc do not change
+  // between iterations, so a single withheld cc address on a three-signer
+  // contract wrote three identical suppression rows and came back three times
+  // in `suppressed`, which reads as three withheld sends when there was one.
+  // Filtered here, the loop only ever carries the surviving lists and only the
+  // signer's own address can add to the tally.
+  //
+  // Recipients the allowlist held back are reported rather than hidden:
+  // "sent: []" with no explanation is how a studio convinces itself a contract
+  // went out when it did not.
+  const policy = await resolveDeliveryPolicy()
+  const scope = await resolveOrgRecipientScope(doc.orgId, policy)
+  const ccPart = partitionRecipients(ccList, policy, scope)
+  const bccPart = partitionRecipients(bccList, policy, scope)
+  const suppressed: string[] = [...ccPart.suppressed, ...bccPart.suppressed]
+  await recordEmailSuppressions(
+    suppressed,
+    {
+      template: 'contract-sign',
+      subject: customSubject ?? `Please sign: ${doc.name}`,
+      orgId: doc.orgId,
+    },
+    policy,
+  )
 
   for (const signer of targetSigners) {
     const signUrl = publicUrl(`/p/contract/${token}/sign/${signer.id}`)
@@ -134,20 +171,25 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         fromName,
         customMessage,
       }))
-      await resend.emails.send({
+      const outcome = await deliverEmail({
         from: emailFromAddress(),
         to: signer.email,
-        cc: ccList.length ? ccList : undefined,
-        bcc: bccList.length ? bccList : undefined,
+        cc: ccPart.allowed,
+        bcc: bccPart.allowed,
         subject: customSubject ?? `Please sign: ${doc.name}`,
         html,
+        template: 'contract-sign',
+        orgId: doc.orgId,
+        policy,
       })
-      sent.push({ signerId: signer.id, email: signer.email })
+      suppressed.push(...outcome.suppressed)
+      if (outcome.success) sent.push({ signerId: signer.id, email: signer.email })
+      else failed.push({ signerId: signer.id, email: signer.email, error: outcome.error ?? 'Unknown error' })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error'
       failed.push({ signerId: signer.id, email: signer.email, error: msg })
     }
   }
 
-  return NextResponse.json({ token, sent, failed })
+  return NextResponse.json({ token, sent, failed, suppressed })
 }

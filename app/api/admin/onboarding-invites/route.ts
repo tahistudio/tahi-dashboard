@@ -188,6 +188,8 @@ export async function POST(req: NextRequest) {
         boundEmail: body.contactEmail.toLowerCase(),
         expiresAt: invite.expiresAt,
       }),
+      undefined,
+      { template: 'client-invite', orgId: targetOrgId ?? null },
     )
     emailed = result.success
     emailError = result.success ? null : result.error ?? 'Failed to send'

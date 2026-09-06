@@ -21,6 +21,7 @@ import { createElement } from 'react'
 import { eq, inArray } from 'drizzle-orm'
 import { schema } from '@/db/d1'
 import { sendEmail } from '@/lib/email'
+import { resolveDeliveryPolicy } from '@/lib/email-gate'
 import { isEventChannelEnabled } from '@/lib/notification-preferences'
 import { publicUrl } from '@/lib/app-url'
 import AnnouncementEmail, { type AnnouncementEmailType } from '@/emails/announcement'
@@ -78,11 +79,14 @@ export async function fanOutAnnouncementEmails(
   if (orgIds.length === 0) return 0
 
   // 2) Load contacts for those orgs that have an email address.
-  let contacts: { id: string; email: string; clerkUserId: string | null }[] = []
+  let contacts: { id: string; orgId: string; email: string; clerkUserId: string | null }[] = []
   try {
     const rows = await database
       .select({
         id: schema.contacts.id,
+        // Carried into the delivery gate so a client whose org is on
+        // `email.allowedOrgIds` can be mailed even from an outside domain.
+        orgId: schema.contacts.orgId,
         email: schema.contacts.email,
         clerkUserId: schema.contacts.clerkUserId,
       })
@@ -109,7 +113,7 @@ export async function fanOutAnnouncementEmails(
     ctaUrl: publicUrl('/'),
   })
 
-  const eligible: { email: string }[] = []
+  const eligible: { email: string; orgId: string }[] = []
   for (const contact of contacts) {
     let allowed = true
     if (contact.clerkUserId) {
@@ -121,7 +125,7 @@ export async function fanOutAnnouncementEmails(
         'email',
       )
     }
-    if (allowed) eligible.push({ email: contact.email.trim() })
+    if (allowed) eligible.push({ email: contact.email.trim(), orgId: contact.orgId })
   }
 
   if (eligible.length === 0) return 0
@@ -131,12 +135,21 @@ export async function fanOutAnnouncementEmails(
   const subject = opts.title.trim()
   const BATCH = 20
   let emailed = 0
+  // Read the delivery policy ONCE for the whole fan-out. Each send used to
+  // resolve it for itself, so an announcement to 200 contacts spent 200 extra
+  // settings reads out of one Worker's subrequest budget before it wrote a
+  // single suppression row.
+  const policy = await resolveDeliveryPolicy()
   for (let i = 0; i < eligible.length; i += BATCH) {
     const slice = eligible.slice(i, i + BATCH)
     const results = await Promise.all(
       slice.map(async (r) => {
         try {
-          const res = await sendEmail(r.email, subject, emailReact)
+          const res = await sendEmail(r.email, subject, emailReact, undefined, {
+            template: 'announcement',
+            orgId: r.orgId,
+            policy,
+          })
           return res.success
         } catch (err) {
           console.error('[announcements] email send failed', err)

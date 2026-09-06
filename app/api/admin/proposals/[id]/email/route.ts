@@ -7,6 +7,13 @@ import { render } from '@react-email/render'
 import { ProposalShareEmail } from '@/emails/proposal-share'
 import { publicUrl } from '@/lib/app-url'
 import { emailFromAddress } from '@/lib/email'
+import {
+  deliverEmail,
+  partitionRecipients,
+  recordEmailSuppressions,
+  resolveDeliveryPolicy,
+  resolveOrgRecipientScope,
+} from '@/lib/email-delivery'
 import { requireProposalAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -17,7 +24,9 @@ interface Recipient { name: string; email: string }
 /**
  * POST /api/admin/proposals/[id]/email
  *
- * Sends the public proposal link to a list of recipients via Resend.
+ * Sends the public proposal link to a list of recipients, through the one
+ * delivery gate in lib/email-delivery.ts. Recipients the tahi.studio allowlist
+ * holds back come back in `suppressed` rather than being silently dropped.
  * Requires the proposal to be in 'shared' status (token must exist).
  *
  * Body: {
@@ -43,9 +52,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   const ccList = (Array.isArray(body.cc) ? body.cc : []).filter(r => r.email?.trim()).map(r => r.email.trim())
   const bccList = (Array.isArray(body.bcc) ? body.bcc : []).filter(r => r.email?.trim()).map(r => r.email.trim())
   const customSubject = body.subject?.trim() || null
-  if (!process.env.RESEND_API_KEY) {
-    return NextResponse.json({ error: 'Email service not configured' }, { status: 500 })
-  }
+
+  // No RESEND_API_KEY check here on purpose. deliverEmail filters and logs
+  // before it looks at the key, so a key-less environment still leaves an
+  // evidence trail for every address it would have withheld.
 
   const database = await db() as unknown as D1
 
@@ -55,6 +65,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   const [proposal] = await database
     .select({
       id: schema.proposals.id,
+      // Carried into the delivery gate so a client whose org is on
+      // `email.allowedOrgIds` can be mailed even from an outside domain.
+      orgId: schema.proposals.orgId,
       title: schema.proposals.title,
       subtitle: schema.proposals.subtitle,
       expiresAt: schema.proposals.expiresAt,
@@ -73,11 +86,28 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   const customMessage = body.message?.trim() || null
   const viewUrl = publicUrl(`/p/proposal/${proposal.token}`)
 
-  const { Resend } = await import('resend')
-  const resend = new Resend(process.env.RESEND_API_KEY)
-
   const sent: string[] = []
   const failed: Array<{ email: string; error: string }> = []
+
+  // cc and bcc are filtered ONCE, not once per recipient: they do not change
+  // between iterations, so partitioning them inside the loop logged one
+  // withheld cc address as many times as there were recipients and reported it
+  // as many withheld sends. Recipients the allowlist held back are reported
+  // rather than hidden.
+  const policy = await resolveDeliveryPolicy()
+  const scope = await resolveOrgRecipientScope(proposal.orgId, policy)
+  const ccPart = partitionRecipients(ccList, policy, scope)
+  const bccPart = partitionRecipients(bccList, policy, scope)
+  const suppressed: string[] = [...ccPart.suppressed, ...bccPart.suppressed]
+  await recordEmailSuppressions(
+    suppressed,
+    {
+      template: 'proposal-share',
+      subject: customSubject ?? `Proposal from Tahi Studio: ${proposal.title}`,
+      orgId: proposal.orgId,
+    },
+    policy,
+  )
 
   for (const r of body.to) {
     if (!r.email?.trim()) continue
@@ -91,19 +121,24 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         customMessage,
         expiresAt: proposal.expiresAt,
       }))
-      await resend.emails.send({
+      const outcome = await deliverEmail({
         from: emailFromAddress(),
         to: r.email,
-        cc: ccList.length ? ccList : undefined,
-        bcc: bccList.length ? bccList : undefined,
+        cc: ccPart.allowed,
+        bcc: bccPart.allowed,
         subject: customSubject ?? `Proposal from Tahi Studio: ${proposal.title}`,
         html,
+        template: 'proposal-share',
+        orgId: proposal.orgId,
+        policy,
       })
-      sent.push(r.email)
+      suppressed.push(...outcome.suppressed)
+      if (outcome.success) sent.push(r.email)
+      else failed.push({ email: r.email, error: outcome.error ?? 'Unknown error' })
     } catch (err) {
       failed.push({ email: r.email, error: err instanceof Error ? err.message : 'Unknown error' })
     }
   }
 
-  return NextResponse.json({ sent, failed, viewUrl })
+  return NextResponse.json({ sent, failed, suppressed, viewUrl })
 }

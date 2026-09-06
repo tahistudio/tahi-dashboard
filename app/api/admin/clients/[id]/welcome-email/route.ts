@@ -147,6 +147,8 @@ export async function POST(req: NextRequest, { params }: Params) {
         boundEmail: email.toLowerCase(),
         expiresAt: invite.expiresAt || null,
       }),
+      undefined,
+      { template: 'welcome', orgId: org.id },
     )
 
     results.push({

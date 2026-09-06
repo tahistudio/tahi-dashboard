@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { SectionShell } from '@/components/tahi/settings/primitives'
+import { EmailDeliveryCard } from '@/components/tahi/settings/sections/email-delivery'
 import { useResource } from '@/lib/use-resource'
 import { apiPath } from '@/lib/api'
 import {
@@ -55,6 +56,12 @@ const XERO_EMAIL_MODE_OPTIONS = [
  * invoice_number_prefix, invoicing.defaultChannel, invoice_footer_note,
  * invoicing.bankDetails, invoicing.xeroPaymentAccountCode,
  * invoicing.xeroEmailMode) via PATCH /api/admin/settings, one call per key.
+ *
+ * The Email delivery card below the form is a separate concern on the same
+ * page (components/tahi/settings/sections/email-delivery.tsx): which addresses
+ * this platform is allowed to mail at all, and the log of what it held back.
+ * It sits here because Studio details is already the super-admin-only place
+ * where "what does a client actually receive" is decided.
  *
  * The three pay keys are validated at the door (lib/invoice-pay-settings.ts):
  * a letter in the account number or a name pasted into the Xero account code
@@ -517,6 +524,7 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
         Invoices pick these details up when they are generated - Xero-synced invoices keep
         Xero&apos;s own numbering.
       </p>
+      <EmailDeliveryCard isAdmin={isAdmin} />
     </SectionShell>
   )
 }

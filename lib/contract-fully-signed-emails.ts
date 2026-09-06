@@ -21,6 +21,7 @@ import { ContractFullySignedEmail } from '@/emails/contract-fully-signed'
 import { buildSignedPdfBase64 } from '@/lib/contract-signed-pdf'
 import { publicUrl } from '@/lib/app-url'
 import { emailFromAddress } from '@/lib/email'
+import { deliverEmail, resolveDeliveryPolicy } from '@/lib/email-delivery'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -48,6 +49,9 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
     const [doc] = await database
       .select({
         id: schema.contractDocuments.id,
+        // Carried into the delivery gate so a client whose org is on
+        // `email.allowedOrgIds` can be mailed even from an outside domain.
+        orgId: schema.contractDocuments.orgId,
         type: schema.contractDocuments.type,
         name: schema.contractDocuments.name,
         bodyHtml: schema.contractDocuments.bodyHtml,
@@ -194,11 +198,17 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
     }
 
     // ── Send to each recipient. Failures are tracked but never thrown ─
-    const { Resend } = await import('resend')
-    const resend = new Resend(process.env.RESEND_API_KEY)
-
+    // Through lib/email-delivery.ts, the one door out, so the tahi.studio
+    // allowlist applies to a countersigned contract the same as to anything
+    // else. A recipient it holds back is recorded in email_suppressions and
+    // reported here as a failure, not as a send.
     const sent: string[] = []
     const failed: Array<{ email: string; error: string }> = []
+    const suppressed: string[] = []
+    // Read once for the whole fan-out rather than once per recipient: the
+    // policy cannot change between two sends of the same contract, and each
+    // resolve is a settings read.
+    const policy = await resolveDeliveryPolicy()
 
     for (const r of recipients) {
       try {
@@ -213,23 +223,29 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
           pdfAttached: pdfBase64 !== null,
         }))
 
-        const sendOpts: Parameters<typeof resend.emails.send>[0] = {
-          // The one from address, decided in lib/email.ts, so a client
+        const outcome = await deliverEmail({
+          // The one from address, decided in lib/email-from.ts, so a client
           // does not see the studio as two senders.
           from: emailFromAddress(),
           to: r.email,
           subject: `Fully signed: ${doc.name}`,
           html,
-        }
-        if (pdfBase64) {
-          sendOpts.attachments = [{
-            filename: pdfFilename,
-            content: pdfBase64,
-            contentType: 'application/pdf',
-          }]
-        }
-        await resend.emails.send(sendOpts)
-        sent.push(r.email)
+          template: 'contract-fully-signed',
+          orgId: doc.orgId,
+          policy,
+          ...(pdfBase64
+            ? {
+              attachments: [{
+                filename: pdfFilename,
+                content: pdfBase64,
+                contentType: 'application/pdf',
+              }],
+            }
+            : {}),
+        })
+        suppressed.push(...outcome.suppressed)
+        if (outcome.success) sent.push(r.email)
+        else failed.push({ email: r.email, error: outcome.error ?? 'Unknown error' })
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown error'
         console.error(`[contract-fully-signed-emails] send to ${r.email} failed:`, msg)
@@ -241,6 +257,7 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
     await writeAudit(database, contractId, sent, sent.length > 0 ? 'sent' : 'failed', {
       sent,
       failed,
+      suppressed,
       pdfAttached: pdfBase64 !== null,
       pdfError,
       pdfBytesBase64: pdfBase64?.length ?? 0,

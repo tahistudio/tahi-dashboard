@@ -9,6 +9,7 @@ import { requireManagePermissions } from '@/lib/require-permission'
 import { requireFeature } from '@/lib/require-feature'
 import { logAudit } from '@/lib/audit'
 import { publicUrl } from '@/lib/app-url'
+import { guardOutboundAddress } from '@/lib/email-gate'
 
 type Params = { params: Promise<{ id: string }> }
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -117,6 +118,30 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!organizationId) {
     console.error('[team-invite] NEXT_PUBLIC_TAHI_ORG_ID is not configured')
     return NextResponse.json({ error: 'Invites are not configured yet' }, { status: 500 })
+  }
+
+  // CLERK IS A SECOND MAIL TRANSPORT and this is where it is asked to fire.
+  // createOrganizationInvitation sends an invitation email from Clerk's own
+  // systems to whatever address we hand it, so lib/email-delivery.ts never
+  // sees it and cannot filter it. Left alone, "no teammate receives anything
+  // from this system until Liam has verified it" was true of every Resend
+  // template and quietly false of the one email that turns a roster row into a
+  // person with a login. So the same rule is asked here, and a withheld
+  // address is written to email_suppressions before we answer, which is what
+  // makes the blackout provable rather than merely intended.
+  //
+  // No orgId: this is the studio's own workspace, not a client's, so the
+  // per-client exemption on `email.allowedOrgIds` has nothing to say about it.
+  const gate = await guardOutboundAddress(email, {
+    template: 'clerk-org-invite',
+    subject: `Clerk invitation to the Tahi workspace for ${member.name}`,
+    orgId: null,
+  })
+  if (!gate.allowed) {
+    return NextResponse.json({
+      error: 'Held back by the email allowlist',
+      message: `Clerk would email the invitation to ${email} itself, and that address is not on the delivery allowlist. ${gate.reason}`,
+    }, { status: 409 })
   }
 
   try {

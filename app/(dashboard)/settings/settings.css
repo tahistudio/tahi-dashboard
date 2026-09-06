@@ -453,6 +453,10 @@ a.chip:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .hist .h-who .subj-av { width: 24px; height: 24px; font-size: 10px; }
 .hist .h-change b { font-weight: 600; }
 .hist .h-change { white-space: nowrap; }
+/* The withheld address in the email suppression log. Its own class, not
+   .h-who, because .h-who is display:none under 768px (there it is a redundant
+   avatar) and here the address is the payload. .hist-wrap scrolls. */
+.hist .h-addr { width: 14rem; word-break: break-all; }
 .hist .h-target { width: 12rem; }
 .hist .h-target .tp { display: block; margin-top: 1px; font: 500 11px 'Manrope', sans-serif; color: var(--text-faint); }
 .hist .h-reason { color: var(--text-muted); white-space: nowrap; }
