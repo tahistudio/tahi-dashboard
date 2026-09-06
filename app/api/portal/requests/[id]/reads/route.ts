@@ -10,8 +10,13 @@
  * Called by the request detail page ~2 seconds after load, so a bounce off the
  * page does not count as read.
  *
- * No body required. Impersonation ("view as client") is refused: a super admin
- * standing in a client's shoes must not stamp a receipt in their name.
+ * No body required. Read-only Client view is refused: a super admin merely
+ * LOOKING must not stamp a receipt in the client's name.
+ *
+ * Act as client is allowed, but the receipt is written with userType
+ * 'team_member' and the studio member's own id. A studio person opening the
+ * page is not the client having seen it, so the row says what actually
+ * happened rather than resetting the client's own unread badge for them.
  */
 
 import { getPortalAuth } from '@/lib/server-auth'
@@ -19,22 +24,25 @@ import { requirePortalFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import type { DB } from '@/db/d1'
 import { and, eq } from 'drizzle-orm'
+import { actingIdentity, recordActingWrite, refusePreviewWrite } from '@/lib/acting-as'
 
 type Params = { params: Promise<{ id: string }> }
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 export async function POST(req: NextRequest, { params }: Params) {
-  const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
+  const auth = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId } = auth
 
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'requests')
   if (featureDenied) return featureDenied
-  if (impersonating) {
-    return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
-  }
+  const previewDenied = refusePreviewWrite(auth, { allowActing: true })
+  if (previewDenied) return previewDenied
+  const acting = actingIdentity(auth)
 
   const { id } = await params
   const database = await db()
@@ -55,13 +63,20 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const now = new Date().toISOString()
 
+  // The reader, named honestly. Acting for a client, the row is the studio
+  // member's own receipt (their team_members id, userType 'team_member'), which
+  // is exactly what the admin-side route would have written. Faking the
+  // client's receipt would clear an unread badge the client never looked at.
+  const readerId = acting ? acting.adminTeamMemberId : userId
+  const readerType: 'team_member' | 'contact' = acting ? 'team_member' : 'contact'
+
   const [existing] = await drizzle
     .select({ id: schema.requestReads.id })
     .from(schema.requestReads)
     .where(and(
       eq(schema.requestReads.requestId, id),
-      eq(schema.requestReads.userId, userId),
-      eq(schema.requestReads.userType, 'contact'),
+      eq(schema.requestReads.userId, readerId),
+      eq(schema.requestReads.userType, readerType),
     ))
     .limit(1)
 
@@ -74,11 +89,19 @@ export async function POST(req: NextRequest, { params }: Params) {
     await drizzle.insert(schema.requestReads).values({
       id: crypto.randomUUID(),
       requestId: id,
-      userId,
-      userType: 'contact',
+      userId: readerId,
+      userType: readerType,
       lastReadAt: now,
     })
   }
+
+  await recordActingWrite(drizzle as unknown as DB, acting, {
+    verb: 'request.read',
+    entityType: 'request',
+    entityId: id,
+    route: 'POST /api/portal/requests/[id]/reads',
+    extra: { lastReadAt: now },
+  })
 
   return NextResponse.json({ ok: true, lastReadAt: now })
 }

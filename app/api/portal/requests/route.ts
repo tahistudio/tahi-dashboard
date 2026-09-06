@@ -1,8 +1,15 @@
 import { getPortalAuth } from '@/lib/server-auth'
 import { requirePortalFeature } from '@/lib/require-feature'
+import {
+  actingByline,
+  actingIdentity,
+  recordActingWrite,
+  refusePreviewWrite,
+} from '@/lib/acting-as'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import type { DB } from '@/db/d1'
 import { eq, desc, asc, and, ne, sql, inArray, notInArray } from 'drizzle-orm'
 import { getPlanLabel, resolveTracksConfig } from '@/lib/plan-utils'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
@@ -301,21 +308,51 @@ async function resolveSubmitterBrandId(
   }
 }
 
+/**
+ * The brand for a request the STUDIO files while acting as a client.
+ *
+ * resolveSubmitterBrandId above starts from the submitting contact's own brand
+ * links, which an acting studio member does not have. Scope to the org instead,
+ * and only honour a brand that is actually theirs: an unvalidated id from the
+ * body would file a request under another tenant's brand.
+ */
+async function resolveOrgBrandId(
+  drizzle: ReturnType<typeof import('drizzle-orm/d1').drizzle>,
+  orgId: string,
+  asked: string | null,
+): Promise<string | null> {
+  if (!asked) return null
+  try {
+    const [brand] = await drizzle
+      .select({ id: schema.brands.id })
+      .from(schema.brands)
+      .where(and(eq(schema.brands.id, asked), eq(schema.brands.orgId, orgId)))
+      .limit(1)
+    return brand?.id ?? null
+  } catch {
+    return null
+  }
+}
+
 // ── POST /api/portal/requests ────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   // getPortalAuth resolves the caller's Clerk org -> the D1 organisations.id, so
   // the row is written under the correct tenant id (getRequestAuth would store
   // the raw Clerk org id, which mismatches every clerkOrgId-provisioned client).
-  const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
+  const auth = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId } = auth
 
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'requests')
   if (featureDenied) return featureDenied
-  if (impersonating) {
-    return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
-  }
+  // OPEN in act mode. Filing a request for a client on the phone with them is
+  // the whole point of the mode, and the row it writes says the studio filed
+  // it. Read-only Client view still gets the same 403 it always did.
+  const previewDenied = refusePreviewWrite(auth, { allowActing: true })
+  if (previewDenied) return previewDenied
+  const acting = actingIdentity(auth)
 
   const body = await req.json() as {
     title?: string; type?: string; category?: string; description?: string
@@ -418,10 +455,25 @@ export async function POST(req: NextRequest) {
   // Who is filing, and which brand it belongs to. One read of the contacts row
   // serves both: the brand before the insert, the name in the studio's
   // notification body after it.
-  const submitter = await loadSubmitter(drizzle2, userId, orgId)
-  const brandId = submitter
-    ? await resolveSubmitterBrandId(drizzle2, submitter.id, askedBrandId)
-    : null
+  // Acting for the client, the studio person has no contacts row at this org,
+  // so there is no seat to read a brand off. Take the asked-for brand only if
+  // it belongs to this org, and file without one otherwise: a request with no
+  // brand is honest, a request under someone else's brand is not.
+  const submitter = acting ? null : await loadSubmitter(drizzle2, userId, orgId)
+  const brandId = acting
+    ? await resolveOrgBrandId(drizzle2, orgId, askedBrandId)
+    : submitter
+      ? await resolveSubmitterBrandId(drizzle2, submitter.id, askedBrandId)
+      : null
+
+  // Who the row says filed it. A client files as themselves; the studio acting
+  // for them files as the studio member, which is what db/schema.ts has always
+  // meant by submitted_by_type 'team_member'. The non-acting branch also fixes
+  // a pre-existing lie: this route wrote the raw Clerk user id and left the
+  // type at its 'contact' default, so the column misdescribed the id it held
+  // for every real client submission.
+  const submittedById = acting ? acting.adminTeamMemberId : (submitter?.id ?? userId)
+  const submittedByType = acting ? 'team_member' : 'contact'
 
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
@@ -468,7 +520,7 @@ export async function POST(req: NextRequest) {
   await drizzle2.run(sql`
     INSERT INTO requests (
       id, org_id, brand_id, title, type, category, description, due_date, form_responses,
-      status, priority, queue_order, submitted_by_id, is_internal,
+      status, priority, queue_order, submitted_by_id, submitted_by_type, is_internal,
       revision_count, max_revisions, request_number, created_at, updated_at
     ) VALUES (
       ${id},
@@ -483,7 +535,8 @@ export async function POST(req: NextRequest) {
       'submitted',
       ${priority},
       ${queueOrder},
-      ${userId},
+      ${submittedById},
+      ${submittedByType},
       0,
       0,
       3,
@@ -532,12 +585,28 @@ export async function POST(req: NextRequest) {
   const clientName = org?.name ?? 'a client'
 
   const cleanTitle = title.trim()
+
+  // The record, before the response. Awaited and allowed to throw: an acting
+  // write that lands without its audit row is the failure this mode exists to
+  // prevent, so a 500 here is the right answer even though the request row is
+  // already in. No-op for an ordinary client submission.
+  await recordActingWrite(drizzle2 as unknown as DB, acting, {
+    verb: 'request.created',
+    entityType: 'request',
+    entityId: id,
+    route: 'POST /api/portal/requests',
+    extra: { requestNumber, title: cleanTitle, category: category ?? 'development', priority },
+  })
+
   await notifyAllAdmins(drizzle2, {
     type: 'request_created',
     title: requestNumber
       ? `New request REQ-${requestNumber}: ${cleanTitle}`
       : `New request: ${cleanTitle}`,
-    body: submitter?.name ? `From ${clientName}, ${submitter.name}` : `From ${clientName}`,
+    // Never let the bell claim the client typed this. The byline is empty on
+    // the ordinary client path, so that half of the string is unchanged.
+    body: (submitter?.name ? `From ${clientName}, ${submitter.name}` : `From ${clientName}`)
+      + actingByline(acting, 'filed'),
     entityType: 'request',
     entityId: id,
     email: studioNewRequestEmailPlan({
@@ -547,7 +616,7 @@ export async function POST(req: NextRequest) {
       clientName,
       category: category ?? 'development',
       priority,
-      submittedBy: submitter?.name ?? null,
+      submittedBy: acting ? `${acting.adminName} at Tahi Studio` : (submitter?.name ?? null),
     }),
   })
 

@@ -544,7 +544,12 @@ function SuggestionApplyChip({
 // ---- Main Component ----------------------------------------------------------
 
 export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }: RequestDetailProps) {
-  const { isImpersonatingClient, isImpersonatingTeamMember, impersonatedAccessRules } = useImpersonation()
+  const {
+    isImpersonatingClient,
+    isImpersonatingTeamMember,
+    impersonatedAccessRules,
+    previewIsReadOnly,
+  } = useImpersonation()
   // Only switch to client view when impersonating a client, not a team member
   const isAdmin = isAdminProp && !isImpersonatingClient
   // A super admin standing in a viewer's shoes reads the studio's page. The
@@ -818,11 +823,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   // if the user leaves sooner, we preserve the unread badge for next time.
   // Both audiences write a receipt now (the portal route stamps userType
   // 'contact'), so the studio can see that the client opened the thread. A
-  // super admin looking through the client lens writes nothing: the receipt
-  // would be a lie in the client's name.
+  // super admin merely LOOKING through the client lens writes nothing: the
+  // receipt would be a lie in the client's name. Acting for the client does
+  // write one, and the portal route stamps it as the studio member's own
+  // (userType 'team_member'), which is the truth and is exactly what the
+  // admin-side route would have recorded.
   const hasRequest = !!request
   useEffect(() => {
-    if (loading || !hasRequest || isImpersonatingClient) return
+    if (loading || !hasRequest || previewIsReadOnly) return
     const url = isAdmin
       ? apiPath(`/api/admin/requests/${requestId}/reads`)
       : apiPath(`/api/portal/requests/${requestId}/reads`)
@@ -832,7 +840,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         .catch(() => { /* non-fatal */ })
     }, 2000)
     return () => clearTimeout(t)
-  }, [isAdmin, loading, hasRequest, isImpersonatingClient, requestId])
+  }, [isAdmin, loading, hasRequest, previewIsReadOnly, requestId])
 
   // Opening the request clears its bell rows for whoever is looking. Clicking
   // the row inside the popover used to be the ONLY way a notification about a
@@ -2206,7 +2214,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       {newUi && !isAdmin && request.status === 'client_review' && (
         <ClientReviewBar
           busy={approving}
-          disabled={isImpersonatingClient}
+          disabled={previewIsReadOnly}
           onApprove={handleReviewApprove}
           onRequestChanges={handleRequestChange}
         />
@@ -2640,10 +2648,13 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                 </div>
               )}
 
-              {/* Client view is a lens, not a login: every portal write
-                  answers 403, so the composer says so rather than letting
-                  someone type a reply the server will refuse. */}
-              {isImpersonatingClient ? (
+              {/* READ-ONLY Client view is a lens, not a login: every portal
+                  write answers 403, so the composer says so rather than letting
+                  someone type a reply the server will refuse. In Act as client
+                  the composer is the real one: the reply lands in the thread
+                  attributed to the studio member (author_type 'team_member'),
+                  which is how the client reads it too. */}
+              {previewIsReadOnly ? (
                 <p
                   className="text-xs"
                   style={{ color: 'var(--color-text-subtle)', margin: 0, lineHeight: 1.5 }}

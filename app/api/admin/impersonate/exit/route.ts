@@ -18,11 +18,20 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { IMPERSONATE_ORG_COOKIE } from '@/lib/preview-cookie'
+import { IMPERSONATE_MODE_COOKIE, IMPERSONATE_ORG_COOKIE } from '@/lib/preview-cookie'
 
-/** Same contract as clearImpersonateOrgCookie in the banner: path=/, expired. */
+/**
+ * Same contract as clearImpersonateOrgCookie in the banner: path=/, expired.
+ *
+ * BOTH cookies, together. Three places clear the preview (this route, the
+ * middleware's ?exit-preview=1 hatch, and the banner's own Exit button); if any
+ * one of them dropped only the org cookie, an operator would come back to the
+ * studio still armed to act, and the next client they previewed would be a
+ * writing session they never asked for.
+ */
 function clear(res: NextResponse): NextResponse {
   res.cookies.set(IMPERSONATE_ORG_COOKIE, '', { path: '/', maxAge: 0, sameSite: 'lax' })
+  res.cookies.set(IMPERSONATE_MODE_COOKIE, '', { path: '/', maxAge: 0, sameSite: 'lax' })
   return res
 }
 

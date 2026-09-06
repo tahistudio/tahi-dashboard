@@ -2,7 +2,9 @@ import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 import {
   EXIT_PREVIEW_PARAM,
+  IMPERSONATE_MODE_COOKIE,
   IMPERSONATE_ORG_COOKIE,
+  readPreviewMode,
   resolvePreviewOrgId,
 } from '@/lib/preview-cookie'
 
@@ -231,6 +233,10 @@ export default clerkMiddleware(async (auth, req) => {
     url.searchParams.delete(EXIT_PREVIEW_PARAM)
     const res = NextResponse.redirect(url)
     res.cookies.set(IMPERSONATE_ORG_COOKIE, '', { path: '/', maxAge: 0, sameSite: 'lax' })
+    // Both cookies, always together. Leaving the mode behind would put an
+    // operator back in the studio still armed, so the next Client view they
+    // opened would be a writing one they never asked for.
+    res.cookies.set(IMPERSONATE_MODE_COOKIE, '', { path: '/', maxAge: 0, sameSite: 'lax' })
     return res
   }
 
@@ -252,12 +258,30 @@ export default clerkMiddleware(async (auth, req) => {
     req.cookies.get(IMPERSONATE_ORG_COOKIE)?.value,
   ) !== null
 
+  // Act as client changes what the previewing operator may WRITE, never which
+  // pages they may see: acting for a client is still the client's audience, so
+  // the two redirects below are identical in both modes. Read here only so a
+  // mode armed with nothing to aim it at is dropped at the edge, rather than
+  // lingering until the next Client view silently picks it up. Applied to
+  // whichever response we end up returning, never as an early exit: returning
+  // here would skip the audience redirects underneath it.
+  const staleMode =
+    !previewingClient &&
+    readPreviewMode(req.cookies.get(IMPERSONATE_MODE_COOKIE)?.value) === 'act'
+
+  const withModeSwept = (res: NextResponse): NextResponse => {
+    if (staleMode) {
+      res.cookies.set(IMPERSONATE_MODE_COOKIE, '', { path: '/', maxAge: 0, sameSite: 'lax' })
+    }
+    return res
+  }
+
   // Client (or a Client-view preview) hitting an admin-only route → /requests
   // Use req.nextUrl.clone() so Next.js adds the basePath (/dashboard) automatically
   if (isAdminOnlyRoute(req) && (!isAdmin || previewingClient)) {
     const url = req.nextUrl.clone()
     url.pathname = '/requests'
-    return NextResponse.redirect(url)
+    return withModeSwept(NextResponse.redirect(url))
   }
 
   // Admin hitting a client-only route → send to /requests, unless they are
@@ -266,10 +290,10 @@ export default clerkMiddleware(async (auth, req) => {
   if (isClientOnlyRoute(req) && isAdmin && !previewingClient) {
     const url = req.nextUrl.clone()
     url.pathname = '/requests'
-    return NextResponse.redirect(url)
+    return withModeSwept(NextResponse.redirect(url))
   }
 
-  return NextResponse.next()
+  return withModeSwept(NextResponse.next())
 })
 
 export const config = {

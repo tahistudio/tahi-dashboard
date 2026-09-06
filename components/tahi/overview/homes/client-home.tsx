@@ -908,6 +908,9 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   const { formatNative } = useDisplayCurrency()
   const go = ctx.go
   const ro = ctx.isReadOnly
+  // Money is gated separately: Act as client turns `ro` off for the client's
+  // WORK but never for reaching their payment page. See OverviewCtx.
+  const moneyRo = ctx.isMoneyReadOnly ?? ctx.isReadOnly
 
   // ── data ───────────────────────────────────────────────────────────────────
   const { data: activityData } = useResource<ActivityResp>('/api/portal/activity')
@@ -1093,7 +1096,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       // the tile disables any action that arrives with no handler.
       primary: {
         label: 'Pay',
-        onAct: ro ? undefined : () => openDestination(invoicePayDestination(nearestUnpaid)),
+        onAct: moneyRo ? undefined : () => openDestination(invoicePayDestination(nearestUnpaid)),
       },
     })
   }
@@ -1267,7 +1270,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   }, [])
   const recent = requests.slice(0, 5)
   const nextCall = calls[0] ?? null
-  const payDisabled: CSSProperties = ro ? { opacity: 0.5, pointerEvents: 'none' } : {}
+  const payDisabled: CSSProperties = moneyRo ? { opacity: 0.5, pointerEvents: 'none' } : {}
 
   return (
     <div className="ov" data-ro={ro ? '1' : '0'}>
@@ -1540,7 +1543,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
                               home that reaches a payment page. */}
                           <button
                             className="ov-cta ov-pay"
-                            disabled={ro}
+                            disabled={moneyRo}
                             style={payDisabled}
                             onClick={() => openDestination(invoicePayDestination(inv))}
                           >

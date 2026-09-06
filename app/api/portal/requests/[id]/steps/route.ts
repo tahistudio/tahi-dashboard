@@ -3,7 +3,9 @@ import { getPortalAuth } from '@/lib/server-auth'
 import { requirePortalFeature } from '@/lib/require-feature'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import type { DB } from '@/db/d1'
 import { eq, and, asc } from 'drizzle-orm'
+import { actingIdentity, authorFor, recordActingWrite, refusePreviewWrite } from '@/lib/acting-as'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -59,15 +61,19 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
+  const auth = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId } = auth
   if (!orgId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'requests')
   if (featureDenied) return featureDenied
-  if (impersonating) {
-    return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
-  }
+  // OPEN in act mode. request_steps.created_by_type already carries
+  // 'team_member' on the studio side, so an acting step is the ordinary studio
+  // value written from the client's own surface.
+  const previewDenied = refusePreviewWrite(auth, { allowActing: true })
+  if (previewDenied) return previewDenied
+  const acting = actingIdentity(auth)
 
   const { id: requestId } = await params
   const body = await req.json() as {
@@ -91,6 +97,8 @@ export async function POST(
 
   if (!request) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+  const creator = authorFor(acting, userId ?? '')
+
   const step = await database
     .insert(schema.requestSteps)
     .values({
@@ -98,10 +106,18 @@ export async function POST(
       parentStepId: body.parentStepId ?? null,
       title: body.title.trim(),
       orderIndex: body.orderIndex ?? 0,
-      createdById: userId ?? undefined,
-      createdByType: 'contact',
+      createdById: creator.id || undefined,
+      createdByType: creator.type,
     })
     .returning()
+
+  await recordActingWrite(database as unknown as DB, acting, {
+    verb: 'request_step.created',
+    entityType: 'request',
+    entityId: requestId,
+    route: 'POST /api/portal/requests/[id]/steps',
+    extra: { stepId: step[0]?.id ?? null, title: body.title.trim() },
+  })
 
   return NextResponse.json({ step: step[0] }, { status: 201 })
 }

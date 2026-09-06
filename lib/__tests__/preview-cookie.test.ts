@@ -10,8 +10,11 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  ACT_MODE_VALUE,
   EXIT_PREVIEW_PARAM,
+  IMPERSONATE_MODE_COOKIE,
   IMPERSONATE_ORG_COOKIE,
+  readPreviewMode,
   readPreviewOrgId,
   resolvePreviewOrgId,
 } from '@/lib/preview-cookie'
@@ -71,5 +74,60 @@ describe('the shared constants', () => {
 
   it('names the escape hatch the middleware honours', () => {
     expect(EXIT_PREVIEW_PARAM).toBe('exit-preview')
+  })
+})
+
+/**
+ * Act as client rides a SECOND cookie. It decides whether a super admin's
+ * Client view can write into somebody else's workspace, so the parsing has to
+ * be boring: one literal counts and everything else is the read-only side.
+ */
+describe('readPreviewMode', () => {
+  it('accepts only the exact literal', () => {
+    expect(readPreviewMode('act')).toBe('act')
+    expect(readPreviewMode(encodeURIComponent('act'))).toBe('act')
+    expect(readPreviewMode('  act  ')).toBe('act')
+  })
+
+  it('reads everything else as the read-only lens', () => {
+    for (const junk of [
+      '', '   ', null, undefined,
+      'ACT',            // case matters: the cookie is written by us, not typed
+      'act ive',
+      'acting',
+      'true', '1', 'yes',
+      'view',
+      '{"mode":"act"}',
+      'act; Path=/',    // a cookie attribute leaking into the value
+      'a'.repeat(500),
+    ]) {
+      expect(readPreviewMode(junk)).toBe('view')
+    }
+  })
+
+  it('judges a malformed encoding instead of throwing', () => {
+    expect(() => readPreviewMode('%E0%A4%A')).not.toThrow()
+    expect(readPreviewMode('%E0%A4%A')).toBe('view')
+  })
+
+  it('is independent of the org cookie, which keeps its own rule', () => {
+    // Two cookies on purpose: clearing one must not be able to leave the other
+    // meaning something. The mode says nothing about WHO is previewed, and the
+    // org cookie says nothing about whether writes are real.
+    expect(readPreviewMode(UUID)).toBe('view')
+    expect(readPreviewOrgId(ACT_MODE_VALUE)).toBeNull()
+  })
+})
+
+describe('the mode constants', () => {
+  it('names the second cookie', () => {
+    expect(IMPERSONATE_MODE_COOKIE).toBe('tahi-impersonate-mode')
+    // Distinct names, or clearing the preview would clear the mode by accident
+    // and the two rules could never be reasoned about apart.
+    expect(IMPERSONATE_MODE_COOKIE).not.toBe(IMPERSONATE_ORG_COOKIE)
+  })
+
+  it('names the one value that means writes are real', () => {
+    expect(ACT_MODE_VALUE).toBe('act')
   })
 })

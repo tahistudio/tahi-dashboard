@@ -3,7 +3,9 @@ import { requirePortalFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import type { DB } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
+import { actingIdentity, recordActingWrite, refusePreviewWrite } from '@/lib/acting-as'
 
 // ── PUT /api/portal/tracks/[trackId]/reorder ───────────────────────────────
 // Client portal: reorder requests in a track queue, scoped to authenticated org.
@@ -12,7 +14,8 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ trackId: string }> }
 ) {
-  const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
+  const auth = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId } = auth
 
   // Deny if not authenticated or if this is the admin org
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
@@ -20,9 +23,11 @@ export async function PUT(
   }
   const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'tracks')
   if (featureDenied) return featureDenied
-  if (impersonating) {
-    return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
-  }
+  // OPEN in act mode. Same reasoning as the capacity reorder next door: no row
+  // carries an author, so the audit entry is the whole record.
+  const previewDenied = refusePreviewWrite(auth, { allowActing: true })
+  if (previewDenied) return previewDenied
+  const acting = actingIdentity(auth)
 
   const { trackId } = await params
 
@@ -94,6 +99,14 @@ export async function PUT(
       .set({ queueOrder: i, updatedAt: now })
       .where(eq(schema.requests.id, requestIds[i]))
   }
+
+  await recordActingWrite(drizzle as unknown as DB, acting, {
+    verb: 'queue.reordered',
+    entityType: 'organisation',
+    entityId: orgId,
+    route: 'PUT /api/portal/tracks/[trackId]/reorder',
+    extra: { trackId, requestIds },
+  })
 
   return NextResponse.json({ success: true })
 }

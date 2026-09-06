@@ -64,6 +64,7 @@ export function OverviewHome({
     isImpersonatingTeamMember,
     impersonatedOrgName,
     impersonatedTeamMemberName,
+    previewIsReadOnly,
   } = useImpersonation()
 
   const go = useCallback(
@@ -92,12 +93,16 @@ export function OverviewHome({
     return <ClientHome ctx={ctx} />
   }
 
-  // Admin session previewing a client ("View as client"). Same checklist, but
-  // read-only: the portal onboarding PATCH refuses an impersonated write.
+  // Admin session previewing a client ("View as client"). Same checklist. In
+  // the read-only mode every control is disabled, because the portal writes
+  // underneath answer 403. In Act as client they are live, because those same
+  // routes now accept the write and attribute it to the operator. Money is the
+  // exception in BOTH modes: the studio does not reach a client's payment page.
   if (isImpersonatingClient) {
     const ctx: OverviewCtx = {
       audience: 'client',
-      isReadOnly: true,
+      isReadOnly: previewIsReadOnly,
+      isMoneyReadOnly: true,
       previewName: impersonatedOrgName ?? orgName,
       go,
       home: 'first',

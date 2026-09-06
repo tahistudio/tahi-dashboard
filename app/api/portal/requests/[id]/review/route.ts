@@ -20,7 +20,15 @@ import { requirePortalFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import type { DB } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
+import {
+  actingByline,
+  actingIdentity,
+  authorFor,
+  recordActingWrite,
+  refusePreviewWrite,
+} from '@/lib/acting-as'
 import { notifyRequestTeam } from '@/lib/notify-request-team'
 import { dispatchDomainEvent } from '@/lib/events'
 import {
@@ -36,7 +44,8 @@ type Params = { params: Promise<{ id: string }> }
 
 export async function POST(req: NextRequest, { params }: Params) {
   try {
-    const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
+    const auth = await getPortalAuth(req)
+    const { orgId, userId, clerkOrgId } = auth
 
     const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'requests')
 
@@ -45,9 +54,13 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
-    if (impersonating) {
-      return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
-    }
+    // OPEN in act mode, and the decision message is signed by the studio. This
+    // is the one opened route where the wrong attribution would be a real lie:
+    // "the client approved this" has to mean the client, so an acting approval
+    // reads as the studio closing it out on their behalf.
+    const previewDenied = refusePreviewWrite(auth, { allowActing: true })
+    if (previewDenied) return previewDenied
+    const acting = actingIdentity(auth)
 
     const { id } = await params
 
@@ -117,15 +130,27 @@ export async function POST(req: NextRequest, { params }: Params) {
       .where(eq(schema.contacts.clerkUserId, userId))
       .limit(1)
 
+    const author = authorFor(acting, contact?.id ?? userId)
+
     const messageId = crypto.randomUUID()
     await drizzle.insert(schema.messages).values({
       id: messageId,
       requestId: id,
       orgId,
-      authorId: contact?.id ?? userId,
-      authorType: 'contact',
+      authorId: author.id,
+      authorType: author.type,
       body: buildReviewMessageHtml(decision, note),
       isInternal: false,
+    })
+
+    // Before the response and outside the best-effort block below: the status
+    // has already moved, so the record of who moved it is not optional.
+    await recordActingWrite(drizzle as unknown as DB, acting, {
+      verb: 'review.submitted',
+      entityType: 'request',
+      entityId: id,
+      route: 'POST /api/portal/requests/[id]/review',
+      extra: { decision, nextStatus, messageId, note: note?.trim() || null },
     })
 
     // Best-effort side effects. Neither may fail the review itself.
@@ -139,9 +164,10 @@ export async function POST(req: NextRequest, { params }: Params) {
         {
           type: 'request_status_changed',
           title: `${reviewDecisionLabel(decision)}: "${request.title}"`,
-          body: decision === 'approve'
+          body: (decision === 'approve'
             ? 'The client approved this delivery. It is now marked delivered.'
-            : 'The client asked for changes. It is back in progress.',
+            : 'The client asked for changes. It is back in progress.')
+            + actingByline(acting, 'recorded'),
           entityType: 'request',
           entityId: id,
         },
@@ -155,7 +181,10 @@ export async function POST(req: NextRequest, { params }: Params) {
           status: nextStatus,
           title: request.title,
           assigneeId: request.assigneeId ?? null,
+          // `source` keeps its historical value so any automation condition
+          // reading it is untouched; the acting flag rides beside it.
           source: 'portal_review',
+          actingAs: acting ? acting.adminTeamMemberId : null,
           decision,
         },
       })

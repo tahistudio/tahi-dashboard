@@ -3,7 +3,15 @@ import { requirePortalFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import type { DB } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
+import {
+  actingByline,
+  actingIdentity,
+  authorFor,
+  recordActingWrite,
+  refusePreviewWrite,
+} from '@/lib/acting-as'
 import { notifyRequestTeam } from '@/lib/notify-request-team'
 import {
   messageSummary,
@@ -19,7 +27,8 @@ type Params = { params: Promise<{ id: string }> }
 // Clients post messages to a request thread (always external : isInternal: false).
 export async function POST(req: NextRequest, { params }: Params) {
   try {
-    const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
+    const auth = await getPortalAuth(req)
+    const { orgId, userId, clerkOrgId } = auth
 
     const featureDenied = await requirePortalFeature({ userId, orgId, clerkOrgId }, 'requests')
 
@@ -28,9 +37,14 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
-    if (impersonating) {
-      return NextResponse.json({ error: 'Read-only in client view' }, { status: 403 })
-    }
+    // OPEN in act mode. The message lands as the STUDIO member, not as the
+    // client: db/schema.ts already types author_type as 'team_member' |
+    // 'contact', and the thread projection in ../route.ts already left-joins
+    // team_members on it, so the client reads it as the studio with no change
+    // to the reader and no migration.
+    const previewDenied = refusePreviewWrite(auth, { allowActing: true })
+    if (previewDenied) return previewDenied
+    const acting = actingIdentity(auth)
 
     const { id } = await params
 
@@ -84,15 +98,28 @@ export async function POST(req: NextRequest, { params }: Params) {
       .where(eq(schema.contacts.clerkUserId, userId))
       .limit(1)
 
+    const author = authorFor(acting, contact?.id ?? userId)
+
     const msgId = crypto.randomUUID()
     await drizzle.insert(schema.messages).values({
       id: msgId,
       requestId: id,
       orgId,
-      authorId: contact?.id ?? userId,
-      authorType: 'contact',
+      authorId: author.id,
+      authorType: author.type,
       body: safeBody,
       isInternal: false,
+    })
+
+    // Awaited and allowed to throw, before the response and before the
+    // notification: a message posted into a client's thread by the studio must
+    // never exist without the row that says who did it.
+    await recordActingWrite(drizzle as unknown as DB, acting, {
+      verb: 'message.posted',
+      entityType: 'request',
+      entityId: id,
+      route: 'POST /api/portal/requests/[id]/messages',
+      extra: { messageId: msgId, requestNumber: request.requestNumber },
     })
 
     await drizzle
@@ -120,8 +147,10 @@ export async function POST(req: NextRequest, { params }: Params) {
       { requestId: id, orgId, assigneeId: request.assigneeId ?? null },
       {
         type: 'new_message',
-        title: `New client message on "${request.title}"`,
-        body: messageSummary(safeBody),
+        title: acting
+          ? `Studio reply on "${request.title}" (sent as the client's workspace)`
+          : `New client message on "${request.title}"`,
+        body: messageSummary(safeBody) + actingByline(acting, 'sent'),
         entityType: 'request',
         entityId: id,
         email: threadReplyEmailPlan({
@@ -129,7 +158,9 @@ export async function POST(req: NextRequest, { params }: Params) {
           requestId: id,
           requestTitle: request.title,
           requestNumber: request.requestNumber,
-          fromName: contact?.name?.trim() || 'A client',
+          fromName: acting
+            ? `${acting.adminName} at Tahi Studio`
+            : (contact?.name?.trim() || 'A client'),
           message: truncate(toPlainText(safeBody), 900),
         }),
       },

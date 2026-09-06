@@ -20,19 +20,32 @@ interface AuditEntry {
   ipAddress?: string | null
 }
 
+/**
+ * The insert, with failures left to the caller.
+ *
+ * Almost every audit row is a nice-to-have beside a write that already
+ * happened, which is why `logAudit` below swallows. Act as client is the
+ * exception: there the row IS the safety story, so an acting write that lands
+ * without its record must fail loudly rather than quietly. See
+ * lib/acting-as.ts.
+ */
+export async function logAuditStrict(database: DB, entry: AuditEntry): Promise<void> {
+  await database.insert(schema.auditLog).values({
+    id: crypto.randomUUID(),
+    actorId: entry.userId ?? null,
+    actorType: entry.userType ?? 'team_member',
+    action: entry.action,
+    entityType: entry.entityType ?? null,
+    entityId: entry.entityId ?? null,
+    metadata: entry.metadata ? JSON.stringify(entry.metadata) : null,
+    ipAddress: entry.ipAddress ?? null,
+    createdAt: new Date().toISOString(),
+  })
+}
+
 export async function logAudit(database: DB, entry: AuditEntry): Promise<void> {
   try {
-    await database.insert(schema.auditLog).values({
-      id: crypto.randomUUID(),
-      actorId: entry.userId ?? null,
-      actorType: entry.userType ?? 'team_member',
-      action: entry.action,
-      entityType: entry.entityType ?? null,
-      entityId: entry.entityId ?? null,
-      metadata: entry.metadata ? JSON.stringify(entry.metadata) : null,
-      ipAddress: entry.ipAddress ?? null,
-      createdAt: new Date().toISOString(),
-    })
+    await logAuditStrict(database, entry)
   } catch (err) {
     console.error('[audit] Failed to write audit log entry:', err)
   }

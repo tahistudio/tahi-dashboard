@@ -679,6 +679,53 @@
 .imp-switch:hover { text-decoration: underline; }
 .imp-switch:focus-visible { outline: 2px solid #9ec495; outline-offset: 2px; }
 
+/* Act as client. The read-only strip's whole promise is that nothing you do
+   can happen; once that stops being true it must not keep looking like the
+   state where it was, so the forest gradient becomes amber and the eye becomes
+   a pencil. Hardcoded hex, the sanctioned exception this strip already lives
+   under (see the announcement bar note below). */
+.imp-banner.imp-acting { background: linear-gradient(90deg, #3a2a10 0%, #4a3512 100%); border-bottom-color: #6b4d18; color: #fdf3e0; }
+.imp-banner.imp-acting::after { background: linear-gradient(90deg, transparent, rgba(245, 178, 60, 0.6), transparent); }
+.imp-banner.imp-acting .imp-eye { color: #f5b23c; }
+.imp-banner.imp-acting .imp-exit { border-color: rgba(245, 178, 60, 0.5); background: rgba(245, 178, 60, 0.15); color: #fdf3e0; }
+.imp-banner.imp-acting .imp-exit:hover { background: rgba(245, 178, 60, 0.28); border-color: rgba(245, 178, 60, 0.75); color: #fff; }
+.imp-banner.imp-acting .imp-exit:focus-visible { outline-color: #f5b23c; }
+.imp-banner.imp-acting .imp-switch:focus-visible { outline-color: #f5b23c; }
+
+/* Mode toggle. Sits before Exit and pushes both to the right of the row, so
+   the destructive-feeling control is never the one nearest the thumb. */
+.imp-banner .imp-mode {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: 1px solid rgba(158, 196, 149, 0.4);
+  background: transparent;
+  color: #cfe6c7;
+  font: 600 0.75rem 'Manrope', sans-serif;
+  padding: 0.375rem 0.8125rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: background 0.14s, border-color 0.14s, color 0.14s;
+}
+.imp-banner .imp-mode:hover:not(:disabled) { background: rgba(158, 196, 149, 0.18); border-color: rgba(158, 196, 149, 0.6); color: #fff; }
+.imp-banner .imp-mode:focus-visible { outline: 2px solid #9ec495; outline-offset: 0.125rem; }
+.imp-banner .imp-mode:disabled { opacity: 0.55; cursor: not-allowed; }
+.imp-banner.imp-acting .imp-mode { border-color: rgba(245, 178, 60, 0.55); color: #fdf3e0; }
+.imp-banner.imp-acting .imp-mode:hover:not(:disabled) { background: rgba(245, 178, 60, 0.22); border-color: rgba(245, 178, 60, 0.8); }
+.imp-banner.imp-acting .imp-mode:focus-visible { outline-color: #f5b23c; }
+/* With a mode button present it owns the margin-left:auto, so Exit sits beside
+   it rather than jumping back to the left. */
+.imp-banner .imp-mode ~ .imp-exit { margin-left: 0; }
+.imp-mode-error { color: #ffd9a0; font: 600 0.75rem 'Manrope', sans-serif; }
+
+/* Phone: the two controls wrap onto their own row at a real touch height,
+   instead of squashing the message until nothing reads. */
+@media (max-width: 767px) {
+  .imp-banner { flex-wrap: wrap; row-gap: 0.5rem; }
+  .imp-banner .imp-mode,
+  .imp-banner .imp-exit { min-height: 2.75rem; display: inline-flex; align-items: center; }
+  .imp-banner .imp-mode { margin-left: auto; }
+}
+
 /* ===================================================================
    ANNOUNCEMENT BAR - client broadcast strip (forest, composed in Settings)
    Hardcoded forest hex, the sanctioned exception alongside the imp-banner.

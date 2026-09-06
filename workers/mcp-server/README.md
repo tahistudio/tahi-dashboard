@@ -130,6 +130,30 @@ attempt is visible in `npx wrangler tail`.
 Refreshing an existing session does not show the consent screen. Claude keeps
 using the refresh token until it expires or is rejected.
 
+## Client view mode over MCP
+
+Three tools cover the Act as client surface, and only two of them do anything
+useful from here.
+
+- `get_client_view_mode` reports the caller's own mode (`view` or `act`), which
+  client the preview points at, and whether the caller may act at all.
+- `set_client_view_mode` arms or disarms it. Arming needs a super admin session
+  that is already previewing a client, so over this connector it is expected to
+  answer 403: the mode is a browser cookie and this server authenticates with
+  the service token, which has no `team_members` row and therefore nobody to
+  attribute a client-workspace write to. Disarming (`mode: 'view'`) always
+  succeeds, which makes it the safe half.
+- `list_acting_as_audit` is the one worth reaching for. It reads the
+  `acting_as_client.*` audit trail with actor and target names resolved: what
+  the studio filed, replied, approved or reordered inside a client's workspace,
+  by whom, and when.
+
+The reason `set_client_view_mode` cannot be made to work service-side is worth
+stating rather than treating as a gap. An acting write is only safe because it
+is attributable to a named person on the roster who agreed to a confirm dialog
+naming the client. A service token satisfies neither half, so granting it would
+turn "the studio did this" into "something did this".
+
 ## Tests
 
 `workers/**` is excluded from the app's Vitest run, so the pure helpers used by

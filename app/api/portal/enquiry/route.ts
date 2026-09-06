@@ -1,4 +1,5 @@
-import { getRequestAuth } from '@/lib/server-auth'
+import { getPortalAuth } from '@/lib/server-auth'
+import { refusePreviewWrite } from '@/lib/acting-as'
 import { clerkClient } from '@clerk/nextjs/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { createElement } from 'react'
@@ -19,10 +20,19 @@ export const dynamic = 'force-dynamic'
  * assigned to the default lead owner) and emails business@tahi.studio so the
  * studio can follow up directly. Custom-project billing is handled off-platform,
  * so this just captures who they are and what they want.
+ *
+ * CLOSED in both preview modes. It used to run on getRequestAuth, which cannot
+ * see Client view at all, so an enquiry filed while previewing a client created
+ * a lead named after the ADMIN's own Clerk profile and emailed the studio about
+ * it. There is no honest acting version either: the enquirer's identity comes
+ * from their Clerk account, and the studio does not have the client's.
  */
 export async function POST(req: NextRequest) {
-  const { userId } = await getRequestAuth(req)
+  const auth = await getPortalAuth(req)
+  const { userId } = auth
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const previewDenied = refusePreviewWrite(auth)
+  if (previewDenied) return previewDenied
 
   const body = (await req.json().catch(() => ({}))) as {
     company?: string
