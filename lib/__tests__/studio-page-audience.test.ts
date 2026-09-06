@@ -32,6 +32,18 @@ function pageFiles(dir: string): string[] {
   return out
 }
 
+/** Every .ts/.tsx under a directory, skipping this test folder. */
+function sourceFiles(dir: string): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(dir)) {
+    if (entry === '__tests__' || entry === 'node_modules') continue
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) out.push(...sourceFiles(full))
+    else if (/\.tsx?$/.test(entry)) out.push(full)
+  }
+  return out
+}
+
 /** Repo-relative, forward slashes, so the allowlists read the same on any OS. */
 function rel(file: string): string {
   return relative(REPO_ROOT, file).split(sep).join('/')
@@ -135,6 +147,21 @@ describe('dashboard pages resolve the audience, not just the Clerk org', () => {
       .filter((p) => !HAND_ROLLED_COOKIE_READ.has(p))
     expect(handRolled).toEqual([])
   })
+
+  it('no module under lib/ or app/api/ hand-rolls it either', () => {
+    // The page scan above cannot see the reader that actually SCOPES data.
+    // getPortalAuth kept its own copy of the rule, honoured on any truthy
+    // value, so a junk cookie was "not previewing" to the middleware and to
+    // getViewAudience (studio shell, /clients reachable) while every portal
+    // API underneath answered for a non-existent org.
+    const handRolled = [
+      ...sourceFiles(join(REPO_ROOT, 'lib')),
+      ...sourceFiles(join(REPO_ROOT, 'app', 'api')),
+    ]
+      .filter((file) => /\.get\(('|")tahi-impersonate-org\1\)/.test(readFileSync(file, 'utf8')))
+      .map(rel)
+    expect(handRolled).toEqual([])
+  })
 })
 
 describe('middleware treats Client view as a client audience', () => {
@@ -158,6 +185,14 @@ describe('middleware treats Client view as a client audience', () => {
     expect(middleware).toContain("from '@/lib/preview-cookie'")
     expect(middleware).toContain('resolvePreviewOrgId(')
     expect(middleware).not.toMatch(/cookies\.get\('tahi-impersonate-org'\)/)
+  })
+
+  it('and so does the portal API reader', () => {
+    // Four readers, one rule: middleware.ts, lib/view-audience.ts, the shell
+    // layout through it, and lib/server-auth.ts here.
+    const serverAuth = readFileSync(join(REPO_ROOT, 'lib', 'server-auth.ts'), 'utf8')
+    expect(serverAuth).toContain("from '@/lib/preview-cookie'")
+    expect(serverAuth).toContain('resolvePreviewOrgId(')
   })
 
   it('keeps an escape hatch that needs no shell to render', () => {

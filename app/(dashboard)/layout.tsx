@@ -19,13 +19,13 @@ import { SkipToContent } from '@/components/tahi/skip-to-content'
 // type-check, a green lint and a green build. See lib/currency.ts and
 // lib/__tests__/server-client-boundary.test.ts.
 import { DisplayCurrencyProvider } from '@/lib/display-currency-context'
-import { resolvePinnedCurrency } from '@/lib/currency'
+import { resolvePinnedCurrency, type PinnedCurrencyEvidence } from '@/lib/currency'
 import { PermissionsProvider, type PermissionsValue } from '@/components/tahi/permissions-context'
 import { PrivateModeProvider } from '@/components/tahi/private-mode-context'
 import { SwrProvider } from '@/components/tahi/swr-provider'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, inArray } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import { resolvePermissions, featureMap, applyModuleGates, MODULE_SETTING_KEYS } from '@/lib/permissions'
 import { linkTeamMemberOnSignIn } from '@/lib/team-link-server'
 import { linkContactOnSignIn } from '@/lib/contact-link-server'
@@ -187,13 +187,26 @@ export default async function DashboardLayout({
   }
 
   // ── Client billing currency ─────────────────────────────────────────────
-  // Money on a client surface is stated in the currency that client is
-  // actually billed in (organisations.preferred_currency), not in whatever
-  // display currency this browser last chose. Before this, a USD client read
-  // their own plan as "NZ$1,500/mo" and the nav chip offered to re-convert it,
-  // so the portal showed two different numbers for one invoice and named
-  // neither currency. Client audiences include the studio inside Client view,
-  // which is resolved from the impersonation cookie (previewOrgId).
+  // A client surface is fixed, not steerable: the nav switcher is gone, because
+  // a client re-converting their own invoice only ever produces a number nobody
+  // will bill or pay. What the pin names is the currency this client is BILLED
+  // in, which is what their invoice totals are rendered in; NZD-base figures
+  // stay in the base (see formatPinnedBaseAmount in lib/currency.ts). Client
+  // audiences include the studio inside Client view, resolved from the
+  // impersonation cookie (previewOrgId).
+  //
+  // Two columns, because neither one alone is a decision.
+  // `organisations.preferred_currency` is `DEFAULT 'USD'` in the schema, so a
+  // row that nobody edited claims US dollars for a NZ client;
+  // `custom_mrr_currency` defaults to the NZD base, so a non-base value there
+  // is something a person typed into the client's Money card. The rule that
+  // weighs them is resolvePinnedCurrency, in lib/currency.ts, with the test.
+  //
+  // custom_mrr_currency rides along as a raw column: it was added by the ad-hoc
+  // migrate route rather than a Drizzle migration, so it is absent from
+  // db/schema.ts and every other reader reaches it through raw SQL too
+  // (app/api/admin/financial-reports/summary). Selecting it here keeps this to
+  // ONE round trip instead of two.
   //
   // This is the only read this layout adds, and it runs for client audiences
   // only, so the studio's shell keeps the query count it had. One indexed
@@ -207,26 +220,29 @@ export default async function DashboardLayout({
   // Fail-safe: any miss, and any D1 error, falls back to the NZD base
   // (resolvePinnedCurrency), not to "unpinned", so a client's money never
   // floats on a studio preference this browser happens to hold, and a database
-  // wobble degrades the shell rather than throwing it. The same row also names
-  // the previewed org for the Client-view banner, so the preview costs no
-  // extra query.
+  // wobble degrades the shell rather than throwing it. The retry without the
+  // raw column is there so an environment that never ran the ad-hoc migration
+  // still names the previewed org in the Client-view banner.
   const currencyOrgKey = isPreviewingClient ? previewOrgId : (!isAdmin ? orgId : null)
-  let preferredCurrency: string | null = null
+  let currencyEvidence: PinnedCurrencyEvidence = {}
   let previewOrgName: string | null = null
   if (currencyOrgKey) {
-    try {
+    const whereOrg = isPreviewingClient
+      ? eq(schema.organisations.id, currencyOrgKey)
+      : eq(schema.organisations.clerkOrgId, currencyOrgKey)
+    // `withMrrCurrency: false` selects the literal NULL in that column's place,
+    // so the retry is the same query and the same row shape, minus the one
+    // reference that could fail to resolve.
+    const readOrg = async (withMrrCurrency: boolean) => {
       const database = await db()
       const columns = {
         name: schema.organisations.name,
         preferredCurrency: schema.organisations.preferredCurrency,
+        customMrrCurrency: withMrrCurrency
+          ? sql<string | null>`custom_mrr_currency`.as('custom_mrr_currency')
+          : sql<string | null>`NULL`.as('custom_mrr_currency'),
       }
-      let [row] = await database
-        .select(columns)
-        .from(schema.organisations)
-        .where(isPreviewingClient
-          ? eq(schema.organisations.id, currencyOrgKey)
-          : eq(schema.organisations.clerkOrgId, currencyOrgKey))
-        .limit(1)
+      let [row] = await database.select(columns).from(schema.organisations).where(whereOrg).limit(1)
       if (!row && !isPreviewingClient) {
         ;[row] = await database
           .select(columns)
@@ -234,13 +250,25 @@ export default async function DashboardLayout({
           .where(eq(schema.organisations.id, currencyOrgKey))
           .limit(1)
       }
-      preferredCurrency = row?.preferredCurrency ?? null
-      if (isPreviewingClient) previewOrgName = row?.name ?? null
-    } catch {
-      preferredCurrency = null
+      return row
+    }
+    // With the raw column first, then without it. Two passes, not two copies
+    // of the query.
+    for (const withMrrCurrency of [true, false]) {
+      try {
+        const row = await readOrg(withMrrCurrency)
+        currencyEvidence = {
+          preferredCurrency: row?.preferredCurrency ?? null,
+          customMrrCurrency: row?.customMrrCurrency ?? null,
+        }
+        if (isPreviewingClient) previewOrgName = row?.name ?? null
+        break
+      } catch {
+        currencyEvidence = {}
+      }
     }
   }
-  const pinnedCurrency = resolvePinnedCurrency(preferredCurrency, currencyOrgKey !== null)
+  const pinnedCurrency = resolvePinnedCurrency(currencyEvidence, currencyOrgKey !== null)
 
   // Favicon (favicon_light_url / favicon_dark_url) is a platform-level Tahi
   // asset (super-admin only, same for every org) rather than per-client

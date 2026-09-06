@@ -31,6 +31,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import {
   asCurrencyCode,
+  BASE_CURRENCY,
   buildRateMap,
   convertFromNzd,
   formatCurrency as formatCurrencyBase,
@@ -56,19 +57,33 @@ const STORAGE_KEY = 'tahi-display-currency'
 const DEFAULT_CURRENCY: CurrencyCode = 'NZD'
 
 interface DisplayCurrencyContextValue {
-  /** Currently selected display currency code. */
+  /**
+   * The currency this session RUNS in: what `toDisplay` converts into and what
+   * `format` labels its output with. A pinned session runs in the NZD base,
+   * NOT in the client's billed currency, because every amount those two take
+   * is already expressed in the base and a pin is not licence to re-denominate
+   * it (see formatPinnedBaseAmount in lib/currency.ts). Read `pinnedCurrency`
+   * for the currency the client is actually billed in.
+   */
   displayCurrency: CurrencyCode
   /** Change the global display currency. Writes through to localStorage. */
   setDisplayCurrency: (code: CurrencyCode) => void
   /**
-   * The currency is fixed to the client's own billing currency and cannot be
-   * changed. True for every client-audience session (a real client, or the
-   * studio inside Client view). `setDisplayCurrency` is a no-op and the nav
-   * switcher does not render: a client's money is theirs, not a preview of
-   * ours, and a client re-converting their own invoice into another currency
-   * only ever produces a number nobody will bill or pay.
+   * The currency is fixed and cannot be changed. True for every client-audience
+   * session (a real client, or the studio inside Client view).
+   * `setDisplayCurrency` is a no-op and the nav switcher does not render: a
+   * client's money is theirs, not a preview of ours, and a client re-converting
+   * their own invoice into another currency only ever produces a number nobody
+   * will bill or pay.
    */
   isPinned: boolean
+  /**
+   * The currency the pinned client is BILLED in (their invoices, their Stripe
+   * charge), or null for a studio session. Deliberately separate from
+   * `displayCurrency`: it is a fact about the client, not an instruction to
+   * convert base figures into it.
+   */
+  pinnedCurrency: CurrencyCode | null
   /** Whether exchange rates have been loaded. `false` = using fallback (unconverted). */
   ratesLoaded: boolean
   /** Raw rates array, in case a consumer needs the canonical data. */
@@ -79,9 +94,9 @@ interface DisplayCurrencyContextValue {
   toDisplay: (amountNzd: number) => number
   /**
    * Format an NZD amount in the current display currency. A pinned session
-   * reads it converted into the client's currency behind the approximate
-   * marker (`\u2248\u00a0US$882`), never as two currencies in one string, and never as
-   * a bare converted figure. See the implementation for why.
+   * reads it in the base currency, unconverted: the pin says what the client
+   * is billed in, not what a base figure is worth. See formatPinnedBaseAmount
+   * in lib/currency.ts for why converting is not safe here.
    */
   format: (amountNzd: number) => string
   /** Format a native-currency amount as-is, no conversion. */
@@ -120,10 +135,10 @@ interface ProviderProps {
   /** Override the default NZD if a caller wants a different initial value. */
   initial?: CurrencyCode
   /**
-   * Fix the display currency and hide the switcher. The dashboard layout
-   * passes the client's `organisations.preferredCurrency` here for every
-   * client-audience session, so a client billed in USD reads US$ everywhere
-   * instead of a NZD-converted preview of their own plan. Null (the studio) is
+   * The currency this client is billed in. Fixes the shell and hides the
+   * switcher: a client's money is not a preview surface. The dashboard layout
+   * resolves it with `resolvePinnedCurrency` for every client-audience session,
+   * which refuses to read a schema default as a decision. Null (the studio) is
    * unchanged: stored preference, switcher, conversions.
    */
   pinned?: string | null
@@ -133,27 +148,26 @@ export function DisplayCurrencyProvider({ children, initial, pinned }: ProviderP
   const pinnedCode = asCurrencyCode(pinned)
   // SSR / first client render uses the default (or passed initial). Once
   // the component mounts we upgrade to the stored preference.
-  const [displayCurrency, setDisplayCurrencyState] = useState<CurrencyCode>(
-    pinnedCode ?? initial ?? DEFAULT_CURRENCY,
+  const [chosenCurrency, setChosenCurrencyState] = useState<CurrencyCode>(
+    initial ?? DEFAULT_CURRENCY,
   )
+  // A pinned session runs in the BASE currency rather than in the client's
+  // billed one. `toDisplay` and `format` both take amounts already expressed in
+  // the base, and converting those is what printed "US$882 per month" at a
+  // client on a NZ$1,500 plan. Their billed currency is still carried, as
+  // `pinnedCurrency`; the amounts that genuinely are native (invoice totals)
+  // reach `formatNative` with their own currency and are untouched by this.
+  const displayCurrency: CurrencyCode = pinnedCode ? BASE_CURRENCY : chosenCurrency
   const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([])
   const [ratesLoaded, setRatesLoaded] = useState(false)
 
   // Hydrate from localStorage after mount. Skipped when pinned: a client's
-  // currency comes from their org, never from a preference this browser may
-  // have picked up during an earlier studio session on the same machine.
+  // shell is decided by their org, never by a preference this browser may have
+  // picked up during an earlier studio session on the same machine.
   useEffect(() => {
-    if (pinnedCode) {
-      setDisplayCurrencyState(pinnedCode)
-      return
-    }
+    if (pinnedCode) return
     const stored = safeReadStoredCurrency()
-    if (stored !== displayCurrency) {
-      setDisplayCurrencyState(stored)
-    }
-    // Intentionally only run on mount (plus a pinned change); `displayCurrency`
-    // in deps would re-read storage every update.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setChosenCurrencyState(prev => (prev === stored ? prev : stored))
   }, [pinnedCode])
 
   // Fetch exchange rates once per session.
@@ -191,7 +205,7 @@ export function DisplayCurrencyProvider({ children, initial, pinned }: ProviderP
     // Pinned sessions have no switcher; ignore a programmatic change too so a
     // stray caller cannot re-denominate a client's own money behind their back.
     if (pinnedCode) return
-    setDisplayCurrencyState(code)
+    setChosenCurrencyState(code)
     if (typeof window !== 'undefined') {
       try {
         window.localStorage.setItem(STORAGE_KEY, code)
@@ -234,19 +248,19 @@ export function DisplayCurrencyProvider({ children, initial, pinned }: ProviderP
 
   const format = useCallback((amountNzd: number): string => {
     // A pin names the currency the client is BILLED in. It does not make an
-    // NZD-base figure a native one, so a pinned client reads it converted into
-    // their own currency, ALONE, behind the approximate marker. The rule and
-    // the two shapes it rejects are stated once, in lib/currency.ts.
-    if (pinnedCode) {
-      return formatPinnedBaseAmount(amountNzd, pinnedCode, exchangeRates, ratesLoaded)
-    }
+    // NZD-base figure a native one, and the base rate of a plan is disputed
+    // between lib/billing.ts and lib/stripe-plans.ts, so a pinned client reads
+    // the base figure in the base currency. The rule and the shapes it rejects
+    // are stated once, in lib/currency.ts.
+    if (pinnedCode) return formatPinnedBaseAmount(amountNzd)
     return formatCurrencyBase(toDisplay(amountNzd), displayCurrency)
-  }, [toDisplay, displayCurrency, pinnedCode, ratesLoaded, exchangeRates])
+  }, [toDisplay, displayCurrency, pinnedCode])
 
   const value = useMemo<DisplayCurrencyContextValue>(() => ({
     displayCurrency,
     setDisplayCurrency,
     isPinned: pinnedCode !== null,
+    pinnedCurrency: pinnedCode,
     ratesLoaded,
     exchangeRates,
     rateMap,
@@ -276,6 +290,7 @@ export function useDisplayCurrency(): DisplayCurrencyContextValue {
     displayCurrency: DEFAULT_CURRENCY,
     setDisplayCurrency: () => {},
     isPinned: false,
+    pinnedCurrency: null,
     ratesLoaded: false,
     exchangeRates: [],
     rateMap: { NZD: 1 },

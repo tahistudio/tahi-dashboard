@@ -34,6 +34,7 @@ import type { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { IMPERSONATE_ORG_COOKIE, resolvePreviewOrgId } from '@/lib/preview-cookie'
 
 export interface RequestAuthResult {
   userId: string | null
@@ -184,6 +185,14 @@ export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResul
  * carries a `tahi-impersonate-org` cookie naming the D1 org to view. ONLY the
  * admin org may use it; a non-impersonating admin keeps the Tahi org id as
  * `orgId` so an endpoint's existing "reject the admin org" guard is unchanged.
+ *
+ * The cookie is read through lib/preview-cookie.ts, the same rule the
+ * middleware and getViewAudience() use, rather than by hand here. This is the
+ * reader that actually SCOPES data, so a third definition of "previewing" is
+ * the one that matters: while this file honoured any truthy value, a junk
+ * cookie was "not previewing" to the shell (which rendered the studio, with
+ * /clients reachable) and a preview of a non-existent org to every portal API
+ * underneath it.
  */
 export async function getPortalAuth(
   req: NextRequest,
@@ -192,9 +201,11 @@ export async function getPortalAuth(
   const clerkOrgId = result.orgId
   const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
 
-  // Tahi admin. Client view carries the target D1 org id in a cookie.
+  // Tahi admin. Client view carries the target D1 org id in a cookie. The
+  // literal `true` is this branch's own condition: only a Tahi session reaches
+  // here, which is the first half of the shared rule.
   if (clerkOrgId && tahiOrgId && clerkOrgId === tahiOrgId) {
-    const target = req.cookies.get('tahi-impersonate-org')?.value
+    const target = resolvePreviewOrgId(true, req.cookies.get(IMPERSONATE_ORG_COOKIE)?.value)
     if (target) {
       return { ...result, orgId: target, clerkOrgId, impersonating: true }
     }

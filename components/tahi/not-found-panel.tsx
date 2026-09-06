@@ -18,6 +18,7 @@ import { LeafGlyph } from '@/components/tahi/tahi-glyphs'
 export function NotFoundPanel({ standalone = false }: { standalone?: boolean }) {
   return (
     <div
+      className={standalone ? 'not-found-standalone' : undefined}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -26,7 +27,12 @@ export function NotFoundPanel({ standalone = false }: { standalone?: boolean }) 
         textAlign: 'center',
         gap: '1rem',
         padding: '3rem 1.5rem',
-        minHeight: standalone ? '100vh' : '60vh',
+        // The standalone height is a CLASS, not an inline value: it needs the
+        // 100vh / 100dvh pair (dvh so the mobile URL bar cannot push the panel
+        // past the visible viewport, vh as the fallback), and a React style
+        // object holds one value per property, so the pair can only be written
+        // in CSS. Inside the shell there is no such problem.
+        minHeight: standalone ? undefined : '60vh',
         background: standalone ? 'var(--color-bg-cream)' : 'transparent',
         color: 'var(--color-text)',
       }}
@@ -75,7 +81,11 @@ export function NotFoundPanel({ standalone = false }: { standalone?: boolean }) 
           marginTop: '0.5rem',
           padding: '0 1.25rem',
           borderRadius: 'var(--radius-leaf-sm)',
-          background: 'var(--color-brand)',
+          // `background` is deliberately NOT here. An inline declaration
+          // outranks any class selector, so stating it inline made the
+          // .not-found-cta:hover rule inert and left the one interactive
+          // element on the page with no hover state. Both the resting colour
+          // and the hover live in app/globals.css, one source of truth.
           color: '#ffffff',
           fontSize: '0.875rem',
           fontWeight: 600,

@@ -2646,13 +2646,28 @@ html.reduce-motion *::after {
    NOT FOUND
    ============================================================
    The 404 panel (components/tahi/not-found-panel.tsx) is a server component
-   styled inline, and an inline style cannot carry a hover. Its one
-   interactive element states it here; focus comes from .tahi-focus-ring. */
+   styled inline, and two of its declarations cannot be written that way.
+
+   1. The CTA's background. An inline declaration outranks any class selector,
+      so while `background` was set in the style object the :hover rule below
+      never applied and the one interactive element on the page had no hover
+      state. Both halves live here now, tokens only, so dark mode still works
+      and there is one source of truth for the colour. Focus comes from
+      .tahi-focus-ring.
+   2. The standalone panel's height. It needs 100dvh (the mobile URL bar makes
+      100vh taller than the visible viewport, which made a page whose whole
+      job is to be a calm dead end scroll) with 100vh underneath it as the
+      fallback, and a React style object holds one value per property. */
 .not-found-cta {
+  background: var(--color-brand);
   transition: background-color var(--dur-2) var(--ease-out);
 }
 .not-found-cta:hover {
   background: var(--color-brand-dark);
+}
+.not-found-standalone {
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* ============================================================

@@ -19,6 +19,17 @@
  *
  * Deliberately a source scan rather than an import: importing the layout would
  * pull in Clerk, D1 and the whole component tree.
+ *
+ * What it does NOT see, stated so the next reader does not mistake it for a
+ * proof. It catches static `import ... from` and `export ... from` in every
+ * shape we write them, including multi-line clauses and `* as ns`. It misses:
+ *   - dynamic `await import('@/lib/some-client-module')`, which is not a
+ *     statement at the start of a line;
+ *   - a PascalCase CONSTANT exported from a client module, which
+ *     `isComponentName` waves through because it cannot tell an object from a
+ *     component without type information.
+ * Both are one edit away from being real, so treat a green run as "the known
+ * shape of the outage cannot come back", not as "the boundary is sound".
  */
 import { describe, it, expect } from 'vitest'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
@@ -99,10 +110,15 @@ interface ImportedSymbol {
 
 /**
  * Anchored to the start of a line (`m`) so a comment that happens to contain
- * the word "import" cannot be read as one. A real import statement is always
- * the first thing on its line; its clause may still wrap onto the next.
+ * the word "import" cannot be read as one. A real import (or re-export)
+ * statement is always the first thing on its line; its clause may still wrap
+ * onto the next.
+ *
+ * `export ... from` is in here as well as `import ... from`: a server file that
+ * re-exports a client module's function hands the same throwing stub to every
+ * one of its own callers, and the narrower regex could not see it.
  */
-const IMPORT_RE = /^import\s+((?:type\s+)?[^;'"]*?)\s+from\s+['"]([^'"]+)['"]/gm
+const IMPORT_RE = /^(?:import|export)\s+((?:type\s+)?[^;'"]*?)\s+from\s+['"]([^'"]+)['"]/gm
 
 /** Names an import statement binds, minus anything type-only. */
 function importedSymbols(clause: string): ImportedSymbol[] {
