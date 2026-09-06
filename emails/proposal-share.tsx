@@ -1,24 +1,24 @@
 /**
- * <ProposalShareEmail> — the "your proposal is ready" email.
+ * <ProposalShareEmail> - the "your proposal is ready" email.
  *
  * Sent to the prospect with a unique view URL. The proposal viewer itself
  * is the cinematic part; this email is a respectful invitation to open it.
  */
-import { Body, Head, Html, Preview } from '@react-email/components'
 import {
-  DetailCard,
-  DetailRow,
+  BlockQuote,
+  EmailBody,
   EmailCard,
-  EmailEyebrow,
+  EmailDocument,
   EmailFooter,
   EmailFootnote,
-  EmailHeader,
+  EmailHero,
   EmailHeading,
+  EmailKicker,
+  EmailNav,
   EmailParagraph,
-  EmailShell,
-  MessageBlock,
+  LedgerRow,
+  LedgerRows,
   PrimaryButton,
-  emailBodyStyle,
 } from './_components'
 
 interface ProposalShareEmailProps {
@@ -46,48 +46,38 @@ export function ProposalShareEmail({
   const firstName = recipientName.split(' ')[0] ?? recipientName
 
   return (
-    <Html>
-      <Head />
-      <Preview>{`${fromName} has shared a proposal: ${proposalTitle}`}</Preview>
-      <Body style={emailBodyStyle}>
-        <EmailShell>
-          <EmailHeader eyebrow="A proposal, ready to read" />
+    <EmailDocument preview={`${fromName} has shared a proposal: ${proposalTitle}`}>
+      <EmailCard>
+        <EmailNav label="Proposal" />
+        <EmailHero>
+          <EmailKicker>Proposal</EmailKicker>
+          <EmailHeading>Kia ora {firstName}, your proposal is ready.</EmailHeading>
+          <EmailParagraph>
+            {fromName} has shared a proposal for your review. It covers the scope, the team, the
+            math behind the price, and the path from project to ongoing care. The deck opens in your
+            browser, no sign in required.
+          </EmailParagraph>
+        </EmailHero>
+        <EmailBody>
+          <LedgerRows>
+            <LedgerRow label={proposalSubtitle ? 'For' : 'Proposal'} value={proposalTitle} tone="brand" />
+            {proposalSubtitle && <LedgerRow label="Scope" value={proposalSubtitle} />}
+            {expiresLabel && <LedgerRow label="Open until" value={expiresLabel} />}
+          </LedgerRows>
 
-          <EmailCard>
-            <EmailEyebrow>Proposal</EmailEyebrow>
-            <EmailHeading>
-              Your <span style={{ color: '#5A824E' }}>proposal</span> is ready
-            </EmailHeading>
+          {customMessage && <BlockQuote attribution={fromName}>{customMessage}</BlockQuote>}
 
-            <EmailParagraph>Hi {firstName},</EmailParagraph>
-            <EmailParagraph>
-              {fromName} has shared a proposal for your review. It covers the scope, the team,
-              the math behind the price, and the path from project to ongoing care. The deck
-              opens in your browser, no sign-in required.
-            </EmailParagraph>
+          <PrimaryButton href={viewUrl}>View proposal</PrimaryButton>
 
-            <DetailCard>
-              <DetailRow first label={proposalSubtitle ? 'For' : 'Proposal'} value={proposalTitle} hero />
-              {proposalSubtitle && <DetailRow label="Scope" value={proposalSubtitle} />}
-              {expiresLabel && <DetailRow label="Open until" value={expiresLabel} />}
-            </DetailCard>
+          <EmailFootnote>
+            Have a question or want a tweak? You can ask from inside the proposal without committing.
+            The deck stays open while we reply.
+          </EmailFootnote>
+        </EmailBody>
+      </EmailCard>
 
-            {customMessage && (
-              <MessageBlock fromName={fromName} message={customMessage} />
-            )}
-
-            <PrimaryButton href={viewUrl}>View proposal</PrimaryButton>
-
-            <EmailFootnote>
-              Have a question or want a tweak? You can ask from inside the proposal without
-              committing. The deck stays open while we reply.
-            </EmailFootnote>
-          </EmailCard>
-
-          <EmailFooter />
-        </EmailShell>
-      </Body>
-    </Html>
+      <EmailFooter audience="client" />
+    </EmailDocument>
   )
 }
 
