@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { getServerAuth } from '@/lib/server-auth'
 import { resolveClientEntry, clientEntryFromPersona, type ClientPersona } from '@/lib/onboarding-entry'
 import { resolveInvite } from '@/lib/onboarding-invites'
+import { loadStudioLead } from '@/lib/onboarding-lead-server'
 import { db } from '@/lib/db'
 import { OnboardingContent, type OnboardingLead } from '@/components/tahi/onboarding-content'
 
@@ -57,6 +58,10 @@ export default async function OnboardingPage({
 
   let entry = resolveClientEntry(params)
   let inviteToken: string | undefined
+  // The org this person is being onboarded into, for the studio-lead lookup
+  // below. An invite names the D1 org directly; otherwise the session's Clerk
+  // org is resolved to the same row (loadStudioLead accepts either shape).
+  let leadOrgRef: string | null = orgId ?? null
   if (token) {
     try {
       const database = await db()
@@ -64,6 +69,7 @@ export default async function OnboardingPage({
         database as ReturnType<typeof import('drizzle-orm/d1').drizzle>,
         token,
       )
+      if (invite?.orgId) leadOrgRef = invite.orgId
       if (invite && invite.flow === 'client' && invite.persona && !invite.expired) {
         // Only disclose the invitee's PII (company / name / email) when the
         // signed-in user's VERIFIED email matches the invite. A token holder on
@@ -93,8 +99,10 @@ export default async function OnboardingPage({
   // complete-but-org-less session would otherwise hit.
   if (onboardingComplete && orgId) redirect('/overview')
 
-  // SEAM: the studio lead is the assigned PM for this client; default to Liam.
-  const lead: OnboardingLead = { name: 'Liam Miller', first: 'Liam', role: 'Your studio lead', initials: 'LM', img: '/liam-profile.jpg' }
+  // The studio lead is the org's assigned project_manager (the same assignment
+  // the client detail page shows), falling back to the first super_admin and
+  // then to the literal this line used to hardcode. See lib/onboarding-lead.ts.
+  const lead: OnboardingLead = await loadStudioLead(leadOrgRef)
 
   return <OnboardingContent entry={entry} lead={lead} redirectTo="/overview" inviteToken={inviteToken} />
 }

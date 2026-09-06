@@ -547,6 +547,7 @@ See `TASKS.md` for the full prioritised list. The high-level categories:
 ```
 NEXT_PUBLIC_TAHI_ORG_ID
 CLERK_SECRET_KEY
+CLERK_WEBHOOK_SECRET
 NEXT_PUBLIC_CLERK_*
 DATABASE_URL
 STRIPE_SECRET_KEY
