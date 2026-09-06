@@ -95,6 +95,8 @@ Stop starting new work at 07:30 NZST (19:30Z). Morning report by 08:00 NZST (20:
 
 - 23:50 NZST (Sun) Notifications rail and Messages LIVE (12d39eb4, health 200/307). Cutover prep: reconciliation done (ManyRequests 20 orgs, 44 clients, 329 requests, 20 invoices, 18 services, 3 brands; D1 59 orgs: 35 real, 10 dummy, 14 uncertain Stripe-import artefacts to MERGE not delete, decision for Liam), allowlist built and reviewed (blockers: Clerk invitations and Stripe are separate mail transports, a domain allowlist would still reach Staci and Nathan, PATCH settings gate too weak; fix agent running), importer build next.
 
+- 00:05 NZST (Mon) Claude Design MCP lost its scopes (needs /design-login by Liam): the proposals editor rework, the consistency pass, the invoices-studio wiring, the Services ladder and the Stalled flag are finished and staged on disk, not written. Local critic on the mirror: editor strong with a wiring bug; consistency pass regressed wide-table pages (rail costs columns). Local fix pass launched; write-back is TASKS DL.0 to DL.4. Repo streams unaffected.
+
 ## Polish list (small things seen live, batch into one fixer before 07:30)
 
 - [x] More sheet Track time row left-aligned (17a490b2).

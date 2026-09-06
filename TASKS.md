@@ -181,6 +181,14 @@ Decisions only Liam can make: ANSWERED.
 - [ ] MC.5 - [Design then FE] Services page rule: show what they have, lower and higher plans, per-plan suggestions; upsell only near limits.
 - [ ] MC.6 - [FE/BE] Deals: Stalled becomes a flag on any stage (not a stage).
 
+## Claude Design write-back after /design-login (blocked 2026-09-06 23:00)
+
+- [ ] DL.0 - [Liam] Run /design-login in Claude Code; the Claude Design MCP token lost its design scopes and every write, read and render fails until then.
+- [ ] DL.1 - [Design] Write the staged proposals, contracts and schedules editor rework (.claude/qa/staged/sales-artifacts.*; three-pane editor with live preview, packages as tabs, template picker, share and publish, version history, client comments inline) after the local fix of the wiring bug the critic found (every list row opened the same document) and the preview header ellipsis and gantt pane width.
+- [ ] DL.2 - [Design] Write the consistency pass (.claude/qa/patched/*: one headline band anatomy in head-band.css, left rail on list pages) after the local fix: the rail must be withheld or collapsible on wide-table pages (Time, Team, Leads, Deals, Calls, Tracks, client Invoices) where it cost columns and clipped money; one band implementation and one height; the .rqt-rail and .lrail families aligned.
+- [ ] DL.3 - [Design] Write the invoices-studio shell wiring under Finance, the Services plan-ladder rule, the Stalled-as-a-flag rework, and archive the scratch mounts (all staged by their agents).
+- [ ] DL.4 - [Design] Re-render and re-critique in the real shell after the writes.
+
 ## Client library and catalogue (Liam, 2026-09-06)
 
 - [ ] CL.1 - [Design first, then FE/BE] **Files as a small Google Drive with threads.** Folders per client (Deliverables, Brand, References, Uploads), drag-and-drop uploads from the client, a comment thread per file (reuse the request thread composer and the messages table with a file target), versions optional. Liam: "i'd like to give them a small version of like google drive but with threads so they can upload docs for us there." Design in Claude Design alongside the Clients pages; the current /files page (list, upload, download) stays until then.
