@@ -64,7 +64,15 @@ function badSource(): NextResponse {
  */
 async function resolveThread(
   database: DrizzleDB,
-  input: { source: InboxSource; id: string; orgId: string; clerkUserId: string; create: boolean },
+  input: {
+    source: InboxSource
+    id: string
+    orgId: string
+    clerkUserId: string
+    /** The seat the gate resolved: the previewed client's row in Client view. */
+    contactId: string | null
+    create: boolean
+  },
 ): Promise<
   | { ok: false; response: NextResponse }
   | {
@@ -95,7 +103,11 @@ async function resolveThread(
     return { ok: true, source: 'channel', id, title: 'Tahi Studio', requestNumber: null, status: null, assigneeId: null, brandId: null }
   }
 
-  const scope = await loadClientScope(database, { clerkUserId: input.clerkUserId, orgId: input.orgId })
+  const scope = await loadClientScope(database, {
+    clerkUserId: input.clerkUserId,
+    orgId: input.orgId,
+    contactId: input.contactId,
+  })
   const request = await clientCanSeeRequest(database, {
     requestId: input.id,
     orgId: input.orgId,
@@ -129,6 +141,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     id: rawId,
     orgId,
     clerkUserId: viewer.clerkUserId,
+    contactId: viewer.domainId,
     create: false,
   })
   if (!resolved.ok) return resolved.response
@@ -215,6 +228,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     id: rawId,
     orgId,
     clerkUserId: viewer.clerkUserId,
+    contactId: viewer.domainId,
     create: true,
   })
   if (!resolved.ok) return resolved.response

@@ -12,18 +12,49 @@
  * reads 'member' with is_primary = 1. Testing the column alone locks the owner
  * out of their own workspace.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+
+interface Op { op: string; col?: unknown; val?: unknown; parts?: unknown[] }
+
+// The predicate is built by lib/portal-identity.ts, so the shape assertions
+// below need the operators and the columns to be inspectable.
+vi.mock('@/db/d1', () => ({
+  schema: {
+    contacts: {
+      id: 'contacts.id',
+      orgId: 'contacts.orgId',
+      clerkUserId: 'contacts.clerkUserId',
+      isPrimary: 'contacts.isPrimary',
+      portalRole: 'contacts.portalRole',
+    },
+  },
+}))
+vi.mock('drizzle-orm', () => ({
+  eq: (col: unknown, val: unknown): Op => ({ op: 'eq', col, val }),
+  desc: (col: unknown): Op => ({ op: 'desc', col }),
+  and: (...parts: unknown[]): Op => ({ op: 'and', parts }),
+}))
+
 import { isPortalAdminContact, resolvePortalRole, isOrgAdmin } from '@/lib/portal-access'
 
 type Row = Record<string, unknown>
 
+const lastWhere: { value: unknown } = { value: undefined }
+
 function fakeDb(rows: Row[]): Parameters<typeof isOrgAdmin>[0] {
   const chain = {
     from: () => chain,
-    where: () => chain,
+    where: (w: unknown) => {
+      lastWhere.value = w
+      return chain
+    },
     limit: () => Promise.resolve(rows),
   }
   return { select: () => chain } as unknown as Parameters<typeof isOrgAdmin>[0]
+}
+
+function wherePartsOfLastCall(): Op[] {
+  return ((lastWhere.value as Op)?.parts ?? []) as Op[]
 }
 
 describe('isPortalAdminContact', () => {
@@ -72,5 +103,44 @@ describe('isOrgAdmin', () => {
     expect(await isOrgAdmin(fakeDb([{ portalRole: 'member', isPrimary: true }]), 'org_1', 'user_1')).toBe(true)
     expect(await isOrgAdmin(fakeDb([{ portalRole: 'member', isPrimary: false }]), 'org_1', 'user_1')).toBe(false)
     expect(await isOrgAdmin(fakeDb([]), 'org_1', 'user_1')).toBe(false)
+  })
+
+  it('matches the caller by login when no preview seat is named', async () => {
+    // Every existing caller passes three arguments, so this is the predicate
+    // the helper has always carried. The seat is opt-in, per call site.
+    await isOrgAdmin(fakeDb([]), 'org_1', 'user_1')
+    expect(wherePartsOfLastCall()).toEqual([
+      { op: 'eq', col: 'contacts.orgId', val: 'org_1' },
+      { op: 'eq', col: 'contacts.clerkUserId', val: 'user_1' },
+    ])
+  })
+
+  it('asks about the previewed seat when one is named', async () => {
+    // In Client view the Clerk id belongs to the operator and no client org
+    // holds a row for it, so this answered false for every workspace. Asking
+    // about the seat asks about the person being previewed.
+    expect(
+      await isOrgAdmin(
+        fakeDb([{ portalRole: 'member', isPrimary: true }]),
+        'org_1',
+        'user_liam',
+        'contact_primary',
+      ),
+    ).toBe(true)
+    expect(wherePartsOfLastCall()).toEqual([
+      { op: 'eq', col: 'contacts.orgId', val: 'org_1' },
+      { op: 'eq', col: 'contacts.id', val: 'contact_primary' },
+    ])
+  })
+
+  it('still answers for the seat, not for the preview: a member seat is denied', async () => {
+    expect(
+      await isOrgAdmin(
+        fakeDb([{ portalRole: 'member', isPrimary: false }]),
+        'org_1',
+        'user_liam',
+        'contact_member',
+      ),
+    ).toBe(false)
   })
 })

@@ -1,5 +1,6 @@
 import { getPortalAuth } from '@/lib/server-auth'
 import { requirePortalFeature } from '@/lib/require-feature'
+import { contactIdentityWhere } from '@/lib/portal-identity'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -10,7 +11,7 @@ import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 // List conversations for the current client org where visibility = 'external'.
 // Includes unread count, last message preview, participant info.
 export async function GET(req: NextRequest) {
-  const { orgId, userId, clerkOrgId } = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId, contactId: previewContactId } = await getPortalAuth(req)
 
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -20,16 +21,15 @@ export async function GET(req: NextRequest) {
 
   const database = await db()
 
-  // Find the contact record for this user
+  // Find the contact record for this user, or the seat a studio preview is
+  // standing in (lib/portal-identity.ts). Without the second case the operator
+  // fell through to the `userId` fallback below, which is a participant id no
+  // client conversation carries, so Client view saw only the org channel and
+  // none of the previewed person's own threads.
   const contactRows = await database
     .select({ id: schema.contacts.id })
     .from(schema.contacts)
-    .where(
-      and(
-        eq(schema.contacts.orgId, orgId),
-        eq(schema.contacts.clerkUserId, userId)
-      )
-    )
+    .where(contactIdentityWhere(orgId, userId, previewContactId))
     .limit(1)
 
   const participantId = contactRows.length > 0 ? contactRows[0].id : userId

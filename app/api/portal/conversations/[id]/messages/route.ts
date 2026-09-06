@@ -1,5 +1,6 @@
 import { getPortalAuth } from '@/lib/server-auth'
 import { requirePortalFeature } from '@/lib/require-feature'
+import { contactIdentityWhere } from '@/lib/portal-identity'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -14,7 +15,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId, userId, clerkOrgId } = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId, contactId: previewContactId } = await getPortalAuth(req)
 
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -49,16 +50,14 @@ export async function GET(
   }
 
   // Verify the conversation belongs to the user's org
-  // Either the conversation's orgId matches, or the user is a participant
+  // Either the conversation's orgId matches, or the user is a participant.
+  // In Client view the login is the operator's, so the participant fallback
+  // below resolved to an id no conversation carries; the seat resolved by
+  // getPortalAuth (lib/portal-identity.ts) is the person being previewed.
   const contactRows = await database
     .select({ id: schema.contacts.id })
     .from(schema.contacts)
-    .where(
-      and(
-        eq(schema.contacts.orgId, orgId),
-        eq(schema.contacts.clerkUserId, userId)
-      )
-    )
+    .where(contactIdentityWhere(orgId, userId, previewContactId))
     .limit(1)
 
   const participantId = contactRows.length > 0 ? contactRows[0].id : userId

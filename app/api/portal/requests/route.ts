@@ -1,5 +1,6 @@
 import { getPortalAuth } from '@/lib/server-auth'
 import { requirePortalFeature } from '@/lib/require-feature'
+import { contactIdentityWhere } from '@/lib/portal-identity'
 import {
   actingByline,
   actingIdentity,
@@ -27,7 +28,7 @@ import {
 // ── GET /api/portal/requests ─────────────────────────────────────────────────
 // Returns requests scoped to the client's own org.
 export async function GET(req: NextRequest) {
-  const { orgId, userId, clerkOrgId } = await getPortalAuth(req)
+  const { orgId, userId, clerkOrgId, contactId: previewContactId } = await getPortalAuth(req)
 
   // Deny if not authenticated or if this is the Tahi admin org (admins use /api/admin/requests)
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
@@ -55,13 +56,15 @@ export async function GET(req: NextRequest) {
   // contact at two client orgs on the same Clerk account, and an unscoped
   // lookup would pick whichever row came back first and scope this org's list
   // by the other org's brands (CLAUDE.md rule 12).
+  //
+  // In Client view the login is the operator's, which matches nobody here, so
+  // the preview saw every brand's requests where the person being previewed
+  // sees only their own. `contactIdentityWhere` stands the read in that seat
+  // (lib/portal-identity.ts).
   const [contact] = await drizzle
     .select({ id: schema.contacts.id })
     .from(schema.contacts)
-    .where(and(
-      eq(schema.contacts.clerkUserId, userId),
-      eq(schema.contacts.orgId, orgId),
-    ))
+    .where(contactIdentityWhere(orgId, userId, previewContactId))
     .limit(1)
 
   let brandIds: string[] | null = null

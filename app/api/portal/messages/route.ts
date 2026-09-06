@@ -31,7 +31,11 @@ export async function GET(req: NextRequest) {
   const { database, orgId, viewer, impersonating } = gate.ctx
 
   const [scope, channels, orgNames] = await Promise.all([
-    loadClientScope(database, { clerkUserId: viewer.clerkUserId, orgId }),
+    loadClientScope(database, {
+      clerkUserId: viewer.clerkUserId,
+      orgId,
+      contactId: viewer.domainId,
+    }),
     loadOrgChannels(database, [orgId]),
     loadOrgNames(database, [orgId]),
   ])

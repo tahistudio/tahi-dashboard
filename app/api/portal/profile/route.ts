@@ -1,5 +1,6 @@
 import { getPortalAuth } from '@/lib/server-auth'
 import { isPortalAdminContact } from '@/lib/portal-access'
+import { contactIdentityWhere } from '@/lib/portal-identity'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -16,12 +17,22 @@ import { eq, and } from 'drizzle-orm'
  * primary contact of any workspace whose role column still holds the NOT NULL
  * 'member' default: the owner was shown no People section while the API behind
  * it would have let them in. Clients must not have to guess this.
+ *
+ * PREVIEW. A studio session in Client view keeps its own Clerk id, so matching
+ * a contacts row on it inside a client org found nothing and this route said
+ * `contact: null, isAdmin: false`. The settings shell reads exactly that, so
+ * the preview hid People and Organisation: the studio was shown a portal no
+ * client has. `contactId` from getPortalAuth names the seat being previewed
+ * (lib/portal-identity.ts, the same seat an acting write is recorded against),
+ * and `preview` says so out loud so the shell can keep its banner logic
+ * without re-deriving the mode.
  */
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await getPortalAuth(req)
+  const { orgId, userId, contactId, previewContact } = await getPortalAuth(req)
   if (!orgId || !userId || orgId === process.env.NEXT_PUBLIC_TAHI_ORG_ID) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const preview = previewContact === true
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -37,22 +48,27 @@ export async function GET(req: NextRequest) {
       phone: schema.contacts.phone,
     })
     .from(schema.contacts)
-    .where(and(
-      eq(schema.contacts.orgId, orgId),
-      eq(schema.contacts.clerkUserId, userId),
-    ))
+    .where(contactIdentityWhere(orgId, userId, contactId))
     .limit(1)
 
   if (!contact) {
     // No linked contact row: basic info only, and not an admin of anything.
+    // In a preview this now means the org genuinely has nobody in it, rather
+    // than the operator's own login failing to match a client workspace.
     return NextResponse.json({
       contact: null,
       orgId,
       isAdmin: false,
+      preview,
     })
   }
 
-  return NextResponse.json({ contact, orgId, isAdmin: isPortalAdminContact(contact) })
+  return NextResponse.json({
+    contact,
+    orgId,
+    isAdmin: isPortalAdminContact(contact),
+    preview,
+  })
 }
 
 /**

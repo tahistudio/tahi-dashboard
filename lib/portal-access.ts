@@ -34,7 +34,7 @@
  */
 
 import { schema } from '@/db/d1'
-import { and, eq } from 'drizzle-orm'
+import { contactIdentityWhere } from '@/lib/portal-identity'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -68,11 +68,24 @@ export function resolvePortalRole(
  * Is this Clerk user a workspace admin of the given D1 org?
  * Matches the caller to their contact row via clerkUserId (linked at
  * provision time for owners and at accept-invite for teammates).
+ *
+ * `previewContactId` is `getPortalAuth().contactId`: while a studio session
+ * previews a client, the Clerk id above belongs to the operator and no client
+ * org holds a row for it, so this answered false for every workspace and the
+ * preview showed a portal stripped of the owner's own surfaces. Passing the
+ * seat asks the question about the person being previewed instead.
+ *
+ * It moves no write gate. Every write that calls this refuses `impersonating`
+ * first (brands, organisation, people, invites, checkout, change requests), so
+ * in both preview modes those routes are already 403 before this is reached;
+ * onboarding/complete is entitled by the Tahi org id before it gets here. This
+ * is the read side only.
  */
 export async function isOrgAdmin(
   drizzle: Drizzle,
   orgId: string,
   userId: string,
+  previewContactId?: string | null,
 ): Promise<boolean> {
   const [contact] = await drizzle
     .select({
@@ -80,7 +93,7 @@ export async function isOrgAdmin(
       isPrimary: schema.contacts.isPrimary,
     })
     .from(schema.contacts)
-    .where(and(eq(schema.contacts.orgId, orgId), eq(schema.contacts.clerkUserId, userId)))
+    .where(contactIdentityWhere(orgId, userId, previewContactId))
     .limit(1)
   return isPortalAdminContact(contact)
 }

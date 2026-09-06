@@ -762,19 +762,28 @@ export async function loadOrgChannels(
  *
  * Held to the caller's org as well as their login: one person can be a contact
  * at two client orgs on the same Clerk account (CLAUDE.md rule 12).
+ *
+ * `contactId` is the seat the caller was already resolved to by the gate
+ * (`gatePortalMessages`), which is the previewed client's row when a studio
+ * session is looking through Client view and the caller's own row otherwise.
+ * Passing it both keeps the preview honest (the operator's Clerk id matches no
+ * row inside a client org, so the scope opened to every brand) and saves the
+ * repeat of a select the gate has already made.
  */
 export async function loadClientScope(
   database: DrizzleDB,
-  input: { clerkUserId: string; orgId: string },
+  input: { clerkUserId: string; orgId: string; contactId?: string | null },
 ): Promise<{ contactId: string | null; brandIds: string[] | null }> {
-  const [contact] = await database
-    .select({ id: schema.contacts.id })
-    .from(schema.contacts)
-    .where(and(
-      eq(schema.contacts.clerkUserId, input.clerkUserId),
-      eq(schema.contacts.orgId, input.orgId),
-    ))
-    .limit(1)
+  const [contact] = input.contactId
+    ? [{ id: input.contactId }]
+    : await database
+        .select({ id: schema.contacts.id })
+        .from(schema.contacts)
+        .where(and(
+          eq(schema.contacts.clerkUserId, input.clerkUserId),
+          eq(schema.contacts.orgId, input.orgId),
+        ))
+        .limit(1)
   if (!contact) return { contactId: null, brandIds: null }
 
   const links = await database
