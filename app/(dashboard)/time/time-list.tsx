@@ -24,6 +24,7 @@ import { FeatureCard } from '@/components/tahi/feature-card'
 import { BarChart, DonutChart, type BarDatum } from '@/components/tahi/chart'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
+import { useDisplayCurrency } from '@/lib/display-currency-context'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,12 @@ interface TimeEntry {
   teamMemberId: string
   teamMemberName: string | null
   hours: number
+  /**
+   * The rate this entry was LOGGED at, in the studio base currency. Null is a
+   * real answer: the entry carries no rate, which is not the same as a rate of
+   * zero, and the Rate column says so in words rather than showing "$0".
+   */
+  hourlyRate: number | null
   billable: boolean | null
   notes: string | null
   date: string
@@ -75,6 +82,32 @@ function formatDate(dateStr: string): string {
 
 function formatHours(h: number): string {
   return h.toFixed(1) + 'h'
+}
+
+/**
+ * The rate an entry was logged at.
+ *
+ * Null is shown in words, never as a zero: an entry with no rate and an entry
+ * billed at nothing are different facts, and only one of them is safe to put
+ * on an invoice. Formatting goes through the shell's display currency (the
+ * stored number is a studio base-currency amount), which is the same helper
+ * every other money cell in the dashboard uses.
+ */
+function RateCell({ rate }: { rate: number | null }) {
+  const { format } = useDisplayCurrency()
+  if (rate === null || rate === undefined) {
+    return (
+      <span style={{ color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>
+        No rate
+      </span>
+    )
+  }
+  return (
+    <span style={{ color: 'var(--color-text)', fontWeight: 500 }}>
+      {format(rate)}
+      <span style={{ color: 'var(--color-text-subtle)', fontWeight: 400 }}>/hr</span>
+    </span>
+  )
 }
 
 // ── Log Time SlideOver ─────────────────────────────────────────────────────
@@ -123,6 +156,10 @@ function LogTimeSlideOver({
     }
     setSaving(true)
     setError('')
+    // An empty field is "not given", which lets the server fall back to the
+    // client's default rate. A typed 0 is a decision and is sent as one, so
+    // it is not quietly turned into that fallback.
+    const typedRate = hourlyRate.trim() === '' ? undefined : Number(hourlyRate)
     try {
       const res = await fetch(apiPath('/api/admin/time'), {
         method: 'POST',
@@ -132,7 +169,7 @@ function LogTimeSlideOver({
           teamMemberId,
           requestId: requestId || undefined,
           hours: parseFloat(hours),
-          hourlyRate: hourlyRate ? parseFloat(hourlyRate) : undefined,
+          hourlyRate: typedRate !== undefined && Number.isFinite(typedRate) ? typedRate : undefined,
           notes: notes.trim() || undefined,
           date,
           billable,
@@ -244,16 +281,23 @@ function LogTimeSlideOver({
               />
             </div>
             <div>
-              <label style={labelStyle} htmlFor="lt-rate">Rate ($/hr)</label>
+              <label style={labelStyle} htmlFor="lt-rate">Rate / hr</label>
               <Input
                 id="lt-rate"
                 type="number"
                 min="0"
                 step="1"
-                placeholder="e.g. 150"
+                placeholder="Client default"
                 value={hourlyRate}
                 onChange={e => setHourlyRate(e.target.value)}
+                aria-describedby="lt-rate-hint"
               />
+              <p
+                id="lt-rate-hint"
+                style={{ margin: '0.3125rem 0 0', fontSize: '0.6875rem', color: 'var(--color-text-subtle)', lineHeight: 1.4 }}
+              >
+                Leave blank to use the client&apos;s default rate.
+              </p>
             </div>
             <div>
               <label style={labelStyle} htmlFor="lt-date">Date</label>
@@ -488,7 +532,7 @@ function ByClientView({
                   <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 500 }}>
                     <thead>
                       <tr style={{ background: 'var(--color-bg-secondary)' }}>
-                        {['Date', 'Team member', 'Request', 'Hours', 'Billable', 'Notes'].map(h => (
+                        {['Date', 'Team member', 'Request', 'Hours', 'Rate', 'Billable', 'Notes'].map(h => (
                           <th
                             key={h}
                             style={{
@@ -530,6 +574,9 @@ function ByClientView({
                           </td>
                           <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>
                             {formatHours(entry.hours)}
+                          </td>
+                          <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem' }}>
+                            <RateCell rate={entry.hourlyRate} />
                           </td>
                           <td style={{ padding: '0.625rem 1rem' }}>
                             <Badge
@@ -709,6 +756,16 @@ export function TimeList() {
       render: r => (
         <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>{formatHours(r.hours)}</span>
       ),
+    },
+    {
+      key: 'rate',
+      header: 'Rate',
+      sortable: true,
+      // Rateless entries sort to the bottom rather than beside a genuine zero.
+      sortValue: r => (r.hourlyRate ?? -1),
+      width: '7.5rem',
+      align: 'right',
+      render: r => <RateCell rate={r.hourlyRate} />,
     },
     {
       key: 'billable',

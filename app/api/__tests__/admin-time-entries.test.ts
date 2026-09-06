@@ -40,6 +40,11 @@ vi.mock('@/db/d1', () => ({
     tasks: { _table: 'tasks', id: 1, orgId: 1, requestId: 1, type: 1 },
     timeEntries: { _table: 'timeEntries', id: 1, date: 1 },
     teamMembers: { _table: 'teamMembers', id: 1, clerkUserId: 1 },
+    // The shared writer (lib/time-entries.ts) reads the client's default
+    // hourly rate when the body names none. Present here so this file
+    // exercises the real path rather than the read-failed fallback.
+    // The rate rule itself is covered in admin-time-rate.test.ts.
+    organisations: { _table: 'organisations', id: 1, defaultHourlyRate: 1 },
   },
 }))
 
