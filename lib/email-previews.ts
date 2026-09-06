@@ -81,6 +81,7 @@ import { appOrigin, publicUrl } from '@/lib/app-url'
 import { invoiceReference } from '@/lib/invoice-billing'
 import { buildHowToPay } from '@/lib/invoice-how-to-pay'
 import {
+  channelMessageEmailPlan,
   clientStatusEmailPlan,
   studioNewRequestEmailPlan,
   threadReplyEmailPlan,
@@ -112,6 +113,8 @@ export const EMAIL_PREVIEW_ENTRIES = [
   { key: 'invoice-sent-bank', template: 'invoice-sent', liveSender: true },
   { key: 'kickoff-booked', template: 'kickoff-booked', liveSender: true },
   { key: 'kickoff-booked-no-link', template: 'kickoff-booked', liveSender: true },
+  { key: 'new-channel-message', template: 'new-channel-message', liveSender: true },
+  { key: 'new-channel-message-studio', template: 'new-channel-message', liveSender: true },
   { key: 'new-message', template: 'new-message', liveSender: true },
   { key: 'new-message-studio', template: 'new-message', liveSender: true },
   { key: 'new-request', template: 'new-request', liveSender: true },
@@ -330,6 +333,28 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
       'Thanks, that reads much better. Two notes from our side: the pick-up window should say ' +
       '"from 9am", not "9am to 5pm", because the late slots sell out. And can the region field ' +
       'default to Nelson? That is where most of our orders come from.',
+  })
+
+  // (1b) The org channel half of Messages: the same 'new_message' event, no
+  //      request, so no [REQ-n] subject prefix and no request detail row.
+  const channelToClient = channelMessageEmailPlan({
+    audience: 'client',
+    orgName: CLIENT_ORG,
+    fromName: STACI,
+    message:
+      'Kia ora. Your October invoice is on its way over, and I have put a hold on two large '
+      + 'track slots for the pick-up campaign so they are there when you want them. Nothing to '
+      + 'do at your end, this is just so you know where things sit.',
+  })
+
+  const channelToStudio = channelMessageEmailPlan({
+    audience: 'studio',
+    orgName: CLIENT_ORG,
+    fromName: CLIENT_CONTACT,
+    message:
+      'Quick one that is not about a particular request: we are opening a second packhouse in '
+      + 'February and will want the site to say so. Happy to talk it through on the next call, '
+      + 'but wanted it written down somewhere before it gets away on us.',
   })
 
   const clientReview = clientStatusEmailPlan({
@@ -686,6 +711,38 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
     },
 
     // lib/notification-email.ts threadReplyEmailPlan (client audience).
+    // lib/notification-email.ts channelMessageEmailPlan (client audience).
+    // The studio wrote on the standing line: no request row, no [REQ-n]
+    // prefix, and the CTA opens the inbox rather than one thread.
+    'new-channel-message': {
+      subject: channelToClient.subject,
+      react: channelToClient.render(target),
+      personalisation: {
+        Greeting: firstName,
+        Eyebrow: 'A message from the studio / Your studio line',
+        Studio: 'Tahi Studio',
+        From: STACI,
+        Quote: 'three sentences of the message, plain text',
+        'Open button': `"Open Messages", ${origin}/messages`,
+      },
+    },
+
+    // The studio-facing half: what lands in the studio inbox when a client
+    // posts on their line. The subject names the client, because that is the
+    // only reference this side has.
+    'new-channel-message-studio': {
+      subject: channelToStudio.subject,
+      react: channelToStudio.render(target),
+      personalisation: {
+        Greeting: firstName,
+        Eyebrow: 'A client wrote in / Inbox',
+        Client: CLIENT_ORG,
+        From: CLIENT_CONTACT,
+        Quote: 'three sentences of the client message, plain text',
+        'Open button': `"Open Messages", ${origin}/messages`,
+      },
+    },
+
     'new-message': {
       subject: threadReply.subject,
       react: threadReply.render(target),

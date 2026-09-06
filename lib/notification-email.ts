@@ -53,6 +53,7 @@ import NewRequestEmail from '@/emails/new-request'
 import RequestDeliveredEmail from '@/emails/request-delivered'
 import RequestClientReviewEmail from '@/emails/request-client-review'
 import NewMessageEmail from '@/emails/new-message'
+import NewChannelMessageEmail from '@/emails/new-channel-message'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -554,7 +555,7 @@ export async function sendNotificationEmails(
 
 // ─── The wired events ────────────────────────────────────────────────────────
 //
-// Four, and only four, for now. Every other notification stays in the bell.
+// Five, and only five, for now. Every other notification stays in the bell.
 // The copy lives here rather than at the call sites so the studio can read the
 // whole client-facing voice in one file.
 
@@ -590,6 +591,51 @@ export function threadReplyEmailPlan(input: {
         fromName: input.fromName,
         message: truncate(input.message, 900),
         requestUrl: url,
+      }),
+  }
+}
+
+/**
+ * (1b) Somebody posted on the standing line between a client and the studio:
+ * the org channel, which is the half of Messages that is not about one
+ * particular request.
+ *
+ * The sibling of (1). It sends on the same event type ('new_message'), so a
+ * person who muted message email is muted for both, and it goes through the
+ * same dispatcher, so it is subject to the same per person, per channel
+ * preference read and the same off-the-response-path fan-out.
+ *
+ * No `[REQ-n]` subject prefix, because there is no request: an org channel
+ * message that borrowed one would thread itself into the wrong Gmail
+ * conversation. The subject names the client instead, which is the only
+ * reference the studio side has.
+ *
+ * Only ever built from a message that is NOT internal. The template quotes the
+ * one message it is handed, and the caller establishes that before it builds
+ * the plan (app/api/portal/messages and app/api/admin/messages).
+ */
+export function channelMessageEmailPlan(input: {
+  audience: EmailAudience
+  orgName: string
+  fromName: string
+  /** Plain text already, via toPlainText. Never raw composer HTML. */
+  message: string
+}): NotificationEmailPlan {
+  const subject =
+    input.audience === 'client'
+      ? `${input.fromName} sent you a message`
+      : `${input.orgName}: new message from ${input.fromName}`
+  const url = `${appOrigin()}/messages`
+  return {
+    subject,
+    render: (target) =>
+      createElement(NewChannelMessageEmail, {
+        audience: input.audience,
+        recipientName: greetingName(target.name, 'there'),
+        orgName: input.orgName,
+        fromName: input.fromName,
+        message: truncate(input.message, 900),
+        messagesUrl: url,
       }),
   }
 }
