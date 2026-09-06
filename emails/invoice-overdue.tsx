@@ -1,28 +1,28 @@
 /**
  * <InvoiceOverdueEmail>: sent when an invoice has slipped past its due date.
- * Warning banner plus a pay-now CTA in warning orange.
+ * Danger kicker plus a note box, and a pay-now CTA.
  *
  * When there is no pay page (a Xero-rail invoice still waiting on approval in
  * Xero) the CTA falls back to the portal and a How to pay block carries the
  * bank details and the reference, so a chase email always tells the client how
  * to actually clear the bill. See lib/invoice-how-to-pay.ts.
  */
-import { Body, Head, Html, Preview } from '@react-email/components'
 import {
-  DetailCard,
-  DetailRow,
-  EmailBanner,
+  EmailBody,
   EmailCard,
-  EmailEyebrow,
+  EmailDocument,
   EmailFooter,
   EmailFootnote,
-  EmailHeader,
+  EmailHero,
   EmailHeading,
+  EmailKicker,
+  EmailNav,
   EmailParagraph,
-  EmailShell,
   HowToPayBlock,
+  LedgerRow,
+  LedgerRows,
+  NoteBox,
   PrimaryButton,
-  emailBodyStyle,
 } from './_components'
 import { hasBankDestination, type InvoiceHowToPay } from '@/lib/invoice-how-to-pay'
 import { invoiceReference } from '@/lib/invoice-billing'
@@ -69,49 +69,43 @@ export function InvoiceOverdueEmail({
   const showTransfer = !paymentUrl && hasBankDestination(howToPay)
 
   return (
-    <Html>
-      <Head />
-      <Preview>{`Reminder: invoice ${displayId} is ${daysOverdue} ${dayWord} overdue`}</Preview>
-      <Body style={emailBodyStyle}>
-        <EmailShell>
-          <EmailHeader eyebrow="Friendly payment reminder" />
+    <EmailDocument preview={`Reminder: invoice ${displayId} is ${daysOverdue} ${dayWord} overdue`}>
+      <EmailCard>
+        <EmailNav label={`Invoice ${displayId}`} />
+        <EmailHero>
+          <EmailKicker tone="danger">Payment overdue</EmailKicker>
+          <EmailHeading>Kia ora {firstName}, a small nudge on this invoice.</EmailHeading>
+          <EmailParagraph>
+            Your invoice from Tahi Studio was due on {dueDate} and is now {daysOverdue} {dayWord} past
+            due. If you have already paid, please ignore this. Banks can take a couple of days to
+            reconcile.
+          </EmailParagraph>
+        </EmailHero>
+        <EmailBody>
+          <NoteBox tone="danger" title="Payment overdue">
+            {daysOverdue} {dayWord} past the due date of {dueDate}.
+          </NoteBox>
 
-          <EmailCard>
-            <EmailBanner kind="warning">Payment overdue</EmailBanner>
-            <EmailEyebrow>Invoice {displayId}</EmailEyebrow>
-            <EmailHeading>
-              A small <span style={{ color: '#5A824E' }}>nudge</span> on this invoice
-            </EmailHeading>
+          <LedgerRows>
+            <LedgerRow label="Amount due" value={`${amountFormatted} ${currency}`} tone="danger" />
+            <LedgerRow label={invoiceNumber ? 'Invoice number' : 'Invoice ID'} value={displayId} mono />
+            <LedgerRow label="Original due date" value={dueDate} />
+            <LedgerRow label="Days overdue" value={String(daysOverdue)} />
+          </LedgerRows>
 
-            <EmailParagraph>
-              Hi {firstName}, your invoice from Tahi Studio was due on {dueDate} and is now
-              {' '}{daysOverdue} {dayWord} past due. If you have already paid, please ignore
-              this. Banks can take a couple of days to reconcile.
-            </EmailParagraph>
+          {showTransfer && howToPay && <HowToPayBlock howToPay={howToPay} />}
 
-            <DetailCard>
-              <DetailRow first label="Amount due" value={`${amountFormatted} ${currency}`} hero />
-              <DetailRow label={invoiceNumber ? 'Invoice number' : 'Invoice ID'} value={displayId} mono />
-              <DetailRow label="Original due date" value={dueDate} />
-              <DetailRow label="Days overdue" value={String(daysOverdue)} />
-            </DetailCard>
+          <PrimaryButton href={paymentUrl ?? invoiceUrl}>{paymentUrl ? 'Pay now' : 'View invoice'}</PrimaryButton>
 
-            {showTransfer && howToPay && <HowToPayBlock howToPay={howToPay} />}
+          <EmailFootnote>
+            If anything is blocking payment, reply to this email and we will work it out together. We
+            would rather hear from you than chase silently.
+          </EmailFootnote>
+        </EmailBody>
+      </EmailCard>
 
-            <PrimaryButton href={paymentUrl ?? invoiceUrl} variant="warning">
-              {paymentUrl ? 'Pay now' : 'View invoice'}
-            </PrimaryButton>
-
-            <EmailFootnote>
-              If anything is blocking payment, reply to this email and we will work it out
-              together. We would rather hear from you than chase silently.
-            </EmailFootnote>
-          </EmailCard>
-
-          <EmailFooter />
-        </EmailShell>
-      </Body>
-    </Html>
+      <EmailFooter audience="client" />
+    </EmailDocument>
   )
 }
 
