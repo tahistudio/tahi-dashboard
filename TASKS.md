@@ -161,6 +161,16 @@ Decisions only Liam can make: ANSWERED.
 - [~] MR.6 - [Design then FE] Studio invoices designed in Claude Design (invoices-studio.* module: list with totals strip, seven saved views, rail chip with pay-link state, bulk bar, New invoice slide-over with the IC.3 defaults; detail with hero, metadata grid, grouped actions, activity strip, chase drafter). Critic: FIX (two blocking interaction bugs in the scratch mount, plus defects); fixer running; then wire into the shell under Finance and port.
 - [~] MR.7 - [Design then FE] Services showcase redesigned in portal-money.* (dark forest plan stage with the two tracks as objects, How you are using Tahi with honest charts, an editorial catalogue with a feature, stories and lines, an add-ons shelf tied to the plan, member-seat and read-only degrades). Critic: FIX not REDO ('best single tile in the prototype'); fixer running; then port over the live showcase.
 
+## Afternoon review feedback (Liam, 2026-09-06 13:20)
+
+- [ ] AR.1 - [FE/BE] Port the reworked Notifications page from Claude Design (left rail with Views All/Unread/Past and Kinds, Email preferences in the rail foot, phone track plus Filters sheet) over the shipped /notifications.
+- [ ] AR.2 - [BE/FE] Port Messages for clients from the portal design (org channel with the studio, request threads, unread, composer with attachments and voice notes) plus a studio inbox; needs the conversations model finished (conversationParticipants, request_thread and org_channel types), portal and admin APIs, MCP parity, emails for new messages.
+- [x] AR.3 - [Design] Leads, Calls and Deals prototypes approved by Liam as-is.
+- [ ] AR.4 - [Design] Proposals individual page (editor) needs a lot more work; redesign in Claude Design before any port.
+- [ ] AR.5 - [Design then FE] Two rules everywhere: filters in a left rail on every list page; headline feature cards consistent across pages (same anatomy, domain accent only). Apply in Claude Design to schedules, contracts, proposals and any other module that diverges, then port.
+- [ ] AR.6 - [BE/FE] Editable preview: 'Act as client' mode for super admins so Liam can edit, submit and approve while previewing a client, with audit entries naming the admin acting on behalf of the org and a visible mode banner. Depends on the client-walk fix re-land (server-side audience).
+- [ ] AR.7 - [FE] Re-land the reverted client-walk fix (PP.5) with the diagnosis fix applied (move resolvePinnedCurrency, asCurrencyCode and BASE_CURRENCY into the server-safe lib/currency.ts), a QA render check before push and the post-deploy health probe.
+
 ## Client library and catalogue (Liam, 2026-09-06)
 
 - [ ] CL.1 - [Design first, then FE/BE] **Files as a small Google Drive with threads.** Folders per client (Deliverables, Brand, References, Uploads), drag-and-drop uploads from the client, a comment thread per file (reuse the request thread composer and the messages table with a file target), versions optional. Liam: "i'd like to give them a small version of like google drive but with threads so they can upload docs for us there." Design in Claude Design alongside the Clients pages; the current /files page (list, upload, download) stays until then.
