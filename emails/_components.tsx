@@ -1,73 +1,143 @@
 /**
- * Shared building blocks for every Tahi email template.
+ * Shared building blocks for every Tahi email template: the "Studio Ledger"
+ * email system.
  *
- * Email clients are weird. We use inline styles, table-friendly layouts,
- * brand colours from the Tahi token list, and the leaf radius
- * (`0 16px 0 16px`) on primary buttons + cards. Most desktop and mobile
- * clients respect asymmetric border-radius now, so the leaf signature
- * survives. Outlook flattens it to a regular box, which still reads fine.
+ * Every email reads, top to bottom:
  *
- * The visual language mirrors the proposal viewer cover: a brand-glass
- * header band with two soft radial glows on a brand-green base, the
- * Tahi Studio wordmark in white, asymmetric leaf radius on the band's
- * bottom-right corner. Every primary CTA is a gradient leaf button.
+ *   EmailShell            cream page, one centred 560px column
+ *     EmailCard           white card, hairline border, leaf radius, clipped
+ *       EmailNav          forest band: white wordmark left, green label right
+ *       EmailHero         kicker, H1, opening paragraph
+ *       EmailBody         ledger rows, note boxes, facts, quotes, steps, code,
+ *                         buttons
+ *       SignOff           closing, bold name, "Tahi Studio"
+ *   EmailFooter           outside the card: wordmark, studio line, audience
+ *                         line, links
  *
- * The `Button` here renders as an anchor styled like a button, since real
- * <button> elements are stripped or restyled by many clients.
+ * Email clients are unforgiving, so everything that matters is inline: table
+ * layout through the React Email primitives (Section, Row, Column), px values,
+ * a web-safe font stack with Manrope first, no CSS variables, no flexbox. The
+ * one <style> block (EMAIL_RESPONSIVE_CSS) only carries the mobile reflow, and
+ * a client that drops it still gets a correct desktop email.
  *
- * Brand palette (do not invent new hexes):
- *   bg          #FFFFFF                   page #f5f7f5
- *   text        #121A0F                   muted #5a6657   subtle #8a9987
- *   brand       #5A824E                   dark #425F39    light #7aab6b
- *   brand-50    #f0f7ee                   100 #dcefd8
- *   border      #d4e0d0                   subtle #e8f0e6
+ * The leaf radius (0 12px 0 12px) appears once per email, on the primary
+ * button, and the card carries the larger leaf (0 20px 0 20px). Clients that
+ * ignore border-radius degrade to square corners, which still reads fine.
+ *
+ * Legacy names (EmailHeader, EmailEyebrow, DetailCard, DetailRow, MessageBlock,
+ * EmailBanner, EmailFootnote) are kept as thin wrappers over the new primitives
+ * so every template compiles while it is ported.
  */
-import type { ReactNode } from 'react'
-import { Container, Heading, Hr, Link, Section, Text } from '@react-email/components'
+import { Children, isValidElement, type ReactNode } from 'react'
+import {
+  Body,
+  Column,
+  Container,
+  Head,
+  Heading,
+  Html,
+  Img,
+  Link,
+  Preview,
+  Row,
+  Section,
+  Text,
+} from '@react-email/components'
 import { publicUrl } from '@/lib/app-url'
 import type { InvoiceHowToPay } from '@/lib/invoice-how-to-pay'
 
+// Studio Ledger tokens. Verbatim from the design; the legacy keys at the bottom
+// of the object are aliases so un-ported templates keep compiling.
 export const EMAIL_TOKENS = {
-  bg: '#f5f7f5',
+  page: '#F7F6F3',
   surface: '#ffffff',
-  text: '#121A0F',
-  textMuted: '#5a6657',
-  textSubtle: '#8a9987',
+  ink: '#121A0F',
+  body: '#3B3A34',
+  muted: '#5D5B55',
+  subtle: '#8C8A83',
+  hairline: '#E8E7E3',
+  hairlineSoft: '#F0EFEB',
   brand: '#5A824E',
   brandDark: '#425F39',
-  brandDeep: '#3e5a35',
-  brandLight: '#7aab6b',
-  brandGlow: '#93c98a',
-  brand50: '#f0f7ee',
+  brand50: '#F0F7EE',
   brand100: '#dcefd8',
-  brandHaze: '#dcefd8',
-  border: '#d4e0d0',
-  borderSubtle: '#e8f0e6',
-  success: '#16a34a',
-  successBg: '#f0fdf4',
-  successBorder: '#bbf7d0',
-  warning: '#fb923c',
-  warningBg: '#fff7ed',
-  warningBorder: '#fed7aa',
-  danger: '#dc2626',
-  dangerBg: '#fef2f2',
-  dangerBorder: '#fecaca',
-  info: '#1e40af',
-  infoBg: '#eff6ff',
-  infoBorder: '#bfdbfe',
-  fontStack: 'Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  brandLight: '#7aab6b',
+  brandGlow: '#93C98A',
+  forest: '#1E2A1B',
+  forestHeading: '#FDFDFC',
+  forestBody: '#C9D6C3',
+  forestLabel: '#93C98A',
+  neutralBg: '#F4F3EF',
+  danger: '#B5473F',
+  dangerBg: '#FBF0EE',
+  amber: '#9A6A1C',
+  amberBg: '#FBF4E6',
+  fontStack: 'Manrope, Helvetica, Arial, sans-serif',
   monoStack: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace',
+  cardRadius: '0 20px 0 20px',
+  buttonRadius: '0 12px 0 12px',
+  quietRadius: '8px',
+  noteRadius: '8px',
   leafRadius: '0 16px 0 16px',
   leafRadiusSm: '0 10px 0 10px',
   leafRadiusLg: '0 24px 0 24px',
-  cardRadius: '0.75rem',
-  buttonRadius: '0 16px 0 16px',
+  maxWidth: 560,
+  // Legacy aliases. Kept so the un-ported templates compile; new work should
+  // use the names above.
+  bg: '#F7F6F3',
+  text: '#121A0F',
+  textMuted: '#5D5B55',
+  textSubtle: '#8C8A83',
+  brandDeep: '#425F39',
+  brandHaze: '#F0F7EE',
+  border: '#E8E7E3',
+  borderSubtle: '#F0EFEB',
+  success: '#425F39',
+  successBg: '#F0F7EE',
+  successBorder: '#F0F7EE',
+  warning: '#9A6A1C',
+  warningBg: '#FBF4E6',
+  warningBorder: '#FBF4E6',
+  info: '#5D5B55',
+  infoBg: '#F4F3EF',
+  infoBorder: '#F4F3EF',
 } as const
 
-// ─── Page-level wrappers ───────────────────────────────────────────────────
+/** The white "Tahi" mark with the green leaf. Transparent, so it needs a dark band. */
+export const EMAIL_WORDMARK_URL = publicUrl('/tahi-logo.png')
+
+const CONTACT_EMAIL = 'business@tahi.studio'
+
+// Padding tokens (desktop). The mobile reflow below overrides the side
+// paddings to 22px through the .tahi-pad hook.
+const PAD_X = 32
+const HERO_PADDING = `34px ${PAD_X}px 6px`
+const BODY_PADDING = `6px ${PAD_X}px 10px`
+const SIGNOFF_PADDING = `10px ${PAD_X}px 30px`
+const NAV_PADDING = `20px ${PAD_X}px`
+
+// Mobile reflow: paddings 22px, H1 21px, facts single column, buttons stacked
+// full width, code 26px. Also asks for Manrope where the client will fetch it.
+export const EMAIL_RESPONSIVE_CSS = [
+  "@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap');",
+  '@media only screen and (max-width: 600px) {',
+  '  .tahi-pad { padding-left: 22px !important; padding-right: 22px !important; }',
+  '  .tahi-h1 { font-size: 21px !important; }',
+  '  .tahi-fact { display: block !important; width: 100% !important; padding-right: 0 !important; padding-bottom: 14px !important; }',
+  '  .tahi-btn { display: block !important; width: 100% !important; box-sizing: border-box !important; margin-right: 0 !important; text-align: center !important; }',
+  '  .tahi-code { font-size: 26px !important; }',
+  '}',
+].join('\n')
+
+/** The one <style> block. Place inside <Head>. */
+export function EmailStyles() {
+  return <style dangerouslySetInnerHTML={{ __html: EMAIL_RESPONSIVE_CSS }} />
+}
+
+// Page-level wrappers
 
 export const emailBodyStyle = {
-  backgroundColor: EMAIL_TOKENS.bg,
+  backgroundColor: EMAIL_TOKENS.page,
   fontFamily: EMAIL_TOKENS.fontStack,
   margin: 0,
   padding: 0,
@@ -76,605 +146,783 @@ export const emailBodyStyle = {
 } as const
 
 export const emailContainerStyle = {
-  maxWidth: '600px',
+  maxWidth: `${EMAIL_TOKENS.maxWidth}px`,
   margin: '0 auto',
-  padding: '1.25rem 0 2rem',
-} as const
-
-// ─── Header band ──────────────────────────────────────────────────────────
-//
-// 8rem-tall brand-glass band that mirrors the proposal viewer cover:
-// brand-green base with two layered radial glows (warm white at top-right,
-// brand-light at bottom-left). The band carries the Tahi Studio wordmark
-// in white. Bottom-right leaf radius matches the rest of the brand
-// signature; the top corners stay square so the band sits flush at the top
-// of the email canvas. A subtle ring motif sits to the right edge to
-// echo the cover's "circle background element".
-//
-// Outlook flattens box-shadow and gradients; a solid brand-green fallback
-// keeps it on-brand there. Other clients render the full atmosphere.
-
-const headerBandStyle = {
-  position: 'relative' as const,
-  margin: '0 1rem',
-  padding: '1.75rem 2rem 2rem',
-  height: '8rem',
-  boxSizing: 'border-box' as const,
-  background: [
-    'radial-gradient(60% 60% at 85% 0%, rgba(255,255,255,0.22) 0%, transparent 55%)',
-    'radial-gradient(80% 60% at 0% 110%, rgba(122,170,114,0.45) 0%, transparent 60%)',
-    'linear-gradient(135deg, #5A824E 0%, #3e5a35 100%)',
-  ].join(', '),
-  backgroundColor: EMAIL_TOKENS.brand,
-  borderRadius: '0 0 16px 0',
-  boxShadow: '0 12px 28px -16px rgba(31,44,26,0.32)',
-  overflow: 'hidden' as const,
-} as const
-
-const headerInnerStyle = {
-  position: 'relative' as const,
-  zIndex: 2,
-  display: 'flex' as const,
-  flexDirection: 'column' as const,
-  alignItems: 'flex-start' as const,
-  justifyContent: 'center' as const,
-  height: '100%',
-} as const
-
-const headerWordmarkStyle = {
-  display: 'inline-flex' as const,
-  alignItems: 'center' as const,
-  gap: '0.625rem',
-  margin: 0,
-} as const
-
-const headerWordmarkTextStyle = {
-  color: '#ffffff',
-  fontSize: '1.0625rem',
-  fontWeight: 800,
-  letterSpacing: '-0.015em',
-  margin: 0,
-  textShadow: '0 1px 2px rgba(0,0,0,0.18)',
-} as const
-
-const headerEyebrowStyle = {
-  color: 'rgba(255,255,255,0.86)',
-  fontSize: '0.6875rem',
-  fontWeight: 700,
-  letterSpacing: '0.18em',
-  textTransform: 'uppercase' as const,
-  margin: '0.625rem 0 0',
-} as const
-
-// CSS-rendered ring on the right edge that echoes the proposal cover's
-// "circle background element". Pure CSS so even image-blocked email
-// clients still see the depth.
-const headerRingStyle = {
-  position: 'absolute' as const,
-  right: '-3rem',
-  top: '-3rem',
-  width: '10.5rem',
-  height: '10.5rem',
-  borderRadius: '50%',
-  border: '1px solid rgba(255,255,255,0.22)',
-  boxShadow: 'inset 0 0 0 1rem rgba(255,255,255,0.05)',
-  pointerEvents: 'none' as const,
-  zIndex: 1,
+  padding: '32px 16px 36px',
 } as const
 
 /**
- * <EmailHeader> — brand-glass band with the Tahi Studio wordmark.
- *
- * Use one per template, sitting at the very top of the shell. The optional
- * `eyebrow` line sits under the wordmark in low-contrast caps, e.g.
- * "A contract for your signature".
+ * <EmailDocument>: Html, Head (with the responsive styles), Preview, Body and
+ * the shell, in one wrapper. A template then only writes the card and footer.
  */
-export function EmailHeader({ eyebrow }: { eyebrow?: string }) {
+export function EmailDocument({ preview, children }: { preview: string; children: ReactNode }) {
   return (
-    <Section style={headerBandStyle}>
-      <span aria-hidden="true" style={headerRingStyle} />
-      <div style={headerInnerStyle}>
-        <div style={headerWordmarkStyle}>
-          {/* Text-only wordmark. The previous design used the logo image
-              for "Tahi" plus a text span for "Tahi Studio" → ended up
-              rendering "Tahi Tahi Studio". The asset at /tahi-logo.png
-              is the "Tahi" mark only (not the full lockup), so dropping
-              it and rendering the wordmark as text gives the cleanest
-              result across every email client. */}
-          <span style={headerWordmarkTextStyle}>Tahi Studio</span>
-        </div>
-        {eyebrow && <Text style={headerEyebrowStyle}>{eyebrow}</Text>}
-      </div>
+    <Html lang="en">
+      <Head>
+        <EmailStyles />
+      </Head>
+      <Preview>{preview}</Preview>
+      <Body style={emailBodyStyle}>
+        <EmailShell>{children}</EmailShell>
+      </Body>
+    </Html>
+  )
+}
+
+/** <EmailShell>: the cream page column, 560px wide, centred. */
+export function EmailShell({ children }: { children: ReactNode }) {
+  return <Container style={emailContainerStyle}>{children}</Container>
+}
+
+// The card
+
+const cardStyle = {
+  backgroundColor: EMAIL_TOKENS.surface,
+  border: `1px solid ${EMAIL_TOKENS.hairline}`,
+  borderRadius: EMAIL_TOKENS.cardRadius,
+  overflow: 'hidden' as const,
+  width: '100%',
+} as const
+
+// Blocks that bring their own padding. A card whose children are all
+// self-padded gets no inner padding; a legacy card with loose content gets a
+// comfortable default so nothing sits flush against the border.
+const SELF_PADDED = new Set<unknown>()
+
+function hasSelfPaddedChild(children: ReactNode): boolean {
+  return Children.toArray(children).some((child) => isValidElement(child) && SELF_PADDED.has(child.type))
+}
+
+/**
+ * <EmailCard>: white, hairline border, leaf radius, clipped. Children are
+ * EmailNav, EmailHero, EmailBody, DarkBand and SignOff, in that order.
+ */
+export function EmailCard({ children }: { children: ReactNode }) {
+  const padded = !hasSelfPaddedChild(children)
+  return (
+    <Section style={cardStyle}>
+      {padded ? <Pad padding={`28px ${PAD_X}px`}>{children}</Pad> : children}
     </Section>
   )
 }
 
-// ─── Surface card — the main content panel ────────────────────────────────
-
-const cardSurfaceStyle = {
-  backgroundColor: EMAIL_TOKENS.surface,
-  borderRadius: EMAIL_TOKENS.cardRadius,
-  border: `1px solid ${EMAIL_TOKENS.borderSubtle}`,
-  padding: '2rem',
-  margin: '-1.25rem 1rem 0',
-  position: 'relative' as const,
-  zIndex: 2,
-  boxShadow: '0 1px 2px rgba(31, 44, 26, 0.04), 0 12px 32px rgba(31, 44, 26, 0.06)',
-} as const
-
-export function EmailCard({ children }: { children: ReactNode }) {
-  return <Section style={cardSurfaceStyle}>{children}</Section>
+/** A padded table cell, with the mobile hook. Internal. */
+function Pad({ padding, children, style }: { padding: string; children: ReactNode; style?: React.CSSProperties }) {
+  return (
+    <Row>
+      <Column className="tahi-pad" style={{ padding, ...style }}>
+        {children}
+      </Column>
+    </Row>
+  )
 }
 
-// ─── Hero greeting + heading inside the card ──────────────────────────────
+// Nav band
 
-const headingStyle = {
-  color: EMAIL_TOKENS.text,
-  fontSize: '2rem',
-  fontWeight: 800,
-  lineHeight: 1.1,
-  letterSpacing: '-0.025em',
-  margin: '0 0 0.75rem',
-} as const
-
-const subheadingStyle = {
-  color: EMAIL_TOKENS.brand,
-  fontSize: '0.6875rem',
-  fontWeight: 700,
-  letterSpacing: '0.16em',
-  textTransform: 'uppercase' as const,
-  margin: '0 0 0.625rem',
-} as const
-
-export function EmailEyebrow({ children }: { children: ReactNode }) {
-  return <Text style={subheadingStyle}>{children}</Text>
-}
-
-export function EmailHeading({ children }: { children: ReactNode }) {
-  return <Heading as="h2" style={headingStyle}>{children}</Heading>
-}
-
-// ─── Body text ────────────────────────────────────────────────────────────
-
-const bodyTextStyle = {
-  color: EMAIL_TOKENS.textMuted,
-  fontSize: '0.9375rem',
-  lineHeight: 1.65,
-  margin: '0 0 1rem',
-} as const
-
-const subtleTextStyle = {
-  color: EMAIL_TOKENS.textSubtle,
-  fontSize: '0.8125rem',
-  lineHeight: 1.55,
-  margin: '0',
-} as const
-
-export function EmailParagraph({ children, subtle = false }: { children: ReactNode; subtle?: boolean }) {
-  return <Text style={subtle ? subtleTextStyle : bodyTextStyle}>{children}</Text>
-}
-
-// ─── Detail card — leaf-radius brand-50 surface with label/value rows ─────
-//
-// Premium upgrade: an asymmetric leaf-radius surface, brand-tinted accent
-// stripe down the left edge, generous internal padding, and a 2px brand
-// border so the card reads as a real "frame" rather than a wash. Inline
-// styles are layered through nested tables so most email clients pick up
-// the visual hierarchy even when they strip backgrounds.
-
-const detailCardStyle = {
-  position: 'relative' as const,
-  background: EMAIL_TOKENS.brand50,
-  border: `1.5px solid ${EMAIL_TOKENS.brand100}`,
-  borderLeft: `4px solid ${EMAIL_TOKENS.brand}`,
-  borderRadius: EMAIL_TOKENS.leafRadius,
-  padding: '1.5rem 1.5rem 1.375rem 1.5rem',
-  margin: '1.5rem 0',
-} as const
-
-const detailLabelStyle = {
-  color: EMAIL_TOKENS.textSubtle,
-  fontSize: '0.6875rem',
-  fontWeight: 700,
-  letterSpacing: '0.1em',
-  textTransform: 'uppercase' as const,
-  margin: '0 0 0.1875rem',
-} as const
-
-const detailLabelStyleSpaced = {
-  ...detailLabelStyle,
-  marginTop: '1rem',
-} as const
-
-const detailValueStyle = {
-  color: EMAIL_TOKENS.text,
-  fontSize: '1.0625rem',
-  fontWeight: 700,
-  lineHeight: 1.4,
-  letterSpacing: '-0.005em',
+const navLabelStyle = {
+  color: EMAIL_TOKENS.forestLabel,
+  fontSize: '11.5px',
+  fontWeight: 600,
+  letterSpacing: '0.02em',
+  lineHeight: '20px',
   margin: 0,
-} as const
-
-const detailValueMutedStyle = {
-  color: EMAIL_TOKENS.text,
-  fontSize: '0.9375rem',
-  fontWeight: 500,
-  lineHeight: 1.4,
-  margin: 0,
+  textAlign: 'right' as const,
+  whiteSpace: 'nowrap' as const,
 } as const
 
 /**
- * <DetailCard> — brand-50 leaf-radius card with a brand accent stripe on
- * the left edge. Children should be a series of <DetailRow> entries.
+ * <EmailNav>: forest band with the white wordmark on the left and a small
+ * green label on the right (the request number, "Client portal",
+ * "Invitation", "Sign in", "Task", "Studio update", "INV-0231", "Billing").
  */
-export function DetailCard({ children }: { children: ReactNode }) {
-  return <Section style={detailCardStyle}>{children}</Section>
+export function EmailNav({ label, wordmarkUrl = EMAIL_WORDMARK_URL }: { label?: string; wordmarkUrl?: string }) {
+  return (
+    <Row style={{ backgroundColor: EMAIL_TOKENS.forest }}>
+      <Column className="tahi-pad" style={{ padding: NAV_PADDING, verticalAlign: 'middle' }}>
+        <Img src={wordmarkUrl} alt="Tahi" height={20} width={52} style={{ display: 'block', height: '20px', width: 'auto' }} />
+      </Column>
+      {label ? (
+        <Column className="tahi-pad" style={{ padding: NAV_PADDING, verticalAlign: 'middle', textAlign: 'right' }}>
+          <Text style={navLabelStyle}>{label}</Text>
+        </Column>
+      ) : null}
+    </Row>
+  )
 }
 
-export function DetailRow({ label, value, hero = false, first = false, mono = false }: {
+/** Legacy alias: <EmailHeader eyebrow="..." /> renders <EmailNav label="..." />. */
+export function EmailHeader({ eyebrow }: { eyebrow?: string }) {
+  return <EmailNav label={eyebrow} />
+}
+
+// Hero
+
+/** <EmailHero>: kicker, H1 and the opening paragraph. */
+export function EmailHero({ children }: { children: ReactNode }) {
+  return <Pad padding={HERO_PADDING}>{children}</Pad>
+}
+
+export type KickerTone = 'brand' | 'danger' | 'amber' | 'neutral'
+
+const kickerColour: Record<KickerTone, string> = {
+  brand: EMAIL_TOKENS.brandDark,
+  danger: EMAIL_TOKENS.danger,
+  amber: EMAIL_TOKENS.amber,
+  neutral: EMAIL_TOKENS.subtle,
+}
+
+/** <EmailKicker>: the small uppercase line above the H1. */
+export function EmailKicker({ tone = 'brand', children }: { tone?: KickerTone; children: ReactNode }) {
+  return (
+    <Text
+      style={{
+        color: kickerColour[tone],
+        fontSize: '10.5px',
+        fontWeight: 700,
+        letterSpacing: '0.09em',
+        lineHeight: '14px',
+        textTransform: 'uppercase',
+        margin: '0 0 16px',
+      }}
+    >
+      {children}
+    </Text>
+  )
+}
+
+/** Legacy alias for <EmailKicker>. */
+export function EmailEyebrow({ children, tone }: { children: ReactNode; tone?: KickerTone }) {
+  return <EmailKicker tone={tone}>{children}</EmailKicker>
+}
+
+/** <EmailHeading>: the 24px H1. */
+export function EmailHeading({ children }: { children: ReactNode }) {
+  return (
+    <Heading
+      as="h1"
+      className="tahi-h1"
+      style={{
+        color: EMAIL_TOKENS.ink,
+        fontSize: '24px',
+        fontWeight: 600,
+        lineHeight: 1.22,
+        letterSpacing: '-0.015em',
+        margin: '0 0 14px',
+      }}
+    >
+      {children}
+    </Heading>
+  )
+}
+
+export type ParagraphVariant = 'default' | 'muted' | 'small'
+
+const paragraphStyles: Record<ParagraphVariant, React.CSSProperties> = {
+  default: { color: EMAIL_TOKENS.body, fontSize: '14.5px', fontWeight: 400, lineHeight: 1.65, margin: '0 0 14px' },
+  muted: { color: EMAIL_TOKENS.muted, fontSize: '13.5px', fontWeight: 400, lineHeight: 1.65, margin: '0 0 14px' },
+  small: { color: EMAIL_TOKENS.subtle, fontSize: '12.5px', fontWeight: 400, lineHeight: 1.6, margin: '0 0 12px' },
+}
+
+/**
+ * <EmailParagraph>: body copy. `variant` picks default, muted or small; the
+ * legacy `subtle` flag maps to small.
+ */
+export function EmailParagraph({
+  children,
+  variant,
+  subtle = false,
+  style,
+}: {
+  children: ReactNode
+  variant?: ParagraphVariant
+  subtle?: boolean
+  style?: React.CSSProperties
+}) {
+  const resolved = variant ?? (subtle ? 'small' : 'default')
+  return <Text style={{ ...paragraphStyles[resolved], ...style }}>{children}</Text>
+}
+
+// Body
+
+/** <EmailBody>: the padded area under the hero that holds the blocks. */
+export function EmailBody({ children }: { children: ReactNode }) {
+  return <Pad padding={BODY_PADDING}>{children}</Pad>
+}
+
+// Ledger rows
+
+export type LedgerTone = 'ink' | 'brand' | 'danger'
+
+const ledgerValueColour: Record<LedgerTone, string> = {
+  ink: EMAIL_TOKENS.ink,
+  brand: EMAIL_TOKENS.brandDark,
+  danger: EMAIL_TOKENS.danger,
+}
+
+/** <LedgerRows>: wraps <LedgerRow> entries; closes with a hairline. */
+export function LedgerRows({ children }: { children: ReactNode }) {
+  return (
+    <Section style={{ borderBottom: `1px solid ${EMAIL_TOKENS.hairline}`, margin: '6px 0 18px' }}>
+      {children}
+    </Section>
+  )
+}
+
+/** <LedgerRow>: label left (muted), value right (ink, bold). */
+export function LedgerRow({
+  label,
+  value,
+  tone = 'ink',
+  mono = false,
+}: {
+  label: ReactNode
+  value: ReactNode
+  tone?: LedgerTone
+  mono?: boolean
+}) {
+  return (
+    <Row style={{ borderTop: `1px solid ${EMAIL_TOKENS.hairline}` }}>
+      <Column style={{ padding: '11px 12px 11px 0', verticalAlign: 'top', width: '38%' }}>
+        <Text style={{ color: EMAIL_TOKENS.muted, fontSize: '13.5px', fontWeight: 500, lineHeight: 1.45, margin: 0 }}>
+          {label}
+        </Text>
+      </Column>
+      <Column style={{ padding: '11px 0', verticalAlign: 'top', textAlign: 'right' }}>
+        <Text
+          style={{
+            color: ledgerValueColour[tone],
+            fontSize: '13.5px',
+            fontWeight: 600,
+            lineHeight: 1.45,
+            margin: 0,
+            ...(mono ? { fontFamily: EMAIL_TOKENS.monoStack, letterSpacing: '0.02em' } : {}),
+          }}
+        >
+          {value}
+        </Text>
+      </Column>
+    </Row>
+  )
+}
+
+/** Legacy: <DetailCard> is a <LedgerRows>. */
+export function DetailCard({ children }: { children: ReactNode }) {
+  return <LedgerRows>{children}</LedgerRows>
+}
+
+/** Legacy: <DetailRow> is a <LedgerRow>; `hero` lifts the value to brand dark. */
+export function DetailRow({
+  label,
+  value,
+  hero = false,
+  mono = false,
+}: {
   label: string
   value: ReactNode
   hero?: boolean
   first?: boolean
   mono?: boolean
 }) {
-  const valueStyle: React.CSSProperties = {
-    ...(hero ? detailValueStyle : detailValueMutedStyle),
-    ...(mono ? { fontFamily: EMAIL_TOKENS.monoStack, letterSpacing: '0.02em' } : {}),
-  }
-  return (
-    <>
-      <Text style={first ? detailLabelStyle : detailLabelStyleSpaced}>{label}</Text>
-      <Text style={valueStyle}>{value}</Text>
-    </>
-  )
+  return <LedgerRow label={label} value={value} tone={hero ? 'brand' : 'ink'} mono={mono} />
 }
 
-// ─── How to pay: bank transfer details, when there is no pay page ─────────
-//
-// A Xero-rail invoice has no pay link until Liam approves it inside Xero, and
-// the push holds every dashboard-raised invoice at DRAFT on purpose, so "no
-// link" is where each of those bills STARTS rather than an edge case. Without
-// this block the client receives a real invoice, a real due date and nothing
-// to act on but a reply.
-//
-// The caller decides whether to render it (see hasBankDestination): a "How to
-// pay" heading over a reference with no account to pay into reads as a broken
-// template to the person holding the bill.
-//
-// Amount and due date are deliberately NOT repeated here. Both already sit in
-// the DetailCard above this block in every template that uses it, and a second
-// copy is a second thing that can disagree.
+// Note box
 
-export function HowToPayBlock({ howToPay }: { howToPay: InvoiceHowToPay }) {
-  const rows: Array<{ label: string; value: string; mono?: boolean }> = []
-  if (howToPay.bankName) rows.push({ label: 'Bank', value: howToPay.bankName })
-  if (howToPay.accountName) rows.push({ label: 'Account name', value: howToPay.accountName })
-  if (howToPay.accountNumber) {
-    rows.push({ label: 'Account number', value: howToPay.accountNumber, mono: true })
-  }
-  rows.push({ label: 'Reference', value: howToPay.reference, mono: true })
+export type NoteTone = 'brand' | 'neutral' | 'amber' | 'danger'
 
-  return (
-    <>
-      <EmailEyebrow>How to pay</EmailEyebrow>
-      <DetailCard>
-        {rows.map((row, i) => (
-          <DetailRow
-            key={row.label}
-            first={i === 0}
-            label={row.label}
-            value={row.value}
-            mono={row.mono}
-          />
-        ))}
-      </DetailCard>
-      <EmailParagraph subtle>{howToPay.hint}</EmailParagraph>
-    </>
-  )
+const noteBg: Record<NoteTone, string> = {
+  brand: EMAIL_TOKENS.brand50,
+  neutral: EMAIL_TOKENS.neutralBg,
+  amber: EMAIL_TOKENS.amberBg,
+  danger: EMAIL_TOKENS.dangerBg,
 }
 
-// ─── Custom message block — used when sender attaches a personal note ─────
+const noteTitleColour: Record<NoteTone, string> = {
+  brand: EMAIL_TOKENS.brandDark,
+  neutral: EMAIL_TOKENS.ink,
+  amber: EMAIL_TOKENS.amber,
+  danger: EMAIL_TOKENS.danger,
+}
 
-const messageBlockStyle = {
-  background: EMAIL_TOKENS.surface,
-  border: `1px dashed ${EMAIL_TOKENS.border}`,
-  borderRadius: '0.625rem',
-  padding: '1rem 1.125rem',
-  margin: '1.25rem 0',
-} as const
-
-const messageBlockLabelStyle = {
-  color: EMAIL_TOKENS.brand,
-  fontSize: '0.6875rem',
-  fontWeight: 700,
-  letterSpacing: '0.1em',
-  textTransform: 'uppercase' as const,
-  margin: '0 0 0.375rem',
-} as const
-
-const messageBlockBodyStyle = {
-  color: EMAIL_TOKENS.text,
-  fontSize: '0.9375rem',
-  lineHeight: 1.6,
-  margin: 0,
-  whiteSpace: 'pre-wrap' as const,
-  fontStyle: 'italic' as const,
-} as const
-
-export function MessageBlock({ fromName, message }: { fromName: string; message: string }) {
+/** <NoteBox>: tinted box with an optional bold title and a short paragraph. */
+export function NoteBox({ tone = 'brand', title, children }: { tone?: NoteTone; title?: ReactNode; children: ReactNode }) {
   return (
-    <Section style={messageBlockStyle}>
-      <Text style={messageBlockLabelStyle}>A note from {fromName}</Text>
-      <Text style={messageBlockBodyStyle}>{message}</Text>
+    <Section style={{ backgroundColor: noteBg[tone], borderRadius: EMAIL_TOKENS.noteRadius, margin: '0 0 16px' }}>
+      <Row>
+        <Column style={{ padding: '14px 18px' }}>
+          {title ? (
+            <Text style={{ color: noteTitleColour[tone], fontSize: '13.5px', fontWeight: 700, lineHeight: 1.45, margin: '0 0 4px' }}>
+              {title}
+            </Text>
+          ) : null}
+          <Text style={{ color: EMAIL_TOKENS.body, fontSize: '13.5px', fontWeight: 400, lineHeight: 1.6, margin: 0 }}>
+            {children}
+          </Text>
+        </Column>
+      </Row>
     </Section>
   )
 }
 
-// ─── Buttons ──────────────────────────────────────────────────────────────
-//
-// The primary CTA is the moment that earns the email. Bigger padding,
-// gradient brand surface, leaf radius, soft brand-glow shadow. Outlook
-// strips gradients, so we set both `backgroundColor` (solid brand) and
-// `background` (gradient) — the cascade lands on the gradient where
-// supported and the solid colour everywhere else.
+const bannerTone: Record<'success' | 'warning' | 'danger' | 'info', NoteTone> = {
+  success: 'brand',
+  warning: 'amber',
+  danger: 'danger',
+  info: 'neutral',
+}
 
-const primaryButtonBase = {
-  display: 'inline-block' as const,
-  fontSize: '1rem',
-  fontWeight: 700,
-  letterSpacing: '-0.005em',
-  padding: '1rem 2.25rem',
-  borderRadius: EMAIL_TOKENS.buttonRadius,
-  textDecoration: 'none',
-  boxShadow: '0 8px 22px -6px rgba(90, 130, 78, 0.45), 0 2px 4px rgba(31, 44, 26, 0.08)',
-  textAlign: 'center' as const,
-  minWidth: '12rem',
-} as const
+/** Legacy: <EmailBanner kind> is a <NoteBox tone>. */
+export function EmailBanner({ kind, children }: { kind: 'success' | 'warning' | 'danger' | 'info'; children: ReactNode }) {
+  return <NoteBox tone={bannerTone[kind]}>{children}</NoteBox>
+}
 
-export function PrimaryButton({ href, children, variant = 'brand' }: {
-  href: string
-  children: ReactNode
-  variant?: 'brand' | 'warning' | 'danger'
+// Facts
+
+/** <Facts>: two columns of <Fact>; single column on mobile. */
+export function Facts({ children }: { children: ReactNode }) {
+  return <Row style={{ margin: '4px 0 14px' }}>{children}</Row>
+}
+
+/** <Fact>: uppercase label, 22px value, small sub line. */
+export function Fact({ label, value, sub }: { label: ReactNode; value: ReactNode; sub?: ReactNode }) {
+  return (
+    <Column className="tahi-fact" style={{ width: '50%', verticalAlign: 'top', paddingRight: '16px' }}>
+      <Text style={{ color: EMAIL_TOKENS.subtle, fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.08em', lineHeight: '14px', textTransform: 'uppercase', margin: '0 0 6px' }}>
+        {label}
+      </Text>
+      <Text style={{ color: EMAIL_TOKENS.ink, fontSize: '22px', fontWeight: 600, lineHeight: 1.2, letterSpacing: '-0.01em', margin: '0 0 4px' }}>
+        {value}
+      </Text>
+      {sub ? (
+        <Text style={{ color: EMAIL_TOKENS.muted, fontSize: '12.5px', fontWeight: 400, lineHeight: 1.5, margin: 0 }}>{sub}</Text>
+      ) : null}
+    </Column>
+  )
+}
+
+// Person plus quote
+
+function initialsOf(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('')
+}
+
+/** <PersonQuote>: 40px avatar (image or initials), bold name, small quote. */
+export function PersonQuote({
+  name,
+  quote,
+  avatarUrl,
+  initials,
+}: {
+  name: string
+  quote: ReactNode
+  avatarUrl?: string | null
+  initials?: string
 }) {
-  const palette =
-    variant === 'warning'
-      ? {
-          bg: EMAIL_TOKENS.warning,
-          gradient: 'linear-gradient(135deg, #fbbf24 0%, #fb923c 100%)',
-          color: '#ffffff',
-          glow: '0 8px 22px -6px rgba(251, 146, 60, 0.45), 0 2px 4px rgba(31, 44, 26, 0.08)',
-        }
-      : variant === 'danger'
-        ? {
-            bg: EMAIL_TOKENS.danger,
-            gradient: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)',
-            color: '#ffffff',
-            glow: '0 8px 22px -6px rgba(220, 38, 38, 0.45), 0 2px 4px rgba(31, 44, 26, 0.08)',
-          }
-        : {
-            bg: EMAIL_TOKENS.brand,
-            gradient: 'linear-gradient(135deg, #5A824E 0%, #425F39 100%)',
-            color: '#ffffff',
-            glow: '0 8px 22px -6px rgba(90, 130, 78, 0.45), 0 2px 4px rgba(31, 44, 26, 0.08)',
-          }
-
+  const fallback = initials ?? initialsOf(name)
   return (
-    <Section style={{ textAlign: 'center' as const, margin: '1.75rem 0 1rem' }}>
-      <Link
-        href={href}
-        style={{
-          ...primaryButtonBase,
-          backgroundColor: palette.bg,
-          background: palette.gradient,
-          color: palette.color,
-          boxShadow: palette.glow,
-        }}
-      >
-        {children}
-      </Link>
+    <Row style={{ margin: '4px 0 16px' }}>
+      <Column style={{ width: '52px', verticalAlign: 'top', paddingRight: '12px' }}>
+        {avatarUrl ? (
+          <Img src={avatarUrl} alt={name} width={40} height={40} style={{ display: 'block', width: '40px', height: '40px', borderRadius: '50%' }} />
+        ) : (
+          <span
+            style={{
+              display: 'inline-block',
+              width: '40px',
+              height: '40px',
+              lineHeight: '40px',
+              borderRadius: '50%',
+              backgroundColor: EMAIL_TOKENS.brandDark,
+              color: '#ffffff',
+              fontSize: '13px',
+              fontWeight: 700,
+              textAlign: 'center',
+            }}
+          >
+            {fallback}
+          </span>
+        )}
+      </Column>
+      <Column style={{ verticalAlign: 'top' }}>
+        <Text style={{ color: EMAIL_TOKENS.ink, fontSize: '13.5px', fontWeight: 700, lineHeight: 1.4, margin: '0 0 3px' }}>{name}</Text>
+        <Text style={{ color: EMAIL_TOKENS.muted, fontSize: '12.5px', fontWeight: 400, lineHeight: 1.55, margin: 0, whiteSpace: 'pre-wrap' }}>
+          {quote}
+        </Text>
+      </Column>
+    </Row>
+  )
+}
+
+// Block quote
+
+/** <BlockQuote>: 2px brand rule, body text, small attribution. */
+export function BlockQuote({ children, attribution }: { children: ReactNode; attribution?: ReactNode }) {
+  return (
+    <Row style={{ margin: '4px 0 16px' }}>
+      <Column style={{ borderLeft: `2px solid ${EMAIL_TOKENS.brand}`, padding: '2px 0 2px 16px' }}>
+        <Text style={{ color: EMAIL_TOKENS.body, fontSize: '14.5px', fontWeight: 400, lineHeight: 1.65, margin: 0, whiteSpace: 'pre-wrap' }}>
+          {children}
+        </Text>
+        {attribution ? (
+          <Text style={{ color: EMAIL_TOKENS.subtle, fontSize: '12px', fontWeight: 500, lineHeight: 1.5, margin: '8px 0 0' }}>{attribution}</Text>
+        ) : null}
+      </Column>
+    </Row>
+  )
+}
+
+/** Legacy: <MessageBlock fromName message> is a <BlockQuote> attributed to the sender. */
+export function MessageBlock({ fromName, message }: { fromName: string; message: string }) {
+  return <BlockQuote attribution={fromName}>{message}</BlockQuote>
+}
+
+// Numbered steps
+
+/** <Steps>: wraps <Step> entries and draws the hairline between them. */
+export function Steps({ children }: { children: ReactNode }) {
+  const items = Children.toArray(children)
+  return (
+    <Section style={{ margin: '4px 0 16px' }}>
+      {items.map((child, i) =>
+        i === 0 ? (
+          child
+        ) : (
+          <Row key={i} style={{ borderTop: `1px solid ${EMAIL_TOKENS.hairline}` }}>
+            <Column>{child}</Column>
+          </Row>
+        ),
+      )}
     </Section>
   )
 }
 
-const secondaryButtonBase = {
-  display: 'inline-block',
-  fontSize: '0.875rem',
+/** <Step>: round brand-50 badge with the number, bold title, muted detail. */
+export function Step({ n, title, detail }: { n: number | string; title: ReactNode; detail?: ReactNode }) {
+  return (
+    <Row>
+      <Column style={{ width: '34px', verticalAlign: 'top', padding: '12px 12px 12px 0' }}>
+        <span
+          style={{
+            display: 'inline-block',
+            width: '22px',
+            height: '22px',
+            lineHeight: '22px',
+            borderRadius: '50%',
+            backgroundColor: EMAIL_TOKENS.brand50,
+            color: EMAIL_TOKENS.brandDark,
+            fontSize: '11.5px',
+            fontWeight: 700,
+            textAlign: 'center',
+          }}
+        >
+          {n}
+        </span>
+      </Column>
+      <Column style={{ verticalAlign: 'top', padding: '12px 0' }}>
+        <Text style={{ color: EMAIL_TOKENS.ink, fontSize: '13.5px', fontWeight: 700, lineHeight: 1.45, margin: '0 0 2px' }}>{title}</Text>
+        {detail ? (
+          <Text style={{ color: EMAIL_TOKENS.muted, fontSize: '12.5px', fontWeight: 400, lineHeight: 1.55, margin: 0 }}>{detail}</Text>
+        ) : null}
+      </Column>
+    </Row>
+  )
+}
+
+// Code box
+
+/** <CodeBox>: a one-time code, 30px, tabular, letter-spaced, centred. */
+export function CodeBox({ code }: { code: string }) {
+  return (
+    <Section style={{ border: `1px solid ${EMAIL_TOKENS.hairline}`, borderRadius: '8px', margin: '4px 0 16px' }}>
+      <Row>
+        <Column style={{ padding: '22px', textAlign: 'center' }}>
+          <Text
+            className="tahi-code"
+            style={{
+              color: EMAIL_TOKENS.ink,
+              fontSize: '30px',
+              fontWeight: 600,
+              letterSpacing: '0.3em',
+              lineHeight: 1.2,
+              fontVariantNumeric: 'tabular-nums',
+              margin: 0,
+              textAlign: 'center',
+              textIndent: '0.3em',
+            }}
+          >
+            {code}
+          </Text>
+        </Column>
+      </Row>
+    </Section>
+  )
+}
+
+// Dark band
+
+/** <DarkBand>: forest section with kicker, H1, paragraph and a white button. */
+export function DarkBand({
+  kicker,
+  heading,
+  children,
+  buttonLabel,
+  buttonHref,
+}: {
+  kicker?: ReactNode
+  heading: ReactNode
+  children?: ReactNode
+  buttonLabel?: string
+  buttonHref?: string
+}) {
+  return (
+    <Row style={{ backgroundColor: EMAIL_TOKENS.forest }}>
+      <Column className="tahi-pad" style={{ padding: `28px ${PAD_X}px` }}>
+        {kicker ? (
+          <Text style={{ color: EMAIL_TOKENS.forestLabel, fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.09em', lineHeight: '14px', textTransform: 'uppercase', margin: '0 0 14px' }}>
+            {kicker}
+          </Text>
+        ) : null}
+        <Heading
+          as="h2"
+          className="tahi-h1"
+          style={{ color: EMAIL_TOKENS.forestHeading, fontSize: '24px', fontWeight: 600, lineHeight: 1.22, letterSpacing: '-0.015em', margin: '0 0 12px' }}
+        >
+          {heading}
+        </Heading>
+        {children ? (
+          <Text style={{ color: EMAIL_TOKENS.forestBody, fontSize: '14.5px', fontWeight: 400, lineHeight: 1.65, margin: '0 0 18px' }}>{children}</Text>
+        ) : null}
+        {buttonLabel && buttonHref ? (
+          <PrimaryButton href={buttonHref} variant="onDark">
+            {buttonLabel}
+          </PrimaryButton>
+        ) : null}
+      </Column>
+    </Row>
+  )
+}
+
+// Buttons
+
+export type ButtonVariant = 'brand' | 'quiet' | 'onDark' | 'warning' | 'danger'
+
+const buttonBase = {
+  display: 'inline-block' as const,
+  fontFamily: EMAIL_TOKENS.fontStack,
+  fontSize: '13.5px',
   fontWeight: 600,
-  padding: '0.75rem 1.25rem',
-  borderRadius: '0.5rem',
+  lineHeight: '18px',
+  padding: '13px 22px',
   textDecoration: 'none',
-  backgroundColor: EMAIL_TOKENS.surface,
-  color: EMAIL_TOKENS.textMuted,
-  border: `1px solid ${EMAIL_TOKENS.border}`,
+  textAlign: 'center' as const,
+  margin: '4px 14px 10px 0',
+  verticalAlign: 'middle' as const,
 } as const
 
+const buttonVariants: Record<ButtonVariant, React.CSSProperties> = {
+  brand: { backgroundColor: EMAIL_TOKENS.brandDark, color: '#ffffff', borderRadius: EMAIL_TOKENS.buttonRadius },
+  // Legacy tones. The design has one primary button, so both land on brand dark.
+  warning: { backgroundColor: EMAIL_TOKENS.brandDark, color: '#ffffff', borderRadius: EMAIL_TOKENS.buttonRadius },
+  danger: { backgroundColor: EMAIL_TOKENS.brandDark, color: '#ffffff', borderRadius: EMAIL_TOKENS.buttonRadius },
+  quiet: {
+    backgroundColor: 'transparent',
+    color: EMAIL_TOKENS.ink,
+    border: `1px solid ${EMAIL_TOKENS.hairline}`,
+    borderRadius: EMAIL_TOKENS.quietRadius,
+    padding: '12px 21px',
+  },
+  onDark: { backgroundColor: '#ffffff', color: EMAIL_TOKENS.forest, borderRadius: EMAIL_TOKENS.buttonRadius },
+}
+
+/** <Buttons>: the row that holds a <PrimaryButton> and a <SecondaryLink>. */
+export function Buttons({ children }: { children: ReactNode }) {
+  return (
+    <Row style={{ margin: '6px 0 8px' }}>
+      <Column style={{ verticalAlign: 'middle' }}>{children}</Column>
+    </Row>
+  )
+}
+
+/**
+ * <PrimaryButton>: brand dark, white text, the one leaf on the page. `quiet`
+ * is a hairline-bordered text button; `onDark` is the white button for a
+ * <DarkBand>.
+ */
+export function PrimaryButton({ href, children, variant = 'brand' }: { href: string; children: ReactNode; variant?: ButtonVariant }) {
+  return (
+    <Link href={href} className="tahi-btn" style={{ ...buttonBase, ...buttonVariants[variant] }}>
+      {children}
+    </Link>
+  )
+}
+
+/** <SecondaryLink>: brand dark text link that sits beside the button. */
 export function SecondaryLink({ href, children }: { href: string; children: ReactNode }) {
-  return <Link href={href} style={secondaryButtonBase}>{children}</Link>
+  return (
+    <Link
+      href={href}
+      className="tahi-btn"
+      style={{
+        display: 'inline-block',
+        fontFamily: EMAIL_TOKENS.fontStack,
+        color: EMAIL_TOKENS.brandDark,
+        fontSize: '13.5px',
+        fontWeight: 600,
+        lineHeight: '18px',
+        padding: '13px 0',
+        margin: '4px 14px 10px 0',
+        textDecoration: 'none',
+        verticalAlign: 'middle',
+      }}
+    >
+      {children}
+    </Link>
+  )
 }
 
-// ─── Footnote — small, low-contrast helper text under the CTA ─────────────
-//
-// Upgrade: instead of loose plain text, the footnote now sits on a
-// brand-50 leaf-radius surface so the cryptographic detail reads as a
-// considered footer rather than fine-print noise. Monospace ranges (e.g.
-// "SHA-256") are caller's responsibility: pass them as <code> children.
+// Footnote and mono
 
-const footnoteStyle = {
-  color: EMAIL_TOKENS.textMuted,
-  fontSize: '0.75rem',
-  lineHeight: 1.6,
-  margin: '1.5rem 0 0',
-  textAlign: 'left' as const,
-} as const
-
-const footnoteSurfaceStyle = {
-  background: EMAIL_TOKENS.brand50,
-  border: `1px solid ${EMAIL_TOKENS.brand100}`,
-  borderRadius: EMAIL_TOKENS.leafRadiusSm,
-  padding: '0.875rem 1rem',
-  margin: '1.5rem 0 0',
-} as const
-
-const footnoteSurfaceTextStyle = {
-  ...footnoteStyle,
-  margin: 0,
-} as const
-
+/** <EmailFootnote>: small helper text; `framed` puts it in a neutral <NoteBox>. */
 export function EmailFootnote({ children, framed = false }: { children: ReactNode; framed?: boolean }) {
-  if (framed) {
-    return (
-      <Section style={footnoteSurfaceStyle}>
-        <Text style={footnoteSurfaceTextStyle}>{children}</Text>
-      </Section>
-    )
-  }
-  return <Text style={footnoteStyle}>{children}</Text>
+  if (framed) return <NoteBox tone="neutral">{children}</NoteBox>
+  return <EmailParagraph variant="small">{children}</EmailParagraph>
 }
 
-/** Inline monospace span for cryptographic identifiers, IDs etc inside a footnote. */
+/** Inline monospace span for identifiers and references. */
 export function Mono({ children }: { children: ReactNode }) {
   return (
-    <span style={{
-      fontFamily: EMAIL_TOKENS.monoStack,
-      fontSize: '0.75rem',
-      letterSpacing: '0.02em',
-      color: EMAIL_TOKENS.brandDark,
-      fontWeight: 600,
-    }}>
+    <span style={{ fontFamily: EMAIL_TOKENS.monoStack, fontSize: '12.5px', letterSpacing: '0.02em', color: EMAIL_TOKENS.brandDark, fontWeight: 600 }}>
       {children}
     </span>
   )
 }
 
-// ─── Footer ───────────────────────────────────────────────────────────────
+// How to pay: bank transfer details, when there is no pay page.
 //
-// Mirrored brand bar at the bottom for symmetry with the header band.
-// Footer typography elevated: studio name in the brand-dark voice, address
-// + contact line in muted, unsubscribe in subtle.
+// A Xero-rail invoice has no pay link until Liam approves it inside Xero, so
+// "no link" is where each of those bills starts. Amount and due date are not
+// repeated here: they already sit in the ledger above this block.
 
-const footerBarStyle = {
-  height: '0.5rem',
-  background: 'linear-gradient(90deg, #7aab6b 0%, #5A824E 50%, #425F39 100%)',
-  borderRadius: '16px 0 16px 0',
-  margin: '0 1rem 1rem',
-} as const
+export function HowToPayBlock({ howToPay }: { howToPay: InvoiceHowToPay }) {
+  const rows: Array<{ label: string; value: string; mono?: boolean }> = []
+  if (howToPay.bankName) rows.push({ label: 'Bank', value: howToPay.bankName })
+  if (howToPay.accountName) rows.push({ label: 'Account name', value: howToPay.accountName })
+  if (howToPay.accountNumber) rows.push({ label: 'Account number', value: howToPay.accountNumber, mono: true })
+  rows.push({ label: 'Reference', value: howToPay.reference, mono: true })
 
-const hrStyle = {
-  borderColor: EMAIL_TOKENS.borderSubtle,
-  borderTop: `1px solid ${EMAIL_TOKENS.borderSubtle}`,
-  borderBottom: 0,
-  margin: '2rem 1rem 1.25rem',
-} as const
-
-const footerStyle = {
-  padding: '0 2rem 1rem',
-  textAlign: 'center' as const,
-} as const
-
-const footerStudioStyle = {
-  color: EMAIL_TOKENS.brandDark,
-  fontSize: '0.875rem',
-  fontWeight: 800,
-  letterSpacing: '-0.015em',
-  margin: '0 0 0.25rem',
-} as const
-
-const footerLineStyle = {
-  color: EMAIL_TOKENS.textSubtle,
-  fontSize: '0.75rem',
-  lineHeight: 1.6,
-  margin: '0.125rem 0',
-} as const
-
-const footerLinkStyle = {
-  color: EMAIL_TOKENS.textMuted,
-  textDecoration: 'underline',
-  fontWeight: 600,
-} as const
-
-/**
- * <EmailFooter> — single source of truth for our sign-off block.
- *
- * Studio wordmark (brand-dark, prominent), tagline, contact + site links,
- * optional unsubscribe, and a closing brand bar that mirrors the header.
- */
-export function EmailFooter({ unsubscribeUrl }: { unsubscribeUrl?: string }) {
   return (
     <>
-      <Hr style={hrStyle} />
-      <Section style={footerStyle}>
-        <Text style={footerStudioStyle}>Tahi Studio</Text>
-        <Text style={footerLineStyle}>
-          Founder-led design and development studio
-        </Text>
-        <Text style={{ ...footerLineStyle, marginTop: '0.5rem' }}>
-          <Link href="mailto:business@tahi.studio" style={footerLinkStyle}>business@tahi.studio</Link>
-          {' '}·{' '}
-          <Link href="https://tahi.studio" style={footerLinkStyle}>tahi.studio</Link>
-        </Text>
-        {unsubscribeUrl && (
-          <Text style={{ ...footerLineStyle, marginTop: '0.625rem' }}>
-            <Link href={unsubscribeUrl} style={{ color: EMAIL_TOKENS.textSubtle, textDecoration: 'underline' }}>
-              Unsubscribe
-            </Link>
-          </Text>
-        )}
-      </Section>
-      <div style={footerBarStyle} />
+      <EmailKicker>How to pay</EmailKicker>
+      <LedgerRows>
+        {rows.map((row) => (
+          <LedgerRow key={row.label} label={row.label} value={row.value} mono={row.mono} />
+        ))}
+      </LedgerRows>
+      <EmailParagraph variant="small">{howToPay.hint}</EmailParagraph>
     </>
   )
 }
 
-// ─── Banner — pill-shaped status chip ─────────────────────────────────────
-//
-// Upgrade: was a full-width status bar. Now reads as a tight, centred pill
-// chip with leaf radius and brand-tinted surface. Great for "Confidential"
-// or "Delivered" callouts that should sit *inside* the message, not above
-// it like a system alert.
+// Sign-off
 
-const bannerWrapStyle = {
-  textAlign: 'center' as const,
-  margin: '0 0 1.5rem',
-} as const
-
-const bannerPillStyle = {
-  display: 'inline-block' as const,
-  borderRadius: EMAIL_TOKENS.leafRadiusSm,
-  padding: '0.4375rem 0.875rem',
-  fontSize: '0.6875rem',
-  fontWeight: 700,
-  letterSpacing: '0.12em',
-  textTransform: 'uppercase' as const,
-  margin: 0,
-} as const
-
-export function EmailBanner({ kind, children }: {
-  kind: 'success' | 'warning' | 'danger' | 'info'
-  children: ReactNode
-}) {
-  const palette = (
-    kind === 'success' ? { bg: EMAIL_TOKENS.successBg, color: EMAIL_TOKENS.success, border: EMAIL_TOKENS.successBorder } :
-    kind === 'warning' ? { bg: EMAIL_TOKENS.warningBg, color: EMAIL_TOKENS.warning, border: EMAIL_TOKENS.warningBorder } :
-    kind === 'danger'  ? { bg: EMAIL_TOKENS.dangerBg,  color: EMAIL_TOKENS.danger,  border: EMAIL_TOKENS.dangerBorder } :
-                         { bg: EMAIL_TOKENS.infoBg,    color: EMAIL_TOKENS.info,    border: EMAIL_TOKENS.infoBorder }
-  )
+/** <SignOff>: closing line, bold name, then "Tahi Studio". */
+export function SignOff({ closing = 'Ngā mihi', name, studio = 'Tahi Studio' }: { closing?: string; name: string; studio?: string }) {
   return (
-    <Section style={bannerWrapStyle}>
-      <Text style={{
-        ...bannerPillStyle,
-        background: palette.bg,
-        color: palette.color,
-        border: `1px solid ${palette.border}`,
-      }}>
-        {children}
+    <Pad padding={SIGNOFF_PADDING}>
+      <Text style={{ color: EMAIL_TOKENS.body, fontSize: '14.5px', fontWeight: 400, lineHeight: 1.65, margin: 0 }}>
+        {closing}
+        <br />
+        <span style={{ color: EMAIL_TOKENS.ink, fontWeight: 700 }}>{name}</span>
+        <br />
+        {studio}
       </Text>
+    </Pad>
+  )
+}
+
+// Footer (outside the card)
+
+export type FooterAudience = 'client' | 'team' | 'auth'
+
+const footerLineStyle = {
+  color: EMAIL_TOKENS.subtle,
+  fontSize: '11.5px',
+  fontWeight: 400,
+  lineHeight: 1.6,
+  margin: '0 0 4px',
+  textAlign: 'center' as const,
+} as const
+
+const footerLinkStyle = {
+  color: EMAIL_TOKENS.muted,
+  fontSize: '11.5px',
+  fontWeight: 600,
+  textDecoration: 'none',
+} as const
+
+function audienceLine(audience: FooterAudience, recipientEmail?: string | null): string {
+  if (audience === 'team') return 'Internal. Clients never receive this email.'
+  if (audience === 'auth') return 'This is an automated message.'
+  return recipientEmail
+    ? `Sent to ${recipientEmail} because you have a Tahi account.`
+    : 'Sent to you because you have a Tahi account.'
+}
+
+/**
+ * <EmailFooter>: centred on the cream page under the card. Wordmark, the
+ * studio line (city and country only, never a street address), the audience
+ * line, and the two links (omitted on auth mail).
+ *
+ * The wordmark image is white on transparent, so on the cream page it is set
+ * as text at the same 12px height.
+ */
+export function EmailFooter({
+  audience = 'client',
+  recipientEmail,
+  settingsUrl = publicUrl('/settings'),
+  helpUrl = `mailto:${CONTACT_EMAIL}`,
+  unsubscribeUrl,
+}: {
+  audience?: FooterAudience
+  recipientEmail?: string | null
+  settingsUrl?: string
+  helpUrl?: string
+  unsubscribeUrl?: string
+}) {
+  return (
+    <Section style={{ padding: '26px 16px 0' }}>
+      <Text style={{ color: EMAIL_TOKENS.subtle, fontSize: '12px', fontWeight: 800, letterSpacing: '-0.01em', lineHeight: '12px', margin: '0 0 10px', textAlign: 'center' }}>
+        Tahi Studio
+      </Text>
+      <Text style={footerLineStyle}>Tahi Studio, Whanganui, New Zealand</Text>
+      <Text style={footerLineStyle}>{audienceLine(audience, recipientEmail)}</Text>
+      {audience !== 'auth' ? (
+        <Text style={{ ...footerLineStyle, margin: '8px 0 0' }}>
+          <Link href={settingsUrl} style={footerLinkStyle}>
+            Notification settings
+          </Link>
+          <span style={{ color: EMAIL_TOKENS.subtle, padding: '0 8px' }}>&middot;</span>
+          <Link href={helpUrl} style={footerLinkStyle}>
+            Help
+          </Link>
+          {unsubscribeUrl ? (
+            <>
+              <span style={{ color: EMAIL_TOKENS.subtle, padding: '0 8px' }}>&middot;</span>
+              <Link href={unsubscribeUrl} style={footerLinkStyle}>
+                Unsubscribe
+              </Link>
+            </>
+          ) : null}
+        </Text>
+      ) : null}
     </Section>
   )
 }
 
-// ─── Use container so consumers don't need to import it themselves ────────
-
-export function EmailShell({ children }: { children: ReactNode }) {
-  return <Container style={emailContainerStyle}>{children}</Container>
-}
+// Register the self-padded blocks so <EmailCard> knows when to stay flush.
+for (const block of [EmailNav, EmailHeader, EmailHero, EmailBody, DarkBand, SignOff]) SELF_PADDED.add(block)
