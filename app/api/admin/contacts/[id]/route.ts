@@ -16,6 +16,7 @@ import {
   normaliseEmail,
   repointContactReferences,
 } from '@/lib/contact-references'
+import { createClerkPresence } from '@/lib/clerk-presence'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type Params = { params: Promise<{ id: string }> }
@@ -325,7 +326,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 // Body (optional): { reassignTo?: contactId }
 //
 // Refused, with the reason, when the contact:
-//   - signs in (clerk_user_id set). A login is never deleted from here.
+//   - signs in: clerk_user_id is set AND Clerk still knows that user. A live
+//     login is never deleted from here. A clerk_user_id Clerk answers 404 for
+//     is STALE (the person was removed in the Clerk dashboard and this row
+//     simply still names them): the id is cleared and the delete goes ahead.
+//     Clerk unreachable keeps the refusal, because fail closed is the only
+//     safe answer to "is this a real person".
 //   - is the only primary at an organisation that still has other people,
 //     and nobody is named to take everything over. Make someone else primary
 //     first, or reassign.
@@ -366,11 +372,23 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const denied = await requireAccessToOrg(drizzle, userId, contact.orgId)
   if (denied) return denied
 
+  // A stored clerk_user_id is not proof of a login: ask Clerk.
+  let staleLogin = false
   if (contact.clerkUserId) {
-    return NextResponse.json({
-      error: `${contact.name} signs in to the portal; a contact with a login cannot be deleted. Unlink them in Clerk first.`,
-      code: 'clerk_linked',
-    }, { status: 409 })
+    const state = await createClerkPresence().userExists(contact.clerkUserId)
+    if (state === 'exists') {
+      return NextResponse.json({
+        error: `${contact.name} signs in to the portal; a contact with a login cannot be deleted. Unlink them in Clerk first.`,
+        code: 'clerk_linked',
+      }, { status: 409 })
+    }
+    if (state === 'unknown') {
+      return NextResponse.json({
+        error: `Clerk could not be reached to check whether ${contact.name} still has a login, so the delete was refused. Try again shortly.`,
+        code: 'clerk_unreachable',
+      }, { status: 409 })
+    }
+    staleLogin = true
   }
 
   const siblings = await listSiblingContacts(drizzle, contact)
@@ -410,6 +428,15 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     }
   }
 
+  // The stale id goes first and on its own, so a failure between here and the
+  // delete leaves a row that no longer claims a login nobody can use.
+  if (staleLogin) {
+    await drizzle
+      .update(schema.contacts)
+      .set({ clerkUserId: null, updatedAt: now })
+      .where(eq(schema.contacts.id, id))
+  }
+
   await drizzle.delete(schema.contacts).where(eq(schema.contacts.id, id))
 
   await logAudit(drizzle as unknown as DB, {
@@ -422,6 +449,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
       name: contact.name,
       email: contact.email,
       wasPrimary: Boolean(contact.isPrimary),
+      staleClerkUserId: staleLogin ? contact.clerkUserId : null,
       reassignedTo: target ? { id: target.id, name: target.name, email: target.email } : null,
       moved: target ? Object.fromEntries(references.counts.filter(c => c.count > 0).map(c => [c.key, c.count])) : {},
       primaryMovedTo: target && contact.isPrimary && !target.isPrimary ? target.id : null,
