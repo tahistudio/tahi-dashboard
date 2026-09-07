@@ -1,20 +1,21 @@
 /**
- * <NewRequestEmail> — admin-facing notification when a client submits a
+ * <NewRequestEmail>: admin-facing notification when a client submits a
  * request. Lands in the team inbox and the request author's confirmation.
  */
-import { Body, Head, Html, Preview } from '@react-email/components'
 import {
-  DetailCard,
-  DetailRow,
+  EmailBody,
   EmailCard,
-  EmailEyebrow,
+  EmailDocument,
   EmailFooter,
-  EmailHeader,
+  EmailHero,
   EmailHeading,
+  EmailKicker,
+  EmailNav,
   EmailParagraph,
-  EmailShell,
+  LedgerRow,
+  LedgerRows,
   PrimaryButton,
-  emailBodyStyle,
+  SecondaryLink,
 } from './_components'
 
 interface NewRequestEmailProps {
@@ -25,6 +26,8 @@ interface NewRequestEmailProps {
   submittedBy?: string
   dashboardUrl: string
   requestId: string
+  /** The per-org request number the subject quotes, e.g. 42 for REQ-42. */
+  requestNumber?: number | null
 }
 
 export function NewRequestEmail({
@@ -35,44 +38,43 @@ export function NewRequestEmail({
   submittedBy,
   dashboardUrl,
   requestId,
+  requestNumber,
 }: NewRequestEmailProps) {
   const requestUrl = `${dashboardUrl}/requests/${requestId}`
+  // The same REQ-n the subject carries. A UUID fragment is not a reference
+  // anyone can quote back, so a request without a number shows none.
+  const reference = requestNumber ? `REQ-${requestNumber}` : null
 
   return (
-    <Html>
-      <Head />
-      <Preview>{`New request: ${requestTitle}`}</Preview>
-      <Body style={emailBodyStyle}>
-        <EmailShell>
-          <EmailHeader eyebrow="New request submitted" />
+    <EmailDocument preview={`New request: ${requestTitle}`}>
+      <EmailCard>
+        <EmailNav label={reference ?? 'New request'} />
 
-          <EmailCard>
-            <EmailEyebrow>Inbox</EmailEyebrow>
-            <EmailHeading>
-              A <span style={{ color: '#5A824E' }}>new request</span> has landed
-            </EmailHeading>
+        <EmailHero>
+          <EmailKicker>New request</EmailKicker>
+          <EmailHeading>{requestTitle}</EmailHeading>
+          <EmailParagraph variant="muted">
+            {submittedBy
+              ? `${submittedBy} just submitted this for ${clientName}. Open it in Triage to take a look.`
+              : `A new request has come in for ${clientName}. Open it in Triage to take a look.`}
+          </EmailParagraph>
+        </EmailHero>
 
-            <EmailParagraph>
-              {submittedBy
-                ? `${submittedBy} just submitted a new request for ${clientName}. Open it in the dashboard to triage and assign.`
-                : `A new request has been submitted for ${clientName}. Open it in the dashboard to triage and assign.`}
-            </EmailParagraph>
+        <EmailBody>
+          <LedgerRows>
+            <LedgerRow label="Client" value={clientName} />
+            {category ? <LedgerRow label="Category" value={category} /> : null}
+            {priority ? <LedgerRow label="Priority" value={priority} /> : null}
+            {reference ? <LedgerRow label="Reference" value={reference} mono /> : null}
+          </LedgerRows>
 
-            <DetailCard>
-              <DetailRow first label="Title" value={requestTitle} hero />
-              <DetailRow label="Client" value={clientName} />
-              {category && <DetailRow label="Category" value={category} />}
-              {priority && <DetailRow label="Priority" value={priority} />}
-              <DetailRow label="Request ID" value={requestId.slice(0, 8).toUpperCase()} mono />
-            </DetailCard>
+          <PrimaryButton href={requestUrl}>Open in Triage</PrimaryButton>
+          <SecondaryLink href={`${requestUrl}?assign=me`}>Assign to me</SecondaryLink>
+        </EmailBody>
+      </EmailCard>
 
-            <PrimaryButton href={requestUrl}>Open request</PrimaryButton>
-          </EmailCard>
-
-          <EmailFooter />
-        </EmailShell>
-      </Body>
-    </Html>
+      <EmailFooter audience="team" />
+    </EmailDocument>
   )
 }
 

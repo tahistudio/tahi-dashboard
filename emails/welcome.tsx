@@ -9,21 +9,23 @@
  * expiry, or from a different account, otherwise reads as the product being
  * broken rather than the link being spent.
  */
-import { Body, Head, Html, Preview, Section, Text } from '@react-email/components'
+import { STUDIO_TIME_ZONE } from '@/lib/kickoff-slot'
 import {
-  DetailCard,
-  DetailRow,
-  EMAIL_TOKENS,
+  Buttons,
+  EmailBody,
   EmailCard,
-  EmailEyebrow,
+  EmailDocument,
   EmailFooter,
-  EmailFootnote,
-  EmailHeader,
+  EmailHero,
+  EmailKicker,
   EmailHeading,
+  EmailNav,
   EmailParagraph,
-  EmailShell,
+  LedgerRow,
+  LedgerRows,
   PrimaryButton,
-  emailBodyStyle,
+  Step,
+  Steps,
 } from './_components'
 
 interface WelcomeEmailProps {
@@ -44,44 +46,18 @@ function formatExpiry(iso: string | null | undefined): string | null {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
-    timeZone: 'UTC',
+    // The recipient reads this in New Zealand. UTC understated the last
+    // valid day by one for every expiry after 12:00 UTC.
+    timeZone: STUDIO_TIME_ZONE,
   })
 }
 
 const features: { title: string; body: string }[] = [
-  { title: 'Submit and track requests',  body: 'Brief us on a piece of work and watch it move through review, in progress, and delivered.' },
-  { title: 'Stay in the loop',           body: 'Updates land in your inbox and on the portal so nothing slips through the cracks.' },
-  { title: 'Pay invoices in a click',    body: 'Stripe-powered checkout, receipts, and a full invoice history in one tab.' },
-  { title: 'Message the team directly',  body: 'Per-request threads keep the conversation tied to the work, not buried in email.' },
+  { title: 'Submit and track requests', body: 'Brief us on a piece of work and watch it move through review, in progress, and delivered.' },
+  { title: 'Stay in the loop', body: 'Updates land in your inbox and on the portal so nothing slips through the cracks.' },
+  { title: 'Pay invoices in a click', body: 'Stripe powered checkout, receipts, and a full invoice history in one tab.' },
+  { title: 'Message the team directly', body: 'Per request threads keep the conversation tied to the work, not buried in email.' },
 ]
-
-const featureGridStyle = {
-  display: 'block' as const,
-  margin: '1.25rem 0',
-} as const
-
-const featureItemStyle = {
-  background: EMAIL_TOKENS.brand50,
-  border: `1px solid ${EMAIL_TOKENS.brand100}`,
-  borderRadius: EMAIL_TOKENS.leafRadius,
-  padding: '0.875rem 1rem',
-  marginBottom: '0.625rem',
-} as const
-
-const featureTitleStyle = {
-  color: EMAIL_TOKENS.brandDark,
-  fontSize: '0.875rem',
-  fontWeight: 700,
-  letterSpacing: '-0.005em',
-  margin: '0 0 0.25rem',
-} as const
-
-const featureBodyStyle = {
-  color: EMAIL_TOKENS.text,
-  fontSize: '0.8125rem',
-  lineHeight: 1.55,
-  margin: 0,
-} as const
 
 export function WelcomeEmail({
   contactName,
@@ -93,63 +69,55 @@ export function WelcomeEmail({
   const firstName = contactName.split(' ')[0] ?? contactName
   const expiry = formatExpiry(expiresAt)
   const bound = boundEmail?.trim() || null
+
   return (
-    <Html>
-      <Head />
-      <Preview>{`Welcome to Tahi Studio, ${firstName}`}</Preview>
-      <Body style={emailBodyStyle}>
-        <EmailShell>
-          <EmailHeader eyebrow="Welcome aboard" />
+    <EmailDocument preview={`Welcome to Tahi Studio, ${firstName}`}>
+      <EmailCard>
+        <EmailNav label="Welcome aboard" />
+        <EmailHero>
+          <EmailKicker>Hello</EmailKicker>
+          <EmailHeading>Kia ora {firstName}, your portal is ready.</EmailHeading>
+          <EmailParagraph>
+            We are delighted to have {orgName} as part of the Tahi family. Your portal is live
+            and ready, and the team is briefed on the relationship. Here is what you can do
+            from day one.
+          </EmailParagraph>
+        </EmailHero>
+        <EmailBody>
+          <Steps>
+            {features.map((f, i) => (
+              <Step key={f.title} n={i + 1} title={f.title} detail={f.body} />
+            ))}
+          </Steps>
 
-          <EmailCard>
-            <EmailEyebrow>Hello</EmailEyebrow>
-            <EmailHeading>
-              Welcome to <span style={{ color: '#5A824E' }}>Tahi Studio</span>
-            </EmailHeading>
-
-            <EmailParagraph>Hi {firstName},</EmailParagraph>
-            <EmailParagraph>
-              We are delighted to have {orgName} as part of the Tahi family. Your portal is
-              live and ready, and the team is briefed on the relationship. Here is what you
-              can do from day one.
-            </EmailParagraph>
-
-            <Section style={featureGridStyle}>
-              {features.map((f) => (
-                <Section key={f.title} style={featureItemStyle}>
-                  <Text style={featureTitleStyle}>{f.title}</Text>
-                  <Text style={featureBodyStyle}>{f.body}</Text>
-                </Section>
-              ))}
-            </Section>
-
+          <Buttons>
             <PrimaryButton href={dashboardUrl}>Open your portal</PrimaryButton>
+          </Buttons>
 
-            {bound || expiry ? (
-              <DetailCard>
-                <DetailRow label="Workspace" value={orgName} first />
-                {bound ? <DetailRow label="Invite sent to" value={bound} /> : null}
-                {expiry ? <DetailRow label="Link valid until" value={expiry} /> : null}
-              </DetailCard>
-            ) : null}
+          {bound || expiry ? (
+            <LedgerRows>
+              <LedgerRow label="Workspace" value={orgName} />
+              {bound ? <LedgerRow label="Invite sent to" value={bound} /> : null}
+              {expiry ? <LedgerRow label="Link valid until" value={expiry} /> : null}
+            </LedgerRows>
+          ) : null}
 
-            {bound ? (
-              <EmailParagraph subtle>
-                This link only works for {bound}, so forwarding it will not give anyone else
-                access. If it has stopped working, reply here and we will send a fresh one.
-              </EmailParagraph>
-            ) : null}
+          {bound ? (
+            <EmailParagraph variant="small">
+              This link only works for {bound}, so forwarding it will not give anyone else
+              access. If it has stopped working, reply here and we will send a fresh one.
+            </EmailParagraph>
+          ) : null}
 
-            <EmailFootnote>
-              Got a question or need a hand getting set up? Just reply to this email or send
-              us a message from the dashboard. We are here.
-            </EmailFootnote>
-          </EmailCard>
+          <EmailParagraph variant="small">
+            Got a question or need a hand getting set up? Just reply to this email or send us
+            a message from the dashboard. We are here.
+          </EmailParagraph>
+        </EmailBody>
+      </EmailCard>
 
-          <EmailFooter />
-        </EmailShell>
-      </Body>
-    </Html>
+      <EmailFooter audience="client" recipientEmail={bound} />
+    </EmailDocument>
   )
 }
 

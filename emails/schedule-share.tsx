@@ -1,21 +1,22 @@
 /**
- * <ScheduleShareEmail> — the "your project schedule is ready" email.
+ * <ScheduleShareEmail> - the "your project schedule is ready" email.
  */
-import { Body, Head, Html, Preview } from '@react-email/components'
+import { STUDIO_TIME_ZONE } from '@/lib/kickoff-slot'
 import {
-  DetailCard,
-  DetailRow,
+  BlockQuote,
+  EmailBody,
   EmailCard,
-  EmailEyebrow,
+  EmailDocument,
   EmailFooter,
   EmailFootnote,
-  EmailHeader,
+  EmailHero,
   EmailHeading,
+  EmailKicker,
+  EmailNav,
   EmailParagraph,
-  EmailShell,
-  MessageBlock,
+  LedgerRow,
+  LedgerRows,
   PrimaryButton,
-  emailBodyStyle,
 } from './_components'
 
 interface ScheduleShareEmailProps {
@@ -38,51 +39,41 @@ export function ScheduleShareEmail({
   targetLaunchDate,
 }: ScheduleShareEmailProps) {
   const launchLabel = targetLaunchDate
-    ? new Date(targetLaunchDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+    ? new Date(targetLaunchDate).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', timeZone: STUDIO_TIME_ZONE })
     : null
   const firstName = recipientName.split(' ')[0] ?? recipientName
 
   return (
-    <Html>
-      <Head />
-      <Preview>{`${fromName} has shared the project schedule for ${scheduleTitle}`}</Preview>
-      <Body style={emailBodyStyle}>
-        <EmailShell>
-          <EmailHeader eyebrow="Your project schedule" />
+    <EmailDocument preview={`${fromName} has shared the project schedule for ${scheduleTitle}`}>
+      <EmailCard>
+        <EmailNav label="Project schedule" />
+        <EmailHero>
+          <EmailKicker>Project schedule</EmailKicker>
+          <EmailHeading>Kia ora {firstName}, the plan is ready.</EmailHeading>
+          <EmailParagraph>
+            {fromName} has shared the project schedule below. It walks through the high-level Gantt,
+            the month by month detail, the risk register, and the RACI matrix.
+          </EmailParagraph>
+        </EmailHero>
+        <EmailBody>
+          <LedgerRows>
+            <LedgerRow label="Project" value={scheduleTitle} tone="brand" />
+            {scheduleSubtitle && <LedgerRow label="Scope" value={scheduleSubtitle} />}
+            {launchLabel && <LedgerRow label="Target launch" value={launchLabel} />}
+          </LedgerRows>
 
-          <EmailCard>
-            <EmailEyebrow>Project schedule</EmailEyebrow>
-            <EmailHeading>
-              The <span style={{ color: '#5A824E' }}>plan</span> is ready
-            </EmailHeading>
+          {customMessage && <BlockQuote attribution={fromName}>{customMessage}</BlockQuote>}
 
-            <EmailParagraph>Hi {firstName},</EmailParagraph>
-            <EmailParagraph>
-              {fromName} has shared the project schedule below. It walks through the high-level
-              Gantt, the month-by-month detail, the risk register, and the RACI matrix.
-            </EmailParagraph>
+          <PrimaryButton href={viewUrl}>View schedule</PrimaryButton>
 
-            <DetailCard>
-              <DetailRow first label="Project" value={scheduleTitle} hero />
-              {scheduleSubtitle && <DetailRow label="Scope" value={scheduleSubtitle} />}
-              {launchLabel && <DetailRow label="Target launch" value={launchLabel} />}
-            </DetailCard>
+          <EmailFootnote>
+            Anything need to shift? Reply to this email and we will update the plan together.
+          </EmailFootnote>
+        </EmailBody>
+      </EmailCard>
 
-            {customMessage && (
-              <MessageBlock fromName={fromName} message={customMessage} />
-            )}
-
-            <PrimaryButton href={viewUrl}>View schedule</PrimaryButton>
-
-            <EmailFootnote>
-              Anything need to shift? Reply to this email and we will update the plan together.
-            </EmailFootnote>
-          </EmailCard>
-
-          <EmailFooter />
-        </EmailShell>
-      </Body>
-    </Html>
+      <EmailFooter audience="client" />
+    </EmailDocument>
   )
 }
 

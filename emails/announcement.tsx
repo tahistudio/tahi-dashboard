@@ -1,26 +1,19 @@
 /**
  * <AnnouncementEmail> - the email half of a portal announcement.
  *
- * Mirrors the in-portal banner: a forest header band, a type-tinted eyebrow
- * (Info / Success / Warning / Maintenance), the announcement title, one or
- * more body paragraphs, an optional CTA button, and the quiet studio footer.
+ * Mirrors the in-portal banner with the dark band: a forest section carrying
+ * a type-tinted kicker (Info / Success / Warning / Maintenance), the
+ * announcement title, the body copy, an optional CTA button, and the quiet
+ * studio footer.
  *
  * The `type` maps onto the same four tones the announcements composer offers.
- * `maintenance` shares the warning palette (amber) since it is an operational
- * heads-up, but keeps its own eyebrow label so the intent stays clear.
+ * It tints the kicker on the forest band: green for success, amber for
+ * warning and maintenance (an operational heads-up), soft blue for info. The
+ * button is always the white onDark button, by design: a coloured button on
+ * the forest band reads as an alert rather than a note from the studio.
  */
-import { Body, Head, Html, Preview, Text } from '@react-email/components'
-import {
-  EMAIL_TOKENS,
-  EmailCard,
-  EmailFooter,
-  EmailHeader,
-  EmailHeading,
-  EmailParagraph,
-  EmailShell,
-  PrimaryButton,
-  emailBodyStyle,
-} from './_components'
+import { Fragment } from 'react'
+import { DarkBand, EmailCard, EmailDocument, EmailFooter, EmailNav, type DarkKickerTone } from './_components'
 
 export type AnnouncementEmailType = 'info' | 'success' | 'warning' | 'maintenance'
 
@@ -32,26 +25,19 @@ interface AnnouncementEmailProps {
   ctaUrl?: string | null
 }
 
-const EYEBROW: Record<AnnouncementEmailType, { label: string; color: string }> = {
-  info: { label: 'Info', color: EMAIL_TOKENS.info },
-  success: { label: 'Success', color: EMAIL_TOKENS.success },
-  warning: { label: 'Warning', color: EMAIL_TOKENS.warning },
-  maintenance: { label: 'Maintenance', color: EMAIL_TOKENS.warning },
+const KICKER: Record<AnnouncementEmailType, string> = {
+  info: 'Info',
+  success: 'Success',
+  warning: 'Warning',
+  maintenance: 'Maintenance',
 }
 
-// Map the announcement tone onto a PrimaryButton variant. Success reuses the
-// brand leaf gradient; warning/maintenance get the amber button.
-function buttonVariant(type: AnnouncementEmailType): 'brand' | 'warning' {
-  return type === 'warning' || type === 'maintenance' ? 'warning' : 'brand'
+const KICKER_TONE: Record<AnnouncementEmailType, DarkKickerTone> = {
+  info: 'info',
+  success: 'brand',
+  warning: 'amber',
+  maintenance: 'amber',
 }
-
-const eyebrowStyle = {
-  fontSize: '0.6875rem',
-  fontWeight: 700,
-  letterSpacing: '0.16em',
-  textTransform: 'uppercase' as const,
-  margin: '0 0 0.625rem',
-} as const
 
 export function AnnouncementEmail({
   title,
@@ -60,7 +46,8 @@ export function AnnouncementEmail({
   ctaLabel,
   ctaUrl,
 }: AnnouncementEmailProps) {
-  const tone = EYEBROW[type] ?? EYEBROW.info
+  const kickerLabel = KICKER[type] ?? KICKER.info
+  const kickerTone = KICKER_TONE[type] ?? KICKER_TONE.info
   // Split the body into paragraphs on blank lines so multi-paragraph
   // announcements keep their spacing in the email.
   const paragraphs = body
@@ -70,34 +57,34 @@ export function AnnouncementEmail({
   const showCta = Boolean(ctaLabel && ctaLabel.trim() && ctaUrl && ctaUrl.trim())
 
   return (
-    <Html>
-      <Head />
-      <Preview>{title}</Preview>
-      <Body style={emailBodyStyle}>
-        <EmailShell>
-          <EmailHeader eyebrow="Announcement" />
+    <EmailDocument preview={title}>
+      <EmailCard>
+        <EmailNav label="Studio update" />
+        <DarkBand
+          kicker={kickerLabel}
+          kickerTone={kickerTone}
+          heading={title}
+          buttonLabel={showCta ? (ctaLabel as string) : undefined}
+          buttonHref={showCta ? (ctaUrl as string) : undefined}
+        >
+          {paragraphs.length
+            ? paragraphs.map((p, i) => (
+                <Fragment key={p}>
+                  {i > 0 ? (
+                    <>
+                      <br />
+                      <br />
+                    </>
+                  ) : null}
+                  {p}
+                </Fragment>
+              ))
+            : body}
+        </DarkBand>
+      </EmailCard>
 
-          <EmailCard>
-            <Text style={{ ...eyebrowStyle, color: tone.color }}>{tone.label}</Text>
-            <EmailHeading>{title}</EmailHeading>
-
-            {paragraphs.length ? (
-              paragraphs.map((p, i) => <EmailParagraph key={i}>{p}</EmailParagraph>)
-            ) : (
-              <EmailParagraph>{body}</EmailParagraph>
-            )}
-
-            {showCta && (
-              <PrimaryButton href={ctaUrl as string} variant={buttonVariant(type)}>
-                {ctaLabel}
-              </PrimaryButton>
-            )}
-          </EmailCard>
-
-          <EmailFooter />
-        </EmailShell>
-      </Body>
-    </Html>
+      <EmailFooter audience="client" />
+    </EmailDocument>
   )
 }
 

@@ -1,26 +1,28 @@
 /**
- * <ContractFullySignedEmail> — covering email sent to every signer + the
+ * <ContractFullySignedEmail>: covering email sent to every signer plus the
  * contract creator the moment a contract becomes fully signed.
  *
  * The signed PDF is attached to this email by the route that sends it.
  * This template just announces the signature is complete and points the
- * recipient at both the attachment and the live public viewer.
+ * recipient at both the attachment and the live public viewer. Studio
+ * Ledger, Work family: neutral kicker, ledger rows, one View button.
  */
-import { Body, Head, Html, Preview } from '@react-email/components'
+import { STUDIO_TIME_ZONE } from '@/lib/kickoff-slot'
 import {
-  DetailCard,
-  DetailRow,
-  EmailBanner,
+  Buttons,
+  EmailBody,
   EmailCard,
-  EmailEyebrow,
+  EmailDocument,
   EmailFooter,
-  EmailFootnote,
-  EmailHeader,
   EmailHeading,
+  EmailHero,
+  EmailKicker,
+  EmailNav,
   EmailParagraph,
-  EmailShell,
+  LedgerRow,
+  LedgerRows,
+  NoteBox,
   PrimaryButton,
-  emailBodyStyle,
 } from './_components'
 
 interface Props {
@@ -49,15 +51,21 @@ const TYPE_LABEL: Record<string, string> = {
   other: 'contract',
 }
 
+/**
+ * "5 Sept 2026, 3:15 pm" in the studio's zone. The sender runs on a worker
+ * whose clock is UTC, so without the zone the stamp would be hours out.
+ */
 function formatTimestamp(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString('en-NZ', {
-      day: 'numeric', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit',
-    })
-  } catch {
-    return iso
-  }
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return date.toLocaleString('en-NZ', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: STUDIO_TIME_ZONE,
+  })
 }
 
 export function ContractFullySignedEmail({
@@ -72,58 +80,52 @@ export function ContractFullySignedEmail({
 }: Props) {
   const typeLabel = TYPE_LABEL[contractType] ?? 'contract'
   const firstName = recipientName.split(' ')[0] ?? recipientName
-  const partyList = signerNames.length > 0
-    ? signerNames.join(', ')
-    : 'all signing parties'
+  const partyList = signerNames.length > 0 ? signerNames.join(', ') : 'all signing parties'
+  const preview = pdfAttached
+    ? `${contractName} is fully signed. PDF attached.`
+    : `${contractName} is fully signed. View the signed copy.`
 
   return (
-    <Html>
-      <Head />
-      <Preview>{pdfAttached
-        ? `${contractName} is fully signed. PDF attached.`
-        : `${contractName} is fully signed. View the signed copy.`}</Preview>
-      <Body style={emailBodyStyle}>
-        <EmailShell>
-          <EmailHeader eyebrow="Contract fully signed" />
+    <EmailDocument preview={preview}>
+      <EmailCard>
+        <EmailNav label="Contract" />
+        <EmailHero>
+          <EmailKicker tone="neutral">{typeLabel}</EmailKicker>
+          <EmailHeading>
+            {recipientWasSigner
+              ? `Thanks for your signature, ${firstName}.`
+              : `Kia ora ${firstName}, your contract is fully signed.`}
+          </EmailHeading>
+          <EmailParagraph>
+            {pdfAttached
+              ? `Every signer has now added their signature, so ${contractName} is fully executed. A PDF copy of the signed agreement is attached for your records.`
+              : `Every signer has now added their signature, so ${contractName} is fully executed. View the signed agreement online via the link below, it carries every signature, the signed-on timestamps, and the audit-trail anchor.`}
+          </EmailParagraph>
+        </EmailHero>
+        <EmailBody>
+          <LedgerRows>
+            <LedgerRow label="Contract" value={contractName} tone="brand" />
+            <LedgerRow label="Type" value={typeLabel} />
+            <LedgerRow label="Signed by" value={partyList} />
+            <LedgerRow label="Fully signed at" value={formatTimestamp(signedAt)} />
+          </LedgerRows>
 
-          <EmailCard>
-            <EmailEyebrow>{typeLabel}</EmailEyebrow>
-            <EmailHeading>
-              {recipientWasSigner
-                ? <>Thanks for your <span style={{ color: '#5A824E' }}>signature</span></>
-                : <>Your contract is <span style={{ color: '#5A824E' }}>fully signed</span></>
-              }
-            </EmailHeading>
-
-            <EmailParagraph>Hi {firstName},</EmailParagraph>
-            <EmailParagraph>
-              {pdfAttached
-                ? `Every signer has now added their signature, so ${contractName} is fully executed. A PDF copy of the signed agreement is attached for your records.`
-                : `Every signer has now added their signature, so ${contractName} is fully executed. View the signed agreement online via the link below — it carries every signature, the signed-on timestamps, and the audit-trail anchor.`}
-            </EmailParagraph>
-
-            <DetailCard>
-              <DetailRow first label="Contract" value={contractName} hero />
-              <DetailRow label="Type" value={typeLabel} />
-              <DetailRow label="Signed by" value={partyList} />
-              <DetailRow label="Fully signed at" value={formatTimestamp(signedAt)} />
-            </DetailCard>
-
+          <Buttons>
             <PrimaryButton href={publicViewerUrl}>View signed contract</PrimaryButton>
+          </Buttons>
 
-            <EmailFootnote>
-              {pdfAttached
-                ? 'The attached PDF includes every signature, the signed-on timestamp, and the SHA-256 chain anchor that makes any future tampering with the original record detectable. Keep it somewhere safe.'
-                : 'The signed contract page above shows every signature, the signed-on timestamp, and the SHA-256 chain anchor that makes any future tampering with the original record detectable. Use your browser’s print-to-PDF if you need a local copy.'}
-            </EmailFootnote>
+          <EmailParagraph variant="small">
+            {pdfAttached
+              ? 'The attached PDF includes every signature, the signed-on timestamp, and the SHA-256 chain anchor that makes any future tampering with the original record detectable. Keep it somewhere safe.'
+              : 'The signed contract page above shows every signature, the signed-on timestamp, and the SHA-256 chain anchor that makes any future tampering with the original record detectable. Use print to PDF in your browser if you need a local copy.'}
+          </EmailParagraph>
 
-            <EmailBanner kind="success">Confidential to the signing parties</EmailBanner>
-          </EmailCard>
+          <NoteBox tone="brand">Confidential to the signing parties.</NoteBox>
+        </EmailBody>
+      </EmailCard>
 
-          <EmailFooter />
-        </EmailShell>
-      </Body>
-    </Html>
+      <EmailFooter audience="client" />
+    </EmailDocument>
   )
 }
 

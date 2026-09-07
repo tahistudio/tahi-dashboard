@@ -9,6 +9,7 @@ import { eq } from 'drizzle-orm'
 import { lookupOrCreatePerson } from '@/lib/people'
 import { sendEmail } from '@/lib/email'
 import ProjectEnquiryEmail from '@/emails/project-enquiry'
+import { appOrigin } from '@/lib/app-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -140,6 +141,7 @@ export async function POST(req: NextRequest) {
         brief,
         budget: body.budget?.trim() || null,
         disciplines: body.disciplines?.trim() || null,
+        leadUrl: `${appOrigin()}/leads/${id}`,
       }),
       undefined,
       { template: 'project-enquiry' },

@@ -203,6 +203,42 @@ describe('the wired event plans', () => {
     expect(plan.subject).toBe('[REQ-7] Delivered: "Fix the footer"')
   })
 
+  it('stamps the delivery with a long en-NZ date in the studio zone, not a raw ISO day', () => {
+    // 01:02 UTC on 5 September is 13:02 NZST the same day; 13:00 UTC on the
+    // 4th is already the 5th in Whanganui.
+    const sameDay = clientStatusEmailPlan({
+      status: 'delivered',
+      requestId: 'req_1',
+      requestTitle: 'Fix the footer',
+      requestNumber: 7,
+      deliveredAt: '2026-09-05T01:02:03.000Z',
+    })
+    const props = sameDay.render(target).props as Record<string, unknown>
+    expect(props.deliveredAt).toBe('5 September 2026')
+
+    const lateUtc = clientStatusEmailPlan({
+      status: 'delivered',
+      requestId: 'req_1',
+      requestTitle: 'Fix the footer',
+      requestNumber: 7,
+      deliveredAt: '2026-09-04T13:00:00.000Z',
+    })
+    expect((lateUtc.render(target).props as Record<string, unknown>).deliveredAt).toBe(
+      '5 September 2026',
+    )
+  })
+
+  it('hands the studio new-request template the same REQ-n the subject quotes', () => {
+    const plan = studioNewRequestEmailPlan({
+      requestId: '0a4f1b6c-1111-2222-3333-444444444444',
+      requestTitle: 'Fix the footer',
+      requestNumber: 42,
+      clientName: 'Acme Ltd',
+    })
+    expect(plan.subject).toBe('[REQ-42] New request from Acme Ltd: Fix the footer')
+    expect((plan.render(target).props as Record<string, unknown>).requestNumber).toBe(42)
+  })
+
   it('greets the reader and labels the company separately on a delivery', () => {
     // One value fed to both rendered "Client: Jo" under a company label, and
     // "Client: there" for a contact row with no usable name.
