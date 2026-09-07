@@ -19,7 +19,14 @@ vi.mock('drizzle-orm', () => drizzleStub())
 vi.mock('@/db/d1', () => ({ schema: schemaDouble }))
 
 import { PARENT_KEYED_TABLES } from '../refs'
-import { OrgDeleteNameMismatch, OrgDeleteRefusal, OrgNotFoundForDelete, runOrgDelete } from '../delete'
+import {
+  ClerkOrganisationDeleteFailed,
+  OrgDeleteNameMismatch,
+  OrgDeleteRefusal,
+  OrgNotFoundForDelete,
+  runOrgDelete,
+} from '../delete'
+import type { ClerkExistence, ClerkPresence } from '../delete'
 import type { DB } from '@/db/d1'
 
 const ORG = 'dummy-0000-0000-0000-000000000009'
@@ -287,5 +294,271 @@ describe('delete apply', () => {
     expect(store.notifications).toEqual([])
     expect(store.notification_preferences).toEqual([])
     expect(store.mentions).toEqual([])
+  })
+})
+
+// ── the accidental workspace ─────────────────────────────────────────────────
+//
+// The row self-serve provisioning creates when a Tahi teammate accepts a team
+// invite with no active organisation: a Clerk organisation, a D1 organisation
+// and a contact carrying the teammate's own login. The ordinary delete refuses
+// over exactly those two facts, so this is the one door that opens, and every
+// test here is about how narrow it is.
+
+const CLERK_ORG = 'org_3IyX9ULTIjV7H5kdN2rUUOKTGS6'
+const STAFF = 'staci@tahi.studio'
+
+function seedAccident(over: Record<string, unknown> = {}) {
+  seedOrg({ clerkOrgId: CLERK_ORG, ...over })
+  store.contacts = [{ id: 'c1', orgId: ORG, name: 'Staci', email: STAFF, clerkUserId: 'user_staci' }]
+  store.team_members = [{ id: 'tm1', name: 'Staci Bonnie', email: 'Staci@Tahi.Studio' }]
+}
+
+/**
+ * The refusal list, not just its first line: the clerk_org_id refusal is
+ * printed first, and the eligibility reasons sit under it.
+ */
+async function refusalLines(call: Promise<unknown>): Promise<string> {
+  try {
+    await call
+  } catch (error) {
+    if (error instanceof OrgDeleteRefusal) return error.refusals.join(' | ')
+    throw error
+  }
+  throw new Error('expected a refusal, got a plan')
+}
+
+/** A Clerk deleter that records what it was asked to remove. */
+function recordingDeleter(result: 'deleted' | 'already_gone' = 'deleted') {
+  const calls: string[] = []
+  return {
+    calls,
+    fn: async (clerkOrgId: string): Promise<'deleted' | 'already_gone'> => {
+      calls.push(clerkOrgId)
+      return result
+    },
+  }
+}
+
+describe('accidental workspace: eligibility', () => {
+  it('reports eligibility, the Clerk org id and the emails on a dry run', async () => {
+    seedAccident()
+    const plan = await runOrgDelete(db(), {
+      orgId: ORG, confirmName: NAME, dryRun: true, removeClerkOrganisation: true,
+    })
+    expect(plan.accidentalWorkspace).toMatchObject({
+      requested: true,
+      eligible: true,
+      reasons: [],
+      clerkOrgId: CLERK_ORG,
+      contactEmails: [STAFF],
+      teamEmails: [STAFF],
+      clerkResult: null,
+    })
+    expect(recorded.deletes).toEqual([])
+  })
+
+  it('matches the team member address case-insensitively', async () => {
+    seedAccident()
+    store.contacts = [{ id: 'c1', orgId: ORG, name: 'Staci', email: '  STACI@tahi.studio ', clerkUserId: 'user_staci' }]
+    const plan = await runOrgDelete(db(), {
+      orgId: ORG, confirmName: NAME, dryRun: true, removeClerkOrganisation: true,
+    })
+    expect(plan.accidentalWorkspace.eligible).toBe(true)
+  })
+
+  it('assesses the row even when the flag was never passed, so the dialog can offer it', async () => {
+    seedAccident()
+    const call = runOrgDelete(db(), { orgId: ORG, confirmName: NAME, dryRun: true })
+    await expect(call).rejects.toBeInstanceOf(OrgDeleteRefusal)
+    await expect(call).rejects.toMatchObject({
+      accidentalWorkspace: { requested: false, eligible: true, clerkOrgId: CLERK_ORG },
+    })
+  })
+
+  it('refuses the Tahi Studio organisation itself, whatever else is true', async () => {
+    const studio = 'org_tahi_studio'
+    process.env.NEXT_PUBLIC_TAHI_ORG_ID = studio
+    try {
+      seedAccident({ clerkOrgId: studio })
+      const call = runOrgDelete(db(), {
+        orgId: ORG, confirmName: NAME, dryRun: true, removeClerkOrganisation: true,
+      })
+      expect(await refusalLines(call)).toMatch(/never deletable/i)
+      expect(recorded.deletes).toEqual([])
+    } finally {
+      delete process.env.NEXT_PUBLIC_TAHI_ORG_ID
+    }
+  })
+
+  it('refuses a login that does not belong to a team member', async () => {
+    seedAccident()
+    store.contacts.push({ id: 'c2', orgId: ORG, name: 'A Client', email: 'someone@client.com', clerkUserId: 'user_client' })
+    const call = runOrgDelete(db(), {
+      orgId: ORG, confirmName: NAME, dryRun: true, removeClerkOrganisation: true,
+    })
+    expect(await refusalLines(call)).toMatch(/someone@client\.com/)
+    expect(await refusalLines(call)).toMatch(/do not belong to a Tahi team member/i)
+    expect(recorded.deletes).toEqual([])
+  })
+
+  it('refuses over a single invoice', async () => {
+    seedAccident()
+    store.invoices = [{ id: 'inv1', orgId: ORG, status: 'draft', totalUsd: 10, currency: 'USD' }]
+    const call = runOrgDelete(db(), {
+      orgId: ORG, confirmName: NAME, dryRun: true, removeClerkOrganisation: true,
+    })
+    expect(await refusalLines(call)).toMatch(/holds 1 invoice/i)
+  })
+
+  it('refuses over a rail id, which the ordinary delete only prints', async () => {
+    seedAccident({ stripeCustomerId: 'cus_test_1' })
+    const call = runOrgDelete(db(), {
+      orgId: ORG, confirmName: NAME, dryRun: true, removeClerkOrganisation: true,
+    })
+    expect(await refusalLines(call)).toMatch(/paid rail id/i)
+  })
+
+  it('refuses over a pipeline row', async () => {
+    seedAccident()
+    store.deals = [{ id: 'deal1', orgId: ORG }]
+    const call = runOrgDelete(db(), {
+      orgId: ORG, confirmName: NAME, dryRun: true, removeClerkOrganisation: true,
+    })
+    await expect(call).rejects.toThrow(/deals \(1\)/)
+    expect(recorded.deletes).toEqual([])
+  })
+
+  it('refuses over a ManyRequests id', async () => {
+    seedAccident({ manyrequestsId: '77' })
+    const call = runOrgDelete(db(), {
+      orgId: ORG, confirmName: NAME, dryRun: true, removeClerkOrganisation: true,
+    })
+    await expect(call).rejects.toThrow(/ManyRequests id/i)
+  })
+})
+
+describe('accidental workspace: apply', () => {
+  it('deletes the Clerk organisation FIRST, then the rows, and reports it', async () => {
+    seedAccident()
+    const deleter = recordingDeleter()
+    let organisationsGoneWhenClerkRan = true
+    const watcher = async (clerkOrgId: string): Promise<'deleted' | 'already_gone'> => {
+      organisationsGoneWhenClerkRan = (store.organisations ?? []).length === 0
+      return deleter.fn(clerkOrgId)
+    }
+    const plan = await runOrgDelete(db(), {
+      orgId: ORG,
+      confirmName: NAME,
+      dryRun: false,
+      removeClerkOrganisation: true,
+      deleteClerkOrganisation: watcher,
+    })
+    expect(deleter.calls).toEqual([CLERK_ORG])
+    expect(organisationsGoneWhenClerkRan).toBe(false)
+    expect(plan.accidentalWorkspace.clerkResult).toBe('deleted')
+    expect(store.organisations).toEqual([])
+    expect(store.contacts).toEqual([])
+  })
+
+  it('treats a Clerk 404 as already gone and carries on', async () => {
+    seedAccident()
+    const plan = await runOrgDelete(db(), {
+      orgId: ORG,
+      confirmName: NAME,
+      dryRun: false,
+      removeClerkOrganisation: true,
+      deleteClerkOrganisation: async () => 'already_gone',
+    })
+    expect(plan.accidentalWorkspace.clerkResult).toBe('already_gone')
+    expect(store.organisations).toEqual([])
+  })
+
+  it('aborts with nothing written when Clerk answers anything else', async () => {
+    seedAccident()
+    const call = runOrgDelete(db(), {
+      orgId: ORG,
+      confirmName: NAME,
+      dryRun: false,
+      removeClerkOrganisation: true,
+      deleteClerkOrganisation: async () => { throw new Error('clerk 500') },
+    })
+    await expect(call).rejects.toBeInstanceOf(ClerkOrganisationDeleteFailed)
+    expect(recorded.deletes).toEqual([])
+    expect(store.organisations).toHaveLength(1)
+    expect(store.contacts).toHaveLength(1)
+  })
+
+  it('aborts when no deleter was supplied at all, rather than half doing it', async () => {
+    seedAccident()
+    const call = runOrgDelete(db(), {
+      orgId: ORG, confirmName: NAME, dryRun: false, removeClerkOrganisation: true,
+    })
+    await expect(call).rejects.toBeInstanceOf(ClerkOrganisationDeleteFailed)
+    expect(store.organisations).toHaveLength(1)
+  })
+
+  it('writes nothing at all on a dry run, and never calls the deleter', async () => {
+    seedAccident()
+    const deleter = recordingDeleter()
+    await runOrgDelete(db(), {
+      orgId: ORG, confirmName: NAME, dryRun: true, removeClerkOrganisation: true, deleteClerkOrganisation: deleter.fn,
+    })
+    expect(deleter.calls).toEqual([])
+    expect(store.organisations).toHaveLength(1)
+  })
+})
+
+// ── stale Clerk ids ──────────────────────────────────────────────────────────
+//
+// The founder can delete the organisation and the user in the Clerk dashboard
+// and leave D1 naming a login nobody can use. Refusing over one of those is
+// refusing over nothing, so both refusals ask Clerk first. Unreachable keeps
+// the refusal: fail closed.
+
+function presence(org: ClerkExistence, user: ClerkExistence): ClerkPresence {
+  return { organisationExists: async () => org, userExists: async () => user }
+}
+
+describe('stale Clerk ids', () => {
+  it('lets the delete through when both the organisation and the user are gone from Clerk', async () => {
+    seedAccident()
+    const plan = await runOrgDelete(db(), {
+      orgId: ORG, confirmName: NAME, dryRun: true, clerkPresence: presence('gone', 'gone'),
+    })
+    expect(plan.warnings.join(' ')).toMatch(/no longer exists, id treated as stale/i)
+    expect(plan.warnings.join(' ')).toContain(STAFF)
+  })
+
+  it('still refuses when the person still exists in Clerk', async () => {
+    seedAccident()
+    const call = runOrgDelete(db(), {
+      orgId: ORG, confirmName: NAME, dryRun: true, clerkPresence: presence('gone', 'exists'),
+    })
+    await expect(call).rejects.toThrow(/can sign in to the portal/i)
+  })
+
+  it('still refuses when the organisation still exists in Clerk', async () => {
+    seedAccident()
+    store.contacts = []
+    const call = runOrgDelete(db(), {
+      orgId: ORG, confirmName: NAME, dryRun: true, clerkPresence: presence('exists', 'gone'),
+    })
+    await expect(call).rejects.toThrow(/carries a Clerk organisation id/i)
+  })
+
+  it('refuses when Clerk cannot be reached, and says so', async () => {
+    seedAccident()
+    const call = runOrgDelete(db(), {
+      orgId: ORG, confirmName: NAME, dryRun: true, clerkPresence: presence('unknown', 'unknown'),
+    })
+    await expect(call).rejects.toThrow(/could not be reached/i)
+    expect(recorded.deletes).toEqual([])
+  })
+
+  it('assumes every id is live when no probe is supplied', async () => {
+    seedAccident()
+    const call = runOrgDelete(db(), { orgId: ORG, confirmName: NAME, dryRun: true })
+    await expect(call).rejects.toThrow(/carries a Clerk organisation id/i)
   })
 })

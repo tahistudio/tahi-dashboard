@@ -25,6 +25,16 @@ vi.mock('@/lib/db', () => ({ db: vi.fn().mockResolvedValue({}) }))
 
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn().mockResolvedValue(undefined) }))
 
+// The route hands runOrgDelete a real Clerk deleter and a real presence probe.
+// Neither is called here (runOrgDelete itself is mocked), but the module must
+// import without reaching for a Clerk secret.
+vi.mock('@clerk/nextjs/server', () => ({
+  clerkClient: vi.fn().mockResolvedValue({
+    organizations: { deleteOrganization: vi.fn(), getOrganization: vi.fn() },
+    users: { getUser: vi.fn() },
+  }),
+}))
+
 // The GET and PATCH handlers in the same route file reach for these; the
 // lifecycle tests never call them, but the module has to import cleanly.
 vi.mock('@/lib/require-access', () => ({ requireAccessToOrg: vi.fn().mockResolvedValue(null) }))
@@ -47,6 +57,7 @@ import { requireFeature } from '@/lib/require-feature'
 import { resolvePermissions } from '@/lib/permissions'
 import { logAudit } from '@/lib/audit'
 import {
+  ClerkOrganisationDeleteFailed,
   OrgDeleteNameMismatch,
   OrgDeleteRefusal,
   OrgMergeRefusal,
@@ -97,6 +108,15 @@ const DELETE_PLAN = {
   invoices: [{ id: 'inv1', number: 'INV-1', status: 'draft', totalUsd: 10, currency: 'USD', createdAt: null, stripeInvoiceId: 'in_test_1', xeroInvoiceId: null }],
   stripeCustomerId: 'cus_test_1',
   xeroContactId: null,
+  accidentalWorkspace: {
+    requested: false,
+    eligible: false,
+    reasons: ['Acme Widgets Test holds 1 invoice(s).'],
+    clerkOrgId: null,
+    contactEmails: [],
+    teamEmails: [],
+    clerkResult: null,
+  },
   warnings: [],
   applied: { rowsDeleted: 0, invoicesDeleted: 0, orgsDeleted: 0 },
 }
@@ -274,6 +294,75 @@ describe('DELETE /api/admin/clients/[id]', () => {
     vi.mocked(runOrgDelete).mockRejectedValue(new OrgNotFoundForDelete(SHELL))
     const res = await DELETE(deleteRequest({ confirmName: 'Acme Widgets Test' }), params)
     expect(res.status).toBe(404)
+  })
+
+  it('leaves removeClerkOrganisation off unless the body says exactly true', async () => {
+    await DELETE(deleteRequest({ confirmName: 'Acme Widgets Test' }), params)
+    expect(vi.mocked(runOrgDelete).mock.calls[0][1].removeClerkOrganisation).toBe(false)
+    vi.mocked(runOrgDelete).mockClear()
+    await DELETE(deleteRequest({ confirmName: 'Acme Widgets Test', removeClerkOrganisation: 'yes' }), params)
+    expect(vi.mocked(runOrgDelete).mock.calls[0][1].removeClerkOrganisation).toBe(false)
+  })
+
+  it('passes removeClerkOrganisation through, with a Clerk deleter and a presence probe', async () => {
+    await DELETE(deleteRequest({ confirmName: 'Acme Widgets Test', removeClerkOrganisation: true }), params)
+    const input = vi.mocked(runOrgDelete).mock.calls[0][1]
+    expect(input.removeClerkOrganisation).toBe(true)
+    expect(typeof input.deleteClerkOrganisation).toBe('function')
+    expect(typeof input.clerkPresence?.organisationExists).toBe('function')
+    expect(typeof input.clerkPresence?.userExists).toBe('function')
+  })
+
+  it('records the Clerk organisation and the team logins on the audit row', async () => {
+    vi.mocked(runOrgDelete).mockResolvedValue({
+      ...DELETE_PLAN,
+      dryRun: false,
+      accidentalWorkspace: {
+        requested: true,
+        eligible: true,
+        reasons: [],
+        clerkOrgId: 'org_accident',
+        contactEmails: ['staci@tahi.studio'],
+        teamEmails: ['staci@tahi.studio'],
+        clerkResult: 'deleted',
+      },
+    })
+    await DELETE(deleteRequest({ confirmName: 'Acme Widgets Test', dryRun: false, removeClerkOrganisation: true }), params)
+    const entry = vi.mocked(logAudit).mock.calls[0][1]
+    expect(entry.metadata?.clerkOrganisationRemoved).toBe(true)
+    expect(entry.metadata?.clerkOrgId).toBe('org_accident')
+    expect(entry.metadata?.clerkResult).toBe('deleted')
+    expect(entry.metadata?.teamEmailsAttached).toEqual(['staci@tahi.studio'])
+  })
+
+  it('carries the eligibility assessment on a 409, so the dialog can offer the checkbox', async () => {
+    vi.mocked(runOrgDelete).mockRejectedValue(new OrgDeleteRefusal(
+      ['Acme Widgets Test carries a Clerk organisation id (org_accident), which means a real login exists against it. Archive it instead.'],
+      {
+        requested: false,
+        eligible: true,
+        reasons: [],
+        clerkOrgId: 'org_accident',
+        contactEmails: ['staci@tahi.studio'],
+        teamEmails: ['staci@tahi.studio'],
+        clerkResult: null,
+      },
+    ))
+    const res = await DELETE(deleteRequest({ confirmName: 'Acme Widgets Test' }), params)
+    expect(res.status).toBe(409)
+    const json = await res.json() as { accidentalWorkspace: { eligible: boolean; clerkOrgId: string } }
+    expect(json.accidentalWorkspace.eligible).toBe(true)
+    expect(json.accidentalWorkspace.clerkOrgId).toBe('org_accident')
+  })
+
+  it('answers 502 and writes no audit row when Clerk refuses to remove the organisation', async () => {
+    vi.mocked(runOrgDelete).mockRejectedValue(new ClerkOrganisationDeleteFailed('org_accident', new Error('clerk 500')))
+    const res = await DELETE(deleteRequest({ confirmName: 'Acme Widgets Test', dryRun: false, removeClerkOrganisation: true }), params)
+    expect(res.status).toBe(502)
+    const json = await res.json() as { error: string }
+    expect(json.error).toMatch(/nothing in the database was changed/i)
+    expect(json.error).not.toContain('clerk 500')
+    expect(logAudit).not.toHaveBeenCalled()
   })
 
   it('never leaks an internal error message', async () => {

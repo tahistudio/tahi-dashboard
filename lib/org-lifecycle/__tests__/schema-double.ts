@@ -17,6 +17,7 @@ export const schemaDouble = {
     'xeroContactId', 'stripeCustomerId', 'manyrequestsId', 'clerkOrgId', 'updatedAt',
   ]),
   contacts: fakeTable('contacts', ['orgId', 'name', 'email', 'clerkUserId', 'updatedAt']),
+  teamMembers: fakeTable('team_members', ['name', 'email', 'clerkUserId']),
   onboardingInvites: fakeTable('onboarding_invites', ORG),
   projects: fakeTable('projects', ORG),
   subscriptions: fakeTable('subscriptions', ['orgId', 'billedContactId']),

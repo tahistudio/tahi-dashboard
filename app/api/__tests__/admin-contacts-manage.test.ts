@@ -36,6 +36,22 @@ vi.mock('@/lib/require-permission', () => ({
   requireManagePermissions: vi.fn().mockResolvedValue({ denied: null }),
 }))
 
+/**
+ * A stored clerk_user_id is not proof of a login: the delete asks Clerk
+ * whether that user still exists. 404 means the person was removed in the
+ * Clerk dashboard and this row simply still names them.
+ */
+const clerk = vi.hoisted(() => ({ getUser: vi.fn() }))
+
+vi.mock('@clerk/nextjs/server', () => ({
+  clerkClient: vi.fn().mockResolvedValue({ users: clerk }),
+}))
+
+/** The shape a Clerk 404 arrives in. */
+function clerkNotFound(): Error & { status: number } {
+  return Object.assign(new Error('Not Found'), { status: 404 })
+}
+
 const captured: {
   audits: Record<string, unknown>[]
   runs: { sql: string; params: unknown[] }[]
@@ -244,6 +260,8 @@ beforeEach(() => {
   world.calls = []
   vi.mocked(requireAccessToOrg).mockResolvedValue(null)
   vi.mocked(requireManagePermissions).mockResolvedValue({ denied: null } as never)
+  // Live by default: the id names somebody Clerk still knows.
+  clerk.getUser.mockResolvedValue({ id: 'user_jane' })
 })
 
 // ── PATCH ────────────────────────────────────────────────────────────────────
@@ -368,14 +386,43 @@ describe('PATCH /api/admin/contacts/[id]', () => {
 // ── DELETE ───────────────────────────────────────────────────────────────────
 
 describe('DELETE /api/admin/contacts/[id]', () => {
-  it('refuses a contact that signs in', async () => {
+  it('refuses a contact that signs in, when Clerk still knows that user', async () => {
     world.contacts = [contact({ id: 'c_1', clerkUserId: 'user_jane' })]
 
     const res = await DELETE(req('DELETE', 'c_1'), params('c_1'))
     expect(res.status).toBe(409)
     expect((await json(res)).code).toBe('clerk_linked')
+    expect(clerk.getUser).toHaveBeenCalledWith('user_jane')
     expect(captured.deletes).toHaveLength(0)
     expect(captured.runs).toHaveLength(0)
+  })
+
+  it('lets a STALE login go: Clerk answers 404, so the id names nobody', async () => {
+    clerk.getUser.mockRejectedValue(clerkNotFound())
+    world.contacts = [contact({ id: 'c_1', clerkUserId: 'user_deleted_in_clerk' })]
+
+    const res = await DELETE(req('DELETE', 'c_1'), params('c_1'))
+    expect(res.status).toBe(200)
+    // The stale id is cleared before the row goes, so a failure in between
+    // leaves nothing claiming a login that does not exist.
+    const cleared = captured.updates.find(u => u.table === 'contacts' && u.set.clerkUserId === null)
+    expect(cleared).toBeTruthy()
+    expect(captured.order.indexOf('update:contacts')).toBeLessThan(captured.order.indexOf('delete:contacts'))
+    expect(captured.deletes.map(d => d.table)).toContain('contacts')
+    expect(captured.audits[0]?.metadata).toMatchObject({ staleClerkUserId: 'user_deleted_in_clerk' })
+  })
+
+  it('refuses when Clerk cannot be reached, rather than guessing', async () => {
+    clerk.getUser.mockRejectedValue(new Error('clerk 500'))
+    world.contacts = [contact({ id: 'c_1', clerkUserId: 'user_jane' })]
+
+    const res = await DELETE(req('DELETE', 'c_1'), params('c_1'))
+    expect(res.status).toBe(409)
+    const body = await json(res)
+    expect(body.code).toBe('clerk_unreachable')
+    expect(String(body.error)).not.toContain('clerk 500')
+    expect(captured.deletes).toHaveLength(0)
+    expect(captured.updates).toHaveLength(0)
   })
 
   it('refuses the only primary at an organisation that still has people', async () => {

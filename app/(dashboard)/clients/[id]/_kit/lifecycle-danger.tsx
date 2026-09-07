@@ -44,6 +44,16 @@ interface MergePlan {
   warnings: string[]
 }
 
+interface AccidentalWorkspace {
+  requested: boolean
+  eligible: boolean
+  reasons: string[]
+  clerkOrgId: string | null
+  contactEmails: string[]
+  teamEmails: string[]
+  clerkResult: 'deleted' | 'already_gone' | null
+}
+
 interface DeletePlan {
   org: { id: string; name: string }
   tables: Record<string, number>
@@ -58,12 +68,14 @@ interface DeletePlan {
     xeroInvoiceId: string | null
   }>
   stripeCustomerId: string | null
+  accidentalWorkspace: AccidentalWorkspace
   warnings: string[]
 }
 
 interface ErrorPayload {
   error?: string
   refusals?: string[]
+  accidentalWorkspace?: AccidentalWorkspace
 }
 
 interface ClientOption {
@@ -333,6 +345,13 @@ function MergeDrawer({ open, org, onClose }: { open: boolean; org: Organisation;
 
 // ── delete ───────────────────────────────────────────────────────────────────
 
+/**
+ * The two refusals the accidental-workspace checkbox is allowed to answer.
+ * Any other refusal in the list means this is a real client and the checkbox
+ * stays hidden, whatever the server says about eligibility.
+ */
+const LOGIN_REFUSAL = /(carries a Clerk organisation id|can sign in to the portal)/
+
 function DeleteDrawer({ open, org, onClose }: { open: boolean; org: Organisation; onClose: () => void }) {
   const router = useRouter()
   const { showToast } = useToast()
@@ -342,6 +361,8 @@ function DeleteDrawer({ open, org, onClose }: { open: boolean; org: Organisation
   const [error, setError] = useState<string | null>(null)
   const [refusals, setRefusals] = useState<string[]>([])
   const [confirming, setConfirming] = useState(false)
+  const [workspace, setWorkspace] = useState<AccidentalWorkspace | null>(null)
+  const [removeClerk, setRemoveClerk] = useState(false)
 
   useEffect(() => {
     if (open) return
@@ -349,9 +370,11 @@ function DeleteDrawer({ open, org, onClose }: { open: boolean; org: Organisation
     setTyped('')
     setError(null)
     setRefusals([])
+    setWorkspace(null)
+    setRemoveClerk(false)
   }, [open])
 
-  const call = useCallback(async (dryRun: boolean) => {
+  const call = useCallback(async (dryRun: boolean, removeClerkOrganisation: boolean) => {
     setBusy(true)
     setError(null)
     setRefusals([])
@@ -361,17 +384,19 @@ function DeleteDrawer({ open, org, onClose }: { open: boolean; org: Organisation
         headers: { 'Content-Type': 'application/json' },
         // The dry run uses the real name so the operator only has to type it
         // for the write. The write sends what they actually typed.
-        body: JSON.stringify({ confirmName: dryRun ? org.name : typed, dryRun }),
+        body: JSON.stringify({ confirmName: dryRun ? org.name : typed, dryRun, removeClerkOrganisation }),
       })
       const json = await res.json() as DeletePlan & ErrorPayload
       if (!res.ok) {
         setError(json.error ?? 'The delete was refused.')
         setRefusals(json.refusals ?? [])
+        setWorkspace(json.accidentalWorkspace ?? null)
         if (dryRun) setPlan(null)
         return
       }
       if (dryRun) {
         setPlan(json)
+        setWorkspace(json.accidentalWorkspace ?? null)
       } else {
         showToast(`${org.name} deleted`, 'success')
         onClose()
@@ -385,6 +410,14 @@ function DeleteDrawer({ open, org, onClose }: { open: boolean; org: Organisation
   }, [org.id, org.name, typed, showToast, onClose, router])
 
   const nameMatches = typed === org.name
+  const loginOnlyRefusal = refusals.length > 0 && refusals.every(line => LOGIN_REFUSAL.test(line))
+  const canOfferClerkRemoval = Boolean(workspace?.eligible) && (removeClerk || loginOnlyRefusal)
+
+  const toggleClerkRemoval = useCallback((next: boolean) => {
+    setRemoveClerk(next)
+    setPlan(null)
+    void call(true, next)
+  }, [call])
 
   return (
     <>
@@ -406,6 +439,35 @@ function DeleteDrawer({ open, org, onClose }: { open: boolean; org: Organisation
             </p>
 
             <Refusals error={error} refusals={refusals} />
+
+            {canOfferClerkRemoval && workspace && (
+              <Callout tone="warning" title="This looks like an accidental workspace">
+                <div className="flex flex-col" style={{ gap: '0.5rem' }}>
+                  <p style={{ margin: 0, fontSize: '0.75rem', lineHeight: 1.55 }}>
+                    Every login attached to {org.name} belongs to a Tahi team member
+                    {workspace.teamEmails.length > 0 ? ` (${workspace.teamEmails.join(', ')})` : ''}, it is not the
+                    studio organisation, and it holds no invoice, no Stripe or Xero id, no ManyRequests id and no
+                    pipeline row. That is a workspace self-serve provisioning made by accident, not a client.
+                  </p>
+                  <label
+                    className="flex items-start"
+                    style={{ gap: '0.5rem', minHeight: '2.75rem', fontSize: '0.75rem', color: 'var(--color-text)', cursor: 'pointer' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={removeClerk}
+                      disabled={busy}
+                      onChange={event => toggleClerkRemoval(event.target.checked)}
+                      style={{ accentColor: 'var(--color-brand)', width: '0.875rem', height: '0.875rem', marginTop: '0.9375rem' }}
+                    />
+                    <span style={{ alignSelf: 'center' }}>
+                      Also remove the Clerk organisation (an accidental workspace created by a Tahi teammate)
+                      {workspace.clerkOrgId ? ` ${workspace.clerkOrgId}` : ''}
+                    </span>
+                  </label>
+                </div>
+              </Callout>
+            )}
 
             {plan && (
               <div className="flex flex-col" style={{ gap: '0.875rem' }}>
@@ -468,7 +530,7 @@ function DeleteDrawer({ open, org, onClose }: { open: boolean; org: Organisation
               Delete this client
             </TahiButton>
           ) : (
-            <TahiButton variant="primary" size="sm" loading={busy} onClick={() => void call(true)}>
+            <TahiButton variant="primary" size="sm" loading={busy} onClick={() => void call(true, removeClerk)}>
               Check what would be deleted
             </TahiButton>
           )}
@@ -479,12 +541,14 @@ function DeleteDrawer({ open, org, onClose }: { open: boolean; org: Organisation
         open={confirming}
         variant="danger"
         title={`Delete ${org.name}?`}
-        description="Everything listed in the preview goes, including the invoices. There is no undo from the dashboard."
+        description={removeClerk
+          ? 'Everything listed in the preview goes, and the Clerk organisation is removed first. There is no undo from the dashboard.'
+          : 'Everything listed in the preview goes, including the invoices. There is no undo from the dashboard.'}
         confirmLabel="Delete it"
         onCancel={() => setConfirming(false)}
         onConfirm={async () => {
           setConfirming(false)
-          await call(false)
+          await call(false, removeClerk)
         }}
       />
     </>

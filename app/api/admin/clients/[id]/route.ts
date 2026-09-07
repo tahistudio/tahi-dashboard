@@ -19,11 +19,13 @@ import { resolvePermissions } from '@/lib/permissions'
 import { logAudit } from '@/lib/audit'
 import type { DB } from '@/db/d1'
 import {
+  ClerkOrganisationDeleteFailed,
   OrgDeleteNameMismatch,
   OrgDeleteRefusal,
   OrgNotFoundForDelete,
   runOrgDelete,
 } from '@/lib/org-lifecycle'
+import { createClerkPresence, deleteClerkOrganisation } from '@/lib/clerk-presence'
 
 type BillingDb = Parameters<typeof applyBillingDerivation>[0]
 type PermissionsDb = Parameters<typeof resolvePermissions>[0]
@@ -433,11 +435,22 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 //   confirmName  REQUIRED. Must equal the organisation's current name exactly.
 //   dryRun       boolean, DEFAULT TRUE. Returns the per-table counts and every
 //                invoice's rail id, amount and date before anything goes.
+//   removeClerkOrganisation
+//                boolean, DEFAULT FALSE. The accidental-workspace door: the
+//                organisation self-serve provisioning creates when a Tahi
+//                teammate accepts a team invite with no active organisation.
+//                It swaps the Clerk-org and signed-in-contact refusals for a
+//                stricter eligibility rule (not the studio org, every login
+//                belongs to a team_members row, no invoice, no rail id, no
+//                ManyRequests id, no pipeline row) and, when eligible, deletes
+//                the Clerk organisation BEFORE any database row.
 //
 // 400 = the typed name does not match, or confirmName is missing.
 // 409 = a refusal: an imported client, a real login, a linked contact, a
 //       pipeline or sales row, or a real ledger. Merge is the answer instead.
 // 404 = no organisation with that id, which is also what a repeat delete gets.
+// 502 = Clerk refused to remove the organisation, so no database row was
+//       touched. A Clerk 404 is treated as already gone and is not an error.
 //
 // This route sends nothing.
 export async function DELETE(req: NextRequest, { params }: Params) {
@@ -457,7 +470,11 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
 
   const { id } = await params
-  const body = (await req.json().catch(() => ({}))) as { confirmName?: unknown; dryRun?: unknown }
+  const body = (await req.json().catch(() => ({}))) as {
+    confirmName?: unknown
+    dryRun?: unknown
+    removeClerkOrganisation?: unknown
+  }
   const confirmName = typeof body.confirmName === 'string' ? body.confirmName : ''
   if (!confirmName.trim()) {
     return NextResponse.json(
@@ -466,9 +483,22 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     )
   }
   const dryRun = body.dryRun !== false
+  // Opt in only: anything other than a literal true leaves the two login
+  // refusals exactly where they are.
+  const removeClerkOrganisation = body.removeClerkOrganisation === true
 
   try {
-    const plan = await runOrgDelete(database, { orgId: id, confirmName, dryRun })
+    const plan = await runOrgDelete(database, {
+      orgId: id,
+      confirmName,
+      dryRun,
+      removeClerkOrganisation,
+      deleteClerkOrganisation,
+      // Both login refusals ask Clerk whether the stored id still names
+      // anything before they refuse over it. A 404 there is a stale column,
+      // not a login; anything else keeps the refusal.
+      clerkPresence: createClerkPresence(),
+    })
 
     if (!dryRun) {
       await logAudit(database, {
@@ -490,6 +520,12 @@ export async function DELETE(req: NextRequest, { params }: Params) {
             xeroInvoiceId: row.xeroInvoiceId,
           })),
           stripeCustomerId: plan.stripeCustomerId,
+          // Named in full on the audit row: which Clerk organisation went and
+          // whose logins were attached to it when it did.
+          clerkOrganisationRemoved: plan.accidentalWorkspace.clerkResult !== null,
+          clerkOrgId: plan.accidentalWorkspace.clerkResult !== null ? plan.accidentalWorkspace.clerkOrgId : null,
+          clerkResult: plan.accidentalWorkspace.clerkResult,
+          teamEmailsAttached: plan.accidentalWorkspace.teamEmails,
           applied: plan.applied,
         },
       })
@@ -504,7 +540,23 @@ export async function DELETE(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: error.message }, { status: 400 })
     }
     if (error instanceof OrgDeleteRefusal) {
-      return NextResponse.json({ error: error.message, refusals: error.refusals }, { status: 409 })
+      return NextResponse.json(
+        {
+          error: error.message,
+          refusals: error.refusals,
+          // So the dialog can offer the accidental-workspace checkbox off the
+          // very refusal it just printed.
+          accidentalWorkspace: error.accidentalWorkspace,
+        },
+        { status: 409 },
+      )
+    }
+    if (error instanceof ClerkOrganisationDeleteFailed) {
+      console.error('[clients/[id] DELETE] Clerk organisation delete failed:', error.reason)
+      return NextResponse.json(
+        { error: 'The Clerk organisation could not be removed. Nothing in the database was changed.' },
+        { status: 502 },
+      )
     }
     console.error('[clients/[id] DELETE] failed:', error)
     return NextResponse.json({ error: 'Delete failed. Nothing further was changed.' }, { status: 500 })
