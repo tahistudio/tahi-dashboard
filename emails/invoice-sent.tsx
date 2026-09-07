@@ -15,22 +15,25 @@
  * and the reference to quote, so the client can act on the bill instead of
  * waiting for a link that has not been issued. See lib/invoice-how-to-pay.ts.
  */
-import { Body, Head, Html, Preview } from '@react-email/components'
 import {
-  DetailCard,
-  DetailRow,
+  Buttons,
+  EmailBody,
   EmailCard,
-  EmailEyebrow,
+  EmailDocument,
   EmailFooter,
   EmailFootnote,
-  EmailHeader,
+  EmailHero,
   EmailHeading,
+  EmailKicker,
+  EmailNav,
   EmailParagraph,
-  EmailShell,
+  Fact,
+  Facts,
   HowToPayBlock,
+  LedgerRow,
+  LedgerRows,
   PrimaryButton,
   SecondaryLink,
-  emailBodyStyle,
 } from './_components'
 import { hasBankDestination, type InvoiceHowToPay } from '@/lib/invoice-how-to-pay'
 import { invoiceReference } from '@/lib/invoice-billing'
@@ -74,56 +77,51 @@ export function InvoiceSentEmail({
   // Three states, in order of what the client can do: pay it in one click,
   // pay it by transfer, or open it and wait for us. Only one is ever shown.
   const showTransfer = !paymentUrl && hasBankDestination(howToPay)
+  const paymentSummary = paymentUrl ? 'Pay online' : showTransfer ? 'Bank transfer' : 'View in portal'
 
   return (
-    <Html>
-      <Head />
-      <Preview>{`Invoice ${displayId} from Tahi Studio: ${amountFormatted} ${currency}`}</Preview>
-      <Body style={emailBodyStyle}>
-        <EmailShell>
-          <EmailHeader eyebrow="A new invoice is ready" />
+    <EmailDocument preview={`Invoice ${displayId} from Tahi Studio: ${amountFormatted} ${currency}`}>
+      <EmailCard>
+        <EmailNav label={`Invoice ${displayId}`} />
+        <EmailHero>
+          <EmailKicker>Invoice</EmailKicker>
+          <EmailHeading>Kia ora {firstName}, your invoice is ready.</EmailHeading>
+          <EmailParagraph>
+            Here is the latest invoice from Tahi Studio.
+            {paymentUrl
+              ? ' You can pay it straight from the button below, or open it in your portal for the full breakdown.'
+              : showTransfer
+                ? ' Our bank details are below, and you can open it in your portal for the full breakdown.'
+                : ' Open it in your portal for the full breakdown.'}
+          </EmailParagraph>
+        </EmailHero>
+        <EmailBody>
+          <Facts>
+            <Fact label="Amount" value={`${amountFormatted} ${currency}`} sub={dueDate ? `Due ${dueDate}` : undefined} />
+            <Fact label="Payment" value={paymentSummary} />
+          </Facts>
 
-          <EmailCard>
-            <EmailEyebrow>Invoice {displayId}</EmailEyebrow>
-            <EmailHeading>
-              Your <span style={{ color: '#5A824E' }}>invoice</span> is ready
-            </EmailHeading>
+          <LedgerRows>
+            <LedgerRow label={invoiceNumber ? 'Invoice number' : 'Invoice ID'} value={displayId} mono />
+            {dueDate && <LedgerRow label="Due date" value={dueDate} />}
+            {notes && <LedgerRow label="Notes" value={notes} />}
+          </LedgerRows>
 
-            <EmailParagraph>
-              Hi {firstName}, here is the latest invoice from Tahi Studio.
-              {paymentUrl
-                ? ' You can pay it straight from the button below, or open it in your portal for the full breakdown.'
-                : showTransfer
-                  ? ' Our bank details are below, and you can open it in your portal for the full breakdown.'
-                  : ' Open it in your portal for the full breakdown.'}
-            </EmailParagraph>
+          {showTransfer && howToPay && <HowToPayBlock howToPay={howToPay} />}
 
-            <DetailCard>
-              <DetailRow first label="Amount due" value={`${amountFormatted} ${currency}`} hero />
-              <DetailRow label={invoiceNumber ? 'Invoice number' : 'Invoice ID'} value={displayId} mono />
-              {dueDate && <DetailRow label="Due date" value={dueDate} />}
-              {notes && <DetailRow label="Notes" value={notes} />}
-            </DetailCard>
+          <Buttons>
+            <PrimaryButton href={paymentUrl ?? invoiceUrl}>{paymentUrl ? 'Pay invoice' : 'View invoice'}</PrimaryButton>
+            {paymentUrl && <SecondaryLink href={invoiceUrl}>View it in your portal</SecondaryLink>}
+          </Buttons>
 
-            {showTransfer && howToPay && <HowToPayBlock howToPay={howToPay} />}
+          <EmailFootnote>
+            Questions about a line item? Reply to this email and we will walk through it with you.
+          </EmailFootnote>
+        </EmailBody>
+      </EmailCard>
 
-            <PrimaryButton href={paymentUrl ?? invoiceUrl}>
-              {paymentUrl ? 'Pay invoice' : 'View invoice'}
-            </PrimaryButton>
-
-            {paymentUrl && (
-              <SecondaryLink href={invoiceUrl}>View it in your portal</SecondaryLink>
-            )}
-
-            <EmailFootnote>
-              Questions about a line item? Reply to this email and we will walk through it with you.
-            </EmailFootnote>
-          </EmailCard>
-
-          <EmailFooter />
-        </EmailShell>
-      </Body>
-    </Html>
+      <EmailFooter audience="client" />
+    </EmailDocument>
   )
 }
 
