@@ -9,20 +9,20 @@
  * app/api/portal/accept-invite/route.ts), which is why the copy says so plainly
  * and why forwarding it is useless.
  */
-import { Body, Head, Html, Preview } from '@react-email/components'
 import {
-  DetailCard,
-  DetailRow,
+  Buttons,
+  EmailBody,
   EmailCard,
-  EmailEyebrow,
+  EmailDocument,
   EmailFooter,
-  EmailFootnote,
-  EmailHeader,
+  EmailHero,
+  EmailKicker,
   EmailHeading,
+  EmailNav,
   EmailParagraph,
-  EmailShell,
+  LedgerRow,
+  LedgerRows,
   PrimaryButton,
-  emailBodyStyle,
 } from './_components'
 
 interface ClientInviteEmailProps {
@@ -62,49 +62,40 @@ export function ClientInviteEmail({
   const sender = fromName?.trim() || 'the Tahi Studio team'
 
   return (
-    <Html>
-      <Head />
-      <Preview>{`Your Tahi Studio portal is ready, ${firstName}`}</Preview>
-      <Body style={emailBodyStyle}>
-        <EmailShell>
-          <EmailHeader eyebrow="Portal invite" />
+    <EmailDocument preview={`Your Tahi Studio portal is ready, ${firstName}`}>
+      <EmailCard>
+        <EmailNav label="Invitation" />
+        <EmailHero>
+          <EmailKicker>You are invited</EmailKicker>
+          <EmailHeading>Your portal is ready.</EmailHeading>
+          <EmailParagraph>
+            Hi {firstName}, {sender} has set up the {orgName} workspace on the Tahi Studio
+            portal. Use the button below to claim your access. It signs you straight into the
+            workspace we built for you, so there is nothing to set up and nothing to pay for
+            here.
+          </EmailParagraph>
+        </EmailHero>
+        <EmailBody>
+          <LedgerRows>
+            <LedgerRow label="Joining as" value={orgName} />
+            <LedgerRow label="Invite sent to" value={boundEmail} />
+            {expiry ? <LedgerRow label="Link valid until" value={expiry} /> : null}
+          </LedgerRows>
 
-          <EmailCard>
-            <EmailEyebrow>You are invited</EmailEyebrow>
-            <EmailHeading>
-              Your <span style={{ color: '#5A824E' }}>portal</span> is ready
-            </EmailHeading>
+          <Buttons>
+            <PrimaryButton href={inviteUrl}>Accept invitation</PrimaryButton>
+          </Buttons>
 
-            <EmailParagraph>Hi {firstName},</EmailParagraph>
-            <EmailParagraph>
-              {sender} has set up the {orgName} workspace on the Tahi Studio portal. Use the
-              button below to claim your access. It signs you straight into the workspace we
-              built for you, so there is nothing to set up and nothing to pay for here.
-            </EmailParagraph>
+          <EmailParagraph variant="small">
+            This link only works for {boundEmail}, so forwarding it will not give anyone else
+            access. Not expecting this, or need it sent to a different address? Just reply to
+            this email and we will sort it out.
+          </EmailParagraph>
+        </EmailBody>
+      </EmailCard>
 
-            <PrimaryButton href={inviteUrl}>Claim your access</PrimaryButton>
-
-            <DetailCard>
-              <DetailRow label="Workspace" value={orgName} first />
-              <DetailRow label="Invite sent to" value={boundEmail} />
-              {expiry ? <DetailRow label="Link valid until" value={expiry} /> : null}
-            </DetailCard>
-
-            <EmailParagraph subtle>
-              This link only works for {boundEmail}, so forwarding it will not give anyone
-              else access.
-            </EmailParagraph>
-
-            <EmailFootnote>
-              Not expecting this, or need it sent to a different address? Just reply to this
-              email and we will sort it out.
-            </EmailFootnote>
-          </EmailCard>
-
-          <EmailFooter />
-        </EmailShell>
-      </Body>
-    </Html>
+      <EmailFooter audience="client" recipientEmail={boundEmail} />
+    </EmailDocument>
   )
 }
 
