@@ -1,6 +1,7 @@
 /**
  * <ScheduleShareEmail> - the "your project schedule is ready" email.
  */
+import { STUDIO_TIME_ZONE } from '@/lib/kickoff-slot'
 import {
   BlockQuote,
   EmailBody,
@@ -38,7 +39,7 @@ export function ScheduleShareEmail({
   targetLaunchDate,
 }: ScheduleShareEmailProps) {
   const launchLabel = targetLaunchDate
-    ? new Date(targetLaunchDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+    ? new Date(targetLaunchDate).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', timeZone: STUDIO_TIME_ZONE })
     : null
   const firstName = recipientName.split(' ')[0] ?? recipientName
 

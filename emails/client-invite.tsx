@@ -9,6 +9,7 @@
  * app/api/portal/accept-invite/route.ts), which is why the copy says so plainly
  * and why forwarding it is useless.
  */
+import { STUDIO_TIME_ZONE } from '@/lib/kickoff-slot'
 import {
   Buttons,
   EmailBody,
@@ -45,7 +46,9 @@ function formatExpiry(iso: string | null | undefined): string | null {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
-    timeZone: 'UTC',
+    // The recipient reads this in New Zealand. UTC understated the last
+    // valid day by one for every expiry after 12:00 UTC.
+    timeZone: STUDIO_TIME_ZONE,
   })
 }
 

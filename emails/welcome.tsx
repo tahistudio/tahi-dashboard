@@ -9,6 +9,7 @@
  * expiry, or from a different account, otherwise reads as the product being
  * broken rather than the link being spent.
  */
+import { STUDIO_TIME_ZONE } from '@/lib/kickoff-slot'
 import {
   Buttons,
   EmailBody,
@@ -45,7 +46,9 @@ function formatExpiry(iso: string | null | undefined): string | null {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
-    timeZone: 'UTC',
+    // The recipient reads this in New Zealand. UTC understated the last
+    // valid day by one for every expiry after 12:00 UTC.
+    timeZone: STUDIO_TIME_ZONE,
   })
 }
 

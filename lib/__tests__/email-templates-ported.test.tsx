@@ -40,6 +40,32 @@ describe('NewRequestEmail', () => {
     expect(html).toContain('https://portal.tahi.studio/requests/abcd1234-5678-90ef-ghij-klmnopqrstuv')
     expect(html).not.toMatch(DASHES)
   })
+
+  it('shows the request number as the reference and never a UUID fragment', async () => {
+    const numbered = await render(
+      NewRequestEmail({
+        requestTitle: 'Refresh the pricing page',
+        clientName: 'Acme Co',
+        dashboardUrl: 'https://portal.tahi.studio',
+        requestId: '0a4f1b6c-5678-90ef-ghij-klmnopqrstuv',
+        requestNumber: 42,
+      }),
+    )
+    expect(numbered).toContain('REQ-42')
+    expect(numbered).not.toContain('REQ-0A4F1B6C')
+
+    const unnumbered = await render(
+      NewRequestEmail({
+        requestTitle: 'Refresh the pricing page',
+        clientName: 'Acme Co',
+        dashboardUrl: 'https://portal.tahi.studio',
+        requestId: '0a4f1b6c-5678-90ef-ghij-klmnopqrstuv',
+        requestNumber: null,
+      }),
+    )
+    expect(unnumbered).not.toContain('REQ-')
+    expect(unnumbered).not.toContain('Reference')
+  })
 })
 
 describe('RequestClientReviewEmail', () => {

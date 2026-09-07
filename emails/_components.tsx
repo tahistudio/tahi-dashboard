@@ -67,6 +67,10 @@ export const EMAIL_TOKENS = {
   forestHeading: '#FDFDFC',
   forestBody: '#C9D6C3',
   forestLabel: '#93C98A',
+  // Kicker tints on the forest band. Amber for an operational heads-up,
+  // a soft blue for plain information; both keep AA contrast on #1E2A1B.
+  forestAmber: '#E6C27A',
+  forestInfo: '#A9C4E0',
   neutralBg: '#F4F3EF',
   danger: '#B5473F',
   dangerBg: '#FBF0EE',
@@ -665,15 +669,30 @@ export function CodeBox({ code }: { code: string }) {
 
 // Dark band
 
-/** <DarkBand>: forest section with kicker, H1, paragraph and a white button. */
+export type DarkKickerTone = 'brand' | 'info' | 'amber'
+
+const darkKickerColour: Record<DarkKickerTone, string> = {
+  brand: EMAIL_TOKENS.forestLabel,
+  info: EMAIL_TOKENS.forestInfo,
+  amber: EMAIL_TOKENS.forestAmber,
+}
+
+/**
+ * <DarkBand>: forest section with kicker, H1, paragraph and a white button.
+ * `kickerTone` tints the kicker only; the button is always the white onDark
+ * variant, because a coloured button on the forest band reads as an alert
+ * rather than a note from the studio.
+ */
 export function DarkBand({
   kicker,
+  kickerTone = 'brand',
   heading,
   children,
   buttonLabel,
   buttonHref,
 }: {
   kicker?: ReactNode
+  kickerTone?: DarkKickerTone
   heading: ReactNode
   children?: ReactNode
   buttonLabel?: string
@@ -683,7 +702,7 @@ export function DarkBand({
     <Row style={{ backgroundColor: EMAIL_TOKENS.forest }}>
       <Column className="tahi-pad" style={{ padding: `28px ${PAD_X}px` }}>
         {kicker ? (
-          <Text style={{ color: EMAIL_TOKENS.forestLabel, fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.09em', lineHeight: '14px', textTransform: 'uppercase', margin: '0 0 14px' }}>
+          <Text style={{ color: darkKickerColour[kickerTone], fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.09em', lineHeight: '14px', textTransform: 'uppercase', margin: '0 0 14px' }}>
             {kicker}
           </Text>
         ) : null}

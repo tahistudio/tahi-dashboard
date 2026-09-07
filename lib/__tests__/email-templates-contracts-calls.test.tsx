@@ -19,6 +19,12 @@ import { ProjectEnquiryEmail } from '@/emails/project-enquiry'
 // file never carries one either.
 const DASHES = new RegExp(`[${String.fromCharCode(0x2013, 0x2014)}]`)
 
+// The kit document: Manrope import plus the mobile reflow hooks. A template
+// that renders a bare <Head /> loses all of it, and the button stops going
+// full width at 375.
+const MANROPE_IMPORT = 'fonts.googleapis.com/css2?family=Manrope'
+const REFLOW_HOOKS = ['.tahi-pad', '.tahi-h1', '.tahi-fact', '.tahi-btn']
+
 describe('ContractSignEmail', () => {
   it('renders the contract name, type and sign link for a client signer', async () => {
     const html = await render(
@@ -37,6 +43,8 @@ describe('ContractSignEmail', () => {
     expect(html).toContain('https://tahi.studio/p/contract/prv_1/sign/sgn_1')
     expect(html).toContain('Shout if the dates need moving.')
     expect(html).not.toMatch(DASHES)
+    expect(html).toContain(MANROPE_IMPORT)
+    for (const hook of REFLOW_HOOKS) expect(html).toContain(hook)
   })
 
   it('swaps the heading for the internal Tahi signer', async () => {
@@ -74,6 +82,25 @@ describe('ContractFullySignedEmail', () => {
     expect(html).toContain('https://tahi.studio/p/contract/prv_3')
     expect(html).toContain('attached for your records')
     expect(html).not.toMatch(DASHES)
+    expect(html).toContain(MANROPE_IMPORT)
+  })
+
+  it('stamps the signing time in the studio zone with no leading zero on the hour', async () => {
+    // 03:15 UTC on 5 September is 3:15 pm NZST.
+    const html = await render(
+      ContractFullySignedEmail({
+        recipientName: 'Ngaire Bloom',
+        recipientWasSigner: true,
+        contractName: 'Acme MSA',
+        contractType: 'msa',
+        signedAt: '2026-09-05T03:15:00.000Z',
+        publicViewerUrl: 'https://tahi.studio/p/contract/prv_3',
+        signerNames: ['Liam Miller'],
+        pdfAttached: true,
+      }),
+    )
+    expect(html).toContain('5 Sept 2026, 3:15 pm')
+    expect(html).not.toContain('03:15')
   })
 
   it('pushes the viewer link instead of the attachment copy when there is no PDF', async () => {
@@ -124,6 +151,13 @@ describe('PreCallDigestEmail', () => {
     expect(html).toContain('https://mahanaorchards.co.nz/about')
     expect(html).toContain('https://portal.tahi.studio/leads/lead_1')
     expect(html).not.toMatch(DASHES)
+    expect(html).toContain(MANROPE_IMPORT)
+    for (const hook of REFLOW_HOOKS) expect(html).toContain(hook)
+    // 21:30 UTC on 6 September is 9:30 am NZST on Monday the 7th.
+    expect(html).toContain('Mon, 7 Sept, 9:30 am')
+    // Source links take the kit colour, not React Email's default blue.
+    expect(html).not.toContain('#067df7')
+    expect(html).toMatch(/href="https:\/\/mahanaorchards\.co\.nz\/about"[^>]*color:#425F39/)
   })
 
   it('omits the optional sections cleanly when there is no lead context', async () => {
@@ -165,5 +199,24 @@ describe('ProjectEnquiryEmail', () => {
     expect(html).toContain('We need a campaign site for the spring season.')
     expect(html).toContain('NZD 15,000 to 25,000')
     expect(html).not.toMatch(DASHES)
+    expect(html).toContain(MANROPE_IMPORT)
+    // No lead link, no button: the route always passes one, the test above
+    // just covers the optional prop.
+    expect(html).not.toContain('Open the lead')
+  })
+
+  it('links the studio to the lead record when it has one', async () => {
+    const html = await render(
+      ProjectEnquiryEmail({
+        contactName: 'Ngaire Bloom',
+        contactEmail: 'ngaire@acme.co.nz',
+        company: 'Acme Orchards',
+        brief: 'We need a campaign site for the spring season.',
+        leadUrl: 'https://portal.tahi.studio/leads/lead_9',
+      }),
+    )
+    expect(html).toContain('Open the lead')
+    expect(html).toContain('https://portal.tahi.studio/leads/lead_9')
+    expect(html).toContain('#425F39')
   })
 })

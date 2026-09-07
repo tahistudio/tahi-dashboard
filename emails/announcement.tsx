@@ -7,11 +7,13 @@
  * studio footer.
  *
  * The `type` maps onto the same four tones the announcements composer offers.
- * `maintenance` shares the amber tone since it is an operational heads-up, but
- * keeps its own kicker label so the intent stays clear.
+ * It tints the kicker on the forest band: green for success, amber for
+ * warning and maintenance (an operational heads-up), soft blue for info. The
+ * button is always the white onDark button, by design: a coloured button on
+ * the forest band reads as an alert rather than a note from the studio.
  */
 import { Fragment } from 'react'
-import { DarkBand, EmailCard, EmailDocument, EmailFooter, EmailNav } from './_components'
+import { DarkBand, EmailCard, EmailDocument, EmailFooter, EmailNav, type DarkKickerTone } from './_components'
 
 export type AnnouncementEmailType = 'info' | 'success' | 'warning' | 'maintenance'
 
@@ -30,6 +32,13 @@ const KICKER: Record<AnnouncementEmailType, string> = {
   maintenance: 'Maintenance',
 }
 
+const KICKER_TONE: Record<AnnouncementEmailType, DarkKickerTone> = {
+  info: 'info',
+  success: 'brand',
+  warning: 'amber',
+  maintenance: 'amber',
+}
+
 export function AnnouncementEmail({
   title,
   body,
@@ -38,6 +47,7 @@ export function AnnouncementEmail({
   ctaUrl,
 }: AnnouncementEmailProps) {
   const kickerLabel = KICKER[type] ?? KICKER.info
+  const kickerTone = KICKER_TONE[type] ?? KICKER_TONE.info
   // Split the body into paragraphs on blank lines so multi-paragraph
   // announcements keep their spacing in the email.
   const paragraphs = body
@@ -52,6 +62,7 @@ export function AnnouncementEmail({
         <EmailNav label="Studio update" />
         <DarkBand
           kicker={kickerLabel}
+          kickerTone={kickerTone}
           heading={title}
           buttonLabel={showCta ? (ctaLabel as string) : undefined}
           buttonHref={showCta ? (ctaUrl as string) : undefined}

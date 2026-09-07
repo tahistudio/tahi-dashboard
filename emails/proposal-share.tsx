@@ -4,6 +4,7 @@
  * Sent to the prospect with a unique view URL. The proposal viewer itself
  * is the cinematic part; this email is a respectful invitation to open it.
  */
+import { STUDIO_TIME_ZONE } from '@/lib/kickoff-slot'
 import {
   BlockQuote,
   EmailBody,
@@ -41,7 +42,7 @@ export function ProposalShareEmail({
   expiresAt,
 }: ProposalShareEmailProps) {
   const expiresLabel = expiresAt
-    ? new Date(expiresAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+    ? new Date(expiresAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', timeZone: STUDIO_TIME_ZONE })
     : null
   const firstName = recipientName.split(' ')[0] ?? recipientName
 

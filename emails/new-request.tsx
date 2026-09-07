@@ -1,5 +1,5 @@
 /**
- * <NewRequestEmail> — admin-facing notification when a client submits a
+ * <NewRequestEmail>: admin-facing notification when a client submits a
  * request. Lands in the team inbox and the request author's confirmation.
  */
 import {
@@ -26,6 +26,8 @@ interface NewRequestEmailProps {
   submittedBy?: string
   dashboardUrl: string
   requestId: string
+  /** The per-org request number the subject quotes, e.g. 42 for REQ-42. */
+  requestNumber?: number | null
 }
 
 export function NewRequestEmail({
@@ -36,14 +38,17 @@ export function NewRequestEmail({
   submittedBy,
   dashboardUrl,
   requestId,
+  requestNumber,
 }: NewRequestEmailProps) {
   const requestUrl = `${dashboardUrl}/requests/${requestId}`
-  const reference = `REQ-${requestId.slice(0, 8).toUpperCase()}`
+  // The same REQ-n the subject carries. A UUID fragment is not a reference
+  // anyone can quote back, so a request without a number shows none.
+  const reference = requestNumber ? `REQ-${requestNumber}` : null
 
   return (
     <EmailDocument preview={`New request: ${requestTitle}`}>
       <EmailCard>
-        <EmailNav label={reference} />
+        <EmailNav label={reference ?? 'New request'} />
 
         <EmailHero>
           <EmailKicker>New request</EmailKicker>
@@ -60,7 +65,7 @@ export function NewRequestEmail({
             <LedgerRow label="Client" value={clientName} />
             {category ? <LedgerRow label="Category" value={category} /> : null}
             {priority ? <LedgerRow label="Priority" value={priority} /> : null}
-            <LedgerRow label="Reference" value={reference} mono />
+            {reference ? <LedgerRow label="Reference" value={reference} mono /> : null}
           </LedgerRows>
 
           <PrimaryButton href={requestUrl}>Open in Triage</PrimaryButton>

@@ -62,6 +62,7 @@
  */
 
 import { createElement, type ReactElement } from 'react'
+import { STUDIO_TIME_ZONE } from '@/lib/kickoff-slot'
 
 import AnnouncementEmail from '@/emails/announcement'
 import { ClientInviteEmail } from '@/emails/client-invite'
@@ -231,12 +232,26 @@ function isoFromNow(days: number, hourUtc = 21, minute = 30): string {
   return d.toISOString()
 }
 
-/** The short date a template renders inline, e.g. "12 Sep 2026". */
+/**
+ * The short date a template renders inline, e.g. "12 Sept 2026", in the
+ * studio's zone: every template that prints a date reads it in New Zealand.
+ */
 function nzDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-NZ', {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
+    timeZone: STUDIO_TIME_ZONE,
+  })
+}
+
+/** The long form of nzDate, e.g. "12 September 2026", for the invite expiries. */
+function nzLongDateZoned(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-NZ', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: STUDIO_TIME_ZONE,
   })
 }
 
@@ -398,8 +413,8 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
   return {
     // lib/announcement-emails.ts: subject is the announcement title verbatim.
     // The amber half of the tone map: `maintenance` and `warning` share the
-    // warning palette and the amber button, and differ only in the eyebrow
-    // label, so one of the two covers both.
+    // amber kicker on the forest band and differ only in the kicker label, so
+    // one of the two covers both. The button is always white on the band.
     announcement: {
       subject: 'Portal maintenance this Sunday, 9pm to 11pm NZST',
       react: createElement(AnnouncementEmail, {
@@ -415,13 +430,13 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
       }),
       personalisation: {
         Title: 'Portal maintenance this Sunday, 9pm to 11pm NZST',
-        Type: 'maintenance (amber eyebrow, amber button)',
+        Type: 'maintenance (amber kicker on the forest band, white button)',
         'CTA label': 'Open your portal',
       },
     },
 
-    // The other half of the tone map. `info` is the default type, and with
-    // `success` it takes the brand button rather than the amber one, so the
+    // The other half of the tone map. `info` is the default type and takes
+    // the soft blue kicker (`success` takes the green one), so the
     // maintenance sample above cannot show it.
     'announcement-info': {
       subject: 'Request templates are live in your portal',
@@ -439,7 +454,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
       }),
       personalisation: {
         Title: 'Request templates are live in your portal',
-        Type: 'info (blue eyebrow, brand button)',
+        Type: 'info (soft blue kicker on the forest band, white button)',
         Body: 'two paragraphs, split on the blank line',
         'CTA label': 'See what changed',
       },
@@ -460,7 +475,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
         Greeting: firstName,
         Client: CLIENT_ORG,
         'Bound address': to,
-        Expires: nzDate(isoFromNow(14)),
+        Expires: nzLongDateZoned(isoFromNow(14)),
         From: LIAM,
       },
     },
@@ -866,6 +881,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
           'orchard visits, and the emails that go with them.',
         budget: 'NZD 15,000 to 25,000',
         disciplines: 'Web design, Webflow build, email templates',
+        leadUrl: `${origin}/leads/lead_7f21c9`,
       }),
       personalisation: {
         From: `${CLIENT_CONTACT} (${CLIENT_CONTACT_EMAIL})`,
@@ -874,6 +890,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
         Brief: 'three sentences',
         Budget: 'NZD 15,000 to 25,000',
         Disciplines: 'Web design, Webflow build, email templates',
+        'Open button': '"Open the lead", the lead record in the dashboard',
       },
     },
 
@@ -979,7 +996,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
         Greeting: firstName,
         Client: CLIENT_ORG,
         'Bound address': to,
-        Expires: nzDate(isoFromNow(14)),
+        Expires: nzLongDateZoned(isoFromNow(14)),
       },
     },
   }

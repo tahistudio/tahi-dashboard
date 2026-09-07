@@ -1,25 +1,27 @@
 /**
- * <PreCallDigestEmail> — fires ~30 min before each scheduled
- * discovery call. Gives Liam (or the call host) a single-glance
- * primer: who they're talking to, AI fit assessment, the discovery
- * questions to ask, scope/budget signals, sources to skim.
+ * <PreCallDigestEmail>: fires ~30 min before each scheduled discovery call.
+ * Gives Liam (or the call host) a single-glance primer: who they are talking
+ * to, AI fit assessment, the discovery questions to ask, scope and budget
+ * signals, sources to skim.
  *
  * Studio Ledger, team mail: quieter than a client email, no sign-off
  * warmth, neutral kicker. Designed to be readable on a phone while
  * walking to the call.
  */
-import { Body, Head, Html, Link, Preview } from '@react-email/components'
+import { Link } from '@react-email/components'
+import { formatSlotSummary } from '@/lib/kickoff-slot'
 import {
   Buttons,
+  EMAIL_TOKENS,
   EmailBody,
   EmailCard,
+  EmailDocument,
   EmailFooter,
   EmailHeading,
   EmailHero,
   EmailKicker,
   EmailNav,
   EmailParagraph,
-  EmailShell,
   Fact,
   Facts,
   LedgerRow,
@@ -27,7 +29,6 @@ import {
   Step,
   Steps,
   PrimaryButton,
-  emailBodyStyle,
 } from './_components'
 
 export interface PreCallDigestEmailProps {
@@ -64,6 +65,14 @@ export interface PreCallDigestEmailProps {
   sources?: string[]
 }
 
+// Kit colour for the source links: React Email's default link blue is not
+// part of the palette.
+const sourceLinkStyle = {
+  color: EMAIL_TOKENS.brandDark,
+  fontWeight: 600,
+  textDecoration: 'underline',
+} as const
+
 export function PreCallDigestEmail({
   callTitle,
   scheduledAt,
@@ -89,123 +98,113 @@ export function PreCallDigestEmail({
   questions,
   sources,
 }: PreCallDigestEmailProps) {
-  const startTime = new Date(scheduledAt)
-  const timeFormatted = startTime.toLocaleString('en-NZ', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  // Studio zone, not the worker's UTC clock: "Mon 7 Sept, 10:00 am".
+  const timeFormatted = formatSlotSummary(scheduledAt) || scheduledAt
   const fullParentUrl = `${dashboardUrl}${parentHref}`
   const hasFirmographics = Boolean(industry || employeeCount || revenueBand || cms || country)
   const hasAiBriefing = aiScore != null || Boolean(aiSnapshot) || Boolean(aiFit)
 
   return (
-    <Html lang="en">
-      <Head />
-      <Preview>{`Pre-call brief: ${withName} in ~30 min`}</Preview>
-      <Body style={emailBodyStyle}>
-        <EmailShell>
-          <EmailCard>
-            <EmailNav label="Pre-call brief" />
-            <EmailHero>
-              <EmailKicker tone="neutral">Starting in ~30 min</EmailKicker>
-              <EmailHeading>
-                {withName}
-                {withSubtitle ? `, ${withSubtitle}` : ''}
-              </EmailHeading>
-              <EmailParagraph variant="muted">{callTitle}</EmailParagraph>
-            </EmailHero>
-            <EmailBody>
-              <Facts>
-                <Fact label="When" value={timeFormatted} />
-                <Fact label="Duration" value={`${durationMinutes} min`} />
-              </Facts>
+    <EmailDocument preview={`Pre-call brief: ${withName} in ~30 min`}>
+      <EmailCard>
+        <EmailNav label="Pre-call brief" />
+        <EmailHero>
+          <EmailKicker tone="neutral">Starting in ~30 min</EmailKicker>
+          <EmailHeading>
+            {withName}
+            {withSubtitle ? `, ${withSubtitle}` : ''}
+          </EmailHeading>
+          <EmailParagraph variant="muted">{callTitle}</EmailParagraph>
+        </EmailHero>
+        <EmailBody>
+          <Facts>
+            <Fact label="When" value={timeFormatted} />
+            <Fact label="Duration" value={`${durationMinutes} min`} />
+          </Facts>
 
-              {meetingUrl ? (
-                <Buttons>
-                  <PrimaryButton href={meetingUrl}>Join the call</PrimaryButton>
-                </Buttons>
-              ) : null}
+          {meetingUrl ? (
+            <Buttons>
+              <PrimaryButton href={meetingUrl}>Join the call</PrimaryButton>
+            </Buttons>
+          ) : null}
 
-              {hasFirmographics ? (
+          {hasFirmographics ? (
+            <>
+              <EmailKicker tone="neutral">Company</EmailKicker>
+              <LedgerRows>
+                {industry ? <LedgerRow label="Industry" value={industry} /> : null}
+                {employeeCount != null ? <LedgerRow label="Employees" value={String(employeeCount)} /> : null}
+                {revenueBand ? <LedgerRow label="Revenue" value={revenueBand} /> : null}
+                {country ? <LedgerRow label="Country" value={country} /> : null}
+                {cms ? <LedgerRow label="CMS" value={cms} tone="brand" /> : null}
+                {techStack && techStack.length > 0 ? (
+                  <LedgerRow label="Tech" value={techStack.slice(0, 6).join(', ')} />
+                ) : null}
+                {leadEmail ? <LedgerRow label="Email" value={leadEmail} mono /> : null}
+                {leadCompany && !industry ? <LedgerRow label="Company" value={leadCompany} /> : null}
+              </LedgerRows>
+            </>
+          ) : null}
+
+          {hasAiBriefing ? (
+            <>
+              <EmailKicker tone="neutral">
+                {aiScore != null ? `AI briefing, score ${aiScore}/100` : 'AI briefing'}
+              </EmailKicker>
+              {aiScoreReason ? <EmailParagraph variant="muted">{aiScoreReason}</EmailParagraph> : null}
+              {aiSnapshot ? (
                 <>
-                  <EmailKicker tone="neutral">Company</EmailKicker>
-                  <LedgerRows>
-                    {industry ? <LedgerRow label="Industry" value={industry} /> : null}
-                    {employeeCount != null ? <LedgerRow label="Employees" value={String(employeeCount)} /> : null}
-                    {revenueBand ? <LedgerRow label="Revenue" value={revenueBand} /> : null}
-                    {country ? <LedgerRow label="Country" value={country} /> : null}
-                    {cms ? <LedgerRow label="CMS" value={cms} tone="brand" /> : null}
-                    {techStack && techStack.length > 0 ? (
-                      <LedgerRow label="Tech" value={techStack.slice(0, 6).join(', ')} />
-                    ) : null}
-                    {leadEmail ? <LedgerRow label="Email" value={leadEmail} mono /> : null}
-                    {leadCompany && !industry ? <LedgerRow label="Company" value={leadCompany} /> : null}
-                  </LedgerRows>
+                  <EmailParagraph variant="small">Snapshot</EmailParagraph>
+                  <EmailParagraph>{aiSnapshot}</EmailParagraph>
                 </>
               ) : null}
-
-              {hasAiBriefing ? (
+              {aiFit ? (
                 <>
-                  <EmailKicker tone="neutral">
-                    {aiScore != null ? `AI briefing, score ${aiScore}/100` : 'AI briefing'}
-                  </EmailKicker>
-                  {aiScoreReason ? <EmailParagraph variant="muted">{aiScoreReason}</EmailParagraph> : null}
-                  {aiSnapshot ? (
-                    <>
-                      <EmailParagraph variant="small">Snapshot</EmailParagraph>
-                      <EmailParagraph>{aiSnapshot}</EmailParagraph>
-                    </>
-                  ) : null}
-                  {aiFit ? (
-                    <>
-                      <EmailParagraph variant="small">Why they fit</EmailParagraph>
-                      <EmailParagraph>{aiFit}</EmailParagraph>
-                    </>
-                  ) : null}
-                  {aiWatchOuts ? (
-                    <>
-                      <EmailParagraph variant="small">Watch-outs</EmailParagraph>
-                      <EmailParagraph>{aiWatchOuts}</EmailParagraph>
-                    </>
-                  ) : null}
+                  <EmailParagraph variant="small">Why they fit</EmailParagraph>
+                  <EmailParagraph>{aiFit}</EmailParagraph>
                 </>
               ) : null}
-
-              {questions && questions.length > 0 ? (
+              {aiWatchOuts ? (
                 <>
-                  <EmailKicker tone="neutral">Questions to ask</EmailKicker>
-                  <Steps>
-                    {questions.slice(0, 8).map((q, i) => (
-                      <Step key={q} n={i + 1} title={q} />
-                    ))}
-                  </Steps>
+                  <EmailParagraph variant="small">Watch-outs</EmailParagraph>
+                  <EmailParagraph>{aiWatchOuts}</EmailParagraph>
                 </>
               ) : null}
+            </>
+          ) : null}
 
-              {sources && sources.length > 0 ? (
-                <>
-                  <EmailKicker tone="neutral">Skim before the call</EmailKicker>
-                  {sources.slice(0, 3).map((src) => (
-                    <EmailParagraph key={src} variant="small" style={{ wordBreak: 'break-all' }}>
-                      <Link href={src}>{src}</Link>
-                    </EmailParagraph>
-                  ))}
-                </>
-              ) : null}
+          {questions && questions.length > 0 ? (
+            <>
+              <EmailKicker tone="neutral">Questions to ask</EmailKicker>
+              <Steps>
+                {questions.slice(0, 8).map((q, i) => (
+                  <Step key={q} n={i + 1} title={q} />
+                ))}
+              </Steps>
+            </>
+          ) : null}
 
-              <Buttons>
-                <PrimaryButton href={fullParentUrl}>Open the full record</PrimaryButton>
-              </Buttons>
-            </EmailBody>
-          </EmailCard>
+          {sources && sources.length > 0 ? (
+            <>
+              <EmailKicker tone="neutral">Skim before the call</EmailKicker>
+              {sources.slice(0, 3).map((src) => (
+                <EmailParagraph key={src} variant="small" style={{ wordBreak: 'break-all' }}>
+                  <Link href={src} style={sourceLinkStyle}>
+                    {src}
+                  </Link>
+                </EmailParagraph>
+              ))}
+            </>
+          ) : null}
 
-          <EmailFooter audience="team" />
-        </EmailShell>
-      </Body>
-    </Html>
+          <Buttons>
+            <PrimaryButton href={fullParentUrl}>Open the full record</PrimaryButton>
+          </Buttons>
+        </EmailBody>
+      </EmailCard>
+
+      <EmailFooter audience="team" />
+    </EmailDocument>
   )
 }
 

@@ -50,6 +50,7 @@ import {
 } from '@/lib/notification-links'
 import type { NotificationRecipient, NotificationUserType } from '@/lib/notifications'
 import NewRequestEmail from '@/emails/new-request'
+import { STUDIO_TIME_ZONE } from '@/lib/kickoff-slot'
 import RequestDeliveredEmail from '@/emails/request-delivered'
 import RequestClientReviewEmail from '@/emails/request-client-review'
 import NewMessageEmail from '@/emails/new-message'
@@ -687,11 +688,20 @@ export function clientStatusEmailPlan(input: {
   }
 }
 
-/** A stable, locale free date for the delivered stamp. */
+/**
+ * The delivered stamp, e.g. "5 September 2026": the same long en-NZ date the
+ * invoice emails use for due dates, in the studio's zone rather than the
+ * worker's UTC clock.
+ */
 function formatDeliveredAt(value: string | null | undefined): string {
   const date = value ? new Date(value) : new Date()
   if (Number.isNaN(date.getTime())) return ''
-  return date.toISOString().slice(0, 10)
+  return date.toLocaleDateString('en-NZ', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: STUDIO_TIME_ZONE,
+  })
 }
 
 /**
@@ -722,6 +732,7 @@ export function studioNewRequestEmailPlan(input: {
         submittedBy: input.submittedBy ?? undefined,
         dashboardUrl: appOrigin(),
         requestId: input.requestId,
+        requestNumber: input.requestNumber,
       }),
   }
 }

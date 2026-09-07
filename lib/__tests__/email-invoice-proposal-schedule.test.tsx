@@ -105,7 +105,23 @@ describe('ProposalShareEmail', () => {
     expect(html).toContain('Liam Miller')
     expect(html).toContain('Two options inside.')
     expect(html).toContain('View proposal')
+    expect(html).toContain('1 Oct 2026')
+    expect(html).not.toContain('Oct 1, 2026')
     expect(html).not.toMatch(DASHES)
+  })
+
+  it('dates the expiry in New Zealand, where the reader is', async () => {
+    // 21:30 UTC on 27 September is already 28 September in New Zealand.
+    const html = await render(
+      ProposalShareEmail({
+        recipientName: 'Ngaire',
+        proposalTitle: 'Mahana Orchards spring campaign',
+        viewUrl: 'https://portal.tahi.studio/p/proposal/prv_8ad4e21f60b9',
+        fromName: 'Liam Miller',
+        expiresAt: '2026-09-27T21:30:00.000Z',
+      }),
+    )
+    expect(html).toContain('28 Sept 2026')
   })
 })
 
@@ -128,6 +144,21 @@ describe('ScheduleShareEmail', () => {
     expect(html).toContain('https://portal.tahi.studio/p/schedule/prv_51ce90d3f8a2')
     expect(html).toContain('Staci Bonnie')
     expect(html).toContain('View schedule')
+    expect(html).toContain('1 Nov 2026')
+    expect(html).not.toContain('Nov 1, 2026')
     expect(html).not.toMatch(DASHES)
+  })
+
+  it('dates the target launch in New Zealand, where the reader is', async () => {
+    const html = await render(
+      ScheduleShareEmail({
+        recipientName: 'Ngaire',
+        scheduleTitle: 'Mahana Orchards spring campaign',
+        viewUrl: 'https://portal.tahi.studio/p/schedule/prv_51ce90d3f8a2',
+        fromName: 'Staci Bonnie',
+        targetLaunchDate: '2026-10-18T21:30:00.000Z',
+      }),
+    )
+    expect(html).toContain('19 Oct 2026')
   })
 })

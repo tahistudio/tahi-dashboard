@@ -39,6 +39,22 @@ describe('welcome email', () => {
     expect(html).not.toMatch(DASHES)
   })
 
+  it('dates the expiry in New Zealand rather than UTC', async () => {
+    // 21:30 UTC on 20 September is 09:30 on the 21st in Whanganui. UTC said
+    // "20 September", a day short of what the link actually allows.
+    const html = await render(
+      WelcomeEmail({
+        contactName: 'Ngaire Hutchins',
+        orgName: 'Mahana Orchards',
+        dashboardUrl: 'https://portal.tahi.studio/accept-invite?token=abc123',
+        boundEmail: 'ngaire@mahana.co.nz',
+        expiresAt: '2026-09-20T21:30:00.000Z',
+      }),
+    )
+    expect(html).toContain('21 September 2026')
+    expect(html).not.toContain('20 September 2026')
+  })
+
   it('drops the bound-email line when there is nothing bound', async () => {
     const html = await render(
       WelcomeEmail({
@@ -71,6 +87,20 @@ describe('client invite email', () => {
     expect(html).toContain('https://portal.tahi.studio/accept-invite?token=xyz789')
     expect(html).toContain('Accept invitation')
     expect(html).not.toMatch(DASHES)
+  })
+
+  it('dates the expiry in New Zealand rather than UTC', async () => {
+    const html = await render(
+      ClientInviteEmail({
+        contactName: 'Ngaire Hutchins',
+        orgName: 'Mahana Orchards',
+        inviteUrl: 'https://portal.tahi.studio/accept-invite?token=xyz789',
+        boundEmail: 'ngaire@mahana.co.nz',
+        expiresAt: '2026-09-20T21:30:00.000Z',
+      }),
+    )
+    expect(html).toContain('21 September 2026')
+    expect(html).not.toContain('20 September 2026')
   })
 })
 
@@ -166,5 +196,28 @@ describe('announcement email', () => {
     expect(html).toContain('Maintenance')
     expect(html).toContain('Portal maintenance this Sunday')
     expect(html).not.toMatch(DASHES)
+  })
+
+  it('tints the kicker by type and keeps the white button on the forest band', async () => {
+    const base = {
+      title: 'A note from the studio',
+      body: 'One paragraph.',
+      ctaLabel: 'Open your portal',
+      ctaUrl: 'https://portal.tahi.studio/',
+    }
+    const info = await render(AnnouncementEmail({ ...base, type: 'info' }))
+    const success = await render(AnnouncementEmail({ ...base, type: 'success' }))
+    const warning = await render(AnnouncementEmail({ ...base, type: 'warning' }))
+    const maintenance = await render(AnnouncementEmail({ ...base, type: 'maintenance' }))
+
+    expect(info).toContain('color:#A9C4E0')
+    expect(success).toContain('color:#93C98A')
+    expect(warning).toContain('color:#E6C27A')
+    expect(maintenance).toContain('color:#E6C27A')
+    expect(info).not.toContain('#E6C27A')
+    expect(maintenance).not.toContain('#A9C4E0')
+    for (const html of [info, success, warning, maintenance]) {
+      expect(html).toMatch(/<a href="https:\/\/portal\.tahi\.studio\/"[^>]*color:#1E2A1B[^>]*background-color:#ffffff/)
+    }
   })
 })
