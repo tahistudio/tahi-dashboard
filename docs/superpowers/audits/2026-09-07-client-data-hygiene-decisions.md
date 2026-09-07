@@ -41,3 +41,11 @@ Consequence: 12 ManyRequests-imported invoices now sit next to their Stripe or X
 ## Stripe charge twins removed (7 Sep 2026, 12:40 NZST)
 
 The dedupe endpoint (dry run, then apply as Liam) removed 9 charge rows that duplicated a Stripe invoice row for the same payment, with their 9 line items: Physitrack 5, Dante Media 2, AI Friction Labs 1, The Longevity Edit 1 (Christian Burton now shows one USD 2,500, as Liam said). The importer no longer produces them: it reads the invoice link through the payment intent. Next: the ManyRequests twins (12 rows) once that builder lands.
+
+## ManyRequests twins removed (7 Sep 2026, 12:55 NZST)
+
+The second dedupe (dry run, then apply as Liam) removed the 12 ManyRequests-imported invoice rows that duplicated a Stripe or Xero ledger row at the same client (ISG 2, Dante Media 2, Blank Space Inc 2, Physitrack 4, Fluvial 2), carrying each ManyRequests id onto the surviving ledger row (no numbers carried because the ledger rows have none yet; the invoice number backfill fills those). Greyhive's pending GBP 1,279.67 ManyRequests invoice stays, it has no twin. The ledger now holds one row per payment.
+
+## Staci's accidental workspace (7 Sep 2026, 12:50 NZST)
+
+A fresh team sign-in had no active organisation, the middleware read that as a lead, and a refresh ran self-serve provisioning: Clerk organisation "Staci's workspace" (org_3IyX9ULTIjV7H5kdN2rUUOKTGS6) plus a D1 client with a contact linked to her login. The routing fix (workspace chooser) is deploying; a delete path for accidental workspaces (removes the Clerk organisation when every attached login is a Tahi teammate) is being built. Until then: delete the organisation in the Clerk dashboard, archive the client row, and have Staci sign in again once the chooser is live.

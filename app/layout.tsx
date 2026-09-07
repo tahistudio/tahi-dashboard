@@ -37,7 +37,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    // Both Clerk fallbacks route through /choose-workspace rather than straight
+    // Both Clerk fallbacks route through /continue rather than straight
     // to a destination. A session that has just been created has no ACTIVE
     // Clerk organisation, even for someone who already accepted an organisation
     // invitation, so landing on /overview or /onboarding decided the person's
@@ -48,8 +48,8 @@ export default function RootLayout({
     <ClerkProvider
       signInUrl="/sign-in"
       signUpUrl="/sign-up"
-      signInFallbackRedirectUrl="/choose-workspace?next=%2Foverview"
-      signUpFallbackRedirectUrl="/choose-workspace?next=%2Foverview"
+      signInFallbackRedirectUrl="/continue?next=%2Foverview"
+      signUpFallbackRedirectUrl="/continue?next=%2Foverview"
       localization={{
         signUp: {
           start: {

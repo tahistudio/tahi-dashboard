@@ -207,7 +207,7 @@ export default clerkMiddleware(async (auth, req) => {
   const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
   const isAdmin = tahiOrgId && orgId === tahiOrgId
 
-  // No ACTIVE org: hand the session to /choose-workspace, never straight to
+  // No ACTIVE org: hand the session to /continue, never straight to
   // onboarding.
   //
   // A Clerk session carries ONE active organisation, not a membership list, and

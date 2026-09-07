@@ -33,7 +33,7 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_CLERK_SIGN_IN_URL: '/sign-in',
     NEXT_PUBLIC_CLERK_SIGN_UP_URL: '/sign-up',
     // Clerk v5+ fallback redirect URLs (replaces deprecated afterSignInUrl / afterSignUpUrl).
-    // Both land on /choose-workspace, never on a dashboard route directly: a
+    // Both land on /continue, never on a dashboard route directly: a
     // freshly signed-in session has no ACTIVE organisation even when the person
     // holds memberships, and the chooser is the only place that can see the
     // membership list and call setActive. It forwards to `next` (here /overview)
@@ -41,8 +41,8 @@ const nextConfig: NextConfig = {
     // /onboarding. There is no env var to change in a deployment: these values
     // are inlined here, and the same pair is set as props on <ClerkProvider>
     // in app/layout.tsx (props win, so the two must agree).
-    NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL: '/choose-workspace?next=%2Foverview',
-    NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL: '/choose-workspace?next=%2Foverview',
+    NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL: '/continue?next=%2Foverview',
+    NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL: '/continue?next=%2Foverview',
     // After sign-out go to sign-in
     NEXT_PUBLIC_CLERK_SIGN_OUT_URL: '/sign-in',
 

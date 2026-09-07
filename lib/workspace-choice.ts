@@ -12,7 +12,7 @@
  * onboard as a client.
  *
  * So the no-org branch stops meaning "lead" and starts meaning "we do not know
- * yet". /choose-workspace resolves it against the real membership list and this
+ * yet". /continue resolves it against the real membership list and this
  * module holds the decision, free of Clerk and React so it can be tested.
  *
  * Kept deliberately dumb: it never fetches, never redirects, never touches
@@ -83,7 +83,7 @@ export function resolveWorkspaceChoice(input: WorkspaceChoiceInput): WorkspaceCh
 export const DEFAULT_WORKSPACE_DESTINATION = '/overview'
 
 /** The chooser's own path, so no caller has to spell it twice. */
-export const CHOOSE_WORKSPACE_PATH = '/choose-workspace'
+export const CHOOSE_WORKSPACE_PATH = '/continue'
 
 /**
  * Make a `next` param safe to redirect to.

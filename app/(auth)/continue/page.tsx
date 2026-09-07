@@ -1,6 +1,6 @@
 import { AuthShell } from '@/components/tahi/auth-shell'
 import { TAHI_TRUST_AVATARS } from '@/lib/auth-shell-config'
-import { ChooseWorkspaceContent } from './choose-workspace-content'
+import { ChooseWorkspaceContent } from './continue-content'
 
 export const metadata = {
   title: 'Opening your workspace - Tahi Studio',
@@ -8,7 +8,7 @@ export const metadata = {
 }
 
 /**
- * /choose-workspace. The landing spot for a signed-in session that has no
+ * /continue. The landing spot for a signed-in session that has no
  * ACTIVE Clerk organisation yet.
  *
  * A Clerk session carries one active org, not a membership list, so a person

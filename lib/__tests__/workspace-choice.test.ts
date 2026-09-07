@@ -95,7 +95,7 @@ describe('safeNextPath', () => {
   })
 
   it('never points back at the chooser', () => {
-    expect(safeNextPath('/choose-workspace?next=/x')).toBe('/overview')
+    expect(safeNextPath('/continue?next=/x')).toBe('/overview')
   })
 
   it('defaults an empty value', () => {
@@ -107,19 +107,19 @@ describe('safeNextPath', () => {
 
 describe('resolveNoOrgRedirect', () => {
   it('sends a no-org session on /overview to the chooser, carrying next', () => {
-    expect(resolveNoOrgRedirect('/overview')).toBe('/choose-workspace?next=%2Foverview')
+    expect(resolveNoOrgRedirect('/overview')).toBe('/continue?next=%2Foverview')
   })
 
   it('preserves the query string of the original location', () => {
     expect(resolveNoOrgRedirect('/requests', '?status=active')).toBe(
-      '/choose-workspace?next=%2Frequests%3Fstatus%3Dactive',
+      '/continue?next=%2Frequests%3Fstatus%3Dactive',
     )
   })
 
   it('lets the onboarding, welcome and chooser paths through', () => {
     expect(resolveNoOrgRedirect('/onboarding')).toBeNull()
     expect(resolveNoOrgRedirect('/welcome')).toBeNull()
-    expect(resolveNoOrgRedirect('/choose-workspace')).toBeNull()
+    expect(resolveNoOrgRedirect('/continue')).toBeNull()
   })
 
   it('leaves API routes alone (they self-guard)', () => {
