@@ -202,7 +202,7 @@ export function OrgDetailsCard({ org, onUpdated }: { org: Organisation; onUpdate
     { value: 'red',   label: 'Red (at risk)' },
   ]
 
-  const STATUS_OPTIONS = ['prospect', 'active', 'paused', 'churned', 'archived']
+  const STATUS_OPTIONS = ['prospect', 'active', 'paused', 'completed', 'churned', 'archived']
 
   return (
     <Card>

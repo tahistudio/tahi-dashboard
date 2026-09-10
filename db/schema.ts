@@ -33,7 +33,7 @@ export const organisations = sqliteTable('organisations', {
   // Client-editable brand accent hex used across their portal (migration 0084)
   accentColour: text('accent_colour'),
   industry: text('industry'),
-  // prospect | active | paused | churned | archived
+  // prospect | active | paused | completed | churned | archived
   status: text('status').notNull().default('prospect'),
   // maintain | scale | tune | launch | hourly | custom | none
   planType: text('plan_type').default('none'),

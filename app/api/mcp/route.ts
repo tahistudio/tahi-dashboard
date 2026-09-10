@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
                 properties: {
                   status: {
                     type: 'string',
-                    enum: ['prospect', 'active', 'paused', 'churned', 'archived'],
+                    enum: ['prospect', 'active', 'paused', 'completed', 'churned', 'archived'],
                     description: 'Filter by client status',
                   },
                   planType: {

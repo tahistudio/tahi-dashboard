@@ -1230,3 +1230,19 @@ So the lock MOVES rather than loosens. The cleanup asks "does it hold finance da
 - Archive remains the reversible answer and stays the right one for anything uncertain.
 
 ---
+
+## #060 - `completed` Is a Distinct Client Status From `churned`
+
+**Date:** 2026-09-10
+
+**Decision:** `organisations.status` gains a sixth value, `completed`, sitting between `paused` and `churned` everywhere the vocabulary is listed. It gets its own teal badge (`--badge-teal-*` tokens, matching `in_progress`), its own saved view on the Clients page rail, and its own bulk action. `churned` keeps its red danger styling and its meaning: a retainer or recurring relationship that was lost.
+
+**Rationale:** The status field was conflating two unrelated facts: "this client is not currently paying us" and "why not". A one-off project client who got what they wanted and has no reason to come back this month reads identically, in every report and every badge, to a retainer client who cancelled after a bad experience. Concretely: Blank Space Inc (a single Stripe-import stub with no invoices attached) was marked `churned`, while Fluvial (an active one-off client with several paid invoices and no work since May) was still marked `active` — same underlying situation, opposite and arbitrary labels, because there was no third option. `churned` should stay reserved for a real lost relationship; it is also the status the review/testimonial outreach pipeline (Batch 7, TASKS.md) should explicitly avoid targeting, and `completed` is exactly the population that pipeline exists for.
+
+**Implications:**
+- No migration: `status` is a plain `text` column with no DB-level CHECK constraint, so this is a vocabulary change only (`lib/status-config.ts` `ORG_STATUS_CONFIG`, `app/(dashboard)/clients/_list/clients-views.ts` `CLIENT_STATUSES`/`CLIENT_STATUS_LABELS`/`CLIENTS_SAVED_VIEWS`/`healthReasons`, the rail dot map, the row-chip tone map, the client-detail status dropdown, the list page's bulk-action menu, and both MCP tool schemas in `workers/mcp-server/src/index.ts` and `app/api/mcp/route.ts`).
+- `completed` clients are excluded from every "active clients" and MRR figure automatically: those all filter on exact equality to `status = 'active'`, never on "not churned/archived", so no reporting code needed to change.
+- MRR churn reporting on `/financial-reports` is unaffected: it counts churn off `subscriptions.cancelled_at`, not `organisations.status`, so a project client moving to `completed` was never counted as churn revenue in the first place.
+- Existing clients are not bulk-reclassified by this decision. Recategorising specific rows (Blank Space Inc, Fluvial, and similar) is a data change, done deliberately per client, not a side effect of shipping the enum value.
+
+---

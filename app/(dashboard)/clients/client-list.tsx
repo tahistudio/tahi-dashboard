@@ -630,6 +630,7 @@ export function ClientList() {
     const actions: BulkAction[] = [
       { id: 'active', section: 'Status', label: 'Mark active', verb: 'set to active', run: () => bulkStatus('active') },
       { id: 'paused', section: 'Status', label: 'Mark paused', verb: 'paused', run: () => bulkStatus('paused') },
+      { id: 'completed', section: 'Status', label: 'Mark completed', verb: 'marked completed', run: () => bulkStatus('completed') },
       { id: 'churned', section: 'Status', label: 'Mark churned', verb: 'marked churned', run: () => bulkStatus('churned') },
     ]
     for (const tag of bulkTagValues) {

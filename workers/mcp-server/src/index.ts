@@ -287,7 +287,7 @@ export const TOOLS: ToolDef[] = [
 
   // ── Read: Clients ─────────────────────────────────────────────────────
   tool('list_clients', 'List all client organisations with status, plan, health score', {
-    status: prop('string', 'Filter by status', { enum: ['prospect', 'active', 'paused', 'churned', 'archived'] }),
+    status: prop('string', 'Filter by status', { enum: ['prospect', 'active', 'paused', 'completed', 'churned', 'archived'] }),
     planType: prop('string', 'Filter by plan type (maintain, scale, tune, launch, hourly)'),
   }),
   tool('get_client', 'Get full detail for a client: org info, contacts, subscription, tracks, requests', {

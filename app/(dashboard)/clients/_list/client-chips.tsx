@@ -32,6 +32,7 @@ import {
 const STATUS_TONE: Record<string, BadgeTone> = {
   active: 'positive',
   paused: 'warning',
+  completed: 'teal',
   churned: 'danger',
   archived: 'neutral',
   prospect: 'info',

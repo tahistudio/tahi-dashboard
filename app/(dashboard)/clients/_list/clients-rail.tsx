@@ -57,6 +57,7 @@ const HEALTH_DOTS: Record<string, string> = {
 const STATUS_DOTS: Record<string, string> = {
   active: 'var(--badge-positive-dot)',
   paused: 'var(--badge-warning-dot)',
+  completed: 'var(--badge-teal-dot)',
   churned: 'var(--badge-danger-dot)',
   archived: 'var(--badge-neutral-dot)',
 }

@@ -263,6 +263,7 @@ export function healthReasons(row: ClientRow): string[] {
   const out: string[] = []
   if (row.healthNote) out.push(row.healthNote)
   if (row.status === 'paused') out.push('The engagement is paused.')
+  if (row.status === 'completed') out.push('The project wrapped. No ongoing engagement, no churn.')
   if (row.status === 'churned') out.push('This client has churned.')
   if (row.status === 'archived') out.push('Archived, and out of the working list.')
   if (row.engagement === 'retainer' && row.openRequestCount === 0) {
@@ -277,11 +278,12 @@ export function healthReasons(row: ClientRow): string[] {
 
 // -- Statuses ----------------------------------------------------------------
 
-export const CLIENT_STATUSES = ['active', 'paused', 'churned', 'archived'] as const
+export const CLIENT_STATUSES = ['active', 'paused', 'completed', 'churned', 'archived'] as const
 
 export const CLIENT_STATUS_LABELS: Record<string, string> = {
   active: 'Active',
   paused: 'Paused',
+  completed: 'Completed',
   churned: 'Churned',
   archived: 'Archived',
   prospect: 'Prospect',
@@ -330,6 +332,7 @@ export const CLIENTS_SAVED_VIEWS: readonly ClientsSavedView[] = [
   { key: 'projects', label: 'Projects', test: r => r.engagement === 'project' || r.engagement === 'hourly' },
   { key: 'at_risk', label: 'At risk', test: r => healthKeyOf(r) === 'red' },
   { key: 'paused', label: 'Paused', test: r => r.status === 'paused' },
+  { key: 'completed', label: 'Completed', test: r => r.status === 'completed' },
   { key: ARCHIVED_VIEW_KEY, label: 'Archived', test: r => r.status === 'archived' },
 ]
 

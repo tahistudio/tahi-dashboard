@@ -50,11 +50,14 @@ export const CATEGORY_CONFIG: Record<string, CategoryStyle> = {
 }
 
 export const ORG_STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; border?: string }> = {
-  prospect: { label: 'Prospect', bg: 'var(--status-submitted-bg)',   text: 'var(--status-submitted-text)',   border: 'var(--status-submitted-border)' },
-  active:   { label: 'Active',   bg: 'var(--status-delivered-bg)',   text: 'var(--status-delivered-text)',   border: 'var(--status-delivered-border)' },
-  paused:   { label: 'Paused',   bg: 'var(--status-in-review-bg)',   text: 'var(--status-in-review-text)',   border: 'var(--status-in-review-border)' },
-  churned:  { label: 'Churned',  bg: 'var(--color-danger-bg)',       text: 'var(--color-danger)' },
-  archived: { label: 'Archived', bg: 'var(--status-archived-bg)',    text: 'var(--status-archived-text)',    border: 'var(--status-archived-border)' },
+  prospect:  { label: 'Prospect',  bg: 'var(--status-submitted-bg)',   text: 'var(--status-submitted-text)',   border: 'var(--status-submitted-border)' },
+  active:    { label: 'Active',    bg: 'var(--status-delivered-bg)',   text: 'var(--status-delivered-text)',   border: 'var(--status-delivered-border)' },
+  paused:    { label: 'Paused',    bg: 'var(--status-in-review-bg)',   text: 'var(--status-in-review-text)',   border: 'var(--status-in-review-border)' },
+  // A one-off project that wrapped cleanly: no ongoing relationship, but
+  // nothing went wrong either. Deliberately not `churned` (see Decision #060).
+  completed: { label: 'Completed', bg: 'var(--badge-teal-bg)',         text: 'var(--badge-teal-text)',         border: 'var(--badge-teal-border)' },
+  churned:   { label: 'Churned',   bg: 'var(--color-danger-bg)',       text: 'var(--color-danger)' },
+  archived:  { label: 'Archived',  bg: 'var(--status-archived-bg)',    text: 'var(--status-archived-text)',    border: 'var(--status-archived-border)' },
 }
 
 export const INVOICE_STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; border?: string }> = {

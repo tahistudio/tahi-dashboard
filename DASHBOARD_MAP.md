@@ -873,11 +873,11 @@ The CRM-meets-account-management surface: a filtered client roster, plus a deep 
 ### Clients list - `/clients`
 `Audience: Admin` · `Status: 🟡 Built, working, not daily-trusted`
 
-**What it is.** The master roster of client organisations (active, paused, churned, archived). Prospects are deliberately excluded here and live in the sales pipeline instead.
+**What it is.** The master roster of client organisations (active, paused, completed, churned, archived). Prospects are deliberately excluded here and live in the sales pipeline instead.
 
 **Key features**
 - `DataTable` with sortable columns: Client (avatar + industry + website), Status, Plan, Health (coloured dot), Open request count, and Last activity (relative time).
-- `FilterBar` with two permanent multiselect chips: Status (active/paused/churned/archived) and Plan (maintain/scale/tune/launch/hourly/custom), plus a debounced name/website search.
+- `FilterBar` with two permanent multiselect chips: Status (active/paused/completed/churned/archived) and Plan (maintain/scale/tune/launch/hourly/custom), plus a debounced name/website search.
 - Status filter is URL-backed (`?status=`, `?q=`) so views are shareable; archived rows are fetched via a separate API call and merged when "archived" is part of a wider selection.
 - "Add client" `SlideOver` form: name, website, industry dropdown, plan, and an optional primary contact (name + email) who gets an invite on save.
 - Row click and a row action both open the client detail; keyboard shortcut `tahi:shortcut` "new-client" opens the create form.
