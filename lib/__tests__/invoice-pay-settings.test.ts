@@ -1,5 +1,5 @@
 /**
- * lib/invoice-pay-settings.ts: the three pay-path settings and their door.
+ * lib/invoice-pay-settings.ts: the four pay-path settings and their door.
  *
  * `settings` is an untyped key/value table of TEXT, so the shape of these
  * values is enforced here or nowhere. What that buys, concretely:
@@ -7,6 +7,11 @@
  *   bankDetails            a malformed blob would otherwise only be discovered
  *                          as an empty "How to pay" block on a live client
  *                          invoice, with no error anywhere.
+ *   bankDetailsByCurrency  the same, plus two of its own: a currency code the
+ *                          studio does not invoice in would save and never
+ *                          resolve, and an account with neither an account
+ *                          number nor an IBAN would put a "How to pay" heading
+ *                          over nowhere to send the money.
  *   xeroPaymentAccountCode a mistyped code does not fail loudly. It posts real
  *                          payments against the wrong Xero account, and those
  *                          have to be found and reversed by hand.
@@ -21,26 +26,33 @@
 import { describe, it, expect } from 'vitest'
 
 import {
+  BANK_ACCOUNT_FIELD_LABELS,
+  BANK_DETAILS_BY_CURRENCY_SETTING_KEY,
   BANK_DETAILS_SETTING_KEY,
+  CURRENCY_ACCOUNT_FIELDS,
   DEFAULT_XERO_EMAIL_MODE,
+  INVOICE_CURRENCIES,
   INVOICE_PAY_SETTING_KEYS,
   XERO_EMAIL_MODES,
   XERO_EMAIL_MODE_SETTING_KEY,
   XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY,
   isXeroEmailMode,
   parseBankDetails,
+  parseBankDetailsByCurrency,
   resolveXeroEmailMode,
   resolveXeroPaymentAccountCode,
   validateBankDetails,
+  validateBankDetailsByCurrency,
   validateInvoicePaySetting,
   validateXeroEmailMode,
   validateXeroPaymentAccountCode,
 } from '@/lib/invoice-pay-settings'
 
 describe('the keys themselves', () => {
-  it('names all three under the invoicing namespace', () => {
+  it('names all four under the invoicing namespace', () => {
     expect(INVOICE_PAY_SETTING_KEYS).toEqual([
       'invoicing.bankDetails',
+      'invoicing.bankDetailsByCurrency',
       'invoicing.xeroPaymentAccountCode',
       'invoicing.xeroEmailMode',
     ])
@@ -186,9 +198,169 @@ describe('invoicing.bankDetails', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// invoicing.bankDetailsByCurrency
+// ---------------------------------------------------------------------------
+//
+// The studio invoices in five currencies and holds an Airwallex global account
+// for each. One shared account quoted a GBP client a New Zealand account
+// number, which their bank either returns or converts at its own rate.
+//
+// Every account below is made up. Nothing in this repo carries the studio's
+// real banking, and the numbers here are zeros and sequences on purpose.
+describe('invoicing.bankDetailsByCurrency', () => {
+  const GBP_ACCOUNT = {
+    bankName: 'Example Bank',
+    accountName: 'Tahi Studio Ltd',
+    location: 'United Kingdom',
+    accountNumber: '00000000',
+    sortCode: '00-00-00',
+    swift: 'AAAAGB0AXXX',
+  }
+
+  it('accepts an account for each currency the studio invoices in', () => {
+    for (const currency of INVOICE_CURRENCIES) {
+      const blob = JSON.stringify({ [currency]: GBP_ACCOUNT })
+      expect(validateBankDetailsByCurrency(blob)).toEqual({ ok: true })
+    }
+  })
+
+  it('refuses a currency the studio does not invoice in', () => {
+    // Not a vocabulary check for its own sake: a JPY account would save, would
+    // never resolve (the resolver only looks up the five), and would read as
+    // configured in settings while every yen invoice quoted the fallback.
+    const result = validateBankDetailsByCurrency(JSON.stringify({ JPY: GBP_ACCOUNT }))
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error).toContain('does not invoice in "JPY"')
+      expect(result.error).toContain('NZD, GBP, USD, AUD, EUR')
+    }
+  })
+
+  it('refuses an account that names nowhere to send the money, with a sentence', () => {
+    // The failure this rule exists for: it saves, it resolves, and the client
+    // reads a "How to pay" heading over a bank name with nothing to pay into.
+    const result = validateBankDetailsByCurrency(JSON.stringify({
+      GBP: { bankName: 'Example Bank', accountName: 'Tahi Studio Ltd', sortCode: '00-00-00' },
+    }))
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error).toBe(
+        'invoicing.bankDetailsByCurrency.GBP needs an account number or an IBAN, otherwise the'
+        + ' How to pay block on a GBP invoice names nowhere to send the money.',
+      )
+    }
+  })
+
+  it('takes an IBAN as the destination, because the EUR account has no account number', () => {
+    const blob = JSON.stringify({
+      EUR: { bankName: 'Example Bank', iban: 'EE00 0000 0000 0000 0000', swift: 'AAAAEE0AXXX' },
+    })
+    expect(validateBankDetailsByCurrency(blob)).toEqual({ ok: true })
+  })
+
+  it('holds the account number and the IBAN to their shapes', () => {
+    const badNumber = validateBankDetailsByCurrency(JSON.stringify({
+      GBP: { ...GBP_ACCOUNT, accountNumber: 'ask Liam' },
+    }))
+    expect(badNumber.ok).toBe(false)
+    if (!badNumber.ok) expect(badNumber.error).toContain('digits, dashes and spaces')
+
+    const badIban = validateBankDetailsByCurrency(JSON.stringify({
+      EUR: { iban: 'EE00-0000-0000' },
+    }))
+    expect(badIban.ok).toBe(false)
+    if (!badIban.ok) expect(badIban.error).toContain('letters, digits and spaces')
+  })
+
+  it('refuses a field it does not know, so a typo is not stored as data', () => {
+    const result = validateBankDetailsByCurrency(JSON.stringify({
+      GBP: { ...GBP_ACCOUNT, sortcode: '00-00-00' },
+    }))
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toContain('does not know the field "sortcode"')
+  })
+
+  it('treats an empty account and an empty value as the clear', () => {
+    expect(validateBankDetailsByCurrency(JSON.stringify({ GBP: {} })).ok).toBe(true)
+    expect(validateBankDetailsByCurrency('').ok).toBe(true)
+    expect(validateBankDetailsByCurrency(null).ok).toBe(true)
+  })
+
+  it('refuses a value that is not a JSON object keyed by currency', () => {
+    expect(validateBankDetailsByCurrency('not json').ok).toBe(false)
+    expect(validateBankDetailsByCurrency('[1,2]').ok).toBe(false)
+    expect(validateBankDetailsByCurrency(JSON.stringify({ GBP: 'Example Bank' })).ok).toBe(false)
+  })
+
+  it('round trips: what validates is what parses back, trimmed', () => {
+    const typed = {
+      GBP: { ...GBP_ACCOUNT, accountName: '  Tahi Studio Ltd  ', referenceHint: '' },
+      USD: {
+        accountName: 'Tahi Studio Ltd',
+        location: 'United States',
+        accountNumber: '000000000000',
+        achRouting: '123456789',
+        fedwireRouting: '987654321',
+        swift: 'AAAAUS0AXXX',
+      },
+    }
+    const blob = JSON.stringify(typed)
+    expect(validateBankDetailsByCurrency(blob)).toEqual({ ok: true })
+
+    const parsed = parseBankDetailsByCurrency(blob)
+    expect(parsed.GBP).toEqual({ ...GBP_ACCOUNT, accountName: 'Tahi Studio Ltd' })
+    expect(parsed.USD).toEqual(typed.USD)
+    // Untouched currencies are absent rather than empty, so the resolver falls
+    // through to the default account instead of matching a hollow object.
+    expect(parsed.NZD).toBeUndefined()
+    expect(parsed.EUR).toBeUndefined()
+  })
+
+  it('parses a hand-edited row tolerantly: a bad blob is no accounts, never a throw', () => {
+    expect(parseBankDetailsByCurrency('not json')).toEqual({})
+    expect(parseBankDetailsByCurrency('[1,2]')).toEqual({})
+    expect(parseBankDetailsByCurrency(null)).toEqual({})
+    // Unknown currency, unknown field and a non-string all dropped, and the
+    // currency left with nothing goes with them.
+    expect(parseBankDetailsByCurrency(JSON.stringify({
+      JPY: { accountNumber: '1' },
+      GBP: { accountNumber: '00000000', sortcode: '00-00-00', swift: 12 },
+      USD: {},
+    }))).toEqual({ GBP: { accountNumber: '00000000' } })
+  })
+
+  it('gives every currency a field set, and never an empty one', () => {
+    for (const currency of INVOICE_CURRENCIES) {
+      const fields = CURRENCY_ACCOUNT_FIELDS[currency]
+      expect(fields.length).toBeGreaterThan(0)
+      // Each set has to name somewhere to send the money, or the editor could
+      // not produce an account the validator accepts.
+      expect(fields.includes('accountNumber') || fields.includes('iban')).toBe(true)
+      for (const field of fields) {
+        expect(BANK_ACCOUNT_FIELD_LABELS[field]).toBeTruthy()
+      }
+    }
+    // The five shapes, straight off the five Airwallex accounts.
+    expect(CURRENCY_ACCOUNT_FIELDS.GBP).toContain('sortCode')
+    expect(CURRENCY_ACCOUNT_FIELDS.USD).toContain('achRouting')
+    expect(CURRENCY_ACCOUNT_FIELDS.USD).toContain('fedwireRouting')
+    expect(CURRENCY_ACCOUNT_FIELDS.AUD).toContain('bsb')
+    expect(CURRENCY_ACCOUNT_FIELDS.NZD).toContain('bankCode')
+    expect(CURRENCY_ACCOUNT_FIELDS.NZD).toContain('branchCode')
+    expect(CURRENCY_ACCOUNT_FIELDS.EUR).toContain('iban')
+    expect(CURRENCY_ACCOUNT_FIELDS.EUR).not.toContain('accountNumber')
+  })
+})
+
 describe('validateInvoicePaySetting', () => {
   it('routes each key to its own validator', () => {
     expect(validateInvoicePaySetting(BANK_DETAILS_SETTING_KEY, 'nope').ok).toBe(false)
+    expect(validateInvoicePaySetting(BANK_DETAILS_BY_CURRENCY_SETTING_KEY, 'nope').ok).toBe(false)
+    expect(validateInvoicePaySetting(
+      BANK_DETAILS_BY_CURRENCY_SETTING_KEY,
+      JSON.stringify({ CHF: { accountNumber: '00000000' } }),
+    ).ok).toBe(false)
     expect(validateInvoicePaySetting(XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY, 'a b').ok).toBe(false)
     expect(validateInvoicePaySetting(XERO_EMAIL_MODE_SETTING_KEY, 'post').ok).toBe(false)
   })

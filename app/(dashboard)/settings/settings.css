@@ -95,6 +95,10 @@
 /* Per-field note: why we hold this, or what it is for. Sits under the input. */
 .set-field-note { font: 500 11.5px/1.45 'Manrope', sans-serif; color: var(--text-faint); }
 .set-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 18px; }
+/* The same two columns WITHOUT the card padding, for a group nested inside
+   .set-grid2 that needs to be one grid item (a tabpanel, say) and still lay
+   its own fields out in the card's rhythm. */
+.set-subgrid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.875rem; }
 
 /* toggle switch */
 .sw { position: relative; width: 42px; height: 24px; border-radius: 999px; border: none; background: var(--bg-tertiary); cursor: pointer; flex-shrink: 0; transition: background .18s var(--ease); }
@@ -546,6 +550,7 @@ a.chip:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
   .ta-icobtn.sm { width: 44px; height: 44px; }
   .btn2.sm { height: 44px; }
   .set-grid2 { grid-template-columns: 1fr; }
+  .set-subgrid2 { grid-template-columns: 1fr; }
   .set-input { min-height: 44px; }
   /* Invisible hit-area pads for small controls (44px DoD without visual change) */
   .sw { position: relative; }

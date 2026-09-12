@@ -67,7 +67,7 @@ import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { formatCurrency } from '@/lib/currency'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { invoiceReference } from '@/lib/invoice-billing'
-import { type InvoiceHowToPay } from '@/lib/invoice-how-to-pay'
+import { howToPayRows, type InvoiceHowToPay } from '@/lib/invoice-how-to-pay'
 import { PortalCopyRow } from '@/components/tahi/portal/portal-money-kit'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -778,15 +778,12 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                 Internet banking, from your account to ours. {invoice.howToPay.hint}
               </p>
               <div style={{ display: 'grid' }}>
-                {invoice.howToPay.bankName && (
-                  <PortalCopyRow label="Bank" value={invoice.howToPay.bankName} />
-                )}
-                {invoice.howToPay.accountName && (
-                  <PortalCopyRow label="Account name" value={invoice.howToPay.accountName} />
-                )}
-                {invoice.howToPay.accountNumber && (
-                  <PortalCopyRow label="Account number" value={invoice.howToPay.accountNumber} mono />
-                )}
+                {/* Only the fields the account for THIS invoice's currency
+                    carries: a sort code on a GBP bill, ACH and Fedwire routing
+                    on a USD one, an IBAN and no account number on a EUR one. */}
+                {howToPayRows(invoice.howToPay).map((row) => (
+                  <PortalCopyRow key={row.field} label={row.label} value={row.value} mono={row.mono} />
+                ))}
                 <PortalCopyRow label="Reference" value={invoice.howToPay.reference} mono />
                 <div
                   className="flex flex-wrap items-center gap-x-3 gap-y-1"

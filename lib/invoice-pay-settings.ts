@@ -8,6 +8,13 @@
  *                                      when there is no pay-now link (a Xero
  *                                      invoice waiting on approval, an org
  *                                      with online invoicing switched off).
+ *                                      ONE account, kept as the fallback.
+ *   invoicing.bankDetailsByCurrency    JSON. The same, but one account per
+ *                                      currency, because the studio holds an
+ *                                      Airwallex global account per currency
+ *                                      and each has its own field shape. This
+ *                                      is what a client's invoice quotes when
+ *                                      their currency has an entry.
  *   invoicing.xeroPaymentAccountCode   The Xero bank account code a hand
  *                                      mark-paid records the payment against.
  *                                      Unset means push-back to Xero is
@@ -245,9 +252,301 @@ export function validateXeroEmailMode(value: unknown): SettingValidation {
   return { ok: true }
 }
 
+// ---------------------------------------------------------------------------
+// invoicing.bankDetailsByCurrency
+// ---------------------------------------------------------------------------
+
+/**
+ * One account per currency, because the studio holds one per currency.
+ *
+ * invoicing.bankDetails above is ONE account. It was written when the studio
+ * banked in one place, and it quotes that one account under every invoice, so
+ * a GBP client reading a GBP bill is told to send pounds to a New Zealand
+ * account number. The bank either refuses it or converts it at their own rate
+ * and takes the spread, and either way the studio chases a payment that never
+ * arrives in the currency it billed.
+ *
+ * The studio holds an Airwallex global account per currency, and each has a
+ * different field shape: New Zealand wants a bank code and a branch code, the
+ * United Kingdom a sort code, the United States an ACH routing number AND a
+ * Fedwire one (they differ, and paying into the wrong rail is a returned
+ * payment), Australia a BSB, the euro account an IBAN and no account number at
+ * all. So this is not "the same four boxes, five times": the shape is per
+ * currency, and CURRENCY_ACCOUNT_FIELDS below names it.
+ *
+ * The legacy key stays readable as the fallback rather than being migrated
+ * away: it holds a real account that is still correct for the currency it was
+ * entered in, and a client whose currency has no entry yet is better served by
+ * that account than by a blank block.
+ */
+export const BANK_DETAILS_BY_CURRENCY_SETTING_KEY = 'invoicing.bankDetailsByCurrency'
+
+/** The five currencies the studio invoices in, and the only keys the map may carry. */
+export const INVOICE_CURRENCIES = ['NZD', 'GBP', 'USD', 'AUD', 'EUR'] as const
+
+export type InvoiceCurrency = (typeof INVOICE_CURRENCIES)[number]
+
+export function isInvoiceCurrency(value: unknown): value is InvoiceCurrency {
+  return typeof value === 'string' && (INVOICE_CURRENCIES as readonly string[]).includes(value)
+}
+
+/**
+ * One bank account, in the widest shape any of the five needs.
+ *
+ * Extends the legacy single-account shape rather than replacing it, so the old
+ * stored value IS a valid account and bankDetailsForCurrency can hand either
+ * back without a conversion step in between.
+ *
+ * `location` is the country the account is held in ("United Kingdom"), which
+ * is what an international transfer form asks for by name.
+ */
+export interface InvoiceBankAccount extends InvoiceBankDetails {
+  location?: string
+  sortCode?: string
+  swift?: string
+  achRouting?: string
+  fedwireRouting?: string
+  bsb?: string
+  bankCode?: string
+  branchCode?: string
+  iban?: string
+}
+
+/** The only fields an account may carry. Anything else is a typo, not data. */
+export const BANK_ACCOUNT_FIELDS = [
+  'bankName',
+  'accountName',
+  'location',
+  'accountNumber',
+  'iban',
+  'sortCode',
+  'bsb',
+  'bankCode',
+  'branchCode',
+  'achRouting',
+  'fedwireRouting',
+  'swift',
+  'referenceHint',
+] as const
+
+export type BankAccountField = (typeof BANK_ACCOUNT_FIELDS)[number]
+
+/**
+ * What each field is CALLED, everywhere it is shown.
+ *
+ * One map, read by the settings editor and by the client-facing block, so the
+ * box Liam types a sort code into is the row the client reads "Sort code" on.
+ * These are the bookkeeper's words rather than ours, and "SWIFT/BIC" carries
+ * both names because banks are split on which one they ask for.
+ */
+export const BANK_ACCOUNT_FIELD_LABELS: Record<BankAccountField, string> = {
+  bankName: 'Bank',
+  accountName: 'Account name',
+  location: 'Bank location',
+  accountNumber: 'Account number',
+  iban: 'IBAN',
+  sortCode: 'Sort code',
+  bsb: 'BSB',
+  bankCode: 'Bank code',
+  branchCode: 'Branch code',
+  achRouting: 'ACH routing',
+  fedwireRouting: 'Fedwire routing',
+  swift: 'SWIFT/BIC',
+  referenceHint: 'Reference hint',
+}
+
+/** Shown in a monospace row: identifiers a client copies digit for digit. */
+export const BANK_ACCOUNT_MONO_FIELDS: readonly BankAccountField[] = [
+  'accountNumber',
+  'iban',
+  'sortCode',
+  'bsb',
+  'bankCode',
+  'branchCode',
+  'achRouting',
+  'fedwireRouting',
+  'swift',
+]
+
+/** On every account, whichever currency it is: who is being paid, and where. */
+const COMMON_ACCOUNT_FIELDS: readonly BankAccountField[] = ['bankName', 'accountName', 'location']
+
+/**
+ * The identifier fields each currency's account actually has, in the order a
+ * transfer form asks for them.
+ *
+ * Straight off the five Airwallex global accounts. A field that is not here is
+ * not a field that account has: offering a sort code box under the USD account
+ * invites a number that means nothing on that rail.
+ */
+export const CURRENCY_ACCOUNT_FIELDS: Record<InvoiceCurrency, readonly BankAccountField[]> = {
+  NZD: [...COMMON_ACCOUNT_FIELDS, 'accountNumber', 'bankCode', 'branchCode', 'referenceHint'],
+  GBP: [...COMMON_ACCOUNT_FIELDS, 'accountNumber', 'sortCode', 'swift', 'referenceHint'],
+  USD: [...COMMON_ACCOUNT_FIELDS, 'accountNumber', 'achRouting', 'fedwireRouting', 'swift', 'referenceHint'],
+  AUD: [...COMMON_ACCOUNT_FIELDS, 'accountNumber', 'bsb', 'referenceHint'],
+  EUR: [...COMMON_ACCOUNT_FIELDS, 'iban', 'swift', 'referenceHint'],
+}
+
+/** currency code -> the account the studio is paid into in that currency. */
+export type InvoiceBankAccountsByCurrency = Partial<Record<InvoiceCurrency, InvoiceBankAccount>>
+
+/**
+ * Read a stored per-currency blob, tolerantly, for the reason parseBankDetails
+ * is tolerant: the surface this feeds is client-facing, and a hand-edited row
+ * has to degrade to an empty block rather than a 500.
+ *
+ * Unknown currencies are dropped, unknown fields are dropped, non-strings and
+ * blanks are ignored, and a currency whose account comes out empty is dropped
+ * with it, so bankDetailsForCurrency falls through to the legacy account
+ * rather than returning an object with nothing in it.
+ */
+export function parseBankDetailsByCurrency(
+  stored: string | null | undefined,
+): InvoiceBankAccountsByCurrency {
+  if (typeof stored !== 'string' || stored.trim() === '') return {}
+  let raw: unknown
+  try {
+    raw = JSON.parse(stored)
+  } catch {
+    return {}
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+
+  const source = raw as Record<string, unknown>
+  const out: InvoiceBankAccountsByCurrency = {}
+
+  for (const currency of INVOICE_CURRENCIES) {
+    const entry = source[currency]
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const fields = entry as Record<string, unknown>
+    const account: InvoiceBankAccount = {}
+    for (const field of BANK_ACCOUNT_FIELDS) {
+      const value = fields[field]
+      if (typeof value === 'string' && value.trim() !== '') account[field] = value.trim()
+    }
+    if (Object.keys(account).length > 0) out[currency] = account
+  }
+
+  return out
+}
+
+/**
+ * An IBAN is letters, digits and the spaces people group them with. Checked
+ * for the reason the account number is: this string goes in front of a client
+ * about to move money, and a punctuation mark in it is a paste of something
+ * else.
+ */
+const IBAN_SHAPE = /^[A-Za-z0-9 ]+$/
+
+/**
+ * Validate a per-currency blob on its way IN. Strict where
+ * parseBankDetailsByCurrency is tolerant, because this is the moment a mistake
+ * can still be reported to the person making it.
+ *
+ * The rule worth naming out loud: an account with neither an account number
+ * nor an IBAN names nowhere to send the money. It would save, it would
+ * resolve, and the client would read a "How to pay" heading over a bank name
+ * and nothing to pay into, which is worse than no block at all.
+ */
+export function validateBankDetailsByCurrency(value: unknown): SettingValidation {
+  if (value == null || value === '') return { ok: true }
+  if (typeof value !== 'string') {
+    return { ok: false, error: `${BANK_DETAILS_BY_CURRENCY_SETTING_KEY} must be a JSON string.` }
+  }
+
+  let raw: unknown
+  try {
+    raw = JSON.parse(value)
+  } catch {
+    return { ok: false, error: `${BANK_DETAILS_BY_CURRENCY_SETTING_KEY} must be valid JSON.` }
+  }
+
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {
+      ok: false,
+      error: `${BANK_DETAILS_BY_CURRENCY_SETTING_KEY} must be a JSON object keyed by currency code: ${INVOICE_CURRENCIES.join(', ')}.`,
+    }
+  }
+
+  const source = raw as Record<string, unknown>
+
+  for (const currency of Object.keys(source)) {
+    if (!isInvoiceCurrency(currency)) {
+      return {
+        ok: false,
+        error: `${BANK_DETAILS_BY_CURRENCY_SETTING_KEY} does not invoice in "${currency}". Allowed currencies: ${INVOICE_CURRENCIES.join(', ')}.`,
+      }
+    }
+
+    const entry = source[currency]
+    if (entry == null) continue
+    if (typeof entry !== 'object' || Array.isArray(entry)) {
+      return {
+        ok: false,
+        error: `${BANK_DETAILS_BY_CURRENCY_SETTING_KEY}.${currency} must be a JSON object with any of ${BANK_ACCOUNT_FIELDS.join(', ')}.`,
+      }
+    }
+
+    const fields = entry as Record<string, unknown>
+
+    for (const field of Object.keys(fields)) {
+      if (!(BANK_ACCOUNT_FIELDS as readonly string[]).includes(field)) {
+        return {
+          ok: false,
+          error: `${BANK_DETAILS_BY_CURRENCY_SETTING_KEY}.${currency} does not know the field "${field}". Allowed fields: ${BANK_ACCOUNT_FIELDS.join(', ')}.`,
+        }
+      }
+    }
+
+    const trimmed: Record<string, string> = {}
+    for (const field of BANK_ACCOUNT_FIELDS) {
+      const fieldValue = fields[field]
+      if (fieldValue === undefined || fieldValue === null) continue
+      if (typeof fieldValue !== 'string') {
+        return {
+          ok: false,
+          error: `${BANK_DETAILS_BY_CURRENCY_SETTING_KEY}.${currency}.${field} must be a string.`,
+        }
+      }
+      if (fieldValue.trim() !== '') trimmed[field] = fieldValue.trim()
+    }
+
+    // Nothing filled in is the clear for that currency, and falls back to the
+    // legacy account like any currency that was never entered at all.
+    if (Object.keys(trimmed).length === 0) continue
+
+    const accountNumber = trimmed.accountNumber ?? ''
+    const iban = trimmed.iban ?? ''
+
+    if (accountNumber === '' && iban === '') {
+      return {
+        ok: false,
+        error: `${BANK_DETAILS_BY_CURRENCY_SETTING_KEY}.${currency} needs an account number or an IBAN, otherwise the How to pay block on a ${currency} invoice names nowhere to send the money.`,
+      }
+    }
+
+    if (accountNumber !== '' && !ACCOUNT_NUMBER_SHAPE.test(accountNumber)) {
+      return {
+        ok: false,
+        error: `${BANK_DETAILS_BY_CURRENCY_SETTING_KEY}.${currency}.accountNumber may only contain digits, dashes and spaces.`,
+      }
+    }
+
+    if (iban !== '' && !IBAN_SHAPE.test(iban)) {
+      return {
+        ok: false,
+        error: `${BANK_DETAILS_BY_CURRENCY_SETTING_KEY}.${currency}.iban may only contain letters, digits and spaces.`,
+      }
+    }
+  }
+
+  return { ok: true }
+}
+
 /** Every key this module validates, for the route and for the tests. */
 export const INVOICE_PAY_SETTING_KEYS = [
   BANK_DETAILS_SETTING_KEY,
+  BANK_DETAILS_BY_CURRENCY_SETTING_KEY,
   XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY,
   XERO_EMAIL_MODE_SETTING_KEY,
 ] as const
@@ -264,6 +563,8 @@ export function validateInvoicePaySetting(key: string, value: unknown): SettingV
   switch (key) {
     case BANK_DETAILS_SETTING_KEY:
       return validateBankDetails(value)
+    case BANK_DETAILS_BY_CURRENCY_SETTING_KEY:
+      return validateBankDetailsByCurrency(value)
     case XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY:
       return validateXeroPaymentAccountCode(value)
     case XERO_EMAIL_MODE_SETTING_KEY:

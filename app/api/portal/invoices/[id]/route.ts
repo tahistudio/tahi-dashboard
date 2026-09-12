@@ -146,7 +146,9 @@ export async function GET(req: NextRequest, { params }: Params) {
         dueDate: rest.dueDate,
         paidAt: rest.paidAt,
       },
-      bankDetails: payContext.bankDetails,
+      // Both stored keys. The account is picked off this invoice's currency,
+      // so the detail page and the list row quote the same one.
+      bankSettings: payContext,
     })
   }
 

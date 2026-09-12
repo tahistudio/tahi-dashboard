@@ -50,6 +50,7 @@ import { NextRequest } from 'next/server'
 import { GET as portalInvoiceList } from '@/app/api/portal/invoices/route'
 import { GET as portalInvoiceDetail } from '@/app/api/portal/invoices/[id]/route'
 import {
+  BANK_DETAILS_BY_CURRENCY_SETTING_KEY,
   BANK_DETAILS_SETTING_KEY,
   XERO_EMAIL_MODE_SETTING_KEY,
 } from '@/lib/invoice-pay-settings'
@@ -108,6 +109,27 @@ const SETTINGS_ROWS = [
   { key: XERO_EMAIL_MODE_SETTING_KEY, value: 'dashboard' },
 ]
 
+/**
+ * The GBP account, made up, in the shape the UK account actually has: an
+ * account number, a sort code and a SWIFT/BIC, and none of the fields the
+ * other four carry.
+ */
+const GBP_ACCOUNT = {
+  bankName: 'Example Bank',
+  accountName: 'Tahi Studio Ltd',
+  location: 'United Kingdom',
+  accountNumber: '00000000',
+  sortCode: '00-00-00',
+  swift: 'AAAAGB0AXXX',
+  referenceHint: 'Quote the reference on your transfer.',
+}
+
+/** The same rows, with one currency filled in and the NZ account as the default. */
+const SETTINGS_ROWS_BY_CURRENCY = [
+  ...SETTINGS_ROWS,
+  { key: BANK_DETAILS_BY_CURRENCY_SETTING_KEY, value: JSON.stringify({ GBP: GBP_ACCOUNT }) },
+]
+
 /** One row as the LIST route selects it. */
 const LIST_ROW = {
   id: 'inv-1042-9c31-4b77-8e05-6f1d2a94c7b3',
@@ -160,6 +182,9 @@ interface HowToPay {
   bankName?: string
   accountName?: string
   accountNumber?: string
+  location?: string
+  sortCode?: string
+  swift?: string
   reference: string
   amount: number
   currency: string
@@ -406,6 +431,62 @@ describe('GET /api/portal/invoices/[id] pay path', () => {
     expect(body.invoice.howToPay).toBeUndefined()
     // The invoice read and the items read, and no settings round trip between.
     expect(entries).toEqual(['select', 'select'])
+  })
+
+  it('quotes the GBP account on a GBP invoice, and the NZ account nowhere on it', async () => {
+    // The bug this key exists for: one account under every invoice meant a GBP
+    // client was told to send pounds to a New Zealand account number, which
+    // their bank returns or converts at its own rate. The block is built off
+    // the INVOICE's currency, not the studio's default billing currency.
+    const gbpInvoice = { ...DETAIL_ROW, currency: 'GBP', totalUsd: 1800, amountUsd: 1800 }
+    const { handle } = makeDb([[gbpInvoice], SETTINGS_ROWS_BY_CURRENCY, []])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (
+      await portalInvoiceDetail(req('/api/portal/invoices/inv-1042'), params('inv-1042'))
+    ).json() as { invoice: Projected }
+
+    expect(body.invoice.howToPay).toEqual({
+      bankName: 'Example Bank',
+      accountName: 'Tahi Studio Ltd',
+      location: 'United Kingdom',
+      accountNumber: '00000000',
+      sortCode: '00-00-00',
+      swift: 'AAAAGB0AXXX',
+      reference: 'INV-2026-0042',
+      amount: 1800,
+      currency: 'GBP',
+      dueDate: '2026-09-30',
+      hint: 'Quote the reference on your transfer.',
+    })
+
+    // Not a field of the NZ account anywhere on this bill, including the
+    // fields the GBP account simply does not have.
+    const serialised = JSON.stringify(body.invoice.howToPay)
+    expect(serialised).not.toContain(BANK.accountNumber)
+    expect(serialised).not.toContain('ANZ')
+    expect(body.invoice.howToPay).not.toHaveProperty('bsb')
+    expect(body.invoice.howToPay).not.toHaveProperty('iban')
+    expect(body.invoice.howToPay).not.toHaveProperty('achRouting')
+  })
+
+  it('falls back to the default account for a currency with nothing entered', async () => {
+    // An AUD bill with only a GBP account stored. Not perfect, but a real
+    // account and a number the client can ring about beats a How to pay
+    // heading over nothing.
+    const audInvoice = { ...DETAIL_ROW, currency: 'AUD' }
+    const { handle } = makeDb([[audInvoice], SETTINGS_ROWS_BY_CURRENCY, []])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (
+      await portalInvoiceDetail(req('/api/portal/invoices/inv-1042'), params('inv-1042'))
+    ).json() as { invoice: Projected }
+
+    expect(body.invoice.howToPay).toMatchObject({
+      accountNumber: BANK.accountNumber,
+      currency: 'AUD',
+    })
+    expect(body.invoice.howToPay).not.toHaveProperty('sortCode')
   })
 
   it('never returns the Xero pay column or the org rail under their own names', async () => {

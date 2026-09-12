@@ -37,7 +37,7 @@ import {
   portalInvoiceDenialCopy,
   type PortalPersonSummary,
 } from '@/lib/portal-admin-label'
-import type { InvoiceHowToPay } from '@/lib/invoice-how-to-pay'
+import { howToPayRows, type InvoiceHowToPay } from '@/lib/invoice-how-to-pay'
 import { invoiceReference } from '@/lib/invoice-billing'
 import {
   PORTAL_INVOICE_STATE_COPY,
@@ -282,10 +282,12 @@ export function PortalInvoiceDetail({
   const copyAll = async () => {
     const block = invoice.howToPay
     if (!block) return
+    // Off the same row builder the card renders, so what lands on the
+    // clipboard is what is on screen: a UK client copies their sort code and
+    // a US one copies both routing numbers, without this list being kept in
+    // step with the card by hand.
     const lines = [
-      block.bankName ? `Bank: ${block.bankName}` : null,
-      block.accountName ? `Account name: ${block.accountName}` : null,
-      block.accountNumber ? `Account number: ${block.accountNumber}` : null,
+      ...howToPayRows(block).map((row) => `${row.label}: ${row.value}`),
       `Reference: ${block.reference}`,
       `Amount: ${formatPortalMoney(block.amount, block.currency)}`,
       block.dueDate ? `Due: ${formatPortalDateLong(block.dueDate)}` : null,
@@ -452,15 +454,12 @@ export function PortalInvoiceDetail({
             {invoice.howToPay.dueDate && (
               <PortalCopyRow label="Due" value={formatPortalDateLong(invoice.howToPay.dueDate)} />
             )}
-            {invoice.howToPay.bankName && (
-              <PortalCopyRow label="Bank" value={invoice.howToPay.bankName} />
-            )}
-            {invoice.howToPay.accountName && (
-              <PortalCopyRow label="Account name" value={invoice.howToPay.accountName} />
-            )}
-            {invoice.howToPay.accountNumber && (
-              <PortalCopyRow label="Account number" value={invoice.howToPay.accountNumber} mono />
-            )}
+            {/* Only the fields this currency's account actually carries. A GBP
+                bill shows a sort code and a SWIFT/BIC, a EUR one an IBAN and
+                no account number at all. */}
+            {howToPayRows(invoice.howToPay).map((row) => (
+              <PortalCopyRow key={row.field} label={row.label} value={row.value} mono={row.mono} />
+            ))}
             <PortalCopyRow label="Reference" value={invoice.howToPay.reference} mono />
           </div>
 

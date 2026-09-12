@@ -201,7 +201,10 @@ export async function GET(req: NextRequest) {
           dueDate: row.dueDate,
           paidAt: row.paidAt,
         },
-        bankDetails: payContext.bankDetails,
+        // Both stored keys. buildHowToPay picks the account off the row's own
+        // currency, so a GBP bill on this page quotes the GBP account and an
+        // NZD bill beside it quotes the NZD one.
+        bankSettings: payContext,
       })
       : null
     // clientInvoiceNote, not the raw column: an imported invoice's notes are

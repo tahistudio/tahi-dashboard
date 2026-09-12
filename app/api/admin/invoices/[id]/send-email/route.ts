@@ -248,7 +248,9 @@ export async function POST(req: NextRequest, { params }: Params) {
       currency: invoiceRow.currency,
       dueDate: invoiceRow.dueDate,
     },
-    bankDetails: payContext.bankDetails,
+    // Both stored keys. The emailed block quotes the account for THIS
+    // invoice's currency, which is the account the payment has to land in.
+    bankSettings: payContext,
   })
 
   // Has this invoice been sent before? Read once, used twice: it guards the
