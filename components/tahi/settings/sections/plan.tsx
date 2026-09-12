@@ -39,12 +39,19 @@ interface SubscriptionData {
   currentPeriodStart: string | null
   currentPeriodEnd: string | null
   commitmentEndDate: string | null
+  /** In `currency`. True `customRate` means a negotiated rate, not a list price. */
+  monthlyRate: number
+  currency: string
+  customRate: boolean
+  /** False when the org has no Stripe customer, so there is no portal to open. */
+  canManagePayment: boolean
   trackCount: number
   createdAt: string
 }
 
 interface BillingData {
   monthlyRate: number
+  currency: string
   cycleMonths: number
   cycleTotal: number
   monthlySavings: number
@@ -166,7 +173,14 @@ export function PlanBillingSection({ isClientAdmin }: { isClientAdmin?: boolean 
 
   const trackRate = currentPlan?.trackRate ?? 0
   const baseRate = billing?.monthlyRate ?? currentPlan?.monthlyRate ?? 0
-  const total = baseRate + extras * trackRate
+  // The currency the base rate is actually billed in. A negotiated rate carries
+  // its own currency, and the per-track price in the catalogue is an NZD list
+  // price, so the two cannot be added: the sum would be a figure nobody agreed
+  // to. On a custom rate we quote the base alone and say extras are quoted.
+  const currency = billing?.currency ?? sub?.currency ?? 'NZD'
+  const customRate = !!sub?.customRate
+  const total = customRate ? baseRate : baseRate + extras * trackRate
+  const showTrackRate = !customRate && trackRate > 0
 
   const nextCharge = sub ? formatDate(sub.currentPeriodEnd) : ''
 
@@ -216,14 +230,14 @@ export function PlanBillingSection({ isClientAdmin }: { isClientAdmin?: boolean 
               <div className="pc-sub">
                 {baseRate > 0 && (
                   <>
-                    <Money nzd={total} />
+                    <Money native={total} currency={currency} withDisplay />
                     <span>/mo</span>
                   </>
                 )}
                 {nextCharge && (baseRate > 0 ? ' · next charge ' + nextCharge : 'Next charge ' + nextCharge)}
               </div>
             </div>
-            {canManage && (
+            {canManage && sub.canManagePayment && (
               <button className="btn2" type="button" onClick={() => void openBilling()}>
                 Manage payment method
               </button>
@@ -251,11 +265,13 @@ export function PlanBillingSection({ isClientAdmin }: { isClientAdmin?: boolean 
               <b>Extra tracks</b>
               <small>
                 Run more work in parallel.{' '}
-                {trackRate > 0 ? (
+                {showTrackRate ? (
                   <>
                     <Money nzd={trackRate} />
                     /mo each, on top of your base plan.
                   </>
+                ) : customRate ? (
+                  'Extra tracks are quoted for your plan, ask us and we will confirm.'
                 ) : (
                   'Priced per plan, on top of your base plan.'
                 )}
@@ -297,28 +313,36 @@ export function PlanBillingSection({ isClientAdmin }: { isClientAdmin?: boolean 
             <div className="pb-row">
               <span>{sub.planLabel} base</span>
               <b>
-                <Money nzd={baseRate} />
+                <Money native={baseRate} currency={currency} withDisplay />
                 /mo
               </b>
             </div>
-            {extras > 0 && (
-              <div className="pb-row">
-                <span>
-                  {extras} extra track{extras > 1 ? 's' : ''} &times; <Money nzd={trackRate} />
-                </span>
-                <b>
-                  <Money nzd={extras * trackRate} />
-                  /mo
-                </b>
+            {customRate ? (
+              <div className="pb-row" style={{ borderBottom: 'none' }}>
+                <span>Extra tracks are quoted for your plan, ask us and we will confirm.</span>
               </div>
+            ) : (
+              <>
+                {extras > 0 && (
+                  <div className="pb-row">
+                    <span>
+                      {extras} extra track{extras > 1 ? 's' : ''} &times; <Money nzd={trackRate} />
+                    </span>
+                    <b>
+                      <Money nzd={extras * trackRate} />
+                      /mo
+                    </b>
+                  </div>
+                )}
+                <div className="pb-row total">
+                  <span>Total{extrasDirty ? ' (if confirmed)' : ''}</span>
+                  <b>
+                    <Money native={total} currency={currency} withDisplay />
+                    /mo
+                  </b>
+                </div>
+              </>
             )}
-            <div className="pb-row total">
-              <span>Total{extrasDirty ? ' (if confirmed)' : ''}</span>
-              <b>
-                <Money nzd={total} />
-                /mo
-              </b>
-            </div>
           </div>
         </>
       ) : (

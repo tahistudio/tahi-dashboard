@@ -4,11 +4,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, ne, asc } from 'drizzle-orm'
+import { resolveTracksConfig, buildEffectiveTracks } from '@/lib/plan-utils'
 
 // ── GET /api/portal/tracks ────────────────────────────────────────────────
 // Client portal: return the authenticated org's tracks with active and queued
 // requests. Internal-only requests (isInternal=true) are never exposed to the
 // client, matching every other portal route.
+//
+// Lanes come from the org's resolved entitlement, not from the physical rows
+// in the tracks table: a client on a custom 1 small + 1 large config with only
+// one row was never shown their large lane at all. Same reconciliation
+// app/api/portal/capacity uses, so the two boards cannot disagree.
 export async function GET(req: NextRequest) {
   const { orgId, userId, clerkOrgId } = await getPortalAuth(req)
 
@@ -28,6 +34,7 @@ export async function GET(req: NextRequest) {
       id: schema.subscriptions.id,
       planType: schema.subscriptions.planType,
       status: schema.subscriptions.status,
+      hasPrioritySupport: schema.subscriptions.hasPrioritySupport,
     })
     .from(schema.subscriptions)
     .where(and(
@@ -45,6 +52,25 @@ export async function GET(req: NextRequest) {
     .select()
     .from(schema.tracks)
     .where(eq(schema.tracks.subscriptionId, sub.id))
+
+  // Per-client tracks override (auto | custom | off). Wrapped so the endpoint
+  // keeps working on a pre-0079 environment, where the columns are missing.
+  let org: { tracksMode: string | null; customSmallTracks: number | null; customLargeTracks: number | null } | undefined
+  try {
+    ;[org] = await drizzle
+      .select({
+        tracksMode: schema.organisations.tracksMode,
+        customSmallTracks: schema.organisations.customSmallTracks,
+        customLargeTracks: schema.organisations.customLargeTracks,
+      })
+      .from(schema.organisations)
+      .where(eq(schema.organisations.id, orgId))
+      .limit(1)
+  } catch {
+    org = undefined
+  }
+
+  const config = resolveTracksConfig(org, sub.planType, !!sub.hasPrioritySupport)
 
   // Get all non-delivered/archived requests for this org, ordered by queue.
   // isInternal=false: internal admin-created requests stay hidden from the client.
@@ -68,9 +94,21 @@ export async function GET(req: NextRequest) {
     ))
     .orderBy(asc(schema.requests.queueOrder), asc(schema.requests.createdAt))
 
-  const currentIds = tracks.map(t => t.currentRequestId).filter(Boolean) as string[]
+  // Effective lanes: 'off' keeps the real rows (there is no track concept to
+  // reconcile to), auto/custom reconcile to the resolved counts so a lane the
+  // client is entitled to renders even with no backing row yet.
+  const effectiveTracks: Array<{
+    id: string
+    type: string
+    isPriorityTrack: number | boolean | null
+    currentRequestId: string | null
+  }> = config.mode === 'off'
+    ? tracks
+    : buildEffectiveTracks(tracks, config.smallTracks, config.largeTracks)
 
-  const items = tracks.map(t => ({
+  const currentIds = effectiveTracks.map(t => t.currentRequestId).filter(Boolean) as string[]
+
+  const items = effectiveTracks.map(t => ({
     id: t.id,
     type: t.type,
     isPriorityTrack: t.isPriorityTrack,

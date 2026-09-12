@@ -3,7 +3,7 @@ import { isOrgAdmin } from '@/lib/portal-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, desc } from 'drizzle-orm'
+import { eq, and, desc, sql } from 'drizzle-orm'
 import {
   calculateBundledSavings,
   calculateGst,
@@ -12,7 +12,7 @@ import {
   PLAN_MONTHLY_RATES,
   type BillingInterval,
 } from '@/lib/billing'
-import { getPlanLabel } from '@/lib/plan-utils'
+import { getPlanLabel, resolveTracksConfig } from '@/lib/plan-utils'
 import { loadPlanCatalog } from '@/lib/plan-catalog'
 
 // ── GET /api/portal/subscription ────────────────────────────────────────────
@@ -65,9 +65,65 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ subscription: null, plans, clientType: 'project' })
   }
 
+  // What this client actually pays, not what the studio lists. Two reads of
+  // the same org row, because they live in two different places:
+  //   1. Typed Drizzle for the columns that ARE in db/schema.ts.
+  //   2. Raw SQL for custom_mrr / custom_mrr_currency, which deliberately are
+  //      NOT in the Drizzle schema (see the comment in app/api/admin/clients/
+  //      [id]/route.ts: keeping them out stops SELECT * crashing on an
+  //      environment where migration 0016 has not run). Both are wrapped so a
+  //      pre-migration environment falls back to the catalogue rate instead of
+  //      500ing, exactly as app/api/portal/capacity/route.ts does.
+  let org:
+    | {
+        preferredCurrency: string | null
+        stripeCustomerId: string | null
+        tracksMode: string | null
+        customSmallTracks: number | null
+        customLargeTracks: number | null
+      }
+    | undefined
+  try {
+    ;[org] = await drizzle
+      .select({
+        preferredCurrency: schema.organisations.preferredCurrency,
+        stripeCustomerId: schema.organisations.stripeCustomerId,
+        tracksMode: schema.organisations.tracksMode,
+        customSmallTracks: schema.organisations.customSmallTracks,
+        customLargeTracks: schema.organisations.customLargeTracks,
+      })
+      .from(schema.organisations)
+      .where(eq(schema.organisations.id, orgId))
+      .limit(1)
+  } catch {
+    org = undefined
+  }
+
+  let customMrr: number | null = null
+  let customMrrCurrency: string | null = null
+  try {
+    const rows = await drizzle.all<{ custom_mrr: number | null; custom_mrr_currency: string | null }>(
+      sql`SELECT custom_mrr, custom_mrr_currency FROM organisations WHERE id = ${orgId} LIMIT 1`
+    )
+    if (rows?.[0]) {
+      customMrr = rows[0].custom_mrr
+      customMrrCurrency = rows[0].custom_mrr_currency
+    }
+  } catch {
+    // Columns do not exist yet (pre-migration-0016). Fall back to the
+    // catalogue rate below rather than failing the whole plan read.
+    customMrr = null
+    customMrrCurrency = null
+  }
+
   const interval = (sub.billingInterval ?? 'monthly') as BillingInterval
   const catalogPlan = catalog.find((p) => p.id === sub.planType)
-  const monthlyRate = catalogPlan?.monthlyRate ?? PLAN_MONTHLY_RATES[sub.planType] ?? 0
+  // A negotiated rate wins over the list price, and it carries its own
+  // currency: converting it would invent a number this client never agreed to.
+  const negotiatedRate = typeof customMrr === 'number' && customMrr > 0 ? customMrr : null
+  const customRate = negotiatedRate !== null
+  const monthlyRate = negotiatedRate ?? (catalogPlan?.monthlyRate ?? PLAN_MONTHLY_RATES[sub.planType] ?? 0)
+  const currency = customRate ? (customMrrCurrency ?? org?.preferredCurrency ?? 'NZD') : 'NZD'
   const cycleMonths = CYCLE_MONTHS[interval]
   const cycleTotal = monthlyRate * cycleMonths
   const monthlySavings = calculateBundledSavings(interval)
@@ -92,13 +148,18 @@ export async function GET(req: NextRequest) {
   // Calculate commitment end date from currentPeriodStart if available
   const commitmentEndDate: string | null = sub.currentPeriodEnd ?? null
 
-  // How many capacity tracks the retainer currently runs (drives the extra
-  // tracks stepper on the client Plan & billing tab).
+  // How much capacity the retainer is ENTITLED to, which is not the same as
+  // how many rows happen to exist in the tracks table: a custom 1 small + 1
+  // large client with only one physical row was being told they had one track.
+  // 'off' mode keeps the real rows, mirroring app/api/portal/capacity.
   const trackRows = await drizzle
     .select({ id: schema.tracks.id })
     .from(schema.tracks)
     .where(eq(schema.tracks.subscriptionId, sub.id))
-  const trackCount = trackRows.length
+  const tracksConfig = resolveTracksConfig(org, sub.planType, !!sub.hasPrioritySupport)
+  const trackCount = tracksConfig.mode === 'off'
+    ? trackRows.length
+    : tracksConfig.smallTracks + tracksConfig.largeTracks
 
   return NextResponse.json({
     // Active retainer -> TrackBoard / "Your plan". The overview home reads this
@@ -117,16 +178,25 @@ export async function GET(req: NextRequest) {
       currentPeriodStart: sub.currentPeriodStart ?? null,
       currentPeriodEnd: sub.currentPeriodEnd ?? null,
       commitmentEndDate,
-      // Convenience mirrors for the overview "Your plan" card (NZD base rate;
-      // the client formats via useDisplayCurrency). nextInvoiceDate is the
-      // current period end, i.e. when the next retainer invoice falls due.
+      // Convenience mirrors for the overview "Your plan" card. monthlyRate is
+      // in `currency`, which is the negotiated currency when customRate is
+      // true and NZD otherwise, so consumers must render it with
+      // <Money native currency> rather than converting it as if it were NZD.
+      // nextInvoiceDate is the current period end, i.e. when the next retainer
+      // invoice falls due.
       nextInvoiceDate: sub.currentPeriodEnd ?? null,
       monthlyRate,
+      currency,
+      customRate,
+      // No Stripe customer means the Stripe billing portal has nothing to open,
+      // so every "manage payment" affordance stays hidden for a Xero-rail client.
+      canManagePayment: !!org?.stripeCustomerId,
       trackCount,
       createdAt: sub.createdAt,
     },
     billing: {
       monthlyRate,
+      currency,
       cycleMonths,
       cycleTotal,
       monthlySavings,

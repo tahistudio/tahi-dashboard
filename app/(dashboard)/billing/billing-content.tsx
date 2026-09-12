@@ -17,6 +17,7 @@ import {
   type PortalPersonSummary,
 } from '@/lib/portal-admin-label'
 import { invoiceReference } from '@/lib/invoice-billing'
+import { Money } from '@/components/tahi/money'
 import { isOwedInvoice } from '@/lib/invoice-status'
 
 interface InvoiceRow {
@@ -43,10 +44,14 @@ interface SubscriptionRow {
   addonDetails?: Array<{ key: string; label: string; monthlyValue: number }>
   currentPeriodEnd: string | null
   commitmentEndDate?: string | null
+  /** False when the org has no Stripe customer: nothing to open, so no button. */
+  canManagePayment?: boolean
 }
 
 interface PortalBilling {
   monthlyRate: number
+  /** The currency monthlyRate and cycleTotal are actually billed in. */
+  currency?: string
   cycleMonths: number
   cycleTotal: number
   monthlySavings: number
@@ -80,6 +85,7 @@ const INTERVAL_LABELS: Record<string, string> = {
 
 export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
   const [portalLoading, setPortalLoading] = useState(false)
+  const [portalError, setPortalError] = useState('')
 
   // Portal-only fetches. Keys are null for admins so SWR skips them;
   // the admin path renders <AdminBillingView /> before these values are used.
@@ -116,21 +122,27 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
     await Promise.all([mutateInvoices(), mutateSub()])
   }
 
+  // A failure here used to go to the console, so the click looked like it did
+  // nothing. Say it on the page instead, in the client's own vocabulary.
+  const PORTAL_UNAVAILABLE = 'Payment management is not available on your account. Your studio contact can help.'
+
   async function openBillingPortal() {
     setPortalLoading(true)
+    setPortalError('')
     try {
       const res = await fetch(apiPath('/api/portal/billing/session'))
       if (!res.ok) {
-        const data = await res.json() as { error?: string }
-        console.error('[billing] Portal session error:', data.error)
+        setPortalError(PORTAL_UNAVAILABLE)
         return
       }
-      const data = await res.json() as { url: string }
+      const data = await res.json() as { url?: string }
       if (data.url) {
         window.open(data.url, '_blank')
+      } else {
+        setPortalError(PORTAL_UNAVAILABLE)
       }
     } catch {
-      console.error('[billing] Failed to open portal')
+      setPortalError('Could not open billing right now. Please try again.')
     } finally {
       setPortalLoading(false)
     }
@@ -212,7 +224,12 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
                       )}
                       {billing && billing.monthlyRate > 0 && (
                         <p>
-                          {billing.cycleMonths > 1 ? `${billing.cycleMonths}-month` : 'Monthly'} total: <span className="text-[var(--color-text)] font-medium">${billing.cycleTotal.toLocaleString()} NZD</span>
+                          {billing.cycleMonths > 1 ? `${billing.cycleMonths}-month` : 'Monthly'} total:{' '}
+                          <Money
+                            native={billing.cycleTotal}
+                            currency={billing.currency ?? 'NZD'}
+                            className="text-[var(--color-text)] font-medium"
+                          />
                         </p>
                       )}
                     </div>
@@ -244,15 +261,25 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
                   <p className="text-sm text-[var(--color-text-muted)]">No active subscription found.</p>
                 )}
               </div>
-              <TahiButton
-                size="sm"
-                onClick={openBillingPortal}
-                disabled={portalLoading}
-                iconLeft={<ExternalLink className="w-3.5 h-3.5" />}
-              >
-                {portalLoading ? 'Loading...' : 'Manage Billing'}
-              </TahiButton>
+              {/* Only a Stripe-rail client has a portal to manage. A client
+                  invoiced through Xero has no Stripe customer, so the button
+                  would 404 on every press. */}
+              {subscription?.canManagePayment && (
+                <TahiButton
+                  size="sm"
+                  onClick={openBillingPortal}
+                  disabled={portalLoading}
+                  iconLeft={<ExternalLink className="w-3.5 h-3.5" />}
+                >
+                  {portalLoading ? 'Loading...' : 'Manage Billing'}
+                </TahiButton>
+              )}
             </div>
+            {portalError && (
+              <p className="text-xs mt-3" role="status" style={{ color: 'var(--color-danger)' }}>
+                {portalError}
+              </p>
+            )}
           </div>
 
           {/* Invoice History */}

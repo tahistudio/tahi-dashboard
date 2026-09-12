@@ -54,8 +54,8 @@ import { isOwedInvoice } from '@/lib/invoice-status'
 import type { OverviewCtx } from '@/components/tahi/overview/ctx'
 import { portalStatusMeta, portalStageFraction, type PortalChipTone } from '@/lib/portal-status'
 import { WaitingOnYou, type WaitingItem } from '@/components/tahi/portal/home/waiting-on-you'
+import { Money } from '@/components/tahi/money'
 import {
-  useOvFormat,
   Icon,
   Card,
   CardH,
@@ -155,7 +155,10 @@ interface SubscriptionResp {
     planLabel: string
     status: string
     nextInvoiceDate: string | null
+    /** In `currency`, which is the negotiated currency for a custom rate. */
     monthlyRate: number
+    currency: string
+    customRate: boolean
     trackCount: number
   }
 }
@@ -905,7 +908,6 @@ function ProjectBoard({
 /* ---------- ClientHome ---------- */
 
 export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
-  const { money } = useOvFormat()
   const { formatNative } = useDisplayCurrency()
   const go = ctx.go
   const ro = ctx.isReadOnly
@@ -1614,11 +1616,24 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
               <span className="ov-chip brand">{subData?.subscription?.status === 'active' ? 'Active' : 'Retainer'}</span>
             </div>
             <div className="ov-mini" style={{ marginTop: 5 }}>
-              {subData?.subscription
-                ? `${money(subData.subscription.monthlyRate)}/mo · ${subData.subscription.trackCount} track${
+              {/* The rate is billed in its own currency (a negotiated GBP
+                  retainer is not an NZD figure), so it renders natively with
+                  the display equivalent appended rather than being converted. */}
+              {subData?.subscription ? (
+                <>
+                  <Money
+                    native={subData.subscription.monthlyRate}
+                    currency={subData.subscription.currency}
+                    withDisplay
+                    sensitive
+                  />
+                  {`/mo · ${subData.subscription.trackCount} track${
                     subData.subscription.trackCount === 1 ? '' : 's'
-                  }`
-                : 'Retainer plan'}
+                  }`}
+                </>
+              ) : (
+                'Retainer plan'
+              )}
             </div>
             <div className="ov-subrows">
               <div className="ov-subrow">
