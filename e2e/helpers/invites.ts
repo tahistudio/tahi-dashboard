@@ -1,4 +1,4 @@
-import { request as playwrightRequest, type APIRequestContext } from '@playwright/test'
+import { request as playwrightRequest, type APIRequestContext, type Page } from '@playwright/test'
 
 /**
  * Admin API helpers for the onboarding-persona e2e tests.
@@ -88,4 +88,27 @@ export async function mintInvite(opts: MintOpts, baseURL?: string): Promise<{ to
 /** A unique Clerk test email (code 424242) so each run signs up a fresh user. */
 export function testEmail(tag: string, runId: number): string {
   return `tahi-e2e-${tag}-${runId}+clerk_test@example.com`
+}
+
+/**
+ * Navigate to `url` right after a Clerk sign-up completes.
+ *
+ * The very first hard navigation after `waitForSession()` sometimes races an
+ * in-flight background fetch from the page being left (observed: a Next.js
+ * RSC request still pending against the previous route). Chromium reports
+ * that unrelated abort as if the new navigation itself had failed with
+ * net::ERR_ABORTED, even though the server answers normally a moment later
+ * and the destination page goes on to render. Waiting for the navigation to
+ * commit (rather than the full load event) plus one retry absorbs that race;
+ * any other error is a real failure and is rethrown as is.
+ */
+export async function gotoAfterSignUp(page: Page, url: string): Promise<void> {
+  try {
+    await page.goto(url, { waitUntil: 'commit' })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    if (!message.includes('ERR_ABORTED')) throw err
+    await page.waitForTimeout(250)
+    await page.goto(url, { waitUntil: 'commit' })
+  }
 }

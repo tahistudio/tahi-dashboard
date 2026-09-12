@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext, type BrowserContext } from '@play
 import { randomUUID } from 'node:crypto'
 import { setupClerkTestingToken } from '@clerk/testing/playwright'
 import { createPageObjects } from '@clerk/testing/playwright/unstable'
-import { adminRequestContext, createTestOrg, mintInvite, testEmail } from './helpers/invites'
+import { adminRequestContext, createTestOrg, gotoAfterSignUp, mintInvite, testEmail } from './helpers/invites'
 
 /**
  * Cross-org isolation proof (run plan A4).
@@ -265,7 +265,7 @@ async function signInAsClient(
   // The invite is consumed explicitly rather than by walking the onboarding UI:
   // this spec is about tenancy, and the onboarding step rail is somebody else's
   // surface to change. Same two calls the onboarding component makes on mount.
-  await page.goto('/onboarding')
+  await gotoAfterSignUp(page, '/onboarding')
   await page.waitForFunction(
     () => !!(window as unknown as { Clerk?: unknown }).Clerk,
     undefined,
@@ -294,7 +294,7 @@ async function signInAsClient(
   // The page stays open on purpose. Clerk refreshes the short-lived session
   // cookie from the browser, and context.request shares that cookie jar, so a
   // battery of API calls that outlives one token still authenticates.
-  await page.goto('/overview')
+  await gotoAfterSignUp(page, '/overview')
   await expect
     .poll(async () => (await context.request.get('/api/portal/project')).status(), {
       timeout: 30_000,
@@ -350,6 +350,28 @@ test.describe('Cross-org isolation (A4)', () => {
       const rows = await seedRows(admin as APIRequestContext, orgId, label, runId)
       const context = await browser.newContext({ baseURL })
       await signInAsClient(context, baseURL, { label, email, token })
+
+      // The platform default, proved once on org A before its own override
+      // lifts it: CLIENT_DEFAULT_DENY (lib/permissions.ts) hides Messages from
+      // every client with no explicit grant, so a fresh org 403s here with
+      // code feature_disabled rather than reaching any org-scoping check at
+      // all. This is what the request-thread 404-vs-403 assertions below need
+      // the per-org allow to see past.
+      if (label === 'A') {
+        const defaultDenied = await context.request.get('/api/portal/messages')
+        expect(defaultDenied.status(), 'org A default (no override) GET /api/portal/messages').toBe(403)
+        const defaultBody = (await defaultDenied.json()) as { code?: string }
+        expect(defaultBody.code, 'org A default deny carries feature_disabled').toBe('feature_disabled')
+      }
+
+      // Messages is CLIENT_DEFAULT_DENY, so every seeded proof org needs an
+      // explicit allow to keep exercising the request-thread tenancy checks
+      // underneath that gate rather than 403ing on the feature before ever
+      // reaching org scoping.
+      await (admin as APIRequestContext).put('/api/admin/permissions/feature-visibility', {
+        data: { subjectType: 'organisation', subjectId: orgId, featureKey: 'messages', effect: 'allow' },
+      })
+
       return { label, orgId, orgName, email, browser: context, api: context.request, ...rows }
     }
 
