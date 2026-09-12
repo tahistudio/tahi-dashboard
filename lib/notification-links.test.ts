@@ -71,9 +71,11 @@ describe('notificationHref - client audience', () => {
   })
 
   it('sends money notifications to portal surfaces, never the admin ones', () => {
-    // The invoice DETAIL page still fetches /api/admin/invoices, so the client
-    // lands on their own list rather than a page that 403s them.
-    expect(notificationHref('invoice', 'i1', 'client')).toBe('/invoices')
+    // The portal invoice detail renders for a client since T2.1 and carries
+    // the How to pay card since S3, so an invoice notification deep-links to
+    // it; only a missing id falls back to their list.
+    expect(notificationHref('invoice', 'i1', 'client')).toBe('/invoices/i1')
+    expect(notificationHref('invoice', null, 'client')).toBe('/invoices')
     expect(notificationHref('subscription', null, 'client')).toBe('/billing')
   })
 
