@@ -8,6 +8,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  clientInvoiceNote,
   daysUntilDue,
   formatCurrencyTotals,
   formatPortalDate,
@@ -112,6 +113,39 @@ describe('daysUntilDue', () => {
     expect(daysUntilDue('2026-09-06', NOW)).toBe(0)
     expect(daysUntilDue('2026-09-06T23:59:59', NOW)).toBe(0)
     expect(daysUntilDue('2026-09-08', NOW)).toBe(2)
+  })
+})
+
+describe('clientInvoiceNote', () => {
+  it('hides a plain import provenance note', () => {
+    expect(clientInvoiceNote('Imported from Xero: INV-0065')).toBeNull()
+    expect(clientInvoiceNote('Imported from Stripe: ch_1AbCdEfGhIjKlMnOp')).toBeNull()
+  })
+
+  it('hides an import note even with a bookkeeping sentence appended after it', () => {
+    // The Dante Media shape: the provenance prefix plus an internal sentence
+    // about how the bill was reconciled. None of it is for the client, and
+    // the whole string is hidden rather than only the first sentence.
+    expect(clientInvoiceNote(
+      "Imported from Xero: INV-0005. Paid through ManyRequests as INV-2025000019, "
+      + "reconciled against the Airwallex deposit. Recorded paid on Liam's call (MC.10).",
+    )).toBeNull()
+  })
+
+  it('matches the prefix case-insensitively and after trimming whitespace', () => {
+    expect(clientInvoiceNote('  imported from manyrequests: legacy invoice 4821')).toBeNull()
+    expect(clientInvoiceNote('IMPORTED FROM STRIPE: ch_1')).toBeNull()
+  })
+
+  it('keeps an ordinary studio-authored note unchanged', () => {
+    expect(clientInvoiceNote('Half up front, remainder due on delivery.'))
+      .toBe('Half up front, remainder due on delivery.')
+  })
+
+  it('keeps null and empty as null', () => {
+    expect(clientInvoiceNote(null)).toBeNull()
+    expect(clientInvoiceNote('')).toBeNull()
+    expect(clientInvoiceNote('   ')).toBeNull()
   })
 })
 

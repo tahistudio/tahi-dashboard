@@ -77,6 +77,29 @@ export function isPortalInvoiceOpen(invoice: PortalInvoiceLike): boolean {
   return !isInvoiceSettled(invoice)
 }
 
+/**
+ * What a client is allowed to read out of invoices.notes.
+ *
+ * Every imported invoice carries a provenance note the importers wrote for
+ * the studio's own bookkeeping: "Imported from Xero: INV-0065", sometimes
+ * with an internal sentence appended after that prefix ("Imported from
+ * Xero: INV-0005. Paid through ManyRequests as INV-2025000019. Recorded
+ * paid on Liam's call."). None of it was written for the client, so it must
+ * never render under "A note from the studio" or any other client surface,
+ * whichever rail raised the row and whatever the studio appended after it.
+ *
+ * A hand-written note is returned unchanged. Null and blank both come back
+ * as null, so a caller can gate a whole block on "is there something to
+ * say" with one check.
+ */
+export function clientInvoiceNote(notes: string | null): string | null {
+  if (!notes) return null
+  const trimmed = notes.trim()
+  if (!trimmed) return null
+  if (/^imported from/i.test(trimmed)) return null
+  return notes
+}
+
 /** Whole days from now until the due date. Negative once it is late. */
 export function daysUntilDue(dueDate: string, now: Date = new Date()): number {
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()

@@ -11,6 +11,7 @@ import {
   readInvoicePayContext,
   resolveInvoicePayUrl,
 } from '@/lib/invoice-how-to-pay'
+import { clientInvoiceNote } from '@/lib/portal-invoice-view'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -149,7 +150,11 @@ export async function GET(req: NextRequest, { params }: Params) {
     })
   }
 
-  const invoice = { ...rest, payUrl, ...(howToPay ? { howToPay } : {}) }
+  // An imported invoice's notes column is a provenance line the importers
+  // wrote for the studio's own bookkeeping, not a message for the client
+  // (see clientInvoiceNote). Filtered here rather than trusted from the
+  // column so the client-facing shape can never regress to raw text again.
+  const invoice = { ...rest, notes: clientInvoiceNote(rest.notes), payUrl, ...(howToPay ? { howToPay } : {}) }
 
   const items = await drizzle
     .select({
@@ -179,6 +184,9 @@ export async function GET(req: NextRequest, { params }: Params) {
   // Internal-only columns (Stripe / Xero ids, reconciliation state) are never
   // selected above, and the two studio-side values that ARE read (the Xero pay
   // page, the org's rail) are destructured off before the object is built, so
-  // nothing internal can leak through this projection.
+  // nothing internal can leak through this projection. `notes` went through
+  // clientInvoiceNote above for the same reason: the column itself is not
+  // internal, but an import's provenance line inside it is, so the text is
+  // filtered rather than trusted.
   return NextResponse.json({ invoice, items })
 }
