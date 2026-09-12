@@ -102,6 +102,8 @@ export async function GET(req: NextRequest) {
     type: string
     isPriorityTrack: number | boolean | null
     currentRequestId: string | null
+    /** True for a synthetic entitlement-only lane with no backing tracks row. */
+    synthetic?: boolean
   }> = config.mode === 'off'
     ? tracks
     : buildEffectiveTracks(tracks, config.smallTracks, config.largeTracks)
@@ -112,6 +114,10 @@ export async function GET(req: NextRequest) {
     id: t.id,
     type: t.type,
     isPriorityTrack: t.isPriorityTrack,
+    // Additive marker so the client can tell an empty entitlement lane (no
+    // backing row, id like "synthetic-large-0") from a real track: it has
+    // nothing of its own to reorder.
+    synthetic: t.synthetic === true,
     currentRequest: t.currentRequestId
       ? requests.find(r => r.id === t.currentRequestId) ?? null
       : null,

@@ -5,11 +5,19 @@ import { NextRequest, NextResponse } from 'next/server'
 import type Stripe from 'stripe'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { getStripe, STRIPE_PLANS, isPlanId, isPresentmentCurrency } from '@/lib/stripe-plans'
 import { INVOICE_CHANNEL_SETTING_KEY, resolveInvoiceChannel } from '@/lib/invoice-channel'
 
 export const dynamic = 'force-dynamic'
+
+/**
+ * Every status this codebase writes to subscriptions.status (db/schema.ts)
+ * that represents a live, non-cancelled retainer. 'incomplete' is deliberately
+ * excluded: it is this route's own abandoned checkout, cleaned up below so a
+ * client can retry or switch presentment currency.
+ */
+const LIVE_SUBSCRIPTION_STATUSES: string[] = ['active', 'past_due', 'paused', 'trialing']
 
 /**
  * POST /api/portal/checkout
@@ -65,11 +73,13 @@ export async function POST(req: NextRequest) {
   // Stripe subscription from a stale tab, a bookmarked /onboarding link or a
   // hand-rolled POST. Two refusals, both before any Stripe client is built:
   //
-  //   active subscription   they are already on a retainer with us. Changing it
-  //                         is a studio conversation, not a self-serve re-buy.
-  //   the Xero rail         the studio invoices them directly, so a Stripe
-  //                         subscription would bill them a second time on a
-  //                         rail nobody reconciles.
+  //   live subscription   they are already on a retainer with us, in any
+  //                       non-cancelled state (active, past_due, paused or
+  //                       trialing). Changing it is a studio conversation,
+  //                       not a self-serve re-buy.
+  //   the Xero rail       the studio invoices them directly, so a Stripe
+  //                       subscription would bill them a second time on a
+  //                       rail nobody reconciles.
   //
   // 'incomplete' subscriptions are deliberately NOT caught: those are this
   // route's own abandoned checkouts, and the cleanup below exists to let a
@@ -78,7 +88,7 @@ export async function POST(req: NextRequest) {
     database
       .select({ id: schema.subscriptions.id })
       .from(schema.subscriptions)
-      .where(and(eq(schema.subscriptions.orgId, orgId), eq(schema.subscriptions.status, 'active')))
+      .where(and(eq(schema.subscriptions.orgId, orgId), inArray(schema.subscriptions.status, LIVE_SUBSCRIPTION_STATUSES)))
       .limit(1),
     database
       .select({ invoiceChannel: schema.organisations.invoiceChannel })
