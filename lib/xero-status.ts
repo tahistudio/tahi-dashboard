@@ -73,8 +73,14 @@ export type XeroMappedStatus = 'draft' | 'sent' | 'paid' | 'written_off'
  *                on its own: the client opened it in the portal, or it aged
  *                past due) and must not undo 'paid' or 'written_off'.
  *   paid         terminal, always allowed. Xero seeing money is real money.
- *   written_off  terminal, always allowed. A VOIDED invoice is dead wherever
- *                the dashboard thought it was.
+ *   written_off  terminal, but it may not overwrite a local 'paid'. A void in
+ *                Xero says the LEDGER gave up on the bill; it does not say the
+ *                money never came. Dante Media INV-0005 and INV-0007 were paid
+ *                through ManyRequests and voided in Xero afterwards (MC.10,
+ *                2026-09-12), and a hand mark-paid with push-back off means the
+ *                same thing: money on a rail Xero was never told about. The
+ *                dashboard keeps 'paid' and its paid_at; Xero keeps its void.
+ *                Every other local status still yields to a void.
  *
  * When push-back lands and a locally paid invoice is actually reflected in
  * Xero, the 'sent' row here can be relaxed so an unwound payment demotes
@@ -84,7 +90,7 @@ const NEVER_OVERWRITTEN_BY: Record<XeroMappedStatus, ReadonlySet<string>> = {
   draft: new Set(['sent', 'viewed', 'overdue', 'paid', 'written_off']),
   sent: new Set(['viewed', 'overdue', 'paid', 'written_off']),
   paid: new Set(),
-  written_off: new Set(),
+  written_off: new Set(['paid']),
 }
 
 /**

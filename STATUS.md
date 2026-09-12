@@ -1,15 +1,21 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-09-05** by Claude (Tasks page port: the surface, its docs and its e2e). Triage snapshot below is still the 2026-08-18 audit.
+> Last updated: **2026-09-12** by Claude (deploy gate gone, `completed` client status, client book reclassified, MC.4 and MC.10 decided, DL.0 unblocked). Triage snapshot below is still the 2026-08-18 audit.
 
 ## The plan (2026-08-18)
 
 Liam's call: ship every surface a client touches first (proposals, contracts, schedules, portal), cut over from ManyRequests, then improve team/owner surfaces slowly. TASKS.md now carries five sprints: **C0 ops unblock -> C1 sell without embarrassment (deliverable money paths, ~5d) -> C2 portal truth (five blockers, ~12d) -> C3 client-facing redesign stragglers (~4d) -> C4 live QA gate.** Roughly 4-5 focused weeks to a defensible cutover.
 
-## DEPLOY GATE - read this before assuming anything is live
+## DEPLOY GATE - RESOLVED 2026-09-10
 
-**Pushes to main do NOT auto-deploy.** The "Deploy dashboard" workflow's production job waits on a GitHub environment approval (required reviewer: tahistudio). The Aug 10 bank-truth fix (dc41442a) sat in that gate for 8 days while prod kept serving the old code - `get_bank_balances` was still reading Xero's ledger the whole time. Approve deploys at GitHub -> Actions -> the run -> Review deployments, or remove the required-reviewer rule on the production environment. Until dc41442a is approved + sync-airwallex fires, do not trust cash/runway numbers from the MCP tools.
+**Pushes to main DO auto-deploy to production now.** The `production` GitHub environment carries no protection rules any more (checked through the API on 2026-09-12: `protection_rules: []`), so the "Deploy dashboard" workflow's production job runs straight through: 4e43bd9d was pushed at 01:07 NZST on 2026-09-10 and was live at 01:14 with nobody clicking anything. The Aug 10 story (dc41442a sat behind a required reviewer for 8 days) is history. If the gate ever comes back it shows up as a run stuck on "waiting" at GitHub -> Actions -> the run -> Review deployments.
+
+## Since the last update (2026-09-10 to 2026-09-12)
+
+- **Client status vocabulary gained `completed`** (Decision #060, 4e43bd9d, live): a one-off project that wrapped cleanly, distinct from `churned` (a lost retainer). Teal badge, its own saved view, filter and bulk action; the MCP `list_clients` enum carries it. Applied on Liam's call: AI Friction Labs, Blank Space Inc, Fluvial, Spot Digital and ISG are `completed`; DANTE MEDIA OÜ and Racquet Club are `churned`.
+- **Client book cleanup:** "test manual" (a re-created Stripe test fixture whose backdated NZ$350 invoice was driving a false "Needs you" nudge on the daily brief) and "Subscription update" (six fake paid Stripe invoices) deleted by Liam through the danger zone. Tahi Test Client stays until launch.
+- **Decisions:** MC.4, Giant Group gets no emails yet, the allowlist stays closed. MC.10, both Dante Media invoices were paid, recorded as paid on the ledger (detail in TASKS.md). DL.0 unblocked: Liam ran /design-login on 2026-09-12, so the Claude Design write-back (DL.1 to DL.4) can run.
 
 ---
 
@@ -80,7 +86,7 @@ Liam's call: ship every surface a client touches first (proposals, contracts, sc
 
 ## Known live bugs (priority order)
 
-1. **P0 - production deploy gate**: dc41442a not deployed; every future push waits on manual approval (see DEPLOY GATE above).
+1. **P0 - production deploy gate: RESOLVED 2026-09-10.** The required-reviewer rule is gone and pushes to main are live in about seven minutes (see DEPLOY GATE above). T0.2 (sync-airwallex + get_bank_balances check) stays open on its own merits.
 2. **P0 - `finance.yieldHoldings` stale**: yield positions grew (Xero shows Yield USD 33,956.89 / AUD 638.80 vs setting's 20,014.13 / 531.51). Confirm in Airwallex UI, update via update_settings after the deploy lands.
 3. **P1 - the five portal blockers** (sprint C2 above).
 4. **P1 - proposal/schedule share leaks live rows; proposal accept + contract sign are silent** (sprint C1).
@@ -109,7 +115,7 @@ Event bus fires automations + outgoing webhooks on real domain events; announcem
 
 ## Definition of Done (enforced)
 
-Per `CLAUDE.md` rule 8: type-check + lint + deploy green (NOW INCLUDING the manual approval click) + live smoke + 375px + dark mode + commit note.
+Per `CLAUDE.md` rule 8: type-check + lint + deploy green (no approval click any more, see DEPLOY GATE) + live smoke + 375px + dark mode + commit note.
 
 ## Production-readiness exit criterion
 

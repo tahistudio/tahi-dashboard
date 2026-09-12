@@ -127,10 +127,21 @@ describe('reconcileXeroStatus', () => {
     expect(reconcileXeroStatus('written_off', 'sent')).toBeNull()
   })
 
-  it('lets the terminal readings through from anywhere', () => {
+  it('lets a paid reading through from anywhere', () => {
     expect(reconcileXeroStatus('draft', 'paid')).toBe('paid')
     expect(reconcileXeroStatus('written_off', 'paid')).toBe('paid')
-    expect(reconcileXeroStatus('paid', 'written_off')).toBe('written_off')
+  })
+
+  it('lets a void through from anywhere except a local paid', () => {
+    // A void in Xero says the ledger gave up on the bill, not that the money
+    // never came: Dante Media INV-0005 and INV-0007 were paid through
+    // ManyRequests and voided in Xero afterwards (MC.10), and a hand mark-paid
+    // with push-back off means the same thing. The dashboard keeps the payment.
+    expect(reconcileXeroStatus('draft', 'written_off')).toBe('written_off')
+    expect(reconcileXeroStatus('sent', 'written_off')).toBe('written_off')
+    expect(reconcileXeroStatus('viewed', 'written_off')).toBe('written_off')
+    expect(reconcileXeroStatus('overdue', 'written_off')).toBe('written_off')
+    expect(reconcileXeroStatus('paid', 'written_off')).toBeNull()
   })
 
   it('copes with a row that has no status yet', () => {
@@ -200,8 +211,15 @@ describe('resolveXeroStatusWrite', () => {
       .toEqual({ paidAt: NOW })
   })
 
-  it('keeps the paid date when Xero voids a settled invoice', () => {
+  it('writes nothing when Xero voids an invoice the dashboard saw paid', () => {
+    // Neither the status nor the paid date moves: the money landed on a rail
+    // Xero was never told about (the written_off row of NEVER_OVERWRITTEN_BY).
     expect(resolveXeroStatusWrite({ status: 'paid', paidAt: '2026-09-01T00:00:00.000Z' }, 'written_off', null, NOW))
+      .toEqual({})
+  })
+
+  it('still voids an unpaid invoice', () => {
+    expect(resolveXeroStatusWrite({ status: 'sent', sentAt: NOW }, 'written_off', null, NOW))
       .toEqual({ status: 'written_off' })
   })
 
