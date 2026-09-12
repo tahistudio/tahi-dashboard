@@ -1,5 +1,12 @@
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
+/* Tailwind v4 scans every non-ignored file for class names. Docs and root
+   markdown carry no templates, and a Windows path in a report (a backslash
+   followed by hex, like a session id) parses as a CSS escape and fails the
+   build, which took production down for one deploy on 2026-09-13. */
+@source not "../docs";
+@source not "../SPECS";
+@source not "../*.md";
 
 /* ============================================================
    TAHI STUDIO : DESIGN SYSTEM
