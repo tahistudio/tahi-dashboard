@@ -115,6 +115,21 @@ export {
 } from './cleanup'
 
 export {
+  applyResidue,
+  planResidue,
+  RESIDUE_ALLOWLIST,
+  RESIDUE_APPLY_ORDER,
+  RESIDUE_CLASSES,
+  type ResidueAllowlistEntry,
+  type ResidueClass,
+  type ResidueGroup,
+  type ResiduePlan,
+  type ResidueRefusal,
+  type ResidueRefusalReason,
+  type ResidueRow,
+} from './residue'
+
+export {
   IMPORT_ENTITIES,
   IMPORT_ENTITY_ORDER,
   isImportEntity,
