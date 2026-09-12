@@ -21,8 +21,9 @@
  *             request export is one GET per request (329 of them).
  *   requestDetailOffset number, where that window starts.
  *   snapshot  object, optional. A pre-fetched ManyRequests export under the
- *             eight list keys (organizations, membersByOrg, brandsByOrg,
- *             subscriptionsByOrg, clients, services, requests, invoices).
+ *             seven list keys (organizations, membersByOrg, brandsByOrg,
+ *             subscriptionsByOrg, services, requests, invoices; the old
+ *             clients key was never read and is now refused as unknown).
  *             When present the run reads from it and never touches the live
  *             API, so no token is needed on this worker. It is validated up
  *             front: a bad snapshot is one 400 naming the key path, never a
@@ -37,7 +38,7 @@
  *         wrangler secret put MANYREQUESTS_API_TOKEN --env staging
  *         echo 'MANYREQUESTS_API_TOKEN="..."' >> .dev.vars       (local)
  *   (b) The snapshot. Read the lists out of ManyRequests through the read-only
- *       MCP connector, assemble them under the eight keys and POST them as
+ *       MCP connector, assemble them under the seven keys and POST them as
  *       body.snapshot. The token check is skipped entirely in that mode. The
  *       payload is a few megabytes: App Router route handlers carry no body
  *       size cap (bodyParser.sizeLimit is a Pages Router setting and
