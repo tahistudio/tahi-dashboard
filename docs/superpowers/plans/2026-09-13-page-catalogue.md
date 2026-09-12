@@ -230,3 +230,11 @@ Everything not in a batch (GI.1 chat bot, GI.2 client-scoped MCP, N1 to N9 north
 - Pre-call digest UTC window fix shipped; daily-summary and sync-drive-transcripts still carry the same bug (Batch J5).
 - The hourly Xero export guard (IC.6 and CT.13) shipped but has never been run live, which is exactly why IC.8 sits in Batch B.
 - In flight right now in this session, do not start a second worktree on any of these: the A4 isolation runner, the invoice notes fix, the pre-call timezone review, the S1 and S2 follow-ups, and the S3 test fixer.
+
+## 6. Corrections after compile (lead, 2026-09-13 late morning)
+
+- Batch G, G1 and G2 are done: all fourteen DL.1 and DL.2 files are in the Claude Design project, the three over the write ceiling went in through the design-sync disk upload, and portal-home.jsx was re-uploaded byte-exact after a transcription error. DL.3 shell wiring is done too. What remains of Batch G is G3 (AR.4 proposals editor), G4 (AR.5 consistency rules) and G5 (DL.4 re-critique in the real shell).
+- Batch F, F2 (GI.3 call link and purpose) is being built now; treat it as in flight, not queued.
+- Batch A, A4: e2e/tenancy-isolation.spec.ts passes 3 of 3 on the QA harness; only the CI wiring is left.
+- Batch B, B1: the services plan ladder is written to the design project (DL.3); the port is the remaining half.
+- Liam's design review verdicts (docs/superpowers/plans/2026-09-13-design-review-checklist.md) decide the order inside Batches G and H.
