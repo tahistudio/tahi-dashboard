@@ -33,6 +33,7 @@ vi.mock('@/lib/import/manyrequests', async (importOriginal) => {
       hardDelete: [],
       refused: [],
       wipeDemo: null,
+      residue: null,
       applied: { archived: 0, orgsDeleted: 0, rowsDeleted: 0 },
       warnings: [],
     }),
@@ -55,7 +56,7 @@ function makeRequest(body: Record<string, unknown>): NextRequest {
   })
 }
 
-type CleanupArgs = { dryRun: boolean; archive: string[]; hardDelete: string[]; wipeDemo: boolean }
+type CleanupArgs = { dryRun: boolean; archive: string[]; hardDelete: string[]; wipeDemo: boolean; residue: boolean }
 
 describe('POST /api/admin/import/cleanup', () => {
   beforeEach(() => {
@@ -87,11 +88,22 @@ describe('POST /api/admin/import/cleanup', () => {
     expect(runCleanup).not.toHaveBeenCalled()
   })
 
-  it('defaults to a dry run with wipeDemo off', async () => {
+  it('defaults to a dry run with wipeDemo and residue off', async () => {
     await POST(makeRequest({ hardDelete: ['org_a'] }))
     const args = vi.mocked(runCleanup).mock.calls[0][1] as unknown as CleanupArgs
     expect(args.dryRun).toBe(true)
     expect(args.wipeDemo).toBe(false)
+    expect(args.residue).toBe(false)
+  })
+
+  it('takes only a literal true for residue, so a stray truthy value cannot start a sweep', async () => {
+    await POST(makeRequest({ residue: 'yes' }))
+    expect((vi.mocked(runCleanup).mock.calls[0][1] as unknown as CleanupArgs).residue).toBe(false)
+  })
+
+  it('passes the residue flag through when the caller asks for the sweep', async () => {
+    await POST(makeRequest({ dryRun: true, residue: true }))
+    expect((vi.mocked(runCleanup).mock.calls[0][1] as unknown as CleanupArgs).residue).toBe(true)
   })
 
   it('treats a non-false dryRun as a dry run', async () => {
@@ -118,12 +130,56 @@ describe('POST /api/admin/import/cleanup', () => {
       hardDelete: [],
       refused: [],
       wipeDemo: null,
+      residue: null,
       applied: { archived: 1, orgsDeleted: 0, rowsDeleted: 0 },
       warnings: [],
     })
     await POST(makeRequest({ dryRun: false, archive: ['org_a'] }))
     expect(logAudit).toHaveBeenCalledTimes(1)
     expect(vi.mocked(logAudit).mock.calls[0][1].action).toBe('manyrequests_cleanup')
+  })
+
+  it('puts the residue counts and refusals in the audit row', async () => {
+    vi.mocked(runCleanup).mockResolvedValue({
+      dryRun: false,
+      archive: [],
+      hardDelete: [],
+      refused: [],
+      wipeDemo: null,
+      residue: {
+        groups: [
+          {
+            class: 'orphan_tracks',
+            label: 'Orphan tracks',
+            table: 'tracks',
+            rows: [{ table: 'tracks', id: 'track_1', reason: 'Its subscription joins to no subscription.' }],
+            refusals: [{ table: 'tracks', id: 'track_2', reason: 'predicate_failed', detail: 'Still holds work.' }],
+          },
+        ],
+        totals: { rows: 1, refusals: 1 },
+        applied: {
+          total: 1,
+          byClass: {
+            orphan_tracks: 1,
+            orphan_subtasks: 0,
+            orphan_blockers: 0,
+            orphan_request_threads: 0,
+            orphan_notifications: 0,
+            seed_subscriptions: 0,
+            known_residue: 0,
+          },
+        },
+      },
+      applied: { archived: 0, orgsDeleted: 0, rowsDeleted: 1 },
+      warnings: [],
+    })
+    await POST(makeRequest({ dryRun: false, residue: true }))
+    expect(logAudit).toHaveBeenCalledTimes(1)
+    const metadata = vi.mocked(logAudit).mock.calls[0][1].metadata as {
+      residue: { applied: { total: number }; refused: Array<{ id: string }> }
+    }
+    expect(metadata.residue.applied.total).toBe(1)
+    expect(metadata.residue.refused.map((row) => row.id)).toEqual(['track_2'])
   })
 
   it('turns a thrown failure into a 500 with the message', async () => {

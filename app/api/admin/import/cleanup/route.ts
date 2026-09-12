@@ -19,6 +19,13 @@
  *               calls on dummy organisations. Only ever rows with NO
  *               ManyRequests key, so nothing the import created or adopted can
  *               be caught.
+ *   residue     boolean, default FALSE. The residue sweep: the leftovers that
+ *               carry no org_id and so are invisible to the org cleanup. An
+ *               orphan track, checklist item, blocker, empty request thread or
+ *               unreachable notification, the seed subscriptions on archived
+ *               organisations that hold no invoices and no work, and the
+ *               audited rows on RESIDUE_ALLOWLIST whose sanity predicate still
+ *               holds. It NEVER archives or deletes an organisation.
  *
  * NEVER TOUCHED: discovery_calls (the pre-call-digest cron mails real people
  * off that table every ten minutes), leads, deals, people, proposals,
@@ -43,6 +50,7 @@ interface CleanupBody {
   archive?: unknown
   hardDelete?: unknown
   wipeDemo?: unknown
+  residue?: unknown
 }
 
 function parseIds(value: unknown): string[] {
@@ -79,6 +87,7 @@ export async function POST(req: NextRequest) {
       archive: parseIds(body.archive),
       hardDelete: parseIds(body.hardDelete),
       wipeDemo: body.wipeDemo === true,
+      residue: body.residue === true,
     })
 
     if (!dryRun && (plan.applied.orgsDeleted > 0 || plan.applied.archived > 0 || plan.applied.rowsDeleted > 0)) {
@@ -93,6 +102,15 @@ export async function POST(req: NextRequest) {
           hardDeleted: plan.hardDelete.map((row) => ({ orgId: row.orgId, name: row.name, children: row.children })),
           refused: plan.refused,
           applied: plan.applied,
+          // Counts per residue class, and the refusals with their reasons, so
+          // the audit row says what the sweep removed and what it would not.
+          residue: plan.residue
+            ? {
+                applied: plan.residue.applied,
+                planned: plan.residue.totals,
+                refused: plan.residue.groups.flatMap((group) => group.refusals),
+              }
+            : null,
         },
       })
     }
@@ -129,7 +147,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     hardDeleteAllowlist: DUMMY_ORGS,
-    defaults: { dryRun: true, wipeDemo: false },
-    note: 'Hard delete matches BOTH the id prefix and the exact name, and refuses any organisation holding a Xero contact, a Stripe customer, a ManyRequests id or an invoice. discovery_calls is never touched.',
+    defaults: { dryRun: true, wipeDemo: false, residue: false },
+    note: 'Hard delete matches BOTH the id prefix and the exact name, and refuses any organisation holding a Xero contact, a Stripe customer, a ManyRequests id or an invoice. discovery_calls is never touched. residue sweeps the leftovers that carry no org_id (orphan tracks, checklist items, blockers, empty request threads, unreachable notifications, seed subscriptions on archived organisations, and the audited rows whose sanity predicate still holds) and never archives or deletes an organisation.',
   })
 }

@@ -21,6 +21,10 @@
  *               scheduled calls that carry no ManyRequests key and hang off a
  *               dummy org (or off no org at all). Pipeline, finance and CRM
  *               rows are never in scope.
+ *   residue     The residue sweep (MC.9). The leftovers with no org_id at all:
+ *               an orphan track, subtask, blocker, empty request thread or
+ *               unreachable notification, plus the audited rows only a human
+ *               could name. It never touches an organisation. See residue.ts.
  *
  * discovery_calls IS NEVER TOUCHED, by anything here, at all. The
  * pre-call-digest cron runs unattended every ten minutes and sends real email
@@ -35,6 +39,8 @@ import { and, eq, inArray, isNull } from 'drizzle-orm'
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core'
 import { schema } from '@/db/d1'
 import type { DB } from '@/db/d1'
+import { isProtectedOrg } from './protected-orgs'
+import { applyResidue, planResidue, type ResiduePlan } from './residue'
 
 /**
  * Ids per IN clause. D1 caps bound parameters at 100 per statement, which the
@@ -80,12 +86,12 @@ export const DUMMY_ORGS: readonly DummyOrgEntry[] = [
 ]
 
 /**
- * Never archived, never deleted, whatever a caller asks for. The QA org is
- * explicitly kept (it is how the studio smoke-tests the portal) and org_tahi is
- * the internal marker every "is this us" check reads.
+ * Never archived, never deleted, whatever a caller asks for. Defined in
+ * protected-orgs.ts so the residue sweep can read the same list without the two
+ * modules importing each other, and re-exported here because every existing
+ * caller (lib/org-lifecycle, the barrel, the tests) reads it from this file.
  */
-export const PROTECTED_ORG_IDS: readonly string[] = ['org_tahi']
-export const PROTECTED_ORG_ID_PREFIXES: readonly string[] = ['d468fd7e']
+export { PROTECTED_ORG_IDS, PROTECTED_ORG_ID_PREFIXES, isProtectedOrg } from './protected-orgs'
 
 /**
  * Request titles that are unambiguously test artefacts, including the two that
@@ -217,11 +223,6 @@ async function countOrgChildren(database: DB, orgId: string): Promise<Record<str
   return counts
 }
 
-export function isProtectedOrg(orgId: string): boolean {
-  if (PROTECTED_ORG_IDS.includes(orgId)) return true
-  return PROTECTED_ORG_ID_PREFIXES.some((prefix) => orgId.startsWith(prefix))
-}
-
 export function matchesDummyAllowlist(org: { id: string; name: string }): DummyOrgEntry | null {
   return (
     DUMMY_ORGS.find((entry) => org.id.startsWith(entry.idPrefix) && org.name.trim() === entry.name) ?? null
@@ -266,6 +267,8 @@ export interface CleanupPlan {
   hardDelete: CleanupOrgAction[]
   refused: CleanupRefusal[]
   wipeDemo: WipeDemoPlan | null
+  /** The residue sweep, when the caller asked for it. Null otherwise. */
+  residue: ResiduePlan | null
   applied: {
     archived: number
     orgsDeleted: number
@@ -279,6 +282,11 @@ export interface CleanupInput {
   archive: readonly string[]
   hardDelete: readonly string[]
   wipeDemo: boolean
+  /**
+   * Optional so every existing caller compiles unchanged, and false by
+   * default: the sweep only ever runs when it is asked for by name.
+   */
+  residue?: boolean
 }
 
 function emptyWipe(): WipeDemoPlan {
@@ -307,6 +315,7 @@ export async function runCleanup(database: DB, input: CleanupInput): Promise<Cle
     hardDelete: [],
     refused: [],
     wipeDemo: null,
+    residue: null,
     applied: { archived: 0, orgsDeleted: 0, rowsDeleted: 0 },
     warnings: [
       'discovery_calls is never touched by this endpoint. The pre-call-digest cron mails real people off that table every ten minutes.',
@@ -417,6 +426,15 @@ export async function runCleanup(database: DB, input: CleanupInput): Promise<Cle
     plan.wipeDemo = await planWipeDemo(database)
   }
 
+  // ── residue sweep ──────────────────────────────────────────────────────
+  // Planned against the database as it stands, so a wipeDemo in the same call
+  // may create orphans this plan does not name. That is deliberate: the sweep
+  // reports only what it can see when it looks, and a second run picks up
+  // whatever the first one left behind.
+  if (input.residue) {
+    plan.residue = await planResidue(database)
+  }
+
   if (input.dryRun) return plan
 
   // ── apply ──────────────────────────────────────────────────────────────
@@ -435,6 +453,11 @@ export async function runCleanup(database: DB, input: CleanupInput): Promise<Cle
 
   if (plan.wipeDemo) {
     plan.applied.rowsDeleted += await applyWipeDemo(database, plan.wipeDemo)
+  }
+
+  if (plan.residue) {
+    await applyResidue(database, plan.residue)
+    plan.applied.rowsDeleted += plan.residue.applied.total
   }
 
   return plan

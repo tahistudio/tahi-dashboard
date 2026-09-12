@@ -1743,12 +1743,13 @@ export const TOOLS: ToolDef[] = [
   ),
   tool(
     'cleanup_dummy_data',
-    'ANSWERS 403 FORBIDDEN UNDER THIS SERVER\'S SERVICE TOKEN, ALWAYS, INCLUDING THE DRY RUN. The route requires super_admin and the MCP service identity resolves to admin, by design: the destructive door needs a human behind it. If you call this and get 403, that is the design, not a misconfiguration; do not retry and do not report a permissions bug. Tell the user to run it from the dashboard as a super admin. Documented here so the contract is discoverable: POST /api/admin/import/cleanup archives or removes the seed and duplicate organisations left over from before the ManyRequests import, DRY RUN BY DEFAULT (leave dryRun unset or true to see exactly what would change, including a count for every table still holding rows for the organisation). Hard delete is REFUSED unless the organisation is on the ten-entry dummy allowlist (matched on both id prefix and exact name) AND holds no Xero contact id, no Stripe customer id, no ManyRequests id, no invoice, and no row in any table the policy protects (finance, pipeline, delivery artefacts, discovery_calls); every refusal comes back with its reason. Archive is reversible and is the right answer for anything uncertain. wipeDemo removes only rows with NO ManyRequests key. discovery_calls is never touched at all: the pre-call-digest cron mails real people off that table every ten minutes.',
+    'ANSWERS 403 FORBIDDEN UNDER THIS SERVER\'S SERVICE TOKEN, ALWAYS, INCLUDING THE DRY RUN. The route requires super_admin and the MCP service identity resolves to admin, by design: the destructive door needs a human behind it. If you call this and get 403, that is the design, not a misconfiguration; do not retry and do not report a permissions bug. Tell the user to run it from the dashboard as a super admin. Documented here so the contract is discoverable: POST /api/admin/import/cleanup archives or removes the seed and duplicate organisations left over from before the ManyRequests import, DRY RUN BY DEFAULT (leave dryRun unset or true to see exactly what would change, including a count for every table still holding rows for the organisation). Hard delete is REFUSED unless the organisation is on the ten-entry dummy allowlist (matched on both id prefix and exact name) AND holds no Xero contact id, no Stripe customer id, no ManyRequests id, no invoice, and no row in any table the policy protects (finance, pipeline, delivery artefacts, discovery_calls); every refusal comes back with its reason. Archive is reversible and is the right answer for anything uncertain. wipeDemo removes only rows with NO ManyRequests key. residue sweeps the leftovers that carry no org_id and so are invisible to the organisation cleanup (orphan tracks, checklist items, blockers, empty request threads, unreachable notifications, seed subscriptions on archived organisations with no invoices and no work, and the audited rows whose sanity predicate still holds), grouped by class with a reason per row and a refusal reason per row it will not take, and it never archives or deletes an organisation. discovery_calls is never touched at all: the pre-call-digest cron mails real people off that table every ten minutes.',
     {
       dryRun: prop('boolean', 'Plan only, change nothing. DEFAULT TRUE.'),
       archive: prop('array', 'Organisation ids to set to status archived. Reversible.', { items: { type: 'string' } }),
       hardDelete: prop('array', 'Organisation ids to remove outright. Refused unless on the dummy allowlist with zero Xero, Stripe, ManyRequests and invoice links.', { items: { type: 'string' } }),
       wipeDemo: prop('boolean', 'Also remove the seed requests, their messages, time entries, participants and reads, plus the tasks and scheduled calls on dummy organisations. Default false.'),
+      residue: prop('boolean', 'Also sweep the residue: orphan tracks, checklist items, blockers, empty request threads and unreachable notifications, the seed subscriptions on archived organisations, and the audited rows that still match their predicate. Never touches an organisation. Default false.'),
     },
   ),
 
@@ -2998,6 +2999,7 @@ async function executeTool(
         ...(args as Record<string, unknown>),
         dryRun: args.dryRun !== false,
         wipeDemo: args.wipeDemo === true,
+        residue: args.residue === true,
       }))
 
     // ── Expense commitments ────────────────────────────────────────
