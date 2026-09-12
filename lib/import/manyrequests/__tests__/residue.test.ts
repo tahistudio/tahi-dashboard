@@ -39,7 +39,7 @@ vi.mock('@/db/d1', () => ({
   schema: {
     organisations: fakeTable('organisations', ['id', 'name', 'status']),
     subscriptions: fakeTable('subscriptions', ['id', 'orgId', 'manyrequestsId', 'stripeSubscriptionId']),
-    tracks: fakeTable('tracks', ['id', 'subscriptionId']),
+    tracks: fakeTable('tracks', ['id', 'subscriptionId', 'currentRequestId']),
     requests: fakeTable('requests', ['id', 'trackId', 'manyrequestsId']),
     tasks: fakeTable('tasks', ['id', 'title', 'trackId', 'orgId']),
     taskSubtasks: fakeTable('task_subtasks', ['id', 'taskId']),
@@ -178,6 +178,21 @@ describe('orphan_tracks', () => {
     expect(idsOf(plan, 'orphan_tracks')).toEqual([])
     expect(refusalsOf(plan, 'orphan_tracks')[0]).toMatchObject({ id: 'track_busy', reason: 'predicate_failed' })
   })
+
+  it('refuses an orphan track whose current_request_id points at a request that still exists, even with no request or task keyed to the track', async () => {
+    tableRows.tracks = [{ id: 'track_busy', subscriptionId: 'sub_gone', currentRequestId: 'req_live' }]
+    tableRows.requests = [{ id: 'req_live', trackId: null, manyrequestsId: '344' }]
+    const plan = await planResidue(fakeDb())
+    expect(idsOf(plan, 'orphan_tracks')).toEqual([])
+    expect(refusalsOf(plan, 'orphan_tracks')[0]).toMatchObject({ id: 'track_busy', reason: 'predicate_failed' })
+    expect(refusalsOf(plan, 'orphan_tracks')[0].detail).toContain('req_live')
+  })
+
+  it('takes an orphan track whose current_request_id points at a request that no longer exists', async () => {
+    tableRows.tracks = [{ id: 'track_orphan', subscriptionId: 'sub_gone', currentRequestId: 'req_gone' }]
+    const plan = await planResidue(fakeDb())
+    expect(idsOf(plan, 'orphan_tracks')).toEqual(['track_orphan'])
+  })
 })
 
 describe('orphan_subtasks', () => {
@@ -263,6 +278,36 @@ describe('orphan_notifications', () => {
     const plan = await planResidue(fakeDb())
     expect(idsOf(plan, 'orphan_notifications')).toEqual([])
   })
+
+  it('takes a task-entity notification pointing at a P18 residue task planned in this same run', async () => {
+    tableRows.tasks = [{ id: TASK_GET_MONEYS, title: 'Get moneys', trackId: null, orgId: 'org_stride' }]
+    tableRows.notifications = [
+      { id: 'n_task_residue', userId: 'member_live', userType: 'team_member', entityType: 'task', entityId: TASK_GET_MONEYS },
+    ]
+    tableRows.team_members = [{ id: 'member_live', clerkUserId: 'user_liam' }]
+    const plan = await planResidue(fakeDb())
+    expect(idsOf(plan, 'orphan_notifications')).toEqual(['n_task_residue'])
+    expect(rowsOf(plan, 'orphan_notifications')[0].reason).toContain(TASK_GET_MONEYS)
+  })
+
+  it('leaves a task-entity notification pointing at a live task alone', async () => {
+    tableRows.tasks = [{ id: 'task_live', title: 'Real work', trackId: null, orgId: 'org_a' }]
+    tableRows.team_members = [{ id: 'member_live', clerkUserId: 'user_liam' }]
+    tableRows.notifications = [
+      { id: 'n_task_live', userId: 'member_live', userType: 'team_member', entityType: 'task', entityId: 'task_live' },
+    ]
+    const plan = await planResidue(fakeDb())
+    expect(idsOf(plan, 'orphan_notifications')).toEqual([])
+  })
+
+  it('takes a task-entity notification whose task id no longer exists', async () => {
+    tableRows.team_members = [{ id: 'member_live', clerkUserId: 'user_liam' }]
+    tableRows.notifications = [
+      { id: 'n_task_gone', userId: 'member_live', userType: 'team_member', entityType: 'task', entityId: 'task_gone' },
+    ]
+    const plan = await planResidue(fakeDb())
+    expect(idsOf(plan, 'orphan_notifications')).toEqual(['n_task_gone'])
+  })
 })
 
 describe('seed_subscriptions', () => {
@@ -314,6 +359,27 @@ describe('seed_subscriptions', () => {
     tableRows.organisations = [{ id: acme, name: 'Acme Corp', status: 'active' }]
     const plan = await planResidue(fakeDb())
     expect(idsOf(plan, 'seed_subscriptions')).toEqual([])
+  })
+
+  it('leaves a subscription whose track current_request_id points at a request that still exists', async () => {
+    seedAcme()
+    tableRows.tracks = [
+      { id: 'track_a', subscriptionId: 'sub_seed', currentRequestId: 'req_live' },
+      { id: 'track_b', subscriptionId: 'sub_seed' },
+    ]
+    tableRows.requests = [{ id: 'req_live', trackId: null, manyrequestsId: '344' }]
+    const plan = await planResidue(fakeDb())
+    expect(idsOf(plan, 'seed_subscriptions')).toEqual([])
+  })
+
+  it('takes a subscription whose track current_request_id points at a request that no longer exists', async () => {
+    seedAcme()
+    tableRows.tracks = [
+      { id: 'track_a', subscriptionId: 'sub_seed', currentRequestId: 'req_gone' },
+      { id: 'track_b', subscriptionId: 'sub_seed' },
+    ]
+    const plan = await planResidue(fakeDb())
+    expect(idsOf(plan, 'seed_subscriptions')).toEqual(['track_a', 'track_b', 'sub_seed'])
   })
 })
 

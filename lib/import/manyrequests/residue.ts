@@ -398,6 +398,7 @@ interface SubscriptionRow {
 interface TrackRow {
   id: string
   subscriptionId: string
+  currentRequestId: string | null
 }
 interface TaskRow {
   id: string
@@ -515,7 +516,11 @@ export async function planResidue(database: DB): Promise<ResiduePlan> {
       })
       .from(schema.subscriptions) as unknown as Promise<SubscriptionRow[]>,
     database
-      .select({ id: schema.tracks.id, subscriptionId: schema.tracks.subscriptionId })
+      .select({
+        id: schema.tracks.id,
+        subscriptionId: schema.tracks.subscriptionId,
+        currentRequestId: schema.tracks.currentRequestId,
+      })
       .from(schema.tracks) as unknown as Promise<TrackRow[]>,
     database
       .select({ id: schema.requests.id, trackId: schema.requests.trackId })
@@ -606,18 +611,21 @@ export async function planResidue(database: DB): Promise<ResiduePlan> {
   // A track carries no org_id at all: its organisation is only reachable
   // through its subscription, which is exactly why the org sweep cannot see
   // these. A track still holding a request or a task is refused instead of
-  // deleted, because that is work, not residue.
+  // deleted, because that is work, not residue. tracks.current_request_id is
+  // an independent "holds a request" signal, exactly as
+  // app/api/admin/subscriptions/[id]/route.ts treats it before refusing a
+  // delete: a track can point at a request through current_request_id without
+  // that request also carrying the track's id. A current_request_id pointing
+  // at a request that no longer exists is not itself evidence of held work.
   for (const track of trackRows) {
     if (liveSubscriptionIds.has(track.subscriptionId)) continue
     const held = (requestsByTrack.get(track.id) ?? 0) + (tasksByTrack.get(track.id) ?? 0)
-    if (held > 0) {
-      refuse(
-        'orphan_tracks',
-        'tracks',
-        track.id,
-        'predicate_failed',
-        `Its subscription ${track.subscriptionId} is gone, but ${held} request(s) or task(s) still sit on this track.`,
-      )
+    const holdsCurrentRequest = Boolean(track.currentRequestId && liveRequestIds.has(track.currentRequestId))
+    if (held > 0 || holdsCurrentRequest) {
+      const detail = holdsCurrentRequest
+        ? `Its subscription ${track.subscriptionId} is gone, but it currently holds request ${track.currentRequestId}.`
+        : `Its subscription ${track.subscriptionId} is gone, but ${held} request(s) or task(s) still sit on this track.`
+      refuse('orphan_tracks', 'tracks', track.id, 'predicate_failed', detail)
       continue
     }
     add(
@@ -724,10 +732,28 @@ export async function planResidue(database: DB): Promise<ResiduePlan> {
     if (row.userType === 'team_member') return !memberIds.has(row.userId) && !memberClerkIds.has(row.userId)
     return false
   }
+  // The task half is the recipient's mirror of the request half above: a
+  // notification survives only while its task is both present AND not itself
+  // slated for removal as known_residue in this same run. known_residue has
+  // not run yet at this point in the sweep, so the set of tasks it WILL plan
+  // is worked out ahead of time, straight off the allowlist, rather than
+  // reordering the whole sweep around one class.
+  const plannedResidueTaskIds = new Set<string>()
+  for (const entry of RESIDUE_ALLOWLIST) {
+    if (entry.table !== 'tasks') continue
+    if (checkAllowlistEntry(entry, context).outcome === 'ok') plannedResidueTaskIds.add(entry.id)
+  }
   for (const notification of notificationRows) {
     const reasons: string[] = []
     if (notification.entityType === 'request' && notification.entityId && !liveRequestIds.has(notification.entityId)) {
       reasons.push(`its request ${notification.entityId} no longer exists`)
+    }
+    if (notification.entityType === 'task' && notification.entityId) {
+      if (!liveTaskIds.has(notification.entityId)) {
+        reasons.push(`its task ${notification.entityId} no longer exists`)
+      } else if (plannedResidueTaskIds.has(notification.entityId)) {
+        reasons.push(`its task ${notification.entityId} is itself being removed as known residue in this run`)
+      }
     }
     if (recipientGone(notification)) {
       reasons.push(`its ${notification.userType} recipient ${notification.userId} joins to no contact or team member`)
@@ -738,9 +764,10 @@ export async function planResidue(database: DB): Promise<ResiduePlan> {
 
   // ── seed_subscriptions ─────────────────────────────────────────────────
   // P10. A subscription on an ARCHIVED organisation that holds no invoices,
-  // where no request and no task sits on any of its tracks. The tracks go with
-  // it. The ORGANISATION IS NEVER TOUCHED: Acme Corp stays, archived, with its
-  // case study submission intact.
+  // where no request and no task sits on any of its tracks, and no track's
+  // current_request_id points at a request that still exists. The tracks go
+  // with it. The ORGANISATION IS NEVER TOUCHED: Acme Corp stays, archived,
+  // with its case study submission intact.
   for (const subscription of subscriptionRows) {
     const org = orgById.get(subscription.orgId)
     if (!org || org.status !== 'archived') continue
@@ -748,7 +775,9 @@ export async function planResidue(database: DB): Promise<ResiduePlan> {
     if ((invoicesByOrg.get(subscription.orgId) ?? 0) > 0) continue
     const subscriptionTracks = tracksBySubscription.get(subscription.id) ?? []
     const busy = subscriptionTracks.filter(
-      (track) => (requestsByTrack.get(track.id) ?? 0) + (tasksByTrack.get(track.id) ?? 0) > 0,
+      (track) =>
+        (requestsByTrack.get(track.id) ?? 0) + (tasksByTrack.get(track.id) ?? 0) > 0 ||
+        (track.currentRequestId && liveRequestIds.has(track.currentRequestId)),
     )
     if (busy.length > 0) continue
     if (subscription.manyrequestsId) {
@@ -937,10 +966,15 @@ function checkAllowlistEntry(entry: ResidueAllowlistEntry, context: ResidueConte
 }
 
 /**
- * The ManyRequests key of a row, whatever table it came from. None of the
- * residue tables except subscriptions declares the column today, so this reads
- * it defensively: adding the column to one of them later must make the sweep
- * refuse the row, not silently keep deleting it.
+ * The ManyRequests key of a row, whatever table it came from. Checked against
+ * db/schema.ts: of the tables this module can delete from (tracks,
+ * task_subtasks, work_blockers, time_entries, tasks, conversations,
+ * conversation_participants, subscriptions, notifications), only subscriptions
+ * declares manyrequests_id today. This reads the column defensively rather
+ * than trusting TABLE_SOURCE_KEY alone, so if tasks, time_entries,
+ * conversations or notifications ever gain the column, the row is refused as
+ * manyrequests_keyed the moment it is populated, without anyone having to
+ * remember to add it to a SELECT first.
  */
 function sourceKeyOf(row: object): string | null {
   const value = (row as Record<string, unknown>).manyrequestsId
