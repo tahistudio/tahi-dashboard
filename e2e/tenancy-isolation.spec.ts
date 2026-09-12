@@ -350,6 +350,28 @@ test.describe('Cross-org isolation (A4)', () => {
       const rows = await seedRows(admin as APIRequestContext, orgId, label, runId)
       const context = await browser.newContext({ baseURL })
       await signInAsClient(context, baseURL, { label, email, token })
+
+      // The platform default, proved once on org A before its own override
+      // lifts it: CLIENT_DEFAULT_DENY (lib/permissions.ts) hides Messages from
+      // every client with no explicit grant, so a fresh org 403s here with
+      // code feature_disabled rather than reaching any org-scoping check at
+      // all. This is what the request-thread 404-vs-403 assertions below need
+      // the per-org allow to see past.
+      if (label === 'A') {
+        const defaultDenied = await context.request.get('/api/portal/messages')
+        expect(defaultDenied.status(), 'org A default (no override) GET /api/portal/messages').toBe(403)
+        const defaultBody = (await defaultDenied.json()) as { code?: string }
+        expect(defaultBody.code, 'org A default deny carries feature_disabled').toBe('feature_disabled')
+      }
+
+      // Messages is CLIENT_DEFAULT_DENY, so every seeded proof org needs an
+      // explicit allow to keep exercising the request-thread tenancy checks
+      // underneath that gate rather than 403ing on the feature before ever
+      // reaching org scoping.
+      await (admin as APIRequestContext).put('/api/admin/permissions/feature-visibility', {
+        data: { subjectType: 'organisation', subjectId: orgId, featureKey: 'messages', effect: 'allow' },
+      })
+
       return { label, orgId, orgName, email, browser: context, api: context.request, ...rows }
     }
 
