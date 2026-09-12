@@ -126,9 +126,8 @@ function teamHref(
  * /schedules, /contracts, /proposals, /calls, /clients, /deals, /leads all
  * redirect a client back to /requests.
  *
- * `invoice` lands on the portal list rather than /invoices/{id}: the invoice
- * detail page still fetches /api/admin/invoices, which 403s a client. Make it
- * a deep link in the same change that gives the detail page a portal branch.
+ * `invoice` deep-links to /invoices/{id}: the detail page grew a portal
+ * branch in 41461250, so a client session no longer 403s there.
  */
 function clientHref(
   entityType: NotificationEntityType,
@@ -136,7 +135,7 @@ function clientHref(
 ): string | null {
   switch (entityType) {
     case 'request':      return entityId ? `/requests/${entityId}` : '/requests'
-    case 'invoice':      return '/invoices'
+    case 'invoice':      return entityId ? `/invoices/${entityId}` : '/invoices'
     case 'subscription': return '/billing'
     // Their own workspace: name, brands, people and plan all live in settings.
     case 'organisation': return '/settings'
