@@ -27,6 +27,10 @@ Liam's call: ship every surface a client touches first (proposals, contracts, sc
 
 ## Triage snapshot (audited against code 2026-08-18; no commits since dc41442a / Aug 10)
 
+### Tenancy proof
+
+- **e2e/tenancy-isolation.spec.ts is the cross-organisation isolation proof** (Batch A S6, 2026-09-13): two seeded client organisations, every portal read and write tried across the boundary in both directions (requests, files, invoices, conversations, contracts, calls, every id-less route), 3 of 3 green on the local QA harness via `npm run test:e2e:tenancy`. Not yet run in CI (needs a seeded D1 and Clerk dev keys on the runner). Re-run it after any change to lib/portal-access.ts, lib/permissions.ts or a portal route.
+
 ### Trusted 100% (daily-driven and/or live-verified)
 
 - **Sales pipeline** (daily-trusted; data real; UI is pre-v3 but honest except the nudge affordances below)
