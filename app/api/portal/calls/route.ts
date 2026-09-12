@@ -126,6 +126,40 @@ export async function GET(req: NextRequest) {
     discovery = []
   }
 
+  // discovery_calls is populated by the Google Calendar sync's auto-classifier
+  // (app/api/admin/integrations/google/sync-calendar/route.ts), not by a
+  // deliberate booking, so a row can be mis-tagged against this org with no
+  // client actually on it. Drop a row when BOTH are true: it has no join link
+  // AND no attendee matches a real contact at this org, since an auto-
+  // classified calendar event with no client attendee and no join link is not
+  // a call the client can act on. scheduled_calls rows are never filtered
+  // here: those exist only because someone at the studio deliberately booked
+  // them for this org.
+  let orgContactEmails = new Set<string>()
+  try {
+    const contactRows = await drizzle
+      .select({ email: schema.contacts.email })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.orgId, orgId))
+    orgContactEmails = new Set(
+      contactRows
+        .map((r) => r.email?.toLowerCase())
+        .filter((e): e is string => !!e),
+    )
+  } catch {
+    orgContactEmails = new Set()
+  }
+
+  discovery = discovery.filter((c) => {
+    if (c.meetingUrl) return true
+    // parseAttendees never throws: a malformed attendees blob resolves to an
+    // empty attendee list, which reads as "no client attendee" rather than
+    // crashing the whole "Next call" widget over one bad row.
+    return parseAttendees(c.attendees).some(
+      (a) => typeof a.email === 'string' && orgContactEmails.has(a.email.toLowerCase()),
+    )
+  })
+
   // One entry per real meeting. A booking writes both tables, so without the
   // collapse the same call appears twice and a stale mirror can sort ahead of
   // the row a re-book moved.
