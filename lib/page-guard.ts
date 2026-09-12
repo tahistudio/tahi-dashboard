@@ -55,10 +55,15 @@ const resolve = cache(async (): Promise<ResolvedAccess | null> => {
   }
 })
 
-/** Redirect to /overview unless the caller can see `featureKey`. */
-export async function requirePageFeature(featureKey: string): Promise<void> {
+/**
+ * Redirect to `fallback` (default `/overview`) unless the caller can see
+ * `featureKey`. Pass a page-specific `fallback` when the default landing
+ * spot is wrong for a denied caller, e.g. the client branch of /messages
+ * sends a denied client to /requests (their actual channel) instead.
+ */
+export async function requirePageFeature(featureKey: string, fallback = '/overview'): Promise<void> {
   const access = await resolve()
-  if (access && !can(access, featureKey)) redirect('/overview')
+  if (access && !can(access, featureKey)) redirect(fallback)
 }
 
 /** Redirect unless the caller can manage permissions (admin+). */

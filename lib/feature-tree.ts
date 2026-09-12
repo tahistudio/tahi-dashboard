@@ -50,10 +50,17 @@ export const FEATURE_TREE: ReadonlyArray<FeatureNode> = [
   // also still gates the daily brief's "N client replies came in overnight"
   // row (app/api/admin/overview/brief), which is why the key survived the
   // period when the page was hidden.
+  //
+  // CLIENT DEFAULT (Liam, 2026-09-13): denied. The request thread is the
+  // client channel, so the standalone inbox stays hidden - no nav entry, no
+  // mobile tab, the page bounces to /requests - until a per-organisation or
+  // per-contact feature_visibility ALLOW opts one client back in
+  // (`CLIENT_DEFAULT_DENY` in lib/permissions.ts). The studio side is
+  // unaffected: it defaults on, same as every other team feature.
   {
     key: 'messages',
     label: 'Messages',
-    description: 'The inbox: a standing line between a client and the studio, plus a thread for every request. Off means the page is hidden, the route redirects and both APIs 403.',
+    description: 'The studio inbox, plus a thread for every request. Hidden for clients by default (the request thread is their channel); an explicit allow override can turn the standalone inbox back on for one client. Off means the page is hidden, the route redirects and both APIs 403.',
     parent: null,
     appliesTo: ['team', 'client'],
     route: '/messages',

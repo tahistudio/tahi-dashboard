@@ -12,7 +12,9 @@
  *   admin        - every feature by default; manages permissions; feature_visibility
  *                  deny can hide a feature from them, but they can always unhide it.
  *   team_member  - sees features their role can .view, minus feature_visibility deny.
- *   client       - client-audience features only, ON by default, minus per-org deny.
+ *   client       - client-audience features only, ON by default, minus per-org deny,
+ *                  EXCEPT `messages` (see CLIENT_DEFAULT_DENY below), which is OFF by
+ *                  default and needs an explicit per-org or per-contact allow.
  *
  * DENY BY DEFAULT: a Tahi-org identity with NO active role assigned sees
  * nothing until a role is granted (it resolves to `team_member` with an EMPTY
@@ -134,6 +136,17 @@ function topAncestor(featureKey: string): string {
   return a[a.length - 1] ?? featureKey
 }
 
+/**
+ * Client-audience top-level features that stay OFF by default, reversing the
+ * level's normal "client sees everything ON" rule below. Today that is just
+ * `messages` (Liam, 2026-09-13): the request thread is the client channel, so
+ * the standalone inbox is a studio surface until an explicit feature_visibility
+ * ALLOW (organisation or contact) opts one client back in. The override loop
+ * above this check always runs first, so an allow row still wins; this is
+ * only the fallback when no row exists for the client at all.
+ */
+const CLIENT_DEFAULT_DENY: ReadonlySet<string> = new Set(['messages'])
+
 /** The permission resource a feature gates against, or undefined if ungated. */
 export function featureResource(featureKey: string): string | undefined {
   return FEATURE_RESOURCE[topAncestor(featureKey)]
@@ -163,7 +176,8 @@ export function holdsNoGrant(access: Pick<ResolvedAccess, 'viewableResources'>):
  * Order: unknown key -> allow unless the caller holds no grant; wrong audience
  * -> deny; super_admin -> allow; explicit override (most-specific
  * feature/ancestor) -> its effect; no grant -> deny; else default by level
- * (admin/client allow; team_member by role baseline).
+ * (admin allow; client allow EXCEPT `CLIENT_DEFAULT_DENY`; team_member by role
+ * baseline).
  */
 export function decideFeature(access: ResolvedAccess, featureKey: string): boolean {
   // An EMPTY viewable set means the caller holds no grant at all (a Tahi-org
@@ -186,7 +200,8 @@ export function decideFeature(access: ResolvedAccess, featureKey: string): boole
   }
 
   if (noGrant) return false
-  if (access.level === 'admin' || access.level === 'client') return true
+  if (access.level === 'admin') return true
+  if (access.level === 'client') return !CLIENT_DEFAULT_DENY.has(topAncestor(featureKey))
 
   // team_member: gated by the role's .view baseline for mapped resources.
   const resource = featureResource(featureKey)

@@ -32,9 +32,12 @@ import {
 
 // ── Primary tab hrefs per audience ──────────────────────────────────────────
 // Admin: the 4 core workspace destinations.
-// Client: the 4 most-visited portal destinations.
-// '/messages' is back in both sets: the inbox is a real page again, and it is
-// one of the two surfaces a client actually opens on a phone.
+// Client: the 4 most-visited portal destinations, when granted.
+// '/messages' is listed for the client audience too, but it is hidden by
+// default (CLIENT_DEFAULT_DENY in lib/permissions.ts): `gateTabs` below drops
+// any href the feature map denies, so a client with no override sees the
+// other 3 primary tabs and this one only reappears once an allow override
+// opts their org (or contact) back in.
 const ADMIN_PRIMARY_HREFS = ['/overview', '/requests', '/tasks', '/messages']
 const CLIENT_PRIMARY_HREFS = ['/overview', '/requests', '/messages', '/files']
 

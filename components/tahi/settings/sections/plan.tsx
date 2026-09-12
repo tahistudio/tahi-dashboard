@@ -393,9 +393,11 @@ export function PlanBillingSection({ isClientAdmin }: { isClientAdmin?: boolean 
             </p>
           )}
           {/* The client channel is the request thread, not a standalone inbox:
-              /messages redirects a client straight back to /requests. This
-              opens the new-request dialog on their own requests list, which is
-              the surface the studio actually answers on. */}
+              Messages is hidden for clients by default (an explicit allow
+              override can turn it back on for one client), so /messages
+              redirects a client with no override straight back to /requests.
+              This opens the new-request dialog on their own requests list,
+              which is the surface the studio actually answers on. */}
           <p className="set-lede" style={{ marginTop: 10, marginBottom: 0 }}>
             Need something bigger, or a custom scope? <Link href="/requests?new=1">Send us a request.</Link>
           </p>

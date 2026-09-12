@@ -133,7 +133,11 @@ export const CLIENT_NAV: NavGroup[] = [
       // The page behind the bell. Rows are keyed on the caller's own Clerk user
       // id, so the route needs no org gate and never bounces a client.
       { label: 'Notifications', href: '/notifications', icon: 'bell', clientVisible: true },
-      // Their line to the studio, plus a thread per request. Same page, same
+      // Hidden by default (Liam, 2026-09-13): the request thread is the
+      // client channel, not this standing inbox. The entry stays in the raw
+      // model so `filterNav`'s features-map check is the only thing that
+      // hides it; a per-org or per-contact allow override brings the item
+      // (and the mobile tab) straight back for one client. Same page, same
       // feature key, client branch (see app/(dashboard)/messages/page.tsx).
       { label: 'Messages', href: '/messages', icon: 'messages', clientVisible: true },
     ],

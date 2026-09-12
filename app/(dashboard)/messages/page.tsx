@@ -25,11 +25,18 @@ export const metadata = { title: 'Messages - Tahi Dashboard' }
  * enforce, so a client org (or a scoped team member) Liam has switched
  * Messages off for is bounced here, hidden in the nav AND 403'd on the data.
  * Visible equals permitted on all three surfaces, never two of the three.
+ *
+ * CLIENT DEFAULT (2026-09-13): denied. The request thread is the client
+ * channel, so a client org with no explicit allow override lands here and
+ * bounces to /requests, not /overview: /requests is their actual channel,
+ * exactly the way every other client-only page (schedules, contracts,
+ * proposals) already sends a denied client home. An org or contact allow
+ * override opts one client back in and the page renders normally for them.
  */
 export default async function MessagesPage() {
-  const { userId, isAdmin, isPreviewingClient } = await getViewAudience()
+  const { userId, isAdmin, isPreviewingClient, isClientAudience } = await getViewAudience()
   if (!userId) redirect('/sign-in')
-  await requirePageFeature('messages')
+  await requirePageFeature('messages', isClientAudience ? '/requests' : '/overview')
   return (
     <MessagesContent
       audience={isAdmin && !isPreviewingClient ? 'studio' : 'client'}

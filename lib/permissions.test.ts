@@ -60,6 +60,33 @@ describe('decideFeature — levels', () => {
     expect(decideFeature(a, 'requests')).toBe(true)
   })
 
+  it('messages stays hidden for a client org with no override (2026-09-13 decision)', () => {
+    // Every other client-audience feature is ON by default; `messages` is the
+    // single, deliberate exception (CLIENT_DEFAULT_DENY). The request thread
+    // is the client channel, not this standing inbox.
+    const a = access('client')
+    expect(decideFeature(a, 'messages')).toBe(false)
+    // Nothing else in the default set moved.
+    expect(decideFeature(a, 'requests')).toBe(true)
+    expect(decideFeature(a, 'invoices')).toBe(true)
+    expect(decideFeature(a, 'files')).toBe(true)
+  })
+
+  it('an explicit allow override still opts one client back into Messages', () => {
+    const orgAllowed = access('client', { overrides: { messages: 'allow' } })
+    expect(decideFeature(orgAllowed, 'messages')).toBe(true)
+  })
+
+  it('an explicit deny override on messages is redundant but still denies (both read the same default)', () => {
+    const orgDenied = access('client', { overrides: { messages: 'deny' } })
+    expect(decideFeature(orgDenied, 'messages')).toBe(false)
+  })
+
+  it('the studio side of Messages is untouched: admin and super_admin still default to allow', () => {
+    expect(decideFeature(access('admin'), 'messages')).toBe(true)
+    expect(decideFeature(access('super_admin'), 'messages')).toBe(true)
+  })
+
   it('team_member only sees features their role can .view (role baseline)', () => {
     // A task_handler-style role: can view requests + tasks, not invoices/deals.
     const a = access('team_member', { viewableResources: ['requests', 'tasks', 'time_entries', 'docs'] })
@@ -397,6 +424,42 @@ describe('nav model - messaging is live for both audiences', () => {
       '/files', '/services',
       '/invoices',
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Messages stays hidden for every client by default (Liam, 2026-09-13). The
+// resolver branch (decideFeature's CLIENT_DEFAULT_DENY), the nav entry and the
+// mobile tab all read the SAME `features` map (layout.tsx -> featureMap ->
+// filterNav), so this is the one place that has to be right.
+// ---------------------------------------------------------------------------
+
+describe('nav model - Messages is hidden for a client by default, restorable per client', () => {
+  const clientOpts = {
+    showAsAdmin: false, isEffectiveAdmin: false, isViewerRole: false,
+    userEmail: null, canManagePermissions: false,
+  }
+
+  it('a client org with no override never gets a /messages nav item', () => {
+    const features = featureMap(access('client'))
+    const visible = navHrefs(filterNav(CLIENT_NAV, { ...clientOpts, features }))
+    expect(visible).not.toContain('/messages')
+    expect(visible).toEqual(['/overview', '/requests', '/notifications', '/files', '/services', '/invoices'])
+  })
+
+  it('an explicit allow override restores the /messages nav item for that one client', () => {
+    const features = featureMap(access('client', { overrides: { messages: 'allow' } }))
+    const visible = navHrefs(filterNav(CLIENT_NAV, { ...clientOpts, features }))
+    expect(visible).toContain('/messages')
+  })
+
+  it('the studio rail is unaffected: /messages stays for the team audience', () => {
+    const features = featureMap(access('admin'))
+    const visible = navHrefs(filterNav(ADMIN_NAV, {
+      showAsAdmin: true, isEffectiveAdmin: true, isViewerRole: false,
+      userEmail: null, canManagePermissions: true, features,
+    }))
+    expect(visible).toContain('/messages')
   })
 })
 

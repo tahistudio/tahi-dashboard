@@ -104,6 +104,20 @@ describe('requirePageFeature', () => {
     vi.mocked(resolvePermissions).mockRejectedValue(new Error('D1 unavailable'))
     expect(await redirectedTo(() => requirePageFeature('financial_reports'))).toBeNull()
   })
+
+  it('honours a caller-supplied fallback instead of the /overview default', async () => {
+    // The messages page passes this for a denied CLIENT audience: /requests is
+    // their actual channel, not /overview. Any page can opt into a fallback;
+    // every existing call site keeps the default by passing nothing.
+    vi.mocked(resolvePermissions).mockResolvedValue({
+      ...base(),
+      level: 'client',
+      audience: 'client',
+      viewableResources: null,
+      overrides: new Map(),
+    })
+    expect(await redirectedTo(() => requirePageFeature('messages', '/requests'))).toBe('/requests')
+  })
 })
 
 describe('requirePageAnyGrant', () => {
