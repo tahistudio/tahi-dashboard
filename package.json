@@ -14,6 +14,7 @@
     "db:migrate": "drizzle-kit migrate",
     "test": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:tenancy": "playwright test e2e/tenancy-isolation.spec.ts",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && wrangler deploy",
     "deploy:staging": "opennextjs-cloudflare build && wrangler deploy --env staging"
