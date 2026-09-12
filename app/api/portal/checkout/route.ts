@@ -5,8 +5,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import type Stripe from 'stripe'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { getStripe, STRIPE_PLANS, isPlanId, isPresentmentCurrency } from '@/lib/stripe-plans'
+import { INVOICE_CHANNEL_SETTING_KEY, resolveInvoiceChannel } from '@/lib/invoice-channel'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,6 +19,10 @@ export const dynamic = 'force-dynamic'
  * Creates the subscription with payment_behavior=default_incomplete so the
  * client confirms the first payment inline; the Stripe webhook
  * (customer.subscription.updated) flips our row to active on success.
+ *
+ * Only a NEW client may reach Stripe here. An org that already holds an active
+ * retainer, or that the studio invoices on the Xero rail, is refused with 409
+ * before a Stripe client is constructed. See the guard below.
  */
 export async function POST(req: NextRequest) {
   const { orgId, userId, impersonating } = await getPortalAuth(req)
@@ -41,11 +46,6 @@ export async function POST(req: NextRequest) {
   // subscription is created directly in the chosen currency. Default USD.
   const currency = body.currency && isPresentmentCurrency(body.currency) ? body.currency : 'usd'
 
-  const stripe = getStripe()
-  if (!stripe) {
-    return NextResponse.json({ error: 'Stripe is not configured' }, { status: 503 })
-  }
-
   const database = await db()
 
   // Starting a paid subscription for the org: workspace admins only. The
@@ -57,6 +57,59 @@ export async function POST(req: NextRequest) {
     !(await isOrgAdmin(database as ReturnType<typeof import('drizzle-orm/d1').drizzle>, orgId, userId))
   ) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  // Belt and braces with buildSteps() in components/tahi/onboarding-content.tsx,
+  // which no longer routes an existing client through the plan and pay steps.
+  // A client the studio already bills must never be able to open a SECOND, real
+  // Stripe subscription from a stale tab, a bookmarked /onboarding link or a
+  // hand-rolled POST. Two refusals, both before any Stripe client is built:
+  //
+  //   active subscription   they are already on a retainer with us. Changing it
+  //                         is a studio conversation, not a self-serve re-buy.
+  //   the Xero rail         the studio invoices them directly, so a Stripe
+  //                         subscription would bill them a second time on a
+  //                         rail nobody reconciles.
+  //
+  // 'incomplete' subscriptions are deliberately NOT caught: those are this
+  // route's own abandoned checkouts, and the cleanup below exists to let a
+  // client retry or switch presentment currency.
+  const [activeSubRows, orgChannelRows, settingRows] = await Promise.all([
+    database
+      .select({ id: schema.subscriptions.id })
+      .from(schema.subscriptions)
+      .where(and(eq(schema.subscriptions.orgId, orgId), eq(schema.subscriptions.status, 'active')))
+      .limit(1),
+    database
+      .select({ invoiceChannel: schema.organisations.invoiceChannel })
+      .from(schema.organisations)
+      .where(eq(schema.organisations.id, orgId))
+      .limit(1),
+    // The whole K/V table: a handful of studio rows, and the same read the
+    // portal invoice routes make to resolve the rail.
+    database
+      .select({ key: schema.settings.key, value: schema.settings.value })
+      .from(schema.settings),
+  ])
+
+  if (activeSubRows[0]) {
+    return NextResponse.json(
+      { error: 'This workspace already has an active retainer. Talk to your studio contact to change it.' },
+      { status: 409 },
+    )
+  }
+
+  const studioDefaultChannel = settingRows.find(r => r.key === INVOICE_CHANNEL_SETTING_KEY)?.value
+  if (resolveInvoiceChannel(orgChannelRows[0]?.invoiceChannel, studioDefaultChannel) === 'xero') {
+    return NextResponse.json(
+      { error: 'This workspace is invoiced directly by the studio. Talk to your studio contact to change your plan.' },
+      { status: 409 },
+    )
+  }
+
+  const stripe = getStripe()
+  if (!stripe) {
+    return NextResponse.json({ error: 'Stripe is not configured' }, { status: 503 })
   }
 
   // The org lookup (D1) and the Stripe price resolution are independent, so run

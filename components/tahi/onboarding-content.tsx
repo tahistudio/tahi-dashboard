@@ -6,17 +6,29 @@
  * in-page persona switcher: the design's Tweaks panel and the duplicate
  * SelfServe component are preview-only and are dropped here.
  *
- * Paths:
- *   - new + self-serve -> chooser (retainer self-serve & paid | project enquiry
- *     -> proposal dead-end, project clients are invited to the platform later).
- *   - new + invited (project/contract attached) -> care-first, no payment.
- *   - existing client -> open a new project/retainer, no re-payment friction.
+ * Paths, and the exact steps buildSteps() assembles for each:
  *
- * Steps are assembled by buildSteps(). The final cream "portal" screens from the
- * design are omitted; on finish we call onComplete (the page routes into the
- * studio). Payment runs through <OnboardingPayment> (Stripe), invites through
- * /api/portal/invites, and the kickoff slot through POST /api/portal/calls,
- * which writes the scheduled_calls row and emails the confirmation.
+ *   new + self-serve        chooser first (retainer self-serve and paid, or a
+ *                           project enquiry, which is a proposal dead-end;
+ *                           project clients are invited to the platform later).
+ *                           Retainer steps: welcome, plan, pay, details, invite.
+ *   new + invited project   welcome, details, invite, kickoff. Care-first, the
+ *                           contract is settled off the platform, no payment.
+ *   existing client         welcome, kickoff. Both engagements, retainer and
+ *                           project alike. Terms were agreed before the invite
+ *                           and the studio already invoices them (often on the
+ *                           Xero rail), so an existing client is never shown a
+ *                           plan picker or a card form. The server refuses too:
+ *                           POST /api/portal/checkout answers 409 for an org
+ *                           that already holds an active retainer or bills on
+ *                           the Xero rail, so a stale tab cannot open a second
+ *                           real Stripe subscription against a paying client.
+ *
+ * The final cream "portal" screens from the design are omitted; on finish we
+ * call onComplete (the page routes into the studio). Payment runs through
+ * <OnboardingPayment> (Stripe), invites through /api/portal/invites, and the
+ * kickoff slot through POST /api/portal/calls, which writes the scheduled_calls
+ * row and emails the confirmation.
  */
 
 import * as React from 'react'
@@ -93,10 +105,12 @@ function upcomingDays(n: number): Date[] {
 
 function buildSteps(engagement: 'project' | 'retainer', clientType: 'new' | 'existing'): string[] {
   const project = engagement === 'project'
-  if (clientType === 'existing') {
-    if (project) return ['welcome', 'kickoff']
-    return ['welcome', 'plan', 'pay']
-  }
+  // An existing client agreed terms with the studio before the invite was ever
+  // minted and is already being invoiced, so neither engagement gets a plan
+  // picker or a card form. Retainer used to return ['welcome','plan','pay'],
+  // which routed a client on the Xero rail into a live Stripe checkout and
+  // never let them reach a kickoff at all.
+  if (clientType === 'existing') return ['welcome', 'kickoff']
   if (project) return ['welcome', 'details', 'invite', 'kickoff']
   return ['welcome', 'plan', 'pay', 'details', 'invite']
 }
@@ -481,7 +495,10 @@ export function OnboardingContent({
     const existing = clientType === 'existing'
     if (existing) {
       title = `Welcome back, ${first}.`
-      sub = `Let's open your new ${engagement === 'retainer' ? 'retainer' : 'project'}, your studio and team are already set up.`
+      // Next (and last) step is the kickoff for both engagements, so the copy
+      // points there rather than at a setup or payment screen that no longer
+      // exists on this path.
+      sub = `Let's get your new ${engagement === 'retainer' ? 'retainer' : 'project'} moving. Your studio and team are already set up, so all that's left is picking a kickoff time.`
       primary = 'Get started'
     } else {
       const known = entry.entry === 'invited'
