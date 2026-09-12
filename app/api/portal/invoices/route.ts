@@ -11,6 +11,7 @@ import {
   readInvoicePayContext,
   resolveInvoicePayUrl,
 } from '@/lib/invoice-how-to-pay'
+import { clientInvoiceNote } from '@/lib/portal-invoice-view'
 
 // ── GET /api/portal/invoices ──────────────────────────────────────────────────
 // Returns invoices scoped to the authenticated client's org.
@@ -33,6 +34,13 @@ import {
 //
 // Nothing studio-side rides along: no rail label, no Stripe or Xero id, no
 // reconciliation state. See lib/invoice-how-to-pay.ts.
+//
+// notes goes through clientInvoiceNote before it reaches the client. An
+// imported invoice's notes column is a provenance line the importers wrote
+// for the studio's own bookkeeping ("Imported from Xero: INV-0065", some with
+// an internal sentence appended after it), never a message meant for the
+// client, so it is filtered here rather than trusted from the column. See
+// lib/portal-invoice-view.ts.
 export async function GET(req: NextRequest) {
   const { orgId, userId, impersonating, clerkOrgId } = await getPortalAuth(req)
 
@@ -86,6 +94,11 @@ export async function GET(req: NextRequest) {
         number: schema.invoices.number,
         totalAmount: schema.invoices.totalUsd,
         currency: schema.invoices.currency,
+        // A studio note, when there is one. Filtered through
+        // clientInvoiceNote below: an imported invoice's notes column is a
+        // provenance line for the studio's own bookkeeping, never a message
+        // for the client.
+        notes: schema.invoices.notes,
         dueDate: schema.invoices.dueDate,
         sentAt: schema.invoices.sentAt,
         paidAt: schema.invoices.paidAt,
@@ -120,6 +133,11 @@ export async function GET(req: NextRequest) {
         number: schema.invoices.number,
         totalAmount: schema.invoices.totalUsd,
         currency: schema.invoices.currency,
+        // A studio note, when there is one. Filtered through
+        // clientInvoiceNote below: an imported invoice's notes column is a
+        // provenance line for the studio's own bookkeeping, never a message
+        // for the client.
+        notes: schema.invoices.notes,
         dueDate: schema.invoices.dueDate,
         sentAt: schema.invoices.sentAt,
         paidAt: schema.invoices.paidAt,
@@ -186,7 +204,10 @@ export async function GET(req: NextRequest) {
         bankDetails: payContext.bankDetails,
       })
       : null
-    return { ...row, payUrl, ...(howToPay ? { howToPay } : {}) }
+    // clientInvoiceNote, not the raw column: an imported invoice's notes are
+    // a provenance line for the studio's own bookkeeping, never a message
+    // for the client, and are stripped here rather than trusted from D1.
+    return { ...row, notes: clientInvoiceNote(row.notes), payUrl, ...(howToPay ? { howToPay } : {}) }
   })
 
   return NextResponse.json({ items: projected, page, limit })

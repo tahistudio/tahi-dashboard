@@ -41,6 +41,7 @@ import type { InvoiceHowToPay } from '@/lib/invoice-how-to-pay'
 import { invoiceReference } from '@/lib/invoice-billing'
 import {
   PORTAL_INVOICE_STATE_COPY,
+  clientInvoiceNote,
   formatPortalDateLong,
   formatPortalMoney,
   isPortalInvoiceOpen,
@@ -249,6 +250,13 @@ export function PortalInvoiceDetail({
   }
 
   const reference = invoiceReference(invoice.id, invoice.number)
+  // Defence in depth: the API already runs `notes` through clientInvoiceNote,
+  // but this is the client's own render path, so it re-applies the same
+  // filter rather than trusting whatever the fetch handed it. An imported
+  // invoice's notes column is a provenance line for the studio's own
+  // bookkeeping ("Imported from Xero: INV-0065", some with a bookkeeping
+  // sentence appended after it), never a message meant for the client.
+  const clientNote = clientInvoiceNote(invoice.notes)
   const state = portalInvoiceState(invoice)
   const stateCopy = PORTAL_INVOICE_STATE_COPY[state]
   const currency = invoice.currency ?? 'NZD'
@@ -560,8 +568,11 @@ export function PortalInvoiceDetail({
         </div>
       </Card>
 
-      {/* A note from the studio */}
-      {invoice.notes && (
+      {/* A note from the studio. Never an import's provenance line: that text
+          is written for the studio's own bookkeeping, and clientNote (via
+          clientInvoiceNote) resolves to null for it, so this block does not
+          render at all. */}
+      {clientNote && (
         <Card padding="md" style={{ background: 'var(--color-bg-secondary)' }}>
           <span
             style={{
@@ -577,7 +588,7 @@ export function PortalInvoiceDetail({
             A note from the studio
           </span>
           <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--color-text)', whiteSpace: 'pre-wrap' }}>
-            {invoice.notes}
+            {clientNote}
           </p>
         </Card>
       )}

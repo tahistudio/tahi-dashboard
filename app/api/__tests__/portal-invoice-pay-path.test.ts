@@ -119,6 +119,7 @@ const LIST_ROW = {
   status: 'sent',
   totalAmount: 4312.5,
   currency: 'NZD',
+  notes: null,
   dueDate: '2026-09-30',
   sentAt: '2026-09-01T00:00:00.000Z',
   paidAt: null,
@@ -292,6 +293,7 @@ describe('GET /api/portal/invoices pay path', () => {
       'dueDate',
       'howToPay',
       'id',
+      'notes',
       'number',
       'orgId',
       'paidAt',
@@ -301,6 +303,51 @@ describe('GET /api/portal/invoices pay path', () => {
       'totalAmount',
       'updatedAt',
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Import provenance notes never reach a client (2026-09-13, Giant Group).
+//
+// Every imported invoice carries a note the importers wrote for the studio's
+// own bookkeeping ("Imported from Xero: INV-0065"), sometimes with an
+// internal sentence appended after that prefix. Neither route may hand it to
+// a client: both project `notes` through clientInvoiceNote before it reaches
+// the response.
+// ---------------------------------------------------------------------------
+describe('GET /api/portal/invoices client note filter', () => {
+  it('hides an imported provenance note, including one with a bookkeeping sentence appended', async () => {
+    // xeroPayUrl set so the row already has somewhere to pay: the pay-path
+    // read is skipped entirely (see "folds the Xero online invoice" above),
+    // which keeps this test about notes and nothing else.
+    const imported = {
+      ...LIST_ROW,
+      xeroPayUrl: 'https://in.xero.com/abc',
+      notes: "Imported from Xero: INV-0005. Paid through ManyRequests as INV-2025000019. "
+        + "Recorded paid on Liam's call (MC.10).",
+    }
+    const { handle } = makeDb([[imported]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (await portalInvoiceList(req('/api/portal/invoices'))).json() as {
+      items: Projected[]
+    }
+    expect(body.items[0].notes).toBeNull()
+  })
+
+  it('keeps a hand-written studio note for the client', async () => {
+    const handWritten = {
+      ...LIST_ROW,
+      xeroPayUrl: 'https://in.xero.com/abc',
+      notes: 'Half up front, remainder due on delivery.',
+    }
+    const { handle } = makeDb([[handWritten]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (await portalInvoiceList(req('/api/portal/invoices'))).json() as {
+      items: Projected[]
+    }
+    expect(body.items[0].notes).toBe('Half up front, remainder due on delivery.')
   })
 })
 
@@ -374,5 +421,45 @@ describe('GET /api/portal/invoices/[id] pay path', () => {
     expect(body.invoice).not.toHaveProperty('xeroInvoiceId')
     expect(body.invoice).not.toHaveProperty('stripeInvoiceId')
     expect(JSON.stringify(body.invoice)).not.toContain('xero-')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Import provenance notes never render as "A note from the studio"
+// (2026-09-13, Giant Group). Same rule as the list, one screen deeper.
+// ---------------------------------------------------------------------------
+describe('GET /api/portal/invoices/[id] client note filter', () => {
+  it('hides an imported provenance note, including one with a bookkeeping sentence appended', async () => {
+    // xeroPayUrl set so there is already somewhere to pay: no settings read,
+    // same trick as "prefers a pay page and reads no settings when one
+    // exists" above, which keeps this test about notes and nothing else.
+    const imported = {
+      ...DETAIL_ROW,
+      xeroPayUrl: 'https://in.xero.com/abc',
+      notes: "Imported from Xero: INV-0005. Paid through ManyRequests as INV-2025000019. "
+        + "Recorded paid on Liam's call (MC.10).",
+    }
+    const { handle } = makeDb([[imported], []])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (
+      await portalInvoiceDetail(req('/api/portal/invoices/inv-1042'), params('inv-1042'))
+    ).json() as { invoice: Projected }
+    expect(body.invoice.notes).toBeNull()
+  })
+
+  it('keeps a hand-written studio note for the client', async () => {
+    const handWritten = {
+      ...DETAIL_ROW,
+      xeroPayUrl: 'https://in.xero.com/abc',
+      notes: 'Half up front, remainder due on delivery.',
+    }
+    const { handle } = makeDb([[handWritten], []])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (
+      await portalInvoiceDetail(req('/api/portal/invoices/inv-1042'), params('inv-1042'))
+    ).json() as { invoice: Projected }
+    expect(body.invoice.notes).toBe('Half up front, remainder due on delivery.')
   })
 })

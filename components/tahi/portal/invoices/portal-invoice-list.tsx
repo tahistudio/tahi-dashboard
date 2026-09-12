@@ -79,6 +79,13 @@ export interface PortalInvoiceRow {
   number?: string | null
   totalAmount: number
   currency: string | null
+  /**
+   * A studio note, already filtered through clientInvoiceNote server-side:
+   * an import's provenance line never reaches here. Not rendered on this
+   * list today (the note lives on the invoice detail page), carried on the
+   * type so the two portal invoice surfaces share one honest contract.
+   */
+  notes?: string | null
   dueDate: string | null
   sentAt: string | null
   paidAt: string | null
