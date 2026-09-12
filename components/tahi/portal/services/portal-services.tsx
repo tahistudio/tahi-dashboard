@@ -39,6 +39,7 @@ import { formatPortalDateLong } from '@/lib/portal-invoice-view'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
+import { Money } from '@/components/tahi/money'
 import { Badge } from '@/components/tahi/badge'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { TahiButton } from '@/components/tahi/tahi-button'
@@ -56,7 +57,10 @@ interface AddonDetail {
 
 interface PortalSubscription {
   planLabel: string
+  /** In `currency`, which is the negotiated currency for a custom rate. */
   monthlyRate: number
+  currency: string
+  customRate: boolean
   trackCount: number
   nextInvoiceDate: string | null
   createdAt: string | null
@@ -351,9 +355,10 @@ function PlanPanel({
   onAsk: () => void
 }) {
   const tracks = subscription.trackCount
-  // The plan rate is not an invoice, so it follows the reader's currency
-  // switcher the way the same field does on their home. An invoice stays in
-  // its own currency because it is a legal record; a monthly rate is not.
+  // The rate is billed in its own currency: a negotiated GBP retainer is not
+  // an NZD figure, so it renders natively with the reader's display currency
+  // appended as an approximation rather than being converted outright.
+  // displayMoney stays for the add-on values, which are NZD studio figures.
   const { format: displayMoney } = useDisplayCurrency()
   return (
     <Card padding="lg">
@@ -390,7 +395,16 @@ function PlanPanel({
           <div className="grid gap-3 sm:grid-cols-2" style={{ marginTop: 'var(--space-4)' }}>
             <PlanFact
               label="Rate"
-              value={<PortalMoney>{`${displayMoney(subscription.monthlyRate)} per month`}</PortalMoney>}
+              value={
+                <PortalMoney>
+                  <Money
+                    native={subscription.monthlyRate}
+                    currency={subscription.currency}
+                    withDisplay
+                  />
+                  {' per month'}
+                </PortalMoney>
+              }
             />
             <PlanFact
               label="Tracks running"
