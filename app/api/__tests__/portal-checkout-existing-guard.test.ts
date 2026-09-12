@@ -139,6 +139,43 @@ describe('POST /api/portal/checkout refuses a client the studio already bills', 
     expect(entries).not.toContain('update')
   })
 
+  // The guard's SQL now filters on inArray(status, LIVE_SUBSCRIPTION_STATUSES)
+  // rather than eq(status, 'active'), so it also catches these three
+  // non-cancelled Stripe states. The fake D1 does not evaluate the real SQL
+  // filter, so each case is pinned by simulating the row the broadened filter
+  // would now match, exactly as the 'active' case above does.
+  it.each(['past_due', 'paused', 'trialing'])(
+    '409s when the org holds a %s subscription, without touching Stripe',
+    async () => {
+      const { handle, entries } = makeDb(guardReads({ activeSubs: [{ id: 'sub-row-1' }] }))
+      vi.mocked(db).mockResolvedValue(handle as never)
+
+      const res = await portalCheckout(checkoutReq(BODY))
+      const json = (await res.json()) as { error?: string }
+
+      expect(res.status).toBe(409)
+      expect(json.error).toContain('already has an active retainer')
+      expect(getStripe).not.toHaveBeenCalled()
+      expect(entries).not.toContain('insert')
+      expect(entries).not.toContain('update')
+    },
+  )
+
+  it('does not block on a cancelled subscription: it falls through to the Xero check and beyond', async () => {
+    // A cancelled subscription is an ENDED retainer, not a live one. The
+    // inArray filter excludes it in the real query, so the fake read comes
+    // back empty here, same as the "no subscription at all" cases below.
+    const { handle } = makeDb(guardReads({ activeSubs: [], orgChannel: null, studioDefault: 'stripe' }))
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await portalCheckout(checkoutReq(BODY))
+    const json = (await res.json()) as { error?: string }
+
+    expect(res.status).toBe(503)
+    expect(json.error).toBe('Stripe is not configured')
+    expect(getStripe).toHaveBeenCalled()
+  })
+
   it('409s for a Xero-rail org with no subscription at all, without touching Stripe', async () => {
     // Giant Group's real shape at the time this guard was written: no
     // subscription row, invoice_channel set to the Xero rail.

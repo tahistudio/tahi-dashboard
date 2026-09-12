@@ -41,6 +41,16 @@ export async function PUT(
     )
   }
 
+  // GET /api/portal/tracks emits synthetic entitlement-only lanes (id like
+  // "synthetic-large-0") for an org's unfilled track slots. They have no
+  // backing tracks row, so there is nothing to reorder on an empty lane.
+  if (trackId.startsWith('synthetic-')) {
+    return NextResponse.json(
+      { error: 'There is nothing to reorder on an empty lane.' },
+      { status: 400 }
+    )
+  }
+
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 

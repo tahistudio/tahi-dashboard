@@ -108,6 +108,9 @@ interface TrackItem {
   isPriorityTrack: boolean | number | null
   currentRequest: TrackReq | null
   queue: TrackReq[]
+  /** True for a synthetic entitlement-only lane with no backing track row;
+   *  there is nothing of its own to reorder. */
+  synthetic?: boolean
 }
 interface TracksResp {
   items: TrackItem[]
@@ -632,6 +635,9 @@ function TrackBoard({
       setLanes(prev =>
         prev.map(t => {
           if (t.id !== trackId) return t
+          // A synthetic lane has no backing track row: the reorder route
+          // refuses it, so never optimistically move it locally either.
+          if (t.synthetic) return t
           const q = [...t.queue]
           const j = qi + dir
           if (j < 0 || j >= q.length) return t
@@ -756,7 +762,9 @@ function TrackBoard({
                       <div className="ln-q" key={q.id}>
                         <span className="ln-q-pos">{qi + 1}</span>
                         <span className="ln-q-t">{q.title}</span>
-                        {!ro && (
+                        {/* A synthetic lane (no backing track row) has nothing
+                            of its own to reorder, so the control never renders. */}
+                        {!ro && !t.synthetic && (
                           <span className="ln-q-ctl">
                             <button aria-label="Move up" disabled={qi === 0} onClick={() => moveQ(t.id, qi, -1)}>
                               <Icon n="up" s={12} />
