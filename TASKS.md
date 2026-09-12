@@ -29,6 +29,23 @@ Format:
 
 ---
 
+## Batch A - Giant Group readiness (2026-09-13, plan docs/superpowers/audits/2026-09-13-giant-group-readiness-plan.md, run log docs/superpowers/plans/2026-09-13-overnight-run-log.md)
+
+Eight auditors found 9 blockers, 17 majors and 6 minors on Giant Group's path; the opus planner cut them into eight slices. All eight are on main and the code slices are live (66b18917 and 2f0c20a0); live smoke in Client view of Giant Group on production the same morning.
+
+- [x] S1 Portal plan truth (57348c00 + 2f0c20a0): real custom rate and currency, real track entitlement (synthetic lanes visible, not reorderable), /tracks bounces a client to /requests, Manage Billing gated on a Stripe customer. Smoke: £2,000/mo and 2 tracks on home, services and settings; /billing shows no Manage Billing. DATA FIX applied the same morning: custom_mrr_currency was null on Giant Group so the portal fell back to NZD; set to GBP (and to GBP on Glasswall, BCS and Elevate). Follow-up: the admin client GET does not echo customMrrCurrency.
+- [x] S2 Existing client never sees a plan picker or card form (9583e104 + 2f0c20a0): welcome then kickoff for every existing client; /api/portal/checkout answers 409 over any live subscription state or a Xero channel. Needs the real-session lap to prove (A5).
+- [x] S3 A client can always see how to pay (65e360d3, merged 2f0c20a0): How to pay card when a Xero invoice has no link; invoice notifications deep-link. Smoke: INV-0065 shows a Xero pay page link, so the card correctly stays hidden. FOUND: import provenance notes ("Imported from Xero: INV-0065") render as "A note from the studio" on the client invoice; fix in flight.
+- [x] S4 The org id reaches the delivery gate (6e605d37): every client-facing notification email carries the org id; nothing sends until Liam flips the allowlist.
+- [x] S5 The next call on the home page is joinable (343f2dc9): attendee guard on portal calls. Smoke: "N8N Content Engine" shows (it is a Giant Group call, Liam confirmed) with TBC where the Join link goes: add the meet link to that call.
+- [~] S6 A4 cross-org isolation proof (127a7732): e2e/tenancy-isolation.spec.ts written; first run on the QA harness failed before any assertion on a pre-existing Playwright race (page.goto rejects with ERR_ABORTED right after Clerk sign-up; onboarding-personas.spec.ts fails the same way); a retry-once fix in the shared helper plus a rerun is in flight.
+- [x] S7 Services catalogue (data, no code): Maintain and Scale created as global public plan rows with no price; the 50 hours, Lottie animation and free site audit add-ons published with their HTML stripped. Smoke: plan card plus five cards with "Ask about this", no prices.
+- [x] S8 MC.7 importer (8dca82f9 + 66b18917): a subset run resolves hand-mapped clients; dead clients snapshot key gone.
+- [x] Messages hidden for every client by default (27ae697f): resolver, nav, mobile tab, page redirect to /requests, both APIs. Smoke: /messages bounces.
+- Also that morning: Liam assigned as Giant Group's project manager; request #243 flipped internal; invoice channel set to Xero; Clerk Production instance confirmed on Membership optional with auto-create off.
+- [ ] Per-currency bank details for the How to pay block (Liam has one Airwallex account per currency: NZD, GBP, USD, AUD, EUR): fields in Settings > Getting paid keyed by currency, the block picks the invoice's currency; Liam types the numbers himself. Queued now that S3 is merged.
+- [ ] The A5 real-session lap (plan section 4): Liam or Staci, incognito, 20 minutes; the only proof for the greeting, the bell, the invite path and the second seat.
+
 ## Sprint T1 - Security & auth foundation (Tier 1, ~1.5 weeks)
 
 Full auth + tenancy audit ran 2026-08-18 (423 routes). Verdict: the CLIENT-facing portal boundary is strong (38/38 portal routes scoped, no IDOR, no client-supplied-org trust, share tokens validated, resolver cannot promote a client). Breaches were unauthenticated side doors bypassing that boundary. Batch 1 fixed + committed (3 commits, 2026-08-18), pending deploy approval.
