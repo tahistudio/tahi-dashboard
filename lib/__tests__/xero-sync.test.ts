@@ -361,9 +361,11 @@ describe('syncXeroPayments', () => {
     expect(byEntry(queries, 'update')).toHaveLength(0)
   })
 
-  it('writes off a paid invoice Xero voided without erasing the paid date', async () => {
-    // A write-off is not an unwind: the money may well have landed, and
-    // /financial-reports keys YTD revenue and the tax-year totals off paid_at.
+  it('leaves a paid invoice alone when Xero voids it', async () => {
+    // A void says the ledger gave up on the bill, not that the money never
+    // came: Dante Media INV-0005 and INV-0007 were paid through ManyRequests
+    // and voided in Xero afterwards (MC.10). Neither the status nor paid_at
+    // moves, so /financial-reports keeps the revenue and the row stays paid.
     serveInvoicePages([[xeroInvoice({ Status: 'VOIDED' })]])
     const { handle, queries } = makeDb([
       [{ id: 'inv-1', xeroInvoiceId: 'xero-1', status: 'paid', source: 'xero', paidAt: '2026-09-02T00:00:00.000Z' }],
@@ -371,9 +373,11 @@ describe('syncXeroPayments', () => {
 
     await syncXeroPayments(handle as unknown as Db)
 
-    const set = argOf(byEntry(queries, 'update')[0], 'set') as Record<string, unknown>
-    expect(set.status).toBe('written_off')
-    expect(set).not.toHaveProperty('paidAt')
+    for (const update of byEntry(queries, 'update')) {
+      const set = argOf(update, 'set') as Record<string, unknown>
+      expect(set).not.toHaveProperty('status')
+      expect(set).not.toHaveProperty('paidAt')
+    }
   })
 
   it('writes off a row Xero has deleted rather than leaving it payable forever', async () => {
@@ -549,7 +553,9 @@ describe('importXeroInvoices', () => {
     expect(byEntry(queries, 'update')).toHaveLength(0)
   })
 
-  it('keeps the paid date when Xero voids a settled invoice', async () => {
+  it('leaves a paid invoice paid when Xero voids it', async () => {
+    // Same rule as the payment sync: a Xero void never demotes a local paid
+    // row (MC.10), so no update may carry a status or touch paid_at.
     serveImportPage([xeroInvoice({ Status: 'VOIDED' })])
     const { handle, queries } = makeDb([
       [{
@@ -562,9 +568,11 @@ describe('importXeroInvoices', () => {
 
     await importXeroInvoices(handle as unknown as Db, 1)
 
-    const set = argOf(byEntry(queries, 'update')[0], 'set') as Record<string, unknown>
-    expect(set.status).toBe('written_off')
-    expect(set).not.toHaveProperty('paidAt')
+    for (const update of byEntry(queries, 'update')) {
+      const set = argOf(update, 'set') as Record<string, unknown>
+      expect(set).not.toHaveProperty('status')
+      expect(set).not.toHaveProperty('paidAt')
+    }
   })
 
   it('does not null a local due date when the Xero payload has none', async () => {
