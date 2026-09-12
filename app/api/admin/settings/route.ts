@@ -153,12 +153,14 @@ export async function PATCH(req: NextRequest) {
     }, { status: 400 })
   }
 
-  // The pay-path keys (bank details, the Xero payment account code, who sends
-  // a Xero-rail invoice). `settings` is untyped TEXT, so the shape has to be
-  // enforced here or not at all: a malformed bankDetails blob would otherwise
-  // only surface as an empty "How to pay" block on a live client invoice, and
-  // a mistyped account code would post real payments to the wrong Xero
-  // account. An empty value is the clear on all three and stays allowed.
+  // The pay-path keys (the single bank account, the per-currency accounts, the
+  // Xero payment account code, who sends a Xero-rail invoice). `settings` is
+  // untyped TEXT, so the shape has to be enforced here or not at all: a
+  // malformed bankDetails blob would otherwise only surface as an empty "How
+  // to pay" block on a live client invoice, a currency key the studio does not
+  // invoice in would save and then never resolve, and a mistyped account code
+  // would post real payments to the wrong Xero account. An empty value is the
+  // clear on all four and stays allowed.
   const payCheck = validateInvoicePaySetting(body.key.trim(), body.value)
   if (!payCheck.ok) {
     return NextResponse.json({ error: payCheck.error }, { status: 400 })

@@ -44,7 +44,7 @@ import {
   Text,
 } from '@react-email/components'
 import { publicUrl } from '@/lib/app-url'
-import type { InvoiceHowToPay } from '@/lib/invoice-how-to-pay'
+import { howToPayRows, type InvoiceHowToPay } from '@/lib/invoice-how-to-pay'
 
 // Studio Ledger tokens. Verbatim from the design; the legacy keys at the bottom
 // of the object are aliases so un-ported templates keep compiling.
@@ -828,10 +828,12 @@ export function Mono({ children }: { children: ReactNode }) {
 // repeated here: they already sit in the ledger above this block.
 
 export function HowToPayBlock({ howToPay }: { howToPay: InvoiceHowToPay }) {
-  const rows: Array<{ label: string; value: string; mono?: boolean }> = []
-  if (howToPay.bankName) rows.push({ label: 'Bank', value: howToPay.bankName })
-  if (howToPay.accountName) rows.push({ label: 'Account name', value: howToPay.accountName })
-  if (howToPay.accountNumber) rows.push({ label: 'Account number', value: howToPay.accountNumber, mono: true })
+  // The bank lines come from howToPayRows so the email, the portal card and
+  // the admin preview name the same fields with the same words. Which account
+  // they describe was decided upstream by the invoice's currency: a GBP bill
+  // carries a sort code here, a USD one carries ACH and Fedwire routing rows.
+  const rows: Array<{ label: string; value: string; mono?: boolean }> = howToPayRows(howToPay)
+    .map((row) => ({ label: row.label, value: row.value, mono: row.mono }))
   rows.push({ label: 'Reference', value: howToPay.reference, mono: true })
 
   return (

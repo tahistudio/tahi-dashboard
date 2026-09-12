@@ -11,17 +11,28 @@ import {
   INVOICE_CHANNEL_SETTING_KEY,
 } from '@/lib/invoice-channel'
 import {
+  BANK_ACCOUNT_FIELD_LABELS,
+  BANK_DETAILS_BY_CURRENCY_SETTING_KEY,
   BANK_DETAILS_SETTING_KEY,
+  CURRENCY_ACCOUNT_FIELDS,
   DEFAULT_XERO_EMAIL_MODE,
+  INVOICE_CURRENCIES,
   XERO_EMAIL_MODE_SETTING_KEY,
   XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY,
   parseBankDetails,
+  parseBankDetailsByCurrency,
   resolveXeroEmailMode,
   validateBankDetails,
+  validateBankDetailsByCurrency,
   validateXeroEmailMode,
   validateXeroPaymentAccountCode,
+  type BankAccountField,
+  type InvoiceBankAccount,
+  type InvoiceBankAccountsByCurrency,
   type InvoiceBankDetails,
+  type InvoiceCurrency,
 } from '@/lib/invoice-pay-settings'
+import { SegmentedControl } from '@/components/tahi/segmented-control'
 
 type SettingsMap = Record<string, string | null>
 
@@ -43,19 +54,87 @@ const XERO_EMAIL_MODE_OPTIONS = [
 ] as const
 
 /**
+ * What each account field is FOR, in the words a bookkeeper filling in a
+ * transfer form would use, plus an example of the shape.
+ *
+ * The labels themselves live in lib/invoice-pay-settings so the box here and
+ * the row on the client's invoice cannot drift apart. These are the extra
+ * sentences that only the person TYPING the account needs. Every example is a
+ * made-up number: nothing in this file is the studio's real account.
+ */
+const ACCOUNT_FIELD_HELP: Partial<Record<BankAccountField, string>> = {
+  accountNumber: 'Digits, dashes and spaces only.',
+  iban: 'Letters, digits and spaces only.',
+  achRouting: 'The 9-digit number for a domestic US transfer.',
+  fedwireRouting: 'The 9-digit number for a US wire. Often different from the ACH one.',
+  swift: 'Needed for an international transfer into this account.',
+  location: 'The country the account is held in, as the sending bank asks for it.',
+  referenceHint: 'The sentence under the details. Leave empty for the standard one.',
+}
+
+const ACCOUNT_FIELD_PLACEHOLDER: Partial<Record<BankAccountField, string>> = {
+  bankName: 'Airwallex',
+  accountName: 'Tahi Studio Ltd',
+  accountNumber: '12-3456-7890123-00',
+  iban: 'EE00 0000 0000 0000 0000',
+  sortCode: '12-34-56',
+  bsb: '123-456',
+  bankCode: '12',
+  branchCode: '3456',
+  achRouting: '123456789',
+  fedwireRouting: '123456789',
+  swift: 'AAAABB0CXXX',
+  referenceHint: 'Please use the invoice number as the reference.',
+}
+
+/** Where the account is held, per currency, as the tab's one-line caption. */
+const CURRENCY_CAPTION: Record<InvoiceCurrency, string> = {
+  NZD: 'New Zealand: account number, bank code and branch code.',
+  GBP: 'United Kingdom: account number, sort code and SWIFT/BIC.',
+  USD: 'United States: account number, ACH routing, Fedwire routing and SWIFT/BIC.',
+  AUD: 'Australia: account number and BSB.',
+  EUR: 'Estonia: IBAN and SWIFT/BIC.',
+}
+
+/** The fields that get a row of their own rather than half the grid. */
+const FULL_WIDTH_FIELDS: readonly BankAccountField[] = ['location', 'iban', 'referenceHint']
+
+/**
+ * Is there somewhere to send the money? The same test the server applies: an
+ * account with neither an account number nor an IBAN is rejected on save, so
+ * the strip must not call it configured.
+ */
+function accountIsSet(account: InvoiceBankAccount | undefined): boolean {
+  if (!account) return false
+  return !!(account.accountNumber?.trim() || account.iban?.trim())
+}
+
+/**
  * Studio details (design: `function Studio(){...}` in settings-app.jsx).
  *
  * Legal name, GST number, registered address, billing currency, invoice
  * number prefix, default invoicing channel and invoice footer note, plus the
- * Getting paid group: the bank details a client is shown when there is no pay
+ * Getting paid group: the bank accounts a client is shown when there is no pay
  * link, the Xero bank account code a dashboard mark-paid records against, and
  * who emails a Xero-rail invoice.
+ *
+ * Getting paid is ONE ACCOUNT PER CURRENCY, behind a tab strip. The studio
+ * invoices in NZD, GBP, USD, AUD and EUR and holds an Airwallex global account
+ * for each, and those accounts do not share a field shape: New Zealand wants a
+ * bank code and a branch code, the UK a sort code, the US an ACH routing
+ * number AND a Fedwire one, Australia a BSB, the euro account an IBAN and no
+ * account number at all. One shared set of boxes quoted a GBP client a New
+ * Zealand account number, which their bank converts at its own rate or returns.
+ * The old single account survives below the tabs as the default: it is the
+ * fallback the resolver still reads for a currency with nothing entered, so it
+ * has to stay editable or a stored value could never be corrected.
  *
  * Batch-saved to the settings K/V store (studio_legal_name,
  * studio_gst_number, studio_address, studio_billing_currency,
  * invoice_number_prefix, invoicing.defaultChannel, invoice_footer_note,
- * invoicing.bankDetails, invoicing.xeroPaymentAccountCode,
- * invoicing.xeroEmailMode) via PATCH /api/admin/settings, one call per key.
+ * invoicing.bankDetails, invoicing.bankDetailsByCurrency,
+ * invoicing.xeroPaymentAccountCode, invoicing.xeroEmailMode) via
+ * PATCH /api/admin/settings, one call per key.
  *
  * The Email delivery card below the form is a separate concern on the same
  * page (components/tahi/settings/sections/email-delivery.tsx): which addresses
@@ -81,7 +160,10 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
   const [invoicePrefix, setInvoicePrefix] = useState('INV-')
   const [invoiceChannel, setInvoiceChannel] = useState<string>(DEFAULT_INVOICE_CHANNEL)
   const [invoiceFooter, setInvoiceFooter] = useState('')
-  // Getting paid.
+  // Getting paid: one account per currency, plus the single default account
+  // kept for any currency that has no entry of its own.
+  const [accounts, setAccounts] = useState<InvoiceBankAccountsByCurrency>({})
+  const [currencyTab, setCurrencyTab] = useState<InvoiceCurrency>('NZD')
   const [bankName, setBankName] = useState('')
   const [accountName, setAccountName] = useState('')
   const [accountNumber, setAccountNumber] = useState('')
@@ -111,6 +193,10 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
       setAccountName(bank.accountName ?? '')
       setAccountNumber(bank.accountNumber ?? '')
       setReferenceHint(bank.referenceHint ?? '')
+      // One blob, five accounts, and the same tolerance: a hand-edited row
+      // that no longer parses reads as "nothing entered yet" rather than
+      // throwing, because this form is also the repair tool.
+      setAccounts(parseBankDetailsByCurrency(data.settings[BANK_DETAILS_BY_CURRENCY_SETTING_KEY]))
       setXeroAccountCode(data.settings[XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY] ?? '')
       // The GET fills this one too, so an absent row still reads as a choice.
       setXeroEmailMode(resolveXeroEmailMode(data.settings[XERO_EMAIL_MODE_SETTING_KEY]))
@@ -132,6 +218,42 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
     if (accountNumber.trim()) blob.accountNumber = accountNumber.trim()
     if (referenceHint.trim()) blob.referenceHint = referenceHint.trim()
     return Object.keys(blob).length === 0 ? '' : JSON.stringify(blob)
+  }
+
+  /** Type one field of one currency's account. */
+  function setAccountField(currency: InvoiceCurrency, field: BankAccountField, value: string) {
+    setAccounts((prev) => {
+      const account: InvoiceBankAccount = { ...prev[currency] }
+      account[field] = value
+      const next: InvoiceBankAccountsByCurrency = { ...prev }
+      next[currency] = account
+      return next
+    })
+  }
+
+  /**
+   * The per-currency blob, in the shape lib/invoice-pay-settings validates.
+   *
+   * Only the fields that currency's account actually HAS are written, so a
+   * sort code left behind by a hand-edited row cannot ride along under the USD
+   * account. Empty boxes are omitted for the same reason the single account
+   * omits them: the client-facing block skips a missing field and would print
+   * an empty labelled row for a blank one. Nothing anywhere saves the empty
+   * value, which is the clear.
+   */
+  function bankAccountsValue(): string {
+    const out: InvoiceBankAccountsByCurrency = {}
+    for (const currency of INVOICE_CURRENCIES) {
+      const draft = accounts[currency]
+      if (!draft) continue
+      const account: InvoiceBankAccount = {}
+      for (const field of CURRENCY_ACCOUNT_FIELDS[currency]) {
+        const value = draft[field]?.trim()
+        if (value) account[field] = value
+      }
+      if (Object.keys(account).length > 0) out[currency] = account
+    }
+    return Object.keys(out).length === 0 ? '' : JSON.stringify(out)
   }
 
   /**
@@ -160,8 +282,10 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
     // the validator's sentence over a card that was half saved, and the value
     // still on screen would not be the value in the database.
     const bankBlob = bankDetailsValue()
+    const accountsBlob = bankAccountsValue()
     const preflight = [
       validateBankDetails(bankBlob),
+      validateBankDetailsByCurrency(accountsBlob),
       validateXeroPaymentAccountCode(xeroAccountCode.trim()),
       validateXeroEmailMode(xeroEmailMode),
     ].find((v) => !v.ok)
@@ -184,6 +308,7 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
         saveKey(INVOICE_CHANNEL_SETTING_KEY, invoiceChannel),
         saveKey('invoice_footer_note', invoiceFooter.trim()),
         saveKey(BANK_DETAILS_SETTING_KEY, bankBlob),
+        saveKey(BANK_DETAILS_BY_CURRENCY_SETTING_KEY, accountsBlob),
         saveKey(XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY, xeroAccountCode.trim()),
         saveKey(XERO_EMAIL_MODE_SETTING_KEY, xeroEmailMode),
       ])
@@ -207,9 +332,10 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
       <SectionShell title="Studio details" lede={LEDE}>
         <div className="set-card">
           <div className="set-grid2">
-            {/* One box per field, in field order: the seven studio details and
-                then the six Getting paid ones. A skeleton that is shorter than
-                the form it stands in for makes the card jump on load. */}
+            {/* One box per field, in field order: the seven studio details,
+                then the currency account on the first tab, then the default
+                account and the two Xero ones. A skeleton shorter than the form
+                it stands in for makes the card jump on load. */}
             {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((i) => (
               <div
                 key={i}
@@ -366,7 +492,132 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               }}
             >
               Shown to a client when their invoice has no pay link yet, and used when you
-              mark one paid by hand.
+              mark one paid by hand. The How to pay block on a client invoice quotes the
+              account matching that invoice&apos;s currency, and falls back to the default
+              account below when the currency has nothing entered.
+            </p>
+          </div>
+
+          {/* ── The five currency accounts ──────────────────────────────────
+              One tab per currency the studio invoices in, because the studio
+              holds one Airwallex global account per currency and each has a
+              different field shape: a sort code under GBP, two routing numbers
+              under USD, an IBAN and no account number at all under EUR. One
+              shared set of boxes would either offer a client a number that
+              means nothing on their rail, or quote a GBP bill a New Zealand
+              account, which the bank converts at its own rate. */}
+          <div style={{ gridColumn: '1 / -1' }}>
+            <SegmentedControl<InvoiceCurrency>
+              value={currencyTab}
+              onChange={setCurrencyTab}
+              options={INVOICE_CURRENCIES.map((code) => ({
+                value: code,
+                label: code,
+                title: accountIsSet(accounts[code])
+                  ? `${code}: account entered`
+                  : `${code}: nothing entered yet`,
+                panelId: 'studio-bank-panel',
+              }))}
+              ariaLabel="Currency to edit the bank account for"
+              describedBy="studio-bank-currency-help"
+              role="tablist"
+              size="sm"
+              fill
+            />
+            <p
+              id="studio-bank-currency-help"
+              className="set-field-note"
+              style={{ margin: '0.375rem 0 0' }}
+            >
+              {CURRENCY_CAPTION[currencyTab]}{' '}
+              {accountIsSet(accounts[currencyTab])
+                ? 'Entered, so a ' + currencyTab + ' invoice quotes this account.'
+                : 'Nothing entered yet, so a ' + currencyTab
+                  + ' invoice falls back to the default account below.'}
+            </p>
+            {/* Which of the five are done, without making the person open
+                each tab to find out. A currency counts as entered only when it
+                names an account number or an IBAN, the same test the server
+                applies on save. */}
+            <p className="set-field-note" style={{ margin: '0.25rem 0 0' }}>
+              Entered:{' '}
+              {INVOICE_CURRENCIES.filter((code) => accountIsSet(accounts[code])).join(', ')
+                || 'none yet'}
+              . Still empty:{' '}
+              {INVOICE_CURRENCIES.filter((code) => !accountIsSet(accounts[code])).join(', ')
+                || 'none'}
+              .
+            </p>
+          </div>
+
+          <div
+            id="studio-bank-panel"
+            role="tabpanel"
+            aria-label={`${currencyTab} account`}
+            className="set-subgrid2"
+            style={{ gridColumn: '1 / -1' }}
+          >
+            {CURRENCY_ACCOUNT_FIELDS[currencyTab].map((field) => {
+              const inputId = `studio-bank-${currencyTab}-${field}`
+              const help = ACCOUNT_FIELD_HELP[field]
+              return (
+                <div
+                  key={field}
+                  className="set-field"
+                  style={FULL_WIDTH_FIELDS.includes(field) ? { gridColumn: '1 / -1' } : undefined}
+                >
+                  <label htmlFor={inputId}>{BANK_ACCOUNT_FIELD_LABELS[field]}</label>
+                  <input
+                    id={inputId}
+                    className="set-input"
+                    value={accounts[currencyTab]?.[field] ?? ''}
+                    onChange={(e) => setAccountField(currencyTab, field, e.target.value)}
+                    placeholder={ACCOUNT_FIELD_PLACEHOLDER[field]}
+                    // No inputMode on the number fields. inputMode="numeric"
+                    // opens the iOS digit keypad, which has no dash and no
+                    // space key, and the placeholders and the server validator
+                    // accept both: these boxes could only be filled on a phone
+                    // by pasting.
+                    aria-describedby={help ? `${inputId}-help` : undefined}
+                  />
+                  {help && (
+                    <small id={`${inputId}-help`} className="set-field-note">
+                      {help}
+                    </small>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* ── The default account ─────────────────────────────────────────
+              The original single account, demoted to the fallback rather than
+              deleted. It still holds a real account that is right for the
+              currency it was typed in, and a client whose currency has no
+              entry above is better served by it than by a How to pay block
+              with nothing under the heading. It stays editable here because
+              the resolver still reads it: removing the boxes would strand
+              whatever is stored with no way to correct or clear it. */}
+          <div style={{ gridColumn: '1 / -1', marginTop: 4 }}>
+            <h3
+              style={{
+                margin: 0,
+                font: '600 13.5px Manrope, sans-serif',
+                color: 'var(--text)',
+              }}
+            >
+              Default account
+            </h3>
+            <p
+              style={{
+                margin: '4px 0 0',
+                font: '400 12.5px/1.5 Manrope, sans-serif',
+                color: 'var(--text-muted)',
+                maxWidth: '52ch',
+              }}
+            >
+              Used for an invoice whose currency has no account above. Leave it empty once
+              every currency you bill in is filled in.
             </p>
           </div>
 
@@ -377,7 +628,7 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               className="set-input"
               value={bankName}
               onChange={(e) => setBankName(e.target.value)}
-              placeholder="ANZ"
+              placeholder="Airwallex"
             />
           </div>
           <div className="set-field">
@@ -404,15 +655,7 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               // could only fill this field on a phone by pasting.
               aria-describedby="studio-account-number-help"
             />
-            <small
-              id="studio-account-number-help"
-              style={{
-                display: 'block',
-                marginTop: 5,
-                color: 'var(--text-faint)',
-                font: '500 12px Manrope',
-              }}
-            >
+            <small id="studio-account-number-help" className="set-field-note">
               Digits, dashes and spaces only.
             </small>
           </div>
@@ -426,15 +669,7 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               placeholder="Please use the invoice number as the reference."
               aria-describedby="studio-reference-hint-help"
             />
-            <small
-              id="studio-reference-hint-help"
-              style={{
-                display: 'block',
-                marginTop: 5,
-                color: 'var(--text-faint)',
-                font: '500 12px Manrope',
-              }}
-            >
+            <small id="studio-reference-hint-help" className="set-field-note">
               The sentence under the bank details. Leave empty for the standard one.
             </small>
           </div>

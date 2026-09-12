@@ -35,14 +35,17 @@ import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_REFERENCE_HINT,
   SETTLED_INVOICE_STATUSES,
+  bankDetailsForCurrency,
   buildHowToPay,
   hasBankDestination,
+  howToPayRows,
   isInvoiceSettled,
   readInvoicePayContext,
   resolveInvoicePayUrl,
 } from '@/lib/invoice-how-to-pay'
 import { INVOICE_CHANNEL_SETTING_KEY } from '@/lib/invoice-channel'
 import {
+  BANK_DETAILS_BY_CURRENCY_SETTING_KEY,
   BANK_DETAILS_SETTING_KEY,
   XERO_EMAIL_MODE_SETTING_KEY,
 } from '@/lib/invoice-pay-settings'
@@ -90,7 +93,7 @@ describe('buildHowToPay', () => {
       channel: 'xero',
       payUrl: null,
       invoice: INVOICE,
-      bankDetails: BANK,
+      bankSettings: { bankDetails: BANK },
     })
 
     expect(block).toEqual({
@@ -111,7 +114,7 @@ describe('buildHowToPay', () => {
       channel: 'xero',
       payUrl: null,
       invoice: INVOICE,
-      bankDetails: BANK,
+      bankSettings: { bankDetails: BANK },
     })!
 
     expect(Object.keys(block).sort()).toEqual([
@@ -128,13 +131,13 @@ describe('buildHowToPay', () => {
 
   it('returns null once either rail has issued a pay page', () => {
     for (const payUrl of ['https://invoice.stripe.com/i/1', 'https://in.xero.com/abc']) {
-      expect(buildHowToPay({ channel: 'xero', payUrl, invoice: INVOICE, bankDetails: BANK }))
+      expect(buildHowToPay({ channel: 'xero', payUrl, invoice: INVOICE, bankSettings: { bankDetails: BANK } }))
         .toBeNull()
     }
   })
 
   it('returns null on the Stripe rail, link or no link', () => {
-    expect(buildHowToPay({ channel: 'stripe', payUrl: null, invoice: INVOICE, bankDetails: BANK }))
+    expect(buildHowToPay({ channel: 'stripe', payUrl: null, invoice: INVOICE, bankSettings: { bankDetails: BANK } }))
       .toBeNull()
   })
 
@@ -149,7 +152,7 @@ describe('buildHowToPay', () => {
         channel: 'xero',
         payUrl: null,
         invoice: { ...INVOICE, status },
-        bankDetails: BANK,
+        bankSettings: { bankDetails: BANK },
       })).toBeNull()
     }
   })
@@ -160,7 +163,7 @@ describe('buildHowToPay', () => {
       channel: 'xero',
       payUrl: null,
       invoice: { ...INVOICE, status: 'sent', paidAt: '2026-09-20T02:00:00.000Z' },
-      bankDetails: BANK,
+      bankSettings: { bankDetails: BANK },
     })).toBeNull()
   })
 
@@ -171,7 +174,7 @@ describe('buildHowToPay', () => {
       channel: 'xero',
       payUrl: null,
       invoice: INVOICE,
-      bankDetails: {},
+      bankSettings: { bankDetails: {} },
     })!
 
     expect(block.reference).toBe('INV-1042')
@@ -189,7 +192,7 @@ describe('buildHowToPay', () => {
       channel: 'xero',
       payUrl: null,
       invoice: { ...INVOICE, number: 'INV-2026-0042' },
-      bankDetails: BANK,
+      bankSettings: { bankDetails: BANK },
     })!
     expect(block.reference).toBe('INV-2026-0042')
   })
@@ -200,7 +203,7 @@ describe('buildHowToPay', () => {
         channel: 'xero',
         payUrl: null,
         invoice: { ...INVOICE, number },
-        bankDetails: BANK,
+        bankSettings: { bankDetails: BANK },
       })!
       expect(block.reference).toBe('INV-1042')
     }
@@ -211,7 +214,7 @@ describe('buildHowToPay', () => {
       channel: 'xero',
       payUrl: null,
       invoice: INVOICE,
-      bankDetails: { ...BANK, referenceHint: '   ' },
+      bankSettings: { bankDetails: { ...BANK, referenceHint: '   ' } },
     })!
     expect(block.hint).toBe(DEFAULT_REFERENCE_HINT)
   })
@@ -221,7 +224,7 @@ describe('buildHowToPay', () => {
       channel: 'xero',
       payUrl: null,
       invoice: { ...INVOICE, currency: null },
-      bankDetails: BANK,
+      bankSettings: { bankDetails: BANK },
     })!
     expect(block.currency).toBe('NZD')
   })
@@ -258,7 +261,7 @@ describe('hasBankDestination', () => {
       channel: 'xero',
       payUrl: null,
       invoice: INVOICE,
-      bankDetails: {},
+      bankSettings: { bankDetails: {} },
     })
     expect(hasBankDestination(block)).toBe(false)
     expect(hasBankDestination(null)).toBe(false)
@@ -269,9 +272,149 @@ describe('hasBankDestination', () => {
       channel: 'xero',
       payUrl: null,
       invoice: INVOICE,
-      bankDetails: { accountNumber: '01-0242-0198765-00' },
+      bankSettings: { bankDetails: { accountNumber: '01-0242-0198765-00' } },
     })
     expect(hasBankDestination(block)).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// bankDetailsForCurrency
+// ---------------------------------------------------------------------------
+//
+// The studio holds an Airwallex global account per currency. Before this, one
+// account was quoted under every invoice, so a GBP bill named a New Zealand
+// account number and the client's bank either returned it or converted it at
+// their own rate.
+//
+// Every account here is made up.
+describe('bankDetailsForCurrency', () => {
+  const GBP_ACCOUNT = {
+    bankName: 'Example Bank',
+    accountName: 'Tahi Studio Ltd',
+    location: 'United Kingdom',
+    accountNumber: '00000000',
+    sortCode: '00-00-00',
+    swift: 'AAAAGB0AXXX',
+  }
+
+  const SETTINGS = { bankAccounts: { GBP: GBP_ACCOUNT }, bankDetails: BANK }
+
+  it('hands back the account for the invoice currency', () => {
+    expect(bankDetailsForCurrency(SETTINGS, 'GBP')).toEqual(GBP_ACCOUNT)
+  })
+
+  it('falls back to the default account for a currency with nothing entered', () => {
+    // Not perfect, but a real account and a number the client can ring about
+    // beats a "How to pay" heading over nothing.
+    expect(bankDetailsForCurrency(SETTINGS, 'NZD')).toEqual(BANK)
+    expect(bankDetailsForCurrency(SETTINGS, 'USD')).toEqual(BANK)
+  })
+
+  it('falls back for a currency it does not know at all', () => {
+    expect(bankDetailsForCurrency(SETTINGS, 'JPY')).toEqual(BANK)
+    expect(bankDetailsForCurrency(SETTINGS, null)).toEqual(BANK)
+  })
+
+  it('reads the currency case and space insensitively', () => {
+    // The column is free text on an imported invoice.
+    expect(bankDetailsForCurrency(SETTINGS, ' gbp ')).toEqual(GBP_ACCOUNT)
+  })
+
+  it('is null when neither the currency nor the default names an account', () => {
+    expect(bankDetailsForCurrency({ bankAccounts: {}, bankDetails: {} }, 'GBP')).toBeNull()
+    expect(bankDetailsForCurrency({}, 'GBP')).toBeNull()
+    expect(bankDetailsForCurrency(null, 'GBP')).toBeNull()
+  })
+
+  it('does not let an empty per-currency entry swallow the default', () => {
+    expect(bankDetailsForCurrency({ bankAccounts: { GBP: {} }, bankDetails: BANK }, 'GBP'))
+      .toEqual(BANK)
+  })
+})
+
+describe('buildHowToPay across currencies', () => {
+  const USD_ACCOUNT = {
+    bankName: 'Example Bank',
+    accountName: 'Tahi Studio Ltd',
+    location: 'United States',
+    accountNumber: '000000000000',
+    achRouting: '123456789',
+    fedwireRouting: '987654321',
+    swift: 'AAAAUS0AXXX',
+  }
+
+  it('quotes the account matching the invoice currency, never the studio default', () => {
+    const block = buildHowToPay({
+      channel: 'xero',
+      payUrl: null,
+      invoice: { ...INVOICE, currency: 'USD' },
+      bankSettings: { bankAccounts: { USD: USD_ACCOUNT }, bankDetails: BANK },
+    })
+
+    expect(block?.accountNumber).toBe('000000000000')
+    expect(block?.achRouting).toBe('123456789')
+    expect(block?.fedwireRouting).toBe('987654321')
+    expect(block?.currency).toBe('USD')
+    // The NZ account is nowhere on a USD bill.
+    expect(block?.accountNumber).not.toBe(BANK.accountNumber)
+  })
+
+  it('lists only the fields the account carries, with the labels a bookkeeper knows', () => {
+    const block = buildHowToPay({
+      channel: 'xero',
+      payUrl: null,
+      invoice: { ...INVOICE, currency: 'USD' },
+      bankSettings: { bankAccounts: { USD: USD_ACCOUNT } },
+    })!
+
+    expect(howToPayRows(block).map((row) => [row.label, row.value])).toEqual([
+      ['Bank', 'Example Bank'],
+      ['Account name', 'Tahi Studio Ltd'],
+      ['Bank location', 'United States'],
+      ['Account number', '000000000000'],
+      ['ACH routing', '123456789'],
+      ['Fedwire routing', '987654321'],
+      ['SWIFT/BIC', 'AAAAUS0AXXX'],
+    ])
+    // No sort code, no BSB, no IBAN: the US account has none of them, and an
+    // empty labelled row is a number the client goes looking for.
+    expect(howToPayRows(block).map((row) => row.field)).not.toContain('sortCode')
+    expect(howToPayRows(block).map((row) => row.field)).not.toContain('iban')
+  })
+
+  it('takes an IBAN as the destination for the euro account', () => {
+    const block = buildHowToPay({
+      channel: 'xero',
+      payUrl: null,
+      invoice: { ...INVOICE, currency: 'EUR' },
+      bankSettings: {
+        bankAccounts: { EUR: { iban: 'EE00 0000 0000 0000 0000', swift: 'AAAAEE0AXXX' } },
+      },
+    })!
+
+    expect(block.iban).toBe('EE00 0000 0000 0000 0000')
+    expect(block.accountNumber).toBeUndefined()
+    expect(howToPayRows(block).map((row) => row.label)).toEqual(['IBAN', 'SWIFT/BIC'])
+    // An IBAN IS somewhere to send the money, so the email renders the block
+    // rather than dropping back to the plain portal CTA.
+    expect(hasBankDestination(block)).toBe(true)
+  })
+
+  it('uses the default account when the invoice currency has no entry', () => {
+    const block = buildHowToPay({
+      channel: 'xero',
+      payUrl: null,
+      invoice: { ...INVOICE, currency: 'AUD' },
+      bankSettings: { bankAccounts: { USD: USD_ACCOUNT }, bankDetails: BANK },
+    })
+
+    expect(block?.accountNumber).toBe(BANK.accountNumber)
+    expect(block?.currency).toBe('AUD')
+    // The amount stays in the invoice's own currency even on the fallback
+    // account: the portal holds no rates, so a converted figure would be a
+    // number the client cannot reconcile against their bank.
+    expect(block?.amount).toBe(INVOICE.totalUsd)
   })
 })
 
@@ -304,7 +447,27 @@ describe('readInvoicePayContext', () => {
     const ctx = readInvoicePayContext([], null)
     expect(ctx.channel).toBe('stripe')
     expect(ctx.bankDetails).toEqual({})
+    expect(ctx.bankAccounts).toEqual({})
     expect(ctx.xeroEmailMode).toBe('dashboard')
+  })
+
+  it('reads the per-currency accounts alongside the default one', () => {
+    const ctx = readInvoicePayContext(
+      [
+        {
+          key: BANK_DETAILS_BY_CURRENCY_SETTING_KEY,
+          value: JSON.stringify({ GBP: { accountNumber: '00000000', sortCode: '00-00-00' } }),
+        },
+        { key: BANK_DETAILS_SETTING_KEY, value: JSON.stringify(BANK) },
+      ],
+      null,
+    )
+    expect(ctx.bankAccounts.GBP).toEqual({ accountNumber: '00000000', sortCode: '00-00-00' })
+    expect(ctx.bankDetails).toEqual(BANK)
+    // The context IS the resolver's argument, so a route never has to
+    // reassemble the two keys and cannot pass one without the other.
+    expect(bankDetailsForCurrency(ctx, 'GBP')).toEqual(ctx.bankAccounts.GBP)
+    expect(bankDetailsForCurrency(ctx, 'NZD')).toEqual(BANK)
   })
 
   it('does not let a malformed stored value escape as a rail, a mode or a bank blob', () => {
@@ -313,12 +476,14 @@ describe('readInvoicePayContext', () => {
       [
         { key: INVOICE_CHANNEL_SETTING_KEY, value: 'xero_bank' },
         { key: BANK_DETAILS_SETTING_KEY, value: 'not json' },
+        { key: BANK_DETAILS_BY_CURRENCY_SETTING_KEY, value: '{"GBP": "Example Bank"}' },
         { key: XERO_EMAIL_MODE_SETTING_KEY, value: 'carrier pigeon' },
       ],
       'also not a rail',
     )
     expect(ctx.channel).toBe('stripe')
     expect(ctx.bankDetails).toEqual({})
+    expect(ctx.bankAccounts).toEqual({})
     expect(ctx.xeroEmailMode).toBe('dashboard')
   })
 })

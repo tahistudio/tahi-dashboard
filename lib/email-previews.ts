@@ -331,11 +331,20 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
       currency: INVOICE_CURRENCY,
       dueDate: invoiceDueIso,
     },
-    bankDetails: {
-      bankName: 'ANZ',
-      accountName: 'Tahi Studio Ltd',
-      accountNumber: '01-0242-0198765-00',
-      referenceHint: 'Please quote the reference above so we can match your payment to this invoice.',
+    // The NZD account, because the previewed invoice is an NZD one: the block
+    // quotes the account for the invoice's OWN currency, and a preview built
+    // off the wrong currency's account would pass while the real send quoted
+    // something else. Placeholder digits, not the studio's real account.
+    bankSettings: {
+      bankAccounts: {
+        NZD: {
+          bankName: 'ANZ',
+          accountName: 'Tahi Studio Ltd',
+          location: 'New Zealand',
+          accountNumber: '01-0242-0198765-00',
+          referenceHint: 'Please quote the reference above so we can match your payment to this invoice.',
+        },
+      },
     },
   })!
   const kickoffIso = isoFromNow(3, 21, 0)
