@@ -4,7 +4,9 @@
  * Fires once every ~5 minutes from a scheduled trigger. Finds
  * discovery_calls that:
  *   - Have status='scheduled'
- *   - Have scheduledAt in the next 25-35 min window
+ *   - Have scheduledAt in the next 25-35 min window (checked against
+ *     the real instant via lib/pre-call-window.ts, not a TEXT compare
+ *     see the "Window" comment below for why that distinction matters)
  *   - Haven't already been sent a pre-call digest (checked via
  *     activities row of type 'call_digest_sent')
  *
@@ -25,13 +27,14 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { and, eq, gte, lte, sql } from 'drizzle-orm'
+import { and, eq, gte, sql } from 'drizzle-orm'
 import { render } from '@react-email/render'
 import { PreCallDigestEmail, type PreCallDigestEmailProps } from '@/emails/pre-call-digest'
 import { publicUrl } from '@/lib/app-url'
 import { emailFromAddress } from '@/lib/email'
 import { deliverEmail } from '@/lib/email-delivery'
 import { logCronRun } from '@/lib/cron-runs'
+import { filterInPreCallWindow } from '@/lib/pre-call-window'
 
 export const dynamic = 'force-dynamic'
 
@@ -77,12 +80,27 @@ export async function POST(req: NextRequest) {
     .limit(1)
   const recipient = recipientSetting?.value?.trim() || 'business@tahi.studio'
 
-  // Find calls in the window
+  // Find calls in the window.
+  //
+  // scheduledAt is a TEXT column, and rows written from Google Calendar
+  // carry Calendar's own RFC3339 offset (e.g. "...+12:00"/"...+13:00"),
+  // not a canonical "Z" instant. A SQLite/JS lexicographic gte/lte
+  // against a Z-suffixed bound breaks on that: "+12:00" sorts AFTER "Z"
+  // on the same calendar day, so a real NZ-morning call's row failed
+  // this filter until roughly the NZ UTC offset had passed, which is
+  // exactly the "hours off" bug (see app/api/admin/discovery-calls/
+  // upcoming/route.ts for the sibling fix this mirrors, and
+  // lib/pre-call-window.ts for the reproduction + the real fix).
+  //
+  // Writers now normalise scheduledAt to canonical Z at the boundary
+  // (lib/call-time.ts), but this cron does not get to assume every row
+  // in D1 has been backfilled yet, so the SQL filter below is only a
+  // coarse, generous pre-filter (cheap row-count guard) and the actual
+  // decision is `filterInPreCallWindow`, which compares real instants.
   const now = Date.now()
-  const windowStart = new Date(now + WINDOW_START_MIN * 60_000).toISOString()
-  const windowEnd = new Date(now + WINDOW_END_MIN * 60_000).toISOString()
+  const coarseLowerBound = new Date(now - 24 * 60 * 60_000).toISOString()
 
-  const candidates = await database
+  const candidatesRaw = await database
     .select({
       id: schema.discoveryCalls.id,
       title: schema.discoveryCalls.title,
@@ -100,9 +118,10 @@ export async function POST(req: NextRequest) {
     .from(schema.discoveryCalls)
     .where(and(
       eq(schema.discoveryCalls.status, 'scheduled'),
-      gte(schema.discoveryCalls.scheduledAt, windowStart),
-      lte(schema.discoveryCalls.scheduledAt, windowEnd),
+      gte(schema.discoveryCalls.scheduledAt, coarseLowerBound),
     ))
+
+  const candidates = filterInPreCallWindow(candidatesRaw, now, WINDOW_START_MIN, WINDOW_END_MIN)
 
   // Deduplicate against already-sent digests (activity row with
   // type='call_digest_sent' and description containing the call id).
@@ -298,8 +317,10 @@ export async function POST(req: NextRequest) {
   }
 
   const summary = {
-    windowStart,
-    windowEnd,
+    // Reported for the /settings/automations "last run" view only, not
+    // the actual decision: that is filterInPreCallWindow, not these bounds.
+    windowStart: new Date(now + WINDOW_START_MIN * 60_000).toISOString(),
+    windowEnd: new Date(now + WINDOW_END_MIN * 60_000).toISOString(),
     candidates: candidates.length,
     alreadySent: candidates.length - toProcess.length,
     processed: results.length,

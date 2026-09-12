@@ -975,7 +975,7 @@ export const TOOLS: ToolDef[] = [
   tool('schedule_lead_call', 'Schedule a discovery call against a lead. Writes a discovery_calls row + a lead_call_scheduled activity. Title + scheduledAt (ISO 8601) are required.', {
     leadId: prop('string', 'Lead ID'),
     title: prop('string', 'Call title, e.g. "Discovery call with Anna Walker"'),
-    scheduledAt: prop('string', 'ISO 8601 datetime, e.g. "2026-06-04T10:00:00Z"'),
+    scheduledAt: prop('string', 'Full ISO 8601 instant with an explicit offset or Z, e.g. "2026-06-04T22:00:00Z", when you mean that UTC moment. A bare "2026-06-04T10:00:00" with no offset is read as Pacific/Auckland wall-clock time, NOT UTC. Never hand-append "Z" to a time you were given in NZ local time.'),
     durationMinutes: prop('number', 'Defaults to 30'),
     googleMeetUrl: prop('string', 'Optional — paste the Google Meet link from Calendar'),
     googleCalendarEventId: prop('string', 'Optional — set when wired via Calendar sync (Phase 2)'),
@@ -983,7 +983,7 @@ export const TOOLS: ToolDef[] = [
   tool('update_lead_call', 'Update a discovery call. Accepts any subset of pre-call fields (title, scheduledAt, durationMinutes, googleMeetUrl, status, meetingType) and post-call fields (transcript, summary, outcome, outcomeNotes, scopeNotes, budgetMin/Max/Currency, timeline). When status flips to "completed" OR outcome is set for the first time, a lead_call_completed activity is written.', {
     callId: prop('string', 'Discovery call ID'),
     title: prop('string', 'Call title'),
-    scheduledAt: prop('string', 'ISO 8601 datetime'),
+    scheduledAt: prop('string', 'Full ISO 8601 instant with an explicit offset or Z when you mean that UTC moment; a bare value with no offset is read as Pacific/Auckland wall-clock time.'),
     durationMinutes: prop('number', 'Length in minutes'),
     status: prop('string', 'scheduled | completed | cancelled | no_show | rescheduled'),
     meetingType: prop('string', 'Classifier: discovery | client | partnership | unclassified. Calendar sync sets this automatically; pass it here to reclassify.'),
@@ -1032,7 +1032,7 @@ export const TOOLS: ToolDef[] = [
   tool('schedule_deal_call', 'Schedule a call against a deal. Writes a discovery_calls row with deal_id set + a deal_call_scheduled activity. Same field shape as schedule_lead_call.', {
     dealId: prop('string', 'Deal ID'),
     title: prop('string', 'Call title, e.g. "Scope refinement with Anna"'),
-    scheduledAt: prop('string', 'ISO 8601 datetime'),
+    scheduledAt: prop('string', 'Full ISO 8601 instant with an explicit offset or Z when you mean that UTC moment; a bare value with no offset is read as Pacific/Auckland wall-clock time.'),
     durationMinutes: prop('number', 'Defaults to 30'),
     googleMeetUrl: prop('string', 'Optional — paste the Google Meet link'),
     googleCalendarEventId: prop('string', 'Optional — set when wired via Calendar sync'),
@@ -1178,7 +1178,7 @@ export const TOOLS: ToolDef[] = [
   tool('create_call', 'Schedule a new call with a client', {
     orgId: prop('string', 'Client organisation ID'),
     title: prop('string', 'Call title'),
-    scheduledAt: prop('string', 'Scheduled date/time in ISO format'),
+    scheduledAt: prop('string', 'Scheduled date/time. Pass a full ISO 8601 instant with an explicit offset or Z (e.g. "2026-09-15T22:00:00Z") when you mean that UTC moment. A bare "2026-09-15T10:00:00" with no offset is read as Pacific/Auckland wall-clock time (the studio\'s own zone), NOT UTC. Do not hand-append "Z" to a time someone told you in NZ local time, that is exactly the bug this was fixed for.'),
     durationMinutes: prop('number', 'Call duration in minutes (default 30)'),
   }, ['orgId', 'title', 'scheduledAt']),
   tool('update_call', 'Update a scheduled call', {
@@ -1187,6 +1187,9 @@ export const TOOLS: ToolDef[] = [
     notes: prop('string', 'Call notes'),
     recordingUrl: prop('string', 'Recording URL'),
   }, ['callId']),
+  tool('normalize_call_times', 'Data repair: rewrite discovery_calls.scheduledAt and scheduled_calls.scheduledAt rows that predate the call-time timezone fix (2026-09-12) to the canonical absolute-instant form. Every writer now normalises scheduledAt at the boundary, so this is a one-time repair for rows already in D1, not an ongoing job. An offset-form row (e.g. Google Calendar\'s own "...+12:00") is re-serialised to the equivalent Z instant, the meaning never changes. A naive row (no offset at all) is read as Pacific/Auckland wall-clock time, the same rule every writer applies today. DEFAULTS TO A DRY RUN: it returns the exact plan (fixed / refused, row by row) and touches nothing unless you pass dryRun false.', {
+    dryRun: prop('boolean', 'Preview only. Defaults to TRUE: pass false to actually rewrite the rows.'),
+  }),
 
   // ── Project Schedules (Gantt) ────────────────────────────────────────
   tool('list_schedules', 'List project schedules (gantt timelines). Filter by orgId, dealId, or status.', {
@@ -2599,6 +2602,8 @@ async function executeTool(
       const { callId, ...body } = args
       return json(await apiWrite(`/api/admin/calls/${callId}`, token, 'PATCH', body))
     }
+    case 'normalize_call_times':
+      return json(await apiWrite('/api/admin/calls/normalize-times', token, 'POST', args as Record<string, unknown>))
 
     // ── Project Schedules (Gantt) ────────────────────────────────────
     case 'list_schedules': {

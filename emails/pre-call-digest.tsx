@@ -98,8 +98,11 @@ export function PreCallDigestEmail({
   questions,
   sources,
 }: PreCallDigestEmailProps) {
-  // Studio zone, not the worker's UTC clock: "Mon 7 Sept, 10:00 am".
-  const timeFormatted = formatSlotSummary(scheduledAt) || scheduledAt
+  // Studio zone, not the worker's UTC clock: "Mon 7 Sept, 10:00 am NZST".
+  // The zone label is included so a naive-vs-absolute mixup in the data
+  // (see lib/call-time.ts) is visible in the email itself, not just
+  // invisible in a bare "10:00 am".
+  const timeFormatted = formatSlotSummary(scheduledAt, { withZone: true }) || scheduledAt
   const fullParentUrl = `${dashboardUrl}${parentHref}`
   const hasFirmographics = Boolean(industry || employeeCount || revenueBand || cms || country)
   const hasAiBriefing = aiScore != null || Boolean(aiSnapshot) || Boolean(aiFit)

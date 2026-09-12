@@ -6,6 +6,7 @@ import { eq, and, asc } from 'drizzle-orm'
 import { scopedOrgIds } from '@/lib/access-scope'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { orgColumnInScope } from '../_scoping/org-scope'
+import { normalizeCallInstant } from '@/lib/call-time'
 
 // GET /api/admin/calls - list calls
 // Query: ?orgId=xxx&status=scheduled
@@ -93,6 +94,13 @@ export async function POST(req: NextRequest) {
   if (!body.scheduledAt?.trim()) {
     return NextResponse.json({ error: 'scheduledAt is required' }, { status: 400 })
   }
+  // Normalise to an absolute UTC instant at the boundary. A naive input
+  // (no offset) is read as Pacific/Auckland wall-clock time, not UTC.
+  // See lib/call-time.ts.
+  const normalizedScheduledAt = normalizeCallInstant(body.scheduledAt)
+  if (!normalizedScheduledAt) {
+    return NextResponse.json({ error: 'scheduledAt is not a valid date' }, { status: 400 })
+  }
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -122,7 +130,7 @@ export async function POST(req: NextRequest) {
       const event = await createCalendarEvent(tokens.accessToken, {
         title,
         description,
-        startIso: body.scheduledAt,
+        startIso: normalizedScheduledAt,
         durationMinutes: duration,
         attendeeEmails,
       })
@@ -151,7 +159,7 @@ export async function POST(req: NextRequest) {
     orgId: body.orgId,
     title,
     description,
-    scheduledAt: body.scheduledAt,
+    scheduledAt: normalizedScheduledAt,
     durationMinutes: duration,
     meetingUrl,
     attendees: JSON.stringify(attendees),
@@ -170,7 +178,7 @@ export async function POST(req: NextRequest) {
       id: crypto.randomUUID(),
       orgId: body.orgId,
       title,
-      scheduledAt: body.scheduledAt,
+      scheduledAt: normalizedScheduledAt,
       durationMinutes: duration,
       status: 'scheduled',
       meetingType: 'client',

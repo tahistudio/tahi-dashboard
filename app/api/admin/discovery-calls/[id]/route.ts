@@ -20,6 +20,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { normalizeCallInstant } from '@/lib/call-time'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -61,7 +62,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const updates: Record<string, string | number | null> = {}
 
   const stringFields = [
-    'title', 'scheduledAt', 'googleMeetUrl', 'googleCalendarEventId',
+    'title', 'googleMeetUrl', 'googleCalendarEventId',
     'status', 'transcriptSource', 'summary', 'outcome', 'outcomeNotes',
     'scopeNotes', 'budgetCurrency', 'timeline', 'meetingType',
   ] as const
@@ -69,6 +70,25 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (f in body) {
       const v = body[f]
       updates[f] = typeof v === 'string' ? (v.trim() || null) : (v === null ? null : (updates[f] ?? null))
+    }
+  }
+
+  // scheduledAt gets its own path (not the generic stringFields loop
+  // above): it must always end up an absolute UTC instant, never
+  // whatever string the caller happened to send. A naive value (no
+  // offset) is read as Pacific/Auckland wall-clock time. See
+  // lib/call-time.ts, this is the exact bug that sent "Pre-call" emails
+  // hours off the real call.
+  if ('scheduledAt' in body) {
+    const v = body.scheduledAt
+    if (typeof v === 'string' && v.trim()) {
+      const normalized = normalizeCallInstant(v)
+      if (!normalized) {
+        return NextResponse.json({ error: 'scheduledAt is not a valid date' }, { status: 400 })
+      }
+      updates.scheduledAt = normalized
+    } else if (v === null) {
+      return NextResponse.json({ error: 'scheduledAt cannot be cleared' }, { status: 400 })
     }
   }
 

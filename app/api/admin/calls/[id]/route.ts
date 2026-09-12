@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { normalizeCallInstant } from '@/lib/call-time'
 
 // PATCH /api/admin/calls/[id] - update call
 export async function PATCH(
@@ -48,7 +49,16 @@ export async function PATCH(
   if (body.notes !== undefined) updates.notes = body.notes
   if (body.recordingUrl !== undefined) updates.recordingUrl = body.recordingUrl
   if (body.title) updates.title = body.title
-  if (body.scheduledAt) updates.scheduledAt = body.scheduledAt
+  if (body.scheduledAt) {
+    // Normalise to an absolute UTC instant at the boundary. A naive
+    // value (no offset) is read as Pacific/Auckland wall-clock time.
+    // See lib/call-time.ts.
+    const normalized = normalizeCallInstant(body.scheduledAt)
+    if (!normalized) {
+      return NextResponse.json({ error: 'scheduledAt is not a valid date' }, { status: 400 })
+    }
+    updates.scheduledAt = normalized
+  }
   if (body.durationMinutes !== undefined) updates.durationMinutes = body.durationMinutes
   if (body.meetingUrl !== undefined) updates.meetingUrl = body.meetingUrl
 

@@ -26,6 +26,7 @@ import { schema } from '@/db/d1'
 import { eq, inArray, sql } from 'drizzle-orm'
 import { getGoogleAccessToken, listCalendarEvents, GoogleNotConnectedError } from '@/lib/google'
 import { logCronRun } from '@/lib/cron-runs'
+import { normalizeCallInstant } from '@/lib/call-time'
 
 export const dynamic = 'force-dynamic'
 
@@ -187,8 +188,16 @@ export async function POST(req: NextRequest) {
 
   for (const ev of usable) {
     const summary = ev.summary?.trim() || 'Untitled meeting'
-    const startIso = ev.start?.dateTime
-    if (!startIso) { skipped++; results.push({ eventId: ev.id, action: 'skipped', reason: 'no start time' }); continue }
+    const rawStartIso = ev.start?.dateTime
+    if (!rawStartIso) { skipped++; results.push({ eventId: ev.id, action: 'skipped', reason: 'no start time' }); continue }
+    // Google returns RFC3339 WITH the calendar's own offset (e.g.
+    // "...+12:00"), never a bare "Z". Canonicalise to an absolute UTC
+    // instant here so scheduledAt is never stored in a form that sorts
+    // wrong against a Z-suffixed window bound (this was the actual root
+    // cause of pre-call digest emails firing hours late, see
+    // lib/call-time.ts and lib/pre-call-window.ts).
+    const startIso = normalizeCallInstant(rawStartIso)
+    if (!startIso) { skipped++; results.push({ eventId: ev.id, action: 'skipped', reason: 'unparseable start time' }); continue }
     const startMs = new Date(startIso).getTime()
     const endMs = ev.end?.dateTime ? new Date(ev.end.dateTime).getTime() : startMs + 30 * 60_000
     const durationMinutes = Math.max(1, Math.round((endMs - startMs) / 60_000))
