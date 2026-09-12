@@ -9,16 +9,40 @@ import { request as playwrightRequest, type APIRequestContext } from '@playwrigh
  * sign-in. (This bypass is dead-code-eliminated from the production build.)
  */
 
-const BASE = 'http://localhost:3000'
+const DEFAULT_BASE = 'http://localhost:3000'
 
-async function adminContext(): Promise<APIRequestContext> {
+/**
+ * Which harness a call is pointed at.
+ *
+ * `PLAYWRIGHT_TEST_BASE_URL` is set by Playwright itself ONLY from the
+ * webServer plugin (playwright/lib/plugins/webServerPlugin.js writes it from
+ * `webServer.url`), which is what the default `playwright.config.ts` uses. A
+ * config that instead sets `use.baseURL` by hand, like the 3179 QA harness,
+ * leaves the variable unset, so those callers pass the `baseURL` fixture in
+ * explicitly. Without one of the two, seeding silently lands in the D1 behind
+ * port 3000 while the assertions read the one behind 3179.
+ */
+function resolveBase(baseURL?: string): string {
+  return baseURL ?? process.env.PLAYWRIGHT_TEST_BASE_URL ?? DEFAULT_BASE
+}
+
+/**
+ * A request context authenticated as the Tahi admin through the dev-only
+ * Ship Studio bypass. Exported so a spec can seed its own fixtures (requests,
+ * files, invoices) through the same door the invite helpers use.
+ *
+ * The caller owns the returned context and must dispose it.
+ */
+export async function adminRequestContext(baseURL?: string): Promise<APIRequestContext> {
+  const base = resolveBase(baseURL)
+  const host = new URL(base).hostname
   return playwrightRequest.newContext({
-    baseURL: BASE,
+    baseURL: base,
     extraHTTPHeaders: { 'x-ship-studio': '1' },
     // The server-auth bypass also accepts the cookie; set both for belt + braces.
     storageState: {
       cookies: [
-        { name: 'tahi-ship-studio', value: '1', domain: 'localhost', path: '/', expires: -1, httpOnly: false, secure: false, sameSite: 'Lax' },
+        { name: 'tahi-ship-studio', value: '1', domain: host, path: '/', expires: -1, httpOnly: false, secure: false, sameSite: 'Lax' },
       ],
       origins: [],
     },
@@ -26,8 +50,8 @@ async function adminContext(): Promise<APIRequestContext> {
 }
 
 /** Create a fresh client org and return its D1 id. */
-export async function createTestOrg(name: string): Promise<string> {
-  const ctx = await adminContext()
+export async function createTestOrg(name: string, baseURL?: string): Promise<string> {
+  const ctx = await adminRequestContext(baseURL)
   try {
     const res = await ctx.post('/api/admin/clients', { data: { name, customMrr: 0 } })
     if (!res.ok()) throw new Error(`createTestOrg failed: ${res.status()} ${await res.text()}`)
@@ -49,8 +73,8 @@ interface MintOpts {
 }
 
 /** Mint an onboarding invite link and return its token + path. */
-export async function mintInvite(opts: MintOpts): Promise<{ token: string; path: string }> {
-  const ctx = await adminContext()
+export async function mintInvite(opts: MintOpts, baseURL?: string): Promise<{ token: string; path: string }> {
+  const ctx = await adminRequestContext(baseURL)
   try {
     const res = await ctx.post('/api/admin/onboarding-invites', { data: opts })
     if (!res.ok()) throw new Error(`mintInvite failed: ${res.status()} ${await res.text()}`)
