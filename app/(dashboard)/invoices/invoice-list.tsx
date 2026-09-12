@@ -35,6 +35,7 @@ import { useToast } from '@/components/tahi/toast'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { formatCurrency } from '@/lib/currency'
 import { isOwedInvoice, partitionInvoicesByStatus } from '@/lib/invoice-status'
+import { type InvoiceHowToPay } from '@/lib/invoice-how-to-pay'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { PageHeader } from '@/components/tahi/page-header'
 import { useUserPreference, oneOf } from '@/lib/use-user-preference'
@@ -76,6 +77,8 @@ interface Invoice {
   xeroInvoiceId?: string | null
   /** Stripe hosted invoice page, served to the client so they can pay. */
   payUrl?: string | null
+  /** Bank-transfer fallback for an unpaid Xero-rail invoice with no pay link. */
+  howToPay?: InvoiceHowToPay | null
   totalAmount: number
   currency: string | null
   dueDate: string | null
@@ -200,6 +203,16 @@ function InvoiceMobileCard({
         >
           Pay now
         </a>
+      )}
+      {!isPayable(invoice) && invoice.howToPay && (
+        <Link
+          href={`/invoices/${invoice.id}`}
+          onClick={e => e.stopPropagation()}
+          className="tahi-focus-ring min-h-11"
+          style={{ ...PAY_LINK_STYLE, alignSelf: 'flex-start' }}
+        >
+          How to pay
+        </Link>
       )}
     </div>
   )
@@ -1182,18 +1195,38 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
         header: '',
         align: 'right',
         width: '7rem',
-        render: r => (isPayable(r) && r.payUrl ? (
-          <a
-            href={r.payUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={e => e.stopPropagation()}
-            className="tahi-focus-ring min-h-11 md:min-h-9"
-            style={PAY_LINK_STYLE}
-          >
-            Pay now
-          </a>
-        ) : null),
+        render: r => {
+          if (isPayable(r) && r.payUrl) {
+            return (
+              <a
+                href={r.payUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={e => e.stopPropagation()}
+                className="tahi-focus-ring min-h-11 md:min-h-9"
+                style={PAY_LINK_STYLE}
+              >
+                Pay now
+              </a>
+            )
+          }
+          // Not payable yet, but there is somewhere the client can send the
+          // money in the meantime: a table cell has no room for the bank
+          // details block itself, so this links through to it instead.
+          if (r.howToPay) {
+            return (
+              <Link
+                href={`/invoices/${r.id}`}
+                onClick={e => e.stopPropagation()}
+                className="tahi-focus-ring min-h-11 md:min-h-9"
+                style={PAY_LINK_STYLE}
+              >
+                How to pay
+              </Link>
+            )
+          }
+          return null
+        },
       })
     }
 

@@ -36,7 +36,7 @@ import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  ArrowLeft, Banknote, CalendarClock, CreditCard, ExternalLink, FileText, Link2,
+  ArrowLeft, Banknote, CalendarClock, CreditCard, ExternalLink, FileText, Landmark, Link2,
   Lock, Mail, RefreshCw, Send, Sparkles, X,
 } from 'lucide-react'
 import { SourceBadge } from '../source-badge'
@@ -67,6 +67,8 @@ import { useImpersonation } from '@/components/tahi/impersonation-banner'
 import { formatCurrency } from '@/lib/currency'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { invoiceReference } from '@/lib/invoice-billing'
+import { type InvoiceHowToPay } from '@/lib/invoice-how-to-pay'
+import { PortalCopyRow } from '@/components/tahi/portal/portal-money-kit'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,6 +84,9 @@ interface InvoiceRow {
   xeroInvoiceId?: string | null
   // Stripe hosted invoice page, served to the client so they can pay.
   payUrl?: string | null
+  // Bank-transfer fallback for an unpaid Xero-rail invoice with no pay link.
+  // Portal projections only; the admin route does not send it.
+  howToPay?: InvoiceHowToPay | null
   // The same page under its column name on the admin projection, so the
   // studio can open what the client sees without a round trip to Stripe.
   stripeHostedInvoiceUrl?: string | null
@@ -749,6 +754,53 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
               <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
                 Secure payment page, hosted by Stripe.
               </span>
+            </div>
+          </>
+        )}
+
+        {/* Client bank-transfer fallback. A Xero-rail invoice sits at DRAFT
+            inside Xero until Liam approves it, so it has no hosted pay page
+            for most of its life. Without this a client held a real bill with
+            nothing on the page to act on. Withheld the moment a pay link
+            shows up or the bill is settled: a link beats a transfer, and a
+            settled invoice owes nothing. */}
+        {!isAdmin && !payUrl && !settled && invoice.howToPay && (
+          <>
+            <Card.Divider />
+            <div>
+              <div className="flex items-center gap-2" style={{ marginBottom: '0.5rem' }}>
+                <Landmark size={16} aria-hidden="true" style={{ color: 'var(--color-brand-dark)' }} />
+                <h2 style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-text)', margin: 0 }}>
+                  How to pay
+                </h2>
+              </div>
+              <p style={{ margin: '0 0 0.5rem', fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+                Internet banking, from your account to ours. {invoice.howToPay.hint}
+              </p>
+              <div style={{ display: 'grid' }}>
+                {invoice.howToPay.bankName && (
+                  <PortalCopyRow label="Bank" value={invoice.howToPay.bankName} />
+                )}
+                {invoice.howToPay.accountName && (
+                  <PortalCopyRow label="Account name" value={invoice.howToPay.accountName} />
+                )}
+                {invoice.howToPay.accountNumber && (
+                  <PortalCopyRow label="Account number" value={invoice.howToPay.accountNumber} mono />
+                )}
+                <PortalCopyRow label="Reference" value={invoice.howToPay.reference} mono />
+                <div
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1"
+                  style={{ padding: 'var(--space-2) 0' }}
+                >
+                  <span style={{ flex: '0 0 8.5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                    Amount
+                  </span>
+                  <Money native={invoice.howToPay.amount} currency={invoice.howToPay.currency} sensitive />
+                </div>
+                {invoice.howToPay.dueDate && (
+                  <PortalCopyRow label="Due" value={formatDate(invoice.howToPay.dueDate)} />
+                )}
+              </div>
             </div>
           </>
         )}

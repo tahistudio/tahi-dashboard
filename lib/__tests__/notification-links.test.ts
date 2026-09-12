@@ -35,6 +35,24 @@ describe('notificationHref, the request cases', () => {
   })
 })
 
+describe('invoice deep link', () => {
+  /**
+   * The detail page grew a portal branch in 41461250, so a client session no
+   * longer 403s on /invoices/{id}. Before that, the client map deliberately
+   * bounced to the list; this pins the deep link so it cannot regress back to
+   * the list-only behaviour.
+   */
+  it('deep-links a client straight to the invoice, same as the team map', () => {
+    expect(notificationHref('invoice', 'inv_1', 'client')).toBe('/invoices/inv_1')
+    expect(notificationHref('invoice', 'inv_1', 'team')).toBe('/invoices/inv_1')
+  })
+
+  it('falls back to the list when there is no id to open', () => {
+    expect(notificationHref('invoice', null, 'client')).toBe('/invoices')
+    expect(notificationHref('invoice', undefined, 'client')).toBe('/invoices')
+  })
+})
+
 describe('request_assigned', () => {
   /**
    * The three request assignment routes borrowed 'task_assigned' before this,
