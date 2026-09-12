@@ -103,7 +103,7 @@ describe('honest destinations', () => {
   })
 
   it('speaks the portal\'s words to a client', () => {
-    expect(notificationDestination('invoice', 'i1', 'client')).toEqual({ href: '/invoices', label: 'Invoices' })
+    expect(notificationDestination('invoice', 'i1', 'client')).toEqual({ href: '/invoices/i1', label: 'Invoices' })
     expect(notificationDestination('organisation', 'o1', 'client')).toEqual({ href: '/settings', label: 'your account' })
     expect(notificationDestination('announcement', 'a1', 'client')).toEqual({ href: '/overview', label: 'Overview' })
   })

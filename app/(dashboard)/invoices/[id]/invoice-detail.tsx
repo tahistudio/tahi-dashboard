@@ -795,7 +795,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                   <span style={{ flex: '0 0 8.5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
                     Amount
                   </span>
-                  <Money native={invoice.howToPay.amount} currency={invoice.howToPay.currency} />
+                  <Money native={invoice.howToPay.amount} currency={invoice.howToPay.currency} sensitive />
                 </div>
                 {invoice.howToPay.dueDate && (
                   <PortalCopyRow label="Due" value={formatDate(invoice.howToPay.dueDate)} />
