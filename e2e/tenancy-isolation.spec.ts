@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext, type BrowserContext } from '@play
 import { randomUUID } from 'node:crypto'
 import { setupClerkTestingToken } from '@clerk/testing/playwright'
 import { createPageObjects } from '@clerk/testing/playwright/unstable'
-import { adminRequestContext, createTestOrg, mintInvite, testEmail } from './helpers/invites'
+import { adminRequestContext, createTestOrg, gotoAfterSignUp, mintInvite, testEmail } from './helpers/invites'
 
 /**
  * Cross-org isolation proof (run plan A4).
@@ -265,7 +265,7 @@ async function signInAsClient(
   // The invite is consumed explicitly rather than by walking the onboarding UI:
   // this spec is about tenancy, and the onboarding step rail is somebody else's
   // surface to change. Same two calls the onboarding component makes on mount.
-  await page.goto('/onboarding')
+  await gotoAfterSignUp(page, '/onboarding')
   await page.waitForFunction(
     () => !!(window as unknown as { Clerk?: unknown }).Clerk,
     undefined,
@@ -294,7 +294,7 @@ async function signInAsClient(
   // The page stays open on purpose. Clerk refreshes the short-lived session
   // cookie from the browser, and context.request shares that cookie jar, so a
   // battery of API calls that outlives one token still authenticates.
-  await page.goto('/overview')
+  await gotoAfterSignUp(page, '/overview')
   await expect
     .poll(async () => (await context.request.get('/api/portal/project')).status(), {
       timeout: 30_000,

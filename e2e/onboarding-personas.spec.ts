@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { setupClerkTestingToken } from '@clerk/testing/playwright'
 import { createPageObjects } from '@clerk/testing/playwright/unstable'
-import { createTestOrg, mintInvite, testEmail } from './helpers/invites'
+import { createTestOrg, gotoAfterSignUp, mintInvite, testEmail } from './helpers/invites'
 
 /**
  * Onboarding persona e2e. Proves the invited link survives a real Clerk sign-up
@@ -40,7 +40,7 @@ test.describe('Onboarding personas (Clerk test mode)', () => {
     await po.signUp.enterTestOtpCode()
     await po.signUp.waitForSession()
 
-    await page.goto('/onboarding')
+    await gotoAfterSignUp(page, '/onboarding')
     await expect(page.getByText(/how can we help/i)).toBeVisible({ timeout: 15_000 })
     // The self-serve chooser offers retainer vs project; never a pre-set flow.
     await expect(page.getByText(/everything.?s ready/i)).toHaveCount(0)
@@ -63,7 +63,7 @@ test.describe('Onboarding personas (Clerk test mode)', () => {
     await po.signUp.enterTestOtpCode()
     await po.signUp.waitForSession()
 
-    await page.goto('/onboarding')
+    await gotoAfterSignUp(page, '/onboarding')
     // Invited project flow: never the self-serve chooser, never a pay step.
     await expect(page.getByText(/how can we help/i)).toHaveCount(0)
     await expect(page.getByText(/everything.?s ready|kickoff|your team/i).first()).toBeVisible({ timeout: 15_000 })
@@ -84,7 +84,7 @@ test.describe('Onboarding personas (Clerk test mode)', () => {
     await po.signUp.enterTestOtpCode()
     await po.signUp.waitForSession()
 
-    await page.goto('/onboarding')
+    await gotoAfterSignUp(page, '/onboarding')
     await expect(page.getByText(/how can we help/i)).toHaveCount(0)
     await expect(page.getByText(/everything.?s ready|kickoff|your team/i).first()).toBeVisible({ timeout: 15_000 })
   })
@@ -103,7 +103,7 @@ test.describe('Onboarding personas (Clerk test mode)', () => {
     await po.signUp.enterTestOtpCode()
     await po.signUp.waitForSession()
 
-    await page.goto('/welcome')
+    await gotoAfterSignUp(page, '/welcome')
     // The teammate "Welcome to Tahi" flow, never the client chooser.
     await expect(page.getByText(/how can we help/i)).toHaveCount(0)
     await expect(page.getByText(/welcome to tahi|your first day|teammate/i).first()).toBeVisible({ timeout: 15_000 })
@@ -142,7 +142,7 @@ test.describe('Onboarding personas (Clerk test mode)', () => {
     await po.signUp.enterTestOtpCode()
     await po.signUp.waitForSession()
 
-    await page.goto('/onboarding')
+    await gotoAfterSignUp(page, '/onboarding')
 
     // Step 1: the returning-client welcome, never the self-serve chooser.
     await expect(page.getByText(/welcome back/i).first()).toBeVisible({ timeout: 15_000 })
