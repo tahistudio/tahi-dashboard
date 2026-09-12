@@ -19,7 +19,9 @@ Applied by the lead through the app's endpoints under Liam's earlier decisions: 
 
 Claude Design write-back: DL.1 and DL.2 complete (14 of 14 files; the three over 100 KB went in through the design-sync disk upload). DL.3 shell wiring and DL.4 re-critique still to do.
 
-Still only Liam: Clerk post-sign-up organisation task off; Messages platform-wide decision; GBP-capable bank account for the How to pay block; the stray "N8N Content Engine" discovery call re-filed; whether anything points at /api/webhooks/email-intake; the A5 real-session lap (plan section 4); the allowlist flip and the invite (OFF until he says).
+Liam's answers (2026-09-13 morning): Messages stays hidden for every client (building the platform default now, workflow messages-hidden-for-clients). Clerk post-sign-up organisation task: he could not find the setting; the lead checks the Clerk connector or the Clerk dashboard in his Chrome session. Bank accounts: he has one per currency and will send the details; BUILD per-currency accounts in Settings > Getting paid with the How to pay block picking the invoice's currency (queued after Batch A because S3 touches the same block); Liam types the account numbers himself. Email intake: unsure, so treat as not wired and soften the "reply on the thread" line in emails/new-message.tsx after S4 merges. "N8N Content Engine" IS a Giant Group call: S5 must show it with a join link rather than hide it; check the slice against that.
+
+Still only Liam: the A5 real-session lap (plan section 4); the allowlist flip and the invite (OFF until he says); the bank account numbers per currency once the fields exist.
 
 ## In flight
 
