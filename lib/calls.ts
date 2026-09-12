@@ -10,6 +10,7 @@
 import { schema } from '@/db/d1'
 import type { db } from '@/lib/db'
 import { desc, eq } from 'drizzle-orm'
+import { normalizeCallInstant } from '@/lib/call-time'
 
 type Database = Awaited<ReturnType<typeof db>>
 
@@ -57,8 +58,12 @@ export async function createCallForParent(
 ): Promise<CreateCallResult> {
   if (!body.title?.trim()) throw new Error('title is required')
   if (!body.scheduledAt) throw new Error('scheduledAt is required (ISO 8601)')
-  const scheduledDate = new Date(body.scheduledAt)
-  if (Number.isNaN(scheduledDate.getTime())) throw new Error('scheduledAt is not a valid date')
+  // Normalise to an absolute UTC instant at the boundary. A naive input
+  // (no offset) is read as Pacific/Auckland wall-clock time, not UTC.
+  // See lib/call-time.ts for why that distinction is the whole bug.
+  const normalizedScheduledAt = normalizeCallInstant(body.scheduledAt)
+  if (!normalizedScheduledAt) throw new Error('scheduledAt is not a valid date')
+  const scheduledDate = new Date(normalizedScheduledAt)
 
   const { callColumn, activityColumn } = parentColumns(parent)
   const id = crypto.randomUUID()
@@ -68,7 +73,7 @@ export async function createCallForParent(
     id,
     [callColumn]: parentId,
     title: body.title.trim(),
-    scheduledAt: body.scheduledAt,
+    scheduledAt: normalizedScheduledAt,
     durationMinutes: body.durationMinutes ?? 30,
     googleMeetUrl: body.googleMeetUrl?.trim() || null,
     googleCalendarEventId: body.googleCalendarEventId?.trim() || null,

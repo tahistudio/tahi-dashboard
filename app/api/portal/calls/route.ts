@@ -8,6 +8,7 @@ import { notifyAllAdmins } from '@/lib/notifications'
 import { sendEmail } from '@/lib/email'
 import { publicUrl } from '@/lib/app-url'
 import { formatSlotSummary, resolveTimeZone } from '@/lib/kickoff-slot'
+import { normalizeCallInstant } from '@/lib/call-time'
 import { mergeUpcomingCalls, type RawPortalCall } from '@/lib/portal-calls'
 import KickoffBookedEmail from '@/emails/kickoff-booked'
 
@@ -221,7 +222,12 @@ export async function POST(req: NextRequest) {
   if (whenMs < Date.now() - 5 * 60_000) {
     return NextResponse.json({ error: 'scheduledAt must be in the future' }, { status: 400 })
   }
-  const scheduledAt = new Date(whenMs).toISOString()
+  // The client's browser already resolved this to a real instant (an
+  // epoch-ms Date), so normalizeCallInstant is a no-op canonicalisation
+  // here, not a reinterpretation. Every writer goes through the same
+  // boundary regardless of how confident it is the input is already
+  // absolute.
+  const scheduledAt = normalizeCallInstant(new Date(whenMs).toISOString()) ?? new Date(whenMs).toISOString()
 
   const title = (typeof body.title === 'string' && body.title.trim()) || 'Kickoff call'
   const rawDuration = typeof body.durationMinutes === 'number' ? body.durationMinutes : 30
