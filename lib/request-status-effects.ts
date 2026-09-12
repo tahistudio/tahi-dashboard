@@ -158,6 +158,9 @@ export async function emitRequestStatusChanged(
         requestId: request.id,
         requestTitle: request.title,
         requestNumber: context.requestNumber,
+        // The client this request belongs to, so the delivery gate can match
+        // an exempted org. Without it every status email is withheld.
+        orgId: request.orgId,
         clientName: context.orgName,
       })
     }

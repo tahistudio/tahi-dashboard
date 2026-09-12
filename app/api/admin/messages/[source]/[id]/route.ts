@@ -348,6 +348,7 @@ export async function POST(req: NextRequest, { params }: Params) {
             requestId: t.id,
             requestTitle: t.title,
             requestNumber: t.requestNumber,
+            orgId: t.orgId,
             fromName,
             message: plain,
           }),
@@ -390,6 +391,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         entityId: t.id,
         email: channelMessageEmailPlan({
           audience: 'client',
+          orgId: t.orgId,
           orgName,
           fromName,
           message: plain,

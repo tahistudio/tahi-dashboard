@@ -187,6 +187,7 @@ describe('the wired event plans', () => {
       requestId: 'req_1',
       requestTitle: 'Fix the footer',
       requestNumber: 7,
+      orgId: 'org_1',
     })
     expect(plan.subject).toBe('[REQ-7] Ready for your review: "Fix the footer"')
     expect(plan.render(target)).toBeTruthy()
@@ -198,6 +199,7 @@ describe('the wired event plans', () => {
       requestId: 'req_1',
       requestTitle: 'Fix the footer',
       requestNumber: 7,
+      orgId: 'org_1',
       deliveredAt: '2026-09-05T01:02:03.000Z',
     })
     expect(plan.subject).toBe('[REQ-7] Delivered: "Fix the footer"')
@@ -211,6 +213,7 @@ describe('the wired event plans', () => {
       requestId: 'req_1',
       requestTitle: 'Fix the footer',
       requestNumber: 7,
+      orgId: 'org_1',
       deliveredAt: '2026-09-05T01:02:03.000Z',
     })
     const props = sameDay.render(target).props as Record<string, unknown>
@@ -221,6 +224,7 @@ describe('the wired event plans', () => {
       requestId: 'req_1',
       requestTitle: 'Fix the footer',
       requestNumber: 7,
+      orgId: 'org_1',
       deliveredAt: '2026-09-04T13:00:00.000Z',
     })
     expect((lateUtc.render(target).props as Record<string, unknown>).deliveredAt).toBe(
@@ -233,6 +237,7 @@ describe('the wired event plans', () => {
       requestId: '0a4f1b6c-1111-2222-3333-444444444444',
       requestTitle: 'Fix the footer',
       requestNumber: 42,
+      orgId: 'org_1',
       clientName: 'Acme Ltd',
     })
     expect(plan.subject).toBe('[REQ-42] New request from Acme Ltd: Fix the footer')
@@ -247,6 +252,7 @@ describe('the wired event plans', () => {
       requestId: 'req_1',
       requestTitle: 'Fix the footer',
       requestNumber: 7,
+      orgId: 'org_1',
       clientName: 'Acme Ltd',
     })
     const props = plan.render(target).props as Record<string, unknown>
@@ -255,7 +261,9 @@ describe('the wired event plans', () => {
   })
 
   it('sends both client statuses to the same resolved request URL', () => {
-    const shared = { requestId: 'req_1', requestTitle: 'Fix the footer', requestNumber: 7 }
+    const shared = {
+      requestId: 'req_1', requestTitle: 'Fix the footer', requestNumber: 7, orgId: 'org_1',
+    }
     const review = clientStatusEmailPlan({ ...shared, status: 'client_review' })
     const delivered = clientStatusEmailPlan({ ...shared, status: 'delivered' })
     const reviewUrl = (review.render(target).props as Record<string, unknown>).reviewUrl
@@ -270,6 +278,7 @@ describe('the wired event plans', () => {
       requestId: 'req_1',
       requestTitle: 'Fix the footer',
       requestNumber: 7,
+      orgId: 'org_1',
       fromName: 'Staci Bonnie',
       message: 'On it.',
     })
@@ -280,6 +289,7 @@ describe('the wired event plans', () => {
       requestId: 'req_1',
       requestTitle: 'Fix the footer',
       requestNumber: 7,
+      orgId: 'org_1',
       fromName: 'Jo Yarnall',
       message: 'Any progress?',
     })
@@ -291,6 +301,7 @@ describe('the wired event plans', () => {
       requestId: 'req_1',
       requestTitle: 'Fix the footer',
       requestNumber: 3,
+      orgId: 'org_1',
       clientName: 'Acme Ltd',
       submittedBy: 'Jo Yarnall',
     })
@@ -400,7 +411,12 @@ describe('dispatchNotificationEmails, the plain text alternative', () => {
         ),
       ),
     )
-    return { subject: '[REQ-4] Liam replied on "New homepage"', render }
+    return {
+      subject: '[REQ-4] Liam replied on "New homepage"',
+      template: 'request-thread-reply',
+      orgId: 'org_1',
+      render,
+    }
   }
 
   beforeEach(() => {

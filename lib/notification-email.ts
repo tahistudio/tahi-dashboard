@@ -86,12 +86,44 @@ export interface PersonRow {
 }
 
 /**
+ * The kebab-case name each wired event is logged and suppressed under.
+ *
+ * Owned here, and set by the plan builder rather than by its caller, so a call
+ * site cannot mistype one and quietly file a send under a name nobody greps
+ * for. These strings end up in `email_suppressions.template`, which is how
+ * "did that client ever hear from us" is answered after the fact.
+ */
+export const EMAIL_TEMPLATE_THREAD_REPLY = 'request-thread-reply'
+export const EMAIL_TEMPLATE_CHANNEL_MESSAGE = 'org-channel-message'
+export const EMAIL_TEMPLATE_REQUEST_STATUS = 'request-status-client'
+export const EMAIL_TEMPLATE_STUDIO_NEW_REQUEST = 'studio-new-request'
+
+/**
  * One event, rendered per recipient. The subject is shared (it names the
  * request, not the person); the body may greet the recipient by name.
+ *
+ * `template` and `orgId` are REQUIRED, and deliberately so. Every send here
+ * used to reach lib/email-delivery.ts with no context at all, which meant the
+ * gate saw `orgId: null` on every notification email and the per-org exemption
+ * in `email.allowedOrgIds` could never match: thread replies, "ready for your
+ * review", "delivered" and the org standing line were withheld forever no
+ * matter what the studio put in the setting, and the suppression log recorded
+ * them as `template: 'unspecified', orgId: null`. Making both required is what
+ * makes tsc, rather than a production inbox, the thing that finds the next
+ * call site that forgets.
  */
 export interface NotificationEmailPlan {
   subject: string
   render: (target: EmailTarget) => ReactElement
+  /** Kebab-case event name, for the suppression log. Set by the builder. */
+  template: string
+  /**
+   * The client this send belongs to. Null ONLY for a send with no client at
+   * all; a studio-audience plan about a client's work still carries that
+   * client's id, because the gate widens for that org's own contacts only and
+   * a studio address is decided by the address rules either way.
+   */
+  orgId: string | null
 }
 
 export interface EmailDispatchResult {
@@ -432,6 +464,11 @@ async function plainTextAlternative(el: ReactElement): Promise<string | undefine
  * The element and its text alternative are rendered ONCE, above the loop: a
  * rate limited retry used to re-render the template, which is the expensive
  * half of a send and the half that cannot change between attempts.
+ *
+ * The delivery context (template and org id) is built once too and handed to
+ * BOTH attempts. A retry that dropped it would be gated by a different rule
+ * than the first try, which is the sort of difference nobody would ever see
+ * until a client stopped hearing from us.
  */
 async function sendWithBackoff(
   target: EmailTarget,
@@ -439,11 +476,12 @@ async function sendWithBackoff(
 ): Promise<{ success: boolean; error?: string }> {
   const el = plan.render(target)
   const text = await plainTextAlternative(el)
-  let last = await sendEmail(target.email, plan.subject, el, text)
+  const context = { template: plan.template, orgId: plan.orgId }
+  let last = await sendEmail(target.email, plan.subject, el, text, context)
   for (let attempt = 0; attempt < RATE_LIMIT_RETRIES; attempt += 1) {
     if (last.success || !isRateLimited(last.error)) return last
     await sleep(RATE_LIMIT_BACKOFF_MS[attempt])
-    last = await sendEmail(target.email, plan.subject, el, text)
+    last = await sendEmail(target.email, plan.subject, el, text, context)
   }
   return last
 }
@@ -570,6 +608,8 @@ export function threadReplyEmailPlan(input: {
   requestId: string
   requestTitle: string
   requestNumber: number | null
+  /** The client the request belongs to, for the delivery gate. */
+  orgId: string | null
   fromName: string
   /** Plain text already, via toPlainText. Never raw composer HTML. */
   message: string
@@ -583,6 +623,8 @@ export function threadReplyEmailPlan(input: {
   const url = notificationEmailUrl(input.requestId, routeAudience(input.audience))
   return {
     subject,
+    template: EMAIL_TEMPLATE_THREAD_REPLY,
+    orgId: input.orgId,
     render: (target) =>
       createElement(NewMessageEmail, {
         audience: input.audience,
@@ -617,6 +659,8 @@ export function threadReplyEmailPlan(input: {
  */
 export function channelMessageEmailPlan(input: {
   audience: EmailAudience
+  /** The client whose standing line this is, for the delivery gate. */
+  orgId: string | null
   orgName: string
   fromName: string
   /** Plain text already, via toPlainText. Never raw composer HTML. */
@@ -629,6 +673,8 @@ export function channelMessageEmailPlan(input: {
   const url = `${appOrigin()}/messages`
   return {
     subject,
+    template: EMAIL_TEMPLATE_CHANNEL_MESSAGE,
+    orgId: input.orgId,
     render: (target) =>
       createElement(NewChannelMessageEmail, {
         audience: input.audience,
@@ -651,6 +697,8 @@ export function clientStatusEmailPlan(input: {
   requestId: string
   requestTitle: string
   requestNumber: number | null
+  /** The client the request belongs to, for the delivery gate. */
+  orgId: string | null
   /** The client COMPANY, for the delivered template's "Client" row. Never the
    *  recipient: that is a greeting, and the two are different sentences. */
   clientName?: string | null
@@ -664,6 +712,8 @@ export function clientStatusEmailPlan(input: {
         input.requestNumber,
         `Ready for your review: "${input.requestTitle}"`,
       ),
+      template: EMAIL_TEMPLATE_REQUEST_STATUS,
+      orgId: input.orgId,
       render: (target) =>
         createElement(RequestClientReviewEmail, {
           recipientName: greetingName(target.name, 'there'),
@@ -675,6 +725,8 @@ export function clientStatusEmailPlan(input: {
   }
   return {
     subject: requestEmailSubject(input.requestNumber, `Delivered: "${input.requestTitle}"`),
+    template: EMAIL_TEMPLATE_REQUEST_STATUS,
+    orgId: input.orgId,
     render: (target) =>
       createElement(RequestDeliveredEmail, {
         requestTitle: input.requestTitle,
@@ -713,6 +765,13 @@ export function studioNewRequestEmailPlan(input: {
   requestId: string
   requestTitle: string
   requestNumber: number | null
+  /**
+   * The client who filed it. Carried even though the audience is the studio:
+   * the gate widens for that org's OWN contact addresses only, so a studio
+   * address is decided by the address rules either way, and the suppression
+   * log stops recording this event against nobody.
+   */
+  orgId: string | null
   clientName: string
   category?: string | null
   priority?: string | null
@@ -723,6 +782,8 @@ export function studioNewRequestEmailPlan(input: {
       input.requestNumber,
       `New request from ${input.clientName}: ${input.requestTitle}`,
     ),
+    template: EMAIL_TEMPLATE_STUDIO_NEW_REQUEST,
+    orgId: input.orgId,
     render: () =>
       createElement(NewRequestEmail, {
         requestTitle: input.requestTitle,

@@ -200,6 +200,18 @@ interface PreviewSample {
 // ─── The sample world ────────────────────────────────────────────────────────
 
 const CLIENT_ORG = 'Mahana Orchards'
+/**
+ * The sample client's id, for the four plans that now carry one to the
+ * delivery gate.
+ *
+ * Deliberately not a UUID and deliberately not any id in the database. The
+ * gate widens `email.allowedOrgIds` per client, so a preview built with a REAL
+ * org id would be judged by that client's exemption and could put a sample in
+ * front of an address the studio has not verified. This string matches no row,
+ * so a preview is always decided by the address rules alone, which is the only
+ * safe way to render one.
+ */
+const PREVIEW_ORG_ID = 'preview-org-not-a-real-client'
 const CLIENT_CONTACT = 'Ngaire Hutchins'
 const CLIENT_CONTACT_EMAIL = 'ngaire@mahanaorchards.co.nz'
 const CLIENT_WEBSITE = 'https://mahanaorchards.co.nz'
@@ -338,6 +350,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
     requestId: REQUEST_ID,
     requestTitle: REQUEST_TITLE,
     requestNumber: REQUEST_NUMBER,
+    orgId: PREVIEW_ORG_ID,
     fromName: STACI,
     message:
       'Morning. The new hero is in with the orchard photography you sent through, and I have ' +
@@ -352,6 +365,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
     requestId: REQUEST_ID,
     requestTitle: REQUEST_TITLE,
     requestNumber: REQUEST_NUMBER,
+    orgId: PREVIEW_ORG_ID,
     fromName: CLIENT_CONTACT,
     message:
       'Thanks, that reads much better. Two notes from our side: the pick-up window should say ' +
@@ -363,6 +377,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
   //      request, so no [REQ-n] subject prefix and no request detail row.
   const channelToClient = channelMessageEmailPlan({
     audience: 'client',
+    orgId: PREVIEW_ORG_ID,
     orgName: CLIENT_ORG,
     fromName: STACI,
     message:
@@ -373,6 +388,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
 
   const channelToStudio = channelMessageEmailPlan({
     audience: 'studio',
+    orgId: PREVIEW_ORG_ID,
     orgName: CLIENT_ORG,
     fromName: CLIENT_CONTACT,
     message:
@@ -386,6 +402,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
     requestId: REQUEST_ID,
     requestTitle: REQUEST_TITLE,
     requestNumber: REQUEST_NUMBER,
+    orgId: PREVIEW_ORG_ID,
     clientName: CLIENT_ORG,
   })
 
@@ -394,6 +411,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
     requestId: REQUEST_ID,
     requestTitle: REQUEST_TITLE,
     requestNumber: REQUEST_NUMBER,
+    orgId: PREVIEW_ORG_ID,
     clientName: CLIENT_ORG,
     deliveredAt: isoFromNow(-1, 4, 10),
   })
@@ -402,6 +420,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
     requestId: REQUEST_ID,
     requestTitle: REQUEST_TITLE,
     requestNumber: REQUEST_NUMBER,
+    orgId: PREVIEW_ORG_ID,
     clientName: CLIENT_ORG,
     category: 'Design',
     priority: 'High',
