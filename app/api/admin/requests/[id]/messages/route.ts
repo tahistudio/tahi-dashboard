@@ -303,6 +303,7 @@ export async function POST(req: NextRequest, { params }: Params) {
             requestId: id,
             requestTitle: request.title,
             requestNumber: request.requestNumber,
+            orgId: request.orgId,
             fromName,
             message: truncate(plainBody, 900),
           }),

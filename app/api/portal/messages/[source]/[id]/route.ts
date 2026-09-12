@@ -311,6 +311,7 @@ export async function POST(req: NextRequest, { params }: Params) {
           requestId: resolved.id,
           requestTitle: resolved.title,
           requestNumber: resolved.requestNumber,
+          orgId,
           fromName,
           message: plain,
         }),
@@ -400,6 +401,7 @@ async function notifyChannelTeam(
       entityId: input.conversationId,
       email: channelMessageEmailPlan({
         audience: 'studio',
+        orgId: input.orgId,
         orgName: input.orgName,
         fromName: input.fromName,
         message: input.plain,

@@ -631,6 +631,7 @@ export async function POST(req: NextRequest) {
       requestId: id,
       requestTitle: cleanTitle,
       requestNumber,
+      orgId,
       clientName,
       category: category ?? 'development',
       priority,

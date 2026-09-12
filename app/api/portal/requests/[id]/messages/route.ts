@@ -163,6 +163,7 @@ export async function POST(req: NextRequest, { params }: Params) {
           requestId: id,
           requestTitle: request.title,
           requestNumber: request.requestNumber,
+          orgId,
           fromName: acting
             ? `${acting.adminName} at Tahi Studio`
             : (contact?.name?.trim() || 'A client'),
