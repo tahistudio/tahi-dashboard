@@ -48,6 +48,13 @@ Merged to main and pushed as 66b18917 (full suite 4080 green, lint zero, build c
 - Liam assigned as Giant Group's project manager (assign_client_pm) so "Your team is being assigned" resolves.
 - Still to smoke after 2f0c20a0 deploys: /invoices list and the September invoice (S3 How to pay card, INV number), /billing without Manage Billing.
 
+## Later that morning
+
+- S6 tenancy proof RUNS AND PASSES: e2e/tenancy-isolation.spec.ts 3 of 3 on the QA harness after a retry-once fix for a pre-existing post-sign-up goto race (52922925); onboarding-personas passes but stays flaky under load. STATUS.md names the spec as the tenancy proof; CI wiring is its own task.
+- Import provenance notes no longer render to clients as "A note from the studio" (2f87f858, live).
+- Data fixes through the app as Liam: custom_mrr_currency GBP on Giant Group, Glasswall, BCS, Elevate; Liam assigned as Giant Group PM.
+- Readiness after this: about 92 percent. Left on Giant Group's path: per-currency bank details (building), a meet link on the N8N call (Liam), the A5 real-session lap (Liam or Staci), the allowlist flip and invite (Liam, when ready).
+
 ## In flight
 
 - Workflow `giant-group-batch-a` (run wf_3b66e233-82b): parser, then one builder per slice S1 to S8 from docs/superpowers/audits/2026-09-13-giant-group-readiness-plan.md in its own worktree, then one reviewer per slice. When it returns: the lead reads each review, merges non-blocking slices into main one at a time (renumber colliding migrations; apply any migration to staging and production D1 before the push), gates each merge (type-check, lint, touched vitest, next build if a route changed), pushes, watches the deploy, runs the slice's read-only live smoke on production, updates TASKS.md and STATUS.md and this log.
