@@ -78,14 +78,26 @@ const EMPTY_SOURCE: ImportSource = {
   invoices: [],
 }
 
-/** Which entities need which reads, so a single-entity run costs one call set. */
+/**
+ * Which entities need which reads, so a single-entity run costs one call set.
+ *
+ * True for everything except `team` and `services`, which need no org context
+ * at all. This is deliberately wide rather than an allowlist of the entities
+ * that obviously need it (organisations, contacts, brands, subscriptions):
+ * `requests`, `messages` and `invoices` all resolve their organisation by
+ * matching the source row against source.organizations (see plan.ts), so a
+ * requests-, messages- or invoices-only run that skipped this list would
+ * refuse every hand-mapped (name-matched, unstamped) client with "Run the
+ * organisations entity first" even though its organisation already exists in
+ * D1. Fetching the organisations list is idempotent and already happens on
+ * every full run, so widening this costs nothing on a run that did not need
+ * it.
+ */
 function needsOrgList(entities: ReadonlySet<ImportEntity>): boolean {
-  return (
-    entities.has('organisations') ||
-    entities.has('contacts') ||
-    entities.has('brands') ||
-    entities.has('subscriptions')
-  )
+  for (const entity of entities) {
+    if (entity !== 'team' && entity !== 'services') return true
+  }
+  return false
 }
 
 function needsRequestDetail(entities: ReadonlySet<ImportEntity>): boolean {

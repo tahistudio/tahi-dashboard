@@ -193,7 +193,6 @@ describe('reads', () => {
     await client.listOrgMembers('3')
     await client.listOrgBrands('3')
     await client.listOrgServices('3')
-    await client.listClients()
     await client.listServices()
     await client.listInvoices()
     await client.listRequests()

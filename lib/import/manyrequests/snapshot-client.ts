@@ -7,7 +7,7 @@
  * MANYREQUESTS_API_TOKEN lives on the MCP worker, not on the dashboard worker
  * the import route runs in. Rather than copy a live credential onto a second
  * worker for one migration, the snapshot is read out of ManyRequests through
- * the read-only MCP connector, assembled into the eight list keys below and
+ * the read-only MCP connector, assembled into the seven list keys below and
  * POSTed to the route as body.snapshot. This module turns that payload into
  * the same ManyRequestsClient interface run.ts already consumes, so the
  * planner, the upserter and the mail probe see no difference at all between a
@@ -48,6 +48,13 @@ import type {
  * type, but validateSnapshotPayload refuses a payload that carries none of
  * them: an empty snapshot would plan a run that reads nothing and reports it
  * as a clean zero.
+ *
+ * There is no `clients` key here. `GET /clients` is a flat, unscoped list with
+ * no reliable link back to an organisation on every row; contacts are read
+ * per organisation instead, through `membersByOrg` (`GET
+ * /organizations/{id}/members`), which is what fetchImportSource in run.ts has
+ * always called. A `clients` key on this payload would be dead weight the
+ * importer never reads.
  */
 export interface ManyRequestsSnapshotPayload {
   organizations?: MrOrganization[]
@@ -55,26 +62,24 @@ export interface ManyRequestsSnapshotPayload {
   membersByOrg?: Record<string, MrClient[]>
   brandsByOrg?: Record<string, MrBrand[]>
   subscriptionsByOrg?: Record<string, MrSubscription[]>
-  clients?: MrClient[]
   services?: MrService[]
   requests?: MrRequest[]
   invoices?: MrInvoice[]
 }
 
-const LIST_KEYS = ['organizations', 'clients', 'services', 'requests', 'invoices'] as const
+const LIST_KEYS = ['organizations', 'services', 'requests', 'invoices'] as const
 const BY_ORG_KEYS = ['membersByOrg', 'brandsByOrg', 'subscriptionsByOrg'] as const
 
 type ListKey = (typeof LIST_KEYS)[number]
 type ByOrgKey = (typeof BY_ORG_KEYS)[number]
 type SnapshotKey = ListKey | ByOrgKey
 
-/** The eight keys, in the order the importer reads them. */
+/** The seven keys, in the order the importer reads them. */
 export const SNAPSHOT_KEYS: readonly SnapshotKey[] = [
   'organizations',
   'membersByOrg',
   'brandsByOrg',
   'subscriptionsByOrg',
-  'clients',
   'services',
   'requests',
   'invoices',
@@ -103,7 +108,7 @@ function hasId(value: unknown): boolean {
 
 /**
  * Check one list of rows. `identity` names the field every row must carry:
- * `id` for the four id-keyed lists, `number` for invoices (the number IS the
+ * `id` for the three id-keyed lists, `number` for invoices (the number IS the
  * identifier on that API), null for the per-org lists, whose rows either have
  * no id at all (subscriptions) or are matched by the planner on other fields.
  */
@@ -231,7 +236,6 @@ export function createSnapshotClient(snapshot: ManyRequestsSnapshotPayload): Man
     listOrgMembers: async (orgId) => byOrg(snapshot.membersByOrg, orgId),
     listOrgBrands: async (orgId) => byOrg(snapshot.brandsByOrg, orgId),
     listOrgServices: async (orgId) => byOrg(snapshot.subscriptionsByOrg, orgId),
-    listClients: async () => copy(snapshot.clients),
     listServices: async () => copy(snapshot.services),
     listInvoices: async () => copy(snapshot.invoices),
     getInvoice: async (number) => {

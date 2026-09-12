@@ -36,7 +36,6 @@ function full() {
     subscriptionsByOrg: {
       '18': [{ service: { id: 5, name: 'Retainer' }, status: 'canceled', billing_period: 'Monthly', hours_per_period: 10 }],
     },
-    clients: [{ id: 40, name: 'Saif Al-Janabi', email: 'saif@blankspaceinc.ca', organization: { id: 18, name: 'Blank Space Inc' } }],
     services: [{ id: 5, name: 'Retainer', type: 'recurring', currency: 'USD', price: 500, hours: 10 }],
     requests: [
       { id: 347, number: 347, title: 'Custom Redirects', status: 'In progress', organization: { id: 18, name: 'Blank Space Inc' } },
@@ -59,14 +58,13 @@ describe('validateSnapshotPayload', () => {
       membersByOrg: 0,
       brandsByOrg: 0,
       subscriptionsByOrg: 0,
-      clients: 0,
       services: 0,
       requests: 0,
       invoices: 0,
     })
   })
 
-  it('accepts the full eight-key shape and counts the per-org maps by rows', () => {
+  it('accepts the full seven-key shape and counts the per-org maps by rows', () => {
     const result = validateSnapshotPayload(full())
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -75,7 +73,6 @@ describe('validateSnapshotPayload', () => {
       membersByOrg: 1,
       brandsByOrg: 1,
       subscriptionsByOrg: 1,
-      clients: 1,
       services: 1,
       requests: 2,
       invoices: 1,
@@ -105,6 +102,40 @@ describe('validateSnapshotPayload', () => {
   it('refuses an invoice with no number, because the number is its identifier', () => {
     const result = validateSnapshotPayload({ invoices: [{ number: 'INV-1' }, { status: 'paid' }] })
     expect(result).toEqual({ ok: false, reason: expect.stringContaining('snapshot.invoices[1].number') })
+  })
+
+  /**
+   * One malformed row per remaining SNAPSHOT_KEYS entry (TASKS.md MC.7), so
+   * every key the importer accepts is proven to refuse a hostile row rather
+   * than only the three exercised above (requests, services, invoices).
+   */
+  it('refuses an organisation with no id, naming the key path', () => {
+    const result = validateSnapshotPayload({ organizations: [{ id: 18 }, { name: 'no id' }] })
+    expect(result).toEqual({ ok: false, reason: expect.stringContaining('snapshot.organizations[1].id') })
+  })
+
+  it('refuses a malformed row inside membersByOrg, naming the org and the row index', () => {
+    const result = validateSnapshotPayload({ membersByOrg: { '18': [{ id: 40 }, 'not a row'] } })
+    expect(result).toEqual({
+      ok: false,
+      reason: expect.stringContaining('snapshot.membersByOrg["18"][1] must be a plain object'),
+    })
+  })
+
+  it('refuses a malformed row inside brandsByOrg, naming the org and the row index', () => {
+    const result = validateSnapshotPayload({ brandsByOrg: { '7': [42] } })
+    expect(result).toEqual({
+      ok: false,
+      reason: expect.stringContaining('snapshot.brandsByOrg["7"][0] must be a plain object'),
+    })
+  })
+
+  it('refuses a malformed row inside subscriptionsByOrg, naming the org and the row index', () => {
+    const result = validateSnapshotPayload({ subscriptionsByOrg: { '18': [null] } })
+    expect(result).toEqual({
+      ok: false,
+      reason: expect.stringContaining('snapshot.subscriptionsByOrg["18"][0] must be a plain object'),
+    })
   })
 
   it('refuses a list that is not an array', () => {
@@ -163,7 +194,6 @@ describe('createSnapshotClient', () => {
   it('answers the lists from the snapshot', async () => {
     const client = createSnapshotClient(full())
     expect(await client.listOrganizations()).toHaveLength(1)
-    expect(await client.listClients()).toHaveLength(1)
     expect(await client.listServices()).toHaveLength(1)
     expect(await client.listRequests()).toHaveLength(2)
     expect(await client.listInvoices()).toHaveLength(1)
@@ -188,7 +218,6 @@ describe('createSnapshotClient', () => {
 
   it('answers empty lists for absent keys', async () => {
     const client = createSnapshotClient(minimal())
-    expect(await client.listClients()).toEqual([])
     expect(await client.listServices()).toEqual([])
     expect(await client.listRequests()).toEqual([])
     expect(await client.listInvoices()).toEqual([])
@@ -237,7 +266,6 @@ describe('createSnapshotClient', () => {
     await client.listOrgMembers('18')
     await client.listOrgBrands('18')
     await client.listOrgServices('18')
-    await client.listClients()
     await client.listServices()
     await client.listInvoices()
     await client.getInvoice('INV-2025000024')

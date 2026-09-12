@@ -183,7 +183,6 @@ export interface ManyRequestsClient {
   listOrgMembers(orgId: string): Promise<MrClient[]>
   listOrgBrands(orgId: string): Promise<MrBrand[]>
   listOrgServices(orgId: string): Promise<MrSubscription[]>
-  listClients(): Promise<MrClient[]>
   listServices(): Promise<MrService[]>
   listInvoices(): Promise<MrInvoice[]>
   getInvoice(number: string): Promise<MrInvoice>
@@ -254,7 +253,6 @@ export function createManyRequestsClient(options: ManyRequestsClientOptions): Ma
     listOrgMembers: (orgId: string) => listAll<MrClient>(`/organizations/${encodeURIComponent(orgId)}/members`),
     listOrgBrands: (orgId: string) => listAll<MrBrand>(`/organizations/${encodeURIComponent(orgId)}/brands`),
     listOrgServices: (orgId: string) => listAll<MrSubscription>(`/organizations/${encodeURIComponent(orgId)}/services`),
-    listClients: () => listAll<MrClient>('/clients'),
     // /services and /requests are NOT in the worker's wired endpoint set (it
     // reaches requests through the ManyRequests MCP connector instead), so
     // these two paths are the only ones here that have not already been

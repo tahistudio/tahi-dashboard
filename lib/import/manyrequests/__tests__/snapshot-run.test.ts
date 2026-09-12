@@ -118,7 +118,6 @@ function snapshot(): ManyRequestsSnapshotPayload {
         },
       ],
     },
-    clients: [{ id: 40, name: 'Saif Al-Janabi', email: 'saif@blankspaceinc.ca', organization: { id: 18, name: 'Blank Space Inc' } }],
     services: [{ id: 5, name: 'Blank Space Retainer', type: 'recurring', currency: 'USD', price: 500, hours: 10 }],
     requests: [
       {
