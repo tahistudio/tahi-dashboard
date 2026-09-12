@@ -38,7 +38,7 @@ vi.mock('@/db/d1', () => ({
   },
 }))
 
-import { runImport } from '../run'
+import { fetchImportSource, runImport } from '../run'
 import type { ManyRequestsClient } from '../client'
 import type { DB } from '@/db/d1'
 
@@ -103,7 +103,6 @@ function fakeClient(): ManyRequestsClient {
     ]),
     listOrgBrands: vi.fn().mockResolvedValue([]),
     listOrgServices: vi.fn().mockResolvedValue([]),
-    listClients: vi.fn().mockResolvedValue([]),
     listServices: vi.fn().mockResolvedValue([]),
     listInvoices: vi.fn().mockResolvedValue([]),
     getInvoice: vi.fn().mockResolvedValue({ number: 'INV-1' }),
@@ -221,6 +220,95 @@ describe('runImport', () => {
       now: '2026-09-07T00:00:00.000Z',
     })
     expect(result.entities.map((entity) => entity.entity)).toEqual(['organisations'])
+  })
+
+  /**
+   * MC.7 (TASKS.md:188). needsOrgList used to answer true only for
+   * organisations, contacts, brands and subscriptions, so a requests-,
+   * messages- or invoices-only run never fetched source.organizations at all.
+   * That is where registerSourceOrgNames (plan.ts) learns that ManyRequests
+   * calls an already-stamped D1 organisation by a different name than the one
+   * it was hand-mapped under, so without it a hand-mapped, already-stamped
+   * client's requests were refused with "Run the organisations entity first"
+   * even though the organisation was already sitting in D1.
+   */
+  it('a requests-only run resolves an already-stamped, hand-mapped organisation by its ManyRequests name instead of refusing "Run the organisations entity first"', async () => {
+    // D1 knows this client by its legal name and already carries the
+    // ManyRequests organisation id (42) on manyrequestsId, from an earlier
+    // full run or a hand edit. ManyRequests itself only ever calls it
+    // "Elevate", and the request below names its organisation as that bare
+    // string, with no id at all, which is the shape the wire type documents.
+    rows.organisations = [
+      {
+        id: 'org-elevate',
+        name: 'Telcom Networks Limited trading as Elevate',
+        status: 'active',
+        manyrequestsId: '42',
+        mrHoursRemaining: null,
+        mrHoursPurchased: null,
+      },
+    ]
+    const client = fakeClient()
+    ;(client.listOrganizations as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue([
+      { id: 42, name: 'Elevate' },
+    ])
+    ;(client.listRequests as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue([
+      {
+        id: 900,
+        number: 900,
+        title: 'Homepage refresh',
+        status: 'Submitted',
+        organization: 'Elevate',
+        created_at: '2026-08-01T00:00:00Z',
+      },
+    ])
+
+    const result = await runImport({
+      database: fakeDb(),
+      client,
+      dryRun: true,
+      entities: ['requests'],
+      since: null,
+      closedAs: 'cancelled',
+      now: '2026-09-07T00:00:00.000Z',
+    })
+
+    expect(client.listOrganizations).toHaveBeenCalled()
+    const requestsEntity = result.entities.find((entity) => entity.entity === 'requests')
+    expect(requestsEntity?.toInsert).toBe(1)
+    expect(
+      result.skipped.requests.some((row) => row.reason.includes('Run the organisations entity first')),
+    ).toBe(false)
+  })
+
+  it('an invoices-only run fetches the organisations list too, for the same hand-mapped-client reason', async () => {
+    const client = fakeClient()
+    await fetchImportSource(client, ['invoices'])
+    expect(client.listOrganizations).toHaveBeenCalled()
+  })
+
+  it('a messages-only run fetches the organisations list, widened alongside requests and invoices', async () => {
+    const client = fakeClient()
+    await fetchImportSource(client, ['messages'])
+    expect(client.listOrganizations).toHaveBeenCalled()
+  })
+
+  it('a team-only run still skips the organisations list entirely', async () => {
+    const client = fakeClient()
+    await fetchImportSource(client, ['team'])
+    expect(client.listOrganizations).not.toHaveBeenCalled()
+  })
+
+  it('a services-only run still skips the organisations list entirely', async () => {
+    const client = fakeClient()
+    await fetchImportSource(client, ['services'])
+    expect(client.listOrganizations).not.toHaveBeenCalled()
+  })
+
+  it('a team-plus-services run still skips the organisations list, since neither needs org context', async () => {
+    const client = fakeClient()
+    await fetchImportSource(client, ['team', 'services'])
+    expect(client.listOrganizations).not.toHaveBeenCalled()
   })
 
   it('walks the request detail list in a WINDOW, not just from the front', async () => {
