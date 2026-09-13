@@ -176,6 +176,26 @@ describe('PreCallDigestEmail', () => {
     expect(html).toContain('Tim Lyons')
     expect(html).not.toContain('Company')
     expect(html).not.toContain('AI briefing')
+    expect(html).not.toContain('Prep note')
+    expect(html).not.toMatch(DASHES)
+  })
+
+  it('includes the prep note when the call has one', async () => {
+    const html = await render(
+      PreCallDigestEmail({
+        callTitle: 'Discovery call',
+        scheduledAt: '2026-09-06T21:30:00.000Z',
+        meetingUrl: 'https://meet.google.com/tah-discovery',
+        durationMinutes: 30,
+        withName: 'Tim Lyons',
+        withSubtitle: null,
+        parentHref: '/leads/lead_1',
+        dashboardUrl: 'https://portal.tahi.studio',
+        prepNote: 'Bring the scope doc and confirm the go-live date.',
+      }),
+    )
+    expect(html).toContain('Prep note')
+    expect(html).toContain('Bring the scope doc and confirm the go-live date.')
     expect(html).not.toMatch(DASHES)
   })
 })

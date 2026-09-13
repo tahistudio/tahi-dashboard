@@ -9,10 +9,11 @@
  * transcript availability. Tabs split upcoming vs past.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
-import { Calendar, FileText, ExternalLink, RefreshCw, UserPlus, TrendingUp, Building2, AlertTriangle, Phone } from 'lucide-react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { Calendar, Check, FileText, ExternalLink, RefreshCw, UserPlus, TrendingUp, Building2, AlertTriangle, Phone } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
@@ -25,6 +26,7 @@ import { LinkedToPanel } from '@/components/tahi/linked-to-panel'
 import { useToast } from '@/components/tahi/toast'
 import { apiPath } from '@/lib/api'
 import { MEETING_TYPES } from '@/lib/calls'
+import { parseCallFocusParams } from '@/lib/call-deep-link'
 
 interface CallRow {
   id: string
@@ -34,6 +36,7 @@ interface CallRow {
   status: string
   meetingType: 'discovery' | 'client' | 'partnership' | 'unclassified' | null
   outcome: string | null
+  prepNote: string | null
   hasTranscript: boolean
   googleMeetUrl: string | null
   googleCalendarEventId: string | null
@@ -87,6 +90,8 @@ function formatRelative(iso: string): string {
 
 export function CallsContent() {
   const { showToast } = useToast()
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const { data, isLoading: loading, mutate: mutateItems } = useSWR<{ items: CallRow[] }>('/api/admin/calls/index')
   const items = data?.items ?? []
   const [search, setSearch] = useState('')
@@ -96,6 +101,29 @@ export function CallsContent() {
   ])
   const [syncing, setSyncing] = useState(false)
   const [previewCall, setPreviewCall] = useState<CallRow | null>(null)
+  const [focusPrepNote, setFocusPrepNote] = useState(false)
+  const [deepLinkApplied, setDeepLinkApplied] = useState(false)
+
+  // Deep link from the studio home daily brief's "Prep note" / "Edit prep
+  // note" verb: /calls?call=<id>&focus=prep opens that call's slide-over
+  // with the Prep note field focused. Applied once, the first time the
+  // list has loaded, so a later refetch (e.g. after saving) never reopens
+  // it. The URL is cleaned up afterwards so a reload or reopening the
+  // slide-over some other way doesn't refocus it again.
+  useEffect(() => {
+    if (deepLinkApplied || !data) return
+    const { callId, focusPrep } = parseCallFocusParams(searchParams)
+    if (callId) {
+      const match = items.find(c => c.id === callId)
+      if (match) {
+        setPreviewCall(match)
+        setFocusPrepNote(focusPrep)
+      }
+      router.replace('/calls', { scroll: false })
+    }
+    setDeepLinkApplied(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, deepLinkApplied])
 
   async function syncNow() {
     setSyncing(true)
@@ -334,7 +362,7 @@ export function CallsContent() {
           getRowId={r => r.id}
           defaultSort={{ key: 'scheduledAt', dir: tab === 'past' ? 'desc' : 'asc' }}
           loading={loading}
-          onRowPreview={r => setPreviewCall(r)}
+          onRowPreview={r => { setPreviewCall(r); setFocusPrepNote(false) }}
           rowActions={(r) => {
             const actions: Array<{ label: string; icon: React.ReactNode; onClick: () => void }> = []
             if (r.googleMeetUrl) {
@@ -396,7 +424,8 @@ export function CallsContent() {
 
       <CallDetailSlideOver
         call={previewCall}
-        onClose={() => setPreviewCall(null)}
+        focusPrepNote={focusPrepNote}
+        onClose={() => { setPreviewCall(null); setFocusPrepNote(false) }}
         onChanged={() => void mutateItems()}
       />
     </div>
@@ -423,27 +452,41 @@ const detailLabelStyle: React.CSSProperties = {
   letterSpacing: '0.05em',
 }
 
+// Prep notes are hand-typed, not pasted, so 4000 chars is generous
+// headroom rather than a real constraint. Mirrors PREP_NOTE_MAX_CHARS in
+// app/api/admin/discovery-calls/[id]/route.ts.
+const PREP_NOTE_MAX_CHARS = 4_000
+
 /**
  * The editable "call detail" reached by clicking a row on /calls: title,
- * meeting type ("what it is for") and full linkage (org / lead / deal /
- * request, "linked to"), the two things Liam could not change from the
- * index before this. Backs onto discovery_calls, the same table the
- * index itself reads, via PATCH /api/admin/discovery-calls/[id].
+ * meeting type ("what it is for"), the Prep note, and full linkage (org /
+ * lead / deal / request, "linked to"). Backs onto discovery_calls, the
+ * same table the index itself reads, via PATCH
+ * /api/admin/discovery-calls/[id].
  */
 function CallDetailSlideOver({
   call,
+  focusPrepNote,
   onClose,
   onChanged,
 }: {
   call: CallRow | null
+  /** True when opened via the /calls?call=<id>&focus=prep deep link (the
+   *  daily brief's "Prep note" / "Edit prep note" verb). Focuses the
+   *  Prep note field once the slide-over is open. */
+  focusPrepNote: boolean
   onClose: () => void
   onChanged: () => void
 }) {
   const [title, setTitle] = useState(call?.title ?? '')
   const [meetingType, setMeetingType] = useState<string>(call?.meetingType ?? 'unclassified')
+  const [prepNote, setPrepNote] = useState(call?.prepNote ?? '')
   const [savingTitle, setSavingTitle] = useState(false)
   const [savingType, setSavingType] = useState(false)
+  const [savingPrepNote, setSavingPrepNote] = useState(false)
+  const [prepNoteSaved, setPrepNoteSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const prepNoteRef = useRef<HTMLTextAreaElement>(null)
 
   // The slide-over itself stays mounted between opens (so its own close
   // animation gets to run), so re-seed local state whenever a different
@@ -451,8 +494,16 @@ function CallDetailSlideOver({
   useEffect(() => {
     setTitle(call?.title ?? '')
     setMeetingType(call?.meetingType ?? 'unclassified')
+    setPrepNote(call?.prepNote ?? '')
+    setPrepNoteSaved(false)
     setError(null)
-  }, [call?.id, call?.title, call?.meetingType])
+  }, [call?.id, call?.title, call?.meetingType, call?.prepNote])
+
+  // Deep-linked from the daily brief: focus the Prep note field once the
+  // slide-over has a call to show.
+  useEffect(() => {
+    if (call && focusPrepNote) prepNoteRef.current?.focus()
+  }, [call?.id, focusPrepNote])
 
   async function patchCall(patch: Record<string, unknown>) {
     if (!call) return
@@ -498,6 +549,24 @@ function CallDetailSlideOver({
       setError(err instanceof Error ? err.message : 'Could not change the type.')
     } finally {
       setSavingType(false)
+    }
+  }
+
+  async function savePrepNote() {
+    if (!call) return
+    const trimmed = prepNote.trim()
+    if (trimmed === (call.prepNote ?? '')) return
+    setSavingPrepNote(true)
+    setPrepNoteSaved(false)
+    setError(null)
+    try {
+      await patchCall({ prepNote: trimmed || null })
+      setPrepNoteSaved(true)
+      onChanged()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the prep note.')
+    } finally {
+      setSavingPrepNote(false)
     }
   }
 
@@ -553,6 +622,51 @@ function CallDetailSlideOver({
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
+          </label>
+
+          <label className="flex flex-col" style={{ gap: '0.3125rem' }}>
+            <span style={detailLabelStyle}>Prep note</span>
+            <textarea
+              ref={prepNoteRef}
+              value={prepNote}
+              onChange={e => setPrepNote(e.target.value)}
+              onBlur={() => void savePrepNote()}
+              onKeyDown={e => {
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                  e.preventDefault()
+                  void savePrepNote()
+                }
+              }}
+              disabled={savingPrepNote}
+              rows={4}
+              maxLength={PREP_NOTE_MAX_CHARS}
+              placeholder="What to bring into this call (Cmd/Ctrl+Enter to save)"
+              className="tahi-focus-ring min-h-[6rem]"
+              style={{
+                ...detailFieldStyle,
+                padding: '0.5625rem 0.75rem',
+                minHeight: '6rem',
+                lineHeight: 1.5,
+                fontFamily: 'inherit',
+                resize: 'vertical',
+              }}
+            />
+            <div className="flex items-center" style={{ gap: '0.375rem', minHeight: '1.125rem' }}>
+              {savingPrepNote && (
+                <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)' }}>Saving...</span>
+              )}
+              {!savingPrepNote && prepNoteSaved && (
+                <span
+                  className="flex items-center"
+                  style={{ gap: '0.25rem', fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-brand-dark)' }}
+                >
+                  <Check size={12} aria-hidden="true" /> Saved
+                </span>
+              )}
+              <span style={{ marginLeft: 'auto', fontSize: '0.625rem', color: 'var(--color-text-subtle)' }}>
+                {prepNote.length}/{PREP_NOTE_MAX_CHARS}
+              </span>
+            </div>
           </label>
 
           {/* Only rendered while a call is actually loaded: LinkedToPanel

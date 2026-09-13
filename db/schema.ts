@@ -1898,6 +1898,11 @@ export const discoveryCalls = sqliteTable('discovery_calls', {
   attendees: text('attendees').notNull().default('[]'),
   // scheduled | completed | cancelled | no_show | rescheduled
   status: text('status').notNull().default('scheduled'),
+  // Free-text prep written before the call: what to bring, what to check
+  // beforehand. Editable from the /calls slide-over and surfaced (read-only)
+  // in <DiscoveryCallsCard>'s expanded row. Capped at 4000 chars at the API
+  // layer; empty string clears it back to null.
+  prepNote: text('prep_note'),
   // ── Post-call fields ──
   // Raw transcript. Length capped at ~50k chars at the API layer.
   transcript: text('transcript'),

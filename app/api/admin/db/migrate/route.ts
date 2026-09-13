@@ -2279,6 +2279,13 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE feedback_comments ADD COLUMN anchor_context text`,
     ],
   },
+  {
+    name: '0102',
+    description: 'discovery_calls.prep_note: the studio home daily brief showed "no prep note yet" for today\'s calls with nothing to open, because that line was derived from scope_notes / summary, both post-call fields written up after a call happens, not before. prep_note is the real pre-call field this needed: free text edited from the /calls slide-over (autosave on blur and Cmd/Ctrl+Enter), shown read-only in <DiscoveryCallsCard>\'s expanded row on every parent surface (lead, deal, request, task, org), and folded into the pre-call digest email when present. Capped at 4000 characters at the API layer (PATCH /api/admin/discovery-calls/[id] and PATCH /api/admin/calls/[id], the latter via the notes column, see the 0102 companion note in that route). scheduled_calls (the legacy client-check-in table) already had a notes column, so that is reused as its prep note rather than adding a duplicate one there. Nullable and additive; the duplicate-column error is swallowed upstream so re-running this migration is safe. Apply BEFORE deploying the code that reads it: the PATCH route and the /calls index select the column directly (no try/catch fallback), unlike the daily brief query, which already tolerates a missing column.',
+    statements: [
+      `ALTER TABLE discovery_calls ADD COLUMN prep_note text`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

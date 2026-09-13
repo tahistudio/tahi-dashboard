@@ -51,6 +51,9 @@ export async function GET(req: NextRequest) {
       attendees: schema.scheduledCalls.attendees,
       status: schema.scheduledCalls.status,
       notes: schema.scheduledCalls.notes,
+      // Same column as notes, under the name every other call surface uses
+      // (discovery_calls.prep_note). See PATCH /api/admin/calls/[id].
+      prepNote: schema.scheduledCalls.notes,
       recordingUrl: schema.scheduledCalls.recordingUrl,
       createdAt: schema.scheduledCalls.createdAt,
     })

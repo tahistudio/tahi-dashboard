@@ -62,6 +62,10 @@ export interface DiscoveryCall {
   budgetMax: number | null
   budgetCurrency: string | null
   timeline: string | null
+  /** Free-text prep written before the call, from the /calls page's
+   *  slide-over. Read-only here: this card only ever renders the post-call
+   *  fields as editable, so a change belongs on /calls itself. */
+  prepNote: string | null
   /** Set by the calendar-sync classifier; also hand-editable from a call's
    *  own "what it is for" control. Null on rows created manually before
    *  classification (e.g. straight from a client's Calls tab). */
@@ -674,6 +678,32 @@ function CallRow({
               >
                 Open Meet link
               </a>
+            </div>
+          )}
+
+          {call.prepNote && call.prepNote.trim() && (
+            <div style={{
+              padding: '0.5625rem 0.75rem',
+              background: 'var(--color-bg-secondary)',
+              border: '1px solid var(--color-border-subtle)',
+              borderRadius: 'var(--radius-md)',
+            }}>
+              <div style={{
+                fontSize: '0.625rem',
+                fontWeight: 600,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: 'var(--color-text-subtle)',
+                marginBottom: '0.25rem',
+              }}>
+                Prep note
+              </div>
+              <p data-private style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                {call.prepNote}
+              </p>
+              <p style={{ margin: '0.3125rem 0 0', fontSize: '0.625rem', color: 'var(--color-text-subtle)' }}>
+                Edit this from the Calls page.
+              </p>
             </div>
           )}
 

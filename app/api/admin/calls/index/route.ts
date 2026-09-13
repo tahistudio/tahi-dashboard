@@ -67,6 +67,7 @@ export async function GET(req: NextRequest) {
       status: schema.discoveryCalls.status,
       meetingType: schema.discoveryCalls.meetingType,
       outcome: schema.discoveryCalls.outcome,
+      prepNote: schema.discoveryCalls.prepNote,
       hasTranscript: schema.discoveryCalls.transcript,
       googleMeetUrl: schema.discoveryCalls.googleMeetUrl,
       googleCalendarEventId: schema.discoveryCalls.googleCalendarEventId,

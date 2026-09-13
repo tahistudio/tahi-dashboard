@@ -975,7 +975,7 @@ export const TOOLS: ToolDef[] = [
   tool('run_lead_ai_cron', 'Manually fire the daily lead-AI cron. Scores active leads where lastAiRunAt is stale; sends transition notifications (high-intent, idle qualifying); applies auto-status flips if enabled in settings. Idempotent — safe to call any time.', {}),
 
   // ── Discovery calls (lead-stage calls with transcript + outcome) ─────
-  tool('list_lead_calls', 'List discovery calls scheduled or completed for a lead. Returns upcoming + past in newest-first order.', {
+  tool('list_lead_calls', 'List discovery calls scheduled or completed for a lead. Returns upcoming + past in newest-first order, including prepNote (the pre-call prep field, distinct from the post-call summary/scopeNotes).', {
     leadId: prop('string', 'Lead ID'),
   }, ['leadId']),
   tool('schedule_lead_call', 'Schedule a discovery call against a lead. Writes a discovery_calls row + a lead_call_scheduled activity. Title + scheduledAt (ISO 8601) are required.', {
@@ -986,13 +986,14 @@ export const TOOLS: ToolDef[] = [
     googleMeetUrl: prop('string', 'Optional — paste the Google Meet link from Calendar'),
     googleCalendarEventId: prop('string', 'Optional — set when wired via Calendar sync (Phase 2)'),
   }, ['leadId', 'title', 'scheduledAt']),
-  tool('update_lead_call', 'Update a discovery call. Accepts any subset of pre-call fields (title, scheduledAt, durationMinutes, googleMeetUrl, status, meetingType), link fields (orgId, leadId, dealId, requestId) and post-call fields (transcript, summary, outcome, outcomeNotes, scopeNotes, budgetMin/Max/Currency, timeline). Link fields are each independently nullable: pass null to unlink, a real id to relink (400s if it does not exist), omit to leave alone. meetingType 400s unless it is one of the classifier values. A change to orgId/leadId/dealId/requestId/meetingType/title is written to audit_log. When status flips to "completed" OR outcome is set for the first time, a lead_call_completed activity is written.', {
+  tool('update_lead_call', 'Update a discovery call. Accepts any subset of pre-call fields (title, scheduledAt, durationMinutes, googleMeetUrl, status, meetingType, prepNote), link fields (orgId, leadId, dealId, requestId) and post-call fields (transcript, summary, outcome, outcomeNotes, scopeNotes, budgetMin/Max/Currency, timeline). Link fields are each independently nullable: pass null to unlink, a real id to relink (400s if it does not exist), omit to leave alone. meetingType 400s unless it is one of the classifier values. A change to orgId/leadId/dealId/requestId/meetingType/title is written to audit_log. When status flips to "completed" OR outcome is set for the first time, a lead_call_completed activity is written.', {
     callId: prop('string', 'Discovery call ID'),
     title: prop('string', 'Call title'),
     scheduledAt: prop('string', 'Full ISO 8601 instant with an explicit offset or Z when you mean that UTC moment; a bare value with no offset is read as Pacific/Auckland wall-clock time.'),
     durationMinutes: prop('number', 'Length in minutes'),
     status: prop('string', 'scheduled | completed | cancelled | no_show | rescheduled'),
     meetingType: prop('string', 'Classifier: discovery | client | partnership | unclassified. Calendar sync sets this automatically; pass it here to reclassify. Must be one of these four values (null/empty clears it) or the call 400s.'),
+    prepNote: prop('string', 'Pre-call prep, written before the call happens (what to bring, what to check beforehand) - distinct from the post-call summary/scopeNotes fields below. Capped at 4000 characters; empty string clears it. Editable from the /calls slide-over and included in the pre-call digest email when present.'),
     orgId: prop('string', 'Linked client organisation ID (null detaches). A non-null id must reference an existing organisation or the call 400s.'),
     leadId: prop('string', 'Linked lead ID (null detaches). A non-null id must reference an existing lead or the call 400s.'),
     dealId: prop('string', 'Linked deal ID (null detaches). A non-null id must reference an existing deal or the call 400s.'),
@@ -1036,7 +1037,7 @@ export const TOOLS: ToolDef[] = [
   }, ['leadId', 'callId']),
 
   // ── Deal calls (multi-meeting deal conversations) ─────────────────────
-  tool('list_deal_calls', 'List calls scheduled or completed against a deal (kickoff, scope refinement, proposal walkthrough, etc). Newest scheduled first.', {
+  tool('list_deal_calls', 'List calls scheduled or completed against a deal (kickoff, scope refinement, proposal walkthrough, etc). Newest scheduled first. Includes prepNote (the pre-call prep field).', {
     dealId: prop('string', 'Deal ID'),
   }, ['dealId']),
   tool('schedule_deal_call', 'Schedule a call against a deal. Writes a discovery_calls row with deal_id set + a deal_call_scheduled activity. Same field shape as schedule_lead_call.', {
@@ -1180,7 +1181,7 @@ export const TOOLS: ToolDef[] = [
 
   // ── Calls ─────────────────────────────────────────────────────────────
   tool('list_calls', 'List all scheduled calls (legacy scheduled_calls table — client check-ins added manually). Use list_all_calls for the unified post-classifier list that also covers Google Calendar pull.'),
-  tool('list_all_calls', 'Unified list of every call from discovery_calls (the post-classifier polymorphic table). Returns lead-attached + client check-ins + partnership + unclassified rows with parent context (lead/deal/org name) and classification. Filters: type (discovery|client|partnership|unclassified), since/until ISO dates.', {
+  tool('list_all_calls', 'Unified list of every call from discovery_calls (the post-classifier polymorphic table). Returns lead-attached + client check-ins + partnership + unclassified rows with parent context (lead/deal/org name), classification, and prepNote (the pre-call prep field). Filters: type (discovery|client|partnership|unclassified), since/until ISO dates.', {
     type: prop('string', 'Filter by meetingType: discovery | client | partnership | unclassified'),
     since: prop('string', 'ISO datetime — earliest scheduledAt to include. Defaults to 60 days ago.'),
     until: prop('string', 'ISO datetime — latest scheduledAt to include. Defaults to 60 days ahead.'),
@@ -1198,6 +1199,7 @@ export const TOOLS: ToolDef[] = [
     orgId: prop('string', 'Reassign to a different client organisation. Must reference an existing org (400s otherwise) and one you have access to (403s otherwise). Cannot be cleared to null.'),
     status: prop('string', 'Updated status: scheduled, completed, cancelled, no_show'),
     notes: prop('string', 'Call notes'),
+    prepNote: prop('string', 'Alias for notes, under the field name every other call surface uses (discovery_calls.prepNote). This table has no dedicated prep_note column, so this writes into notes. Capped at 4000 characters; empty string clears it.'),
     recordingUrl: prop('string', 'Recording URL'),
   }, ['callId']),
   tool('normalize_call_times', 'Data repair: rewrite discovery_calls.scheduledAt and scheduled_calls.scheduledAt rows that predate the call-time timezone fix (2026-09-12) to the canonical absolute-instant form. Every writer now normalises scheduledAt at the boundary, so this is a one-time repair for rows already in D1, not an ongoing job. An offset-form row (e.g. Google Calendar\'s own "...+12:00") is re-serialised to the equivalent Z instant, the meaning never changes. A naive row (no offset at all) is read as Pacific/Auckland wall-clock time, the same rule every writer applies today. DEFAULTS TO A DRY RUN: it returns the exact plan (fixed / refused, row by row) and touches nothing unless you pass dryRun false.', {
