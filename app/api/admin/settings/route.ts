@@ -33,6 +33,8 @@ import { resolvePermissions } from '@/lib/permissions'
 import { logAudit } from '@/lib/audit'
 import {
   STUDIO_PROJECT_MANAGER_SETTING_KEY,
+  isDefaultProjectManagerSettingKey,
+  validateDefaultProjectManagerSetting,
   validateStudioProjectManagerSetting,
 } from '@/lib/studio-project-manager'
 import type { DB } from '@/db/d1'
@@ -191,6 +193,16 @@ export async function PATCH(req: NextRequest) {
     const pmCheck = validateStudioProjectManagerSetting(body.value)
     if (!pmCheck.ok) {
       return NextResponse.json({ error: pmCheck.error }, { status: 400 })
+    }
+  }
+
+  // The two engagement-type defaults ("project manager for new retainer
+  // clients" / "...new project clients"). Same permissiveness as the studio
+  // override above: only a whitespace-only value is rejected.
+  if (isDefaultProjectManagerSettingKey(body.key.trim())) {
+    const defaultPmCheck = validateDefaultProjectManagerSetting(body.key.trim(), body.value)
+    if (!defaultPmCheck.ok) {
+      return NextResponse.json({ error: defaultPmCheck.error }, { status: 400 })
     }
   }
 

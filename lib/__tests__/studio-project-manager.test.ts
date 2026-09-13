@@ -12,7 +12,12 @@ import { describe, it, expect } from 'vitest'
 import {
   resolveProjectManager,
   validateStudioProjectManagerSetting,
+  validateDefaultProjectManagerSetting,
+  defaultProjectManagerSettingKeyFor,
+  isDefaultProjectManagerSettingKey,
   STUDIO_PROJECT_MANAGER_SETTING_KEY,
+  DEFAULT_PROJECT_MANAGER_RETAINER_SETTING_KEY,
+  DEFAULT_PROJECT_MANAGER_PROJECT_SETTING_KEY,
   type ProjectManagerDeps,
 } from '@/lib/studio-project-manager'
 
@@ -124,5 +129,42 @@ describe('validateStudioProjectManagerSetting', () => {
     const result = validateStudioProjectManagerSetting('   ')
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error).toContain(STUDIO_PROJECT_MANAGER_SETTING_KEY)
+  })
+})
+
+describe('defaultProjectManagerSettingKeyFor / isDefaultProjectManagerSettingKey', () => {
+  it('maps retainer to its own key and project to its own key', () => {
+    expect(defaultProjectManagerSettingKeyFor('retainer')).toBe(DEFAULT_PROJECT_MANAGER_RETAINER_SETTING_KEY)
+    expect(defaultProjectManagerSettingKeyFor('project')).toBe(DEFAULT_PROJECT_MANAGER_PROJECT_SETTING_KEY)
+  })
+
+  it('recognises exactly the two default-PM keys, nothing else', () => {
+    expect(isDefaultProjectManagerSettingKey(DEFAULT_PROJECT_MANAGER_RETAINER_SETTING_KEY)).toBe(true)
+    expect(isDefaultProjectManagerSettingKey(DEFAULT_PROJECT_MANAGER_PROJECT_SETTING_KEY)).toBe(true)
+    expect(isDefaultProjectManagerSettingKey(STUDIO_PROJECT_MANAGER_SETTING_KEY)).toBe(false)
+    expect(isDefaultProjectManagerSettingKey('invoicing.defaultChannel')).toBe(false)
+  })
+})
+
+describe('validateDefaultProjectManagerSetting', () => {
+  it('accepts an empty value on either key: no default for that engagement type', () => {
+    expect(validateDefaultProjectManagerSetting(DEFAULT_PROJECT_MANAGER_RETAINER_SETTING_KEY, '')).toEqual({ ok: true })
+    expect(validateDefaultProjectManagerSetting(DEFAULT_PROJECT_MANAGER_PROJECT_SETTING_KEY, null)).toEqual({ ok: true })
+    expect(validateDefaultProjectManagerSetting(DEFAULT_PROJECT_MANAGER_RETAINER_SETTING_KEY, undefined)).toEqual({ ok: true })
+  })
+
+  it('accepts any non-blank id: an unknown one falls through at assignment time, not here', () => {
+    expect(validateDefaultProjectManagerSetting(DEFAULT_PROJECT_MANAGER_RETAINER_SETTING_KEY, 'tm_liam')).toEqual({ ok: true })
+    expect(validateDefaultProjectManagerSetting(DEFAULT_PROJECT_MANAGER_PROJECT_SETTING_KEY, 'anything-at-all')).toEqual({ ok: true })
+  })
+
+  it('rejects a whitespace-only value, naming the key it was given', () => {
+    const retainerResult = validateDefaultProjectManagerSetting(DEFAULT_PROJECT_MANAGER_RETAINER_SETTING_KEY, '   ')
+    expect(retainerResult.ok).toBe(false)
+    if (!retainerResult.ok) expect(retainerResult.error).toContain(DEFAULT_PROJECT_MANAGER_RETAINER_SETTING_KEY)
+
+    const projectResult = validateDefaultProjectManagerSetting(DEFAULT_PROJECT_MANAGER_PROJECT_SETTING_KEY, '   ')
+    expect(projectResult.ok).toBe(false)
+    if (!projectResult.ok) expect(projectResult.error).toContain(DEFAULT_PROJECT_MANAGER_PROJECT_SETTING_KEY)
   })
 })

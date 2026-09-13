@@ -26,7 +26,13 @@ import {
   type ImportSource,
   type PlanOptions,
 } from './plan'
-import { applyEntityPlan, countsFor, readImportSnapshot, readMailProbe } from './upsert'
+import {
+  applyEntityPlan,
+  countsFor,
+  readImportSnapshot,
+  readMailProbe,
+  type ApplyOutcome,
+} from './upsert'
 import {
   IMPORT_ENTITY_ORDER,
   type EntityCounts,
@@ -36,6 +42,8 @@ import {
   type MailProbe,
   type SkippedRow,
 } from './types'
+import { assignDefaultProjectManager } from '@/lib/default-project-manager-server'
+import type { ClientEngagementType } from '@/lib/studio-project-manager'
 
 /** How many sample rows a dry run returns per entity. */
 export const SAMPLE_LIMIT = 20
@@ -229,7 +237,7 @@ export async function runImport(options: RunImportOptions): Promise<ImportResult
 
   let snapshot: ImportSnapshot = await readImportSnapshot(database)
 
-  async function runEntity(entity: ImportEntity): Promise<void> {
+  async function runEntity(entity: ImportEntity): Promise<{ plan: EntityPlan; outcome: ApplyOutcome | null }> {
     const plan: EntityPlan = PLAN_BUILDERS[entity](source, snapshot, planOptions)
 
     samples[entity] = [
@@ -256,7 +264,7 @@ export async function runImport(options: RunImportOptions): Promise<ImportResult
       counts.push(countsFor(plan, null))
       // Plan the next entity against the world this one would build.
       snapshot = projectPlan(snapshot, plan)
-      return
+      return { plan, outcome: null }
     }
 
     const outcome = await applyEntityPlan(database, plan)
@@ -271,6 +279,7 @@ export async function runImport(options: RunImportOptions): Promise<ImportResult
     // Re-read rather than project: the next entity must plan against what was
     // actually written, including anything the apply refused.
     snapshot = await readImportSnapshot(database)
+    return { plan, outcome }
   }
 
   for (const entity of entities) {
@@ -283,7 +292,14 @@ export async function runImport(options: RunImportOptions): Promise<ImportResult
     // suspect) and the PARTIAL result is returned so the route can write it
     // down.
     try {
-      await runEntity(entity)
+      const { plan, outcome } = await runEntity(entity)
+      // Every organisation this run just created gets the studio's default
+      // project manager for its engagement type, same as every other client
+      // creation surface (POST /api/admin/clients, POST /api/portal/provision).
+      // Only on an apply (outcome is null on a dry run, which writes nothing).
+      if (entity === 'organisations' && outcome) {
+        await assignDefaultProjectManagersForNewOrgs(database, plan, outcome, source, snapshot)
+      }
     } catch (error) {
       warnings.push(
         `Entity "${entity}" failed and the run stopped there: ${error instanceof Error ? error.message : 'unknown error'}. Everything before it is in the counts above and, on an apply, in the audit row. The import is idempotent, so re-running resumes rather than duplicates.`,
@@ -344,4 +360,54 @@ export function mailProbesAgree(before: MailProbe, after: MailProbe): boolean {
   if (before.notifications !== after.notifications) return false
   if (before.suppressions === null || after.suppressions === null) return true
   return before.suppressions === after.suppressions
+}
+
+/**
+ * After the organisations entity applies, give each BRAND NEW client the
+ * studio's default project manager for its engagement type - the same
+ * default POST /api/admin/clients and POST /api/portal/provision apply, via
+ * lib/default-project-manager-server.ts.
+ *
+ * Engagement type is read from the SOURCE data already fetched for this run
+ * (source.subscriptionsByOrg), never from D1: the subscriptions entity, even
+ * when selected, is applied LATER in this same run, so its rows do not exist
+ * yet at this point. A ManyRequests organisation with at least one service in
+ * subscriptionsByOrg is a retainer; one this run fetched services for with
+ * none is a one-off project; a run that never fetched subscriptions at all
+ * (the subscriptions entity was not selected) knows nothing about billing, so
+ * it defaults to retainer, same as every other "nothing known yet" caller.
+ *
+ * Never throws. assignDefaultProjectManager already swallows its own
+ * failures, and everything else here (matching a manyrequestsId back to the
+ * D1 row the apply just created) is wrapped too: ONE ORGANISATION'S DEFAULT
+ * PM IS NOT THE IMPORT RUN, and this step must never turn a clean apply into
+ * a "partial result" warning.
+ */
+async function assignDefaultProjectManagersForNewOrgs(
+  database: DB,
+  plan: EntityPlan,
+  outcome: ApplyOutcome,
+  source: ImportSource,
+  snapshot: ImportSnapshot,
+): Promise<void> {
+  try {
+    const failedKeys = new Set(outcome.failures.map((failure) => failure.manyrequestsId))
+    const orgByKey = new Map(snapshot.orgs.map((org) => [org.manyrequestsId, org]))
+    const drizzle = database as unknown as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+    for (const row of plan.toInsert) {
+      const key = row.manyrequestsId
+      if (!key || failedKeys.has(key)) continue
+      const org = orgByKey.get(key)
+      if (!org) continue
+
+      const subs = source.subscriptionsByOrg[key]
+      const engagementType: ClientEngagementType =
+        subs === undefined ? 'retainer' : subs.length > 0 ? 'retainer' : 'project'
+
+      await assignDefaultProjectManager(drizzle, org.id, engagementType)
+    }
+  } catch {
+    // Never let a default-PM lookup turn a clean import into a partial one.
+  }
 }

@@ -119,3 +119,67 @@ export function validateStudioProjectManagerSetting(
   }
   return { ok: true }
 }
+
+/**
+ * The two engagement-type defaults: who becomes a BRAND NEW client's project
+ * manager, by whether the engagement is a retainer or a one-off project.
+ *
+ * "Project manager for all clients, and is the default for all new ones...
+ * by type of project/retainer." Unlike STUDIO_PROJECT_MANAGER_SETTING_KEY
+ * (which overrides EVERY client, existing and new, while it is set), these two
+ * only ever apply at the moment a client organisation is created: they seed
+ * the org's per-client `team_member_access` project_manager rule, the same
+ * row PUT /api/admin/clients/{id}/pm writes, and never touch a client that
+ * already has one. See lib/default-project-manager-server.ts for the writer.
+ */
+export const DEFAULT_PROJECT_MANAGER_RETAINER_SETTING_KEY = 'studio.defaultProjectManagerId.retainer'
+export const DEFAULT_PROJECT_MANAGER_PROJECT_SETTING_KEY = 'studio.defaultProjectManagerId.project'
+
+export const DEFAULT_PROJECT_MANAGER_SETTING_KEYS = [
+  DEFAULT_PROJECT_MANAGER_RETAINER_SETTING_KEY,
+  DEFAULT_PROJECT_MANAGER_PROJECT_SETTING_KEY,
+] as const
+
+export type DefaultProjectManagerSettingKey = (typeof DEFAULT_PROJECT_MANAGER_SETTING_KEYS)[number]
+
+export function isDefaultProjectManagerSettingKey(
+  key: string,
+): key is DefaultProjectManagerSettingKey {
+  return (DEFAULT_PROJECT_MANAGER_SETTING_KEYS as readonly string[]).includes(key)
+}
+
+/** How a brand new client is billed, which decides which of the two defaults it gets. */
+export type ClientEngagementType = 'retainer' | 'project'
+
+/** The settings key that holds the default PM for one engagement type. */
+export function defaultProjectManagerSettingKeyFor(
+  engagementType: ClientEngagementType,
+): DefaultProjectManagerSettingKey {
+  return engagementType === 'retainer'
+    ? DEFAULT_PROJECT_MANAGER_RETAINER_SETTING_KEY
+    : DEFAULT_PROJECT_MANAGER_PROJECT_SETTING_KEY
+}
+
+/**
+ * Validate a write to either studio.defaultProjectManagerId.retainer or
+ * .project.
+ *
+ * Same permissiveness as validateStudioProjectManagerSetting and for the same
+ * reason: assignDefaultProjectManager already treats an id that does not
+ * resolve to a real team member as unset (it skips the client silently rather
+ * than failing its creation), so the only value rejected here is one that
+ * would look "set" in the settings table while actually being blank.
+ */
+export function validateDefaultProjectManagerSetting(
+  key: string,
+  value: string | null | undefined,
+): { ok: true } | { ok: false; error: string } {
+  if (value == null || value === '') return { ok: true }
+  if (!value.trim()) {
+    return {
+      ok: false,
+      error: `${key} must be empty (no default project manager for new clients of that engagement type) or a team member id, not blank whitespace.`,
+    }
+  }
+  return { ok: true }
+}
