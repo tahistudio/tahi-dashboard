@@ -174,7 +174,7 @@ seen on production.
   applied when a client is created (client dialog, importer, self-serve
   onboarding); the override keeps winning while it is set. Agent pm-defaults in
   flight.
-- [~] BP.1 (MERGED 1ebb63f5 as the stripped-back version: floating draggable ball, comment panel, context stored, MCP list_feedback_comments; no inbox yet; migration 0100 through the runner after deploy) - [Design then FE/BE] **Beta comment pins.** A Figma-style comment
+- [~] BP.1 (MERGED 1ebb63f5, then b0b5eb17 adds click-to-pick: click the ball, then the element the comment is about, highlighted and pinned, its selector, tag, text, position and section context stored with the comment (migration 0101); the ball soft-snaps to the nearest screen edge on release. Stripped-back version: floating draggable ball, comment panel, context stored, MCP list_feedback_comments; no inbox yet; migration 0100 through the runner after deploy) - [Design then FE/BE] **Beta comment pins.** A Figma-style comment
   mode in the dashboard for the beta: any signed-in user (client, Liam, Staci)
   drops a pin on the thing they mean; the pin stores the route, the anchored
   element (selector path plus visible text), viewport width and breakpoint,
