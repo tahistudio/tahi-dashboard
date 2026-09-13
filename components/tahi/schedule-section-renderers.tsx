@@ -8,24 +8,15 @@
  */
 'use client'
 
-import React, { useEffect, useState } from 'react'
-import { GanttGrid, type GanttRow } from '@/components/tahi/gantt-grid'
+import React from 'react'
+import { GanttGrid, GanttCardStack, type GanttRow } from '@/components/tahi/gantt-grid'
 import { GanttLegend } from '@/components/tahi/gantt-legend'
 import { SectionHeader, AccentTitle } from '@/components/tahi/deliverable'
+import { useIsNarrow } from '@/lib/use-is-narrow'
 
-// Simple viewport-width hook for "stack as cards on mobile" decisions.
-// SSR-safe: returns false on first render, then updates after mount.
-function useIsNarrow(breakpointPx = 720): boolean {
-  const [isNarrow, setIsNarrow] = useState(false)
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const check = () => setIsNarrow(window.innerWidth < breakpointPx)
-    check()
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [breakpointPx])
-  return isNarrow
-}
+// Re-exported so any existing import of `useIsNarrow` from this module
+// (it used to be defined here) keeps working.
+export { useIsNarrow }
 
 export type SectionType = 'overview' | 'gantt' | 'risk_register' | 'raci_matrix' | 'text'
 
@@ -107,7 +98,7 @@ export function SlideShell({ eyebrow, title, sub, chrome = true, children }: Sli
     <section style={slideShell}>
       {eyebrow && <div style={slideEyebrow}>{eyebrow}</div>}
       {title && (
-        <AccentTitle text={title} size="md" as="h2" style={{ margin: 0 }} />
+        <AccentTitle text={title} size="md" as="h2" style={{ margin: 0, color: 'var(--page-chrome-text, #1f2c1a)' }} />
       )}
       {sub && <p style={slideSub}>{sub}</p>}
       <div style={{ marginTop: title || eyebrow ? '1.25rem' : 0 }}>{children}</div>
@@ -158,6 +149,12 @@ export function GanttSection({
       })
     : rows
 
+  // Below 720px the fixed-width gantt grid (64rem minWidth) is a pinch-
+  // scroll strip that reads as a wall of tiny bars. Swap to a card per
+  // row (phase, owner, weeks, a mini progress bar), the same "stack on
+  // mobile" pattern RiskRegisterSection already uses below.
+  const isNarrow = useIsNarrow()
+
   return (
     <SlideShell
       eyebrow={section.subtitle ?? 'Project schedule'}
@@ -165,7 +162,11 @@ export function GanttSection({
       sub={zoomed ? `Weeks ${zoomStart}–${zoomEnd}` : null}
       chrome={chrome}
     >
-      <GanttGrid rows={localRows} numberOfWeeks={localWeekCount} />
+      {isNarrow ? (
+        <GanttCardStack rows={localRows} numberOfWeeks={localWeekCount} />
+      ) : (
+        <GanttGrid rows={localRows} numberOfWeeks={localWeekCount} />
+      )}
       <div style={{ marginTop: '1rem' }}>
         <GanttLegend compact />
       </div>
@@ -195,7 +196,7 @@ export function RiskRegisterSection({ section, chrome = true }: { section: Sched
             <article
               key={r.id ?? i}
               style={{
-                background: '#ffffff',
+                background: 'var(--page-chrome-card, #ffffff)',
                 border: '1px solid var(--color-border-subtle, #e8f0e6)',
                 borderRadius: '0.625rem',
                 padding: '0.875rem 1rem',
@@ -206,7 +207,7 @@ export function RiskRegisterSection({ section, chrome = true }: { section: Sched
             >
               <header style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.625rem', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 700, color: '#1f2c1a', lineHeight: 1.35 }}>
+                  <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 700, color: 'var(--page-chrome-text, #1f2c1a)', lineHeight: 1.35 }}>
                     {r.risk}
                   </h3>
                   <p style={{ margin: '0.1875rem 0 0', fontSize: '0.6875rem', color: '#8a9987', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
@@ -265,7 +266,7 @@ function CardField({ label, value }: { label: string; value: string }) {
         fontWeight: 600,
         marginBottom: '0.1875rem',
       }}>{label}</p>
-      <p style={{ margin: 0, fontSize: '0.8125rem', color: '#2d3a26', lineHeight: 1.55 }}>{value}</p>
+      <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--page-chrome-text, #2d3a26)', lineHeight: 1.55 }}>{value}</p>
     </div>
   )
 }
@@ -483,7 +484,7 @@ const slideEyebrow: React.CSSProperties = {
 const slideTitle: React.CSSProperties = {
   fontSize: 'clamp(1.25rem, 3vw, 1.875rem)',
   fontWeight: 800,
-  color: '#1f2c1a',
+  color: 'var(--page-chrome-text, #1f2c1a)',
   margin: 0,
   letterSpacing: '-0.015em',
 }
@@ -497,7 +498,7 @@ const slideSub: React.CSSProperties = {
 const proseStyle: React.CSSProperties = {
   fontSize: '0.9375rem',
   lineHeight: 1.7,
-  color: '#1f2c1a',
+  color: 'var(--page-chrome-text, #1f2c1a)',
 }
 
 const tableWrap: React.CSSProperties = {

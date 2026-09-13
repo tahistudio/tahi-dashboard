@@ -187,6 +187,12 @@ interface ChromePalette {
   border: string
   chromeText: string
   childText: string
+  /** Background for a self-contained card/table sitting inside this
+   *  chrome (RiskRegisterSection cards, RACI group bands, etc). Exposed
+   *  as `--page-chrome-card` alongside `--page-chrome-text` so a card's
+   *  background and its text always swap together and never leave
+   *  near-invisible text on a mismatched surface. */
+  cardBg: string
   shadow: string
   brandVariant: 'dark' | 'white'
 }
@@ -201,6 +207,7 @@ function paletteForTheme(theme: PageChromeTheme): ChromePalette {
       border: 'rgba(220, 239, 216, 0.18)',
       chromeText: '#a8c89e',
       childText: BRAND.surface,
+      cardBg: 'rgba(255, 255, 255, 0.06)',
       shadow: '0 12px 32px rgba(31, 44, 26, 0.32)',
       brandVariant: 'white',
     }
@@ -218,6 +225,7 @@ function paletteForTheme(theme: PageChromeTheme): ChromePalette {
       border: 'rgba(220, 239, 216, 0.22)',
       chromeText: '#a8c89e',
       childText: BRAND.surface,
+      cardBg: 'rgba(255, 255, 255, 0.08)',
       shadow: '0 16px 48px rgba(31, 44, 26, 0.24)',
       brandVariant: 'white',
     }
@@ -227,6 +235,7 @@ function paletteForTheme(theme: PageChromeTheme): ChromePalette {
     border: BRAND.borderSubtle,
     chromeText: BRAND.subtle,
     childText: BRAND.ink,
+    cardBg: BRAND.surface,
     shadow: '0 4px 16px rgba(31, 44, 26, 0.05)',
     brandVariant: 'dark',
   }
@@ -270,6 +279,9 @@ export function PageChrome({
         // default. Most renderers hardcode BRAND.ink / BRAND.body so we
         // additionally expose this as a CSS var consumers can read.
         ['--page-chrome-text' as string]: p.childText,
+        // Companion var for a self-contained card/table background living
+        // inside this chrome (see ChromePalette.cardBg above).
+        ['--page-chrome-card' as string]: p.cardBg,
       }}
       data-page-chrome-theme={theme}
     >
@@ -360,14 +372,14 @@ export function SectionHeader({
           {eyebrow}
         </div>
       )}
-      <AccentTitle text={title} size="md" as="h2" />
+      <AccentTitle text={title} size="md" as="h2" style={{ color: 'var(--page-chrome-text, ' + BRAND.ink + ')' }} />
       {body && (
         <div
           style={{
             marginTop: '1.125rem',
             fontSize: '0.9375rem',
             lineHeight: 1.7,
-            color: BRAND.body,
+            color: 'var(--page-chrome-text, ' + BRAND.body + ')',
             maxWidth: '50rem',
             display: 'flex',
             flexDirection: 'column',
