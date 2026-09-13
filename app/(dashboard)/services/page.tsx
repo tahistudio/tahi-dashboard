@@ -16,8 +16,14 @@ export default async function ServicesPage() {
   // 'services' is a client-audience feature, so gate the two branches by their
   // own audience: the client by the feature their org may be denied, the studio
   // side by holding any grant at all (a roleless team member sees nothing).
+  //
+  // CLIENT DEFAULT (Liam, 2026-09-14): denied. A client with no explicit allow
+  // override lands here and bounces to /requests, not /overview: the same
+  // fallback /messages sends a denied client to, since /requests is their
+  // actual channel. An org or contact allow override opts one client back in
+  // and the page renders normally for them.
   if (isAdmin) await requirePageAnyGrant()
-  else await requirePageFeature('services')
+  else await requirePageFeature('services', '/requests')
 
   // A Tahi login previewing the portal as a client (the impersonation cookie
   // makes the portal routes answer for that org) sees what the client sees:

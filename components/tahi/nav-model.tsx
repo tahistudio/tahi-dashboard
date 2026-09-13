@@ -146,6 +146,11 @@ export const CLIENT_NAV: NavGroup[] = [
     group: 'Library',
     items: [
       { label: 'Files',    href: '/files',    icon: 'files',    clientOnly: true, clientVisible: true },
+      // Hidden by default (Liam, 2026-09-14), same mechanism as Messages
+      // above: the entry stays in the raw model so `filterNav`'s features-map
+      // check is the only thing that hides it; a per-org or per-contact allow
+      // override brings the item straight back for one client. Same page,
+      // same feature key (see app/(dashboard)/services/page.tsx).
       { label: 'Services', href: '/services', icon: 'services', clientOnly: true, clientVisible: true },
     ],
   },

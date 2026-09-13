@@ -87,6 +87,27 @@ describe('decideFeature — levels', () => {
     expect(decideFeature(access('super_admin'), 'messages')).toBe(true)
   })
 
+  it('services stays hidden for a client org with no override (2026-09-14 decision)', () => {
+    // Same mechanism as messages: services is the second, deliberate exception
+    // to "every client-audience feature is ON by default" (CLIENT_DEFAULT_DENY).
+    const a = access('client')
+    expect(decideFeature(a, 'services')).toBe(false)
+    // Nothing else in the default set moved.
+    expect(decideFeature(a, 'requests')).toBe(true)
+    expect(decideFeature(a, 'invoices')).toBe(true)
+    expect(decideFeature(a, 'files')).toBe(true)
+  })
+
+  it('an explicit allow override still opts one client back into Services', () => {
+    const orgAllowed = access('client', { overrides: { services: 'allow' } })
+    expect(decideFeature(orgAllowed, 'services')).toBe(true)
+  })
+
+  it('an explicit deny override on services is redundant but still denies (both read the same default)', () => {
+    const orgDenied = access('client', { overrides: { services: 'deny' } })
+    expect(decideFeature(orgDenied, 'services')).toBe(false)
+  })
+
   it('team_member only sees features their role can .view (role baseline)', () => {
     // A task_handler-style role: can view requests + tasks, not invoices/deals.
     const a = access('team_member', { viewableResources: ['requests', 'tasks', 'time_entries', 'docs'] })
@@ -444,7 +465,7 @@ describe('nav model - Messages is hidden for a client by default, restorable per
     const features = featureMap(access('client'))
     const visible = navHrefs(filterNav(CLIENT_NAV, { ...clientOpts, features }))
     expect(visible).not.toContain('/messages')
-    expect(visible).toEqual(['/overview', '/requests', '/notifications', '/files', '/services', '/invoices'])
+    expect(visible).toEqual(['/overview', '/requests', '/notifications', '/files', '/invoices'])
   })
 
   it('an explicit allow override restores the /messages nav item for that one client', () => {
@@ -460,6 +481,33 @@ describe('nav model - Messages is hidden for a client by default, restorable per
       userEmail: null, canManagePermissions: true, features,
     }))
     expect(visible).toContain('/messages')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Services stays hidden for every client by default (Liam, 2026-09-14), the
+// same mechanism and the same reasoning as Messages above: one `features` map
+// (layout.tsx -> featureMap -> filterNav) drives the resolver branch, the nav
+// entry and the page redirect together.
+// ---------------------------------------------------------------------------
+
+describe('nav model - Services is hidden for a client by default, restorable per client', () => {
+  const clientOpts = {
+    showAsAdmin: false, isEffectiveAdmin: false, isViewerRole: false,
+    userEmail: null, canManagePermissions: false,
+  }
+
+  it('a client org with no override never gets a /services nav item', () => {
+    const features = featureMap(access('client'))
+    const visible = navHrefs(filterNav(CLIENT_NAV, { ...clientOpts, features }))
+    expect(visible).not.toContain('/services')
+    expect(visible).toEqual(['/overview', '/requests', '/notifications', '/files', '/invoices'])
+  })
+
+  it('an explicit allow override restores the /services nav item for that one client', () => {
+    const features = featureMap(access('client', { overrides: { services: 'allow' } }))
+    const visible = navHrefs(filterNav(CLIENT_NAV, { ...clientOpts, features }))
+    expect(visible).toContain('/services')
   })
 })
 

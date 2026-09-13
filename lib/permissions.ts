@@ -13,8 +13,9 @@
  *                  deny can hide a feature from them, but they can always unhide it.
  *   team_member  - sees features their role can .view, minus feature_visibility deny.
  *   client       - client-audience features only, ON by default, minus per-org deny,
- *                  EXCEPT `messages` (see CLIENT_DEFAULT_DENY below), which is OFF by
- *                  default and needs an explicit per-org or per-contact allow.
+ *                  EXCEPT `messages` and `services` (see CLIENT_DEFAULT_DENY below),
+ *                  which are OFF by default and need an explicit per-org or
+ *                  per-contact allow.
  *
  * DENY BY DEFAULT: a Tahi-org identity with NO active role assigned sees
  * nothing until a role is granted (it resolves to `team_member` with an EMPTY
@@ -138,14 +139,20 @@ function topAncestor(featureKey: string): string {
 
 /**
  * Client-audience top-level features that stay OFF by default, reversing the
- * level's normal "client sees everything ON" rule below. Today that is just
- * `messages` (Liam, 2026-09-13): the request thread is the client channel, so
- * the standalone inbox is a studio surface until an explicit feature_visibility
- * ALLOW (organisation or contact) opts one client back in. The override loop
- * above this check always runs first, so an allow row still wins; this is
- * only the fallback when no row exists for the client at all.
+ * level's normal "client sees everything ON" rule below.
+ *
+ *   - `messages` (Liam, 2026-09-13): the request thread is the client
+ *     channel, so the standalone inbox is a studio surface until an explicit
+ *     feature_visibility ALLOW (organisation or contact) opts one client
+ *     back in.
+ *   - `services` (Liam, 2026-09-14): the catalogue is a studio surface for
+ *     now too, same reasoning and same mechanism.
+ *
+ * The override loop above this check always runs first, so an allow row
+ * still wins; this is only the fallback when no row exists for the client
+ * at all.
  */
-const CLIENT_DEFAULT_DENY: ReadonlySet<string> = new Set(['messages'])
+const CLIENT_DEFAULT_DENY: ReadonlySet<string> = new Set(['messages', 'services'])
 
 /** The permission resource a feature gates against, or undefined if ungated. */
 export function featureResource(featureKey: string): string | undefined {
