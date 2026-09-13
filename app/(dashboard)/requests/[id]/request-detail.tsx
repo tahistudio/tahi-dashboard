@@ -1418,9 +1418,9 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           <div className="animate-pulse rounded" style={{ height: 28, width: '60%', background: 'var(--color-bg-tertiary)', marginBottom: '0.5rem' }} />
           <div className="animate-pulse rounded" style={{ height: 14, width: '30%', background: 'var(--color-bg-tertiary)' }} />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_16rem] lg:grid-cols-[1fr_20rem] gap-6">
-          <div className="bg-[var(--color-bg)] rounded-xl animate-pulse" style={{ height: 300, border: '1px solid var(--color-border)' }} />
-          <div className="bg-[var(--color-bg)] rounded-xl animate-pulse" style={{ height: 300, border: '1px solid var(--color-border)' }} />
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem] gap-6">
+          <div className="bg-[var(--color-bg)] rounded-xl animate-pulse min-w-0" style={{ height: 300, border: '1px solid var(--color-border)' }} />
+          <div className="bg-[var(--color-bg)] rounded-xl animate-pulse min-w-0" style={{ height: 300, border: '1px solid var(--color-border)' }} />
         </div>
       </div>
     )
@@ -2413,11 +2413,19 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         />
       )}
 
-      {/* Two-column layout */}
-      <div className="grid grid-cols-1 md:grid-cols-[1fr_16rem] lg:grid-cols-[1fr_20rem] gap-6">
+      {/* Two-column layout. Single lg breakpoint (not md): between 768 and
+          1024px there is not enough room for a comfortable main column next
+          to a fixed rail once the sidebar and page padding are subtracted,
+          so the columns only split at 1024px and stack below it. The main
+          track is minmax(0, 1fr) (not bare 1fr, which defaults its
+          automatic minimum to the content's min-content size) so an
+          unbreakable child in the thread or a file name can never force the
+          column wider than the space actually available; min-w-0 on the
+          column wrapper below backs that up for its flex children. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem] gap-6">
         {/* Left column - thread-first, description / sub-requests / files below,
             activity collapsed at the bottom */}
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6 min-w-0">
           {/* Ported order: brief, then the conversation about it. */}
           {newUi && briefCard}
 
@@ -2722,26 +2730,30 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
             Ported order: Time, Actions, Discovery calls, Details, People,
             Checklists. Legacy order keeps Details last.
 
-            From md up the rail sticks to the top of the scrollport (the
-            <main> element in the dashboard layout), so Time, Actions and the
-            status control stay reachable on a long thread. `self-start` is
-            what makes that work: a stretched grid item is as tall as the row
-            and has nowhere to travel. Below md the grid is one column and the
-            rail scrolls with the page.
+            From lg up (matching the grid's own two-column breakpoint above)
+            the rail sticks to the top of the scrollport (the <main> element
+            in the dashboard layout), so Time, Actions and the status control
+            stay reachable on a long thread. `self-start` is what makes that
+            work: a stretched grid item is as tall as the row and has nowhere
+            to travel. Below lg the grid is one column and the rail flows and
+            scrolls with the page like any other stacked card, so a wheel
+            scroll anywhere over it scrolls the page rather than being
+            captured by a sticky, height-capped container it is not actually
+            inside of yet.
 
             A pinned box stops translating, so a rail taller than the viewport
             would put Details, People and Checklists permanently out of reach:
             the max-height plus its own overflow is what keeps the bottom of a
             studio rail scrollable once it pins. The shell is `h-screen`, so
             the budget is 100vh less the 3.5rem top bar, less the top offset,
-            less a little breathing room at the bottom: 6rem at md, 7rem at lg.
+            less a little breathing room at the bottom: 7rem at lg.
             Deliberately conservative, because an optional banner above the top
             bar can only ever make the scrollport shorter, and a rail that ends
             early reads as spacing while one that ends late is unreachable. The
             top offset itself is what keeps the first card off the top bar.
             Menus in here render through the shared portalled <Popover>, so
             they still escape this scroll container. */}
-        <div className="flex flex-col gap-4 md:self-start md:sticky md:top-4 lg:top-6 md:max-h-[calc(100vh_-_6rem)] lg:max-h-[calc(100vh_-_7rem)] md:overflow-y-auto md:overscroll-contain">
+        <div className="flex flex-col gap-4 min-w-0 lg:self-start lg:sticky lg:top-6 lg:max-h-[calc(100vh_-_7rem)] lg:overflow-y-auto lg:overscroll-contain">
           {/* Time (admin only): live timer + manual log + recent entries */}
           {isAdmin && <TimeCard target={{ kind: 'request', id: requestId }} />}
 
