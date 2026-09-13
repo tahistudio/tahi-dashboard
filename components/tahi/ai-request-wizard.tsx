@@ -28,7 +28,9 @@ import { Sparkles, Send, AlertTriangle } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { SearchableSelect } from '@/components/tahi/searchable-select'
+import { ChatMarkdown } from '@/components/tahi/chat-markdown'
 import { looksLikeBriefHtml, plainTextToBriefHtml } from '@/lib/brief-html'
+import { clampComposerHeight, COMPOSER_MAX_LINES } from '@/lib/composer-autogrow'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -210,6 +212,108 @@ export function buildCreateRequestBody(input: CreateRequestBodyInput): Record<st
   return body
 }
 
+/** The body POST /api/admin/requests/:id/sub-requests wants: `size`
+ *  ('small' | 'large'), not the wizard's wider `type` vocabulary. */
+export function buildCreateSubRequestBody(draft: RequestDraft): Record<string, unknown> {
+  return {
+    title: draft.title,
+    description: draftBriefHtml(draft.description),
+    size: draft.type === 'large_task' || draft.type === 'new_feature' ? 'large' : 'small',
+    category: draft.category,
+    priority: draft.priority,
+    estimatedHours: draft.estimatedHours,
+  }
+}
+
+// ── Creating every draft in a batch, not just the first ──────────────────────
+//
+// A wizard turn can hand back several drafts at once ("Create 3 requests").
+// Each draft used to fire its own POST to the same top-level create route, one
+// call per draft, awaited in order. That already created every draft when
+// every call succeeded, but one draft failing (a plan that does not carry a
+// large track is the common case: a large_task draft the client's plan does
+// not allow 400s) threw the whole loop into the catch block, silently
+// abandoning whichever drafts had not been posted yet and reporting only
+// "failed to create the request", with no word on the ones that DID land.
+// That read exactly like "I can only add one of these three".
+//
+// The fix has two parts. First, every draft's own request is isolated in its
+// own try/catch, so one failure can never stop the rest from being attempted.
+// Second, where the API actually supports linking a batch (the admin route's
+// sub-requests endpoint), the batch files as one parent plus its children
+// rather than as unrelated siblings: /api/portal/requests/:id/sub-requests
+// has no POST at all ("clients create sub-requests through the team"), so a
+// client's own batch can only ever be siblings, tied together with a shared
+// note in each description instead of a structural link.
+
+export type DraftCreationRole = 'single' | 'parent' | 'sub' | 'sibling'
+
+export interface DraftCreationStep {
+  index: number
+  role: DraftCreationRole
+}
+
+/**
+ * How each draft in a batch should be filed, decided once before any
+ * network call is made. Pure: the same count and flow always produce the
+ * same plan, so the loop that walks it needs no branching of its own.
+ */
+export function planDraftCreation(count: number, isAdminFlow: boolean): DraftCreationStep[] {
+  if (count <= 0) return []
+  if (count === 1) return [{ index: 0, role: 'single' }]
+  if (!isAdminFlow) {
+    return Array.from({ length: count }, (_, index) => ({ index, role: 'sibling' as const }))
+  }
+  return Array.from({ length: count }, (_, index) => ({ index, role: index === 0 ? 'parent' : 'sub' as const }))
+}
+
+/** The note tying an unlinked sibling draft to the rest of its batch. Empty
+ *  when there is nothing to name (a lone draft, or every other title is
+ *  somehow blank). */
+export function siblingNote(drafts: readonly RequestDraft[], index: number): string {
+  const others = drafts.filter((_, i) => i !== index).map(d => d.title).filter(Boolean)
+  if (others.length === 0) return ''
+  return `Filed together with: ${others.join(', ')}.`
+}
+
+/** A sibling draft with the shared note folded into its description. Pure:
+ *  returns the draft unchanged when there is no note to add. */
+export function withSiblingNote(draft: RequestDraft, drafts: readonly RequestDraft[], index: number): RequestDraft {
+  const note = siblingNote(drafts, index)
+  if (!note) return draft
+  return { ...draft, description: draft.description ? `${draft.description}\n\n${note}` : note }
+}
+
+export interface DraftCreationOutcome {
+  draft: RequestDraft
+  ok: boolean
+}
+
+/**
+ * The one message the panel shows once every draft in the batch has been
+ * attempted. Names every draft on full success, so a person never has to
+ * count cards to know all of them landed, and names exactly which ones did
+ * not on a partial failure rather than a single generic apology.
+ */
+export function summariseCreation(outcomes: readonly DraftCreationOutcome[]): string {
+  if (outcomes.length === 0) return 'Nothing to create yet.'
+  if (outcomes.length === 1) {
+    return outcomes[0].ok
+      ? 'Done. Request has been created.'
+      : 'Failed to create the request. Please try again.'
+  }
+  const okCount = outcomes.filter(o => o.ok).length
+  const titles = outcomes.map(o => o.draft.title)
+  if (okCount === outcomes.length) {
+    return `Done. All ${outcomes.length} requests have been created: ${titles.join(', ')}.`
+  }
+  if (okCount === 0) {
+    return 'None of the requests could be created. Try again or fall back to the standard form.'
+  }
+  const failed = outcomes.filter(o => !o.ok).map(o => o.draft.title)
+  return `Created ${okCount} of ${outcomes.length} requests. Could not file: ${failed.join(', ')}. Try again for those.`
+}
+
 // ── Which of the panel's own submit controls apply ───────────────────────────
 
 export interface WizardSubmitControlsInput {
@@ -261,9 +365,23 @@ const AI_WIZARD_CSS = `
   30%{ transform: translateY(-0.25rem); opacity: 1; }
 }
 .tahi-ai-progress-fill{ transition: width var(--motion-medium, 300ms) var(--ease-out, ease); }
+/* The composer's own focus state. Same tokens as the shared .tskw-field
+   input used elsewhere in the wizards: a plain static border was easy to
+   miss next to every other input's visible ring. Lives on the wrapper
+   (not the textarea itself) via :focus-within so the ring reads as the
+   whole composer, send button included, being focused. */
+.tahi-ai-composer{
+  border: 1px solid var(--color-border);
+  transition: border-color var(--motion-quick, 150ms) var(--ease-out, ease), box-shadow var(--motion-quick, 150ms) var(--ease-out, ease);
+}
+.tahi-ai-composer:focus-within{
+  border-color: var(--focus-ring-color);
+  box-shadow: var(--focus-ring);
+}
 @media (prefers-reduced-motion: reduce){
   .tahi-ai-typing i{ animation: none; opacity: 0.55; }
   .tahi-ai-progress-fill{ transition: none; }
+  .tahi-ai-composer{ transition: none; }
 }
 `
 
@@ -345,6 +463,22 @@ export function AiRequestWizardPanel({
     return () => window.clearTimeout(t)
   }, [])
 
+  // Grows the composer from one line to about 8 as the answer gets longer,
+  // then lets it scroll. `scrollHeight` only exists on the DOM node, so this
+  // stays a component effect; the arithmetic itself (lib/composer-autogrow)
+  // is the pure, tested half.
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    const style = window.getComputedStyle(el)
+    const lineHeight = Number.parseFloat(style.lineHeight)
+    const verticalPadding = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom)
+    el.style.height = 'auto'
+    const { height, scrolls } = clampComposerHeight(el.scrollHeight, lineHeight, COMPOSER_MAX_LINES, verticalPadding)
+    el.style.height = `${height}px`
+    el.style.overflowY = scrolls ? 'auto' : 'hidden'
+  }, [input])
+
   const sendMessage = useCallback(async () => {
     const trimmed = input.trim()
     if (!trimmed || sending) return
@@ -359,7 +493,12 @@ export function AiRequestWizardPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
-          context,
+          // `context.orgId` alone misses the standalone drawer, which opens
+          // with no client named and lets the person pick one mid-interview:
+          // `targetOrgId` is what has actually been resolved by now, so the
+          // route can load that client's context as soon as it is known
+          // rather than only when the caller happened to pass it up front.
+          context: isAdminFlow && targetOrgId ? { ...context, orgId: targetOrgId } : context,
         }),
       })
       const data = await res.json().catch(() => ({})) as {
@@ -401,7 +540,7 @@ export function AiRequestWizardPanel({
     } finally {
       setSending(false)
     }
-  }, [input, sending, messages, context, wizardEndpoint])
+  }, [input, sending, messages, context, wizardEndpoint, isAdminFlow, targetOrgId])
 
   const handleCreate = useCallback(async () => {
     if (!latestDrafts || creating) return
@@ -416,37 +555,65 @@ export function AiRequestWizardPanel({
     }
     setCreating(true)
     try {
-      const results: boolean[] = []
-      for (const draft of latestDrafts) {
-        const res = await fetch(apiPath(submitEndpoint), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(buildCreateRequestBody({
-            draft,
-            speaker: context.speaker,
-            clientOrgId: targetOrgId,
-            internalOnly,
-          })),
-        })
-        results.push(res.ok)
+      const plan = planDraftCreation(latestDrafts.length, isAdminFlow)
+      const outcomes: DraftCreationOutcome[] = []
+      let parentId: string | null = null
+
+      for (const step of plan) {
+        const draft = latestDrafts[step.index]
+        // Each draft's own request is isolated: a network error or a 400 on
+        // one (a large_task draft the client's plan does not carry a large
+        // track for, for instance) must never stop the rest of the batch
+        // from being attempted. Losing that isolation is what used to read
+        // as "only one of three got created" with no word on the other two.
+        try {
+          if (step.role === 'sub' && parentId) {
+            const res = await fetch(apiPath(`${submitEndpoint}/${parentId}/sub-requests`), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(buildCreateSubRequestBody(draft)),
+            })
+            outcomes.push({ draft, ok: res.ok })
+            continue
+          }
+          // 'single' and 'parent' file exactly like before; a 'sibling' step,
+          // or a 'sub' step that falls through here because the parent never
+          // got an id (the parent request itself failed), carries a note
+          // naming the rest of the batch so the set still reads as related
+          // work even with no structural link.
+          const toFile = step.role === 'sibling' || step.role === 'sub'
+            ? withSiblingNote(draft, latestDrafts, step.index)
+            : draft
+          const res = await fetch(apiPath(submitEndpoint), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildCreateRequestBody({
+              draft: toFile,
+              speaker: context.speaker,
+              clientOrgId: targetOrgId,
+              internalOnly,
+            })),
+          })
+          if (res.ok && step.role === 'parent') {
+            const json = await res.json().catch(() => null) as { id?: string } | null
+            parentId = json?.id ?? null
+          }
+          outcomes.push({ draft, ok: res.ok })
+        } catch {
+          outcomes.push({ draft, ok: false })
+        }
       }
-      const allOk = results.every(Boolean)
+
+      const okCount = outcomes.filter(o => o.ok).length
       setMessages(prev => [
         ...prev,
         {
           role: 'assistant',
-          ...(allOk ? {} : { notice: true }),
-          content: allOk
-            ? `Done. ${latestDrafts.length === 1 ? 'Request has' : `All ${latestDrafts.length} requests have`} been created.`
-            : 'Some requests could not be created. Try again or fall back to the standard form.',
+          ...(okCount === outcomes.length ? {} : { notice: true }),
+          content: summariseCreation(outcomes),
         },
       ])
-      if (allOk) onRequestsCreated?.()
-    } catch {
-      setMessages(prev => [
-        ...prev,
-        { role: 'assistant', notice: true, content: 'Failed to create the request. Please try again.' },
-      ])
+      if (okCount > 0) onRequestsCreated?.()
     } finally {
       setCreating(false)
     }
@@ -578,7 +745,14 @@ export function AiRequestWizardPanel({
               {msg.notice && (
                 <AlertTriangle size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: '0.1875rem' }} />
               )}
-              <span>{msg.content}</span>
+              {/* User answers stay plain text, always: nothing a client or
+                  admin types is ever parsed as markup. A notice is the
+                  panel's own copy, also plain. Only a real assistant reply
+                  goes through the renderer, so a numbered question reads as
+                  a list instead of literal asterisks and digits. */}
+              {msg.role === 'user' || msg.notice
+                ? <span>{msg.content}</span>
+                : <ChatMarkdown text={msg.content} />}
             </div>
             {msg.requests && msg.requests.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.25rem' }}>
@@ -767,12 +941,11 @@ export function AiRequestWizardPanel({
             </button>
           </div>
         )}
-        <div style={{
+        <div className="tahi-ai-composer" style={{
           display: 'flex',
           alignItems: 'flex-end',
           gap: '0.5rem',
           padding: '0.5rem',
-          border: '1px solid var(--color-border)',
           borderRadius: 'var(--radius-lg)',
           background: 'var(--color-bg)',
         }}>
@@ -792,12 +965,13 @@ export function AiRequestWizardPanel({
             style={{
               flex: 1,
               minHeight: '1.5rem',
-              maxHeight: '8rem',
               resize: 'none',
+              overflowY: 'hidden',
               border: 'none',
               outline: 'none',
               background: 'transparent',
               fontSize: '0.875rem',
+              lineHeight: 1.5,
               color: 'var(--color-text)',
               fontFamily: 'inherit',
               padding: '0.25rem',
@@ -811,8 +985,8 @@ export function AiRequestWizardPanel({
             aria-label="Send message"
             className="tahi-focus-ring"
             style={{
-              width: '2.25rem',
-              height: '2.25rem',
+              width: '2.75rem',
+              height: '2.75rem',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
