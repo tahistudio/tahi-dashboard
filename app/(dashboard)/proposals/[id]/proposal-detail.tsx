@@ -206,6 +206,13 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(changes),
       })
+      // The server bumps updatedAt on write, but the local proposal only
+      // refreshes through the SWR effect, which doesn't refire on every
+      // edit. Without this, hasUnpublished compares a stale local updatedAt
+      // against publishedAt and, once published in this session, the
+      // Publish button never comes back even though the proposal has
+      // genuinely changed since.
+      setProposal(prev => prev ? { ...prev, updatedAt: new Date().toISOString() } : prev)
     } catch {
       showToast('Failed to save', 'error')
     }
@@ -259,6 +266,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(changes),
       })
+      setProposal(prev => prev ? { ...prev, updatedAt: new Date().toISOString() } : prev)
     } catch {
       showToast('Failed to save section', 'error')
     }
@@ -267,6 +275,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
     setSections(prev => prev.filter(s => s.id !== sectionId))
     try {
       await fetch(apiPath(`/api/admin/proposals/${proposalId}/sections/${sectionId}`), { method: 'DELETE' })
+      setProposal(prev => prev ? { ...prev, updatedAt: new Date().toISOString() } : prev)
     } catch {
       await mutate()
       showToast('Failed to delete section', 'error')
@@ -301,6 +310,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
           body: JSON.stringify({ position: a.position }),
         }),
       ])
+      setProposal(prev => prev ? { ...prev, updatedAt: new Date().toISOString() } : prev)
     } catch {
       await mutate()
       showToast('Failed to reorder', 'error')
@@ -332,6 +342,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(changes),
       })
+      setProposal(prev => prev ? { ...prev, updatedAt: new Date().toISOString() } : prev)
     } catch {
       showToast('Failed to save variant', 'error')
     }
@@ -340,6 +351,7 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
     setVariants(prev => prev.filter(v => v.id !== variantId))
     try {
       await fetch(apiPath(`/api/admin/proposals/${proposalId}/variants/${variantId}`), { method: 'DELETE' })
+      setProposal(prev => prev ? { ...prev, updatedAt: new Date().toISOString() } : prev)
     } catch {
       await mutate()
       showToast('Failed to delete variant', 'error')
@@ -371,9 +383,9 @@ export function ProposalDetail({ proposalId }: { proposalId: string }) {
     setSharing(true)
     try {
       const res = await fetch(apiPath(`/api/admin/proposals/${proposalId}/share`), { method: 'POST' })
-      const data = await res.json() as { token?: string }
+      const data = await res.json() as { token?: string; publishedAt?: string | null }
       if (!res.ok || !data.token) throw new Error('Failed')
-      setProposal(prev => prev ? { ...prev, status: 'shared', publicShareToken: data.token! } : prev)
+      setProposal(prev => prev ? { ...prev, status: 'shared', publicShareToken: data.token!, publishedAt: data.publishedAt ?? prev.publishedAt } : prev)
       const url = `${window.location.origin}/p/proposal/${data.token}`
       try { await navigator.clipboard.writeText(url); showToast('Public link copied', 'success') }
       catch { showToast('Public link ready', 'success') }
