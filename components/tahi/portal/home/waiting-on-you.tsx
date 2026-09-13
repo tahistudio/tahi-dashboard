@@ -25,12 +25,18 @@
  *   error     the reads behind the tile failed, so it says so and offers a
  *             Try again rather than falling through to "All quiet"
  *   populated the ranked rows plus a real "+N more waiting" expander
- *   empty     a calm LIGHT card, "All quiet in the studio."
+ *   empty     the SAME dark forest tile as every other state, body swapped
+ *             for the calm "All quiet in the studio." copy plus, only when
+ *             there is genuinely nothing open, a plain text link. This used
+ *             to drop to a separate light card with its own leaf badge, so
+ *             the one surface that is supposed to stay fixed-dark went pale
+ *             the moment a client had nothing waiting. One panel now, two
+ *             bodies.
  *   read-only every write control disabled, with the lens note saying why
  *
- * Colour: the tile is fixed forest (documented in portal-home.css beside the
- * sidebar exemption); the empty card is entirely token-driven so dark mode is
- * free.
+ * Colour: the tile is fixed forest in every one of these states, including
+ * empty (documented in portal-home.css beside the sidebar exemption). Nothing
+ * on this component reads a light surface any more.
  */
 
 import { useState } from 'react'
@@ -144,11 +150,18 @@ export function WaitingOnYou({
 
   if (items.length === 0) {
     return (
-      <section className="pfh-quiet" aria-label="Waiting on you">
-        <span className="pfh-quiet-leaf" aria-hidden="true">
-          <OfficialLeaf size={18} />
+      <section className="pfh-tile" aria-label="Waiting on you">
+        <span className="pfh-tile-clip" aria-hidden="true">
+          <span className="pfh-tile-leaf">
+            <OfficialLeaf size={112} color="#eef6e9" />
+          </span>
         </span>
-        <div className="pfh-quiet-t">
+
+        <div className="pfh-head">
+          <h2>Waiting on you</h2>
+        </div>
+
+        <div className="pfh-quiet-body">
           <b>All quiet in the studio.</b>
           <p>
             {isFirstRun
@@ -164,7 +177,7 @@ export function WaitingOnYou({
           {onStart && !hasOpenRequests && (
             <button
               type="button"
-              className="pfh-quiet-link tahi-focus-ring"
+              className="pfh-quiet-link"
               disabled={ro}
               onClick={ro ? undefined : onStart}
               title={ro ? `Read-only while you are viewing as ${previewName ?? 'the client'}` : undefined}
@@ -173,6 +186,13 @@ export function WaitingOnYou({
             </button>
           )}
         </div>
+
+        {ro && (
+          <p className="pfh-ro">
+            <Icon n="clock" s={13} />
+            You are reading this as {previewName ?? 'the client'}. Every action here is read-only in client view.
+          </p>
+        )}
       </section>
     )
   }
