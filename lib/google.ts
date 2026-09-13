@@ -277,6 +277,62 @@ export async function updateCalendarEvent(
   return await res.json() as CalendarEvent
 }
 
+/** One interval the studio's primary calendar reports as busy. UTC instants,
+ *  straight off Google's own freeBusy response. */
+export interface FreeBusyBlock {
+  start: string
+  end: string
+}
+
+/**
+ * Free/busy for the studio's primary calendar between timeMin and timeMax
+ * (both ISO strings). Unlike `listCalendarEvents`, this never needs
+ * `calendar.readonly` scope on individual event contents, since it is the
+ * lightest read that answers "is this half hour taken", which is all the
+ * kickoff slot picker (GET /api/portal/kickoff-slots) needs to know.
+ *
+ * Throws on any transport or API error, INCLUDING a per-calendar error in the
+ * response body (e.g. the token's scope does not cover freeBusy on this
+ * calendar). Callers treat every failure here the same way they treat
+ * GoogleNotConnectedError: fall back to the plain availability window with
+ * nothing marked busy, never fail the caller's request over it.
+ */
+export async function getPrimaryCalendarFreeBusy(
+  accessToken: string,
+  timeMin: string,
+  timeMax: string,
+): Promise<FreeBusyBlock[]> {
+  const res = await fetch('https://www.googleapis.com/calendar/v3/freeBusy', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      timeMin,
+      timeMax,
+      items: [{ id: 'primary' }],
+    }),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Calendar freeBusy failed: ${res.status} ${body.slice(0, 300)}`)
+  }
+  const data = await res.json() as {
+    calendars?: Record<string, {
+      busy?: Array<{ start?: string; end?: string }>
+      errors?: Array<{ reason?: string }>
+    }>
+  }
+  const primary = data.calendars?.primary
+  if (primary?.errors?.length) {
+    throw new Error(`Calendar freeBusy error: ${primary.errors.map(e => e.reason ?? 'unknown').join(', ')}`)
+  }
+  return (primary?.busy ?? [])
+    .filter((b): b is { start: string; end: string } => !!b.start && !!b.end)
+    .map(b => ({ start: b.start, end: b.end }))
+}
+
 // ── Drive ─────────────────────────────────────────────────────────────────
 
 export interface DriveFile {
