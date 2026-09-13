@@ -13,6 +13,15 @@
  * admin) has no single client the comment is about, so their row carries
  * NULL org_id; a client contact's row carries the D1 organisations.id
  * getPortalAuth already resolved for their session.
+ *
+ * An optional `anchor` object (built client-side by
+ * lib/feedback-anchor.ts, see components/tahi/feedback-ball.tsx's pick
+ * mode) describes a specific element the comment is about: a selector path,
+ * tag, short text snippet, bounding rect + page scroll height, and a bit of
+ * ancestor context. Absent entirely for a general comment. Present but
+ * malformed (oversized, or missing/non-integer rect fields) is a 400: a
+ * corrupt anchor is worse than none, since GET /api/admin/feedback and the
+ * MCP tool would otherwise hand a broken pointer back to whoever reads it.
  */
 import { getPortalAuth, getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { contactIdentityWhere } from '@/lib/portal-identity'
@@ -27,6 +36,10 @@ const MAX_BODY_LENGTH = 5000
 const RATE_LIMIT_PER_HOUR = 30
 const BREAKPOINTS = new Set(['phone', 'tablet', 'desktop'])
 const THEMES = new Set(['light', 'dark'])
+const MAX_ANCHOR_SELECTOR_LENGTH = 600
+const MAX_ANCHOR_TEXT_LENGTH = 200
+const MAX_ANCHOR_CONTEXT_LENGTH = 200
+const MAX_ANCHOR_TAG_LENGTH = 50
 
 interface FeedbackBody {
   body?: unknown
@@ -38,6 +51,71 @@ interface FeedbackBody {
   theme?: unknown
   userAgent?: unknown
   context?: unknown
+  anchor?: unknown
+}
+
+interface AnchorRectValue {
+  x: number
+  y: number
+  width: number
+  height: number
+  scrollHeight: number
+}
+
+interface ParsedAnchor {
+  selector: string
+  tag: string | null
+  text: string | null
+  rect: AnchorRectValue
+  context: string | null
+}
+
+function isFiniteInt(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v)
+}
+
+function parseAnchorRect(v: unknown): AnchorRectValue | null {
+  if (!v || typeof v !== 'object') return null
+  const r = v as Record<string, unknown>
+  if (!isFiniteInt(r.x) || !isFiniteInt(r.y) || !isFiniteInt(r.width) || !isFiniteInt(r.height) || !isFiniteInt(r.scrollHeight)) {
+    return null
+  }
+  return { x: r.x, y: r.y, width: r.width, height: r.height, scrollHeight: r.scrollHeight }
+}
+
+/**
+ * Validates the optional anchor payload.
+ *   undefined -> nothing was sent (fine, a general comment)
+ *   null      -> something was sent but failed validation (caller 400s)
+ *   otherwise -> a validated anchor ready to store
+ */
+function parseAnchor(value: unknown): ParsedAnchor | null | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'object') return null
+  const a = value as Record<string, unknown>
+
+  if (typeof a.selector !== 'string') return null
+  const selector = a.selector.trim()
+  if (!selector || selector.length > MAX_ANCHOR_SELECTOR_LENGTH) return null
+
+  const rect = parseAnchorRect(a.rect)
+  if (!rect) return null
+
+  const tag = typeof a.tag === 'string' ? a.tag.trim().slice(0, MAX_ANCHOR_TAG_LENGTH) || null : null
+
+  let text: string | null = null
+  if (a.text !== undefined && a.text !== null) {
+    if (typeof a.text !== 'string' || a.text.length > MAX_ANCHOR_TEXT_LENGTH) return null
+    text = a.text
+  }
+
+  let context: string | null = null
+  if (a.context !== undefined && a.context !== null) {
+    if (typeof a.context !== 'string' || a.context.length > MAX_ANCHOR_CONTEXT_LENGTH) return null
+    context = a.context
+  }
+
+  return { selector, tag, text, rect, context }
 }
 
 function isBreakpoint(v: unknown): v is 'phone' | 'tablet' | 'desktop' {
@@ -83,6 +161,11 @@ export async function POST(req: NextRequest) {
   }
   if (trimmedBody.length > MAX_BODY_LENGTH) {
     return NextResponse.json({ error: `body must be ${MAX_BODY_LENGTH} characters or fewer` }, { status: 400 })
+  }
+
+  const anchor = parseAnchor(body?.anchor)
+  if (anchor === null) {
+    return NextResponse.json({ error: 'invalid anchor' }, { status: 400 })
   }
 
   const database = (await db()) as D1
@@ -150,6 +233,11 @@ export async function POST(req: NextRequest) {
     userAgent: asTrimmedString(body?.userAgent, 500),
     body: trimmedBody,
     context: serializeContext(body?.context),
+    anchorSelector: anchor?.selector ?? null,
+    anchorTag: anchor?.tag ?? null,
+    anchorText: anchor?.text ?? null,
+    anchorRect: anchor ? JSON.stringify(anchor.rect) : null,
+    anchorContext: anchor?.context ?? null,
   })
 
   return NextResponse.json({ ok: true, stored: true, id }, { status: 201 })

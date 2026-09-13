@@ -2268,6 +2268,17 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_feedback_comments_created ON feedback_comments(created_at)`,
     ],
   },
+  {
+    name: '0101',
+    description: 'feedback_comments gains anchor_selector, anchor_tag, anchor_text, anchor_rect and anchor_context: click-to-pick-an-element for the beta feedback ball, the way Claude Design/Webflow/Figma let you pin a comment to something on screen. anchor_selector prefers an id, then data-testid/aria-label, then a short tag+nth-of-type path capped at 8 segments (lib/feedback-anchor.ts#buildSelectorPath). anchor_rect is JSON: {x, y, width, height, scrollHeight}, all integers, the element\'s bounding rect relative to the page plus the page\'s total scroll height. anchor_context is the nearest ancestor\'s data-section or aria-label. All five are nullable: a general comment (Escape out of pick mode, or clicking the ball a second time) carries none of them. Additive; the duplicate-column error is swallowed upstream so re-runs are safe.',
+    statements: [
+      `ALTER TABLE feedback_comments ADD COLUMN anchor_selector text`,
+      `ALTER TABLE feedback_comments ADD COLUMN anchor_tag text`,
+      `ALTER TABLE feedback_comments ADD COLUMN anchor_text text`,
+      `ALTER TABLE feedback_comments ADD COLUMN anchor_rect text`,
+      `ALTER TABLE feedback_comments ADD COLUMN anchor_context text`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
