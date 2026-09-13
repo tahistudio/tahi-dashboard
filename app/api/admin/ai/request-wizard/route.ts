@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { HAIKU_MODEL } from '@/lib/ai-models'
 import { db } from '@/lib/db'
 import { estimateRequestHours, wizardHourEstimatesPromptBlock } from '@/lib/wizard-hour-estimates'
-import { loadRequestOrgContext } from '@/lib/ai-request-org-context'
+import { loadRequestOrgContext, CLIENT_HISTORY_PROMPT_RULES } from '@/lib/ai-request-org-context'
 import { requireAccessToOrg } from '@/lib/require-access'
 
 export const dynamic = 'force-dynamic'
@@ -130,6 +130,7 @@ TIMELINE HONESTY (critical, read carefully):
 CLIENT CONTEXT:
 - If a CONTEXT section below names the client's industry, brands, or past requests, treat that as already known. Never ask a question whose answer is already listed there.
 - If the CONTEXT section says this client has more than one brand or website on file, ask which one this request is for before drafting. Never guess or split the difference.
+${CLIENT_HISTORY_PROMPT_RULES}
 
 YOUR JOB:
 1. When the user describes what they need, ask 2-3 smart follow-up questions to scope properly: specific deliverable, affected pages/sections, available assets, deadline.
