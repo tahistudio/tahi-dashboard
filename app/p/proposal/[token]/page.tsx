@@ -1,8 +1,11 @@
+import type { Metadata } from 'next'
 import { ProposalViewer } from './proposal-viewer'
+import { resolveProposalMetadata, toMetadata } from '@/lib/public-viewer-metadata'
 
-export const metadata = {
-  title: 'Proposal',
-  robots: { index: false, follow: false },
+export async function generateMetadata({ params }: { params: Promise<{ token: string }> }): Promise<Metadata> {
+  const { token } = await params
+  const doc = await resolveProposalMetadata(token)
+  return toMetadata(doc)
 }
 
 export default async function PublicProposalPage({ params }: { params: Promise<{ token: string }> }) {

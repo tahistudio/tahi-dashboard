@@ -386,11 +386,11 @@ function SingleTestimonial({ section }: { section: PublicSection }) {
         <div style={slideInner}>
           {section.subtitle && <div style={slideEyebrow}>{section.subtitle}</div>}
           {section.title && <h2 style={slideTitle}>{section.title}</h2>}
-          <blockquote style={{ fontSize: '1.375rem', lineHeight: 1.45, color: '#1f2c1a', margin: '1.25rem 0 1rem 0', fontStyle: 'italic', fontWeight: 500 }}>
+          <blockquote style={{ fontSize: '1.375rem', lineHeight: 1.45, color: 'var(--page-chrome-text, #1f2c1a)', margin: '1.25rem 0 1rem 0', fontStyle: 'italic', fontWeight: 500 }}>
             &ldquo;{data.quote}&rdquo;
           </blockquote>
           <div style={{ fontSize: '0.875rem', color: '#5a6657' }}>
-            <strong style={{ color: '#1f2c1a' }}>{data.author ?? ''}</strong>
+            <strong style={{ color: 'var(--page-chrome-text, #1f2c1a)' }}>{data.author ?? ''}</strong>
             {data.role ? <span> · {data.role}</span> : null}
             {data.company ? <span style={{ color: '#8a9987' }}> · {data.company}</span> : null}
           </div>
@@ -424,13 +424,13 @@ function ValueAnchor({ section }: { section: PublicSection }) {
       {section.title && <h2 style={slideTitle}>{section.title}</h2>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(15rem, 1fr))', gap: '1rem', marginTop: '1rem' }}>
         {/* Stacked alternatives */}
-        <div style={{ background: '#fdfefd', border: '1px dashed #d4e0d0', borderRadius: '0.875rem', padding: '1.25rem' }}>
+        <div style={{ background: 'var(--page-chrome-card, #fdfefd)', border: '1px dashed #d4e0d0', borderRadius: '0.875rem', padding: '1.25rem' }}>
           <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#8a9987', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.75rem' }}>
             Hiring separately
           </div>
           <div style={{ display: 'grid', gap: '0.5rem' }}>
             {alts.map(a => (
-              <div key={a.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: '0.875rem', color: '#1f2c1a' }}>
+              <div key={a.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: '0.875rem', color: 'var(--page-chrome-text, #1f2c1a)' }}>
                 <span>{a.label}</span>
                 <span style={{ color: '#5a6657', fontVariantNumeric: 'tabular-nums' }}>
                   {fmt(a.lo)} to {fmt(a.hi)}
@@ -440,7 +440,7 @@ function ValueAnchor({ section }: { section: PublicSection }) {
           </div>
           <div style={{ borderTop: '1px solid #e8f0e6', marginTop: '0.875rem', paddingTop: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
             <strong style={{ fontSize: '0.875rem' }}>Total</strong>
-            <strong style={{ fontSize: '1.125rem', fontVariantNumeric: 'tabular-nums', color: '#1f2c1a' }}>
+            <strong style={{ fontSize: '1.125rem', fontVariantNumeric: 'tabular-nums', color: 'var(--page-chrome-text, #1f2c1a)' }}>
               {fmt(lo)} to {fmt(hi)}{data?.unit === 'mo' ? '/mo' : ''}
             </strong>
           </div>
@@ -1040,7 +1040,7 @@ function TestimonialCard({
   return (
     <figure
       style={{
-        background: '#ffffff',
+        background: 'var(--page-chrome-card, #ffffff)',
         border: '1px solid #e8f0e6',
         borderRadius: '0 24px 0 24px',
         padding: '2rem 2.25rem',
@@ -1056,11 +1056,11 @@ function TestimonialCard({
       <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" style={{ color: '#5A824E', opacity: 0.6 }}>
         <path d="M9 7c-3 0-5 2-5 5v6h6v-6H6c0-2 1-3 3-3V7zm10 0c-3 0-5 2-5 5v6h6v-6h-4c0-2 1-3 3-3V7z" fill="currentColor" />
       </svg>
-      <blockquote style={{ fontSize: 'clamp(1.125rem, 1.4vw, 1.375rem)', lineHeight: 1.5, color: '#121A0F', margin: 0, fontWeight: 500, letterSpacing: '-0.005em' }}>
+      <blockquote style={{ fontSize: 'clamp(1.125rem, 1.4vw, 1.375rem)', lineHeight: 1.5, color: 'var(--page-chrome-text, #121A0F)', margin: 0, fontWeight: 500, letterSpacing: '-0.005em' }}>
         {item.quote}
       </blockquote>
       <figcaption style={{ marginTop: 'auto', fontSize: '0.875rem', color: '#5a6657' }}>
-        <div style={{ fontWeight: 700, color: '#1f2c1a' }}>{item.author}</div>
+        <div style={{ fontWeight: 700, color: 'var(--page-chrome-text, #1f2c1a)' }}>{item.author}</div>
         {(item.role || item.company) && (
           <div style={{ fontSize: '0.8125rem', color: '#8a9987', marginTop: '0.125rem' }}>
             {item.role}

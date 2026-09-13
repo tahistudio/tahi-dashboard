@@ -391,3 +391,136 @@ export function GanttGrid({
     </div>
   )
 }
+
+/**
+ * <GanttCardStack>, the narrow-viewport alternative to <GanttGrid>.
+ *
+ * The grid's week columns need real horizontal room (64rem minWidth) to
+ * stay legible; below the public viewer's narrow breakpoint that becomes
+ * a pinch-scroll strip nobody can read. This renders the same rows as a
+ * vertical list of cards instead: phase label, owner pill, start/end
+ * week, and a mini progress bar standing in for the bar's position and
+ * width. No horizontal scroll, no `role="table"`.
+ */
+export function GanttCardStack({
+  rows,
+  numberOfWeeks,
+}: {
+  rows: GanttRow[]
+  numberOfWeeks: number
+}) {
+  const weeks = Math.max(1, numberOfWeeks)
+
+  if (rows.length === 0) {
+    return (
+      <div
+        style={{
+          padding: '2rem',
+          textAlign: 'center',
+          color: 'var(--color-text-subtle)',
+          fontSize: '0.875rem',
+          fontStyle: 'italic',
+          border: '1px solid var(--color-border)',
+          borderRadius: '0.5rem',
+        }}
+      >
+        No rows yet. Add a section header or task to get started.
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+      {rows.map(row => {
+        if (row.rowType === 'section_header') {
+          return (
+            <div
+              key={row.id}
+              style={{
+                background: '#1f2c1a',
+                color: '#ffffff',
+                borderRadius: '0.5rem',
+                padding: '0.5rem 0.875rem',
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+              }}
+            >
+              {row.label}
+            </div>
+          )
+        }
+
+        const start = row.startWeek
+        const end = row.endWeek ?? row.startWeek
+        const validRange =
+          start != null && end != null &&
+          start >= 1 && start <= weeks &&
+          end >= 1 && end <= weeks &&
+          end >= start
+        const ownerColour = row.owner ? OWNER_BG[row.owner] : '#d4e0d0'
+        const barLeftPct = validRange ? ((start! - 1) / weeks) * 100 : 0
+        const barWidthPct = validRange ? ((end! - start! + 1) / weeks) * 100 : 0
+        const isGate = row.rowType === 'gate' || row.rowType === 'critical_gate'
+
+        return (
+          <article
+            key={row.id}
+            style={{
+              border: '1px solid var(--color-border)',
+              borderRadius: '0.625rem',
+              padding: '0.75rem 0.875rem',
+              background: 'var(--color-bg)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.5rem',
+            }}
+          >
+            <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.625rem' }}>
+              <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {row.label}
+              </span>
+              {isGate ? (
+                <span style={{ fontSize: '0.625rem', fontWeight: 600, color: row.rowType === 'critical_gate' ? '#dc2626' : '#5A824E', textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0 }}>
+                  Gate
+                </span>
+              ) : row.owner ? (
+                <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: OWNER_LABEL_COLOR[row.owner], flexShrink: 0 }}>
+                  {OWNER_LABEL[row.owner]}
+                </span>
+              ) : null}
+            </header>
+
+            {validRange ? (
+              <>
+                <div style={{ position: 'relative', height: '0.5rem', borderRadius: '999px', background: 'var(--color-bg-secondary)', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: `${barLeftPct}%`,
+                      width: isGate ? '0.5rem' : `${barWidthPct}%`,
+                      minWidth: isGate ? '0.5rem' : undefined,
+                      top: 0,
+                      bottom: 0,
+                      borderRadius: '999px',
+                      background: ownerColour,
+                      backgroundImage: row.riskFlag ? RISK_OVERLAY : undefined,
+                    }}
+                  />
+                </div>
+                <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
+                  {start === end ? `Week ${start}` : `Weeks ${start} to ${end}`}
+                </span>
+              </>
+            ) : (
+              <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>
+                No timeline set
+              </span>
+            )}
+          </article>
+        )
+      })}
+    </div>
+  )
+}

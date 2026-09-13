@@ -28,6 +28,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { apiPath } from '@/lib/api'
 import { useShareViewTracking } from '@/components/tahi/use-share-view-tracking'
 import { useSectionDwellTracking } from '@/components/tahi/use-section-dwell-tracking'
+import { useToast } from '@/components/tahi/toast'
 import {
   BrandMark, CoverPage, PageChrome, AccentTitle, BRAND,
   type MetadataCell, type PageChromeTheme,
@@ -62,6 +63,28 @@ interface PublicSection {
 function normaliseTheme(value: string | null | undefined): PageChromeTheme {
   if (value === 'dark' || value === 'feature') return value
   return 'light'
+}
+
+/**
+ * True when a still-open proposal has expired and should stop offering
+ * to accept the old number.
+ *
+ * `status === 'expired'` is the server's word once that gets set (see the
+ * accept route's expiry check landing separately); the `expiresAt`-in-
+ * the-past comparison is a client-side belt-and-braces read so the
+ * viewer stops offering to accept the moment the date passes, even
+ * before any server-side status flip has happened. A proposal the
+ * visitor already accepted or declined keeps showing that decision
+ * rather than flipping to the expired state.
+ */
+export function isProposalExpired(
+  proposal: Pick<PublicProposal, 'status' | 'expiresAt'>,
+  submitted: 'accepted' | 'declined' | null,
+  now: number = Date.now(),
+): boolean {
+  if (submitted) return false
+  if (proposal.status === 'expired') return true
+  return !!proposal.expiresAt && new Date(proposal.expiresAt).getTime() < now
 }
 
 interface PublicVariant {
@@ -173,6 +196,7 @@ type ProposalViewerProps =
 export function ProposalViewer(props: ProposalViewerProps) {
   const { token, previewProposalId } = props
   const isPreview = !!previewProposalId
+  const { showToast } = useToast()
   const [proposal, setProposal] = useState<PublicProposal | null>(null)
   const [sections, setSections] = useState<PublicSection[]>([])
   const [variants, setVariants] = useState<PublicVariant[]>([])
@@ -257,7 +281,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
       })
       if (!res.ok) {
         const errData = await res.json().catch(() => ({})) as { error?: string }
-        alert(errData.error ?? 'Failed to submit. Please try again.')
+        showToast(errData.error ?? 'Failed to submit. Please try again.', 'error')
         return
       }
       if (decisionMode.kind === 'question') {
@@ -272,7 +296,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
       // Refresh to pick up any server-side changes.
       void reload()
     } catch {
-      alert('Network error. Please try again.')
+      showToast('Network error. Please try again.', 'error')
     } finally {
       setSubmitting(false)
     }
@@ -316,6 +340,8 @@ export function ProposalViewer(props: ProposalViewerProps) {
   const decidedVariant = proposal.decidedVariantId
     ? variants.find(v => v.id === proposal.decidedVariantId)
     : null
+
+  const isExpired = isProposalExpired(proposal, submitted)
 
   // Cover metadata cells, in the PDF order.
   const metadata: MetadataCell[] = []
@@ -392,6 +418,16 @@ export function ProposalViewer(props: ProposalViewerProps) {
         </div>
       )}
 
+      {/* Expired banner: only when the proposal was never decided. An
+          accepted/declined proposal keeps showing its decision even past
+          the expiry date. */}
+      {isExpired && (
+        <div style={expiredBanner}>
+          <strong>This proposal expired{proposal.expiresAt ? ` on ${formatDate(proposal.expiresAt)}` : ''}.</strong>
+          <span style={{ marginLeft: '0.625rem', fontWeight: 500, opacity: 0.85 }}>Ask Liam for a fresh link.</span>
+        </div>
+      )}
+
       {/* Cover page */}
       <div ref={el => observeSection(el, 'cover')}>
         <CoverPage
@@ -452,6 +488,7 @@ export function ProposalViewer(props: ProposalViewerProps) {
                 submitted={submitted}
                 isPreview={isPreview}
                 questionAcked={questionAcked}
+                expired={isExpired}
               />
             </PageChrome>
           </div>
@@ -621,9 +658,9 @@ function defaultSectionName(type: string): string {
  * slide. The tab strip, scope checklist, pricing card and CTAs are
  * unchanged.
  */
-function VariantsSection({
+export function VariantsSection({
   variants, activeVariantId, activeVariant, onSelect, onDecision,
-  submitted, isPreview, questionAcked,
+  submitted, isPreview, questionAcked, expired,
 }: {
   variants: PublicVariant[]
   activeVariantId: string | null
@@ -633,6 +670,9 @@ function VariantsSection({
   submitted: 'accepted' | 'declined' | null
   isPreview: boolean
   questionAcked: boolean
+  /** Proposal has expired and was never decided. Hides the accept /
+   *  decline / question controls in favour of a short explanation. */
+  expired: boolean
 }) {
   const [showCompare, setShowCompare] = useState(false)
   const featured = variants.find(v => v.isFeatured)
@@ -789,7 +829,22 @@ function VariantsSection({
             </div>
           )}
 
-          {!submitted && !isPreview && (
+          {!submitted && !isPreview && expired && (
+            <div style={{
+              padding: '0.75rem 1rem',
+              background: '#fff7ed',
+              color: '#c2410c',
+              border: '1px solid #fed7aa',
+              borderRadius: '0.625rem',
+              fontSize: '0.875rem',
+              fontWeight: 500,
+              lineHeight: 1.5,
+            }}>
+              <strong>This proposal has expired.</strong> Ask Liam for a fresh link before deciding.
+            </div>
+          )}
+
+          {!submitted && !isPreview && !expired && (
             <>
               {questionAcked && (
                 <div style={{
@@ -833,7 +888,7 @@ function VariantsSection({
  * box on mount and on resize. CSS transitions on transform and width
  * give the indicator the smooth slide-and-stretch motion.
  */
-function VariantTabStrip({
+export function VariantTabStrip({
   variants, activeVariantId, onSelect,
 }: {
   variants: PublicVariant[]
@@ -853,20 +908,37 @@ function VariantTabStrip({
       if (!tab) return
       const containerRect = container.getBoundingClientRect()
       const tabRect = tab.getBoundingClientRect()
+      // scrollLeft is added back in: once the strip scrolls, the tab's
+      // bounding rect moves with it but the container's rect doesn't, so
+      // the raw (tabRect.left - containerRect.left) drifts by exactly the
+      // scrolled distance. Adding scrollLeft keeps the indicator glued to
+      // the tab regardless of scroll position.
       setIndicator({
-        left: tabRect.left - containerRect.left,
+        left: tabRect.left - containerRect.left + container.scrollLeft,
         width: tabRect.width,
       })
     }
     measure()
+    const container = containerRef.current
     const ro = new ResizeObserver(measure)
-    if (containerRef.current) ro.observe(containerRef.current)
+    if (container) ro.observe(container)
     window.addEventListener('resize', measure)
+    container?.addEventListener('scroll', measure, { passive: true })
     return () => {
       ro.disconnect()
       window.removeEventListener('resize', measure)
+      container?.removeEventListener('scroll', measure)
     }
   }, [activeVariantId, variants.length])
+
+  // Selecting a tab (including via keyboard/programmatic selection) should
+  // bring it fully into view on a scrolled strip, not just flip the
+  // indicator underneath a tab the visitor can't see.
+  useEffect(() => {
+    if (!activeVariantId) return
+    const tab = tabRefs.current.get(activeVariantId)
+    tab?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+  }, [activeVariantId])
 
   return (
     <div
@@ -874,15 +946,24 @@ function VariantTabStrip({
       role="tablist"
       style={{
         position: 'relative',
-        display: 'inline-flex',
+        display: 'flex',
         background: BRAND.band,
         border: `1px solid ${BRAND.borderSubtle}`,
         borderRadius: '999px',
         padding: '0.25rem',
         boxShadow: 'inset 0 1px 2px rgba(31,44,26,0.04)',
-        overflow: 'hidden',
         maxWidth: '100%',
         flexWrap: 'nowrap',
+        // Three or more pill-shaped tabs at a comfortable tap size clip
+        // past 375px with no way to reach the last one. Let the strip
+        // scroll horizontally instead of clipping, with a snap point per
+        // tab and a soft edge fade so "there's more to scroll" reads as
+        // an affordance rather than a cut-off layout bug.
+        overflowX: 'auto',
+        scrollSnapType: 'x proximity',
+        WebkitOverflowScrolling: 'touch',
+        maskImage: 'linear-gradient(to right, transparent 0, black 0.75rem, black calc(100% - 0.75rem), transparent 100%)',
+        WebkitMaskImage: 'linear-gradient(to right, transparent 0, black 0.75rem, black calc(100% - 0.75rem), transparent 100%)',
       }}
     >
       {indicator && (
@@ -915,6 +996,7 @@ function VariantTabStrip({
             style={{
               position: 'relative',
               zIndex: 1,
+              flexShrink: 0,
               minHeight: '2.75rem',
               padding: '0.625rem 1.125rem',
               fontSize: '0.875rem',
@@ -925,6 +1007,7 @@ function VariantTabStrip({
               borderRadius: '999px',
               cursor: 'pointer',
               whiteSpace: 'nowrap',
+              scrollSnapAlign: 'start',
               transition: 'color 240ms ease',
             }}
           >
@@ -1383,4 +1466,16 @@ function decidedBanner(kind: 'accepted' | 'declined'): React.CSSProperties {
     borderRadius: '0.75rem',
     fontSize: '0.875rem',
   }
+}
+
+const expiredBanner: React.CSSProperties = {
+  width: 'calc(100% - clamp(1.5rem, 6vw, 3rem))',
+  maxWidth: '76rem',
+  margin: '0 auto',
+  padding: '0.875rem 1.25rem',
+  background: '#fff7ed',
+  color: '#c2410c',
+  border: '1px solid #fed7aa',
+  borderRadius: '0.75rem',
+  fontSize: '0.875rem',
 }
