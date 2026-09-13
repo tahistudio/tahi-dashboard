@@ -156,6 +156,39 @@ describe('POST /api/admin/time/stamp-invoiced', () => {
     expect(queries).toHaveLength(0)
   })
 
+  it('rejects a before date with a month outside 1 to 12', async () => {
+    const { handle, queries } = makeDb()
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await stampInvoiced(stampReq({ before: '2026-13-01' }))
+    const json = await res.json() as { error: string }
+
+    expect(res.status).toBe(400)
+    expect(json.error).toContain('calendar date')
+    expect(queries).toHaveLength(0)
+  })
+
+  it('rejects a before date with a day outside the month (2026-02-30, not a leap year)', async () => {
+    const { handle, queries } = makeDb()
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await stampInvoiced(stampReq({ before: '2026-02-30' }))
+    const json = await res.json() as { error: string }
+
+    expect(res.status).toBe(400)
+    expect(json.error).toContain('calendar date')
+    expect(queries).toHaveLength(0)
+  })
+
+  it('accepts 2024-02-29, a real leap day', async () => {
+    const { handle } = makeDb(reads([entryRow()], [org()]))
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await stampInvoiced(stampReq({ before: '2024-02-29' }))
+
+    expect(res.status).toBe(200)
+  })
+
   it('defaults to a dry run: plans without writing anything', async () => {
     const { handle, queries } = makeDb(reads([entryRow()], [org()]))
     vi.mocked(db).mockResolvedValue(handle as never)

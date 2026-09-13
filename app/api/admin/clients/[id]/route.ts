@@ -119,6 +119,13 @@ export async function GET(req: NextRequest, { params }: Params) {
       if (rows?.[0]) {
         billingExtras = {
           customMrr: rows[0].custom_mrr,
+          // This fallback query cannot select custom_mrr_currency (the column
+          // is not on this environment yet), so it is named explicitly as
+          // null rather than left absent. A caller reading customMrr without
+          // its currency beside it would price it in whatever currency it
+          // assumed, which is exactly the mistake lib/currency.ts's pinning
+          // exists to prevent.
+          customMrrCurrency: null,
           billingModel: rows[0].billing_model,
           retainerStartDate: rows[0].retainer_start_date,
           retainerEndDate: rows[0].retainer_end_date,

@@ -13,6 +13,34 @@ import {
 } from '@/lib/stamp-invoiced'
 
 /**
+ * True when `value` is a real calendar date in YYYY-MM-DD form, not just a
+ * string shaped like one. A plain digit-pattern regex accepts nonsense such
+ * as 2026-13-99 or 2026-02-30, both of which SQLite's TEXT date column
+ * happily stores and `lte` happily compares against, so a typo'd cutoff would
+ * silently stamp the wrong entries (or none at all) instead of failing loudly
+ * here.
+ *
+ * Validated by round-tripping through Date.UTC: an out-of-range month or day
+ * rolls the calendar forward (month 13 becomes next January, Feb 30 becomes
+ * March), so the parsed value only echoes the input back when every field was
+ * a real calendar day. UTC is used throughout to keep this immune to the
+ * runtime's local timezone.
+ */
+function isValidCalendarDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  )
+}
+
+/**
  * POST /api/admin/time/stamp-invoiced
  *
  * IC.8: the pre-cutover step for the hourly-to-Xero export (IC.6 / CT.13).
@@ -57,7 +85,7 @@ export async function POST(req: NextRequest) {
     dryRun?: unknown
   }
 
-  if (typeof body.before !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(body.before)) {
+  if (typeof body.before !== 'string' || !isValidCalendarDate(body.before)) {
     return NextResponse.json(
       { error: 'before is required and must be a calendar date in YYYY-MM-DD form' },
       { status: 400 },

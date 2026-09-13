@@ -77,7 +77,7 @@ export function NewMessageEmail({
 
           <EmailParagraph variant="small">
             {toClient
-              ? 'Reply on the thread rather than by email if you can. Files, feedback and approvals all stay attached to the request.'
+              ? 'Replies to this email are not read. Reply on the thread instead, where files, feedback and approvals stay attached to the request.'
               : 'Replying on the thread marks the request as answered for the client.'}
           </EmailParagraph>
         </EmailBody>
