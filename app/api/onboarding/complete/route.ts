@@ -22,6 +22,7 @@ import {
   paymentTermsLabel,
 } from '@/lib/invoice-billing'
 import { withInvoiceNumber } from '@/lib/invoice-number'
+import { stampOrgOnboarded } from '@/lib/org-onboarding'
 
 export const dynamic = 'force-dynamic'
 
@@ -358,6 +359,41 @@ export async function POST(req: NextRequest) {
   if (!entitled) {
     // Not paid and not invited: do not unlock the dashboard.
     return NextResponse.json({ ok: false, reason: 'not-entitled' }, { status: 402 })
+  }
+
+  // Mirror the entitlement onto the ORGANISATION itself, once, for every seat
+  // that ever joins it afterwards. The flag stamped below on the Clerk user is
+  // per-PERSON; a colleague invited into this same org later (a plain Clerk
+  // organization invitation, never one of our own onboarding invite tokens)
+  // never calls this route themselves, so their own flag would read false even
+  // though the org has clearly been through onboarding. This is the write the
+  // dashboard layout and the /onboarding page read back (lib/org-onboarding.ts,
+  // lib/org-onboarding-server.ts), so neither has to ask Clerk about every
+  // other contact at the org. Client entitlements only: a teammate completing
+  // here has no client organisation row to stamp. Best-effort: a D1 hiccup
+  // must not undo the entitlement already proven above.
+  if (!isTeammate) {
+    try {
+      const database = await db()
+      const drizzle = database as Drizzle
+      const [org] = await drizzle
+        .select({ onboardingState: schema.organisations.onboardingState })
+        .from(schema.organisations)
+        .where(eq(schema.organisations.id, orgId))
+        .limit(1)
+      if (org) {
+        await drizzle
+          .update(schema.organisations)
+          .set({
+            onboardingState: stampOrgOnboarded(org.onboardingState),
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(schema.organisations.id, orgId))
+      }
+    } catch {
+      // non-fatal: the per-user flag below is still the durable record for
+      // this person; a later seat simply re-derives the org's other signals.
+    }
   }
 
   try {

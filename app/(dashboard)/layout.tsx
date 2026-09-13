@@ -31,6 +31,7 @@ import { eq, inArray, sql } from 'drizzle-orm'
 import { resolvePermissions, featureMap, applyModuleGates, MODULE_SETTING_KEYS } from '@/lib/permissions'
 import { linkTeamMemberOnSignIn } from '@/lib/team-link-server'
 import { linkContactOnSignIn } from '@/lib/contact-link-server'
+import { resolveAndStampOrgOnboarding } from '@/lib/org-onboarding-server'
 import './app-shell.css'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -92,6 +93,24 @@ export default async function DashboardLayout({
   // was written for never reached it. An already-linked user still costs one
   // indexed lookup and nothing more, so running it first is free.
   if (!isAdmin) await linkContactOnSignIn(userId, orgId)
+
+  // Org-level onboarding backfill. onboardingComplete above is a property of
+  // the signed-in Clerk USER, written exactly once by POST
+  // /api/onboarding/complete. A colleague invited straight into an org that
+  // finished onboarding long ago (a plain Clerk organization invitation,
+  // never one of our own onboarding invite tokens) never called that route
+  // themselves, so their own flag reads false even though their ORGANISATION
+  // is a paying, established client - and their very first sign-in landed
+  // them on the client onboarding wizard instead of inside their own
+  // organisation's portal. Onboarding completion is a property of the ORG
+  // (see lib/org-onboarding.ts); a client whose org already qualifies is
+  // treated as complete here, and their own publicMetadata is stamped so the
+  // cheap per-user check also passes next time. Only runs once the cheap
+  // check has already missed, so an established user's normal page load pays
+  // nothing extra.
+  if (!isAdmin && !onboardingComplete) {
+    onboardingComplete = await resolveAndStampOrgOnboarding(userId, orgId)
+  }
 
   if (!onboardingComplete) redirect('/onboarding')
 
