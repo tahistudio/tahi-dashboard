@@ -5,6 +5,7 @@ import {
   CLIENT_REVIEW_STATUS,
   fileOpenDestination,
   invoicePayDestination,
+  isClientHomeMemberSeat,
   isDeliveredForClient,
   isOpenForClient,
   needsClientReview,
@@ -211,5 +212,29 @@ describe('requestRouteId', () => {
 
   it('encodes an id that would otherwise change the path', () => {
     expect(requestRouteId('a/b')).toBe('requests/a%2Fb')
+  })
+})
+
+describe('isClientHomeMemberSeat', () => {
+  it('is true only for an explicit member seat', () => {
+    expect(isClientHomeMemberSeat({ seat: 'member' })).toBe(true)
+  })
+
+  it('reads an explicit admin seat as the admin shape', () => {
+    expect(isClientHomeMemberSeat({ seat: 'admin' })).toBe(false)
+  })
+
+  it('reads a still-loading subscription (no payload yet) as the admin shape', () => {
+    // subData is undefined until the read answers. The home must not flash
+    // the member variant (or its own real data) before the server has said
+    // which one this seat gets.
+    expect(isClientHomeMemberSeat(undefined)).toBe(false)
+    expect(isClientHomeMemberSeat(null)).toBe(false)
+  })
+
+  it('reads a payload from an older deploy with no seat field as the admin shape', () => {
+    // Back-compat: a subscription object that IS present is trustworthy on
+    // its own, matching every other field this route has ever sent.
+    expect(isClientHomeMemberSeat({})).toBe(false)
   })
 })

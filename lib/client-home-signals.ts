@@ -197,3 +197,36 @@ export function externalLinkDestination(url: string | null | undefined): HomeDes
 export function requestRouteId(requestId: string | null | undefined): string {
   return itemRouteId('requests', requestId)
 }
+
+/** Minimum shape the seat decision below needs from a subscription read. */
+export interface ClientHomeSeatLike {
+  seat?: 'admin' | 'member'
+}
+
+/**
+ * Whether the client home's Billing zone must draw the member variant - no
+ * plan in the greeting, no rate, no invoices due, no Pay button, "Billing is
+ * handled by your account admin" in their place - instead of the admin's real
+ * Invoices and Plan/Project cards.
+ *
+ * "I shouldn't see my plan on the home screen if I'm a member" (Liam). The
+ * server has already done the actual withholding by the time this runs:
+ * GET /api/portal/subscription hands a member seat `subscription: null` and
+ * `seat: 'member'` regardless of what this function returns (see
+ * app/api/portal/subscription/route.ts). This only decides which card SHAPE
+ * the home draws with what it was given - never a second gate the client
+ * could get to disagree with the server.
+ *
+ * Reads the flag as an explicit opt-IN to the member variant, not an opt-out
+ * from the admin one: only `seat === 'member'` returns true. A still-loading
+ * read (subData undefined), a real admin, an impersonating preview (which
+ * always reads as admin - see the route), and a payload from an older deploy
+ * with no `seat` field at all all draw the admin shape, matching the
+ * existing convention that a present subscription value is trustworthy on
+ * its own.
+ */
+export function isClientHomeMemberSeat(
+  subData: ClientHomeSeatLike | null | undefined,
+): boolean {
+  return subData?.seat === 'member'
+}

@@ -38,6 +38,8 @@ vi.mock('@/lib/require-feature', () => ({
 }))
 
 import { db } from '@/lib/db'
+import { getPortalAuth } from '@/lib/server-auth'
+import { isOrgAdmin } from '@/lib/portal-access'
 import { NextRequest } from 'next/server'
 
 import { GET as portalSubscription } from '@/app/api/portal/subscription/route'
@@ -133,6 +135,7 @@ interface SubscriptionBody {
   } | null
   billing?: { monthlyRate: number; currency: string; cycleTotal: number }
   plans: Array<{ id: string; monthlyRate: number }>
+  seat?: 'admin' | 'member'
 }
 
 interface TracksBody {
@@ -305,6 +308,101 @@ describe('GET /api/portal/subscription plan truth', () => {
     expect(body.subscription?.invoiceChannel).toBe('stripe')
     // SUB_ROW carries a real currentPeriodEnd, so the date wins outright.
     expect(body.subscription?.nextInvoiceDate).toBe('2026-10-01T00:00:00.000Z')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Seat gating: what a member seat is (and is not) handed, and the flag every
+// consumer branches on. "I shouldn't see my plan on the home screen if I'm a
+// member" (Liam) - the route used to just 403 a plain member outright, which
+// left the home's Plan card falling back to generic-but-still-plan-shaped
+// copy ("Retainer", "TBC", "Ask about your plan") instead of never rendering
+// at all. Now every seat gets a 200, and the `seat` flag says which shape it
+// is honest to draw.
+// ---------------------------------------------------------------------------
+describe('GET /api/portal/subscription seat gating', () => {
+  it('withholds every plan and money field from a member seat with an active subscription, but resolves clientType honestly', async () => {
+    vi.mocked(isOrgAdmin).mockResolvedValueOnce(false)
+    // Reads, in order: plan catalogue, the active subscription. A member
+    // seat is refused before the org, invoice-channel, custom-rate or tracks
+    // reads ever run.
+    const { handle, entries } = makeDb([
+      [],
+      [SUB_ROW],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await portalSubscription(req('/api/portal/subscription'))
+    expect(res.status).toBe(200)
+    const body = await res.json() as SubscriptionBody
+
+    expect(body.seat).toBe('member')
+    expect(body.subscription).toBeNull()
+    expect(body.plans).toEqual([])
+    expect(body.clientType).toBe('retainer')
+    expect(entries).toEqual(['select', 'select'])
+  })
+
+  it('withholds the catalogue from a member seat with no active subscription too', async () => {
+    vi.mocked(isOrgAdmin).mockResolvedValueOnce(false)
+    // Reads, in order: plan catalogue, subscription (none), the projects
+    // probe, the published-schedule probe.
+    const { handle } = makeDb([[], [], [], []])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (await portalSubscription(req('/api/portal/subscription'))).json() as SubscriptionBody
+
+    expect(body.seat).toBe('member')
+    expect(body.subscription).toBeNull()
+    expect(body.plans).toEqual([])
+  })
+
+  it('gives a workspace admin every field, tagged seat: admin', async () => {
+    vi.mocked(isOrgAdmin).mockResolvedValueOnce(true)
+    const { handle } = makeDb([
+      [],
+      [SUB_ROW],
+      [ORG_CUSTOM_TRACKS],
+      [],
+      [{ custom_mrr: 2000, custom_mrr_currency: 'GBP' }],
+      [SMALL_TRACK_ROW],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (await portalSubscription(req('/api/portal/subscription'))).json() as SubscriptionBody
+
+    expect(body.seat).toBe('admin')
+    expect(body.subscription).not.toBeNull()
+    expect(body.subscription?.monthlyRate).toBe(2000)
+    expect(body.plans.length).toBeGreaterThan(0)
+  })
+
+  it('reads Client view / Act as client as an admin seat, without ever asking isOrgAdmin', async () => {
+    vi.mocked(getPortalAuth).mockResolvedValueOnce({
+      userId: 'user_admin',
+      orgId: 'org-giant',
+      sessionId: null,
+      clerkOrgId: 'clerk_org_tahi',
+      impersonating: true,
+    })
+    // A studio preview has no contact row of its own: isOrgAdmin would say
+    // false if asked, so the route must never ask it while impersonating.
+    vi.mocked(isOrgAdmin).mockResolvedValueOnce(false)
+    const { handle } = makeDb([
+      [],
+      [SUB_ROW],
+      [ORG_CUSTOM_TRACKS],
+      [],
+      [{ custom_mrr: 2000, custom_mrr_currency: 'GBP' }],
+      [SMALL_TRACK_ROW],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (await portalSubscription(req('/api/portal/subscription'))).json() as SubscriptionBody
+
+    expect(body.seat).toBe('admin')
+    expect(body.subscription).not.toBeNull()
+    expect(vi.mocked(isOrgAdmin)).not.toHaveBeenCalled()
   })
 })
 

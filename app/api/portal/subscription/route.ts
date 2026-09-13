@@ -34,12 +34,20 @@ export async function GET(req: NextRequest) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // Financial data (plan rates, cycle totals, GST): workspace admins of the
-  // org only. Impersonation (admin Client view) has no contact row, so it is
-  // allowed through for this read.
-  if (!impersonating && !(await isOrgAdmin(drizzle, orgId, userId))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  // Financial data (plan rates, add-ons, invoice channel, track entitlement,
+  // cycle totals, GST): workspace admins of the org only. Impersonation
+  // (admin Client view / Act as client) has no contact row of its own, and
+  // the point of the preview is to see what the studio can see, so it reads
+  // as an admin too. A plain member seat still reaches this route rather than
+  // being turned away at the door: `clientType` is a structural fact (which
+  // board shape the home renders, TrackBoard vs ProjectBoard), never a money
+  // one, so it keeps resolving honestly for every seat. Every plan, rate and
+  // invoice-adjacent field below is withheld server-side instead, behind the
+  // `seat` flag, so nothing here is ever trusted to the client to hide (see
+  // lib/portal-access.ts and components/tahi/overview/homes/client-home.tsx's
+  // member variant).
+  const isAdmin = impersonating || (await isOrgAdmin(drizzle, orgId, userId))
+  const seat: 'admin' | 'member' = isAdmin ? 'admin' : 'member'
 
   const catalog = await loadPlanCatalog(drizzle)
   const plans = catalog.map((p) => ({
@@ -107,7 +115,24 @@ export async function GET(req: NextRequest) {
     // read /api/portal/project). 'retainer' with no subscription row is the
     // honest "your plan is being set up" state: TrackBoard's own empty state
     // says so without any project language.
-    return NextResponse.json({ subscription: null, plans, clientType: presentation.clientType })
+    return NextResponse.json({
+      subscription: null,
+      // The catalogue is a public price list, but this route's promise to a
+      // member seat is that no plan or money field crosses the wire at all,
+      // so it withholds this too rather than drawing a line between "rate"
+      // and "list of rates".
+      plans: isAdmin ? plans : [],
+      clientType: presentation.clientType,
+      seat,
+    })
+  }
+
+  // A member seat still gets the honest structural fact (this org runs a
+  // retainer), never the rate, add-ons, invoice channel, track entitlement or
+  // next-invoice date that make it a plan. See the member variant in
+  // components/tahi/overview/homes/client-home.tsx.
+  if (!isAdmin) {
+    return NextResponse.json({ clientType: 'retainer', subscription: null, plans: [], seat })
   }
 
   // What this client actually pays, not what the studio lists. Two reads of
@@ -241,6 +266,7 @@ export async function GET(req: NextRequest) {
     // Active retainer -> TrackBoard / "Your plan". The overview home reads this
     // signal (present subscription => retainer) to branch the client home.
     clientType: 'retainer',
+    seat,
     subscription: {
       id: sub.id,
       planType: sub.planType,

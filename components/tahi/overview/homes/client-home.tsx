@@ -46,6 +46,7 @@ import {
   externalLinkDestination,
   fileOpenDestination,
   invoicePayDestination,
+  isClientHomeMemberSeat,
   partitionClientRequests,
   requestRouteId,
   type HomeDestination,
@@ -154,6 +155,14 @@ interface InvoicesResp {
 
 interface SubscriptionResp {
   clientType: 'retainer' | 'project'
+  /**
+   * 'admin' sees every field below; 'member' always gets `subscription: null`
+   * (the server withholds the plan name, rate, add-ons and invoice channel
+   * rather than trusting this component to hide them). Absent on a payload
+   * from an older deploy reads as 'admin', matching the field's own default:
+   * a subscription that IS present is trustworthy on its own.
+   */
+  seat?: 'admin' | 'member'
   subscription: null | {
     id: string
     planType: string
@@ -960,6 +969,13 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // reader on the ordinary path.
   const invoicesSettled = !!invoicesData || !!invoicesError
   const { data: subData, isLoading: subLoading } = useResource<SubscriptionResp>('/api/portal/subscription')
+  // A member seat (not a workspace admin of their own org, and not a studio
+  // session previewing one) never gets a `subscription` object back from the
+  // server - see app/api/portal/subscription/route.ts. This only decides
+  // which Billing-zone card renders; the server has already done the actual
+  // withholding, so there is nothing for the client to hide that it was not
+  // already handed.
+  const isMemberSeat = isClientHomeMemberSeat(subData)
 
   // Retainer (TrackBoard) vs project (ProjectBoard): derived from the real
   // subscription signal; ctx.clientType is a preview-only override. Defaults to
@@ -1524,6 +1540,22 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       </Zone>
 
       <Zone label="Billing">
+        {/* A member seat (not a workspace admin of their own org) never gets a
+            subscription object back from the server, and their own invoices
+            read 403s the same way it always has. Rather than let the Plan
+            card fall back to generic placeholder copy ("Retainer", "TBC",
+            "Ask about your plan") beside a dropped Invoices card, which still
+            reads as "there is a plan here, just no numbers", the whole zone
+            collapses to one honest line: money lives with the org admin, full
+            stop. While the read is in flight this renders the plain admin
+            shape below (a brief shimmer, never the wrong final state). */}
+        {isMemberSeat ? (
+          <Card span={12}>
+            <CardH ic="wallet" title="Billing" />
+            <div className="ov-mini">Billing is handled by your account admin.</div>
+          </Card>
+        ) : (
+        <>
         {/* A seat that may not read the org's invoices gets no invoices card at
             all. Rendering it empty told them "No invoices yet." about bills
             that exist, beside a Pay button for a list they were never served.
@@ -1673,6 +1705,8 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
               </button>
             </div>
           </Card>
+        )}
+        </>
         )}
       </Zone>
     </div>
