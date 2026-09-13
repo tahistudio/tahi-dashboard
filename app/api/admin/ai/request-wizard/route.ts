@@ -14,6 +14,10 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { HAIKU_MODEL } from '@/lib/ai-models'
+import { db } from '@/lib/db'
+import { estimateRequestHours, wizardHourEstimatesPromptBlock } from '@/lib/wizard-hour-estimates'
+import { loadRequestOrgContext } from '@/lib/ai-request-org-context'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 export const dynamic = 'force-dynamic'
 
@@ -88,6 +92,12 @@ BRAND VOICE:
 - NEVER use em dashes or en dashes. Use commas, colons, full stops, or restructure the sentence instead.
 - NZ English spelling (colour, organise, centre).
 
+REPLY FORMATTING (strict):
+- Plain sentences and short paragraphs by default.
+- **Bold** is allowed for a single key word or phrase. Nothing else is ever bold.
+- A short numbered list is allowed for follow-up questions or steps, three items or fewer.
+- NEVER use headings, tables, or code fences in a reply. This is a chat message, not a document.
+
 REQUESTS VS TASKS (important):
 - Requests are client-facing work items. The client sees the title, description, status, and comments.
 - Tasks are internal to Tahi (clients never see them). Do not mention tasks to the user.
@@ -109,11 +119,17 @@ CATEGORY RULES:
 - Visual redesign, mockup, and layout work is ALWAYS "design". Webflow build/implementation is "development".
 - For redesign + rebuild projects, create a "design" request first with a note that development follows after design approval. If it's genuinely one tight package, suggest splitting into two requests.
 
-HOUR ESTIMATES (baselines, adjust for complexity):
-- design small: 6-12 | design large: 24-40
-- development small: 8-16 | development large: 32-60
-- content small: 4-8 | content large: 12-24
-- strategy small: 4-8 | strategy large: 16-30
+HOUR ESTIMATES (the studio's own numbers; every draft's hours are set from this table regardless of what you write, so use it rather than inventing your own figure):
+${wizardHourEstimatesPromptBlock()}
+
+TIMELINE HONESTY (critical, read carefully):
+- Never agree to a timeline the scope cannot meet. A 15 to 20 page design plus a Webflow build plus content is weeks of work, not days: do not say "days" for anything that size.
+- When you mention how long something will take, give a realistic range in weeks per part (for example: design 2 to 3 weeks, build 2 to 3 weeks, content 1 to 2 weeks), built from the HOUR ESTIMATES above, not from what the client wants to hear.
+- If the client insists on a specific date, do not promise it. Say plainly, in the request description, what can realistically ship by that date and what cannot.
+
+CLIENT CONTEXT:
+- If a CONTEXT section below names the client's industry, brands, or past requests, treat that as already known. Never ask a question whose answer is already listed there.
+- If the CONTEXT section says this client has more than one brand or website on file, ask which one this request is for before drafting. Never guess or split the difference.
 
 YOUR JOB:
 1. When the user describes what they need, ask 2-3 smart follow-up questions to scope properly: specific deliverable, affected pages/sections, available assets, deadline.
@@ -143,7 +159,7 @@ Here's what I've drafted based on your description. Have a look and let me know 
 </requests>
 
 RULES:
-- estimatedHours must be a number (integer).
+- estimatedHours must be a number (integer). It is only ever a starting point: the route sets the real value from the studio's own table, not from what you write here.
 - category must be one of: design, development, content, strategy.
 - type must be one of: small_task, large_task, bug_fix, new_feature.
 - priority must be "standard" or "high". Map urgent/ASAP/deadline-today to "high". Default is "standard".
@@ -202,21 +218,28 @@ function parseRequestsFromResponse(text: string): { reply: string; requests: Req
     const CATEGORIES = ['design', 'development', 'content', 'strategy'] as const
     const TYPES = ['small_task', 'large_task', 'bug_fix', 'new_feature'] as const
     const PRIORITIES = ['standard', 'high'] as const
-    const requests: RequestDraft[] = parsed.map(r => ({
-      id: generateId(),
-      title: (typeof r.title === 'string' ? r.title : 'New request').slice(0, 60),
-      description: typeof r.description === 'string' ? r.description : '',
-      category: (CATEGORIES as readonly string[]).includes(r.category as string)
+    const requests: RequestDraft[] = parsed.map(r => {
+      const category: RequestDraft['category'] = (CATEGORIES as readonly string[]).includes(r.category as string)
         ? r.category as RequestDraft['category']
-        : 'design',
-      type: (TYPES as readonly string[]).includes(r.type as string)
+        : 'design'
+      const type: RequestDraft['type'] = (TYPES as readonly string[]).includes(r.type as string)
         ? r.type as RequestDraft['type']
-        : 'small_task',
-      priority: (PRIORITIES as readonly string[]).includes(r.priority as string)
-        ? r.priority as RequestDraft['priority']
-        : 'standard',
-      estimatedHours: typeof r.estimatedHours === 'number' ? r.estimatedHours : 8,
-    }))
+        : 'small_task'
+      return {
+        id: generateId(),
+        title: (typeof r.title === 'string' ? r.title : 'New request').slice(0, 60),
+        description: typeof r.description === 'string' ? r.description : '',
+        category,
+        type,
+        priority: (PRIORITIES as readonly string[]).includes(r.priority as string)
+          ? r.priority as RequestDraft['priority']
+          : 'standard',
+        // Never the model's own number: a model asked to estimate hours for
+        // a large scope once answered "8", which is the kind of confident
+        // arithmetic error the studio's own table exists to catch.
+        estimatedHours: estimateRequestHours(category, type),
+      }
+    })
     return { reply, requests }
   } catch {
     return { reply: text.replace(/<requests>[\s\S]*?<\/requests>/, '').trim(), requests: [] }
@@ -259,16 +282,11 @@ function detectPriority(text: string): RequestDraft['priority'] {
   return 'standard'
 }
 
-function estimateHours(category: RequestDraft['category'], type: RequestDraft['type']): number {
-  const isLarge = type === 'large_task' || type === 'new_feature'
-  const estimates: Record<RequestDraft['category'], { small: number; large: number }> = {
-    design:      { small: 8,  large: 32 },
-    development: { small: 12, large: 46 },
-    content:     { small: 6,  large: 18 },
-    strategy:    { small: 6,  large: 23 },
-  }
-  return estimates[category][isLarge ? 'large' : 'small']
-}
+// Hour estimates for both the model's own draft and the deterministic
+// fallback come from lib/wizard-hour-estimates.ts (imported above as
+// estimateRequestHours), the single table the system prompt is built from
+// too, so the three can never quote different numbers for the same
+// category and size.
 
 function generateTitle(text: string, category: RequestDraft['category']): string {
   const firstSentence = text.split(/[.!?\n]/)[0].trim()
@@ -346,7 +364,7 @@ function handleDeterministic(messages: WizardMessage[]): WizardResponse {
     description: buildDescription(allText),
     category: resolvedCategory,
     type,
-    estimatedHours: estimateHours(resolvedCategory, type),
+    estimatedHours: estimateRequestHours(resolvedCategory, type),
     priority,
   }
   return {
@@ -359,7 +377,7 @@ function handleDeterministic(messages: WizardMessage[]): WizardResponse {
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -399,7 +417,33 @@ export async function POST(req: NextRequest) {
   if (context?.speaker === 'admin') contextParts.push(`The speaker is a Tahi team member drafting on behalf of a client.`)
   if (context?.speaker === 'client') contextParts.push(`The speaker is the client themselves.`)
   if (context?.planType) contextParts.push(`The client's plan is "${context.planType}".`)
-  const contextNote = contextParts.join(' ')
+
+  // The caller (the panel) sends context.orgId once a client has been named,
+  // whether that happened before the drawer opened or mid-conversation via
+  // its own client picker. A team member scoped to specific clients could
+  // otherwise name any org id here and have that client's name, industry,
+  // website, brands and recent request titles woven into the reply, so scope
+  // is checked first, the same way POST /api/admin/requests does it (CLAUDE.md
+  // rule 11). A denial is answered directly, not swallowed: silently dropping
+  // the context would leave the wizard asking questions the caller can never
+  // answer for a client it cannot see.
+  //
+  // Once access is confirmed, the context read itself is best effort: a read
+  // that fails costs the model some helpful background, never the draft.
+  if (context?.orgId) {
+    try {
+      const database = await db()
+      const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+      const denied = await requireAccessToOrg(drizzle, userId, context.orgId)
+      if (denied) return denied
+      const orgContext = await loadRequestOrgContext(drizzle, context.orgId)
+      if (orgContext) contextParts.push(orgContext)
+    } catch {
+      // No context this turn. The interview still works, it just has to ask.
+    }
+  }
+
+  const contextNote = contextParts.join('\n\n')
 
   try {
     // The wizard seeds its transcript with an assistant greeting, and the

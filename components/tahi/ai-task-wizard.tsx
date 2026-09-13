@@ -31,6 +31,7 @@ import { AlertTriangle, Check, FileText, Loader2, Paperclip, Pencil, Send, Spark
 import { useSWRConfig } from 'swr'
 import { apiPath } from '@/lib/api'
 import { SlideOver } from '@/components/tahi/slide-over'
+import { ChatMarkdown } from '@/components/tahi/chat-markdown'
 import { DEGRADED_PREFIX, aiWizardProgress } from '@/components/tahi/ai-request-wizard'
 import { TASK_PRIORITIES, taskPriorityLabel } from '@/lib/task-priorities'
 import {
@@ -696,7 +697,7 @@ export function AiTaskWizardPanel({
                       {msg.attachment}
                     </span>
                   )}
-                  {msg.role === 'user' || msg.notice ? msg.content : renderMessageContent(msg.content)}
+                  {msg.role === 'user' || msg.notice ? msg.content : <ChatMarkdown text={msg.content} />}
                 </span>
               </div>
 
@@ -1058,91 +1059,6 @@ export function AiTaskWizardButton({ onClick }: { onClick: () => void }) {
       AI Help
     </button>
   )
-}
-
-// ── Inline Markdown Renderer ─────────────────────────────────────────────────
-
-function renderInlineFormatting(text: string): ReactNode[] {
-  const parts: ReactNode[] = []
-  // Match **bold** and *italic* patterns
-  const regex = /(\*\*(.+?)\*\*|\*(.+?)\*)/g
-  let lastIndex = 0
-  let match: RegExpExecArray | null = null
-
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index))
-    }
-    if (match[2]) {
-      parts.push(<strong key={match.index}>{match[2]}</strong>)
-    } else if (match[3]) {
-      parts.push(<em key={match.index}>{match[3]}</em>)
-    }
-    lastIndex = match.index + match[0].length
-  }
-
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex))
-  }
-
-  return parts.length > 0 ? parts : [text]
-}
-
-function renderMessageContent(content: string): ReactNode {
-  const lines = content.split('\n')
-  const elements: ReactNode[] = []
-  let listItems: ReactNode[] = []
-  let listStart = 0
-
-  const flushList = () => {
-    if (listItems.length > 0) {
-      elements.push(
-        <ol
-          key={`ol-${listStart}`}
-          style={{
-            margin: '0.375rem 0',
-            paddingLeft: '1.25rem',
-            listStyleType: 'decimal',
-          }}
-        >
-          {listItems}
-        </ol>,
-      )
-      listItems = []
-    }
-  }
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    const numberedMatch = line.match(/^(\d+)\.\s+(.+)$/)
-
-    if (numberedMatch) {
-      if (listItems.length === 0) {
-        listStart = i
-      }
-      listItems.push(
-        <li key={i} style={{ marginBottom: '0.125rem' }}>
-          {renderInlineFormatting(numberedMatch[2])}
-        </li>,
-      )
-    } else {
-      flushList()
-      if (line.trim() === '') {
-        elements.push(<br key={i} />)
-      } else {
-        elements.push(
-          <span key={i}>
-            {i > 0 && listItems.length === 0 && elements.length > 0 && lines[i - 1].trim() !== '' ? <br /> : null}
-            {renderInlineFormatting(line)}
-          </span>,
-        )
-      }
-    }
-  }
-
-  flushList()
-
-  return <>{elements}</>
 }
 
 // ── Draft card ────────────────────────────────────────────────────────────────

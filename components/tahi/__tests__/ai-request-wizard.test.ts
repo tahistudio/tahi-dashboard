@@ -12,7 +12,12 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildCreateRequestBody,
+  buildCreateSubRequestBody,
   draftBriefHtml,
+  planDraftCreation,
+  siblingNote,
+  withSiblingNote,
+  summariseCreation,
   wizardSubmitControls,
   DEGRADED_PREFIX,
   type RequestDraft,
@@ -136,6 +141,124 @@ describe('wizardSubmitControls', () => {
   it('offers neither on the portal, where the route derives the org and nothing is internal', () => {
     expect(wizardSubmitControls({ ...drawer, isAdminFlow: false }))
       .toEqual({ clientPicker: false, internalOnly: false })
+  })
+})
+
+describe('planDraftCreation', () => {
+  it('files a single draft as itself, no batching machinery involved', () => {
+    expect(planDraftCreation(1, true)).toEqual([{ index: 0, role: 'single' }])
+    expect(planDraftCreation(1, false)).toEqual([{ index: 0, role: 'single' }])
+  })
+
+  it('returns nothing for an empty batch', () => {
+    expect(planDraftCreation(0, true)).toEqual([])
+  })
+
+  it('nests an admin batch: first draft is the parent, the rest are its sub-requests', () => {
+    expect(planDraftCreation(3, true)).toEqual([
+      { index: 0, role: 'parent' },
+      { index: 1, role: 'sub' },
+      { index: 2, role: 'sub' },
+    ])
+  })
+
+  it('never nests a client batch: the portal has no sub-requests POST, so every draft is a sibling', () => {
+    expect(planDraftCreation(3, false)).toEqual([
+      { index: 0, role: 'sibling' },
+      { index: 1, role: 'sibling' },
+      { index: 2, role: 'sibling' },
+    ])
+  })
+})
+
+describe('siblingNote and withSiblingNote', () => {
+  const drafts: RequestDraft[] = [
+    { ...DRAFT, id: 'a', title: 'Redesign homepage hero' },
+    { ...DRAFT, id: 'b', title: 'Write launch blog post' },
+    { ...DRAFT, id: 'c', title: 'Fix checkout bug' },
+  ]
+
+  it('names every other draft in the batch, not itself', () => {
+    expect(siblingNote(drafts, 0)).toBe('Filed together with: Write launch blog post, Fix checkout bug.')
+  })
+
+  it('is empty for a lone draft, so a single create never grows an empty note', () => {
+    expect(siblingNote([drafts[0]], 0)).toBe('')
+  })
+
+  it('folds the note into the description rather than replacing it', () => {
+    const noted = withSiblingNote(drafts[0], drafts, 0)
+    expect(noted.description).toBe(
+      'Replace the hero image and headline.\n\nCopy comes from the client.\n\nFiled together with: Write launch blog post, Fix checkout bug.',
+    )
+  })
+
+  it('leaves a lone draft unchanged', () => {
+    expect(withSiblingNote(drafts[0], [drafts[0]], 0)).toEqual(drafts[0])
+  })
+})
+
+describe('buildCreateSubRequestBody', () => {
+  it('maps the wizard size vocabulary onto the sub-requests route small/large field', () => {
+    expect(buildCreateSubRequestBody({ ...DRAFT, type: 'small_task' }).size).toBe('small')
+    expect(buildCreateSubRequestBody({ ...DRAFT, type: 'bug_fix' }).size).toBe('small')
+    expect(buildCreateSubRequestBody({ ...DRAFT, type: 'large_task' }).size).toBe('large')
+    expect(buildCreateSubRequestBody({ ...DRAFT, type: 'new_feature' }).size).toBe('large')
+  })
+
+  it('converts the brief to HTML like the top-level create body does', () => {
+    const body = buildCreateSubRequestBody(DRAFT)
+    expect(body.description).toBe(
+      '<p>Replace the hero image and headline.</p><p>Copy comes from the client.</p>',
+    )
+  })
+
+  it('carries title, category, priority and hours through unchanged', () => {
+    const body = buildCreateSubRequestBody(DRAFT)
+    expect(body.title).toBe(DRAFT.title)
+    expect(body.category).toBe(DRAFT.category)
+    expect(body.priority).toBe(DRAFT.priority)
+    expect(body.estimatedHours).toBe(DRAFT.estimatedHours)
+  })
+})
+
+describe('summariseCreation', () => {
+  it('reports a single success or failure exactly as before', () => {
+    expect(summariseCreation([{ draft: DRAFT, ok: true }])).toBe('Done. Request has been created.')
+    expect(summariseCreation([{ draft: DRAFT, ok: false }]))
+      .toBe('Failed to create the request. Please try again.')
+  })
+
+  it('names every draft on a full batch success, so nobody has to count cards', () => {
+    const a = { ...DRAFT, id: 'a', title: 'Redesign homepage hero' }
+    const b = { ...DRAFT, id: 'b', title: 'Write launch blog post' }
+    const c = { ...DRAFT, id: 'c', title: 'Fix checkout bug' }
+    expect(summariseCreation([
+      { draft: a, ok: true }, { draft: b, ok: true }, { draft: c, ok: true },
+    ])).toBe(
+      'Done. All 3 requests have been created: Redesign homepage hero, Write launch blog post, Fix checkout bug.',
+    )
+  })
+
+  it('names exactly which drafts failed on a partial batch, instead of one generic apology', () => {
+    const a = { ...DRAFT, id: 'a', title: 'Redesign homepage hero' }
+    const b = { ...DRAFT, id: 'b', title: 'Write launch blog post' }
+    expect(summariseCreation([{ draft: a, ok: true }, { draft: b, ok: false }]))
+      .toBe('Created 1 of 2 requests. Could not file: Write launch blog post. Try again for those.')
+  })
+
+  it('says so plainly when every draft in the batch failed', () => {
+    const a = { ...DRAFT, id: 'a' }
+    const b = { ...DRAFT, id: 'b' }
+    expect(summariseCreation([{ draft: a, ok: false }, { draft: b, ok: false }]))
+      .toBe('None of the requests could be created. Try again or fall back to the standard form.')
+  })
+
+  it('never uses an em or en dash', () => {
+    const a = { ...DRAFT, id: 'a' }
+    const text = summariseCreation([{ draft: a, ok: true }])
+    expect(text.includes(String.fromCharCode(0x2014))).toBe(false)
+    expect(text.includes(String.fromCharCode(0x2013))).toBe(false)
   })
 })
 

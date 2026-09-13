@@ -23,6 +23,9 @@ import { HAIKU_MODEL } from '@/lib/ai-models'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { estimateRequestHours, wizardHourEstimatesPromptBlock } from '@/lib/wizard-hour-estimates'
+import { loadRequestOrgContext } from '@/lib/ai-request-org-context'
+import { resolveD1OrgId } from '@/lib/upload-access'
 
 export const dynamic = 'force-dynamic'
 
@@ -139,6 +142,12 @@ BRAND VOICE:
 - NEVER use em dashes or en dashes. Use commas, colons, full stops, or restructure.
 - NZ English spelling (colour, organise, centre).
 
+REPLY FORMATTING (strict):
+- Plain sentences and short paragraphs by default.
+- **Bold** is allowed for a single key word or phrase. Nothing else is ever bold.
+- A short numbered list is allowed for follow-up questions, three items or fewer.
+- NEVER use headings, tables, or code fences in a reply. This is a chat message, not a document.
+
 YOU ARE SPEAKING TO A CLIENT (NOT INTERNAL TAHI STAFF):
 - Never mention pricing, hour estimates, plan tiers, or internal tracks.
 - Never refer to "tasks", they are "requests" from the client's side.
@@ -156,6 +165,18 @@ CATEGORIES (shown to the user as labels):
 - development: Webflow builds, code changes, integrations, bug fixes, CMS work.
 - content: blog posts, copy, newsletters, case studies.
 - strategy: audits, roadmaps, competitor research, conversion planning.
+
+INTERNAL SCOPE GUIDE (never state these numbers to the client; they are only so your own sense of how big a job is stays honest):
+${wizardHourEstimatesPromptBlock()}
+
+TIMELINE HONESTY (critical, read carefully):
+- Never agree that something can be done in "days" when the scope described is actually weeks of work (for example, a full multi-page design plus a Webflow build plus content). Use the INTERNAL SCOPE GUIDE above to judge this, silently.
+- Do not state a timeline yourself. If the client asks how long something will take or insists on a date, tell them the Tahi team will confirm timing once the request is submitted, and, in the request description, note plainly what the client asked for so the team can answer honestly.
+- Never promise a delivery date on the Tahi team's behalf.
+
+CLIENT CONTEXT:
+- If a CONTEXT section below names this client's industry, brands, or past requests, treat that as already known. Never ask a question whose answer is already listed there.
+- If the CONTEXT section says this client has more than one brand or website on file, ask which one this request is for before drafting. Never guess or split the difference.
 
 YOUR JOB:
 1. When the user describes what they need, ask 2-3 focused questions to scope it properly: what specifically they want delivered, which pages or sections are affected, any assets they'll provide, and deadline.
@@ -187,7 +208,7 @@ RULES:
 - category must be one of: design, development, content, strategy.
 - type must be one of: small_task, large_task, bug_fix, new_feature.
 - priority: "standard" by default, "high" ONLY when the client explicitly says urgent, ASAP, or sets a tight deadline within a week.
-- estimatedHours must be a positive integer.
+- estimatedHours must be a positive integer. It is only ever a starting point: the route sets the real value from the studio's own scope guide, not from what you write here.
 - Title under 60 characters, no filler like "I need you to" or "please help with".
 - Description should sound like the client wrote it.
 - Never use em dashes or en dashes.`
@@ -242,21 +263,27 @@ function parseRequestsFromResponse(text: string): { reply: string; requests: Req
     const CATEGORIES = ['design', 'development', 'content', 'strategy'] as const
     const TYPES = ['small_task', 'large_task', 'bug_fix', 'new_feature'] as const
     const PRIORITIES = ['standard', 'high'] as const
-    const requests: RequestDraft[] = parsed.map(r => ({
-      id: generateId(),
-      title: (typeof r.title === 'string' ? r.title : 'New request').slice(0, 60),
-      description: typeof r.description === 'string' ? r.description : '',
-      category: (CATEGORIES as readonly string[]).includes(r.category as string)
+    const requests: RequestDraft[] = parsed.map(r => {
+      const category: RequestDraft['category'] = (CATEGORIES as readonly string[]).includes(r.category as string)
         ? r.category as RequestDraft['category']
-        : 'design',
-      type: (TYPES as readonly string[]).includes(r.type as string)
+        : 'design'
+      const type: RequestDraft['type'] = (TYPES as readonly string[]).includes(r.type as string)
         ? r.type as RequestDraft['type']
-        : 'small_task',
-      priority: (PRIORITIES as readonly string[]).includes(r.priority as string)
-        ? r.priority as RequestDraft['priority']
-        : 'standard',
-      estimatedHours: typeof r.estimatedHours === 'number' ? r.estimatedHours : 8,
-    }))
+        : 'small_task'
+      return {
+        id: generateId(),
+        title: (typeof r.title === 'string' ? r.title : 'New request').slice(0, 60),
+        description: typeof r.description === 'string' ? r.description : '',
+        category,
+        type,
+        priority: (PRIORITIES as readonly string[]).includes(r.priority as string)
+          ? r.priority as RequestDraft['priority']
+          : 'standard',
+        // Never the model's own number, same as the admin wizard: the
+        // studio's own table decides the hours, not the model's arithmetic.
+        estimatedHours: estimateRequestHours(category, type),
+      }
+    })
     return { reply, requests }
   } catch {
     return { reply: text.replace(/<requests>[\s\S]*?<\/requests>/, '').trim(), requests: [] }
@@ -299,16 +326,10 @@ function detectPriority(text: string): RequestDraft['priority'] {
   return 'standard'
 }
 
-function estimateHours(category: RequestDraft['category'], type: RequestDraft['type']): number {
-  const isLarge = type === 'large_task' || type === 'new_feature'
-  const estimates: Record<RequestDraft['category'], { small: number; large: number }> = {
-    design:      { small: 8,  large: 32 },
-    development: { small: 12, large: 46 },
-    content:     { small: 6,  large: 18 },
-    strategy:    { small: 6,  large: 23 },
-  }
-  return estimates[category][isLarge ? 'large' : 'small']
-}
+// Hour estimates come from lib/wizard-hour-estimates.ts (imported above as
+// estimateRequestHours), the same table the admin wizard and the system
+// prompt's INTERNAL SCOPE GUIDE both use, so the model's draft, the keyword
+// fallback, and the prompt copy can never quote different numbers.
 
 function generateTitle(text: string, category: RequestDraft['category']): string {
   const firstSentence = text.split(/[.!?\n]/)[0].trim()
@@ -361,7 +382,7 @@ function handleDeterministic(messages: WizardMessage[]): WizardResponse {
     description: buildDescription(allText),
     category: resolvedCategory,
     type,
-    estimatedHours: estimateHours(resolvedCategory, type),
+    estimatedHours: estimateRequestHours(resolvedCategory, type),
     priority,
   }
   return {
@@ -446,9 +467,24 @@ export async function POST(req: NextRequest) {
       .onConflictDoUpdate({ target: schema.settings.key, set: { value, updatedAt: stamp } })
   }
 
-  const contextNote = context?.planType
-    ? `The client's plan is "${context.planType}". Do not mention this to the user.`
-    : ''
+  const contextParts: string[] = []
+  if (context?.planType) {
+    contextParts.push(`The client's plan is "${context.planType}". Do not mention this to the user.`)
+  }
+  // `orgId` here is the raw Clerk org id (getRequestAuth, not getPortalAuth);
+  // resolveD1OrgId is the same lookup getPortalAuth itself does. Best
+  // effort: a context read that fails costs the model some helpful
+  // background about this client, never the draft itself.
+  try {
+    const d1OrgId = await resolveD1OrgId(drizzle, orgId)
+    if (d1OrgId) {
+      const orgContext = await loadRequestOrgContext(drizzle, d1OrgId)
+      if (orgContext) contextParts.push(orgContext)
+    }
+  } catch {
+    // No context this turn. The interview still works, it just has to ask.
+  }
+  const contextNote = contextParts.join('\n\n')
 
   try {
     const anthropicMessages: AnthropicMessage[] = messages.map(m => ({ role: m.role, content: m.content }))
