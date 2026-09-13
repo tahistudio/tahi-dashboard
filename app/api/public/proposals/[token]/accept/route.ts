@@ -235,7 +235,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   })
 
   // A deal activity, when the proposal is actually linked to one. No stage
-  // move here on purpose — that is a separate, deliberate Liam decision.
+  // move here on purpose, that is a separate, deliberate Liam decision.
   if (proposal.dealId) {
     const activityType =
       status === 'accepted' ? 'proposal_accepted' : status === 'declined' ? 'proposal_declined' : 'proposal_question'

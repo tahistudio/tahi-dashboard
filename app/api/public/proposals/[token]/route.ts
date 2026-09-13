@@ -11,7 +11,7 @@ type RouteContext = { params: Promise<{ token: string }> }
  * already flipped to 'expired' (the accept route does this lazily, on the
  * first write attempt after the deadline), or it is still 'shared' but the
  * deadline has already passed and nobody has tried to act on it yet. A
- * decided proposal (accepted/declined) is never "expired" — the decision
+ * decided proposal (accepted/declined) is never "expired", the decision
  * already happened, so the clock stopped mattering.
  */
 function isPastExpiry(status: string, expiresAt: string | null): boolean {
