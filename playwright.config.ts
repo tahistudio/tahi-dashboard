@@ -29,7 +29,13 @@ export default defineConfig({
   webServer: {
     command: 'npm run dev',
     url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
+    // CI normally starts its own server so that nothing is reused between
+    // runs. The tenancy job is the exception: it has to build the local D1 and
+    // replay the runtime migration route against a running server before a
+    // single test may start, so it starts the dev server itself and sets
+    // PLAYWRIGHT_REUSE_SERVER=1 to have Playwright attach rather than refuse
+    // the busy port. See .github/workflows/e2e-tenancy.yml.
+    reuseExistingServer: !process.env.CI || process.env.PLAYWRIGHT_REUSE_SERVER === '1',
     timeout: 120_000,
   },
 })
