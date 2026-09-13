@@ -179,6 +179,13 @@ export function requestToolCall(
       }
     case 'list_request_files':
       return { path: `/api/admin/requests/${s('requestId')}/files`, method: 'GET' }
+    case 'delete_file':
+      // Hard-deletes from R2 and the files table. The MCP service token
+      // resolves to the Tahi admin org (see request-tools.ts module docs), so
+      // this always runs the admin path: any file, scoped by team-member
+      // access to its org. The route is shared with the portal delete, which
+      // additionally refuses a contact deleting a studio deliverable.
+      return { path: `/api/uploads/${s('fileId')}`, method: 'DELETE', body: {} }
 
     // ── Kanban columns ────────────────────────────────────────────────
     case 'list_kanban_columns': {

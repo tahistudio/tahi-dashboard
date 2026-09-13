@@ -16,12 +16,14 @@
 
 import { useMemo, useState } from 'react'
 import useSWR from 'swr'
-import { Download, File, FileText, Link2, Search } from 'lucide-react'
+import { Download, File, FileText, Link2, Search, Trash2 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { Card } from '@/components/tahi/card'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { SlideOver } from '@/components/tahi/slide-over'
+import { useToast } from '@/components/tahi/toast'
 import { CountText, Grow, LinkButton, SectionTitle, SubBar } from '../_kit/chrome'
 
 export interface FileRow {
@@ -33,6 +35,9 @@ export interface FileRow {
   requestTitle?: string | null
   storageKey: string
   createdAt: string
+  /** Set when this file is a message attachment. Deletion for those lives on
+   *  the conversation thread, not here, so the row has no Delete action. */
+  messageId?: string | null
 }
 
 function formatSize(bytes: number | null): string {
@@ -71,11 +76,14 @@ export function FilesTab({
   onOpenFile: (id: string | null) => void
 }) {
   const [query, setQuery] = useState('')
+  const { showToast } = useToast()
+  const [deleteTarget, setDeleteTarget] = useState<FileRow | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   // Files live across many requests; this fetches the client's requests then
   // each request's files and merges them. An inline SWR fetcher keeps that
   // multi-request transform intact while caching the merged result.
-  const { data: files = [], isLoading: loading } = useSWR<FileRow[]>(
+  const { data: files = [], isLoading: loading, mutate } = useSWR<FileRow[]>(
     `client-files:${clientId}`,
     async () => {
       const r = await fetch(apiPath(`/api/admin/requests?clientId=${clientId}&status=all`))
@@ -107,6 +115,27 @@ export function FilesTab({
   }, [files, query])
 
   const open = files.find(f => f.id === fileId) ?? null
+
+  async function handleDelete() {
+    if (!deleteTarget) return
+    const target = deleteTarget
+    const previous = files
+    setDeleting(true)
+    // Optimistic removal, rolled back on a failed write.
+    await mutate(previous.filter(f => f.id !== target.id), false)
+    try {
+      const res = await fetch(apiPath(`/api/uploads/${target.id}`), { method: 'DELETE' })
+      if (!res.ok) throw new Error('delete failed')
+      showToast('File deleted', 'success')
+      setDeleteTarget(null)
+      if (fileId === target.id) onOpenFile(null)
+    } catch {
+      await mutate(previous, false)
+      showToast('Could not delete the file. Please try again.', 'error')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const columns: DataTableColumn<FileRow>[] = [
     {
@@ -303,10 +332,47 @@ export function FilesTab({
                 <Link2 className="w-3.5 h-3.5" aria-hidden="true" />
                 Open in a tab
               </LinkButton>
+              {/* Files attached to a message are managed from the conversation
+                  thread, not this drive view - no Delete action on those rows. */}
+              {!open.messageId && (
+                <button
+                  type="button"
+                  onClick={() => setDeleteTarget(open)}
+                  aria-label={`Delete ${open.filename}`}
+                  className="tahi-focus-ring min-h-[2.75rem] md:min-h-[2.25rem]"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.375rem',
+                    padding: '0 0.875rem',
+                    borderRadius: 'var(--radius-button)',
+                    border: '1px solid var(--color-danger)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-danger)',
+                    fontSize: '0.8125rem',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  Delete
+                </button>
+              )}
             </div>
           )}
         </SlideOver.Footer>
       </SlideOver>
+
+      <ConfirmDialog
+        open={deleteTarget != null}
+        title={`Delete ${deleteTarget?.filename ?? 'this file'}?`}
+        description="This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => { if (!deleting) setDeleteTarget(null) }}
+      />
     </div>
   )
 }

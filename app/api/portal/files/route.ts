@@ -16,6 +16,14 @@ interface FileItem {
   uploadedBy: string
   ago: string
   url: string
+  /**
+   * True when this contact's org may delete the row through
+   * DELETE /api/uploads/[fileId]: a client may only remove a file their own
+   * org uploaded (uploadedByType 'contact'), never a studio deliverable, and
+   * never one attached to a message (managed from the conversation instead,
+   * not from this list).
+   */
+  deletable: boolean
 }
 
 function rel(iso: string | null, now: number): string {
@@ -80,6 +88,7 @@ export async function GET(req: NextRequest) {
     mimeType: string | null
     uploadedById: string
     uploadedByType: string
+    messageId: string | null
     createdAt: string
     reqInternal: boolean | null
     msgInternal: boolean | null
@@ -96,6 +105,7 @@ export async function GET(req: NextRequest) {
         mimeType: schema.files.mimeType,
         uploadedById: schema.files.uploadedById,
         uploadedByType: schema.files.uploadedByType,
+        messageId: schema.files.messageId,
         createdAt: schema.files.createdAt,
         reqInternal: schema.requests.isInternal,
         msgInternal: schema.messages.isInternal,
@@ -150,6 +160,7 @@ export async function GET(req: NextRequest) {
     uploadedBy: nameById.get(r.uploadedById) ?? (r.uploadedByType === 'team_member' ? 'Your team' : 'You'),
     ago: rel(r.createdAt, now),
     url: `/api/uploads/serve?key=${encodeURIComponent(r.storageKey)}`,
+    deletable: r.uploadedByType === 'contact' && r.messageId === null,
   }))
 
   return NextResponse.json({ items })

@@ -185,3 +185,32 @@ export function decideUploadRead(input: {
   if (requesterD1OrgId && requesterD1OrgId === keyOrgId) return { outcome: 'allow' }
   return { outcome: 'deny', status: 403, error: 'Forbidden' }
 }
+
+/**
+ * Delete-specific tightening over decideUploadRead.
+ *
+ * Reading a file only ever asked "is this your org's file". Deleting asks
+ * one more question of a non-admin: files.uploaded_by_type and files.org_id
+ * are the only two columns this decides from. A client (contact) may only
+ * remove a file their OWN org uploaded (uploadedByType 'contact'); a studio
+ * deliverable (uploadedByType 'team_member') in their org is readable and
+ * downloadable but never client-deletable through this route. Admins are
+ * unaffected: team-member scoping alone gates them, same as read, any
+ * uploader.
+ */
+export function decideUploadDelete(input: {
+  isAdmin: boolean
+  uploadedByType: string
+  fileOrgId: string | null
+  keyOrgId: string | null
+  requesterClerkOrgId: string | null
+  requesterD1OrgId: string | null
+}): UploadReadDecision {
+  const decision = decideUploadRead(input)
+  if (decision.outcome !== 'allow') return decision
+  if (input.isAdmin) return decision
+  if (input.uploadedByType !== 'contact') {
+    return { outcome: 'deny', status: 403, error: 'Only files you uploaded yourself can be deleted' }
+  }
+  return decision
+}
