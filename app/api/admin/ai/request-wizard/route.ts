@@ -17,6 +17,7 @@ import { HAIKU_MODEL } from '@/lib/ai-models'
 import { db } from '@/lib/db'
 import { estimateRequestHours, wizardHourEstimatesPromptBlock } from '@/lib/wizard-hour-estimates'
 import { loadRequestOrgContext } from '@/lib/ai-request-org-context'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 export const dynamic = 'force-dynamic'
 
@@ -376,7 +377,7 @@ function handleDeterministic(messages: WizardMessage[]): WizardResponse {
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -419,15 +420,23 @@ export async function POST(req: NextRequest) {
 
   // The caller (the panel) sends context.orgId once a client has been named,
   // whether that happened before the drawer opened or mid-conversation via
-  // its own client picker. Best effort: a context read that fails costs the
-  // model some helpful background, never the draft itself.
+  // its own client picker. A team member scoped to specific clients could
+  // otherwise name any org id here and have that client's name, industry,
+  // website, brands and recent request titles woven into the reply, so scope
+  // is checked first, the same way POST /api/admin/requests does it (CLAUDE.md
+  // rule 11). A denial is answered directly, not swallowed: silently dropping
+  // the context would leave the wizard asking questions the caller can never
+  // answer for a client it cannot see.
+  //
+  // Once access is confirmed, the context read itself is best effort: a read
+  // that fails costs the model some helpful background, never the draft.
   if (context?.orgId) {
     try {
       const database = await db()
-      const orgContext = await loadRequestOrgContext(
-        database as ReturnType<typeof import('drizzle-orm/d1').drizzle>,
-        context.orgId,
-      )
+      const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+      const denied = await requireAccessToOrg(drizzle, userId, context.orgId)
+      if (denied) return denied
+      const orgContext = await loadRequestOrgContext(drizzle, context.orgId)
       if (orgContext) contextParts.push(orgContext)
     } catch {
       // No context this turn. The interview still works, it just has to ask.

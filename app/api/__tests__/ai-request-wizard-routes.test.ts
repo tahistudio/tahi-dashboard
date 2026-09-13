@@ -50,10 +50,25 @@ vi.mock('@/lib/require-feature', () => ({
   requirePortalFeature: vi.fn().mockResolvedValue(null),
 }))
 
+// The admin route now gates its client-context lookup on team member access
+// scoping (CLAUDE.md rule 11). Mocked here rather than driven through the
+// minimal settings-only db mock above: the real resolveAccessScoping chain
+// has its own coverage in admin-requests-scoping.test.ts, and the loader this
+// gates has its own in lib/ai-request-org-context.test.ts.
+vi.mock('@/lib/require-access', () => ({
+  requireAccessToOrg: vi.fn().mockResolvedValue(null),
+}))
+
+vi.mock('@/lib/ai-request-org-context', () => ({
+  loadRequestOrgContext: vi.fn().mockResolvedValue(''),
+}))
+
 import { POST as adminPost } from '@/app/api/admin/ai/request-wizard/route'
 import { POST as portalPost } from '@/app/api/portal/ai/request-wizard/route'
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth } from '@/lib/server-auth'
+import { requireAccessToOrg } from '@/lib/require-access'
+import { loadRequestOrgContext } from '@/lib/ai-request-org-context'
 
 function makeRequest(path: string): NextRequest {
   return new NextRequest(`http://localhost:3000${path}`, {
@@ -65,6 +80,19 @@ function makeRequest(path: string): NextRequest {
 
 function anthropicError(status: number): Error & { status: number } {
   return Object.assign(new Error('boom'), { status })
+}
+
+/** A wizard turn that names a client org, the shape the panel sends once a
+ *  client has been picked. */
+function makeRequestWithOrgId(orgId: string): NextRequest {
+  return new NextRequest('http://localhost:3000/api/admin/ai/request-wizard', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: [{ role: 'user', content: 'Redesign the hero' }],
+      context: { orgId },
+    }),
+  })
 }
 
 function asAdmin() {
@@ -159,6 +187,52 @@ describe('POST /api/admin/ai/request-wizard', () => {
     expect(body.reply).toBe('What page is it on?')
     expect(body.done).toBe(false)
     expect(body.degraded).toBeUndefined()
+  })
+
+  // CLAUDE.md rule 11: this route returns client details (org name, industry,
+  // website, brands, recent request titles) once context.orgId is supplied.
+  // Without a scope check a team member restricted to specific clients could
+  // name any org id here and have another client's details woven into the
+  // reply.
+  describe('client context scoping', () => {
+    it('loads org context for a team member scoped to that client', async () => {
+      vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_scoped', orgId: 'org_tahi', sessionId: 's' })
+      vi.mocked(requireAccessToOrg).mockResolvedValueOnce(null)
+      vi.mocked(loadRequestOrgContext).mockResolvedValueOnce('CLIENT ON FILE: Acme Co')
+      createMessage.mockResolvedValueOnce({ content: [{ type: 'text', text: 'Which page?' }] })
+
+      const res = await adminPost(makeRequestWithOrgId('org-acme'))
+      expect(res.status).toBe(200)
+      expect(vi.mocked(requireAccessToOrg)).toHaveBeenCalledWith(expect.anything(), 'user_scoped', 'org-acme')
+      expect(vi.mocked(loadRequestOrgContext)).toHaveBeenCalledWith(expect.anything(), 'org-acme')
+      const [[sentPayload]] = createMessage.mock.calls
+      expect((sentPayload as { system: string }).system).toContain('CLIENT ON FILE: Acme Co')
+    })
+
+    it('403s and never loads org context or calls the model when the org is out of scope', async () => {
+      vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_scoped', orgId: 'org_tahi', sessionId: 's' })
+      vi.mocked(requireAccessToOrg).mockResolvedValueOnce(
+        NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
+      )
+
+      const res = await adminPost(makeRequestWithOrgId('org-other'))
+      expect(res.status).toBe(403)
+      expect(await res.json()).toEqual({ error: 'Forbidden' })
+      expect(vi.mocked(loadRequestOrgContext)).not.toHaveBeenCalled()
+      expect(createMessage).not.toHaveBeenCalled()
+    })
+
+    it('always loads context for the Tahi admin, since scoping bypasses admins', async () => {
+      asAdmin()
+      vi.mocked(requireAccessToOrg).mockResolvedValueOnce(null)
+      vi.mocked(loadRequestOrgContext).mockResolvedValueOnce('CLIENT ON FILE: Acme Co')
+      createMessage.mockResolvedValueOnce({ content: [{ type: 'text', text: 'Which page?' }] })
+
+      const res = await adminPost(makeRequestWithOrgId('org-acme'))
+      expect(res.status).toBe(200)
+      expect(vi.mocked(requireAccessToOrg)).toHaveBeenCalledWith(expect.anything(), 'user_1', 'org-acme')
+      expect(vi.mocked(loadRequestOrgContext)).toHaveBeenCalledWith(expect.anything(), 'org-acme')
+    })
   })
 })
 
