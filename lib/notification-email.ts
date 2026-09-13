@@ -56,7 +56,6 @@ import RequestClientReviewEmail from '@/emails/request-client-review'
 import NewMessageEmail from '@/emails/new-message'
 import NewChannelMessageEmail from '@/emails/new-channel-message'
 import ProposalDecisionEmail from '@/emails/proposal-decision'
-import ContractSignatureEmail from '@/emails/contract-signature'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -100,7 +99,6 @@ export const EMAIL_TEMPLATE_CHANNEL_MESSAGE = 'org-channel-message'
 export const EMAIL_TEMPLATE_REQUEST_STATUS = 'request-status-client'
 export const EMAIL_TEMPLATE_STUDIO_NEW_REQUEST = 'studio-new-request'
 export const EMAIL_TEMPLATE_PROPOSAL_DECISION = 'proposal-decision'
-export const EMAIL_TEMPLATE_CONTRACT_SIGNATURE = 'contract-signature'
 
 /**
  * One event, rendered per recipient. The subject is shared (it names the
@@ -841,40 +839,6 @@ export function studioProposalDecisionEmailPlan(input: {
         variantName: input.variantName ?? undefined,
         comment: input.comment ?? undefined,
         acceptorName: input.acceptorName ?? undefined,
-      }),
-  }
-}
-
-/**
- * (5) One signer of a multi-party e-sign contract has signed while others are
- * still pending. Studio audience. Built here, alongside (4), so this slice and
- * the one that wires the contract sign route to it never both edit this file;
- * not yet called by any route.
- */
-export function studioContractSignatureEmailPlan(input: {
-  contractId: string
-  contractName: string
-  /** The client the contract belongs to, for the delivery gate. */
-  orgId: string | null
-  clientName: string
-  signerName: string
-  signerRole?: string | null
-  /** How many signers are still pending after this one. */
-  remainingSigners: number
-}): NotificationEmailPlan {
-  return {
-    subject: `${input.signerName} signed "${input.contractName}"`,
-    template: EMAIL_TEMPLATE_CONTRACT_SIGNATURE,
-    orgId: input.orgId,
-    render: () =>
-      createElement(ContractSignatureEmail, {
-        contractId: input.contractId,
-        contractName: input.contractName,
-        clientName: input.clientName,
-        signerName: input.signerName,
-        signerRole: input.signerRole ?? undefined,
-        remainingSigners: input.remainingSigners,
-        dashboardUrl: appOrigin(),
       }),
   }
 }

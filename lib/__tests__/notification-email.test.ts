@@ -24,7 +24,6 @@ import {
   isSendableEmail,
   messageSummary,
   requestEmailSubject,
-  studioContractSignatureEmailPlan,
   studioNewRequestEmailPlan,
   studioProposalDecisionEmailPlan,
   threadReplyEmailPlan,
@@ -362,46 +361,6 @@ describe('studioProposalDecisionEmailPlan (S2, T3.3)', () => {
     const props = plan.render(target).props as Record<string, unknown>
     expect(props.comment).toBe('What is the turnaround?')
     expect(props.acceptorName).toBe('Jo Yarnall')
-  })
-})
-
-describe('studioContractSignatureEmailPlan (S2, T3.3)', () => {
-  /**
-   * Not wired to any route yet (a later slice fires it from the contract
-   * sign route once a signer signs while others are still pending); built
-   * here so lib/notification-email.ts is edited by this slice alone.
-   */
-  const target: EmailTarget = {
-    email: 'liam@tahi.studio', name: 'Liam', userType: 'team_member', clerkUserId: 'user_1',
-  }
-
-  it('names the signer and the contract in the subject', () => {
-    const plan = studioContractSignatureEmailPlan({
-      contractId: 'con_1',
-      contractName: 'Master Services Agreement',
-      orgId: 'org_1',
-      clientName: 'Acme Ltd',
-      signerName: 'Jo Yarnall',
-      remainingSigners: 1,
-    })
-    expect(plan.subject).toBe('Jo Yarnall signed "Master Services Agreement"')
-    expect(plan.orgId).toBe('org_1')
-    expect(plan.template).toBe('contract-signature')
-  })
-
-  it('renders the remaining signer count', () => {
-    const plan = studioContractSignatureEmailPlan({
-      contractId: 'con_1',
-      contractName: 'Master Services Agreement',
-      orgId: 'org_1',
-      clientName: 'Acme Ltd',
-      signerName: 'Jo Yarnall',
-      signerRole: 'client',
-      remainingSigners: 2,
-    })
-    const props = plan.render(target).props as Record<string, unknown>
-    expect(props.remainingSigners).toBe(2)
-    expect(props.signerRole).toBe('client')
   })
 })
 

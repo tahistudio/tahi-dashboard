@@ -86,7 +86,6 @@ import { buildHowToPay } from '@/lib/invoice-how-to-pay'
 import {
   channelMessageEmailPlan,
   clientStatusEmailPlan,
-  studioContractSignatureEmailPlan,
   studioNewRequestEmailPlan,
   studioProposalDecisionEmailPlan,
   threadReplyEmailPlan,
@@ -113,9 +112,6 @@ export const EMAIL_PREVIEW_ENTRIES = [
   { key: 'contract-partially-signed', template: 'contract-partially-signed', liveSender: true },
   { key: 'contract-sign', template: 'contract-sign', liveSender: true },
   { key: 'contract-sign-tahi', template: 'contract-sign', liveSender: true },
-  // Not yet called by any route: built here (S2, T3.3) for the contract sign
-  // route to fire once a signer signs while others are still pending.
-  { key: 'contract-signature', template: 'contract-signature', liveSender: false },
   { key: 'invoice-overdue', template: 'invoice-overdue', liveSender: false },
   { key: 'invoice-overdue-bank', template: 'invoice-overdue', liveSender: false },
   { key: 'invoice-sent', template: 'invoice-sent', liveSender: true },
@@ -486,19 +482,6 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
     acceptorName: CLIENT_CONTACT,
   })
 
-  // (S2, T3.3) Not yet called by any route: built alongside the above so this
-  // slice and the one that wires the contract sign route to it never both
-  // edit lib/notification-email.ts.
-  const contractSignature = studioContractSignatureEmailPlan({
-    contractId: 'con_c41d90ab7e26',
-    contractName,
-    orgId: PREVIEW_ORG_ID,
-    clientName: CLIENT_ORG,
-    signerName: CLIENT_CONTACT,
-    signerRole: 'client',
-    remainingSigners: 1,
-  })
-
   return {
     // lib/announcement-emails.ts: subject is the announcement title verbatim.
     // The amber half of the tone map: `maintenance` and `warning` share the
@@ -689,20 +672,6 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
         Type: 'Master services agreement',
         From: LIAM,
         'Custom message': 'present (two lines from Liam)',
-      },
-    },
-
-    // No live sender yet (S2, T3.3): built for the contract sign route to
-    // call once a signer signs while others are still pending. Studio
-    // audience, so no greeting: same reasoning as 'new-request' below.
-    'contract-signature': {
-      subject: contractSignature.subject,
-      react: contractSignature.render(target),
-      personalisation: {
-        Contract: contractName,
-        Client: CLIENT_ORG,
-        'Signed by': `${CLIENT_CONTACT} (client)`,
-        'Remaining signers': '1',
       },
     },
 
