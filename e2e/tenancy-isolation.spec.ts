@@ -317,7 +317,15 @@ async function threadMessages(api: APIRequestContext, requestId: string): Promis
 }
 
 test.describe('Cross-org isolation (A4)', () => {
-  test.describe.configure({ mode: 'serial' })
+  // One retry, everywhere, including locally where the project default is zero.
+  // The flake this absorbs is the harness, not the invariants: two Clerk OTP
+  // sign-ups and forty API calls against a dev server, which is the same load
+  // that made the 2026-09-05 parallel run report "Target page, context or
+  // browser has been closed" five times and then pass serially. A retry of a
+  // serial group re-runs beforeAll, so a retry means two fresh orgs and two
+  // fresh Clerk test users; one is the budget for that, which is also why this
+  // caps the CI default of two.
+  test.describe.configure({ mode: 'serial', retries: 1 })
   test.skip(!hasClerk, 'Clerk keys not configured; set CLERK_SECRET_KEY to run.')
 
   // Playwright requires the fixtures argument to be an object pattern, and this

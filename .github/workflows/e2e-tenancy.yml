@@ -1,0 +1,305 @@
+name: E2E tenancy isolation
+
+# The cross-org isolation proof (run plan A4), in CI.
+#
+# e2e/tenancy-isolation.spec.ts seeds two real client workspaces, signs up two
+# real Clerk test users, and fires one battery of cross-org attempts in each
+# direction: portal request, thread, invoice, stored file, contract share token
+# and every id-less portal read. It passed on the local QA harness on
+# 2026-09-13 and this workflow is what keeps it passing.
+#
+# ---------------------------------------------------------------------------
+# SECRETS LIAM MUST ADD (Settings -> Secrets and variables -> Actions ->
+# Repository secrets). Both come from the Clerk DEVELOPMENT instance, never
+# production: this job signs up users and creates organisations.
+#
+#   CLERK_SECRET_KEY_DEV         sk_test_...
+#   CLERK_PUBLISHABLE_KEY_DEV    pk_test_...
+#
+# Optional repository VARIABLE (not a secret), only if the dev admin org id
+# ever stops matching the value baked into next.config.ts:
+#
+#   E2E_TAHI_ORG_ID              org_...
+#
+# Until the two secrets exist the job skips with a notice and stays green. A
+# green skip is not a proof; the summary says so in as many words.
+# ---------------------------------------------------------------------------
+#
+# WHAT THIS JOB DELIBERATELY CANNOT DO. It is given no RESEND_API_KEY, no
+# STRIPE_*, no Google and no Xero credentials, so no route it touches can send
+# an email, create a Stripe object or push a calendar event even if the same
+# call would do so on a configured harness. The D1 it writes to is a local
+# sqlite built from zero inside the runner and thrown away with it.
+#
+# WHY IT DOES NOT GATE A DEPLOY. Deploy dashboard (deploy.yml) keeps its own
+# gate: type-check, lint, build. This job runs alongside it and is read by a
+# human. Wiring it into the deploy gate is a separate decision, because a
+# Clerk outage would then block shipping.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'app/api/portal/**'
+      - 'app/api/public/contracts/**'
+      - 'app/api/uploads/**'
+      - 'app/api/admin/db/migrate/**'
+      - 'lib/server-auth.ts'
+      - 'lib/permissions.ts'
+      - 'middleware.ts'
+      - 'db/schema.ts'
+      - 'db/d1.ts'
+      - 'drizzle/migrations/**'
+      - 'e2e/tenancy-isolation.spec.ts'
+      - 'e2e/helpers/**'
+      - 'e2e/global-setup.ts'
+      - 'playwright.config.ts'
+      - 'scripts/e2e-local-d1.mjs'
+      - '.github/workflows/e2e-tenancy.yml'
+  pull_request:
+    paths:
+      - 'app/api/portal/**'
+      - 'app/api/public/contracts/**'
+      - 'app/api/uploads/**'
+      - 'app/api/admin/db/migrate/**'
+      - 'lib/server-auth.ts'
+      - 'lib/permissions.ts'
+      - 'middleware.ts'
+      - 'db/schema.ts'
+      - 'db/d1.ts'
+      - 'drizzle/migrations/**'
+      - 'e2e/tenancy-isolation.spec.ts'
+      - 'e2e/helpers/**'
+      - 'e2e/global-setup.ts'
+      - 'playwright.config.ts'
+      - 'scripts/e2e-local-d1.mjs'
+      - '.github/workflows/e2e-tenancy.yml'
+
+concurrency:
+  group: e2e-tenancy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tenancy:
+    name: Cross-org isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      PORT: '3000'
+      BASE_URL: http://localhost:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The secrets context cannot be read in a job-level `if`, so the guard is
+      # a step that publishes a flag every later step keys off. Absent keys are
+      # a skip with a notice, never a red run.
+      - name: Check for the Clerk dev keys
+        id: keys
+        env:
+          CLERK_SECRET_KEY_DEV: ${{ secrets.CLERK_SECRET_KEY_DEV }}
+          CLERK_PUBLISHABLE_KEY_DEV: ${{ secrets.CLERK_PUBLISHABLE_KEY_DEV }}
+        run: |
+          if [ -n "$CLERK_SECRET_KEY_DEV" ] && [ -n "$CLERK_PUBLISHABLE_KEY_DEV" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Tenancy proof skipped::Repository secrets CLERK_SECRET_KEY_DEV and CLERK_PUBLISHABLE_KEY_DEV are not set, so e2e/tenancy-isolation.spec.ts did not run. This job is green because there was nothing to run, not because cross-org isolation was proved."
+            {
+              echo "## Tenancy proof skipped"
+              echo ""
+              echo "Nothing ran. Cross-org isolation was **not** proved by this job."
+              echo ""
+              echo "Add these repository secrets, from the Clerk **development** instance:"
+              echo ""
+              echo "| Secret | Value |"
+              echo "| --- | --- |"
+              echo "| \`CLERK_SECRET_KEY_DEV\` | \`sk_test_...\` |"
+              echo "| \`CLERK_PUBLISHABLE_KEY_DEV\` | \`pk_test_...\` |"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.keys.outputs.present == 'true'
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.keys.outputs.present == 'true'
+        run: npm ci
+
+      - name: Install Chromium
+        if: steps.keys.outputs.present == 'true'
+        # Only chromium: the spec skips every other project (tenancy is not a
+        # viewport concern) and the run below pins --project=chromium, so a
+        # webkit download would be pure minutes.
+        run: npx playwright install --with-deps chromium
+
+      # Source 1 of 2. Replays drizzle/migrations/*.sql into a brand new local
+      # D1. This is the step that stops the 2026-09-13 incident recurring: the
+      # seeded QA sqlite was six migrations behind and
+      # GET /api/portal/notifications answered "no such table:
+      # notification_preferences" in the middle of the proof. Nothing is
+      # carried over between runs, so there is no snapshot to fall behind.
+      - name: Build the local D1 from every migration
+        if: steps.keys.outputs.present == 'true'
+        run: node scripts/e2e-local-d1.mjs --reset
+
+      # `npx next dev` rather than `npm run dev`, which would add --turbopack.
+      # The harness has only ever been proved on webpack dev (the Windows QA
+      # worktree cannot run turbopack at all, because turbopack refuses its
+      # node_modules junction), and a CI-only engine swap is not a thing to
+      # discover during a security proof.
+      - name: Start the dev server
+        if: steps.keys.outputs.present == 'true'
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY_DEV }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY_DEV }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY_DEV }}
+          # Never leave this empty: isTahiAdmin compares against it, and an
+          # empty string would make every org-less caller an admin. The
+          # fallback is the value next.config.ts already bakes in.
+          NEXT_PUBLIC_TAHI_ORG_ID: ${{ vars.E2E_TAHI_ORG_ID || 'org_3BTHLj5IhFDy8DnaI2ytVbt4WrG' }}
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+        run: |
+          npx next dev --port "$PORT" > dev-server.log 2>&1 &
+          echo $! > dev-server.pid
+          # Readiness is a 200 from the migration route through the Ship Studio
+          # bypass, not a socket that accepts. That proves the middleware
+          # bypass, server-auth and the route itself in one probe, and it
+          # compiles the route the next step needs anyway.
+          for _ in $(seq 1 40); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -m 30 \
+              -b 'tahi-ship-studio=1' -H 'x-ship-studio: 1' \
+              "$BASE_URL/api/admin/db/migrate" || true)
+            if [ "$code" = "200" ]; then
+              echo "dev server ready on $BASE_URL"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::the dev server never answered 200 on $BASE_URL/api/admin/db/migrate"
+          tail -n 120 dev-server.log
+          exit 1
+
+      # Source 2 of 2. Migrations 0012 to 0097 only ever existed as inline SQL
+      # in app/api/admin/db/migrate/route.ts, because Workers have no
+      # filesystem. The route is dev-only reachable through the Ship Studio
+      # bypass, which needs the cookie (the middleware gate) and the header
+      # (the server-auth gate).
+      #
+      # Run twice on purpose: the MIGRATIONS array is not in dependency order
+      # (0044 and 0050 alter discovery_calls, which a later entry creates), so
+      # the first pass leaves a few and the second settles them. What is left
+      # after that on an empty database is the 0078 seed, which inserts
+      # super_admin rows for two team_members that only exist in production and
+      # fails its foreign key. That one is expected; anything else is not.
+      - name: Replay the runtime migration route
+        if: steps.keys.outputs.present == 'true'
+        run: |
+          migrate() {
+            curl -sS -X POST "$BASE_URL/api/admin/db/migrate" \
+              -b 'tahi-ship-studio=1' \
+              -H 'x-ship-studio: 1' \
+              -H 'Content-Type: application/json' \
+              -d '{"name":"all"}' \
+              --max-time 300 -o "$1"
+          }
+          migrate inline-migrate-pass1.json
+          migrate inline-migrate-pass2.json
+          node -e '
+            const fs = require("node:fs")
+            const j = JSON.parse(fs.readFileSync("inline-migrate-pass2.json", "utf8"))
+            const bad = (j.results || []).filter(r => r.status !== "applied")
+            for (const r of bad) console.log("  " + r.name + ": " + r.error)
+            const unexpected = bad.filter(r => !String(r.error || "").includes("FOREIGN KEY"))
+            if (unexpected.length > 0) {
+              console.log("::error::" + unexpected.length + " inline migrations failed for a reason other than an empty-database foreign key")
+              process.exit(1)
+            }
+            console.log(bad.length + " expected foreign key failures on an empty database, 0 unexpected")
+          '
+
+      # Both sources are in. Settle the statements the first source could not
+      # apply yet and prove the tables that went missing last time are present,
+      # before spending forty seconds on two Clerk sign-ups.
+      - name: Verify the schema is whole
+        if: steps.keys.outputs.present == 'true'
+        run: node scripts/e2e-local-d1.mjs --verify
+
+      # Compiling a route on first hit is a dev-server cost, not a tenancy
+      # cost, and the spec's per-step timeouts should not be paying it. The
+      # Ship Studio cookie is what gets these past the middleware so the module
+      # actually compiles; the status codes are meaningless here and ignored.
+      - name: Warm the routes the spec touches
+        if: steps.keys.outputs.present == 'true'
+        run: |
+          id=00000000-0000-4000-8000-000000000000
+          for path in \
+            /api/portal/project /api/portal/calls /api/portal/team /api/portal/tracks \
+            /api/portal/files /api/portal/notifications /api/portal/announcements \
+            /api/portal/conversations /api/portal/requests /api/portal/invoices \
+            "/api/portal/requests/$id" "/api/portal/requests/$id/files" \
+            "/api/portal/requests/$id/sub-requests" "/api/portal/invoices/$id" \
+            "/api/portal/messages/request/$id" "/api/public/contracts/$id" \
+            "/api/uploads/serve?key=$id" /api/admin/clients /api/admin/onboarding-invites
+          do
+            curl -sS -o /dev/null -m 60 -b 'tahi-ship-studio=1' -H 'x-ship-studio: 1' \
+              "$BASE_URL$path" || true
+          done
+
+      - name: Run the tenancy proof
+        if: steps.keys.outputs.present == 'true'
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY_DEV }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY_DEV }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY_DEV }}
+          NEXT_PUBLIC_TAHI_ORG_ID: ${{ vars.E2E_TAHI_ORG_ID || 'org_3BTHLj5IhFDy8DnaI2ytVbt4WrG' }}
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          # The server is already up and already migrated, so Playwright must
+          # attach to it instead of refusing a busy port.
+          PLAYWRIGHT_REUSE_SERVER: '1'
+          PLAYWRIGHT_HTML_OPEN: never
+        # The spec pins its own single retry (a retry re-seeds two orgs and two
+        # Clerk users, so two would be wasteful) and skips every non-chromium
+        # project, which --project makes explicit rather than implicit.
+        run: npm run test:e2e:tenancy -- --project=chromium
+
+      - name: Summarise
+        if: always() && steps.keys.outputs.present == 'true'
+        run: |
+          {
+            echo "## Cross-org isolation"
+            echo ""
+            if [ "${{ job.status }}" = "success" ]; then
+              echo "Green. Two seeded client orgs, one battery in each direction, no leak."
+            else
+              echo "Red or cancelled. Download the \`tenancy-failure\` artifact for the Playwright report, the traces and the dev server log."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop the dev server
+        if: always() && steps.keys.outputs.present == 'true'
+        run: |
+          if [ -f dev-server.pid ]; then
+            kill "$(cat dev-server.pid)" 2>/dev/null || true
+          fi
+
+      - name: Upload the failure artifacts
+        if: failure() && steps.keys.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenancy-failure
+          retention-days: 14
+          if-no-files-found: ignore
+          path: |
+            playwright-report/
+            test-results/
+            dev-server.log
+            inline-migrate-pass1.json
+            inline-migrate-pass2.json
+            .wrangler/e2e-deferred-statements.json
