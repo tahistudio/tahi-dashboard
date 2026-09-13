@@ -74,35 +74,68 @@ export async function GET(req: NextRequest) {
       leadName: schema.leads.name,
       dealId: schema.discoveryCalls.dealId,
       dealTitle: schema.deals.title,
+      requestId: schema.discoveryCalls.requestId,
+      requestTitle: schema.requests.title,
       orgId: schema.discoveryCalls.orgId,
       orgName: schema.organisations.name,
     })
     .from(schema.discoveryCalls)
     .leftJoin(schema.leads, eq(schema.discoveryCalls.leadId, schema.leads.id))
     .leftJoin(schema.deals, eq(schema.discoveryCalls.dealId, schema.deals.id))
+    .leftJoin(schema.requests, eq(schema.discoveryCalls.requestId, schema.requests.id))
     .leftJoin(schema.organisations, eq(schema.discoveryCalls.orgId, schema.organisations.id))
     .where(and(...conditions))
     .orderBy(desc(schema.discoveryCalls.scheduledAt))
 
-  // A deal-linked call can carry a null orgId while its deal points at a
-  // client. Resolve those deals so a restricted caller cannot read another
-  // client's call through the deal join.
+  // A deal- or request-linked call can carry a null orgId while its deal
+  // or request points at a client. Resolve those so a restricted caller
+  // cannot read another client's call (or its request title) through
+  // either join.
   let visibleRows = dRows
   if (scope.kind === 'some') {
     const dealIds = [...new Set(
       dRows.filter(r => !r.orgId && r.dealId).map(r => r.dealId as string),
     )]
+    const dealOrgById = new Map<string, string | null>()
     if (dealIds.length > 0) {
       const dealOrgRows = await database
         .select({ id: schema.deals.id, orgId: schema.deals.orgId })
         .from(schema.deals)
         .where(columnInIds(schema.deals.id, dealIds))
-      const dealOrgById = new Map(dealOrgRows.map(d => [d.id, d.orgId]))
-      visibleRows = dRows.filter(r => {
-        if (r.orgId || !r.dealId) return true
-        return isOrgInScope(scope, dealOrgById.get(r.dealId) ?? null, 'allow-if-any-scope')
-      })
+      for (const d of dealOrgRows) dealOrgById.set(d.id, d.orgId)
     }
+
+    const requestIds = [...new Set(
+      dRows.filter(r => !r.orgId && r.requestId).map(r => r.requestId as string),
+    )]
+    const requestOrgById = new Map<string, string | null>()
+    if (requestIds.length > 0) {
+      const requestOrgRows = await database
+        .select({ id: schema.requests.id, orgId: schema.requests.orgId })
+        .from(schema.requests)
+        .where(columnInIds(schema.requests.id, requestIds))
+      for (const r of requestOrgRows) requestOrgById.set(r.id, r.orgId)
+    }
+
+    visibleRows = dRows.filter(r => {
+      if (r.orgId) return true
+      // No direct org: a call with neither a deal nor a request link is a
+      // genuinely pre-client call (lead-only / unclassified), visible to
+      // anyone with any scope at all. One with a deal and/or a request
+      // link inherits that parent's org for scoping instead - a scoped
+      // caller must not read another client's deal or request title
+      // through the join.
+      if (!r.dealId && !r.requestId) {
+        return isOrgInScope(scope, null, 'allow-if-any-scope')
+      }
+      if (r.dealId && !isOrgInScope(scope, dealOrgById.get(r.dealId) ?? null, 'allow-if-any-scope')) {
+        return false
+      }
+      if (r.requestId && !isOrgInScope(scope, requestOrgById.get(r.requestId) ?? null, 'allow-if-any-scope')) {
+        return false
+      }
+      return true
+    })
   }
 
   // Surface lifecycle hints: hasTranscript bool, isClassified bool.

@@ -9,10 +9,10 @@
  * transcript availability. Tabs split upcoming vs past.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
-import { Calendar, FileText, ExternalLink, RefreshCw, UserPlus, TrendingUp, Building2, AlertTriangle } from 'lucide-react'
+import { Calendar, FileText, ExternalLink, RefreshCw, UserPlus, TrendingUp, Building2, AlertTriangle, Phone } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
@@ -20,8 +20,11 @@ import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
+import { SlideOver } from '@/components/tahi/slide-over'
+import { LinkedToPanel } from '@/components/tahi/linked-to-panel'
 import { useToast } from '@/components/tahi/toast'
 import { apiPath } from '@/lib/api'
+import { MEETING_TYPES } from '@/lib/calls'
 
 interface CallRow {
   id: string
@@ -38,6 +41,8 @@ interface CallRow {
   leadName: string | null
   dealId: string | null
   dealTitle: string | null
+  requestId: string | null
+  requestTitle: string | null
   orgId: string | null
   orgName: string | null
   source: 'discovery_calls'
@@ -90,6 +95,7 @@ export function CallsContent() {
     { id: 'type', values: [] },
   ])
   const [syncing, setSyncing] = useState(false)
+  const [previewCall, setPreviewCall] = useState<CallRow | null>(null)
 
   async function syncNow() {
     setSyncing(true)
@@ -238,6 +244,11 @@ export function CallsContent() {
             {r.orgName}
           </Link>
         )
+        if (r.requestId && r.requestTitle) return (
+          <Link data-private href={`/requests/${r.requestId}`} className="truncate" style={{ fontSize: '0.8125rem', color: 'var(--color-text)', textDecoration: 'none', fontWeight: 500 }}>
+            {r.requestTitle}
+          </Link>
+        )
         return <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>Unlinked — triage</span>
       },
     },
@@ -323,6 +334,7 @@ export function CallsContent() {
           getRowId={r => r.id}
           defaultSort={{ key: 'scheduledAt', dir: tab === 'past' ? 'desc' : 'asc' }}
           loading={loading}
+          onRowPreview={r => setPreviewCall(r)}
           rowActions={(r) => {
             const actions: Array<{ label: string; icon: React.ReactNode; onClick: () => void }> = []
             if (r.googleMeetUrl) {
@@ -381,6 +393,190 @@ export function CallsContent() {
           }
         />
       </Card>
+
+      <CallDetailSlideOver
+        call={previewCall}
+        onClose={() => setPreviewCall(null)}
+        onChanged={() => void mutateItems()}
+      />
     </div>
+  )
+}
+
+const MEETING_TYPE_OPTIONS = MEETING_TYPES.map(v => ({ value: v, label: TYPE_META[v].label }))
+
+const detailFieldStyle: React.CSSProperties = {
+  padding: '0 0.75rem',
+  borderRadius: 'var(--radius-md)',
+  border: '1px solid var(--color-border)',
+  background: 'var(--color-bg)',
+  color: 'var(--color-text)',
+  fontSize: '0.875rem',
+  width: '100%',
+}
+
+const detailLabelStyle: React.CSSProperties = {
+  fontSize: '0.6875rem',
+  fontWeight: 600,
+  color: 'var(--color-text-muted)',
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em',
+}
+
+/**
+ * The editable "call detail" reached by clicking a row on /calls: title,
+ * meeting type ("what it is for") and full linkage (org / lead / deal /
+ * request, "linked to"), the two things Liam could not change from the
+ * index before this. Backs onto discovery_calls, the same table the
+ * index itself reads, via PATCH /api/admin/discovery-calls/[id].
+ */
+function CallDetailSlideOver({
+  call,
+  onClose,
+  onChanged,
+}: {
+  call: CallRow | null
+  onClose: () => void
+  onChanged: () => void
+}) {
+  const [title, setTitle] = useState(call?.title ?? '')
+  const [meetingType, setMeetingType] = useState<string>(call?.meetingType ?? 'unclassified')
+  const [savingTitle, setSavingTitle] = useState(false)
+  const [savingType, setSavingType] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // The slide-over itself stays mounted between opens (so its own close
+  // animation gets to run), so re-seed local state whenever a different
+  // call becomes the target rather than on mount alone.
+  useEffect(() => {
+    setTitle(call?.title ?? '')
+    setMeetingType(call?.meetingType ?? 'unclassified')
+    setError(null)
+  }, [call?.id, call?.title, call?.meetingType])
+
+  async function patchCall(patch: Record<string, unknown>) {
+    if (!call) return
+    const res = await fetch(apiPath(`/api/admin/discovery-calls/${call.id}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { error?: string }
+      throw new Error(body.error ?? 'Could not save. Please try again.')
+    }
+  }
+
+  async function saveTitle() {
+    if (!call) return
+    const trimmed = title.trim()
+    if (!trimmed || trimmed === call.title) { setTitle(call.title); return }
+    setSavingTitle(true)
+    setError(null)
+    try {
+      await patchCall({ title: trimmed })
+      onChanged()
+    } catch (err) {
+      setTitle(call.title)
+      setError(err instanceof Error ? err.message : 'Could not save the title.')
+    } finally {
+      setSavingTitle(false)
+    }
+  }
+
+  async function changeType(next: string) {
+    if (!call) return
+    const prev = meetingType
+    setMeetingType(next)
+    setSavingType(true)
+    setError(null)
+    try {
+      await patchCall({ meetingType: next })
+      onChanged()
+    } catch (err) {
+      setMeetingType(prev)
+      setError(err instanceof Error ? err.message : 'Could not change the type.')
+    } finally {
+      setSavingType(false)
+    }
+  }
+
+  return (
+    <SlideOver
+      open={!!call}
+      onClose={onClose}
+      title="Call details"
+      icon={<Phone size={15} />}
+      ariaLabel="Call details"
+    >
+      <SlideOver.Body>
+        <div className="flex flex-col" style={{ gap: '1.125rem' }}>
+          {error && (
+            <div
+              role="alert"
+              style={{
+                padding: '0.625rem 0.75rem',
+                background: 'var(--color-danger-bg)',
+                border: '1px solid var(--color-danger)',
+                borderRadius: 'var(--radius-md)',
+                fontSize: '0.75rem',
+                color: 'var(--color-danger)',
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          <label className="flex flex-col" style={{ gap: '0.3125rem' }}>
+            <span style={detailLabelStyle}>Title</span>
+            <input
+              data-private
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              onBlur={() => void saveTitle()}
+              disabled={savingTitle}
+              className="tahi-focus-ring min-h-[2.75rem] md:min-h-[2.25rem]"
+              style={detailFieldStyle}
+            />
+          </label>
+
+          <label className="flex flex-col" style={{ gap: '0.3125rem' }}>
+            <span style={detailLabelStyle}>What it is for</span>
+            <select
+              value={meetingType}
+              onChange={e => void changeType(e.target.value)}
+              disabled={savingType}
+              className="tahi-focus-ring min-h-[2.75rem] md:min-h-[2.25rem]"
+              style={detailFieldStyle}
+            >
+              {MEETING_TYPE_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+
+          {/* Only rendered while a call is actually loaded: LinkedToPanel
+              needs a real resourceId, and this keeps the panel's own fields
+              (title, type) visible, matching the rest of the fields, through
+              the SlideOver's own close animation rather than vanishing the
+              instant the row is deselected. */}
+          {call && (
+            <LinkedToPanel
+              resourceType="call"
+              resourceId={call.id}
+              orgId={call.orgId}
+              orgName={call.orgName}
+              dealId={call.dealId}
+              dealTitle={call.dealTitle}
+              leadId={call.leadId}
+              leadName={call.leadName}
+              requestId={call.requestId}
+              requestTitle={call.requestTitle}
+              onChanged={onChanged}
+            />
+          )}
+        </div>
+      </SlideOver.Body>
+    </SlideOver>
   )
 }

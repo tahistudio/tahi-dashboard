@@ -30,7 +30,9 @@ import { Plus, ArrowUpRight, ChevronDown, Sparkles, RefreshCw, ListChecks, Check
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { Input } from '@/components/tahi/input'
+import { LinkedToPanel } from '@/components/tahi/linked-to-panel'
 import { apiPath } from '@/lib/api'
+import { MEETING_TYPES } from '@/lib/calls'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -60,9 +62,28 @@ export interface DiscoveryCall {
   budgetMax: number | null
   budgetCurrency: string | null
   timeline: string | null
+  /** Set by the calendar-sync classifier; also hand-editable from a call's
+   *  own "what it is for" control. Null on rows created manually before
+   *  classification (e.g. straight from a client's Calls tab). */
+  meetingType: 'discovery' | 'client' | 'partnership' | 'unclassified' | null
   createdById: string
   createdAt: string
   updatedAt: string
+  /** Joined labels for the call's own links (see listCallsForParent in
+   *  lib/calls.ts). Optional: only the parent-list endpoints join these in,
+   *  so a caller building a DiscoveryCall by hand can omit them and
+   *  <LinkedToPanel> falls back to resolving the label itself. */
+  orgName?: string | null
+  dealTitle?: string | null
+  leadName?: string | null
+  requestTitle?: string | null
+}
+
+const MEETING_TYPE_LABELS: Record<string, string> = {
+  discovery: 'Discovery',
+  client: 'Client check-in',
+  partnership: 'Partnership',
+  unclassified: 'Unclassified',
 }
 
 /** A proposed task the AI pulled out of a client/project call transcript.
@@ -181,11 +202,15 @@ export function DiscoveryCallsCard({
   }
 
   async function updateCall(callId: string, patch: Partial<DiscoveryCall>) {
-    await fetch(apiPath(`/api/admin/discovery-calls/${callId}`), {
+    const res = await fetch(apiPath(`/api/admin/discovery-calls/${callId}`), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string }
+      throw new Error(err.error ?? 'Could not save. Please try again.')
+    }
     await refreshAndBubble()
   }
 
@@ -349,6 +374,7 @@ export function DiscoveryCallsCard({
                 onExtract={() => extractCall(c.id)}
                 onCreateTask={(item) => createTaskFromActionItem(c, item)}
                 onPromote={promoteToDealAction ? () => promoteToDealAction(c) : null}
+                onRefresh={refreshAndBubble}
               />
             ))}
           </ul>
@@ -369,6 +395,7 @@ export function DiscoveryCallsCard({
                 onExtract={() => extractCall(c.id)}
                 onCreateTask={(item) => createTaskFromActionItem(c, item)}
                 onPromote={promoteToDealAction ? () => promoteToDealAction(c) : null}
+                onRefresh={refreshAndBubble}
               />
             ))}
           </ul>
@@ -554,6 +581,7 @@ function CallRow({
   onExtract,
   onCreateTask,
   onPromote,
+  onRefresh,
 }: {
   call: DiscoveryCall
   showPromote: boolean
@@ -562,6 +590,10 @@ function CallRow({
   onExtract: () => Promise<ExtractionResult>
   onCreateTask: (item: ExtractedActionItem) => Promise<void>
   onPromote: (() => Promise<void>) | null
+  /** Refetch (no PATCH), passed to <LinkedToPanel>, which owns its own
+   *  fetch against the call's PATCH endpoint and only needs the parent
+   *  to pick up the result afterwards. */
+  onRefresh: () => Promise<void>
 }) {
   const [expanded, setExpanded] = useState(false)
   const isUpcoming = new Date(call.scheduledAt).getTime() >= Date.now() && call.status === 'scheduled'
@@ -645,6 +677,8 @@ function CallRow({
             </div>
           )}
 
+          <CallLinkAndPurpose call={call} onUpdate={onUpdate} onRefresh={onRefresh} />
+
           <CallPostFields call={call} onUpdate={onUpdate} onExtract={onExtract} onCreateTask={onCreateTask} />
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -678,6 +712,132 @@ function CallRow({
   )
 }
 
+const callFieldStyle: React.CSSProperties = {
+  height: '2rem',
+  padding: '0 0.5625rem',
+  background: 'var(--color-bg)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-md)',
+  fontSize: 'var(--text-sm)',
+  color: 'var(--color-text)',
+  outline: 'none',
+  width: '100%',
+}
+
+/**
+ * "What it is for" (title + meeting type) and "Linked to" (org / lead /
+ * deal / request). The two things a call's own record could not change
+ * before this, on every surface that renders <DiscoveryCallsCard>
+ * (a client's Calls tab, lead, deal, request, task).
+ */
+function CallLinkAndPurpose({
+  call,
+  onUpdate,
+  onRefresh,
+}: {
+  call: DiscoveryCall
+  onUpdate: (patch: Partial<DiscoveryCall>) => Promise<void>
+  onRefresh: () => Promise<void>
+}) {
+  const [title, setTitle] = useState(call.title)
+  const [meetingType, setMeetingType] = useState(call.meetingType ?? '')
+  const [savingTitle, setSavingTitle] = useState(false)
+  const [savingType, setSavingType] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function saveTitle() {
+    const trimmed = title.trim()
+    if (!trimmed || trimmed === call.title) { setTitle(call.title); return }
+    setSavingTitle(true)
+    setError(null)
+    try {
+      await onUpdate({ title: trimmed })
+    } catch (err) {
+      setTitle(call.title)
+      setError(err instanceof Error ? err.message : 'Could not save the title.')
+    } finally {
+      setSavingTitle(false)
+    }
+  }
+
+  async function changeType(next: string) {
+    const prev = meetingType
+    setMeetingType(next)
+    setSavingType(true)
+    setError(null)
+    try {
+      await onUpdate({ meetingType: (next || null) as DiscoveryCall['meetingType'] })
+    } catch (err) {
+      setMeetingType(prev)
+      setError(err instanceof Error ? err.message : 'Could not change the type.')
+    } finally {
+      setSavingType(false)
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      {error && (
+        <div
+          role="alert"
+          style={{
+            padding: '0.4375rem 0.625rem',
+            background: 'var(--color-danger-bg)',
+            border: '1px solid var(--color-danger)',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '0.6875rem',
+            color: 'var(--color-danger)',
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <div className="grid gap-2 grid-cols-1 sm:grid-cols-2">
+        <FieldLabel label="Title">
+          <input
+            data-private
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            onBlur={() => void saveTitle()}
+            disabled={savingTitle}
+            className="tahi-focus-ring min-h-[2.75rem] md:min-h-[2.25rem]"
+            style={callFieldStyle}
+          />
+        </FieldLabel>
+        <FieldLabel label="What it is for">
+          <select
+            value={meetingType}
+            onChange={e => void changeType(e.target.value)}
+            disabled={savingType}
+            className="tahi-focus-ring tahi-select min-h-[2.75rem] md:min-h-[2.25rem]"
+            style={callFieldStyle}
+          >
+            <option value="">- unclassified -</option>
+            {MEETING_TYPES.filter(t => t !== 'unclassified').map(t => (
+              <option key={t} value={t}>{MEETING_TYPE_LABELS[t]}</option>
+            ))}
+          </select>
+        </FieldLabel>
+      </div>
+
+      <LinkedToPanel
+        resourceType="call"
+        resourceId={call.id}
+        orgId={call.orgId}
+        dealId={call.dealId}
+        leadId={call.leadId}
+        requestId={call.requestId}
+        orgName={call.orgName}
+        dealTitle={call.dealTitle}
+        leadName={call.leadName}
+        requestTitle={call.requestTitle}
+        onChanged={() => { void onRefresh() }}
+      />
+    </div>
+  )
+}
+
 function CallPostFields({
   call,
   onUpdate,
@@ -699,6 +859,7 @@ function CallPostFields({
   const [budgetCurrency, setBudgetCurrency] = useState(call.budgetCurrency ?? 'NZD')
   const [timeline, setTimeline] = useState(call.timeline ?? '')
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [extracting, setExtracting] = useState(false)
   const [extractionError, setExtractionError] = useState<string | null>(null)
   const [suggestion, setSuggestion] = useState<Partial<DiscoveryCall> | null>(null)
@@ -717,6 +878,7 @@ function CallPostFields({
 
   async function save() {
     setSaving(true)
+    setSaveError(null)
     try {
       const patch: Partial<DiscoveryCall> = {
         transcript: transcript.trim() || null,
@@ -734,6 +896,8 @@ function CallPostFields({
         (patch as Record<string, unknown>).status = 'completed'
       }
       await onUpdate(patch)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Could not save. Please try again.')
     } finally {
       setSaving(false)
     }
@@ -936,6 +1100,17 @@ function CallPostFields({
           style={textareaStyle}
         />
       </FieldLabel>
+
+      {saveError && (
+        <div style={{
+          padding: '0.4375rem 0.625rem',
+          background: 'var(--color-danger-bg)',
+          border: '1px solid var(--color-danger)',
+          borderRadius: 'var(--radius-sm)',
+          fontSize: '0.6875rem',
+          color: 'var(--color-danger)',
+        }}>{saveError}</div>
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <TahiButton size="sm" onClick={save} disabled={!dirty || saving}>

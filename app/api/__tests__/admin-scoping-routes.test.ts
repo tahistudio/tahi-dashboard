@@ -37,6 +37,7 @@ import { GET as dealsList } from '@/app/api/admin/deals/route'
 import { GET as dealDetail } from '@/app/api/admin/deals/[id]/route'
 import { GET as dealActivities } from '@/app/api/admin/deals/[id]/activities/route'
 import { PATCH as callPatch } from '@/app/api/admin/calls/[id]/route'
+import { GET as callsIndexGet } from '@/app/api/admin/calls/index/route'
 import { GET as timeList } from '@/app/api/admin/time/route'
 import { POST as announcementCreate } from '@/app/api/admin/announcements/route'
 import { PATCH as messagePatch } from '@/app/api/admin/conversations/[id]/messages/route'
@@ -287,6 +288,91 @@ describe('PATCH /api/admin/calls/[id]', () => {
     )
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ success: true })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/admin/calls/index
+// ---------------------------------------------------------------------------
+describe('GET /api/admin/calls/index', () => {
+  // Minimal discovery_calls row shape the route's join produces. orgId /
+  // dealId / requestId default to null (a fully pre-client row); each test
+  // overrides only the field(s) it cares about.
+  const baseRow = {
+    id: 'call-1',
+    title: 'Kickoff',
+    scheduledAt: new Date().toISOString(),
+    durationMinutes: 30,
+    status: 'scheduled',
+    meetingType: null,
+    outcome: null,
+    hasTranscript: null,
+    googleMeetUrl: null,
+    googleCalendarEventId: null,
+    leadId: null,
+    leadName: null,
+    dealId: null,
+    dealTitle: null,
+    requestId: null,
+    requestTitle: null,
+    orgId: null,
+    orgName: null,
+  }
+
+  it('hides a call whose only link is a request outside the caller scope', async () => {
+    scopedTo(['org-a'])
+    const row = { ...baseRow, requestId: 'req-1', requestTitle: 'Secret migration' }
+    const { handle, queries } = makeDb([[row], [{ id: 'req-1', orgId: 'org-b' }]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await callsIndexGet(req('/api/admin/calls/index'))
+    expect(res.status).toBe(200)
+    const body = await res.json() as { items: Array<{ id: string }> }
+    expect(body.items).toHaveLength(0)
+    // Main select + the request-org resolution, no deal-org lookup needed.
+    expect(queries).toHaveLength(2)
+  })
+
+  it('shows a call whose only link is a request inside the caller scope', async () => {
+    scopedTo(['org-a'])
+    const row = { ...baseRow, requestId: 'req-1', requestTitle: 'Kickoff plan' }
+    const { handle, queries } = makeDb([[row], [{ id: 'req-1', orgId: 'org-a' }]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await callsIndexGet(req('/api/admin/calls/index'))
+    expect(res.status).toBe(200)
+    const body = await res.json() as { items: Array<{ id: string; requestTitle: string | null }> }
+    expect(body.items).toHaveLength(1)
+    expect(body.items[0].requestTitle).toBe('Kickoff plan')
+    expect(queries).toHaveLength(2)
+  })
+
+  it('does not filter a fully unlinked (pre-client) call for a scoped caller', async () => {
+    scopedTo(['org-a'])
+    const { handle, queries } = makeDb([[baseRow]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await callsIndexGet(req('/api/admin/calls/index'))
+    expect(res.status).toBe(200)
+    const body = await res.json() as { items: Array<{ id: string }> }
+    expect(body.items).toHaveLength(1)
+    // No dealId/requestId to resolve on this row - only the main select ran.
+    expect(queries).toHaveLength(1)
+  })
+
+  it('does not filter by request for an unrestricted caller', async () => {
+    unrestricted()
+    const row = { ...baseRow, requestId: 'req-1', requestTitle: 'Anyone can see this' }
+    const { handle, queries } = makeDb([[row]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await callsIndexGet(req('/api/admin/calls/index'))
+    expect(res.status).toBe(200)
+    const body = await res.json() as { items: Array<{ id: string }> }
+    expect(body.items).toHaveLength(1)
+    // Unrestricted skips the scoping filter block entirely - only the main
+    // select ran, no request-org resolution.
+    expect(queries).toHaveLength(1)
   })
 })
 

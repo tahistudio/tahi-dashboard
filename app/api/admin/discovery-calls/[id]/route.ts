@@ -7,10 +7,25 @@
  *   - Post-call fields: transcript, transcriptSource, summary,
  *     outcome, outcomeNotes, scopeNotes, budgetMin, budgetMax,
  *     budgetCurrency, timeline
+ *   - Link + purpose fields: orgId, leadId, dealId, requestId (each
+ *     nullable, pass null to unlink, omit to leave alone; a non-null
+ *     value must reference an existing row or the request 400s) and
+ *     meetingType (must be one of MEETING_TYPES or the request 400s).
+ *
+ * A relink is access-scoping checked on BOTH ends: the caller must have
+ * access to the call's CURRENT org (so a scoped team member cannot unlink
+ * or read someone else's call) and to every NEW link target's org (so
+ * they cannot point the call at a client outside their scope). leadId
+ * never carries an org (a lead is pre-client) and a null-org deal is also
+ * pre-client; both follow the "allow unless the caller has zero access at
+ * all" rule used by the /calls index (see
+ * app/api/admin/calls/index/route.ts and lib/require-access.ts).
  *
  * Side effect: when status flips to "completed" (or outcome is set on
  * a call that wasn't completed), a lead_call_completed activity is
- * written so the lead timeline picks it up.
+ * written so the lead timeline picks it up. A change to any of
+ * orgId/leadId/dealId/requestId/meetingType/title also writes an
+ * audit_log row (see lib/audit.ts) so a relink is traceable.
  *
  * DELETE /api/admin/discovery-calls/[id] — hard delete.
  */
@@ -21,8 +36,12 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { normalizeCallInstant } from '@/lib/call-time'
+import { isMeetingType, resolveCallOrgId, validateCallLinkFields } from '@/lib/calls'
+import { requireAccessToOrgOrPreClient } from '@/lib/require-access'
+import { logAudit } from '@/lib/audit'
 
 type Params = { params: Promise<{ id: string }> }
+type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 // Transcripts can run long — a 60-minute Meet call easily produces
 // 100k+ chars of Gemini transcript. Cap is here to stop a runaway paste
@@ -64,13 +83,82 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const stringFields = [
     'title', 'googleMeetUrl', 'googleCalendarEventId',
     'status', 'transcriptSource', 'summary', 'outcome', 'outcomeNotes',
-    'scopeNotes', 'budgetCurrency', 'timeline', 'meetingType',
+    'scopeNotes', 'budgetCurrency', 'timeline',
   ] as const
   for (const f of stringFields) {
     if (f in body) {
       const v = body[f]
       updates[f] = typeof v === 'string' ? (v.trim() || null) : (v === null ? null : (updates[f] ?? null))
     }
+  }
+
+  // meetingType: classifier vocabulary only. A non-empty value that isn't
+  // one of MEETING_TYPES is a caller mistake (typo, stale enum), not a
+  // silent "unclassified", so it 400s rather than writing garbage the
+  // /calls index filter can never match again.
+  if ('meetingType' in body) {
+    const v = body.meetingType
+    if (v === null || v === '') {
+      updates.meetingType = null
+    } else if (isMeetingType(v)) {
+      updates.meetingType = v
+    } else {
+      return NextResponse.json({
+        error: `meetingType must be one of: discovery, client, partnership, unclassified`,
+      }, { status: 400 })
+    }
+  }
+
+  // Link fields: who/what this call is for. Each is independently
+  // nullable (a call can be unlinked from a lead without touching its
+  // org, etc). null clears the link; a non-null id must resolve to a
+  // real row.
+  const linkFields = ['orgId', 'leadId', 'dealId', 'requestId'] as const
+  const linkPatch: { orgId?: string | null; leadId?: string | null; dealId?: string | null; requestId?: string | null } = {}
+  for (const f of linkFields) {
+    if (f in body) {
+      const v = body[f]
+      if (v === null) {
+        linkPatch[f] = null
+      } else if (typeof v === 'string' && v.trim()) {
+        linkPatch[f] = v.trim()
+      } else {
+        return NextResponse.json({ error: `${f} must be a non-empty string or null` }, { status: 400 })
+      }
+    }
+  }
+  if (Object.keys(linkPatch).length > 0) {
+    const linkResult = await validateCallLinkFields(database, linkPatch)
+    if (linkResult.error) {
+      return NextResponse.json({ error: linkResult.error.message }, { status: 400 })
+    }
+
+    // Access scoping, checked on both ends of a relink (see the route's
+    // own doc comment above for the full rationale):
+    //
+    // 1. The call's CURRENT org: a scoped member must not be able to
+    //    unlink or otherwise touch a call belonging to a client outside
+    //    their scope, even if every id in the patch is perfectly valid.
+    const currentOrgId = await resolveCallOrgId(database, {
+      orgId: prev.orgId, dealId: prev.dealId, requestId: prev.requestId,
+    })
+    const currentDenied = await requireAccessToOrgOrPreClient(database as Drizzle, userId, currentOrgId)
+    if (currentDenied) return currentDenied
+
+    // 2. Every NEW link target: a relink must not be usable to point
+    //    the call at (or read the label of) a client outside scope.
+    //    linkResult.orgIds carries the org each provided field resolves
+    //    to, from the SAME lookup that already checked existence (no
+    //    extra query): orgId is its own value, leadId is always null
+    //    (leads carry no organisation), dealId/requestId are the target
+    //    row's own org (null for a pre-client deal).
+    for (const field of ['orgId', 'leadId', 'dealId', 'requestId'] as const) {
+      if (!(field in linkPatch) || linkPatch[field] === null) continue // clearing a link, not pointing at a new org
+      const targetDenied = await requireAccessToOrgOrPreClient(database as Drizzle, userId, linkResult.orgIds[field] ?? null)
+      if (targetDenied) return targetDenied
+    }
+
+    Object.assign(updates, linkPatch)
   }
 
   // scheduledAt gets its own path (not the generic stringFields loop
@@ -130,6 +218,27 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     .update(schema.discoveryCalls)
     .set({ ...updates, updatedAt: now })
     .where(eq(schema.discoveryCalls.id, id))
+
+  // Audit the "who is this for / what is this" fields specifically:
+  // these are the ones a relink can silently misattribute a call against,
+  // so the before/after is worth a durable trail beyond the updatedAt bump.
+  const AUDITED_FIELDS = ['orgId', 'leadId', 'dealId', 'requestId', 'meetingType', 'title'] as const
+  const auditedChanges: Record<string, { before: string | number | null; after: string | number | null }> = {}
+  for (const f of AUDITED_FIELDS) {
+    if (f in updates && updates[f] !== (prev as Record<string, unknown>)[f]) {
+      auditedChanges[f] = { before: (prev as Record<string, string | number | null>)[f] ?? null, after: updates[f] }
+    }
+  }
+  if (Object.keys(auditedChanges).length > 0) {
+    await logAudit(database, {
+      action: 'discovery_call_updated',
+      userId,
+      userType: 'team_member',
+      entityType: 'discovery_call',
+      entityId: id,
+      metadata: { changes: auditedChanges },
+    })
+  }
 
   // Activity hook: writing an outcome OR flipping to completed both
   // count as "the call happened". Fire once per transition, not on
