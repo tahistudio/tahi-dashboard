@@ -61,6 +61,8 @@ Merged to main and pushed as 66b18917 (full suite 4080 green, lint zero, build c
 - Gave the Teams join link for the N8N Content Engine call; set on the call through the discovery-calls PATCH as Liam.
 - Plan: run the A5 real-session lap, then flip the allowlist for Giant Group and invite.
 
+- GI.3 calls link and purpose editable: merged ef2feca0 after a blocking review (relink scope) was fixed; live look pending.
+
 ## In flight
 
 - Workflow `giant-group-batch-a` (run wf_3b66e233-82b): parser, then one builder per slice S1 to S8 from docs/superpowers/audits/2026-09-13-giant-group-readiness-plan.md in its own worktree, then one reviewer per slice. When it returns: the lead reads each review, merges non-blocking slices into main one at a time (renumber colliding migrations; apply any migration to staging and production D1 before the push), gates each merge (type-check, lint, touched vitest, next build if a route changed), pushes, watches the deploy, runs the slice's read-only live smoke on production, updates TASKS.md and STATUS.md and this log.
