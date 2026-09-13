@@ -163,6 +163,7 @@ describe('email preview samples', () => {
     const noGreeting = new Set([
       'announcement',
       'announcement-info',
+      'contract-partially-signed',
       'new-request',
       'pre-call-digest',
       'project-enquiry',
@@ -180,7 +181,7 @@ describe('email preview samples', () => {
     for (const preview of previews) {
       const html = await render(preview.react)
       const hits = html.split(FIRST_NAME).length - 1
-      const greets = !['announcement', 'announcement-info', 'new-request', 'pre-call-digest', 'project-enquiry'].includes(
+      const greets = !['announcement', 'announcement-info', 'contract-partially-signed', 'new-request', 'pre-call-digest', 'project-enquiry'].includes(
         preview.key,
       )
       expect(hits > 0, `${preview.key}`).toBe(greets)

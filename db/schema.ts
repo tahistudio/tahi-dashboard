@@ -2954,9 +2954,18 @@ export const contractSignatures = sqliteTable('contract_signatures', {
   userAgent: text('user_agent'),
   country: text('country'),
   // Tamper-evident hash chain. Each new signature = sha256(prevChainHash
-  // || signerId || signatureDataUrl || timestamp). Changing ANY signature
-  // breaks the chain for all subsequent signatures.
+  // || signerId || signatureDataUrl || timestamp || bodyHash). Changing ANY
+  // signature breaks the chain for all subsequent signatures.
   chainHash: text('chain_hash').notNull(),
+  // sha256 of contract_documents.body_html AT THE MOMENT THIS SIGNATURE WAS
+  // TAKEN (migration 0099). Folded into chainHash above, and independently
+  // comparable to a fresh hash of the current body via
+  // lib/contract-chain.ts#bodyMatchesSignedHash, which is what proves "this
+  // is what you signed" or flags that it no longer is. Nullable and
+  // FORWARD-ONLY: every signature taken before this column existed has no
+  // anchor to compare against, and must read as unverifiable rather than as
+  // a false pass.
+  bodyHash: text('body_hash'),
   signedAt: text('signed_at').notNull(),
   ...timestamps,
 }, (table) => [

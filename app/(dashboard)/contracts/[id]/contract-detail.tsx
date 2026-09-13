@@ -25,7 +25,7 @@ import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Trash2, Eye, Copy, RefreshCw, Plus, ShieldCheck, Globe, Mail,
   ExternalLink, Send, BookmarkPlus, FileText, Users, Activity, Check, X,
-  Hourglass, FileSignature,
+  Hourglass, FileSignature, Download,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
@@ -213,6 +213,7 @@ export function ContractDetail({ id }: { id: string }) {
   // ── Mutations ────────────────────────────────────────────────────────
 
   async function patchContract(changes: Partial<ContractDoc>) {
+    const previous = contract
     setContract(prev => prev ? { ...prev, ...changes } : prev)
     try {
       const res = await fetch(apiPath(`/api/admin/contracts/${id}`), {
@@ -220,8 +221,18 @@ export function ContractDetail({ id }: { id: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(changes),
       })
-      if (!res.ok) throw new Error('save failed')
+      if (!res.ok) {
+        // Roll the optimistic update back: the body lock (a sent contract's
+        // bodyHtml or variableValues) names the exact reason in the error
+        // field, so show that instead of a generic failure whenever the
+        // server sends one.
+        setContract(previous)
+        const data = await res.json().catch(() => null) as { error?: string } | null
+        showToast(data?.error ?? 'Could not save.', 'error')
+        return
+      }
     } catch {
+      setContract(previous)
       showToast('Could not save.', 'error')
     }
   }
@@ -271,6 +282,36 @@ export function ContractDetail({ id }: { id: string }) {
       void mutate()
     } catch {
       showToast('Could not resend.', 'error')
+    }
+  }
+
+  // Distinct from resendSigner above: that resends the pre-sign SIGNING
+  // INVITE, this resends the FULLY-SIGNED COPY once every party has already
+  // signed. Kept as separate buttons in the rail so the two can never be
+  // confused.
+  async function downloadSignedPdf() {
+    try {
+      const res = await fetch(apiPath(`/api/admin/contracts/${id}/signed-pdf`))
+      if (!res.ok) throw new Error()
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${(contract?.name ?? 'contract').toLowerCase().replace(/\s+/g, '-')}-signed.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      showToast('Could not download the signed PDF.', 'error')
+    }
+  }
+
+  async function resendSignedPdf() {
+    try {
+      const res = await fetch(apiPath(`/api/admin/contracts/${id}/signed-pdf`), { method: 'POST' })
+      if (!res.ok) throw new Error()
+      showToast('Signed PDF resent.')
+    } catch {
+      showToast('Could not resend the signed PDF.', 'error')
     }
   }
 
@@ -622,6 +663,30 @@ export function ContractDetail({ id }: { id: string }) {
               </p>
             )}
           </RailSection>
+
+          {contract.status === 'signed' && (
+            <RailSection title="Signed PDF">
+              <div style={{ display: 'grid', gap: '0.5rem' }}>
+                <button
+                  onClick={downloadSignedPdf}
+                  className="inline-flex items-center"
+                  style={{ ...railBtn, background: 'var(--color-brand)', color: '#FFFFFF', borderColor: 'var(--color-brand)', justifyContent: 'center' }}
+                >
+                  <Download size={12} />
+                  Download signed PDF
+                </button>
+                <button
+                  onClick={resendSignedPdf}
+                  className="inline-flex items-center"
+                  style={{ ...railBtn, justifyContent: 'center' }}
+                  title="Emails the signed PDF again, distinct from resending a signing invite"
+                >
+                  <Mail size={12} />
+                  Resend signed PDF
+                </button>
+              </div>
+            </RailSection>
+          )}
 
           <RailSection title="Public link">
             {publicUrl ? (

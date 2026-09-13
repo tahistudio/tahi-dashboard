@@ -17,8 +17,10 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, asc, inArray } from 'drizzle-orm'
 import { render as renderEmail } from '@react-email/render'
+import { getCloudflareContext } from '@opennextjs/cloudflare'
 import { ContractFullySignedEmail } from '@/emails/contract-fully-signed'
 import { buildSignedPdfBase64 } from '@/lib/contract-signed-pdf'
+import { putContractSignedPdf } from '@/lib/contract-signed-artifact'
 import { publicUrl } from '@/lib/app-url'
 import { emailFromAddress } from '@/lib/email'
 import { deliverEmail, resolveDeliveryPolicy } from '@/lib/email-delivery'
@@ -197,6 +199,26 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
       console.error('[contract-fully-signed-emails] PDF render failed, falling back to no-attachment email:', pdfError)
     }
 
+    // ── Persist the PDF to R2, before the send, so a lost or filtered email
+    // never means the signed agreement exists nowhere at all. Best effort:
+    // a storage failure costs the download/resend routes a rebuild later
+    // (lib/contract-signed-artifact.ts regenerates on the fly), never this
+    // send.
+    if (pdfBase64) {
+      try {
+        const cfCtx = await getCloudflareContext({ async: true })
+        const storage = (cfCtx?.env as { STORAGE?: R2Bucket } | undefined)?.STORAGE
+        if (storage) {
+          const key = await putContractSignedPdf({ STORAGE: storage }, contractId, pdfBase64)
+          await database.update(schema.contractDocuments)
+            .set({ signedStorageKey: key })
+            .where(eq(schema.contractDocuments.id, contractId))
+        }
+      } catch (err) {
+        console.error('[contract-fully-signed-emails] R2 persist failed:', err)
+      }
+    }
+
     // ── Send to each recipient. Failures are tracked but never thrown ─
     // Through lib/email-delivery.ts, the one door out, so the tahi.studio
     // allowlist applies to a countersigned contract the same as to anything
@@ -270,7 +292,8 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
   }
 }
 
-function slugify(s: string): string {
+/** Shared with the signed-pdf download routes so the filename never drifts. */
+export function slugify(s: string): string {
   return s
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')

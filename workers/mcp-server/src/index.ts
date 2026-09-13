@@ -851,7 +851,10 @@ export const TOOLS: ToolDef[] = [
     contractId: prop('string', 'Contract ID'),
     rotate: prop('boolean', 'Force a new token even if one exists'),
   }, ['contractId']),
-  tool('revoke_contract_share', 'Clear the public share token. Pending signers can no longer sign until you re-send.', {
+  tool('revoke_contract_share', 'Clear the public share token, and actually undo signing: every non-pending signer goes back to pending, every signature on the contract is deleted (its ids are audit-logged first), and the document returns to draft with finalHash and signedAt cleared.', {
+    contractId: prop('string', 'Contract ID'),
+  }, ['contractId']),
+  tool('resend_contract_signed_pdf', 'Re-send the fully-signed covering email (with the signed PDF attached) to every signer and the creator. Only valid once the contract status is "signed".', {
     contractId: prop('string', 'Contract ID'),
   }, ['contractId']),
   tool('list_contract_templates', 'List reusable contract templates (NDA / SOW / MSA bodies with {{variable}} slots).'),
@@ -2330,6 +2333,8 @@ async function executeTool(
     }
     case 'revoke_contract_share':
       return json(await apiWrite(`/api/admin/contracts/${s('contractId')}/send`, token, 'DELETE'))
+    case 'resend_contract_signed_pdf':
+      return json(await apiWrite(`/api/admin/contracts/${s('contractId')}/signed-pdf`, token, 'POST'))
     case 'list_contract_templates':
       return json(await apiGet('/api/admin/contracts/templates', token))
     case 'create_contract_template':

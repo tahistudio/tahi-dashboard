@@ -4,15 +4,11 @@ import { schema } from '@/db/d1'
 import { eq, and, asc } from 'drizzle-orm'
 import { getCloudflareContext } from '@opennextjs/cloudflare'
 import { sendFullySignedContractEmails } from '@/lib/contract-fully-signed-emails'
+import { sha256Hex, computeChainHash } from '@/lib/contract-chain'
+import { notifyStudioOfContractSignature } from '@/lib/contract-signature-notify'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ token: string; signerId: string }> }
-
-async function sha256Hex(input: string): Promise<string> {
-  const data = new TextEncoder().encode(input)
-  const buf = await crypto.subtle.digest('SHA-256', data)
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
-}
 
 async function hashIp(ip: string | null): Promise<string | null> {
   if (!ip) return null
@@ -24,15 +20,20 @@ async function hashIp(ip: string | null): Promise<string | null> {
  * POST /api/public/contracts/[token]/sign/[signerId]
  * Records a signature with tamper-evident hash chain.
  *
- * Hash chain rule:
- *   chainHash = sha256(prevChainHash || signerId || signatureDataUrl || timestamp)
+ * Hash chain rule (lib/contract-chain.ts):
+ *   chainHash = sha256(prevChainHash || signerId || signatureDataUrl || timestamp || bodyHash)
  *
  * Where prevChainHash is the chainHash of the most recent existing signature on
- * this contract, or '' if this is the first signature. Tampering with any earlier
- * signature breaks every later chainHash (recomputable to verify).
+ * this contract, or '' if this is the first signature, and bodyHash is
+ * sha256(contract body) at the moment of THIS signature. Tampering with any
+ * earlier signature breaks every later chainHash (recomputable to verify), and
+ * editing the contract body after signing is independently detectable by
+ * re-hashing the current body and comparing it against the bodyHash stored on
+ * each signature.
  *
  * When this is the final pending signer, the contract status flips to 'signed'
- * and finalHash is recorded.
+ * and finalHash is recorded. Every signature, partial or final, notifies the
+ * studio (lib/contract-signature-notify.ts).
  */
 export async function POST(req: NextRequest, ctx: RouteContext) {
   const { token, signerId } = await ctx.params
@@ -60,6 +61,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       id: schema.contractDocuments.id,
       status: schema.contractDocuments.status,
       expiresAt: schema.contractDocuments.expiresAt,
+      dealId: schema.contractDocuments.dealId,
+      orgId: schema.contractDocuments.orgId,
+      name: schema.contractDocuments.name,
+      type: schema.contractDocuments.type,
+      bodyHtml: schema.contractDocuments.bodyHtml,
     })
     .from(schema.contractDocuments)
     .where(eq(schema.contractDocuments.publicShareToken, token))
@@ -108,7 +114,19 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     .where(eq(schema.contractSignatures.contractId, doc.id))
     .orderBy(asc(schema.contractSignatures.signedAt))
   const prevChainHash = prior.length ? prior[prior.length - 1].chainHash : ''
-  const chainHash = await sha256Hex(`${prevChainHash}|${signerId}|${sigUrl}|${now}`)
+  // The body hash anchors this signature to the exact body it was taken
+  // against: fold it into the chain input and store it on the row (migration
+  // 0099) so a body edit after signing is independently detectable via
+  // lib/contract-chain.ts#bodyMatchesSignedHash, not just implied by the
+  // chain no longer matching.
+  const bodyHash = await sha256Hex(doc.bodyHtml)
+  const chainHash = await computeChainHash({
+    prevChainHash,
+    signerId,
+    signatureDataUrl: sigUrl,
+    timestamp: now,
+    bodyHash,
+  })
 
   // Audit metadata
   const ip = req.headers.get('cf-connecting-ip') ?? req.headers.get('x-forwarded-for')
@@ -127,6 +145,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     userAgent: ua,
     country,
     chainHash,
+    bodyHash,
     signedAt: now,
     createdAt: now,
     updatedAt: now,
@@ -164,6 +183,32 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     finalHash: finalHash ?? undefined,
     updatedAt: now,
   }).where(eq(schema.contractDocuments.id, doc.id))
+
+  // ── Tell the studio. Every signature notifies, not only the last one: a
+  // mid-flight signature on a multi-party contract used to produce nothing
+  // at all, so a team member could open it believing it untouched when one
+  // party had already signed. Awaited (it is a bell insert plus at most a
+  // couple of admin emails, not the heavy PDF work below) and never lets a
+  // notification failure surface to the signer.
+  try {
+    const totalSigners = await database
+      .select({ id: schema.contractSigners.id })
+      .from(schema.contractSigners)
+      .where(eq(schema.contractSigners.contractId, doc.id))
+    await notifyStudioOfContractSignature(database, {
+      contractId: doc.id,
+      contractName: doc.name,
+      contractType: doc.type,
+      orgId: doc.orgId,
+      dealId: doc.dealId,
+      signerName: signer.name,
+      totalSigners: totalSigners.length,
+      signedCount: totalSigners.length - remaining.length,
+      final: contractStatus === 'signed',
+    })
+  } catch (err) {
+    console.error('[sign route] studio notification failed:', err)
+  }
 
   // ── Fully signed? Kick off the signed-PDF email send asynchronously.
   // We re-verify status from the DB to guard against race conditions (two
