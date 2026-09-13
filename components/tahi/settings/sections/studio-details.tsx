@@ -32,9 +32,15 @@ import {
   type InvoiceBankDetails,
   type InvoiceCurrency,
 } from '@/lib/invoice-pay-settings'
+import { STUDIO_PROJECT_MANAGER_SETTING_KEY } from '@/lib/studio-project-manager'
 import { SegmentedControl } from '@/components/tahi/segmented-control'
 
 type SettingsMap = Record<string, string | null>
+
+interface TeamOption {
+  id: string
+  name: string
+}
 
 const CURRENCIES = ['NZD', 'USD', 'AUD', 'GBP', 'EUR']
 const LEDE =
@@ -152,6 +158,13 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
   const { data, isLoading, mutate } = useResource<{ settings: SettingsMap }>(
     isAdmin === false ? null : '/api/admin/settings',
   )
+  // The roster for the project manager select below. Not gated behind the
+  // Team feature: this is the same LITE roster /api/admin/team already hands
+  // any caller who cannot see full Team (id, name, email, ...).
+  const { data: teamData } = useResource<{ items: TeamOption[] }>(
+    isAdmin === false ? null : '/api/admin/team',
+  )
+  const teamOptions = teamData?.items ?? []
 
   const [legalName, setLegalName] = useState('')
   const [gstNumber, setGstNumber] = useState('')
@@ -170,6 +183,10 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
   const [referenceHint, setReferenceHint] = useState('')
   const [xeroAccountCode, setXeroAccountCode] = useState('')
   const [xeroEmailMode, setXeroEmailMode] = useState<string>(DEFAULT_XERO_EMAIL_MODE)
+  // "make Liam Miller as the project manager for everyone no matter what. in
+  // the future we'll add more." Empty means today's per-client assignments;
+  // see lib/studio-project-manager.ts.
+  const [projectManagerId, setProjectManagerId] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -200,6 +217,7 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
       setXeroAccountCode(data.settings[XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY] ?? '')
       // The GET fills this one too, so an absent row still reads as a choice.
       setXeroEmailMode(resolveXeroEmailMode(data.settings[XERO_EMAIL_MODE_SETTING_KEY]))
+      setProjectManagerId(data.settings[STUDIO_PROJECT_MANAGER_SETTING_KEY] ?? '')
     }
   }, [data])
 
@@ -311,6 +329,7 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
         saveKey(BANK_DETAILS_BY_CURRENCY_SETTING_KEY, accountsBlob),
         saveKey(XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY, xeroAccountCode.trim()),
         saveKey(XERO_EMAIL_MODE_SETTING_KEY, xeroEmailMode),
+        saveKey(STUDIO_PROJECT_MANAGER_SETTING_KEY, projectManagerId.trim()),
       ])
       setSaved(true)
       await mutate()
@@ -464,6 +483,34 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               onChange={(e) => setInvoiceFooter(e.target.value)}
               placeholder="Thank you for working with Tahi Studio. Payment is due within 14 days."
             />
+          </div>
+          <div className="set-field" style={{ gridColumn: '1 / -1' }}>
+            <label htmlFor="studio-project-manager">Project manager shown to every client</label>
+            <select
+              id="studio-project-manager"
+              className="set-input"
+              value={projectManagerId}
+              onChange={(e) => setProjectManagerId(e.target.value)}
+              aria-describedby="studio-project-manager-help"
+            >
+              <option value="">Use per-client assignments</option>
+              {teamOptions.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+            <small
+              id="studio-project-manager-help"
+              style={{
+                display: 'block',
+                marginTop: 5,
+                color: 'var(--text-faint)',
+                font: '500 12px Manrope',
+              }}
+            >
+              Leave empty to use per-client assignments.
+            </small>
           </div>
 
           {/* ── Getting paid ────────────────────────────────────────────────

@@ -52,6 +52,7 @@ import {
 } from '@/lib/client-home-signals'
 import { isOwedInvoice } from '@/lib/invoice-status'
 import { cadenceWord } from '@/lib/next-invoice-date'
+import { CLIENT_HOME_ONBOARDING_CHECKLIST_ENABLED } from '@/lib/onboarding-steps'
 import type { OverviewCtx } from '@/components/tahi/overview/ctx'
 import { portalStatusMeta, portalStageFraction, type PortalChipTone } from '@/lib/portal-status'
 import { WaitingOnYou, type WaitingItem } from '@/components/tahi/portal/home/waiting-on-you'
@@ -1328,7 +1329,12 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         </button>
       </div>
 
-      <ClientFirstRun ctx={ctx} />
+      {/* Off for now (lib/onboarding-steps.ts
+          CLIENT_HOME_ONBOARDING_CHECKLIST_ENABLED): the card, its
+          /api/portal/onboarding read and its localStorage dismissal check all
+          skip entirely, so the client overview renders exactly as it would
+          for a client who had already dismissed the card - no empty slot. */}
+      {CLIENT_HOME_ONBOARDING_CHECKLIST_ENABLED && <ClientFirstRun ctx={ctx} />}
 
       <div className="ov-mast">
         <TheWire events={wire} />

@@ -60,3 +60,31 @@ export function buildSteps(
 export function stepsTakePayment(steps: readonly string[]): boolean {
   return steps.includes('pay')
 }
+
+/**
+ * Feature flag: the "watch a hello video" surfaces across onboarding.
+ *
+ * False for now (Liam, walking the flow as a dummy client). Gates the
+ * VideoModal and its trigger in components/tahi/onboarding-content.tsx, and
+ * the "Watch the welcome video" step plus its Loom embed in
+ * components/tahi/onboarding-checklist.tsx. Every caller filters the step out
+ * entirely rather than rendering a disabled row or an empty slot, so step
+ * counts (1 of 4, 2 of 4, ...) are correct with the video absent.
+ *
+ * onboardingLoomUrl itself (the organisations column) is untouched: this only
+ * gates the UI that plays it, so flipping the flag back on needs no data
+ * migration.
+ */
+export const ONBOARDING_VIDEO_ENABLED = false
+
+/**
+ * Feature flag: the client-home "Welcome to your studio... four small steps"
+ * onboarding checklist card (ClientFirstRun in
+ * components/tahi/overview/homes/client-home.tsx).
+ *
+ * False for now. The client overview renders exactly as it does once a client
+ * has dismissed the card themselves: nothing in its place, no empty slot. The
+ * /onboarding wizard (buildSteps, above) is a separate flow and stays live
+ * regardless of this flag.
+ */
+export const CLIENT_HOME_ONBOARDING_CHECKLIST_ENABLED = false

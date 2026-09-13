@@ -11,7 +11,12 @@
  * These are the assertions that make the next edit to the table honest.
  */
 import { describe, it, expect } from 'vitest'
-import { buildSteps, stepsTakePayment } from '@/lib/onboarding-steps'
+import {
+  buildSteps,
+  stepsTakePayment,
+  ONBOARDING_VIDEO_ENABLED,
+  CLIENT_HOME_ONBOARDING_CHECKLIST_ENABLED,
+} from '@/lib/onboarding-steps'
 
 describe('buildSteps', () => {
   describe('new client', () => {
@@ -68,5 +73,19 @@ describe('buildSteps', () => {
     expect(buildSteps('retainer', 'new')).toEqual([
       'welcome', 'plan', 'pay', 'details', 'invite',
     ])
+  })
+})
+
+// "make Liam Miller as the project manager for everyone no matter what" also
+// came with two asks to hide surfaces for now: the hello video, and the whole
+// client-home checklist card. Both flags default off; this pins that so a
+// stray edit cannot flip either back on unnoticed.
+describe('feature flags', () => {
+  it('the onboarding video is off for now', () => {
+    expect(ONBOARDING_VIDEO_ENABLED).toBe(false)
+  })
+
+  it('the client-home onboarding checklist card is off for now', () => {
+    expect(CLIENT_HOME_ONBOARDING_CHECKLIST_ENABLED).toBe(false)
   })
 })

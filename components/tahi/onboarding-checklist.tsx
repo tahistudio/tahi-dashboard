@@ -6,6 +6,7 @@ import {
   CheckCircle2, Circle, ArrowRight, Video, Upload,
   FileText, CreditCard, Users, PartyPopper, ChevronDown,
 } from 'lucide-react'
+import { ONBOARDING_VIDEO_ENABLED } from '@/lib/onboarding-steps'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ interface StepConfig {
   icon: React.ReactNode
 }
 
-const STEPS: StepConfig[] = [
+const ALL_STEPS: StepConfig[] = [
   {
     key: 'welcomeVideoWatched',
     title: 'Watch the welcome video',
@@ -77,6 +78,14 @@ const STEPS: StepConfig[] = [
     icon: <Users size={16} />,
   },
 ]
+
+// The video step is currently off (lib/onboarding-steps.ts
+// ONBOARDING_VIDEO_ENABLED). Filtered out here, once, rather than rendered
+// disabled: every count below (completedCount, totalSteps, "i of N") derives
+// from STEPS, so the step counts skip it cleanly with no empty slot.
+const STEPS: StepConfig[] = ONBOARDING_VIDEO_ENABLED
+  ? ALL_STEPS
+  : ALL_STEPS.filter(s => s.key !== 'welcomeVideoWatched')
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -253,7 +262,7 @@ export function OnboardingChecklist({ state, loomUrl, onToggleStep, onDismiss }:
       </div>
 
       {/* Loom embed when step 1 is expanded and loomUrl exists */}
-      {loomUrl && expandedStep === 'welcomeVideoWatched' && (
+      {ONBOARDING_VIDEO_ENABLED && loomUrl && expandedStep === 'welcomeVideoWatched' && (
         <div style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--color-border-subtle)' }}>
           <div
             style={{

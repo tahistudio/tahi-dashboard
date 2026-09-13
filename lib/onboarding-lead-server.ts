@@ -15,6 +15,7 @@ import {
   type StudioLeadCandidate,
   type StudioLeadDeps,
 } from '@/lib/onboarding-lead'
+import { STUDIO_PROJECT_MANAGER_SETTING_KEY } from '@/lib/studio-project-manager'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -23,6 +24,34 @@ const SUPER_ADMIN_ROLE = 'super_admin'
 
 export function buildStudioLeadDeps(drizzle: Drizzle): StudioLeadDeps {
   return {
+    /**
+     * The studio-wide override: settings key studio.projectManagerId,
+     * resolved to a real team member. Null when the setting is empty,
+     * unreadable, or names somebody who no longer exists, which the resolver
+     * treats identically to "unset" - see lib/studio-project-manager.ts.
+     */
+    findStudioProjectManager: async (): Promise<StudioLeadCandidate | null> => {
+      const [setting] = await drizzle
+        .select({ value: schema.settings.value })
+        .from(schema.settings)
+        .where(eq(schema.settings.key, STUDIO_PROJECT_MANAGER_SETTING_KEY))
+        .limit(1)
+      const id = setting?.value?.trim()
+      if (!id) return null
+
+      const [row] = await drizzle
+        .select({
+          id: schema.teamMembers.id,
+          name: schema.teamMembers.name,
+          email: schema.teamMembers.email,
+          avatarUrl: schema.teamMembers.avatarUrl,
+        })
+        .from(schema.teamMembers)
+        .where(eq(schema.teamMembers.id, id))
+        .limit(1)
+      return row ? { ...row, avatarUrl: row.avatarUrl ?? null } : null
+    },
+
     /**
      * The org's project_manager, in one join: the access rule, its org link and
      * the member it names. Identical to GET /api/admin/clients/[id]/pm, so the

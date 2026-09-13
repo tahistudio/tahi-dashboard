@@ -9,6 +9,10 @@
  * is actually assigned to them.
  *
  * RESOLUTION ORDER (most specific first)
+ *   0. The studio-wide override, settings key studio.projectManagerId (see
+ *      lib/studio-project-manager.ts). "make Liam Miller as the project
+ *      manager for everyone no matter what." When set, that member is the
+ *      lead for every client, full stop, and the two steps below never run.
  *   1. The org's assigned PM. Assignment lives in `team_member_access`: a
  *      `project_manager` rule whose `team_member_access_orgs` link names this
  *      org. That is the same record GET /api/admin/clients/[id]/pm reads and
@@ -24,6 +28,8 @@
  * testable without D1, the same split as lib/team-link.ts. The D1 wiring is
  * lib/onboarding-lead-server.ts.
  */
+
+import { resolveProjectManager } from '@/lib/studio-project-manager'
 
 /** Shape the onboarding screen renders (matches OnboardingLead). */
 export interface StudioLead {
@@ -43,6 +49,12 @@ export interface StudioLeadCandidate {
 }
 
 export interface StudioLeadDeps {
+  /**
+   * The studio-wide override (settings key studio.projectManagerId),
+   * resolved to a real team member, or null when unset or unresolvable. Wins
+   * outright over both steps below - see lib/studio-project-manager.ts.
+   */
+  findStudioProjectManager: () => Promise<StudioLeadCandidate | null>
   /** The project_manager assigned to this org, or null. */
   findPmForOrg: (orgRef: string) => Promise<StudioLeadCandidate | null>
   /** The oldest active super_admin on the roster, or null. */
@@ -113,21 +125,13 @@ export async function resolveStudioLead(
   deps: StudioLeadDeps,
   orgRef: string | null | undefined,
 ): Promise<StudioLead> {
-  if (orgRef) {
-    try {
-      const pm = await deps.findPmForOrg(orgRef)
-      if (pm) return leadFromCandidate(pm)
-    } catch {
-      // fall through to the roster fallback
-    }
-  }
-
-  try {
-    const owner = await deps.findFirstSuperAdmin()
-    if (owner) return leadFromCandidate(owner)
-  } catch {
-    // fall through to the literal
-  }
-
-  return DEFAULT_STUDIO_LEAD
+  const candidate = await resolveProjectManager<StudioLeadCandidate>(
+    {
+      findStudioOverride: deps.findStudioProjectManager,
+      findPerClientPm: deps.findPmForOrg,
+      findFallback: deps.findFirstSuperAdmin,
+    },
+    orgRef,
+  )
+  return candidate ? leadFromCandidate(candidate) : DEFAULT_STUDIO_LEAD
 }

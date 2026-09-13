@@ -30,8 +30,13 @@ const OWNER: StudioLeadCandidate = {
   id: 'tm_owner', name: 'Liam Miller', email: 'business@tahi.studio', avatarUrl: null,
 }
 
+const STUDIO_OVERRIDE: StudioLeadCandidate = {
+  id: 'tm_liam', name: 'Liam Miller', email: 'business@tahi.studio', avatarUrl: null,
+}
+
 function deps(over: Partial<StudioLeadDeps> = {}): StudioLeadDeps {
   return {
+    findStudioProjectManager: () => Promise.resolve(null),
     findPmForOrg: () => Promise.resolve(null),
     findFirstSuperAdmin: () => Promise.resolve(null),
     ...over,
@@ -39,6 +44,36 @@ function deps(over: Partial<StudioLeadDeps> = {}): StudioLeadDeps {
 }
 
 describe('resolveStudioLead', () => {
+  // "make Liam Miller as the project manager for everyone no matter what."
+  it('the studio-wide override wins outright, even when the org has its own PM', async () => {
+    const lead = await resolveStudioLead(deps({
+      findStudioProjectManager: () => Promise.resolve(STUDIO_OVERRIDE),
+      findPmForOrg: () => Promise.resolve(PM),
+      findFirstSuperAdmin: () => Promise.resolve(OWNER),
+    }), 'org_acme')
+
+    expect(lead.name).toBe('Liam Miller')
+    expect(lead.first).toBe('Liam')
+  })
+
+  it('no override set: names the org assigned PM as before', async () => {
+    const lead = await resolveStudioLead(deps({
+      findPmForOrg: () => Promise.resolve(PM),
+      findFirstSuperAdmin: () => Promise.resolve(OWNER),
+    }), 'org_acme')
+
+    expect(lead.name).toBe('Staci Bonnie')
+  })
+
+  it('an override id that resolves to nobody falls through to the org PM', async () => {
+    const lead = await resolveStudioLead(deps({
+      findStudioProjectManager: () => Promise.resolve(null),
+      findPmForOrg: () => Promise.resolve(PM),
+    }), 'org_acme')
+
+    expect(lead.name).toBe('Staci Bonnie')
+  })
+
   it('names the org assigned PM when there is one', async () => {
     const lead = await resolveStudioLead(deps({
       findPmForOrg: () => Promise.resolve(PM),
