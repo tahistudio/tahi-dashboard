@@ -485,6 +485,20 @@ export function KanbanBoard({
           gap: '0.875rem',
           alignItems: 'flex-start',
           overflowX: 'auto',
+          // Explicit, and NOT 'visible'. Per the CSS overflow spec, a
+          // 'visible' axis paired with a non-'visible' axis always computes
+          // to 'auto' - that promotion applies even when 'visible' is
+          // written out by hand, not just when it is the unset default. So
+          // overflowX: 'auto' alone (or paired with an explicit 'visible')
+          // silently turns this into a scroll container on the vertical
+          // axis too, and a flex item with any non-'visible' overflow drops
+          // its automatic min-height to 0, letting the board clip and draw
+          // its own vertical scrollbar alongside the page's real one on
+          // .dashboard-main. 'hidden' keeps this a horizontal-only
+          // scroller (same pairing requests-timeline.tsx already uses):
+          // the board only ever scrolls sideways, and the page owns the
+          // one and only vertical scrollbar.
+          overflowY: 'hidden',
           overscrollBehaviorX: 'contain',
           paddingBottom: '0.25rem',  // room for the native scrollbar
         }}

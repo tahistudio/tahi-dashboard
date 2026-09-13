@@ -378,6 +378,16 @@ const AI_WIZARD_CSS = `
   border-color: var(--focus-ring-color);
   box-shadow: var(--focus-ring);
 }
+/* The wrapper owns the ring above, so the textarea inside it must not also
+   paint one: without this, the global catch-all textarea:focus-visible rule
+   in globals.css (border-color + box-shadow: var(--shadow-ring)) still fires
+   on the field itself, and a focused composer shows two rings, one inside
+   the other. Same fix as .tahi-focus-within's field override. */
+.tahi-ai-composer textarea:focus,
+.tahi-ai-composer textarea:focus-visible{
+  outline: none;
+  box-shadow: none;
+}
 @media (prefers-reduced-motion: reduce){
   .tahi-ai-typing i{ animation: none; opacity: 0.55; }
   .tahi-ai-progress-fill{ transition: none; }
