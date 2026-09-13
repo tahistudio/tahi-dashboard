@@ -1584,6 +1584,10 @@ export const TOOLS: ToolDef[] = [
     body: prop('string', 'Message body (HTML or plain text; sanitised server side)'),
     attachmentFileIds: { type: 'array', items: { type: 'string' }, description: 'files.id values already uploaded through /api/uploads/confirm' },
   }, ['orgId', 'source', 'id', 'body']),
+  tool('portal_kickoff_slots', 'CLIENT VIEW of bookable half-hour kickoff slots for the onboarding picker (GET /api/portal/kickoff-slots): the studio\'s business-hours window with Google Calendar busy blocks removed where the calendar sync succeeds, otherwise the plain window with calendarSynced false. org_id is required because the service token has no client org of its own to resolve.', {
+    org_id: prop('string', 'The client organisation (organisations.id) to read as'),
+    time_zone: prop('string', 'IANA zone for slot labels, e.g. "Pacific/Auckland". Defaults to the studio zone when omitted or invalid.'),
+  }, ['org_id']),
 
   tool('list_conversations', 'The raw conversations table with unread counts. Prefer list_messages, which is the surface the dashboard actually renders.'),
   tool('create_conversation', 'Create a new messaging conversation. Type org_channel is FIND-OR-CREATE: there is exactly one standing line per client, so a second call for an org that already has one returns the existing room rather than a duplicate.', {
@@ -2875,6 +2879,11 @@ async function executeTool(
           attachmentFileIds: Array.isArray(args.attachmentFileIds) ? args.attachmentFileIds : [],
         },
       ))
+    case 'portal_kickoff_slots': {
+      const params: Record<string, string> = { orgId: need('org_id') }
+      if (typeof args.time_zone === 'string' && args.time_zone) params.timeZone = args.time_zone
+      return json(await apiGet('/api/portal/kickoff-slots', token, params))
+    }
 
     case 'list_conversations':
       return json(await apiGet('/api/admin/conversations', token))

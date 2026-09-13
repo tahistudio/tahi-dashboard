@@ -105,10 +105,8 @@ describe('email preview registry', () => {
     const dark = previews.filter((p) => !p.liveSender).map((p) => p.key)
     // Both invoice-overdue variants: the chaser that would send them does not
     // exist yet, so neither the pay-link nor the bank-transfer layout has ever
-    // reached a client. contract-signature is built for the contract sign
-    // route to call once a signer signs while others are still pending (S2,
-    // T3.3), but nothing calls it yet.
-    expect(dark).toEqual(['contract-signature', 'invoice-overdue', 'invoice-overdue-bank', 'review-request'])
+    // reached a client.
+    expect(dark).toEqual(['invoice-overdue', 'invoice-overdue-bank', 'review-request'])
   })
 
   it('summarises to { key, template, liveSender, subject } without the element', () => {
@@ -166,7 +164,6 @@ describe('email preview samples', () => {
       'announcement',
       'announcement-info',
       'contract-partially-signed',
-      'contract-signature',
       'new-request',
       'pre-call-digest',
       'project-enquiry',
@@ -191,7 +188,6 @@ describe('email preview samples', () => {
         'announcement',
         'announcement-info',
         'contract-partially-signed',
-        'contract-signature',
         'new-request',
         'pre-call-digest',
         'project-enquiry',
