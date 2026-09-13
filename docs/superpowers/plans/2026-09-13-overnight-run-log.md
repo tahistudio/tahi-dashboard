@@ -175,3 +175,8 @@ Read STATUS.md, TASKS.md and this file. `git log --oneline -15` for what landed.
 
 - Liam: "let's allow giant group, and send them both an invite". Applied as Liam: email.allowedOrgIds = ["aa80a2d6-0494-424d-8ccc-9af524c31fa7"] (their own contact addresses pass the gate; everything else unchanged). Michael Day (michael.day@giantgroup.com, primary, portal admin) invited through POST /api/admin/onboarding-invites with send and reuse: emailed true, link valid until 27 September. Mark Ramsey's invite held: the contact row reads mark.ramsey@giantgroup.com and Liam typed ramsay; waiting for the spelling.
 - Also this hour: the "test manual" invoice written off and the brief recomputed (LW.30); agents building prep notes on calls (LW.31) and the member-seat home (LW.32).
+
+## 11:00 to 11:30 NZ 2026-09-14
+
+- Member seats no longer see the plan or billing on the client home (62cb00a2, LW.32; the subscription route answers a member with seat: member and no money fields, the billing zone collapses to one line). Prep notes on every call (7f851a56, LW.31): discovery_calls.prep_note through migration 0102 applied on production through wrangler before the push, scheduled calls reuse notes; the brief links to /calls?call=<id>&focus=prep, the slide-over autosaves, the digest carries the note, MCP fields added.
+- The full suite went red once on nine tests the member-seat slice never touched (middleware.test.ts, utils formatDate), green in isolation and on the re-run: logged as LW.34 to harden.
