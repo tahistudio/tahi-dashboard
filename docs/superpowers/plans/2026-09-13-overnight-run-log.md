@@ -149,3 +149,7 @@ Read STATUS.md, TASKS.md and this file. `git log --oneline -15` for what landed.
 
 - All 19 modules designed and 18 critiqued; after one revision each, 14 modules stand at SHIP and 4 at FIX with a bounded list (portal-account, portal-files, portal-money, requests, tasks); calculator-analytics's critique hung for over 30 minutes and was stopped with the workflow. The shell wiring step never started (it sat behind the pipeline barrier), so it runs now as a standalone opus agent, with a standalone critic for calculator-analytics.
 - Review document: docs/superpowers/plans/2026-09-14-design-review-for-liam.md (compiled by scripts/design-review-compile.mjs from the workflow journal; every module has its preview link, files, page keys, what was left out, the critic's remaining issues and the open questions). Regenerated once the wiring and the last critique land.
+
+## 06:45 NZ 2026-09-14: shell wiring verified
+
+- The workflow's wiring step had in fact landed its edits silently before the journal recorded it; the standalone opus agent verified reachability (owner 31 of 33 ids, teammate 6 of 7, client 14 of 14, the misses are legacy shims), zero console errors, and repaired "Tahi App Shell.html" (ten duplicated stylesheet links now carry the ids the modules check for, head-band.css after app-shell.css, requests-focus before requests-detail, sales-pipeline-kit after the band). Review document updated (088b9add). Calculator-analytics critique still running standalone.

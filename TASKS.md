@@ -279,6 +279,9 @@ order inside catalogue batches G and H.
 
 ## Designs that still need doing
 
+Overnight 2026-09-14: every module in this section has a fresh design in Claude Design (see docs/superpowers/plans/2026-09-14-design-review-for-liam.md, verdicts per module). Lines below stay open until Liam marks SHIP, FIX or REDO on that document; the port order follows his marks.
+
+
 - [ ] AR.4 - [Design] Proposals individual page (editor) needs a lot more work;
   redesign in Claude Design before any port. Includes the wiring bug the critic
   found, where every list row opens the same hardcoded document.
