@@ -38,6 +38,7 @@ export const schemaDouble = {
   caseStudySubmissions: fakeTable('case_study_submissions', ORG),
   caseStudies: fakeTable('case_studies', ORG),
   emailSuppressions: fakeTable('email_suppressions', ORG),
+  feedbackComments: fakeTable('feedback_comments', ORG),
   teamMemberAccessOrgs: fakeTable('team_member_access_orgs', ['orgId', 'accessId']),
   requestForms: fakeTable('request_forms', ORG),
   kanbanColumns: fakeTable('kanban_columns', ORG),

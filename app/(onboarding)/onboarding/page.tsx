@@ -8,6 +8,7 @@ import { resolveAndStampOrgOnboarding } from '@/lib/org-onboarding-server'
 import { loadStudioLead } from '@/lib/onboarding-lead-server'
 import { db } from '@/lib/db'
 import { OnboardingContent, type OnboardingLead } from '@/components/tahi/onboarding-content'
+import { FeedbackBall } from '@/components/tahi/feedback-ball'
 
 export const metadata = { title: 'Welcome to Tahi' }
 
@@ -123,12 +124,15 @@ export default async function OnboardingPage({
   const lead: OnboardingLead = await loadStudioLead(leadOrgRef)
 
   return (
-    <OnboardingContent
-      entry={entry}
-      lead={lead}
-      redirectTo="/overview"
-      inviteToken={inviteToken}
-      isPreviewingClient={isPreviewingClient}
-    />
+    <>
+      <OnboardingContent
+        entry={entry}
+        lead={lead}
+        redirectTo="/overview"
+        inviteToken={inviteToken}
+        isPreviewingClient={isPreviewingClient}
+      />
+      <FeedbackBall />
+    </>
   )
 }

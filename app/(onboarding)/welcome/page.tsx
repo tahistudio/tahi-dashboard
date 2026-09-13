@@ -6,6 +6,7 @@ import { resolveTeamEntry } from '@/lib/onboarding-entry'
 import { resolveInvite } from '@/lib/onboarding-invites'
 import { db } from '@/lib/db'
 import { TeamWelcomeContent, type TeamHire, type TeamBuddy } from '@/components/tahi/team-welcome-content'
+import { FeedbackBall } from '@/components/tahi/feedback-ball'
 
 export const metadata = { title: 'Welcome to Tahi' }
 
@@ -104,5 +105,10 @@ export default async function WelcomePage({
   }
   const buddy: TeamBuddy = { first: 'Liam', name: 'Liam Miller', initials: 'LM', img: '/liam-profile.jpg' }
 
-  return <TeamWelcomeContent hire={hire} buddy={buddy} redirectTo="/overview" inviteToken={inviteToken} />
+  return (
+    <>
+      <TeamWelcomeContent hire={hire} buddy={buddy} redirectTo="/overview" inviteToken={inviteToken} />
+      <FeedbackBall />
+    </>
+  )
 }

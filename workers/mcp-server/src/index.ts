@@ -1534,6 +1534,14 @@ export const TOOLS: ToolDef[] = [
     facets: prop('boolean', 'True to add per-view (all, unread, past) and per-kind row totals, counted over the window rather than derived from the page'),
   }),
 
+  // ── Feedback ──────────────────────────────────────────────────────────
+  tool('list_feedback_comments', 'The beta feedback floating comment ball\'s rows, newest first. This is the ONLY way to read feedback: there is no inbox UI in the dashboard yet. Each row carries who wrote it (userId, userType: admin | team_member | contact, userEmail), where (route, pageTitle), their screen (viewportWidth, viewportHeight, breakpoint: phone | tablet | desktop, theme: light | dark, userAgent), the free-text body, and a context JSON blob (the last 20 console errors/warnings, the last 20 failed fetches with method/url/status, the visible headings on the page, and the impersonation state when the sender was a Tahi admin previewing a client). orgId is null on every Tahi team/admin row (there is no single client the comment is about) and the client\'s organisation id on a contact row.', {
+    org_id: prop('string', 'Narrow to one client (organisations.id). Tahi team/admin rows have no org and never match this filter.'),
+    route: prop('string', 'Exact route match, e.g. /requests/abc123'),
+    since: prop('string', 'ISO instant: only rows at or after it'),
+    limit: prop('number', 'Page size, 1 to 200 (default 100)'),
+  }),
+
   // ── Messaging ─────────────────────────────────────────────────────────
   // The inbox is ONE surface over TWO stores: an org channel (the standing
   // line with a client) and a request thread (the message stream that already
@@ -2814,6 +2822,16 @@ async function executeTool(
       if (args.unread === true) params.unread = 'true'
       if (args.facets === true) params.facets = 'true'
       return json(await apiGet('/api/notifications', token, params))
+    }
+
+    // ── Feedback ────────────────────────────────────────────────────────
+    case 'list_feedback_comments': {
+      const params: Record<string, string> = {}
+      if (typeof args.org_id === 'string' && args.org_id) params.org_id = args.org_id
+      if (typeof args.route === 'string' && args.route) params.route = args.route
+      if (typeof args.since === 'string' && args.since) params.since = args.since
+      if (typeof args.limit === 'number') params.limit = String(args.limit)
+      return json(await apiGet('/api/admin/feedback', token, params))
     }
 
     // ── Messaging ─────────────────────────────────────────────────────

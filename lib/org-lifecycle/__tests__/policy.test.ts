@@ -80,6 +80,12 @@ function columnsOf(entry: SchemaTable): Map<string, string> {
  */
 const DOCUMENTED_EXCLUSIONS: readonly string[] = [
   'auditLog.actorId',
+  // feedback_comments.user_id has a userType sibling but always holds the
+  // caller's Clerk user id (app/api/feedback/route.ts), never a contacts.id.
+  // Same reasoning as message_reactions.user_id, which the regex below never
+  // even flags (no type sibling there); this one needs the explicit key
+  // because it does have one.
+  'feedbackComments.userId',
 ]
 
 describe('CONTACT_REFERENCE_COLUMNS is derived from the schema, not from memory', () => {
