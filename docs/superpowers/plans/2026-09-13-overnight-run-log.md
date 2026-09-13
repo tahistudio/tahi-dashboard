@@ -116,3 +116,10 @@ Read STATUS.md, TASKS.md and this file. `git log --oneline -15` for what landed.
 - The dead C3 template: emails/contract-signature.tsx and studioContractSignatureEmailPlan are only used by the preview page; C4's contract-partially-signed is the live path. Retire in D2.
 - In review (sonnet, workflow review-walkthrough-slices): AI wizard 47d0def9 (LW.13 to LW.17), seat landing 06486308 (LW.19, five clauses), Tahi seat invites 81153703 (LW.18, Clerk invitations removed from three routes, new team accept route). Still building: onboarding-lead-video-2 (LW.2 to LW.5, LW.9), kickoff-slots-2 (LW.6, LW.7 read-only view).
 - Liam ran /design-login at 22:35 NZ: design-system access authorized for the DL.4 re-critique.
+
+## 22:50 to 23:20 NZ: the walk-through fixes merged
+
+- Reviews (sonnet, two workflows): wizard had one confirmed blocker (admin route loaded any org's context without requireAccessToOrg), fixed on the branch (bdc4b329); seat landing clean (one nit: an extra Clerk read on the rare path); invites clean; project manager clean; kickoff slots clean apart from the missing MCP twin (follow-up).
+- Merged and pushed: 7516bc5b (seat landing 1c598e9a, invites), 7ca50bff (project manager f8341c3d, kickoff slots with one import conflict resolved), f2c3182f (wizard). Suite at f2c3182f: 297 files, 4547 tests, lint zero, build compiled.
+- Liam asked (23:00 NZ) for readiness and three feasibility answers (WhatsApp/Slack bot, role-scoped MCP, tasks from a PDF); answered in chat: Giant Group 95 percent, full daily driver 80 percent; bot about 3 days Slack first plus Whisper on Workers AI; role-scoped MCP about two weeks on the existing resolver; PDF tasks about 3 days (tasks cannot carry files today, the task wizard never nests). Tonight after the current work: the design pass, one page at a time, held for his review before any port.
+- Next on this run: f2c3182f deploy, then PATCH studio.projectManagerId to Liam's team member id b3025c04 as Liam, then the design capture scout's result and the DL.4 re-critique.
