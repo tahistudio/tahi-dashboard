@@ -23,7 +23,12 @@ const state: {
   org: Row | null
   studioDefault: string | null
   updates: Row[]
-} = { org: null, studioDefault: null, updates: [] }
+  /** Queued behaviour for successive drizzle.all() calls (billingExtras).
+   *  'throw' simulates a column missing on this environment; an array is the
+   *  row set to resolve with. Unset calls fall back to an empty result, which
+   *  is what every existing test in this file relies on. */
+  allQueue: Array<'throw' | Row[]>
+} = { org: null, studioDefault: null, updates: [], allQueue: [] }
 
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn().mockResolvedValue({
@@ -114,7 +119,11 @@ vi.mock('@/lib/db', () => ({
       },
     }),
     // billingExtras (custom_mrr and friends live outside Drizzle)
-    all: () => Promise.resolve([]),
+    all: () => {
+      const next = state.allQueue.shift()
+      if (next === 'throw') return Promise.reject(new Error('no such column: custom_mrr_currency'))
+      return Promise.resolve(next ?? [])
+    },
     run: () => Promise.resolve(undefined),
     update: () => ({
       set: (patch: Row) => {
@@ -161,6 +170,7 @@ beforeEach(() => {
   state.org = org()
   state.studioDefault = null
   state.updates = []
+  state.allQueue = []
   vi.mocked(getRequestAuth).mockResolvedValue({
     userId: 'user_admin',
     orgId: 'org_tahi',
@@ -201,6 +211,24 @@ describe('GET /api/admin/clients/[id] invoicing facts', () => {
     const res = await GET(getReq(), ctx)
     const body = await res.json() as { org: Row }
     expect(body.org.effectiveInvoiceChannel).toBe('stripe')
+  })
+})
+
+describe('GET /api/admin/clients/[id] customMrr fallback', () => {
+  it('names customMrrCurrency as null when only the pre-currency-column query succeeds', async () => {
+    // First read (custom_mrr_currency + the _is_manual flags) fails, as it
+    // does on an environment that has not run the later migration. The
+    // fallback query still returns custom_mrr, but has no currency column to
+    // select, so the route must state null rather than leave the key out.
+    state.allQueue = [
+      'throw',
+      [{ custom_mrr: 4200, billing_model: 'retainer', retainer_start_date: null, retainer_end_date: null }],
+    ]
+    const res = await GET(getReq(), ctx)
+    expect(res.status).toBe(200)
+    const body = await res.json() as { org: Row }
+    expect(body.org.customMrr).toBe(4200)
+    expect(body.org.customMrrCurrency).toBeNull()
   })
 })
 
