@@ -335,25 +335,27 @@
   color: var(--text-muted);
   text-wrap: pretty;
 }
-.pfh-quiet-cta {
+/* A plain text link, not a button: the masthead already carries the one
+   primary "New request" CTA, so a client with genuinely nothing open gets a
+   quiet door rather than a second button competing for the same attention. */
+.pfh-quiet-link {
   display: inline-flex;
   align-items: center;
-  gap: 0.375rem;
-  height: 2.125rem;
-  margin-top: 0.75rem;
-  padding: 0 0.875rem;
+  min-height: 1.375rem;
+  margin-top: 0.625rem;
+  padding: 0;
   border: none;
-  border-radius: 0 0.625rem 0 0.625rem;
-  background: var(--brand);
-  color: #ffffff;
+  background: none;
   font: 600 0.8125rem 'Manrope', sans-serif;
+  color: var(--brand-strong);
+  text-decoration: underline;
+  text-underline-offset: 0.1875rem;
   cursor: pointer;
-  transition: background 0.15s, transform 0.12s;
+  transition: color 0.15s;
 }
-.pfh-quiet-cta:hover:not(:disabled) { background: var(--brand-strong); }
-.pfh-quiet-cta:active:not(:disabled) { transform: translateY(0.0625rem); }
-.pfh-quiet-cta:focus-visible { outline: 0.125rem solid var(--brand); outline-offset: 0.125rem; }
-.pfh-quiet-cta:disabled { opacity: 0.5; cursor: not-allowed; }
+.pfh-quiet-link:hover:not(:disabled) { color: var(--brand); }
+.pfh-quiet-link:focus-visible { outline: 0.125rem solid var(--brand); outline-offset: 0.125rem; border-radius: 0.25rem; }
+.pfh-quiet-link:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ---------- a read that failed ----------
    The design's portal-home state list has four live states and an error one:
@@ -507,7 +509,7 @@
   .pfh-more { min-height: 2.75rem; }
   .pfh-open { min-height: 2.75rem; }
   .pfh-quiet { flex-direction: column; }
-  .pfh-quiet-cta { height: 2.75rem; width: 100%; justify-content: center; }
+  .pfh-quiet-link { min-height: 2.75rem; }
   .pfh-err-cta { min-height: 2.75rem; }
 }
 
@@ -515,14 +517,14 @@
   .pfh-btn { min-height: 2.75rem; }
   .pfh-more { min-height: 2.75rem; }
   .pfh-open { min-height: 2.75rem; }
-  .pfh-quiet-cta { min-height: 2.75rem; }
+  .pfh-quiet-link { min-height: 2.75rem; }
   .pfh-err-cta { min-height: 2.75rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .pfh-open svg,
   .pfh-btn,
-  .pfh-quiet-cta,
+  .pfh-quiet-link,
   .pfh-err-cta { transition: none; }
   .pfh-open:hover svg { transform: none; }
   .pfh-skel-row { animation: none; opacity: 0.8; }

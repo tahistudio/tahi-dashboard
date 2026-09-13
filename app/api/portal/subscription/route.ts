@@ -16,6 +16,7 @@ import { getPlanLabel, resolveTracksConfig } from '@/lib/plan-utils'
 import { loadPlanCatalog } from '@/lib/plan-catalog'
 import { INVOICE_CHANNEL_SETTING_KEY, resolveInvoiceChannel } from '@/lib/invoice-channel'
 import { projectNextInvoiceDate } from '@/lib/next-invoice-date'
+import { resolveEngagementPresentation } from '@/lib/engagement-presentation'
 
 // ── GET /api/portal/subscription ────────────────────────────────────────────
 // Returns the client's active subscription with billing tier details, plus
@@ -62,9 +63,51 @@ export async function GET(req: NextRequest) {
     .limit(1)
 
   if (!sub) {
-    // No active retainer -> this is a project-type client. The home uses
-    // clientType to pick ProjectBoard vs TrackBoard (and to read /api/portal/project).
-    return NextResponse.json({ subscription: null, plans, clientType: 'project' })
+    // No active subscription does NOT by itself mean "project": a
+    // custom-priced client with nothing provisioned yet is a retainer whose
+    // plan is still being set up, not a one-off project (see
+    // lib/engagement-presentation.ts). The real signal is the engagement
+    // itself: a real projects row, or a schedule the studio has actually
+    // published to this client, read the same way /api/portal/project reads
+    // them.
+    let hasProjectRow = false
+    try {
+      const [projectRow] = await drizzle
+        .select({ id: schema.projects.id })
+        .from(schema.projects)
+        .where(eq(schema.projects.orgId, orgId))
+        .limit(1)
+      hasProjectRow = !!projectRow
+    } catch {
+      hasProjectRow = false
+    }
+
+    let hasPublishedSchedule = false
+    try {
+      const [scheduleRow] = await drizzle
+        .select({ id: schema.projectSchedules.id })
+        .from(schema.projectSchedules)
+        .where(and(
+          eq(schema.projectSchedules.orgId, orgId),
+          eq(schema.projectSchedules.status, 'shared'),
+        ))
+        .limit(1)
+      hasPublishedSchedule = !!scheduleRow
+    } catch {
+      hasPublishedSchedule = false
+    }
+
+    const presentation = resolveEngagementPresentation({
+      hasActiveSubscription: false,
+      hasProjectRow,
+      hasPublishedSchedule,
+    })
+
+    // The home uses clientType to pick ProjectBoard vs TrackBoard (and to
+    // read /api/portal/project). 'retainer' with no subscription row is the
+    // honest "your plan is being set up" state: TrackBoard's own empty state
+    // says so without any project language.
+    return NextResponse.json({ subscription: null, plans, clientType: presentation.clientType })
   }
 
   // What this client actually pays, not what the studio lists. Two reads of

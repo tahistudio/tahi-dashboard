@@ -696,11 +696,13 @@ function TrackBoard({
         <div className="ov-tb-head">
           <div>
             <h3>Your work in motion</h3>
-            <span className="ov-mini">Your tracks appear here once your plan is set up.</span>
+            {/* Honest, and without any project language: a custom-priced
+                client with no subscription row yet is a retainer whose plan
+                has not been provisioned, not a one-off project. See
+                lib/engagement-presentation.ts. No "New request" here: the
+                masthead already carries the one primary CTA for that. */}
+            <span className="ov-mini">Your plan is being set up by the studio.</span>
           </div>
-          <button className="ov-cta" disabled={ro} onClick={onStart}>
-            New request
-          </button>
         </div>
         <div className="ov-mini">No active tracks yet.</div>
       </div>
@@ -717,9 +719,6 @@ function TrackBoard({
             {lanes.length} track{lanes.length === 1 ? '' : 's'} running in parallel
           </span>
         </div>
-        <button className="ov-cta" disabled={ro} onClick={onStart}>
-          New request
-        </button>
       </div>
       <div className="ov-tb-lanes">
         {lanes.map((t, ti) => {
@@ -816,20 +815,16 @@ function TrackBoard({
 
 function ProjectBoard({
   project,
-  ro,
   loading,
   failed,
   onRetry,
-  onStart,
 }: {
   project: ProjectResp | undefined
-  ro: boolean
   /** True until /api/portal/project has answered. */
   loading: boolean
   /** True when the read failed with nothing to fall back on. */
   failed: boolean
   onRetry: () => void
-  onStart: () => void
 }) {
   const phases = project?.phases ?? []
   const title = project?.scheduleTitle || project?.project?.name || 'Your project'
@@ -877,13 +872,9 @@ function ProjectBoard({
             {phases.length > 0 ? ` · ${stage}` : ''}
           </span>
         </div>
-        {/* This slot used to hold a permanently disabled "Messaging soon"
-            button, an affordance for a surface that does not exist. The one
-            thing a client can genuinely start from here is a request, so that
-            is what it does, and it opens the dialog rather than a list. */}
-        <button className="ov-cta" disabled={ro} onClick={onStart}>
-          New request
-        </button>
+        {/* No "New request" here: it duplicated the masthead's primary CTA
+            and the "Start a request" affordance in Waiting on you, three
+            doors to the same dialog on one page. The masthead carries it. */}
       </div>
       {phases.length > 0 ? (
         <div className="ov-phases">
@@ -1354,6 +1345,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
           previewName={ctx.previewName}
           onStart={startRequest}
           isFirstRun={noRequestsAtAll}
+          hasOpenRequests={openReqs.length > 0}
         />
         {/* Every reading behind the strip can now be withheld (a denied
             invoices read, a failed requests read), and an empty .ov-vitals is
@@ -1366,11 +1358,9 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
           {isProject ? (
             <ProjectBoard
               project={projectData}
-              ro={ro}
               loading={subLoading || projectLoading}
               failed={projectFailed}
               onRetry={() => { void mutateProject() }}
-              onStart={startRequest}
             />
           ) : (
             <TrackBoard
