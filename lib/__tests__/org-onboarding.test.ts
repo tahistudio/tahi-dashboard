@@ -22,6 +22,7 @@ const blank: OrgOnboardingSignals = {
   hasLiveSubscription: false,
   hasProjectEngagement: false,
   hasPortalContactRequest: false,
+  hasAcceptedSeat: false,
 }
 
 /**
@@ -36,6 +37,7 @@ const companyIncBlank: OrgOnboardingSignals = {
   hasLiveSubscription: false,
   hasProjectEngagement: false,
   hasPortalContactRequest: false,
+  hasAcceptedSeat: false,
 }
 
 describe('isOrgOnboarded', () => {
@@ -77,8 +79,18 @@ describe('isOrgOnboarded', () => {
         hasLiveSubscription: false,
         hasProjectEngagement: false,
         hasPortalContactRequest: false,
+        hasAcceptedSeat: false,
       }),
     ).toBe(false)
+  })
+
+  it('is true for an org with an accepted seat (the reported bug: the stamp fell through)', () => {
+    // The seat's own publicMetadata.onboardingComplete stamp is what actually
+    // does the work (lib/onboarding-invites.ts acceptClientInvite); this is the
+    // fallback for when that per-user write itself never landed, so the org's
+    // OWN onboarding gate does not send the same seat back to the wizard on a
+    // later sign-in either.
+    expect(isOrgOnboarded({ ...blank, hasAcceptedSeat: true })).toBe(true)
   })
 
   describe('Company Inc: custom plan, no subscription, no project row, checklist keys present', () => {

@@ -20,7 +20,7 @@
  */
 
 import { clerkClient } from '@clerk/nextjs/server'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import {
@@ -122,11 +122,32 @@ export async function resolveAndStampOrgOnboarding(
       hasPortalContactRequest = false
     }
 
+    // Fifth clause (lib/org-onboarding.ts): a seat that has actually accepted
+    // and linked up (portal_role/clerk_user_id set) proves this org's first
+    // contact is long past onboarding, independent of whether that seat's own
+    // publicMetadata stamp (acceptClientInvite) happened to persist.
+    let hasAcceptedSeat = false
+    try {
+      const [seat] = await database
+        .select({ id: schema.contacts.id })
+        .from(schema.contacts)
+        .where(and(
+          eq(schema.contacts.orgId, org.id),
+          eq(schema.contacts.isPrimary, false),
+          isNotNull(schema.contacts.clerkUserId),
+        ))
+        .limit(1)
+      hasAcceptedSeat = !!seat
+    } catch {
+      hasAcceptedSeat = false
+    }
+
     const onboarded = isOrgOnboarded({
       onboardingState: parseOnboardingState(org.onboardingState),
       hasLiveSubscription,
       hasProjectEngagement,
       hasPortalContactRequest,
+      hasAcceptedSeat,
     })
     if (!onboarded) return false
 

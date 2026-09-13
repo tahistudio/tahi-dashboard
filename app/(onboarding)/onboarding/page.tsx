@@ -3,14 +3,43 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { getViewAudience } from '@/lib/view-audience'
 import { resolveClientEntry, clientEntryFromPersona, type ClientPersona } from '@/lib/onboarding-entry'
-import { resolveInvite } from '@/lib/onboarding-invites'
+import { resolveInvite, isSeatInvite, acceptClientInvite } from '@/lib/onboarding-invites'
 import { resolveAndStampOrgOnboarding } from '@/lib/org-onboarding-server'
 import { loadStudioLead } from '@/lib/onboarding-lead-server'
 import { db } from '@/lib/db'
 import { OnboardingContent, type OnboardingLead } from '@/components/tahi/onboarding-content'
 import { FeedbackBall } from '@/components/tahi/feedback-ball'
+import { AuthShell } from '@/components/tahi/auth-shell'
 
 export const metadata = { title: 'Welcome to Tahi' }
+
+type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+/**
+ * Plain landing for a seat invite that could not be accepted: the wrong
+ * account, or a token that is already spent or expired. Never the wizard -
+ * this person is not a first contact, so there is nothing to onboard them
+ * into.
+ */
+function InviteProblem({ headline, message }: { headline: string; message: string }) {
+  return (
+    <AuthShell
+      centeredScene
+      pill="Your workspace"
+      headline={headline}
+      footerPrompt="Wrong account?"
+      footerLinkLabel="Sign in with a different one"
+      footerLinkHref="/sign-in"
+    >
+      <div className="w-full text-center">
+        <p className="text-[0.9375rem] leading-[1.6] text-[var(--color-text)]">{message}</p>
+        <p className="mt-[0.75rem] text-[0.8125rem] leading-[1.5] text-[var(--color-text-muted)]">
+          Ask the studio for a new invite if you still need access.
+        </p>
+      </div>
+    </AuthShell>
+  )
+}
 
 /**
  * Client onboarding entry. The link decides the experience (self-serve chooser,
@@ -69,15 +98,43 @@ export default async function OnboardingPage({
   // below. An invite names the D1 org directly; otherwise the session's Clerk
   // org is resolved to the same row (loadStudioLead accepts either shape).
   let leadOrgRef: string | null = orgId ?? null
+  // Set inside the try below, acted on AFTER it: redirect() throws a special
+  // Next.js control-flow error that a surrounding catch would otherwise
+  // swallow silently (see the redirect() calls elsewhere in this file, all
+  // outside their own try blocks, for the same reason).
+  let seatAccepted = false
+  let seatProblem: { headline: string; message: string } | null = null
   if (token) {
     try {
-      const database = await db()
-      const invite = await resolveInvite(
-        database as ReturnType<typeof import('drizzle-orm/d1').drizzle>,
-        token,
-      )
+      const database = (await db()) as D1
+      const invite = await resolveInvite(database, token)
       if (invite?.orgId) leadOrgRef = invite.orgId
-      if (invite && invite.flow === 'client' && invite.persona && !invite.expired) {
+
+      if (invite && invite.flow === 'client' && invite.orgId) {
+        // Seat vs first contact, decided from the ORG'S OWN roster
+        // (lib/onboarding-invites.ts isSeatInvite), never invite.persona or
+        // invite.flow. A seat invite (this org already has someone else on
+        // it - the admin who sent it, an earlier teammate) is accepted
+        // immediately, right here, server-side: no chooser, no plan, no pay
+        // step, ever. A first-contact invite (a brand-new org, nobody on it
+        // yet) falls through to today's wizard below.
+        const seat = await isSeatInvite(database, invite.orgId, invite.contactEmail)
+        if (seat) {
+          const result = await acceptClientInvite(database, userId, invite)
+          if (result.ok) {
+            seatAccepted = true
+          } else if (result.status === 403) {
+            seatProblem = {
+              headline: 'This invite needs a different account.',
+              message: `This invite was sent to ${invite.contactEmail ?? 'a different address'}. Sign in with that email address to accept it.`,
+            }
+          } else {
+            seatProblem = { headline: 'This invite is no longer valid.', message: result.error }
+          }
+        }
+      }
+
+      if (!seatAccepted && !seatProblem && invite && invite.flow === 'client' && invite.persona && !invite.expired) {
         // Only disclose the invitee's PII (company / name / email) when the
         // signed-in user's VERIFIED email matches the invite. A token holder on
         // a different account still gets the right persona/flow, but never the
@@ -96,6 +153,15 @@ export default async function OnboardingPage({
     } catch {
       // fall back to the query-param entry
     }
+  }
+
+  // The invited org becomes the session's active organisation via
+  // /continue's own setActive dance (lib/workspace-choice.ts): this fresh
+  // seat holds exactly one Clerk membership (the one just granted), so it
+  // activates on its own with no picker shown.
+  if (seatAccepted) redirect('/continue')
+  if (seatProblem) {
+    return <InviteProblem headline={seatProblem.headline} message={seatProblem.message} />
   }
 
   // Prefill from the signed-in user where the link did not carry identity.

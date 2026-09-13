@@ -8,6 +8,41 @@ import {
   resolvePreviewOrgId,
 } from '@/lib/preview-cookie'
 import { resolveNoOrgRedirect } from '@/lib/workspace-choice'
+import { db } from '@/lib/db'
+import { isSeatInvite, resolveInvite } from '@/lib/onboarding-invites'
+
+type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+/**
+ * Whether a signed-out visitor carrying this invite token should land on
+ * sign-up rather than sign-in.
+ *
+ * True only for a genuine seat invite: the token resolves to a live client
+ * invite whose org already has someone else on it (isSeatInvite decides from
+ * the org's OWN roster, never the token's flow string). Clerk's sign-in
+ * screen has nothing to authenticate against for an address with no account
+ * yet and answers "Couldn't find your account" instead of offering to create
+ * one (reproduced live on production, 2026-09-14) - sign-up is where that
+ * account actually gets created. A first-contact invite (a brand-new org,
+ * nobody on it yet) keeps today's sign-in landing, whose footer link still
+ * offers sign-up.
+ *
+ * Fails closed to false (today's sign-in landing) on any resolution error, an
+ * unknown/garbage token, a team invite, or an expired one: the worst those
+ * cases risk is the pre-existing friction, never a hard failure on a
+ * request every signed-out visitor with a link passes through.
+ */
+async function shouldLandOnSignUp(linkToken: string | null): Promise<boolean> {
+  if (!linkToken) return false
+  try {
+    const database = (await db()) as D1
+    const invite = await resolveInvite(database, linkToken)
+    if (!invite || invite.flow !== 'client' || !invite.orgId || invite.expired) return false
+    return await isSeatInvite(database, invite.orgId, invite.contactEmail)
+  } catch {
+    return false
+  }
+}
 
 // Public routes : no auth needed. The app serves at the domain root (no
 // basePath), so a logged-out signer hitting /p/contract/<token> is never
@@ -170,9 +205,9 @@ export default clerkMiddleware(async (auth, req) => {
       if (!userId) {
         const target = p + (req.nextUrl.search || '')
         const url = req.nextUrl.clone()
-        url.pathname = '/sign-in'
         url.search = ''
         url.searchParams.set('redirect_url', target)
+        url.pathname = (await shouldLandOnSignUp(linkToken)) ? '/sign-up' : '/sign-in'
         res = NextResponse.redirect(url)
       } else {
         res = NextResponse.next()
