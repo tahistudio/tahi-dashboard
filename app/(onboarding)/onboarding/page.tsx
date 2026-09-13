@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { getServerAuth } from '@/lib/server-auth'
 import { resolveClientEntry, clientEntryFromPersona, type ClientPersona } from '@/lib/onboarding-entry'
 import { resolveInvite } from '@/lib/onboarding-invites'
+import { resolveAndStampOrgOnboarding } from '@/lib/org-onboarding-server'
 import { loadStudioLead } from '@/lib/onboarding-lead-server'
 import { db } from '@/lib/db'
 import { OnboardingContent, type OnboardingLead } from '@/components/tahi/onboarding-content'
@@ -94,6 +95,18 @@ export default async function OnboardingPage({
   // Prefill from the signed-in user where the link did not carry identity.
   entry.contactName = entry.contactName ?? viewerName
   entry.contactEmail = entry.contactEmail ?? viewerEmail
+
+  // Org-level onboarding backfill (see lib/org-onboarding.ts). A colleague
+  // invited straight into an already-onboarded org via a plain Clerk
+  // organization invitation never ran this route's own completion call
+  // themselves, so onboardingComplete above reads false even though their
+  // organisation finished onboarding long ago. Treat them as complete too,
+  // and stamp their own publicMetadata so the cheap check also passes next
+  // time. Only checked once the cheap per-user flag has already missed.
+  if (!onboardingComplete && orgId) {
+    onboardingComplete = await resolveAndStampOrgOnboarding(userId, orgId)
+  }
+
   // Only skip onboarding when they are genuinely ready (complete AND in an org).
   // Gating on orgId too prevents the /overview <-> /onboarding redirect loop a
   // complete-but-org-less session would otherwise hit.
