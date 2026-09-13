@@ -69,6 +69,14 @@ export interface DiscoveryCall {
   createdById: string
   createdAt: string
   updatedAt: string
+  /** Joined labels for the call's own links (see listCallsForParent in
+   *  lib/calls.ts). Optional: only the parent-list endpoints join these in,
+   *  so a caller building a DiscoveryCall by hand can omit them and
+   *  <LinkedToPanel> falls back to resolving the label itself. */
+  orgName?: string | null
+  dealTitle?: string | null
+  leadName?: string | null
+  requestTitle?: string | null
 }
 
 const MEETING_TYPE_LABELS: Record<string, string> = {
@@ -820,6 +828,10 @@ function CallLinkAndPurpose({
         dealId={call.dealId}
         leadId={call.leadId}
         requestId={call.requestId}
+        orgName={call.orgName}
+        dealTitle={call.dealTitle}
+        leadName={call.leadName}
+        requestTitle={call.requestTitle}
         onChanged={() => { void onRefresh() }}
       />
     </div>

@@ -91,26 +91,47 @@ export function LinkedToPanel({
 
   // Eagerly fetch enough to render the current labels when the parent
   // didn't supply them. Skip lookups when the link is null or already named.
+  //
+  // The default list endpoints are filtered/paginated (active items,
+  // newest N first), so a linked row that fell outside that window (an
+  // older or delivered request, an archived deal, an inactive org, a
+  // closed lead) never shows up in `list.find(...)`. Rather than leave
+  // the label unresolved forever (which used to render as "Not linked"
+  // even though the link is very much set), each resolver falls back to
+  // fetching the single row by id when the list lookup comes up empty.
   useEffect(() => {
     let cancelled = false
     async function resolveOrg() {
       if (!orgId || resolvedOrgName) return
       const r = await fetch(apiPath('/api/admin/clients')).catch(() => null)
-      if (!r?.ok || cancelled) return
-      const data = await r.json() as { organisations?: OrgOption[]; clients?: OrgOption[] }
-      setOrgs(data.organisations ?? data.clients ?? [])
-      const hit = (data.clients ?? []).find(o => o.id === orgId)
-      if (hit) setResolvedOrgName(hit.name)
+      if (r?.ok && !cancelled) {
+        const data = await r.json() as { organisations?: OrgOption[]; clients?: OrgOption[] }
+        const list = data.organisations ?? data.clients ?? []
+        setOrgs(list)
+        const hit = list.find(o => o.id === orgId)
+        if (hit) { setResolvedOrgName(hit.name); return }
+      }
+      if (cancelled) return
+      const single = await fetch(apiPath(`/api/admin/clients/${orgId}`)).catch(() => null)
+      if (!single?.ok || cancelled) return
+      const data = await single.json() as { org?: { name?: string } }
+      if (data.org?.name) setResolvedOrgName(data.org.name)
     }
     async function resolveDeal() {
       if (!dealId || resolvedDealTitle) return
       const r = await fetch(apiPath('/api/admin/deals')).catch(() => null)
-      if (!r?.ok || cancelled) return
-      const data = await r.json() as { items?: DealOption[]; deals?: DealOption[] }
-      const list = data.items ?? data.deals ?? []
-      setDeals(list)
-      const hit = list.find(d => d.id === dealId)
-      if (hit) setResolvedDealTitle(hit.title)
+      if (r?.ok && !cancelled) {
+        const data = await r.json() as { items?: DealOption[]; deals?: DealOption[] }
+        const list = data.items ?? data.deals ?? []
+        setDeals(list)
+        const hit = list.find(d => d.id === dealId)
+        if (hit) { setResolvedDealTitle(hit.title); return }
+      }
+      if (cancelled) return
+      const single = await fetch(apiPath(`/api/admin/deals/${dealId}`)).catch(() => null)
+      if (!single?.ok || cancelled) return
+      const data = await single.json() as { deal?: { title?: string } }
+      if (data.deal?.title) setResolvedDealTitle(data.deal.title)
     }
     async function resolveProposal() {
       if (!proposalId || resolvedProposalTitle) return
@@ -125,22 +146,34 @@ export function LinkedToPanel({
     async function resolveLead() {
       if (!leadId || resolvedLeadName) return
       const r = await fetch(apiPath('/api/admin/leads')).catch(() => null)
-      if (!r?.ok || cancelled) return
-      const data = await r.json() as { leads?: LeadOption[]; items?: LeadOption[] }
-      const list = data.leads ?? data.items ?? []
-      setLeads(list)
-      const hit = list.find(l => l.id === leadId)
-      if (hit) setResolvedLeadName(hit.name)
+      if (r?.ok && !cancelled) {
+        const data = await r.json() as { leads?: LeadOption[]; items?: LeadOption[] }
+        const list = data.leads ?? data.items ?? []
+        setLeads(list)
+        const hit = list.find(l => l.id === leadId)
+        if (hit) { setResolvedLeadName(hit.name); return }
+      }
+      if (cancelled) return
+      const single = await fetch(apiPath(`/api/admin/leads/${leadId}`)).catch(() => null)
+      if (!single?.ok || cancelled) return
+      const data = await single.json() as { lead?: { name?: string } }
+      if (data.lead?.name) setResolvedLeadName(data.lead.name)
     }
     async function resolveRequest() {
       if (!requestId || resolvedRequestTitle) return
       const r = await fetch(apiPath('/api/admin/requests')).catch(() => null)
-      if (!r?.ok || cancelled) return
-      const data = await r.json() as { requests?: RequestOption[] }
-      const list = data.requests ?? []
-      setRequests(list)
-      const hit = list.find(rq => rq.id === requestId)
-      if (hit) setResolvedRequestTitle(hit.title)
+      if (r?.ok && !cancelled) {
+        const data = await r.json() as { requests?: RequestOption[] }
+        const list = data.requests ?? []
+        setRequests(list)
+        const hit = list.find(rq => rq.id === requestId)
+        if (hit) { setResolvedRequestTitle(hit.title); return }
+      }
+      if (cancelled) return
+      const single = await fetch(apiPath(`/api/admin/requests/${requestId}`)).catch(() => null)
+      if (!single?.ok || cancelled) return
+      const data = await single.json() as { request?: { title?: string } }
+      if (data.request?.title) setResolvedRequestTitle(data.request.title)
     }
     void resolveOrg(); void resolveDeal(); void resolveProposal(); void resolveLead(); void resolveRequest()
     return () => { cancelled = true }
@@ -364,14 +397,23 @@ function LinkRow({
           <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{label}</span>
         </div>
         <div className="flex items-center" style={{ gap: 'var(--space-2)', flex: 1, minWidth: 0, flexWrap: 'wrap' }}>
-          {valueLabel && valueHref ? (
-            <Link
-              href={valueHref}
-              className="truncate"
-              style={{ fontSize: '0.875rem', color: 'var(--color-text)', textDecoration: 'none', fontWeight: 500 }}
-            >
-              {valueLabel}
-            </Link>
+          {currentId ? (
+            valueHref ? (
+              <Link
+                href={valueHref}
+                className="truncate"
+                style={{ fontSize: '0.875rem', color: 'var(--color-text)', textDecoration: 'none', fontWeight: 500 }}
+              >
+                {/* An id is set but its label hasn't resolved yet (or the
+                    resolve fetch failed) - never fall through to "Not
+                    linked" while a real link exists. */}
+                {valueLabel ?? 'Linked (loading)'}
+              </Link>
+            ) : (
+              <span className="truncate" style={{ fontSize: '0.875rem', color: 'var(--color-text)', fontWeight: 500 }}>
+                {valueLabel ?? 'Linked (loading)'}
+              </span>
+            )
           ) : (
             <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-subtle)', fontStyle: 'italic' }}>Not linked</span>
           )}

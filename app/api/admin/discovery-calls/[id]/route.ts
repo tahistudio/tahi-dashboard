@@ -12,6 +12,15 @@
  *     value must reference an existing row or the request 400s) and
  *     meetingType (must be one of MEETING_TYPES or the request 400s).
  *
+ * A relink is access-scoping checked on BOTH ends: the caller must have
+ * access to the call's CURRENT org (so a scoped team member cannot unlink
+ * or read someone else's call) and to every NEW link target's org (so
+ * they cannot point the call at a client outside their scope). leadId
+ * never carries an org (a lead is pre-client) and a null-org deal is also
+ * pre-client; both follow the "allow unless the caller has zero access at
+ * all" rule used by the /calls index (see
+ * app/api/admin/calls/index/route.ts and lib/require-access.ts).
+ *
  * Side effect: when status flips to "completed" (or outcome is set on
  * a call that wasn't completed), a lead_call_completed activity is
  * written so the lead timeline picks it up. A change to any of
@@ -27,10 +36,12 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { normalizeCallInstant } from '@/lib/call-time'
-import { isMeetingType, validateCallLinkFields } from '@/lib/calls'
+import { isMeetingType, resolveCallOrgId, validateCallLinkFields } from '@/lib/calls'
+import { requireAccessToOrgOrPreClient } from '@/lib/require-access'
 import { logAudit } from '@/lib/audit'
 
 type Params = { params: Promise<{ id: string }> }
+type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 // Transcripts can run long — a 60-minute Meet call easily produces
 // 100k+ chars of Gemini transcript. Cap is here to stop a runaway paste
@@ -117,10 +128,36 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     }
   }
   if (Object.keys(linkPatch).length > 0) {
-    const linkError = await validateCallLinkFields(database, linkPatch)
-    if (linkError) {
-      return NextResponse.json({ error: linkError.message }, { status: 400 })
+    const linkResult = await validateCallLinkFields(database, linkPatch)
+    if (linkResult.error) {
+      return NextResponse.json({ error: linkResult.error.message }, { status: 400 })
     }
+
+    // Access scoping, checked on both ends of a relink (see the route's
+    // own doc comment above for the full rationale):
+    //
+    // 1. The call's CURRENT org: a scoped member must not be able to
+    //    unlink or otherwise touch a call belonging to a client outside
+    //    their scope, even if every id in the patch is perfectly valid.
+    const currentOrgId = await resolveCallOrgId(database, {
+      orgId: prev.orgId, dealId: prev.dealId, requestId: prev.requestId,
+    })
+    const currentDenied = await requireAccessToOrgOrPreClient(database as Drizzle, userId, currentOrgId)
+    if (currentDenied) return currentDenied
+
+    // 2. Every NEW link target: a relink must not be usable to point
+    //    the call at (or read the label of) a client outside scope.
+    //    linkResult.orgIds carries the org each provided field resolves
+    //    to, from the SAME lookup that already checked existence (no
+    //    extra query): orgId is its own value, leadId is always null
+    //    (leads carry no organisation), dealId/requestId are the target
+    //    row's own org (null for a pre-client deal).
+    for (const field of ['orgId', 'leadId', 'dealId', 'requestId'] as const) {
+      if (!(field in linkPatch) || linkPatch[field] === null) continue // clearing a link, not pointing at a new org
+      const targetDenied = await requireAccessToOrgOrPreClient(database as Drizzle, userId, linkResult.orgIds[field] ?? null)
+      if (targetDenied) return targetDenied
+    }
+
     Object.assign(updates, linkPatch)
   }
 

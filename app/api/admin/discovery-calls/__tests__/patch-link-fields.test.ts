@@ -5,6 +5,13 @@
  * existence validation, 400s) and the meetingType vocabulary check, plus
  * the audit_log row a change to any of those (or title) should leave.
  *
+ * Also covers access-scoping on a relink: a scoped team member must not be
+ * able to relink a call onto (or off of) a client outside their scope
+ * through this route. `resolveAccessScoping` is mocked directly (not the
+ * queries it would make), so a scoped/unrestricted decision never touches
+ * the fake D1 queue below, only the route's own lookups do. Mirrors the
+ * mocking pattern in app/api/admin/calls/__tests__/patch-link-fields.test.ts.
+ *
  * The fake D1 is a queue-based chainable recorder: each call the route
  * makes to select/insert/update shifts the next queued result off the
  * front, in the exact order the route issues them. See
@@ -20,7 +27,13 @@ vi.mock('@/lib/server-auth', () => ({
 
 vi.mock('@/lib/db', () => ({ db: vi.fn() }))
 
+vi.mock('@/lib/access-scoping', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/access-scoping')>()),
+  resolveAccessScoping: vi.fn(),
+}))
+
 import { db } from '@/lib/db'
+import { resolveAccessScoping } from '@/lib/access-scoping'
 import { NextRequest } from 'next/server'
 import { PATCH } from '@/app/api/admin/discovery-calls/[id]/route'
 
@@ -88,6 +101,10 @@ const baseCall = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Unrestricted by default so every pre-existing test in this file keeps
+  // exercising the validation/audit paths without a scoping denial getting
+  // in the way. Tests that specifically cover scoping override this.
+  vi.mocked(resolveAccessScoping).mockResolvedValue(null)
 })
 
 describe('PATCH /api/admin/discovery-calls/[id], link fields', () => {
@@ -216,5 +233,86 @@ describe('PATCH /api/admin/discovery-calls/[id], link fields', () => {
     expect(res.status).toBe(200)
     expect(queries).toHaveLength(2)
     expect(queries[1][0].method).toBe('update')
+  })
+})
+
+describe('PATCH /api/admin/discovery-calls/[id], access scoping on a relink', () => {
+  it('403s a relink to an org outside the caller scope', async () => {
+    vi.mocked(resolveAccessScoping).mockResolvedValue(['org_a'])
+    const { handle, queries } = makeDb([[baseCall], [{ id: 'org_b' }]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await PATCH(req({ orgId: 'org_b' }), params('call-1'))
+    expect(res.status).toBe(403)
+    // Existing-call lookup + the org-exists lookup, never reaches update.
+    expect(queries).toHaveLength(2)
+  })
+
+  it('403s a relink to a deal belonging to an org outside the caller scope', async () => {
+    vi.mocked(resolveAccessScoping).mockResolvedValue(['org_a'])
+    const { handle, queries } = makeDb([[baseCall], [{ id: 'deal_1', orgId: 'org_b' }]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await PATCH(req({ dealId: 'deal_1' }), params('call-1'))
+    expect(res.status).toBe(403)
+    expect(queries).toHaveLength(2)
+  })
+
+  it('403s a relink to a request belonging to an org outside the caller scope', async () => {
+    vi.mocked(resolveAccessScoping).mockResolvedValue(['org_a'])
+    const { handle, queries } = makeDb([[baseCall], [{ id: 'req_1', orgId: 'org_b' }]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await PATCH(req({ requestId: 'req_1' }), params('call-1'))
+    expect(res.status).toBe(403)
+    expect(queries).toHaveLength(2)
+  })
+
+  it('403s editing the link fields of a call that already belongs to an org outside the caller scope', async () => {
+    vi.mocked(resolveAccessScoping).mockResolvedValue(['org_a'])
+    const otherOrgCall = { ...baseCall, orgId: 'org_b' }
+    const { handle, queries } = makeDb([[otherOrgCall], [{ id: 'lead_1' }]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    // Every id in the patch is perfectly valid (lead_1 exists) - the call
+    // itself belonging to an out-of-scope org must still deny.
+    const res = await PATCH(req({ leadId: 'lead_1' }), params('call-1'))
+    expect(res.status).toBe(403)
+    expect(queries).toHaveLength(2)
+  })
+
+  it('allows an unrestricted admin to relink a call across orgs', async () => {
+    vi.mocked(resolveAccessScoping).mockResolvedValue(null)
+    const { handle, queries } = makeDb([[baseCall], [{ id: 'org_b' }], [], []])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await PATCH(req({ orgId: 'org_b' }), params('call-1'))
+    expect(res.status).toBe(200)
+    expect(queries).toHaveLength(4)
+  })
+
+  it('allows linking to a lead (no organisation) even when the caller is scope-restricted', async () => {
+    // Leads carry no orgId column at all, so a lead link is pre-client:
+    // the "allow unless the caller has zero access at all" rule applies,
+    // same as the /calls index (see app/api/admin/calls/index/route.ts).
+    vi.mocked(resolveAccessScoping).mockResolvedValue(['org_a'])
+    const { handle, queries } = makeDb([[baseCall], [{ id: 'lead_1' }], [], []])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await PATCH(req({ leadId: 'lead_1' }), params('call-1'))
+    expect(res.status).toBe(200)
+    expect(queries).toHaveLength(4)
+  })
+
+  it('403s linking to a lead when the caller has zero access at all', async () => {
+    // Deny-by-default: a caller with no access rule configured cannot
+    // touch this call at all, even a fully pre-client one.
+    vi.mocked(resolveAccessScoping).mockResolvedValue([])
+    const { handle, queries } = makeDb([[baseCall], [{ id: 'lead_1' }]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await PATCH(req({ leadId: 'lead_1' }), params('call-1'))
+    expect(res.status).toBe(403)
+    expect(queries).toHaveLength(2)
   })
 })
