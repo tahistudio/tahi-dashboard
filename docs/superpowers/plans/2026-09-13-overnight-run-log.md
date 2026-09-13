@@ -153,3 +153,10 @@ Read STATUS.md, TASKS.md and this file. `git log --oneline -15` for what landed.
 ## 06:45 NZ 2026-09-14: shell wiring verified
 
 - The workflow's wiring step had in fact landed its edits silently before the journal recorded it; the standalone opus agent verified reachability (owner 31 of 33 ids, teammate 6 of 7, client 14 of 14, the misses are legacy shims), zero console errors, and repaired "Tahi App Shell.html" (ten duplicated stylesheet links now carry the ids the modules check for, head-band.css after app-shell.css, requests-focus before requests-detail, sales-pipeline-kit after the band). Review document updated (088b9add). Calculator-analytics critique still running standalone.
+
+## 07:10 NZ 2026-09-14: night closed out for Liam's review
+
+- Calculator-analytics critiqued standalone: FIX (the 375 title input clips, one loading tile, one dark hex). Its critic also found that the shell scrolls inside its own container, so every critic's full-page screenshot covered only the first viewport; recorded as a caveat at the top of the review document (c741bd32).
+- Final state of the design pass: 19 modules designed, 19 critiqued, 13 SHIP and 6 FIX after one revision each (portal-account, portal-files, portal-money, requests, tasks, calculator-analytics). Held for Liam; the next revision round runs after his marks so his review sees stable files.
+- Code shipped tonight (all deployed green): PM defaults by engagement type (PM.1), the wizard's client history (GI.4 step one), the comment ball (BP.1 stripped back, migration 0100), the kickoff slots MCP twin, the duplicate contract template retired. Production settings applied as Liam: studio.projectManagerId and both default keys = Liam.
+- Liam's morning list: reconnect Google (Settings > Integrations); read docs/superpowers/plans/2026-09-14-design-review-for-liam.md and mark each module; confirm TASKS.md (reorganised, 95 open ids); the A5 lap and the allowlist flip for Giant Group remain his.
