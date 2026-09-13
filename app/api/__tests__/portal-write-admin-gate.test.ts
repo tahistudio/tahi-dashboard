@@ -32,7 +32,7 @@ vi.mock('@/lib/server-auth', () => ({ getPortalAuth: vi.fn() }))
 
 vi.mock('drizzle-orm', () => {
   const stub = (...args: unknown[]) => ({ args })
-  return { eq: stub, and: stub, asc: stub, desc: stub, inArray: stub }
+  return { eq: stub, and: stub, asc: stub, desc: stub, inArray: stub, isNull: stub }
 })
 
 vi.mock('@/db/d1', () => ({
@@ -62,6 +62,11 @@ vi.mock('@/db/d1', () => ({
       createdAt: 'created_at',
     },
     organisations: { _table: 'organisations', id: 'id', name: 'name' },
+    onboardingInvites: {
+      _table: 'onboarding_invites', id: 'id', token: 'token', flow: 'flow', orgId: 'org_id',
+      contactEmail: 'contact_email', contactName: 'contact_name', expiresAt: 'expires_at',
+      usedAt: 'used_at', createdAt: 'created_at',
+    },
     subscriptions: {
       _table: 'subscriptions',
       orgId: 'org_id',
@@ -89,6 +94,16 @@ vi.mock('@/lib/email-gate', () => ({
     allowedAddresses: [],
     blockedAddresses: [],
   }),
+}))
+
+// POST /api/portal/people and POST /api/portal/invites now mint their own app
+// invite token and send the Studio Ledger email (lib/email.ts), rather than a
+// Clerk organization invitation. This describe block is about the admin gate,
+// not the send itself (that has its own spec in
+// app/api/__tests__/clerk-invite-allowlist.test.ts), so the send is mocked to
+// always succeed.
+vi.mock('@/lib/email', () => ({
+  sendEmail: vi.fn().mockResolvedValue({ success: true }),
 }))
 
 vi.mock('@/lib/notifications', () => ({ notifyAllAdmins: vi.fn().mockResolvedValue(undefined) }))
