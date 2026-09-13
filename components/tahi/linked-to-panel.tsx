@@ -1,21 +1,24 @@
 /**
  * <LinkedToPanel> — universal linkage editor for proposal / contract /
- * schedule resources.
+ * schedule / call resources.
  *
- * Shows the current org / deal / proposal links with inline change + remove
- * buttons. Patches the resource via the existing detail PATCH endpoint;
- * activity-log entries on the affected deals fire server-side.
+ * Shows the current org / deal / proposal / lead / request links with
+ * inline change + remove buttons. Patches the resource via the existing
+ * detail PATCH endpoint; activity-log entries on the affected deals fire
+ * server-side.
  *
  * Surface only what the resource type actually supports:
- *   - Proposal:  org + deal
- *   - Schedule:  org + deal + proposal
- *   - Contract:  org + deal + proposal
+ *   - Proposal:  org + deal + lead
+ *   - Schedule:  org + deal + proposal + lead
+ *   - Contract:  org + deal + proposal + lead
+ *   - Call:      org + deal + lead + request (discovery_calls is
+ *                polymorphic across all four, see db/schema.ts)
  */
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import Link from 'next/link'
-import { Building2, TrendingUp, FileText, Link2, X, ChevronDown, UserPlus } from 'lucide-react'
+import { Building2, TrendingUp, FileText, Link2, X, ChevronDown, UserPlus, ClipboardList } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { Popover } from '@/components/tahi/popover'
@@ -24,24 +27,28 @@ interface OrgOption { id: string; name: string }
 interface DealOption { id: string; title: string; orgId: string | null; orgName: string | null; stageName: string | null }
 interface ProposalOption { id: string; title: string; orgId: string | null; orgName: string | null; status: string }
 interface LeadOption { id: string; name: string; company: string | null; status: string }
+interface RequestOption { id: string; title: string; orgId: string | null; orgName: string | null; status: string }
 
 interface Props {
   /** Which resource to patch. Drives the PATCH endpoint and which fields show. */
-  resourceType: 'proposal' | 'schedule' | 'contract'
+  resourceType: 'proposal' | 'schedule' | 'contract' | 'call'
   resourceId: string
   /** Current values from the loaded resource. */
   orgId: string | null
   dealId: string | null
-  /** Lead linkage — only schedules support this today (migration 0049).
-   *  Hidden on resource types that don't have a lead_id column. */
+  /** Lead linkage, only schedules and calls support this today (migration
+   *  0049). Hidden on resource types that don't have a lead_id column. */
   leadId?: string | null
-  /** Only used for schedule + contract. Null/undefined for proposal (it doesn't link to other proposals). */
+  /** Only used for schedule + contract. Null/undefined for proposal (it doesn't link to other proposals) and call (calls don't link to proposals). */
   proposalId?: string | null
+  /** Request linkage, calls only (discovery_calls.request_id). */
+  requestId?: string | null
   /** Display labels — provided by the parent so we don't re-fetch on mount. */
   orgName?: string | null
   dealTitle?: string | null
   proposalTitle?: string | null
   leadName?: string | null
+  requestTitle?: string | null
   /** Called after a successful PATCH so the parent can refresh its state. */
   onChanged?: () => void
 }
@@ -50,19 +57,29 @@ const resourceLabel = {
   proposal: 'proposal',
   schedule: 'schedule',
   contract: 'contract',
+  call: 'call',
 } as const
 
+const resourcePath: Record<Props['resourceType'], string> = {
+  proposal: 'proposals',
+  schedule: 'schedules',
+  contract: 'contracts',
+  call: 'discovery-calls',
+}
+
 export function LinkedToPanel({
-  resourceType, resourceId, orgId, dealId, leadId, proposalId,
+  resourceType, resourceId, orgId, dealId, leadId, proposalId, requestId,
   orgName: orgNameProp, dealTitle: dealTitleProp, proposalTitle: proposalTitleProp, leadName: leadNameProp,
+  requestTitle: requestTitleProp,
   onChanged,
 }: Props) {
   const { showToast } = useToast()
-  const [editing, setEditing] = useState<null | 'org' | 'deal' | 'proposal' | 'lead'>(null)
+  const [editing, setEditing] = useState<null | 'org' | 'deal' | 'proposal' | 'lead' | 'request'>(null)
   const [orgs, setOrgs] = useState<OrgOption[]>([])
   const [deals, setDeals] = useState<DealOption[]>([])
   const [proposals, setProposals] = useState<ProposalOption[]>([])
   const [leads, setLeads] = useState<LeadOption[]>([])
+  const [requests, setRequests] = useState<RequestOption[]>([])
   const [busy, setBusy] = useState(false)
   // Resolved labels — start with the props if provided, fall back to looking
   // up in the loaded option lists once they've been fetched.
@@ -70,6 +87,7 @@ export function LinkedToPanel({
   const [resolvedDealTitle, setResolvedDealTitle] = useState<string | null>(dealTitleProp ?? null)
   const [resolvedProposalTitle, setResolvedProposalTitle] = useState<string | null>(proposalTitleProp ?? null)
   const [resolvedLeadName, setResolvedLeadName] = useState<string | null>(leadNameProp ?? null)
+  const [resolvedRequestTitle, setResolvedRequestTitle] = useState<string | null>(requestTitleProp ?? null)
 
   // Eagerly fetch enough to render the current labels when the parent
   // didn't supply them. Skip lookups when the link is null or already named.
@@ -114,19 +132,35 @@ export function LinkedToPanel({
       const hit = list.find(l => l.id === leadId)
       if (hit) setResolvedLeadName(hit.name)
     }
-    void resolveOrg(); void resolveDeal(); void resolveProposal(); void resolveLead()
+    async function resolveRequest() {
+      if (!requestId || resolvedRequestTitle) return
+      const r = await fetch(apiPath('/api/admin/requests')).catch(() => null)
+      if (!r?.ok || cancelled) return
+      const data = await r.json() as { requests?: RequestOption[] }
+      const list = data.requests ?? []
+      setRequests(list)
+      const hit = list.find(rq => rq.id === requestId)
+      if (hit) setResolvedRequestTitle(hit.title)
+    }
+    void resolveOrg(); void resolveDeal(); void resolveProposal(); void resolveLead(); void resolveRequest()
     return () => { cancelled = true }
-  }, [orgId, dealId, proposalId, leadId, resolvedOrgName, resolvedDealTitle, resolvedProposalTitle, resolvedLeadName])
+  }, [orgId, dealId, proposalId, leadId, requestId, resolvedOrgName, resolvedDealTitle, resolvedProposalTitle, resolvedLeadName, resolvedRequestTitle])
 
   const orgName = resolvedOrgName
   const dealTitle = resolvedDealTitle
   const proposalTitle = resolvedProposalTitle
   const leadName = resolvedLeadName
-  const showProposalRow = resourceType !== 'proposal'
-  // Lead row supported on all three deliverable types after migrations
-  // 0049 (schedules) and 0053 (proposals + contracts). The corresponding
-  // PATCH endpoints accept leadId on the body.
+  const requestTitle = resolvedRequestTitle
+  // Proposals don't reference other proposals, and calls don't reference
+  // proposals at all (discovery_calls has no proposal_id column).
+  const showProposalRow = resourceType !== 'proposal' && resourceType !== 'call'
+  // Lead row supported on all deliverable types after migrations 0049
+  // (schedules) and 0053 (proposals + contracts), plus calls (which have
+  // always carried lead_id, see db/schema.ts). The corresponding PATCH
+  // endpoints accept leadId on the body.
   const showLeadRow = true
+  // Request row: calls only (discovery_calls.request_id).
+  const showRequestRow = resourceType === 'call'
 
   // Lazy-load options when an editor opens.
   useEffect(() => {
@@ -162,17 +196,24 @@ export function LinkedToPanel({
             setLeads(data.leads ?? data.items ?? [])
           }
         }
+        if (editing === 'request' && requests.length === 0) {
+          const r = await fetch(apiPath('/api/admin/requests'))
+          if (r.ok && !cancelled) {
+            const data = await r.json() as { requests?: RequestOption[] }
+            setRequests(data.requests ?? [])
+          }
+        }
       } catch { /* silent */ }
     }
     void load()
     return () => { cancelled = true }
-  }, [editing, orgs.length, deals.length, proposals.length, leads.length])
+  }, [editing, orgs.length, deals.length, proposals.length, leads.length, requests.length])
 
   // Patch the resource via its detail endpoint.
   const patch = useCallback(async (changes: Record<string, string | null>) => {
     setBusy(true)
     try {
-      const url = `/api/admin/${resourceType === 'proposal' ? 'proposals' : resourceType === 'schedule' ? 'schedules' : 'contracts'}/${resourceId}`
+      const url = `/api/admin/${resourcePath[resourceType]}/${resourceId}`
       const res = await fetch(apiPath(url), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -191,6 +232,7 @@ export function LinkedToPanel({
   // Filter dropdown options to the relevant org where appropriate.
   const dealOptions = deals.filter(d => !orgId || d.orgId === orgId || !d.orgId)
   const proposalOptions = proposals.filter(p => !orgId || p.orgId === orgId || !p.orgId)
+  const requestOptions = requests.filter(rq => !orgId || rq.orgId === orgId || !rq.orgId)
 
   return (
     <div
@@ -270,6 +312,23 @@ export function LinkedToPanel({
             currentId={proposalId ?? null}
             options={proposalOptions.map(p => ({ id: p.id, label: `${p.title}${p.orgName ? ` · ${p.orgName}` : ''}` }))}
             onPick={(id) => patch({ proposalId: id })}
+          />
+        )}
+
+        {showRequestRow && (
+          <LinkRow
+            icon={<ClipboardList className="w-3.5 h-3.5" />}
+            label="Request"
+            valueLabel={requestTitle ?? null}
+            valueHref={requestId ? `/requests/${requestId}` : null}
+            onChange={() => setEditing('request')}
+            onRemove={requestId ? () => patch({ requestId: null }) : null}
+            editing={editing === 'request'}
+            onClose={() => setEditing(null)}
+            busy={busy}
+            currentId={requestId ?? null}
+            options={requestOptions.map(rq => ({ id: rq.id, label: `${rq.title}${rq.orgName ? ` · ${rq.orgName}` : ''}` }))}
+            onPick={(id) => patch({ requestId: id })}
           />
         )}
       </div>

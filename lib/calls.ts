@@ -116,3 +116,81 @@ export async function listCallsForParent(
     .where(eq(column, parentId))
     .orderBy(desc(schema.discoveryCalls.scheduledAt))
 }
+
+// ── Meeting type vocabulary ──────────────────────────────────────────────
+//
+// Set by the calendar sync classifier (app/api/admin/integrations/google/
+// sync-calendar/route.ts) and reclassifiable by hand from the /calls index
+// or a call's own detail. Kept here as the single source of truth so the
+// PATCH routes, the MCP tool description and the UI dropdown never drift.
+
+export const MEETING_TYPES = ['discovery', 'client', 'partnership', 'unclassified'] as const
+export type MeetingType = typeof MEETING_TYPES[number]
+
+export function isMeetingType(value: unknown): value is MeetingType {
+  return typeof value === 'string' && (MEETING_TYPES as readonly string[]).includes(value)
+}
+
+// ── Link-field validation (who a call is "for") ──────────────────────────
+//
+// discoveryCalls is polymorphic: orgId / leadId / dealId / requestId can
+// each be set independently. A PATCH that relinks a call must not be able
+// to point it at a row that doesn't exist, so every non-null id in the
+// patch is checked against its own table before the update runs.
+
+export interface CallLinkFields {
+  orgId?: string | null
+  leadId?: string | null
+  dealId?: string | null
+  requestId?: string | null
+}
+
+export interface CallLinkValidationError {
+  field: keyof CallLinkFields
+  message: string
+}
+
+/**
+ * Validate that every non-null id present in `fields` references a real
+ * row. A field that is `null` or omitted is always valid (it means "leave
+ * unlinked" / "leave unchanged"). Returns the first failing field's error,
+ * or null when everything checks out.
+ */
+export async function validateCallLinkFields(
+  database: Database,
+  fields: CallLinkFields,
+): Promise<CallLinkValidationError | null> {
+  if (fields.orgId) {
+    const [row] = await database
+      .select({ id: schema.organisations.id })
+      .from(schema.organisations)
+      .where(eq(schema.organisations.id, fields.orgId))
+      .limit(1)
+    if (!row) return { field: 'orgId', message: 'orgId does not reference an existing organisation' }
+  }
+  if (fields.leadId) {
+    const [row] = await database
+      .select({ id: schema.leads.id })
+      .from(schema.leads)
+      .where(eq(schema.leads.id, fields.leadId))
+      .limit(1)
+    if (!row) return { field: 'leadId', message: 'leadId does not reference an existing lead' }
+  }
+  if (fields.dealId) {
+    const [row] = await database
+      .select({ id: schema.deals.id })
+      .from(schema.deals)
+      .where(eq(schema.deals.id, fields.dealId))
+      .limit(1)
+    if (!row) return { field: 'dealId', message: 'dealId does not reference an existing deal' }
+  }
+  if (fields.requestId) {
+    const [row] = await database
+      .select({ id: schema.requests.id })
+      .from(schema.requests)
+      .where(eq(schema.requests.id, fields.requestId))
+      .limit(1)
+    if (!row) return { field: 'requestId', message: 'requestId does not reference an existing request' }
+  }
+  return null
+}

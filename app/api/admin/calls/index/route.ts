@@ -74,12 +74,15 @@ export async function GET(req: NextRequest) {
       leadName: schema.leads.name,
       dealId: schema.discoveryCalls.dealId,
       dealTitle: schema.deals.title,
+      requestId: schema.discoveryCalls.requestId,
+      requestTitle: schema.requests.title,
       orgId: schema.discoveryCalls.orgId,
       orgName: schema.organisations.name,
     })
     .from(schema.discoveryCalls)
     .leftJoin(schema.leads, eq(schema.discoveryCalls.leadId, schema.leads.id))
     .leftJoin(schema.deals, eq(schema.discoveryCalls.dealId, schema.deals.id))
+    .leftJoin(schema.requests, eq(schema.discoveryCalls.requestId, schema.requests.id))
     .leftJoin(schema.organisations, eq(schema.discoveryCalls.orgId, schema.organisations.id))
     .where(and(...conditions))
     .orderBy(desc(schema.discoveryCalls.scheduledAt))

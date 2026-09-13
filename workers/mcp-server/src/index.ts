@@ -980,13 +980,17 @@ export const TOOLS: ToolDef[] = [
     googleMeetUrl: prop('string', 'Optional — paste the Google Meet link from Calendar'),
     googleCalendarEventId: prop('string', 'Optional — set when wired via Calendar sync (Phase 2)'),
   }, ['leadId', 'title', 'scheduledAt']),
-  tool('update_lead_call', 'Update a discovery call. Accepts any subset of pre-call fields (title, scheduledAt, durationMinutes, googleMeetUrl, status, meetingType) and post-call fields (transcript, summary, outcome, outcomeNotes, scopeNotes, budgetMin/Max/Currency, timeline). When status flips to "completed" OR outcome is set for the first time, a lead_call_completed activity is written.', {
+  tool('update_lead_call', 'Update a discovery call. Accepts any subset of pre-call fields (title, scheduledAt, durationMinutes, googleMeetUrl, status, meetingType), link fields (orgId, leadId, dealId, requestId) and post-call fields (transcript, summary, outcome, outcomeNotes, scopeNotes, budgetMin/Max/Currency, timeline). Link fields are each independently nullable: pass null to unlink, a real id to relink (400s if it does not exist), omit to leave alone. meetingType 400s unless it is one of the classifier values. A change to orgId/leadId/dealId/requestId/meetingType/title is written to audit_log. When status flips to "completed" OR outcome is set for the first time, a lead_call_completed activity is written.', {
     callId: prop('string', 'Discovery call ID'),
     title: prop('string', 'Call title'),
     scheduledAt: prop('string', 'Full ISO 8601 instant with an explicit offset or Z when you mean that UTC moment; a bare value with no offset is read as Pacific/Auckland wall-clock time.'),
     durationMinutes: prop('number', 'Length in minutes'),
     status: prop('string', 'scheduled | completed | cancelled | no_show | rescheduled'),
-    meetingType: prop('string', 'Classifier: discovery | client | partnership | unclassified. Calendar sync sets this automatically; pass it here to reclassify.'),
+    meetingType: prop('string', 'Classifier: discovery | client | partnership | unclassified. Calendar sync sets this automatically; pass it here to reclassify. Must be one of these four values (null/empty clears it) or the call 400s.'),
+    orgId: prop('string', 'Linked client organisation ID (null detaches). A non-null id must reference an existing organisation or the call 400s.'),
+    leadId: prop('string', 'Linked lead ID (null detaches). A non-null id must reference an existing lead or the call 400s.'),
+    dealId: prop('string', 'Linked deal ID (null detaches). A non-null id must reference an existing deal or the call 400s.'),
+    requestId: prop('string', 'Linked request ID (null detaches). A non-null id must reference an existing request or the call 400s.'),
     googleMeetUrl: prop('string', 'Meet link'),
     transcript: prop('string', 'Paste the Gemini / Whisper transcript. Capped at 250k chars at the API layer.'),
     transcriptSource: prop('string', 'gemini_meet | manual_paste | whisper_api'),
@@ -1181,8 +1185,11 @@ export const TOOLS: ToolDef[] = [
     scheduledAt: prop('string', 'Scheduled date/time. Pass a full ISO 8601 instant with an explicit offset or Z (e.g. "2026-09-15T22:00:00Z") when you mean that UTC moment. A bare "2026-09-15T10:00:00" with no offset is read as Pacific/Auckland wall-clock time (the studio\'s own zone), NOT UTC. Do not hand-append "Z" to a time someone told you in NZ local time, that is exactly the bug this was fixed for.'),
     durationMinutes: prop('number', 'Call duration in minutes (default 30)'),
   }, ['orgId', 'title', 'scheduledAt']),
-  tool('update_call', 'Update a scheduled call', {
+  tool('update_call', 'Update a scheduled call (the legacy scheduled_calls table: hand-booked client check-ins, distinct from the discovery_calls table update_lead_call patches). title and description are what the call is for. orgId reassigns which client it belongs to: it 400s if the id does not reference an existing organisation, and 400s if you try to clear it (the column is NOT NULL, every check-in belongs to a client), and 403s if you lack access to the target org. There is no leadId, dealId, requestId or meetingType here, this table has no such columns, use update_lead_call for a call that needs any of those.', {
     callId: prop('string', 'Call ID'),
+    title: prop('string', 'What the call is for'),
+    description: prop('string', 'Longer description of what the call is for (null clears it)'),
+    orgId: prop('string', 'Reassign to a different client organisation. Must reference an existing org (400s otherwise) and one you have access to (403s otherwise). Cannot be cleared to null.'),
     status: prop('string', 'Updated status: scheduled, completed, cancelled, no_show'),
     notes: prop('string', 'Call notes'),
     recordingUrl: prop('string', 'Recording URL'),
