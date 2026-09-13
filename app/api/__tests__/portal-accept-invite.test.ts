@@ -41,6 +41,7 @@ const clerkState = {
   createdOrgId: 'clerk_org_new',
   createMembership: vi.fn().mockResolvedValue(undefined),
   createOrganization: vi.fn(),
+  updateUser: vi.fn().mockResolvedValue(undefined),
 }
 
 vi.mock('@clerk/nextjs/server', () => ({
@@ -48,12 +49,14 @@ vi.mock('@clerk/nextjs/server', () => ({
     users: {
       getUser: vi.fn().mockImplementation(() => Promise.resolve({
         primaryEmailAddressId: 'eml_1',
+        publicMetadata: {},
         emailAddresses: [{
           id: 'eml_1',
           emailAddress: clerkState.email,
           verification: { status: clerkState.verified ? 'verified' : 'unverified' },
         }],
       })),
+      updateUser: (...args: unknown[]) => clerkState.updateUser(...args),
     },
     organizations: {
       createOrganizationMembership: (...args: unknown[]) => clerkState.createMembership(...args),
@@ -79,9 +82,17 @@ vi.mock('@/db/d1', () => ({
 
 const inviteState: { value: Record<string, unknown> | null } = { value: null }
 
-vi.mock('@/lib/onboarding-invites', () => ({
-  resolveInvite: vi.fn().mockImplementation(() => Promise.resolve(inviteState.value)),
-}))
+// Only `resolveInvite` is faked, so `acceptClientInvite` (the function under
+// test, now shared with the seat branch of the onboarding page) runs for
+// real against the fake D1 / Clerk below - these route tests exercise the
+// shared lib, not a mock of it.
+vi.mock('@/lib/onboarding-invites', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/onboarding-invites')>()
+  return {
+    ...actual,
+    resolveInvite: vi.fn().mockImplementation(() => Promise.resolve(inviteState.value)),
+  }
+})
 
 vi.mock('@/lib/db', () => {
   const answer = () => Promise.resolve(captured.selectRows.length ? captured.selectRows.shift()! : [])
@@ -168,6 +179,7 @@ describe('POST /api/portal/accept-invite', () => {
     clerkState.verified = true
     clerkState.createMembership = vi.fn().mockResolvedValue(undefined)
     clerkState.createOrganization = vi.fn().mockResolvedValue({ id: 'clerk_org_new' })
+    clerkState.updateUser = vi.fn().mockResolvedValue(undefined)
   })
 
   it('creates and links the contact row when the invite has no matching contact', async () => {
@@ -184,6 +196,17 @@ describe('POST /api/portal/accept-invite', () => {
     // First person at the org: primary, and the workspace admin.
     expect(inserted[0].isPrimary).toBe(true)
     expect(inserted[0].portalRole).toBe('admin')
+  })
+
+  it('stamps the accepting user onboardingComplete on success', async () => {
+    queue({ id: 'org_acme', name: 'Acme Corp', clerkOrgId: 'clerk_org_1' }, [])
+
+    const res = await POST(makeRequest())
+    expect(res.status).toBe(200)
+    expect(clerkState.updateUser).toHaveBeenCalledWith(
+      'user_client',
+      expect.objectContaining({ publicMetadata: expect.objectContaining({ onboardingComplete: true }) }),
+    )
   })
 
   it('makes the primary contact an admin when they found the workspace', async () => {

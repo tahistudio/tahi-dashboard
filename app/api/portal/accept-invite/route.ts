@@ -1,10 +1,7 @@
 import { getRequestAuth } from '@/lib/server-auth'
-import { clerkClient } from '@clerk/nextjs/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { schema } from '@/db/d1'
-import { eq, and, isNull } from 'drizzle-orm'
-import { resolveInvite } from '@/lib/onboarding-invites'
+import { acceptClientInvite, resolveInvite } from '@/lib/onboarding-invites'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,22 +10,12 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 /**
  * POST /api/portal/accept-invite { token }
  *
- * Consume a client onboarding invite: join the signed-in user to the
- * pre-created org with no payment step.
- *
- * Security (the link is a bearer token, so we bind and claim it carefully):
- *   - Email binding: the signed-in user's verified primary email MUST equal the
- *     invite's contactEmail. A forwarded link is useless to anyone else.
- *   - Single-use, claimed ATOMICALLY (UPDATE ... WHERE used_at IS NULL) before
- *     any membership is granted, so two racing requests cannot both win.
- *   - Expiry enforced.
- *   - The first person to accept a brand-new org's invite creates its Clerk org;
- *     anyone joining an already-existing Clerk org is added as a plain member,
- *     never a Clerk admin.
- *   - The portal role (contacts.portalRole, which is what the portal's own
- *     organisation / brands / people routes check) is stricter still: see the
- *     `shouldOwn` block below. Creating the Clerk org does NOT by itself make
- *     the acceptor the workspace owner.
+ * Thin wrapper: all of the acceptance logic (email binding, the atomic
+ * single-use claim, the Clerk membership, the contact link/promotion, and the
+ * onboardingComplete stamp) lives in lib/onboarding-invites.ts
+ * acceptClientInvite, shared with the seat branch of
+ * app/(onboarding)/onboarding/page.tsx so both callers agree on exactly one
+ * set of rules.
  *
  * Returns { orgId (D1), clerkOrgId }; the client then calls Clerk setActive.
  */
@@ -41,162 +28,15 @@ export async function POST(req: NextRequest) {
 
   const database = (await db()) as D1
   const invite = await resolveInvite(database, body.token)
-  if (!invite || invite.flow !== 'client' || !invite.orgId) {
-    return NextResponse.json({ error: 'Invalid invite' }, { status: 400 })
-  }
-  if (invite.expired) {
-    return NextResponse.json({ error: 'This invite has expired' }, { status: 410 })
-  }
-  if (!invite.contactEmail) {
-    // An unbound invite cannot be safely claimed; the studio must re-issue it
-    // with the invitee's email so we can verify who is accepting.
-    return NextResponse.json({ error: 'This invite is not linked to an email. Ask the studio for a new link.' }, { status: 400 })
-  }
+  const result = await acceptClientInvite(database, userId, invite)
 
-  // Email binding: only the invited person (verified) may accept.
-  const clerk = await clerkClient()
-  const user = await clerk.users.getUser(userId)
-  const primary = user.emailAddresses.find(e => e.id === user.primaryEmailAddressId)
-  const userEmail = (primary?.emailAddress ?? '').toLowerCase()
-  const verified = primary?.verification?.status === 'verified'
-  if (!verified || userEmail !== invite.contactEmail.toLowerCase()) {
-    return NextResponse.json(
-      { error: 'This invite was sent to a different email address.' },
-      { status: 403 },
-    )
-  }
-
-  const [org] = await database
-    .select({
-      id: schema.organisations.id,
-      name: schema.organisations.name,
-      clerkOrgId: schema.organisations.clerkOrgId,
-    })
-    .from(schema.organisations)
-    .where(eq(schema.organisations.id, invite.orgId))
-    .limit(1)
-  if (!org) return NextResponse.json({ error: 'Organisation not found' }, { status: 404 })
-
-  const now = new Date().toISOString()
-
-  // Atomic single-use claim: only the request that flips used_at from NULL wins.
-  const claimed = await database
-    .update(schema.onboardingInvites)
-    .set({ usedAt: now, usedByUserId: userId, updatedAt: now })
-    .where(and(eq(schema.onboardingInvites.id, invite.id), isNull(schema.onboardingInvites.usedAt)))
-    .returning({ id: schema.onboardingInvites.id })
-
-  if (claimed.length === 0) {
-    // Already used. Idempotent only if THIS user is the one who used it.
-    const [row] = await database
-      .select({ usedByUserId: schema.onboardingInvites.usedByUserId })
-      .from(schema.onboardingInvites)
-      .where(eq(schema.onboardingInvites.id, invite.id))
-      .limit(1)
-    if (row?.usedByUserId !== userId) {
-      return NextResponse.json({ error: 'This invite has already been used.' }, { status: 409 })
-    }
-  }
-
-  let clerkOrgId = org.clerkOrgId
-  if (clerkOrgId) {
-    // Join an existing Clerk org as a plain member (never auto-admin).
-    try {
-      await clerk.organizations.createOrganizationMembership({
-        organizationId: clerkOrgId,
-        userId,
-        role: 'org:member',
-      })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : ''
-      if (!/already a member|already exists/i.test(msg)) {
-        // Non-fatal: membership likely already present; continue.
-      }
-    }
-  } else {
-    // Lazily create the Clerk org; the first invited user becomes its admin (owner).
-    const created = await clerk.organizations.createOrganization({ name: org.name, createdBy: userId })
-    clerkOrgId = created.id
-    await database
-      .update(schema.organisations)
-      .set({ clerkOrgId, updatedAt: now })
-      .where(eq(schema.organisations.id, org.id))
-  }
-
-  // Link (or create) the contact row for this Clerk user.
-  //
-  // Two things used to go wrong here. An invite sent to someone with no contact
-  // row linked nothing at all, so the person had a login and no identity in the
-  // product: no notifications, no participant record, messages stamped with a
-  // raw Clerk id. And portalRole was never set, so even the founding member of
-  // a workspace landed on the 'member' default and was refused by their own
-  // organisation, brands and people routes.
-  //
-  // Best-effort throughout: a failure here must not undo a membership that has
-  // already been granted.
-  const inviteEmail = invite.contactEmail.toLowerCase()
-  try {
-    const existing = await database
-      .select({
-        id: schema.contacts.id,
-        email: schema.contacts.email,
-        portalRole: schema.contacts.portalRole,
-        isPrimary: schema.contacts.isPrimary,
-      })
-      .from(schema.contacts)
-      .where(eq(schema.contacts.orgId, org.id))
-
-    const match = existing.find(c => c.email?.trim().toLowerCase() === inviteEmail)
-    // Who gets to own the workspace.
-    //
-    // Deliberately NOT "whoever accepts first". An invite can be sent to every
-    // contact at a client, and a migrated org can arrive with portal_role
-    // 'member' on every row, so "first acceptor at an org with no admin" handed
-    // the keys to whichever address happened to click first: an AP mailbox from
-    // a Xero import, a designer who left. The owner then arrived second and
-    // landed as a plain member on their own workspace.
-    //
-    // So promotion needs BOTH a workspace with no administrator yet AND a
-    // genuine claim to be its owner: either nobody is on the roster at all (the
-    // true founding case), or the row this invite matches is the org's primary
-    // contact. Everyone else is a member, and Tahi promotes them explicitly via
-    // set_contact_portal_role. `foundingMember` (this acceptance created the
-    // Clerk org) is NOT sufficient on its own: an intern can be the first to
-    // click.
-    const orgHasAdmin = existing.some(c => c.portalRole === 'admin')
-    const shouldOwn = !orgHasAdmin && (existing.length === 0 || !!match?.isPrimary)
-    const portalRole = shouldOwn ? 'admin' : 'member'
-
-    if (match) {
-      await database
-        .update(schema.contacts)
-        .set({
-          clerkUserId: userId,
-          updatedAt: now,
-          // Never demote: an existing admin stays an admin.
-          ...(match.portalRole === 'admin' ? {} : { portalRole }),
-        })
-        .where(and(eq(schema.contacts.id, match.id), eq(schema.contacts.orgId, org.id)))
-    } else {
-      await database.insert(schema.contacts).values({
-        id: crypto.randomUUID(),
-        orgId: org.id,
-        name: invite.contactName?.trim() || inviteEmail.split('@')[0],
-        email: inviteEmail,
-        clerkUserId: userId,
-        isPrimary: existing.length === 0,
-        portalRole,
-        createdAt: now,
-        updatedAt: now,
-      })
-    }
-  } catch {
-    // non-fatal
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status })
   }
 
   // The token is consumed: clear the survival cookie the middleware set so a
   // later visit doesn't re-trigger an accept attempt on a spent invite.
-  const res = NextResponse.json({ ok: true, orgId: org.id, clerkOrgId })
+  const res = NextResponse.json({ ok: true, orgId: result.orgId, clerkOrgId: result.clerkOrgId })
   res.cookies.set('tahi-invite-token', '', { path: '/', maxAge: 0 })
   return res
 }

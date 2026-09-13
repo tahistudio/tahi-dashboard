@@ -103,6 +103,22 @@ export interface OrgOnboardingSignals {
    * lib/org-onboarding-server.ts.
    */
   hasPortalContactRequest: boolean
+  /**
+   * FIFTH CLAUSE, added for the seat-invite bug (2026-09-14): a seat accepted
+   * through lib/onboarding-invites.ts acceptClientInvite stamps the
+   * ACCEPTING USER's own publicMetadata.onboardingComplete directly, which is
+   * what actually keeps a fresh seat off the client wizard on their very next
+   * load - this org-level signal only exists as the fallback for when that
+   * per-user stamp itself never lands (a transient Clerk write failure at
+   * accept time, best-effort by design so it never undoes a membership
+   * already granted). True once the org has any NON-PRIMARY contact linked to
+   * a Clerk user: a seat only ever gets invited into an org that already has
+   * a primary contact, so a second linked contact is proof this org's first
+   * contact is long past onboarding, independent of whether the seat's own
+   * stamp happened to persist. See lib/org-onboarding-server.ts for the D1
+   * read.
+   */
+  hasAcceptedSeat: boolean
 }
 
 /** Is this ORGANISATION onboarded, regardless of which seat is asking? */
@@ -111,6 +127,7 @@ export function isOrgOnboarded(signals: OrgOnboardingSignals): boolean {
   if (signals.hasLiveSubscription) return true
   if (signals.hasProjectEngagement) return true
   if (signals.hasPortalContactRequest) return true
+  if (signals.hasAcceptedSeat) return true
   if (CLIENT_HOME_CHECKLIST_KEYS.some(key => key in (signals.onboardingState ?? {}))) return true
   return false
 }
