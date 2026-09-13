@@ -18,6 +18,13 @@ import { logAudit } from '@/lib/audit'
 // a lead, deal or request belongs to that route instead. What this route
 // owns: which client org the call is for (orgId, required, a check-in
 // always belongs to a client) and what it's for (title, description).
+//
+// prepNote is accepted for parity with the discovery_calls PATCH route,
+// but this table has no dedicated prep_note column: it writes into the
+// existing notes column instead (same 4000-char cap, empty string clears).
+
+const PREP_NOTE_MAX_CHARS = 4_000
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -31,6 +38,7 @@ export async function PATCH(
   const body = await req.json() as {
     status?: string
     notes?: string
+    prepNote?: string | null
     recordingUrl?: string
     title?: string
     description?: string | null
@@ -64,6 +72,22 @@ export async function PATCH(
 
   if (body.status) updates.status = body.status
   if (body.notes !== undefined) updates.notes = body.notes
+  // prepNote is the same column as notes, offered under the name every
+  // other call surface uses (see PATCH /api/admin/discovery-calls/[id]).
+  // Same 4000-char cap; empty string clears it back to null.
+  if (body.prepNote !== undefined) {
+    if (typeof body.prepNote === 'string') {
+      const trimmed = body.prepNote.trim()
+      if (trimmed.length > PREP_NOTE_MAX_CHARS) {
+        return NextResponse.json({
+          error: `prepNote must be ${PREP_NOTE_MAX_CHARS} characters or fewer`,
+        }, { status: 400 })
+      }
+      updates.notes = trimmed || null
+    } else if (body.prepNote === null) {
+      updates.notes = null
+    }
+  }
   if (body.recordingUrl !== undefined) updates.recordingUrl = body.recordingUrl
   if (body.title) updates.title = body.title
   if (body.description !== undefined) updates.description = body.description?.trim() || null

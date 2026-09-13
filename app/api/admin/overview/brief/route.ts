@@ -9,6 +9,7 @@ import { resolveAccessScoping } from '@/lib/access-scoping'
 import { BRIEF_FEATURES, briefCacheKeyForFingerprint, briefScopeFingerprint } from '@/lib/brief-cache-key'
 import { overnightCutoff, daysPastDue } from '@/lib/overview-aggregates'
 import { owedStatusList } from '@/lib/invoice-status'
+import { formatCallPrepBriefRow } from '@/lib/call-brief-item'
 
 export const dynamic = 'force-dynamic'
 
@@ -140,7 +141,7 @@ export async function computeBrief(
     }
   }
 
-  // ── URGENT: today's discovery calls with no prep note (gated on calls) ──────
+  // ── URGENT: today's discovery calls, prep note status (gated on calls) ──────
   if (canSeeCalls) {
     try {
       // NZ studio day, so a "2:30pm today" call is grouped correctly regardless
@@ -148,10 +149,10 @@ export async function computeBrief(
       const nzDay = now.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })
       const calls = await drizzle
         .select({
+          id: schema.discoveryCalls.id,
           title: schema.discoveryCalls.title,
           scheduledAt: schema.discoveryCalls.scheduledAt,
-          scopeNotes: schema.discoveryCalls.scopeNotes,
-          summary: schema.discoveryCalls.summary,
+          prepNote: schema.discoveryCalls.prepNote,
           status: schema.discoveryCalls.status,
         })
         .from(schema.discoveryCalls)
@@ -159,29 +160,23 @@ export async function computeBrief(
         .orderBy(asc(schema.discoveryCalls.scheduledAt))
         .limit(60)
 
-      const todayNoPrep = calls
+      const todayCalls = calls
         .filter(c => {
           const d = new Date(c.scheduledAt)
           if (!Number.isFinite(d.getTime())) return false
           const callDay = d.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })
-          const hasPrep = !!(c.scopeNotes?.trim() || c.summary?.trim())
-          return callDay === nzDay && !hasPrep
+          return callDay === nzDay
         })
         .slice(0, 2)
 
-      for (const c of todayNoPrep) {
+      for (const c of todayCalls) {
         const time = new Date(c.scheduledAt).toLocaleTimeString('en-NZ', {
           hour: 'numeric',
           minute: '2-digit',
           hour12: true,
           timeZone: 'Pacific/Auckland',
         })
-        urgent.push({
-          tone: 'warn',
-          verb: 'Prep note',
-          to: 'calls',
-          text: `${c.title} · ${time} — no prep note yet`,
-        })
+        urgent.push(formatCallPrepBriefRow(c, time))
       }
     } catch {
       // Discovery calls table missing — skip this source.

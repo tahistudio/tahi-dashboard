@@ -40,6 +40,8 @@ export interface PreCallDigestEmailProps {
   withSubtitle: string | null // company / role
   parentHref: string // dashboard URL to the parent record
   dashboardUrl: string
+  /** Free-text prep written from the /calls slide-over before the call. */
+  prepNote?: string | null
 
   // Lead context (when call parent is a lead)
   leadEmail?: string | null
@@ -82,6 +84,7 @@ export function PreCallDigestEmail({
   withSubtitle,
   parentHref,
   dashboardUrl,
+  prepNote,
   leadEmail,
   leadCompany,
   industry,
@@ -129,6 +132,13 @@ export function PreCallDigestEmail({
             <Buttons>
               <PrimaryButton href={meetingUrl}>Join the call</PrimaryButton>
             </Buttons>
+          ) : null}
+
+          {prepNote ? (
+            <>
+              <EmailKicker tone="brand">Prep note</EmailKicker>
+              <EmailParagraph>{prepNote}</EmailParagraph>
+            </>
           ) : null}
 
           {hasFirmographics ? (

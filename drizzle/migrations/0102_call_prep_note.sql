@@ -1,0 +1,24 @@
+-- Migration 0102: discovery_calls gains prep_note.
+--
+-- Liam's studio home daily brief showed "Kickoff call, 9:30 am, no prep
+-- note yet" for today's calls, with a "Prep note" verb that had nothing to
+-- open: the item was derived from scope_notes / summary, both post-call
+-- fields, so there was no way to actually write a prep note before the
+-- call happened. prep_note is that dedicated pre-call field: free text
+-- written from the /calls slide-over (autosave on blur / Cmd+Enter),
+-- shown read-only in <DiscoveryCallsCard>'s expanded row, and included in
+-- the pre-call digest email when present.
+--
+-- scheduled_calls (the legacy client-check-in table) already has a notes
+-- column; that is reused as its prep note rather than adding a duplicate
+-- column, see PATCH /api/admin/calls/[id].
+--
+-- Nullable, additive. No IF NOT EXISTS on the column (SQLite has no such
+-- clause for ADD COLUMN); the runner in app/api/admin/db/migrate/route.ts
+-- already swallows "duplicate column name" errors so re-running this
+-- migration is safe.
+--
+-- Apply BEFORE deploying the code that reads it: the PATCH route and the
+-- /calls index select the column directly (no try/catch fallback), unlike
+-- the daily brief query, which already tolerates a missing column.
+ALTER TABLE discovery_calls ADD COLUMN prep_note text;

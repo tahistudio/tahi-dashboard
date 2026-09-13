@@ -3,7 +3,8 @@
  *
  * Update a discovery call. Accepts any subset of:
  *   - Pre-call fields: title, scheduledAt, durationMinutes,
- *     googleMeetUrl, attendees, status
+ *     googleMeetUrl, attendees, status, prepNote (capped at 4000 chars,
+ *     empty string clears it)
  *   - Post-call fields: transcript, transcriptSource, summary,
  *     outcome, outcomeNotes, scopeNotes, budgetMin, budgetMax,
  *     budgetCurrency, timeline
@@ -48,6 +49,10 @@ type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 // blowing the D1 row size budget (~1MB hard limit), not to be miserly.
 // 250k is roughly a 3-hour call at typical transcript density.
 const TRANSCRIPT_MAX_CHARS = 250_000
+
+// Prep notes are hand-typed before a call, not pasted, so 4000 chars is
+// generous headroom rather than a real constraint.
+const PREP_NOTE_MAX_CHARS = 4_000
 
 export async function PATCH(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
@@ -190,6 +195,26 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         : t
     } else if (t === null) {
       updates.transcript = null
+    }
+  }
+
+  // Prep note: hand-typed before the call, capped well short of the
+  // transcript limit above since nobody is pasting 250k chars into a
+  // "what to bring" field. Empty string clears it back to null; a value
+  // past the cap 400s rather than silently truncating, so the caller
+  // knows to trim it themselves.
+  if ('prepNote' in body) {
+    const v = body.prepNote
+    if (typeof v === 'string') {
+      const trimmed = v.trim()
+      if (trimmed.length > PREP_NOTE_MAX_CHARS) {
+        return NextResponse.json({
+          error: `prepNote must be ${PREP_NOTE_MAX_CHARS} characters or fewer`,
+        }, { status: 400 })
+      }
+      updates.prepNote = trimmed || null
+    } else if (v === null) {
+      updates.prepNote = null
     }
   }
 
