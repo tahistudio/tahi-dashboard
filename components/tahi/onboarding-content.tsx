@@ -6,7 +6,10 @@
  * in-page persona switcher: the design's Tweaks panel and the duplicate
  * SelfServe component are preview-only and are dropped here.
  *
- * Paths, and the exact steps buildSteps() assembles for each:
+ * Paths, and the exact steps buildSteps() assembles for each. The function
+ * itself lives in lib/onboarding-steps.ts, where it is unit tested per branch;
+ * this table is the same one, kept here because it is what a reader of the
+ * flow needs in front of them:
  *
  *   new + self-serve        chooser first (retainer self-serve and paid, or a
  *                           project enquiry, which is a proposal dead-end;
@@ -48,6 +51,7 @@ import {
 } from '@/components/tahi/onboarding-shell'
 import { OnboardingPayment } from '@/components/tahi/onboarding-payment'
 import { formatSlotSummary, slotIso, visitorTimeZone } from '@/lib/kickoff-slot'
+import { buildSteps } from '@/lib/onboarding-steps'
 import type { ClientEntry } from '@/lib/onboarding-entry'
 
 export interface OnboardingLead {
@@ -101,18 +105,6 @@ function upcomingDays(n: number): Date[] {
     out.push(new Date(d))
   }
   return out
-}
-
-function buildSteps(engagement: 'project' | 'retainer', clientType: 'new' | 'existing'): string[] {
-  const project = engagement === 'project'
-  // An existing client agreed terms with the studio before the invite was ever
-  // minted and is already being invoiced, so neither engagement gets a plan
-  // picker or a card form. Retainer used to return ['welcome','plan','pay'],
-  // which routed a client on the Xero rail into a live Stripe checkout and
-  // never let them reach a kickoff at all.
-  if (clientType === 'existing') return ['welcome', 'kickoff']
-  if (project) return ['welcome', 'details', 'invite', 'kickoff']
-  return ['welcome', 'plan', 'pay', 'details', 'invite']
 }
 
 // ── Loom-style hello modal ─────────────────────────────────────────────

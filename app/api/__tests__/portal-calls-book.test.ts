@@ -57,6 +57,24 @@ vi.mock('@/emails/kickoff-booked', () => ({
   default: function KickoffBookedEmail() { return null },
 }))
 
+// Google Calendar. The route imports this lazily and treats EVERY failure as
+// "not connected", so the default below (a rejecting token read) is the
+// ordinary production state: no integration, no event, booking unaffected.
+vi.mock('@/lib/google', () => ({
+  GoogleNotConnectedError: class GoogleNotConnectedError extends Error {},
+  getGoogleAccessToken: vi.fn(),
+  createCalendarEvent: vi.fn(),
+  updateCalendarEvent: vi.fn(),
+}))
+
+// The email allowlist, which decides who may be put on a calendar invite
+// (Google mails attendees itself, outside our gate). Only the POLICY is mocked;
+// partitionRecipients is the real rule from lib/email-allowlist.
+vi.mock('@/lib/email-gate', () => ({
+  resolveDeliveryPolicy: vi.fn(),
+  resolveOrgRecipientScope: vi.fn(),
+}))
+
 vi.mock('@/db/d1', () => ({
   schema: {
     scheduledCalls: {
@@ -78,6 +96,7 @@ vi.mock('@/db/d1', () => ({
       status: 'status',
       scheduledAt: 'scheduled_at',
       durationMinutes: 'duration_minutes',
+      googleCalendarEventId: 'google_calendar_event_id',
       googleMeetUrl: 'google_meet_url',
       attendees: 'attendees',
     },
@@ -138,6 +157,9 @@ import { getPortalAuth } from '@/lib/server-auth'
 import { notifyAllAdmins } from '@/lib/notifications'
 import { sendEmail } from '@/lib/email'
 import { formatSlotSummary, STUDIO_TIME_ZONE } from '@/lib/kickoff-slot'
+import { getGoogleAccessToken, createCalendarEvent, updateCalendarEvent, type CalendarEvent } from '@/lib/google'
+import { resolveDeliveryPolicy, resolveOrgRecipientScope } from '@/lib/email-gate'
+import { closedPolicy, type DeliveryPolicy } from '@/lib/email-allowlist'
 import type { KickoffBookedEmailProps } from '@/emails/kickoff-booked'
 
 const dbMock = (dbModule as unknown as { __mock: DbMockHandles }).__mock
@@ -185,6 +207,15 @@ function emailProps(): KickoffBookedEmailProps {
   return element.props
 }
 
+/** Pretend Google Workspace is connected and hand back this event. */
+function connectGoogle(event: CalendarEvent = { id: 'gcal_1', hangoutLink: 'https://meet.google.com/abc-defg-hij' }) {
+  vi.mocked(getGoogleAccessToken).mockResolvedValue({
+    accessToken: 'ya29.token', refreshToken: 'r', expiresAt: null, email: 'studio@tahi.studio', scopes: '',
+  })
+  vi.mocked(createCalendarEvent).mockResolvedValue(event)
+  vi.mocked(updateCalendarEvent).mockResolvedValue(event)
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   dbMock.state.queues = {}
@@ -192,6 +223,10 @@ beforeEach(() => {
   dbMock.state.updates = []
   vi.mocked(getPortalAuth).mockResolvedValue(portalAuth())
   vi.mocked(sendEmail).mockResolvedValue({ success: true })
+  // Production's ordinary state: Google absent, allowlist closed.
+  vi.mocked(getGoogleAccessToken).mockRejectedValue(new Error('Google Workspace is not connected.'))
+  vi.mocked(resolveDeliveryPolicy).mockResolvedValue(closedPolicy())
+  vi.mocked(resolveOrgRecipientScope).mockResolvedValue({ orgId: 'org_client' })
 })
 
 describe('POST /api/portal/calls - gates', () => {
@@ -385,5 +420,170 @@ describe('POST /api/portal/calls - timezone', () => {
     await POST(bookRequest({ scheduledAt: inFuture(24), durationMinutes: 100000 }))
     const call = dbMock.state.inserts.find(i => i.table === 'scheduled_calls')!
     expect(call.values.durationMinutes).toBe(240)
+  })
+})
+
+// T1.4 (b). The booking has always written a real scheduled_calls row; what it
+// never did was put the meeting anywhere the studio looks, or carry a join
+// link. Google Calendar is now pushed to when the integration is connected.
+//
+// The load-bearing property is that it stays OPTIONAL: a client picking a slot
+// keeps it whether Google is connected, disconnected, or answering with an
+// error, because the alternative is losing the slot they just chose on the last
+// screen of onboarding.
+describe('POST /api/portal/calls - Google Calendar', () => {
+  it('books normally with no integration connected, and says so', async () => {
+    seedLookups()
+    const res = await POST(bookRequest({ scheduledAt: inFuture(24) }))
+    expect(res.status).toBe(201)
+    const json = await res.json() as { meetingUrl: string | null; calendarPushed: boolean }
+    expect(json.calendarPushed).toBe(false)
+    expect(json.meetingUrl).toBeNull()
+
+    const call = dbMock.state.inserts.find(i => i.table === 'scheduled_calls')
+    expect(call).toBeDefined()
+    expect(call!.values.meetingUrl).toBeNull()
+    expect(createCalendarEvent).not.toHaveBeenCalled()
+  })
+
+  it('still books when the calendar push throws, rather than losing the slot', async () => {
+    seedLookups()
+    connectGoogle()
+    vi.mocked(createCalendarEvent).mockRejectedValue(new Error('Calendar create failed: 503'))
+
+    const res = await POST(bookRequest({ scheduledAt: inFuture(24) }))
+    expect(res.status).toBe(201)
+    const json = await res.json() as { calendarPushed: boolean; meetingUrl: string | null }
+    expect(json.calendarPushed).toBe(false)
+    expect(json.meetingUrl).toBeNull()
+    expect(dbMock.state.inserts.some(i => i.table === 'scheduled_calls')).toBe(true)
+    expect(sendEmail).toHaveBeenCalledTimes(1)
+  })
+
+  it('stores the Meet link on the call and carries it into the confirmation email', async () => {
+    seedLookups()
+    connectGoogle()
+
+    const res = await POST(bookRequest({ scheduledAt: inFuture(24) }))
+    const json = await res.json() as { meetingUrl: string | null; calendarPushed: boolean }
+    expect(json.calendarPushed).toBe(true)
+    expect(json.meetingUrl).toBe('https://meet.google.com/abc-defg-hij')
+
+    const call = dbMock.state.inserts.find(i => i.table === 'scheduled_calls')!
+    expect(call.values.meetingUrl).toBe('https://meet.google.com/abc-defg-hij')
+    // Null here is the "Open your studio" layout; a link flips the CTA to
+    // "Join the call" (emails/kickoff-booked.tsx).
+    expect(emailProps().meetingUrl).toBe('https://meet.google.com/abc-defg-hij')
+  })
+
+  it('reads the conference entry point when Google omits hangoutLink', async () => {
+    seedLookups()
+    connectGoogle({
+      id: 'gcal_2',
+      conferenceData: {
+        entryPoints: [
+          { entryPointType: 'phone', uri: 'tel:+64' },
+          { entryPointType: 'video', uri: 'https://meet.google.com/xyz' },
+        ],
+      },
+    })
+    await POST(bookRequest({ scheduledAt: inFuture(24) }))
+    const call = dbMock.state.inserts.find(i => i.table === 'scheduled_calls')!
+    expect(call.values.meetingUrl).toBe('https://meet.google.com/xyz')
+  })
+
+  it('writes the event id onto the mirror so the pull-sync does not duplicate it', async () => {
+    seedLookups()
+    connectGoogle()
+    await POST(bookRequest({ scheduledAt: inFuture(24) }))
+    const mirror = dbMock.state.inserts.find(i => i.table === 'discovery_calls')!
+    expect(mirror.values.googleCalendarEventId).toBe('gcal_1')
+    expect(mirror.values.googleMeetUrl).toBe('https://meet.google.com/abc-defg-hij')
+  })
+
+  // Google emails every attendee ITSELF (sendUpdates=all), on a rail the
+  // studio's allowlist cannot see or suppress. Putting the client on the event
+  // while the gate is closed would mail a real client from Google.
+  it('never puts a client on the invite while the allowlist is closed', async () => {
+    seedLookups()
+    connectGoogle()
+    await POST(bookRequest({ scheduledAt: inFuture(24) }))
+
+    expect(createCalendarEvent).toHaveBeenCalledTimes(1)
+    const [, input] = vi.mocked(createCalendarEvent).mock.calls[0]
+    // The contact (ava@acme.test) and the PM (liam@tahi.studio) are both
+    // attendees on OUR row; neither passes the default gate, whose only
+    // allowed address is business@tahi.studio.
+    expect(input.attendeeEmails).toEqual([])
+  })
+
+  it('invites an address the gate would have delivered to anyway', async () => {
+    seedLookups()
+    connectGoogle()
+    const openPolicy: DeliveryPolicy = { ...closedPolicy(), mode: 'all', blockedAddresses: [] }
+    vi.mocked(resolveDeliveryPolicy).mockResolvedValue(openPolicy)
+
+    await POST(bookRequest({ scheduledAt: inFuture(24) }))
+    const [, input] = vi.mocked(createCalendarEvent).mock.calls[0]
+    expect(input.attendeeEmails).toEqual(['ava@acme.test', 'liam@tahi.studio'])
+  })
+
+  it('withholds every address when the policy cannot be read', async () => {
+    seedLookups()
+    connectGoogle()
+    vi.mocked(resolveDeliveryPolicy).mockRejectedValue(new Error('settings unreadable'))
+
+    const res = await POST(bookRequest({ scheduledAt: inFuture(24) }))
+    expect(res.status).toBe(201)
+    const [, input] = vi.mocked(createCalendarEvent).mock.calls[0]
+    expect(input.attendeeEmails).toEqual([])
+  })
+
+  // A re-book must MOVE the meeting. Creating a second event would leave the
+  // studio's calendar showing a time the client already abandoned, which is the
+  // same bug the discovery_calls mirror exists to prevent.
+  it('moves the existing event on a re-book instead of creating a second one', async () => {
+    seedLookups({
+      existingCall: [{ id: 'call_existing' }],
+      existingMirror: [{
+        id: 'call_existing',
+        googleCalendarEventId: 'gcal_1',
+        googleMeetUrl: 'https://meet.google.com/abc-defg-hij',
+      }],
+    })
+    connectGoogle()
+    const when = inFuture(72)
+    await POST(bookRequest({ scheduledAt: when }))
+
+    expect(createCalendarEvent).not.toHaveBeenCalled()
+    expect(updateCalendarEvent).toHaveBeenCalledTimes(1)
+    const [, eventId, input] = vi.mocked(updateCalendarEvent).mock.calls[0]
+    expect(eventId).toBe('gcal_1')
+    expect(new Date(input.startIso).getTime()).toBe(new Date(when).getTime())
+
+    const moved = dbMock.state.updates.find(u => u.table === 'scheduled_calls')!
+    expect(moved.values.meetingUrl).toBe('https://meet.google.com/abc-defg-hij')
+  })
+
+  it('keeps a link it already holds when a later push fails', async () => {
+    seedLookups({
+      existingCall: [{ id: 'call_existing' }],
+      existingMirror: [{
+        id: 'call_existing',
+        googleCalendarEventId: 'gcal_1',
+        googleMeetUrl: 'https://meet.google.com/abc-defg-hij',
+      }],
+    })
+    connectGoogle()
+    vi.mocked(updateCalendarEvent).mockRejectedValue(new Error('Calendar update failed: 500'))
+
+    const res = await POST(bookRequest({ scheduledAt: inFuture(72) }))
+    expect(res.status).toBe(201)
+    // The client may already have been emailed this URL, so a failed push must
+    // not blank it.
+    const json = await res.json() as { meetingUrl: string | null }
+    expect(json.meetingUrl).toBe('https://meet.google.com/abc-defg-hij')
+    const moved = dbMock.state.updates.find(u => u.table === 'scheduled_calls')!
+    expect(moved.values.meetingUrl).toBe('https://meet.google.com/abc-defg-hij')
   })
 })

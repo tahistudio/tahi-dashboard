@@ -220,6 +220,14 @@ export async function GET(req: NextRequest) {
 // the same id and moves with it, so the two tables cannot disagree about when
 // the meeting is (the studio's /calls index reads the mirror exclusively).
 //
+// When Google Workspace is connected the booking is also pushed to the studio's
+// calendar, and the Meet link Google mints is stored on the row and carried in
+// the confirmation email. That push is best-effort in both directions: it never
+// fails the booking when Google is absent, and a re-book PATCHes the existing
+// event rather than leaving a stale one behind. The client is deliberately NOT
+// added as a calendar attendee while the email allowlist is closed; see the
+// block below.
+//
 // `timeZone` is the visitor's own IANA zone. The picker promises wall-clock in
 // their timezone, and this worker runs in UTC, so every artefact that outlives
 // the screen (the confirmation email, the studio's bell row) is formatted
@@ -360,6 +368,101 @@ export async function POST(req: NextRequest) {
   }
 
   const id = existingId ?? crypto.randomUUID()
+
+  // The discovery_calls mirror, read ONCE. It decides two things: whether the
+  // upsert at the bottom inserts or updates, and whether this booking already
+  // has a Google Calendar event behind it that a re-book must MOVE rather than
+  // duplicate.
+  let mirror: { id: string; googleCalendarEventId: string | null; googleMeetUrl: string | null } | null = null
+  try {
+    const [row] = await drizzle
+      .select({
+        id: schema.discoveryCalls.id,
+        googleCalendarEventId: schema.discoveryCalls.googleCalendarEventId,
+        googleMeetUrl: schema.discoveryCalls.googleMeetUrl,
+      })
+      .from(schema.discoveryCalls)
+      .where(eq(schema.discoveryCalls.id, id))
+      .limit(1)
+    mirror = row ?? null
+  } catch {
+    // Older D1s without the Google columns: no mirror, no linkage, carry on.
+    mirror = null
+  }
+
+  // ── Google Calendar ────────────────────────────────────────────────────────
+  // Put the kickoff on the studio's calendar so it exists where the team
+  // actually looks, and so Google mints the Meet link the confirmation email
+  // carries. ENTIRELY OPTIONAL. When Google Workspace is not connected, or the
+  // push fails for any reason, the booking still stands with no meeting link,
+  // exactly as it did before this existed. A calendar problem must never cost
+  // the client the slot they just picked, so every failure here is swallowed
+  // and reported alongside a 201.
+  //
+  // WHO GOES ON THE INVITE, and why it is usually nobody. Google emails every
+  // attendee itself (`sendUpdates=all`), which is a delivery rail the studio's
+  // own allowlist cannot see or suppress: putting the client on this event
+  // would mail them from Google while lib/email-gate is still closed. So an
+  // address is only added when it would have passed that same gate anyway.
+  // With the allowlist in its default state that is nobody, and the client
+  // still gets their confirmation from us, through the gate, below.
+  let meetingUrl: string | null = mirror?.googleMeetUrl ?? null
+  let googleEventId: string | null = mirror?.googleCalendarEventId ?? null
+  let calendarPushed = false
+
+  try {
+    const [{ getGoogleAccessToken, createCalendarEvent, updateCalendarEvent }, { resolveDeliveryPolicy, resolveOrgRecipientScope }, { partitionRecipients }] =
+      await Promise.all([
+        import('@/lib/google'),
+        import('@/lib/email-gate'),
+        import('@/lib/email-allowlist'),
+      ])
+
+    // Only asked on the create path: a re-book is a time change, and PATCHing
+    // without an `attendees` key leaves the event's existing guests alone.
+    const allowedAttendeeEmails = async (): Promise<string[]> => {
+      try {
+        const policy = await resolveDeliveryPolicy()
+        const scope = await resolveOrgRecipientScope(orgId, policy)
+        return partitionRecipients(
+          attendees.map(a => a.email).filter((e): e is string => !!e),
+          policy,
+          scope,
+        ).allowed
+      } catch {
+        // An unreadable settings table withholds every address rather than
+        // defaulting to "invite them all".
+        return []
+      }
+    }
+
+    const tokens = await getGoogleAccessToken(database)
+    const event = googleEventId
+      ? await updateCalendarEvent(tokens.accessToken, googleEventId, {
+          title,
+          description,
+          startIso: scheduledAt,
+          durationMinutes,
+        })
+      : await createCalendarEvent(tokens.accessToken, {
+          title,
+          description,
+          startIso: scheduledAt,
+          durationMinutes,
+          attendeeEmails: await allowedAttendeeEmails(),
+        })
+    calendarPushed = true
+    googleEventId = event.id ?? googleEventId
+    meetingUrl =
+      event.hangoutLink
+      ?? event.conferenceData?.entryPoints?.find(e => e.entryPointType === 'video')?.uri
+      ?? meetingUrl
+  } catch {
+    // Not connected, token refresh failed, Google returned an error, or the
+    // module would not load. All the same outcome: no calendar event, and a
+    // booking that still holds.
+  }
+
   try {
     if (existingId) {
       await drizzle
@@ -369,6 +472,9 @@ export async function POST(req: NextRequest) {
           durationMinutes,
           description,
           attendees: JSON.stringify(attendees),
+          // Never overwrite a link we already hold with a null from a failed
+          // push: the client may already have been emailed that URL.
+          ...(meetingUrl ? { meetingUrl } : {}),
           ...(notes ? { notes } : {}),
           updatedAt: now,
         })
@@ -381,7 +487,7 @@ export async function POST(req: NextRequest) {
         description,
         scheduledAt,
         durationMinutes,
-        meetingUrl: null,
+        meetingUrl,
         attendees: JSON.stringify(attendees),
         status: 'scheduled',
         notes,
@@ -403,12 +509,11 @@ export async function POST(req: NextRequest) {
   const mirrorAttendees = JSON.stringify(
     attendees.map(a => ({ name: a.name, email: a.email, role: a.type })),
   )
+  //
+  // googleCalendarEventId is also what stops the pull-sync
+  // (integrations/google/sync-calendar) inserting a second row for the event we
+  // just pushed: that sync upserts by this key.
   try {
-    const [mirror] = await drizzle
-      .select({ id: schema.discoveryCalls.id })
-      .from(schema.discoveryCalls)
-      .where(eq(schema.discoveryCalls.id, id))
-      .limit(1)
     if (mirror) {
       await drizzle
         .update(schema.discoveryCalls)
@@ -418,6 +523,8 @@ export async function POST(req: NextRequest) {
           durationMinutes,
           status: 'scheduled',
           attendees: mirrorAttendees,
+          ...(googleEventId ? { googleCalendarEventId: googleEventId } : {}),
+          ...(meetingUrl ? { googleMeetUrl: meetingUrl } : {}),
           updatedAt: now,
         })
         .where(eq(schema.discoveryCalls.id, id))
@@ -430,6 +537,8 @@ export async function POST(req: NextRequest) {
         durationMinutes,
         status: 'scheduled',
         meetingType: 'client',
+        googleCalendarEventId: googleEventId,
+        googleMeetUrl: meetingUrl,
         attendees: mirrorAttendees,
         createdById: userId,
         createdAt: now,
@@ -468,7 +577,10 @@ export async function POST(req: NextRequest) {
           timeZone,
           durationMinutes,
           hostName: host?.name ?? null,
-          meetingUrl: null,
+          // Present once Google Workspace is connected, which flips the CTA
+          // from "Open your studio" to "Join the call". Null is the ordinary
+          // case and the layout handles it (emails/kickoff-booked.tsx).
+          meetingUrl,
           portalUrl: publicUrl('/overview'),
         }),
         undefined,
@@ -480,5 +592,8 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ id, scheduledAt, timeZone, durationMinutes, emailed }, { status: 201 })
+  return NextResponse.json(
+    { id, scheduledAt, timeZone, durationMinutes, emailed, meetingUrl, calendarPushed },
+    { status: 201 },
+  )
 }

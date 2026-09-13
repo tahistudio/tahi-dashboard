@@ -221,6 +221,62 @@ export async function createCalendarEvent(
   return await res.json() as CalendarEvent
 }
 
+/** Move an existing event (PATCH, so unmentioned fields survive).
+ *
+ *  Exists for re-booking. A client who goes back and picks another slot
+ *  must MOVE the meeting, not leave a stale event sitting at the old
+ *  time while a second one appears at the new one. PATCH also keeps the
+ *  conference data, so the Meet link the client was already emailed
+ *  stays valid across the move.
+ *
+ *  Attendees are only sent when the caller passes a list; omitting the
+ *  key leaves the event's existing guests untouched, which is what a
+ *  pure time change wants.
+ */
+export async function updateCalendarEvent(
+  accessToken: string,
+  eventId: string,
+  input: {
+    title?: string
+    description?: string | null
+    startIso: string
+    durationMinutes: number
+    attendeeEmails?: string[]
+  },
+): Promise<CalendarEvent> {
+  const start = new Date(input.startIso)
+  if (Number.isNaN(start.getTime())) {
+    throw new Error(`updateCalendarEvent: invalid startIso "${input.startIso}"`)
+  }
+  const end = new Date(start.getTime() + input.durationMinutes * 60_000)
+  const body: Record<string, unknown> = {
+    start: { dateTime: start.toISOString() },
+    end: { dateTime: end.toISOString() },
+  }
+  if (input.title) body.summary = input.title
+  if (input.description !== undefined) body.description = input.description ?? undefined
+  if (input.attendeeEmails) {
+    body.attendees = input.attendeeEmails.filter(Boolean).map(email => ({ email }))
+  }
+
+  const res = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}?conferenceDataVersion=1&sendUpdates=all`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    },
+  )
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Calendar update failed: ${res.status} ${text.slice(0, 300)}`)
+  }
+  return await res.json() as CalendarEvent
+}
+
 // ── Drive ─────────────────────────────────────────────────────────────────
 
 export interface DriveFile {
