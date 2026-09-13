@@ -140,3 +140,7 @@ Read STATUS.md, TASKS.md and this file. `git log --oneline -15` for what landed.
 ## 00:30 NZ 2026-09-14: comment ball live
 
 - BP.1 (stripped back) merged 1ebb63f5, deployed green, migration 0100 applied through the runner (3 statements), GET /api/admin/feedback answers an empty list; the MCP tool is list_feedback_comments. Reviewed by the lead before merge: identity and org from the session only, 5000 character cap, 30 per hour silently ignored, admin read gated, the recorder keeps method, url and status of failed calls only.
+
+## 00:50 to 03:05 NZ 2026-09-14: usage limit pause
+
+- The account usage limit hit at about 00:50 NZ with the design pass mid-flight (16 of 19 modules designed, 4 critiqued, 18 agent calls failed). It reset at about 03:00 NZ; the stale run was stopped and the workflow resumed from its journal (finished work cached, failed calls re-run): calculator-analytics, content-marketing and sales-artifacts designs, the remaining critiques, revisions, then the shell wiring. Follow-ups merged before the pause: kickoff slots MCP twin and the duplicate contract signature template retired (1ccc3b08, deployed green).
