@@ -18,6 +18,7 @@ import {
   ladderPlanNames,
   planPressure,
   rungLive,
+  type LadderPlanKey,
 } from './plan-ladder'
 
 describe('ladder order', () => {
@@ -81,24 +82,62 @@ describe('ladder order', () => {
   })
 })
 
+describe('rung copy matches the plan truth', () => {
+  // subscriptions.planType (db/schema.ts) is maintain or scale only: those are
+  // the only two plans with a row in the tracks table. Tune and Launch are
+  // projects.type values, the same one-off table hourly and custom live in,
+  // and never had a track to describe.
+  const NON_TRACK_PLANS: LadderPlanKey[] = ['tune', 'launch']
+  const TRACK_PLANS: LadderPlanKey[] = ['maintain', 'scale']
+
+  it('never claims a track for a plan that never had one', () => {
+    for (const key of NON_TRACK_PLANS) {
+      const copy = RUNGS[key]
+      const text = `${copy.bestIf} ${copy.tracks} ${copy.turnaround} ${copy.services}`.toLowerCase()
+      expect(text).not.toContain('track')
+    }
+  })
+
+  it('still tells the track plans about their tracks', () => {
+    for (const key of TRACK_PLANS) {
+      expect(RUNGS[key].tracks.toLowerCase()).toContain('track')
+    }
+  })
+})
+
 describe('plan rows in the catalogue', () => {
   it('names every plan on the ladder', () => {
     expect(ladderPlanNames()).toEqual(['Tune', 'Maintain', 'Scale', 'Launch'])
   })
 
-  it('recognises a catalogue row that is really a plan, whatever its casing', () => {
-    expect(isLadderPlanName('Maintain')).toBe(true)
-    expect(isLadderPlanName('  scale ')).toBe(true)
+  it('recognises a catalogue row that is one of this client\'s own rendered rungs, whatever its casing', () => {
+    const view = ladder('maintain')
+    expect(isLadderPlanName('Maintain', view)).toBe(true)
+    expect(isLadderPlanName('  scale ', view)).toBe(true)
+    expect(isLadderPlanName('Tune', view)).toBe(true)
+  })
+
+  it('leaves a plan alone when it never rendered as one of this client\'s three rungs', () => {
+    // A Maintain client's ladder is Tune / Maintain / Scale: Launch never
+    // renders for them, so a real Launch service card must not be stripped.
+    const view = ladder('maintain')
+    expect(isLadderPlanName('Launch', view)).toBe(false)
   })
 
   it('leaves a real service alone', () => {
-    expect(isLadderPlanName('Lottie animation')).toBe(false)
-    expect(isLadderPlanName('')).toBe(false)
-    expect(isLadderPlanName(null)).toBe(false)
+    const view = ladder('maintain')
+    expect(isLadderPlanName('Lottie animation', view)).toBe(false)
+    expect(isLadderPlanName('', view)).toBe(false)
+    expect(isLadderPlanName(null, view)).toBe(false)
+  })
+
+  it('answers false with no ladder to stand on', () => {
+    expect(isLadderPlanName('Maintain', null)).toBe(false)
   })
 
   it('follows the rename, so a renamed plan still leaves the grid', () => {
-    expect(isLadderPlanName('Steady', { maintain: 'Steady' })).toBe(true)
+    const view = ladder('maintain', { maintain: 'Steady' })
+    expect(isLadderPlanName('Steady', view)).toBe(true)
   })
 })
 

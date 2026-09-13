@@ -45,6 +45,15 @@ export interface RungCopy {
 
 /**
  * The rung copy, reviewed by Liam 2026-09-06 (.claude/qa/svc_data_block.txt).
+ * That review flagged its own Tune and Launch entries as the biggest thing to
+ * land before this ports: db/schema.ts settles it. `subscriptions.planType`
+ * (the only table with a `tracks` row) is maintain or scale only. Tune and
+ * Launch are `projects.type` values, the same one-off table Hourly and
+ * Custom live in: a single scoped engagement with a price, a start date and
+ * an expected delivery, never a track. Tune and Launch still stand as rungs
+ * (that is Liam's call, not this file's to revisit), but their tracks and
+ * services copy now says so rather than borrowing Maintain and Scale's
+ * capacity language.
  *
  * This belongs beside `feats[]` in the `plan_catalog` settings key, edited in
  * Settings > Client plans. It lives here until those columns exist, and
@@ -55,7 +64,7 @@ export const RUNGS: Readonly<Record<LadderPlanKey, RungCopy>> = {
   tune: {
     name: 'Tune',
     bestIf: 'Best if the site mostly does its job and you want someone to keep it tidy a few times a year.',
-    tracks: 'One job at a time, booked in when you need it rather than always open.',
+    tracks: 'Not an open ended slot: each Tune is its own booked project, scoped and delivered on its own rather than kept running.',
     turnaround: 'You book a window. Between windows, nothing of yours is running.',
     services: 'Fixes, small changes, and a check that nothing has quietly broken.',
   },
@@ -76,9 +85,9 @@ export const RUNGS: Readonly<Record<LadderPlanKey, RungCopy>> = {
   launch: {
     name: 'Launch',
     bestIf: 'Best if you are putting something new into the world on a date, and the season is riding on it.',
-    tracks: 'More than two things at once, sized to whatever is being launched.',
+    tracks: 'Not an open ended slot either: Launch is a single scoped build, planned to your date rather than kept running.',
     turnaround: 'Work is planned back from your launch date instead of pulled off a queue.',
-    services: 'Everything in Scale, plus a written schedule with the date on it and a team held against it.',
+    services: 'A written schedule with the date on it, a team held against it, and a support window once it ships.',
   },
 }
 
@@ -132,18 +141,25 @@ export function ladderPlanNames(names?: PlanNameOverrides): string[] {
 }
 
 /**
- * Is this catalogue row a plan rather than a service?
+ * Is this catalogue row one of the rungs actually drawn on THIS client's own
+ * ladder, rather than any plan the studio happens to sell?
  *
- * The studio's Maintain and Scale rows live in the `services` table so they
- * can carry copy, which means the client catalogue would otherwise print them
- * twice: once as a rung and once as a card. The Services page drops them from
- * the grid only when the ladder actually rendered, so a member seat or a
- * custom-plan client still sees the full catalogue.
+ * The studio's Maintain and Scale rows (and, for whoever is standing next to
+ * them, Tune or Launch) live in the `services` table so they can carry copy,
+ * which means the client catalogue would otherwise print them twice: once as
+ * a rung and once as a card. Only the plans this client's own `view` actually
+ * renders as down/here/up are dropped. Checking a card against all four
+ * ladder names unconditionally would strip a Maintain client's real one-off
+ * Launch service card too, even though Launch never rendered as one of their
+ * three rungs. Passing the view fixes that: Launch stays a card for everyone
+ * except the client standing on it.
  */
-export function isLadderPlanName(name: string | null | undefined, names?: PlanNameOverrides): boolean {
+export function isLadderPlanName(name: string | null | undefined, view: LadderView | null): boolean {
   const candidate = (name ?? '').trim().toLowerCase()
-  if (!candidate) return false
-  return ladderPlanNames(names).some(planName => planName.toLowerCase() === candidate)
+  if (!candidate || !view) return false
+  return [view.down, view.here, view.up].some(
+    rung => rung !== null && rung.name.toLowerCase() === candidate,
+  )
 }
 
 // ── The client's own figures ─────────────────────────────────────────────────

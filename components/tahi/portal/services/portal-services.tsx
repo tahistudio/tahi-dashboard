@@ -79,6 +79,8 @@ interface PortalSubscription {
   nextInvoiceDate: string | null
   createdAt: string | null
   addonDetails: AddonDetail[]
+  /** The client's own company name, for the ladder's intro sentence. */
+  orgName?: string | null
 }
 
 interface SubscriptionResponse {
@@ -183,12 +185,13 @@ export function PortalServices({ preview = false }: { preview?: boolean }) {
     [data, failed],
   )
   // The studio's Maintain and Scale rows live in `services` so they can carry
-  // copy, and the ladder above already tells that story. They leave the grid
-  // only when the ladder actually rendered, so a member seat or a custom-plan
-  // client still sees the whole catalogue.
+  // copy, and the ladder above already tells that story. A card leaves the
+  // grid only when it is one of THIS client's own rendered rungs, so a
+  // Maintain client's real one-off Launch service card stays, and a member
+  // seat or a custom-plan client still sees the whole catalogue.
   const cards = React.useMemo(
-    () => (ladderView ? allCards.filter(card => !isLadderPlanName(card.name, planNames)) : allCards),
-    [allCards, ladderView, planNames],
+    () => (ladderView ? allCards.filter(card => !isLadderPlanName(card.name, ladderView)) : allCards),
+    [allCards, ladderView],
   )
   const filters = React.useMemo(() => deliveryFilters(cards), [cards])
   const shown = filter === 'all' ? cards : cards.filter(card => card.delivery === filter)
@@ -237,6 +240,7 @@ export function PortalServices({ preview = false }: { preview?: boolean }) {
           view={ladderView}
           live={live}
           pressure={pressure}
+          orgName={subscription?.orgName}
           readOnly={readOnly}
           readOnlyReason={READ_ONLY_REASON}
           onTalk={() => askAbout({

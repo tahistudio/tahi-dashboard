@@ -75,7 +75,7 @@ describe('the ladder itself', () => {
     expect(html).toContain('6 days from asked to delivered, averaged over your own work.')
     // The neighbours keep their studio written sentences.
     expect(html).toContain('One track, always moving.')
-    expect(html).toContain('More than two things at once')
+    expect(html).toContain('Not an open ended slot either')
   })
 
   it('keeps the rung\'s words when nothing has been delivered to measure', () => {
@@ -179,11 +179,50 @@ const SERVICES = {
   ],
 }
 
-function renderPage(capacity: Record<string, unknown>, subscription: unknown = SUBSCRIPTION): string {
+// A Maintain client's ladder is Tune / Maintain / Scale (lib/plan-ladder.ts
+// LADDER_ORDER): Launch sits one rung past their own and never renders for
+// them. Their orgName also rides this same /api/portal/subscription payload,
+// so the ladder can greet them without a second fetch.
+const MAINTAIN_SUBSCRIPTION = {
+  clientType: 'retainer' as const,
+  subscription: {
+    planType: 'maintain',
+    planLabel: 'Maintain',
+    monthlyRate: 1500,
+    currency: 'NZD',
+    customRate: false,
+    trackCount: 1,
+    nextInvoiceDate: '2026-10-01',
+    createdAt: '2026-04-30T00:00:00.000Z',
+    addonDetails: [],
+    orgName: 'Giant Group',
+  },
+  plans: [
+    { id: 'maintain', name: 'Maintain' },
+    { id: 'scale', name: 'Scale' },
+  ],
+}
+
+// A real one-off Launch build sits in the same catalogue as the Maintain and
+// Scale plan rows. Only the latter two are this client's own rendered rungs.
+const SERVICES_WITH_LAUNCH = {
+  items: [
+    { id: 's-1', name: 'Maintain', description: 'PLAN ROW COPY, already told by the ladder.', category: 'service', isRecurring: 1 },
+    { id: 's-2', name: 'Scale', description: 'PLAN ROW COPY, already told by the ladder.', category: 'service', isRecurring: 1 },
+    { id: 's-4', name: 'Launch', description: 'A one off site build, scoped and quoted on its own.', category: 'service', isRecurring: 0 },
+    { id: 's-3', name: 'Lottie animation', description: 'A moving mark for the hero.', category: 'addon', isRecurring: 0 },
+  ],
+}
+
+function renderPage(
+  capacity: Record<string, unknown>,
+  subscription: unknown = SUBSCRIPTION,
+  services: unknown = SERVICES,
+): string {
   return renderToStaticMarkup(
     <SWRConfig value={{
       fallback: {
-        '/api/portal/services': SERVICES,
+        '/api/portal/services': services,
         '/api/portal/subscription': subscription,
         '/api/portal/capacity': capacity,
       },
@@ -208,6 +247,30 @@ describe('the Services page with the ladder mounted', () => {
     const html = renderPage({ tracks: [], queue: [], delivered: [] })
     expect(html).not.toContain('PLAN ROW COPY')
     expect(html).toContain('A moving mark for the hero.')
+  })
+
+  it('keeps a real Launch service card for a Maintain client, whose ladder never renders Launch', () => {
+    const html = renderPage(
+      { tracks: [], queue: [], delivered: [] },
+      MAINTAIN_SUBSCRIPTION,
+      SERVICES_WITH_LAUNCH,
+    )
+    // Maintain and Scale ARE this client's own rendered rungs (Tune / Maintain
+    // / Scale), so those two plan rows still leave the grid.
+    expect(html).not.toContain('PLAN ROW COPY')
+    // Launch is one rung past a Maintain client and never rendered for them,
+    // so the real one-off Launch card must not vanish with it.
+    expect(html).toContain('A one off site build, scoped and quoted on its own.')
+  })
+
+  it('greets the client by name straight off the subscription payload, with no second fetch', () => {
+    const html = renderPage({ tracks: [], queue: [], delivered: [] }, MAINTAIN_SUBSCRIPTION)
+    expect(html).toContain('what either would mean for Giant Group')
+  })
+
+  it('falls back to the generic sentence when the payload carries no org name', () => {
+    const html = renderPage({ tracks: [], queue: [], delivered: [] })
+    expect(html).toContain('what either would mean for you')
   })
 
   it('leaves the catalogue whole for a client with no ladder to stand on', () => {
