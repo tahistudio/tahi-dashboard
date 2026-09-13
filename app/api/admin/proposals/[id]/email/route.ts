@@ -73,6 +73,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       expiresAt: schema.proposals.expiresAt,
       status: schema.proposals.status,
       token: schema.proposals.publicShareToken,
+      publishedSnapshot: schema.proposals.publishedSnapshot,
     })
     .from(schema.proposals)
     .where(eq(schema.proposals.id, id))
@@ -80,6 +81,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   if (!proposal) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (!proposal.token) {
     return NextResponse.json({ error: 'Share the proposal first to mint a public link.' }, { status: 400 })
+  }
+  if (!proposal.publishedSnapshot) {
+    return NextResponse.json({ error: 'Publish the proposal before emailing the link.' }, { status: 400 })
   }
 
   const fromName = 'Liam Miller'

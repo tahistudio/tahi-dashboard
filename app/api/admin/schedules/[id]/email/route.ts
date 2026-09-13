@@ -66,6 +66,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       subtitle: schema.projectSchedules.subtitle,
       targetLaunchDate: schema.projectSchedules.targetLaunchDate,
       token: schema.projectSchedules.publicShareToken,
+      publishedSnapshot: schema.projectSchedules.publishedSnapshot,
     })
     .from(schema.projectSchedules)
     .where(eq(schema.projectSchedules.id, id))
@@ -73,6 +74,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   if (!schedule) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (!schedule.token) {
     return NextResponse.json({ error: 'Share the schedule first to mint a public link.' }, { status: 400 })
+  }
+  if (!schedule.publishedSnapshot) {
+    return NextResponse.json({ error: 'Publish the schedule before emailing the link.' }, { status: 400 })
   }
 
   const fromName = 'Liam Miller'

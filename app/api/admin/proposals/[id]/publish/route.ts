@@ -2,8 +2,9 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, asc } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { requireProposalAccess } from '@/app/api/admin/_sales-access/artifact-scope'
+import { buildProposalSnapshot } from '@/lib/proposal-snapshot'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -27,65 +28,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   const denied = await requireProposalAccess(database, { userId, orgId }, id)
   if (denied) return denied
 
-  const [proposal] = await database
-    .select({
-      id: schema.proposals.id,
-      title: schema.proposals.title,
-      subtitle: schema.proposals.subtitle,
-      preparedFor: schema.proposals.preparedFor,
-      preparedBy: schema.proposals.preparedBy,
-      effectiveDate: schema.proposals.effectiveDate,
-      expiresAt: schema.proposals.expiresAt,
-    })
-    .from(schema.proposals)
-    .where(eq(schema.proposals.id, id))
-    .limit(1)
-  if (!proposal) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-
-  const [sections, variants] = await Promise.all([
-    database.select({
-      id: schema.proposalSections.id,
-      type: schema.proposalSections.type,
-      title: schema.proposalSections.title,
-      subtitle: schema.proposalSections.subtitle,
-      data: schema.proposalSections.data,
-      themeMode: schema.proposalSections.themeMode,
-      position: schema.proposalSections.position,
-    })
-      .from(schema.proposalSections)
-      .where(eq(schema.proposalSections.proposalId, id))
-      .orderBy(asc(schema.proposalSections.position)),
-    database.select({
-      id: schema.proposalVariants.id,
-      name: schema.proposalVariants.name,
-      tagline: schema.proposalVariants.tagline,
-      oneOffAmount: schema.proposalVariants.oneOffAmount,
-      monthlyAmount: schema.proposalVariants.monthlyAmount,
-      currency: schema.proposalVariants.currency,
-      scopeHtml: schema.proposalVariants.scopeHtml,
-      pricingNotesHtml: schema.proposalVariants.pricingNotesHtml,
-      timelineScheduleId: schema.proposalVariants.timelineScheduleId,
-      ctaLabel: schema.proposalVariants.ctaLabel,
-      isFeatured: schema.proposalVariants.isFeatured,
-      position: schema.proposalVariants.position,
-    })
-      .from(schema.proposalVariants)
-      .where(eq(schema.proposalVariants.proposalId, id))
-      .orderBy(asc(schema.proposalVariants.position)),
-  ])
-
-  const snapshot = {
-    proposal: {
-      title: proposal.title,
-      subtitle: proposal.subtitle,
-      preparedFor: proposal.preparedFor,
-      preparedBy: proposal.preparedBy,
-      effectiveDate: proposal.effectiveDate,
-      expiresAt: proposal.expiresAt,
-    },
-    sections,
-    variants,
-  }
+  const snapshot = await buildProposalSnapshot(database, id)
+  if (!snapshot) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   const now = new Date().toISOString()
   await database.update(schema.proposals).set({
@@ -94,5 +38,5 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     updatedAt: now,
   }).where(eq(schema.proposals.id, id))
 
-  return NextResponse.json({ publishedAt: now, sectionCount: sections.length, variantCount: variants.length })
+  return NextResponse.json({ publishedAt: now, sectionCount: snapshot.sections.length, variantCount: snapshot.variants.length })
 }
