@@ -166,7 +166,7 @@ seen on production.
 
 ## Liam's late-evening asks, for the beta
 
-- [~] PM.1 - [BE/FE] **Default project manager for new clients, by engagement
+- [~] PM.1 (MERGED e9feda94, live, both defaults set to Liam on production 2026-09-14 00:05 NZ; Liam to confirm from Settings) - [BE/FE] **Default project manager for new clients, by engagement
   type.** Liam is the project manager for every client today
   (studio.projectManagerId override, LW.3) and must also be the default for
   every client added from now on. Settings: "Project manager for new retainer
@@ -174,7 +174,7 @@ seen on production.
   applied when a client is created (client dialog, importer, self-serve
   onboarding); the override keeps winning while it is set. Agent pm-defaults in
   flight.
-- [ ] BP.1 - [Design then FE/BE] **Beta comment pins.** A Figma-style comment
+- [~] BP.1 (MERGED 1ebb63f5 as the stripped-back version: floating draggable ball, comment panel, context stored, MCP list_feedback_comments; no inbox yet; migration 0100 through the runner after deploy) - [Design then FE/BE] **Beta comment pins.** A Figma-style comment
   mode in the dashboard for the beta: any signed-in user (client, Liam, Staci)
   drops a pin on the thing they mean; the pin stores the route, the anchored
   element (selector path plus visible text), viewport width and breakpoint,
@@ -184,7 +184,7 @@ seen on production.
   breakpoint), each pin converts to a task with one click, replies close the
   loop. Proposal: 3 to 4 days; needs a feedback_pins table and a small overlay
   component mounted in both shells.
-- [ ] GI.4 - [BE, design later] **The request wizard learns the client deeply.**
+- [~] GI.4 (step one MERGED ff9939bd: history, coverage gaps and plan in the wizard prompt; step two, the advisor, still open) - [BE, design later] **The request wizard learns the client deeply.**
   A per-client memory the wizard and a future advisor read: every request with
   category, size, outcome and dates; site audits and health; brands; the plan
   and its usage; what the client has never asked for. Phase 1 (about 3 days): a
