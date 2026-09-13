@@ -8,10 +8,13 @@ import {
   slotDateTime,
   slotIso,
   formatSlotSummary,
+  formatSlotTime,
   formatSlotLong,
   isValidTimeZone,
   resolveTimeZone,
   visitorTimeZone,
+  groupKickoffSlotsByDay,
+  kickoffBookingErrorMessage,
   STUDIO_TIME_ZONE,
 } from '@/lib/kickoff-slot'
 
@@ -180,5 +183,113 @@ describe('zone-aware formatting', () => {
 
   it('is empty for an unparseable timestamp', () => {
     expect(formatSlotLong('not-a-date')).toBe('')
+  })
+})
+
+describe('formatSlotTime', () => {
+  const iso = '2026-09-09T01:30:00.000Z' // 1:30pm in Auckland
+
+  it('renders just the time, no day', () => {
+    const label = formatSlotTime(iso, { timeZone: 'Pacific/Auckland' })
+    expect(label).toMatch(/1:30/)
+    expect(label).not.toMatch(/Sep|Wed/)
+  })
+
+  it('is empty for an unparseable timestamp', () => {
+    expect(formatSlotTime('not-a-date')).toBe('')
+  })
+})
+
+describe('groupKickoffSlotsByDay', () => {
+  it('groups slots onto the same calendar day in the requested zone', () => {
+    const groups = groupKickoffSlotsByDay(
+      [
+        { start: '2026-09-24T21:00:00.000Z', label: '9:00 am' },
+        { start: '2026-09-24T21:30:00.000Z', label: '9:30 am' },
+        { start: '2026-09-27T20:00:00.000Z', label: '9:00 am' },
+      ],
+      'Pacific/Auckland',
+    )
+    expect(groups.map(g => g.dateKey)).toEqual(['2026-09-25', '2026-09-28'])
+    expect(groups[0].slots).toHaveLength(2)
+    expect(groups[1].slots).toHaveLength(1)
+  })
+
+  it('preserves the order the slots arrived in (earliest first)', () => {
+    const groups = groupKickoffSlotsByDay(
+      [
+        { start: '2026-09-27T20:00:00.000Z', label: 'later day' },
+        { start: '2026-09-24T21:00:00.000Z', label: 'earlier day' },
+      ],
+      'Pacific/Auckland',
+    )
+    expect(groups.map(g => g.dateKey)).toEqual(['2026-09-28', '2026-09-25'])
+  })
+
+  it('splits weekday and date so the picker keeps its two-line heading', () => {
+    const [group] = groupKickoffSlotsByDay(
+      [{ start: '2026-09-24T21:00:00.000Z', label: '9:00 am' }],
+      'Pacific/Auckland',
+    )
+    expect(group.weekday).toBe('Fri')
+    expect(group.date).toContain('25')
+    expect(group.date).toContain('Sep')
+  })
+
+  it('the SAME instant can land on a different calendar day in a different zone', () => {
+    const slots = [{ start: '2026-09-24T12:30:00.000Z', label: 'midnight-ish' }]
+    const nz = groupKickoffSlotsByDay(slots, 'Pacific/Auckland')
+    const ny = groupKickoffSlotsByDay(slots, 'America/New_York')
+    expect(nz[0].dateKey).toBe('2026-09-25')
+    expect(ny[0].dateKey).toBe('2026-09-24')
+  })
+
+  it('falls back to the studio zone for a junk timezone, never throws', () => {
+    const groups = groupKickoffSlotsByDay(
+      [{ start: '2026-09-24T21:00:00.000Z', label: '9:00 am' }],
+      'Middle/Earth',
+    )
+    expect(groups).toHaveLength(1)
+    expect(groups[0].dateKey).toBe('2026-09-25')
+  })
+
+  it('skips a slot with an unparseable start rather than throwing', () => {
+    const groups = groupKickoffSlotsByDay(
+      [
+        { start: 'not-a-date', label: 'junk' },
+        { start: '2026-09-24T21:00:00.000Z', label: '9:00 am' },
+      ],
+      'Pacific/Auckland',
+    )
+    expect(groups).toHaveLength(1)
+    expect(groups[0].slots).toHaveLength(1)
+  })
+
+  it('is empty for an empty slot list', () => {
+    expect(groupKickoffSlotsByDay([], 'Pacific/Auckland')).toEqual([])
+  })
+})
+
+describe('kickoffBookingErrorMessage', () => {
+  it('names the read-only client view specifically, for the exact contract POST /api/portal/calls returns', () => {
+    expect(kickoffBookingErrorMessage(403, 'Read-only in client view'))
+      .toBe('This is a read-only client view, so nothing was booked.')
+  })
+
+  it('keeps the generic line for any other 403 (e.g. no org, wrong org)', () => {
+    expect(kickoffBookingErrorMessage(403, 'Forbidden'))
+      .toBe('We could not hold that time. Try another slot, or we will follow up by email.')
+  })
+
+  it('keeps the generic line for a 500, a stale slot, or a network failure', () => {
+    expect(kickoffBookingErrorMessage(500, 'Could not book that time'))
+      .toBe('We could not hold that time. Try another slot, or we will follow up by email.')
+    expect(kickoffBookingErrorMessage(0, null))
+      .toBe('We could not hold that time. Try another slot, or we will follow up by email.')
+  })
+
+  it('does not match on the string alone without the 403', () => {
+    expect(kickoffBookingErrorMessage(500, 'Read-only in client view'))
+      .toBe('We could not hold that time. Try another slot, or we will follow up by email.')
   })
 })

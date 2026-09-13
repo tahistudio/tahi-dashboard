@@ -1,7 +1,7 @@
 import { clerkClient } from '@clerk/nextjs/server'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { getServerAuth } from '@/lib/server-auth'
+import { getViewAudience } from '@/lib/view-audience'
 import { resolveClientEntry, clientEntryFromPersona, type ClientPersona } from '@/lib/onboarding-entry'
 import { resolveInvite } from '@/lib/onboarding-invites'
 import { resolveAndStampOrgOnboarding } from '@/lib/org-onboarding-server'
@@ -22,7 +22,12 @@ export default async function OnboardingPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const params = await searchParams
-  const { userId, orgId } = await getServerAuth()
+  // getViewAudience() also answers whether this is a Tahi session previewing
+  // the portal as one client (Client view): the kickoff step's booking POST
+  // refuses that session by design, so the picker needs to know up front
+  // rather than let every slot fail with a generic error (see
+  // components/tahi/onboarding-content.tsx).
+  const { userId, orgId, isPreviewingClient } = await getViewAudience()
   if (!userId) {
     const qs = new URLSearchParams(params as Record<string, string>).toString()
     redirect(`/sign-in?redirect_url=${encodeURIComponent('/onboarding' + (qs ? '?' + qs : ''))}`)
@@ -117,5 +122,13 @@ export default async function OnboardingPage({
   // then to the literal this line used to hardcode. See lib/onboarding-lead.ts.
   const lead: OnboardingLead = await loadStudioLead(leadOrgRef)
 
-  return <OnboardingContent entry={entry} lead={lead} redirectTo="/overview" inviteToken={inviteToken} />
+  return (
+    <OnboardingContent
+      entry={entry}
+      lead={lead}
+      redirectTo="/overview"
+      inviteToken={inviteToken}
+      isPreviewingClient={isPreviewingClient}
+    />
+  )
 }

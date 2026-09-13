@@ -50,7 +50,14 @@ import {
   type LedgerStep,
 } from '@/components/tahi/onboarding-shell'
 import { OnboardingPayment } from '@/components/tahi/onboarding-payment'
-import { formatSlotSummary, slotIso, visitorTimeZone } from '@/lib/kickoff-slot'
+import {
+  formatSlotSummary,
+  visitorTimeZone,
+  groupKickoffSlotsByDay,
+  kickoffBookingErrorMessage,
+  type GroupableKickoffSlot,
+  type KickoffSlotDayGroup,
+} from '@/lib/kickoff-slot'
 import { buildSteps, ONBOARDING_VIDEO_ENABLED } from '@/lib/onboarding-steps'
 import type { ClientEntry } from '@/lib/onboarding-entry'
 
@@ -87,24 +94,14 @@ const PLANS: Plan[] = [
 const ANCHOR = 'Hiring the equivalent specialists separately runs $5,200 to $17,500+ a month. This is one calm line item, change it anytime.'
 const BUDGETS = ['Not sure yet', 'Under $5k', '$5k to $15k', '$15k to $50k', '$50k+']
 const DISCIPLINES = ['Design', 'Development', 'Both design and development']
-const SLOT_TIMES = ['9:30 am', '11:00 am', '1:30 pm', '3:00 pm']
+
+/** The read-only-preview note the portal's own write CTAs use (see
+ *  components/tahi/portal/invoices/portal-invoice-list.tsx and friends). */
+const READ_ONLY_KICKOFF_REASON = 'Read only while viewing as a client'
 
 const META: Record<string, string> = {
   welcome: 'Welcome', plan: 'Your plan', pay: 'Payment', details: 'Confirm you',
   work: 'Your brief', invite: 'Your team', kickoff: 'Kickoff', orient: 'Welcome',
-}
-
-function upcomingDays(n: number): Date[] {
-  const out: Date[] = []
-  const d = new Date()
-  let guard = 0
-  while (out.length < n && guard++ < 30) {
-    d.setDate(d.getDate() + 1)
-    const wd = d.getDay()
-    if (wd === 0 || wd === 6) continue
-    out.push(new Date(d))
-  }
-  return out
 }
 
 // ── Loom-style hello modal ─────────────────────────────────────────────
@@ -177,30 +174,128 @@ function VideoModal({ open, onClose, lead }: { open: boolean; onClose: () => voi
 }
 
 /**
- * The chip value is the slot's real ISO instant, not an opaque "2-1:30 pm" id,
- * so the kickoff step can POST a bookable time straight from state. Times are
- * wall-clock in the visitor's own timezone (see lib/kickoff-slot).
+ * Fetched shape of GET /api/portal/kickoff-slots. Only the fields this
+ * component reads; the route returns a couple more (studioTimeZone,
+ * calendarSynced) that nothing here needs.
  */
-function SlotPicker({ calDays, slot, setSlot }: { calDays: Date[]; slot: string | null; setSlot: (s: string) => void }) {
-  return (
-    <div className="ob-cal">
-      {calDays.map((d, di) => {
-        const wd = d.toLocaleDateString('en-NZ', { weekday: 'short' })
-        const dom = d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })
-        return (
+interface KickoffSlotsPayload {
+  timeZone?: string
+  timeZoneLabel?: string
+  studioTimeZoneLabel?: string
+  slots?: GroupableKickoffSlot[]
+}
+
+const KICKOFF_SKELETON_DAYS = 5
+const KICKOFF_SKELETON_SLOTS = 4
+
+/**
+ * The chip value is the slot's real ISO instant, not an opaque "2-1:30 pm" id,
+ * so the kickoff step can POST a bookable time straight from state.
+ *
+ * Slots come from GET /api/portal/kickoff-slots: real availability from the
+ * studio's calendar (lib/kickoff-availability.ts), not four fixed labels
+ * guessed client-side. Grouped into days IN THE VISITOR'S OWN ZONE
+ * (groupKickoffSlotsByDay), because a slot near midnight can land on a
+ * different calendar day depending on whose clock is doing the grouping.
+ *
+ * `disabled` is true while previewing the portal as a client (Client view):
+ * the booking POST refuses that session by design, so there is nothing
+ * honest to book here, and the chips stay inert rather than promising a
+ * click that will 403.
+ */
+function SlotPicker({
+  slot,
+  setSlot,
+  disabled,
+  hostFirst,
+}: {
+  slot: string | null
+  setSlot: (s: string) => void
+  disabled: boolean
+  hostFirst: string
+}) {
+  const [loading, setLoading] = React.useState(true)
+  const [loadError, setLoadError] = React.useState(false)
+  const [days, setDays] = React.useState<KickoffSlotDayGroup<GroupableKickoffSlot>[]>([])
+  const [zoneNote, setZoneNote] = React.useState<{ visitor: string; studio: string } | null>(null)
+
+  React.useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      setLoadError(false)
+      try {
+        const tz = visitorTimeZone()
+        const res = await fetch(`/api/portal/kickoff-slots?timeZone=${encodeURIComponent(tz)}`)
+        if (!res.ok) throw new Error('kickoff-slots request failed')
+        const json = (await res.json()) as KickoffSlotsPayload
+        if (cancelled) return
+        setDays(groupKickoffSlotsByDay(json.slots ?? [], tz))
+        setZoneNote({ visitor: json.timeZoneLabel || tz, studio: json.studioTimeZoneLabel || 'Pacific/Auckland' })
+      } catch {
+        if (!cancelled) setLoadError(true)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="ob-cal" aria-busy="true" aria-label="Loading available times">
+        {Array.from({ length: KICKOFF_SKELETON_DAYS }).map((_, di) => (
           <div className="ob-cal-day" key={di}>
-            <div className="ob-cal-d"><b>{wd}</b><span>{dom}</span></div>
+            <div className="ob-cal-d"><b>&nbsp;</b><span>&nbsp;</span></div>
             <div className="ob-slots">
-              {SLOT_TIMES.map(time => {
-                const iso = slotIso(d, time)
-                if (!iso) return null
-                return <button key={time} className={cn('ob-slot-chip', slot === iso && 'on')} onClick={() => setSlot(iso)}>{time}</button>
-              })}
+              {Array.from({ length: KICKOFF_SKELETON_SLOTS }).map((_, si) => (
+                <button key={si} type="button" className="ob-slot-chip skel" disabled aria-hidden="true" tabIndex={-1} />
+              ))}
             </div>
           </div>
-        )
-      })}
-    </div>
+        ))}
+      </div>
+    )
+  }
+
+  // Quiet fallback: never an alarming error banner on the last screen of
+  // onboarding. A slot never gets picked here, and bookKickoffAndFinish
+  // already treats no slot as "enter the studio, we'll follow up by email".
+  if (loadError) {
+    return <p className="ob-tz-note">We couldn&apos;t load live availability right now. Continue, and we&apos;ll follow up by email to find a time.</p>
+  }
+  if (days.length === 0) {
+    return <p className="ob-tz-note">No open times in the next few days. Continue, and we&apos;ll follow up by email to find a time.</p>
+  }
+
+  return (
+    <>
+      <div className="ob-cal">
+        {days.map(day => (
+          <div className="ob-cal-day" key={day.dateKey}>
+            <div className="ob-cal-d"><b>{day.weekday}</b><span>{day.date}</span></div>
+            <div className="ob-slots">
+              {day.slots.map(s => (
+                <button
+                  key={s.start}
+                  type="button"
+                  className={cn('ob-slot-chip', slot === s.start && 'on')}
+                  onClick={() => setSlot(s.start)}
+                  disabled={disabled}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      {zoneNote && (
+        <p className="ob-tz-note">
+          Times shown in {zoneNote.visitor} (your time). {hostFirst} is in {zoneNote.studio}.
+        </p>
+      )}
+    </>
   )
 }
 
@@ -225,11 +320,21 @@ export function OnboardingContent({
   lead,
   redirectTo,
   inviteToken,
+  isPreviewingClient = false,
 }: {
   entry: ClientEntry
   lead: OnboardingLead
   redirectTo: string
   inviteToken?: string
+  /**
+   * True when this is a Tahi session previewing the portal as one client
+   * (Client view), resolved server-side by lib/view-audience.ts and handed
+   * down as a plain boolean, never read from the cookie in this client
+   * component. POST /api/portal/calls refuses every write from this session
+   * by design, so the kickoff step disables booking rather than promising a
+   * click that will 403.
+   */
+  isPreviewingClient?: boolean
 }) {
   const router = useRouter()
   const { setActive } = useClerk()
@@ -311,7 +416,6 @@ export function OnboardingContent({
   const [enqSubmitting, setEnqSubmitting] = React.useState(false)
   const [enqError, setEnqError] = React.useState<string | null>(null)
 
-  const calDays = React.useMemo(() => upcomingDays(4), [])
   const steps = React.useMemo(() => buildSteps(engagement, clientType), [engagement, clientType])
   const ledgerSteps: LedgerStep[] = steps.map(s => ({ id: s, label: META[s] }))
   const stepId = steps[Math.min(idx, steps.length - 1)]
@@ -419,12 +523,12 @@ export function OnboardingContent({
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string }
         console.error('[onboarding] kickoff booking failed', res.status, j.error)
-        setBookError('We could not hold that time. Try another slot, or we will follow up by email.')
+        setBookError(kickoffBookingErrorMessage(res.status, j.error))
         return
       }
       onComplete()
     } catch {
-      setBookError('We could not hold that time. Try another slot, or we will follow up by email.')
+      setBookError(kickoffBookingErrorMessage(0, null))
     } finally {
       setBooking(false)
     }
@@ -623,7 +727,8 @@ export function OnboardingContent({
           </span>
           <span className="ob-kickoff-t"><b>30 min with {lead.first}</b><small>Video call, we&apos;ll align on direction, no prep needed.</small></span>
         </div>
-        <SlotPicker calDays={calDays} slot={slot} setSlot={setSlot} />
+        {isPreviewingClient && <p className="ob-readonly-note">{READ_ONLY_KICKOFF_REASON}</p>}
+        <SlotPicker slot={slot} setSlot={setSlot} disabled={isPreviewingClient} hostFirst={lead.first} />
         <div className="ob-trust">
           <Check size={13} />
           {slot

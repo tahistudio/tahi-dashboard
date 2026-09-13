@@ -570,15 +570,21 @@ export const ONBOARDING_CSS = `
 .ob-kickoff-t{ display:flex; flex-direction:column; }
 .ob-kickoff-t b{ font-size:14.5px; color:var(--ob-text); font-weight:600; }
 .ob-kickoff-t small{ font-size:12.5px; color:var(--ob-muted); }
-.ob-cal{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+.ob-cal{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; }
 .ob-cal-day{ display:flex; flex-direction:column; gap:8px; }
 .ob-cal-d{ text-align:center; padding-bottom:4px; }
 .ob-cal-d b{ display:block; font-size:13px; color:var(--ob-text); font-weight:700; }
 .ob-cal-d span{ font-size:11.5px; color:var(--ob-muted); }
 .ob-slots{ display:flex; flex-direction:column; gap:8px; }
-.ob-slot-chip{ height:38px; border-radius:.5rem; border:1px solid var(--ob-border-strong); background:#fff; font:600 12.5px 'Manrope'; color:var(--ob-text); cursor:pointer; transition:border-color .12s, background .12s, color .12s; }
+.ob-slot-chip{ min-height:2.75rem; border-radius:.5rem; border:1px solid var(--ob-border-strong); background:#fff; font:600 12.5px 'Manrope'; color:var(--ob-text); cursor:pointer; transition:border-color .12s, background .12s, color .12s; }
 .ob-slot-chip:hover{ border-color:var(--ob-brand); }
 .ob-slot-chip.on{ background:var(--ob-brand-dark); border-color:var(--ob-brand-dark); color:#fff; }
+.ob-slot-chip.skel{ cursor:default; border-style:dashed; opacity:.5; animation:ob-skel-pulse 1.3s ease-in-out infinite; }
+@keyframes ob-skel-pulse{ 0%,100%{ opacity:.35; } 50%{ opacity:.6; } }
+.ob-slot-chip:disabled:not(.skel){ cursor:not-allowed; opacity:.5; }
+.ob-slot-chip:disabled:not(.skel):hover{ border-color:var(--ob-border-strong); }
+.ob-tz-note{ margin:14px 0 0; font-size:12.5px; line-height:1.5; color:var(--ob-subtle); }
+.ob-readonly-note{ display:flex; align-items:center; gap:9px; padding:11px 13px; border:1px solid rgba(217,119,6,0.35); background:rgba(217,119,6,0.08); border-radius:.5rem; color:#b45309; font-size:13px; margin-bottom:14px; }
 
 /* ---- welcome card + loom ---- */
 .ob-welcomecard{ border:1px solid var(--ob-border-strong); border-radius:.875rem; padding:18px; background:var(--ob-brand-wash); }

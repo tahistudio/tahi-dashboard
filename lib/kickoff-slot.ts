@@ -102,6 +102,21 @@ export function formatSlotSummary(iso: string, options: SlotFormatOptions = {}):
   return `${day}, ${time}`
 }
 
+/** Just the time, e.g. "1:30 pm". The chip label GET /api/portal/kickoff-slots
+ *  returns per slot, and what the picker renders on each button. */
+export function formatSlotTime(iso: string, options: SlotFormatOptions = {}): string {
+  const dt = new Date(iso)
+  if (!Number.isFinite(dt.getTime())) return ''
+  const { locale = 'en-NZ', withZone = false } = options
+  const timeZone = resolveTimeZone(options.timeZone)
+  return dt.toLocaleTimeString(locale, {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone,
+    ...(withZone ? { timeZoneName: 'short' as const } : {}),
+  })
+}
+
 /** Long form for the email, e.g. "Wednesday, 9 September at 1:30 pm NZST". */
 export function formatSlotLong(iso: string, options: SlotFormatOptions = {}): string {
   const dt = new Date(iso)
@@ -121,4 +136,87 @@ export function formatSlotLong(iso: string, options: SlotFormatOptions = {}): st
     timeZoneName: 'short',
   })
   return `${day} at ${time}`
+}
+
+// ── grouping (GET /api/portal/kickoff-slots consumers) ─────────────────────
+
+/** The minimum a slot needs to be grouped and rendered. */
+export interface GroupableKickoffSlot {
+  /** The bookable UTC instant, exactly what the booking POST sends. */
+  start: string
+  /** Pre-formatted time label, already rendered in the caller's zone. */
+  label: string
+}
+
+export interface KickoffSlotDayGroup<T extends GroupableKickoffSlot = GroupableKickoffSlot> {
+  /** Stable sort/dedupe key, "YYYY-MM-DD" in the grouping zone. */
+  dateKey: string
+  /** Short weekday, e.g. "Tue", in the grouping zone. */
+  weekday: string
+  /** Day + month, e.g. "9 Sep", in the grouping zone. */
+  date: string
+  slots: T[]
+}
+
+/**
+ * Group a flat slot list into calendar days IN `timeZone`, the visitor's own
+ * zone, not the studio's. A slot near midnight can land on a different
+ * calendar day depending on whose clock is doing the grouping, which is
+ * exactly why this cannot just reuse `studioDate` off the server payload.
+ *
+ * `weekday` / `date` come back split (rather than one combined string) so the
+ * picker can keep its existing two-line day heading (bold weekday, muted
+ * date) unchanged.
+ *
+ * Pure: no network, no DOM. Order is preserved (the route already returns
+ * slots earliest-first), so callers get days in chronological order for free.
+ */
+export function groupKickoffSlotsByDay<T extends GroupableKickoffSlot>(
+  slots: T[],
+  timeZone: string | null | undefined,
+): KickoffSlotDayGroup<T>[] {
+  const zone = resolveTimeZone(timeZone)
+  const groups = new Map<string, KickoffSlotDayGroup<T>>()
+  const order: string[] = []
+
+  for (const slot of slots) {
+    const dt = new Date(slot.start)
+    if (!Number.isFinite(dt.getTime())) continue
+    // en-CA reliably renders YYYY-MM-DD, which sorts and dedupes correctly
+    // with no extra parsing.
+    const dateKey = dt.toLocaleDateString('en-CA', { timeZone: zone })
+    let group = groups.get(dateKey)
+    if (!group) {
+      const weekday = dt.toLocaleDateString('en-NZ', { weekday: 'short', timeZone: zone })
+      const date = dt.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', timeZone: zone })
+      group = { dateKey, weekday, date, slots: [] }
+      groups.set(dateKey, group)
+      order.push(dateKey)
+    }
+    group.slots.push(slot)
+  }
+
+  return order.map(key => groups.get(key) as KickoffSlotDayGroup<T>)
+}
+
+// ── booking outcome copy (components/tahi/onboarding-content.tsx) ──────────
+
+/**
+ * The kickoff step's fallback message on a failed booking POST.
+ *
+ * Liam walked the kickoff step as a dummy client from his own admin browser,
+ * which is Client view (read-only by design): POST /api/portal/calls
+ * correctly answered 403 { error: 'Read-only in client view' }, but the
+ * wizard showed the generic "we could not hold that time" line, which reads
+ * like a real outage rather than the read-only lens it actually was.
+ *
+ * Every other failure (a genuine 403/500, a network error, a slot that has
+ * gone stale) keeps the generic copy: it is still true and still the right
+ * next action (try another slot).
+ */
+export function kickoffBookingErrorMessage(status: number, apiError: string | null | undefined): string {
+  if (status === 403 && apiError === 'Read-only in client view') {
+    return 'This is a read-only client view, so nothing was booked.'
+  }
+  return 'We could not hold that time. Try another slot, or we will follow up by email.'
 }
