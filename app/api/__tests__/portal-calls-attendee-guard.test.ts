@@ -248,4 +248,64 @@ describe('GET /api/portal/calls - discovery_calls attendee guard', () => {
     const json = await res.json() as { items: CallItem[] }
     expect(json.items.find((i) => i.title === 'Mystery event')).toBeUndefined()
   })
+
+  // Giant Group (2026-09-13): the discovery_calls row for "N8N Content
+  // Engine" carries a Microsoft Teams link in google_meet_url, set through
+  // PATCH /api/admin/discovery-calls/[id]. The client home's "Next call"
+  // card must show Join for that link regardless of which vendor minted it,
+  // and regardless of whether a scheduled_calls mirror of the same meeting
+  // also exists with no link of its own.
+  it('mirrored in both tables, link only on the discovery row: meetingUrl is set', async () => {
+    const when = inFuture(48)
+    dbMock.state.queues = {
+      scheduled_calls: [[{
+        id: 'sched-n8n',
+        title: 'N8N Content Engine',
+        scheduledAt: when,
+        durationMinutes: 60,
+        meetingUrl: null,
+        attendees: JSON.stringify([]),
+      }]],
+      discovery_calls: [[{
+        id: '2663a77a-a8b8-478c-9542-d6588c3ea5ab',
+        title: 'N8N Content Engine',
+        scheduledAt: when,
+        durationMinutes: 60,
+        meetingUrl: 'https://teams.microsoft.com/l/meetup-join/abc',
+        attendees: JSON.stringify([
+          { name: 'Liam Miller', email: 'liam@tahi.studio', role: 'host' },
+        ]),
+      }]],
+      contacts: [[{ email: 'mickey.day@giantgroup.com' }]],
+      team_members: [[]],
+    }
+
+    const res = await GET(callsRequest())
+    const json = await res.json() as { items: Array<CallItem & { meetingUrl: string | null }> }
+    const item = json.items.find((i) => i.title === 'N8N Content Engine')
+    expect(item).toBeDefined()
+    expect(item?.meetingUrl).toBe('https://teams.microsoft.com/l/meetup-join/abc')
+  })
+
+  it('a call with no link anywhere returns meetingUrl null, not thrown away', async () => {
+    dbMock.state.queues = {
+      scheduled_calls: [[{
+        id: 'sched-checkin',
+        title: 'Quarterly check-in',
+        scheduledAt: inFuture(72),
+        durationMinutes: 30,
+        meetingUrl: null,
+        attendees: JSON.stringify([]),
+      }]],
+      discovery_calls: [[]],
+      contacts: [[{ email: 'mickey.day@giantgroup.com' }]],
+      team_members: [[]],
+    }
+
+    const res = await GET(callsRequest())
+    const json = await res.json() as { items: Array<CallItem & { meetingUrl: string | null }> }
+    const item = json.items.find((i) => i.title === 'Quarterly check-in')
+    expect(item).toBeDefined()
+    expect(item?.meetingUrl).toBeNull()
+  })
 })
