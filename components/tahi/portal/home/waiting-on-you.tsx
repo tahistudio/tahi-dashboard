@@ -68,6 +68,15 @@ export interface WaitingOnYouProps {
   onStart?: () => void
   /** True for a client with no requests at all, which gets the warmer copy. */
   isFirstRun?: boolean
+  /**
+   * True when the client has at least one open request already. The header
+   * above this tile, and the work board below it, both carry their own
+   * "New request" door: offering a THIRD one here to a client who already has
+   * work in flight reads as spam. Only a client with zero open requests sees
+   * the plain text link; anyone else gets the empty-state copy with nothing
+   * to press.
+   */
+  hasOpenRequests?: boolean
   /** True when a read behind this tile failed (403 / 500 / offline). Beats
    *  every other state: a failed read must never read as "all quiet". */
   failed?: boolean
@@ -84,6 +93,7 @@ export function WaitingOnYou({
   previewName,
   onStart,
   isFirstRun,
+  hasOpenRequests,
   failed,
   onRetry,
 }: WaitingOnYouProps) {
@@ -145,15 +155,20 @@ export function WaitingOnYou({
               ? 'Nothing here yet. Send us the first thing and you will watch every step of it from this page.'
               : 'Nothing is waiting on you right now. We will tell you the moment there is something to look at.'}
           </p>
-          {onStart && (
+          {/* The header above already carries the one primary "New request"
+              CTA. Offering a second one here, to a client who has open work
+              in flight, is the exact spam this tile used to be part of: a
+              plain text link, and only when there is genuinely nothing open
+              to start from. Anyone with an open request reads plain copy and
+              nothing to press. */}
+          {onStart && !hasOpenRequests && (
             <button
               type="button"
-              className="pfh-quiet-cta tahi-focus-ring"
+              className="pfh-quiet-link tahi-focus-ring"
               disabled={ro}
               onClick={ro ? undefined : onStart}
               title={ro ? `Read-only while you are viewing as ${previewName ?? 'the client'}` : undefined}
             >
-              <Icon n="plus" s={15} />
               {isFirstRun ? 'Make your first request' : 'Start a request'}
             </button>
           )}
