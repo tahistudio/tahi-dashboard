@@ -170,6 +170,10 @@ seen on production.
 - [~] LW.22 - [FE/BE] Files have no way to remove or delete a file: a Delete action on the client Files page, the request Files panel and the admin list, R2 object first then the row, confirm dialog, MCP delete_file. Agent files-delete.
 - [~] LW.23 - [BE/FE] Services hidden for clients for now, the way Messages is (client default deny, nav, page guard, portal API 403, per-org override still possible). Agent hide-services-clients. Note: this reverses the 2026-09-12 direction that clients compare plans on Services; Liam's call today.
 - [~] LW.24 - [FE] AI request wizard composer shows two focus rings; keep only the outer composer ring. Agent requests-ui-fixes.
+- [~] LW.27 - [FE] Client home empty state: keep the dark header panel, drop the leaf badge (Liam: "remove that badge with the fern in it, I liked the full dark mode header"). Agent home-empty-onboarding-exit.
+- [~] LW.28 - [FE] Onboarding has no way out: a "Sign out and return to sign in" line on every step and on /welcome. Same agent.
+- [~] LW.29 - [BE/FE] Settings > People: the bin on a teammate row does nothing for a person who signed up by hand and never joined the Clerk org; route made resilient to a missing membership, ConfirmDialog, honest errors. Agent people-delete-fix.
+- [x] LW.21 and LW.24 MERGED bdf333c4 (board strip overflow-y hidden, composer textarea ring removed). LW.22 MERGED 349b4462. LW.23 MERGED 24ae1753.
 - [~] LW.26 - [BE/FE] Seat invite flow (Blah Blah Inc repro): the accept link lands on sign-in ("Couldn't find your account") for a new address, and a hand-made sign-up is sent through the plan chooser instead of into the invited org, so the Clerk membership never gets created. Fix: signed-out plus token goes to sign-up with the email prefilled (sign-in when the account exists), acceptance runs on arrival (membership, contact link, onboarding stamp), then the invited org opens; seat versus first contact decided from the org's existing members. Agent seat-invite-flow.
 - [x] LW.25 - Comment ball: click, then pick the element the comment is about; soft snap to the nearest edge (b0b5eb17, live, migration 0101 applied).
 
