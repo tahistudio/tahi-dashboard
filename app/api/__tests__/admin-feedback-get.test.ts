@@ -95,6 +95,38 @@ describe('GET /api/admin/feedback - listing', () => {
     expect(json.items[0].id).toBe('fb_2')
   })
 
+  it('passes the anchor columns straight through on a row that has one', async () => {
+    rowsToReturn = [
+      {
+        id: 'fb_3',
+        body: 'About this button',
+        createdAt: '2026-01-03T00:00:00.000Z',
+        anchorSelector: '#save-btn',
+        anchorTag: 'button',
+        anchorText: 'Save changes',
+        anchorRect: JSON.stringify({ x: 10, y: 20, width: 100, height: 40, scrollHeight: 2000 }),
+        anchorContext: 'Billing',
+      },
+    ]
+    const res = await GET(feedbackGet())
+    const json = (await res.json()) as { items: Row[] }
+    expect(json.items[0].anchorSelector).toBe('#save-btn')
+    expect(json.items[0].anchorTag).toBe('button')
+    expect(json.items[0].anchorText).toBe('Save changes')
+    expect(JSON.parse(json.items[0].anchorRect as string)).toEqual({ x: 10, y: 20, width: 100, height: 40, scrollHeight: 2000 })
+    expect(json.items[0].anchorContext).toBe('Billing')
+  })
+
+  it('a general comment (no anchor) still returns null anchor columns untouched', async () => {
+    rowsToReturn = [
+      { id: 'fb_4', body: 'General note', createdAt: '2026-01-04T00:00:00.000Z', anchorSelector: null, anchorRect: null },
+    ]
+    const res = await GET(feedbackGet())
+    const json = (await res.json()) as { items: Row[] }
+    expect(json.items[0].anchorSelector).toBeNull()
+    expect(json.items[0].anchorRect).toBeNull()
+  })
+
   it('applies no where clause with no filters', async () => {
     await GET(feedbackGet())
     expect(lastWhereArg).toBeUndefined()

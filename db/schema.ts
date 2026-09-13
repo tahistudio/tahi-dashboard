@@ -3803,6 +3803,16 @@ export const feedbackComments = sqliteTable('feedback_comments', {
   body: text('body').notNull(),
   // JSON: { consoleErrors, failedFetches, headings, impersonation }
   context: text('context'),
+  // Anchor data (migration 0101): captured when the comment was left about a
+  // specific picked element rather than the page in general. All nullable:
+  // a general comment (Escape, or clicking the ball a second time) carries
+  // none of these.
+  anchorSelector: text('anchor_selector'),
+  anchorTag: text('anchor_tag'),
+  anchorText: text('anchor_text'),
+  // JSON: { x, y, width, height, scrollHeight }, see lib/feedback-anchor.ts
+  anchorRect: text('anchor_rect'),
+  anchorContext: text('anchor_context'),
   createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
 }, (table) => [
   index('idx_feedback_comments_org').on(table.orgId),

@@ -260,6 +260,110 @@ describe('POST /api/feedback - context and fields', () => {
   })
 })
 
+describe('POST /api/feedback - anchor (pick mode)', () => {
+  const validAnchor = {
+    selector: '#save-btn',
+    tag: 'button',
+    text: 'Save changes',
+    rect: { x: 10, y: 20, width: 100, height: 40, scrollHeight: 2000 },
+    context: 'Billing',
+  }
+
+  it('stores a valid anchor alongside the comment', async () => {
+    dbMock.state.queues = { team_members: [[{ email: 'liam@tahi.studio', role: 'admin' }]], feedback_comments: [[]] }
+    const res = await POST(feedbackRequest({ body: 'About this button', anchor: validAnchor }))
+    expect(res.status).toBe(201)
+    const row = dbMock.state.inserts.find((i) => i.table === 'feedback_comments')!
+    expect(row.values.anchorSelector).toBe('#save-btn')
+    expect(row.values.anchorTag).toBe('button')
+    expect(row.values.anchorText).toBe('Save changes')
+    expect(row.values.anchorContext).toBe('Billing')
+    expect(JSON.parse(row.values.anchorRect as string)).toEqual(validAnchor.rect)
+  })
+
+  it('stores nulls for every anchor column when no anchor is sent (a general comment)', async () => {
+    dbMock.state.queues = { team_members: [[{ email: 'liam@tahi.studio', role: 'admin' }]], feedback_comments: [[]] }
+    const res = await POST(feedbackRequest({ body: 'General note' }))
+    expect(res.status).toBe(201)
+    const row = dbMock.state.inserts.find((i) => i.table === 'feedback_comments')!
+    expect(row.values.anchorSelector).toBeNull()
+    expect(row.values.anchorTag).toBeNull()
+    expect(row.values.anchorText).toBeNull()
+    expect(row.values.anchorRect).toBeNull()
+    expect(row.values.anchorContext).toBeNull()
+  })
+
+  it('accepts an anchor with no text or context (both optional)', async () => {
+    dbMock.state.queues = { team_members: [[{ email: 'liam@tahi.studio', role: 'admin' }]], feedback_comments: [[]] }
+    const res = await POST(feedbackRequest({
+      body: 'About this',
+      anchor: { selector: '#x', rect: { x: 0, y: 0, width: 10, height: 10, scrollHeight: 100 } },
+    }))
+    expect(res.status).toBe(201)
+    const row = dbMock.state.inserts.find((i) => i.table === 'feedback_comments')!
+    expect(row.values.anchorSelector).toBe('#x')
+    expect(row.values.anchorText).toBeNull()
+    expect(row.values.anchorContext).toBeNull()
+  })
+
+  it('400s an anchor with an oversized selector', async () => {
+    const res = await POST(feedbackRequest({
+      body: 'hi',
+      anchor: { ...validAnchor, selector: 'x'.repeat(601) },
+    }))
+    expect(res.status).toBe(400)
+    expect(dbMock.state.inserts).toHaveLength(0)
+  })
+
+  it('400s an anchor with oversized text', async () => {
+    const res = await POST(feedbackRequest({
+      body: 'hi',
+      anchor: { ...validAnchor, text: 'x'.repeat(201) },
+    }))
+    expect(res.status).toBe(400)
+    expect(dbMock.state.inserts).toHaveLength(0)
+  })
+
+  it('400s an anchor with oversized context', async () => {
+    const res = await POST(feedbackRequest({
+      body: 'hi',
+      anchor: { ...validAnchor, context: 'x'.repeat(201) },
+    }))
+    expect(res.status).toBe(400)
+    expect(dbMock.state.inserts).toHaveLength(0)
+  })
+
+  it('400s an anchor missing a rect field', async () => {
+    const res = await POST(feedbackRequest({
+      body: 'hi',
+      anchor: { ...validAnchor, rect: { x: 0, y: 0, width: 10, height: 10 } },
+    }))
+    expect(res.status).toBe(400)
+    expect(dbMock.state.inserts).toHaveLength(0)
+  })
+
+  it('400s an anchor with a non-integer rect field', async () => {
+    const res = await POST(feedbackRequest({
+      body: 'hi',
+      anchor: { ...validAnchor, rect: { x: 0.5, y: 0, width: 10, height: 10, scrollHeight: 100 } },
+    }))
+    expect(res.status).toBe(400)
+    expect(dbMock.state.inserts).toHaveLength(0)
+  })
+
+  it('400s an anchor with an empty selector', async () => {
+    const res = await POST(feedbackRequest({ body: 'hi', anchor: { ...validAnchor, selector: '   ' } }))
+    expect(res.status).toBe(400)
+    expect(dbMock.state.inserts).toHaveLength(0)
+  })
+
+  it('400s a non-object anchor', async () => {
+    const res = await POST(feedbackRequest({ body: 'hi', anchor: 'not an object' }))
+    expect(res.status).toBe(400)
+    expect(dbMock.state.inserts).toHaveLength(0)
+  })
+})
+
 describe('POST /api/feedback - rate limiting', () => {
   it('ignores (not errors) a request past 30 in the trailing hour', async () => {
     const thirty = Array.from({ length: 30 }, (_, i) => ({ id: `fb_${i}` }))
