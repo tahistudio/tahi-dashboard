@@ -1,5 +1,3 @@
-# TASKS.md, reorganised 2026-09-13 (the previous file is archived at docs/superpowers/plans/2026-09-13-TASKS-before-reorganisation.md)
-
 # Tahi Dashboard, reorganised task list
 
 Proposed replacement for TASKS.md. Written 2026-09-13 from evidence, not memory:
@@ -256,7 +254,7 @@ order inside catalogue batches G and H.
 
 ## Claude Design write-back
 
-- [x] DL.3 - [Design] Write the invoices-studio shell wiring under Finance (done 2026-09-13, recorded in the run log and the catalogue section 6; the reorganiser could not see it because design writes leave no git trace)
+- [~] DL.3 - [Design] Write the invoices-studio shell wiring under Finance
   (exact edits scoped in
   `docs/superpowers/audits/2026-09-07-invoices-services-stalled-integration.json`:
   one stylesheet link, three script tags, one app-mount line, one app-shell prop
@@ -288,14 +286,14 @@ order inside catalogue batches G and H.
   and any other module that diverges, then port. Carry the DL.2 caveat: the rail
   must be withheld or collapsible on wide-table pages (Time, Team, Leads, Deals,
   Calls, Tracks, client Invoices) where it costs columns and clips money.
-- [~] MR.6 - [Design then FE] Studio invoices designed in Claude Design (the critic FIX is being worked in the overnight design pass, module "finance", 2026-09-14; port after Liam reviews)
+- [~] MR.6 - [Design then FE] Studio invoices designed in Claude Design
   (invoices-studio.* module: list with totals strip, seven saved views, rail chip
   with pay-link state, bulk bar, New invoice slide-over with the IC.3 defaults;
   detail with hero, metadata grid, grouped actions, activity strip, chase
   drafter). Critic: FIX (two blocking interaction bugs in the scratch mount,
   plus defects); fixer was running; then wire into the shell under Finance and
   port. The fixer's outcome is not recorded anywhere, so this stays `[~]`.
-- [~] MR.7 - [Design then FE] Services showcase redesigned in portal-money.* (port half live via CB1; the fuller showcase is being reworked in the overnight design pass, module "portal-money", 2026-09-14)
+- [~] MR.7 - [Design then FE] Services showcase redesigned in portal-money.*
   (dark forest plan stage with the two tracks as objects, How you are using Tahi
   with honest charts, an editorial catalogue with a feature, stories and lines,
   an add-ons shelf tied to the plan, member-seat and read-only degrades). Critic:
