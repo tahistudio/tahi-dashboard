@@ -85,6 +85,14 @@ Liam walked the portal as a dummy client (Company Inc, contacts on liammiller.de
 - [~] LW.19 BIG BUG: accepting a seat invite to an onboarded org lands on the onboarding wizard ("Welcome to Tahi... Staci is your lead") instead of inside the org. Cause: app/(dashboard)/layout.tsx reads onboarding completion off the individual user's Clerk metadata. Agent seat-landing: completion is a property of the organisation.
 - [x] LW.20 Teams link on the N8N Content Engine call restored after the calendar sync fix (5829bf0d) stopped wiping it.
 
+## Catalogue Batch C (2026-09-13 evening, deliverable truth)
+
+- [~] C1 publish before share (3ecafbba): a proposal share snapshots on first share only, publish re-arms after edits, both email routes refuse an unpublished link. Review clean. LIAM or lead: the live lap in the T3 plan (share, edit, verify pinned, publish, revoke 404, re-share) and heal the two Giant Group schedules that are shared without a snapshot (POST /api/admin/schedules/<id>/publish, no email).
+- [~] C2 public viewer integrity (bad0d7ef): dark slides readable, no localStorage bleed, third package selectable at 375, gantt card stack under 720px, no alert(), OG tags. Reviewer blocker was the missing e2e/public-viewers.spec.ts (queued below as D3), the expired-accept finding is covered by C3's guard; two minors left: the dark strip is a post-hydration effect (brief flash possible), RiskRegisterSection border hex.
+- [~] C3 accept, decline and question close the loop (97e51af0, migration 0098 applied on production 2026-09-13 22:40 NZ; staging apply refused the token, re-run when the token is fixed): accepted amounts frozen, expired documents refused with 410, studio bell and email for all three outcomes.
+- [~] C4 contract signature artefacts (this merge, migration 0099 to apply through POST /api/admin/db/migrate {"name":"0099"} as Liam right after the deploy; wrangler apply was refused by the permission classifier): every signature notifies, signed PDF to R2, body hash anchor, revoke resets. Follow-up: C3 shipped emails/contract-signature.tsx and studioContractSignatureEmailPlan for the same event C4 wires through emails/contract-partially-signed.tsx; only the preview page uses C3's, retire it in D2.
+- [ ] D3 Playwright specs the reviewers asked for: e2e/sales-publish.spec.ts and e2e/public-viewers.spec.ts on the QA harness, then one live rehearsal.
+
 ## Client integrations (Giant Group asks, Liam 2026-09-13)
 
 - [ ] GI.1 - [Design first, then BE] **Chat bot into Tahi.** A WhatsApp or Slack bot the client types or voice-notes to; the message (voice transcribed) becomes a request on the client's organisation with the sender as the contact, and the studio gets the normal request_created notification. Needs: a channel adapter per platform, sender-to-contact matching, transcription, an idempotency key per message, the same intake validation as the New request dialog. Memory: project_client_integrations_ideas_2026_09_13.
