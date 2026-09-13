@@ -457,10 +457,12 @@ export async function POST(req: NextRequest) {
       event.hangoutLink
       ?? event.conferenceData?.entryPoints?.find(e => e.entryPointType === 'video')?.uri
       ?? meetingUrl
-  } catch {
+  } catch (err) {
     // Not connected, token refresh failed, Google returned an error, or the
     // module would not load. All the same outcome: no calendar event, and a
-    // booking that still holds.
+    // booking that still holds. Swallowed on purpose, but never silently:
+    // the worker tail is the only place this failure can be seen.
+    console.error('[POST /api/portal/calls] calendar push failed', err)
   }
 
   try {

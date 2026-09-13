@@ -7,7 +7,8 @@
  * if the env vars are missing).
  *
  * Scopes:
- *   - calendar.events.readonly  (sync upcoming + past meetings)
+ *   - calendar.events           (sync upcoming + past meetings, write the kickoff event)
+ *   - calendar.freebusy         (kickoff slot picker hides busy times)
  *   - drive.readonly            (pull "Notes by Gemini" docs)
  *   - analytics.readonly        (GA4 Data API — for /content-studio ideation)
  *   - webmasters.readonly       (Search Console — query gaps + index coverage)
@@ -38,8 +39,15 @@ const GOOGLE_STATE_KEY = 'google_oauth_state'
 // Nonce lifetime: the user should complete consent well within 10 minutes.
 const GOOGLE_STATE_TTL_MS = 10 * 60 * 1000
 
+// calendar.events (not .readonly): the client kickoff booking in
+// app/api/portal/calls writes the event onto the studio calendar, and a
+// read-only grant makes that insert fail silently (found on production
+// 2026-09-13). calendar.freebusy lets the kickoff slot picker hide the
+// times the studio is already busy. Widening scopes means Liam reconnects
+// Google once from Settings; the status route reports the granted set.
 const SCOPES = [
-  'https://www.googleapis.com/auth/calendar.events.readonly',
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar.freebusy',
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/analytics.readonly',
   'https://www.googleapis.com/auth/webmasters.readonly',
