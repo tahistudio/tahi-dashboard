@@ -144,3 +144,8 @@ Read STATUS.md, TASKS.md and this file. `git log --oneline -15` for what landed.
 ## 00:50 to 03:05 NZ 2026-09-14: usage limit pause
 
 - The account usage limit hit at about 00:50 NZ with the design pass mid-flight (16 of 19 modules designed, 4 critiqued, 18 agent calls failed). It reset at about 03:00 NZ; the stale run was stopped and the workflow resumed from its journal (finished work cached, failed calls re-run): calculator-analytics, content-marketing and sales-artifacts designs, the remaining critiques, revisions, then the shell wiring. Follow-ups merged before the pause: kickoff slots MCP twin and the duplicate contract signature template retired (1ccc3b08, deployed green).
+
+## 06:20 NZ 2026-09-14: design pass compiled for Liam
+
+- All 19 modules designed and 18 critiqued; after one revision each, 14 modules stand at SHIP and 4 at FIX with a bounded list (portal-account, portal-files, portal-money, requests, tasks); calculator-analytics's critique hung for over 30 minutes and was stopped with the workflow. The shell wiring step never started (it sat behind the pipeline barrier), so it runs now as a standalone opus agent, with a standalone critic for calculator-analytics.
+- Review document: docs/superpowers/plans/2026-09-14-design-review-for-liam.md (compiled by scripts/design-review-compile.mjs from the workflow journal; every module has its preview link, files, page keys, what was left out, the critic's remaining issues and the open questions). Regenerated once the wiring and the last critique land.
