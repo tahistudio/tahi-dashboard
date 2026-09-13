@@ -165,6 +165,7 @@ describe('email preview samples', () => {
     const noGreeting = new Set([
       'announcement',
       'announcement-info',
+      'contract-partially-signed',
       'contract-signature',
       'new-request',
       'pre-call-digest',
@@ -189,6 +190,7 @@ describe('email preview samples', () => {
       const greets = ![
         'announcement',
         'announcement-info',
+        'contract-partially-signed',
         'contract-signature',
         'new-request',
         'pre-call-digest',

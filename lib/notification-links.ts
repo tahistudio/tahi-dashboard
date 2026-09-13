@@ -53,9 +53,13 @@ export type NotificationEventType =
   // outcomes a prospect can leave on a public link.
   | 'proposal_declined'
   | 'proposal_question'
-  // One signer of a multi-party e-sign contract has signed, others are still
-  // pending. Distinct from 'contract_signed' (every signer done). No route
-  // fires this yet; wired by the contract sign route in a later slice.
+  // A signer other than the last one signed a multi-party contract. Its own
+  // event, separate from 'contract_signed', because before this the studio
+  // heard nothing at all until the final signature: an in-flight signature on
+  // a two-or-more-signer contract produced no bell and no email, so a studio
+  // member could open a contract believing it untouched when one party had
+  // already signed. Carries entityType 'contract' like its sibling, so it
+  // deep-links and folds into the 'document' kind for free.
   | 'contract_partially_signed'
 
 export type NotificationEntityType =

@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { eq, ne, and } from 'drizzle-orm'
 import { requireContractAccess } from '@/app/api/admin/_sales-access/artifact-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -16,7 +16,7 @@ function mintToken(): string {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-// POST /api/admin/contracts/documents/[id]/send — mint share token + flip status.
+// POST /api/admin/contracts/documents/[id]/send, mint share token + flip status.
 //
 // Note: this does NOT trigger Resend emails. Email send is a separate
 // concern (operator can paste signer URLs from the response into their
@@ -69,7 +69,14 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   })
 }
 
-// DELETE — revoke (back to draft, clear token, cancel pending signers).
+// DELETE, revoke: back to draft, clear token, and actually undo every
+// signature rather than only resetting the document. Before this a revoke on
+// a partly-signed contract left the document reading 'draft' while its
+// signers still read 'signed' and its signatures still existed, chained
+// under a document the UI now called unsent. Every non-pending signer goes
+// back to pending, every signature this contract has is deleted, and the
+// discarded signature ids are written to auditLog FIRST: once the rows are
+// gone that log entry is the only forensic trail left of what got revoked.
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -77,12 +84,52 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
   const database = await db() as unknown as D1
   const denied = await requireContractAccess(database, { userId, orgId }, id)
   if (denied) return denied
+
+  const now = new Date().toISOString()
+
+  const discarded = await database
+    .select({ id: schema.contractSignatures.id, signerId: schema.contractSignatures.signerId })
+    .from(schema.contractSignatures)
+    .where(eq(schema.contractSignatures.contractId, id))
+
+  if (discarded.length > 0) {
+    await database.insert(schema.auditLog).values({
+      id: crypto.randomUUID(),
+      actorId: userId,
+      actorType: 'team_member',
+      action: 'contract_revoked_signatures_discarded',
+      entityType: 'contract',
+      entityId: id,
+      metadata: JSON.stringify({
+        discardedSignatureIds: discarded.map(d => d.id),
+        discardedSignerIds: discarded.map(d => d.signerId),
+      }),
+      ipAddress: null,
+      createdAt: now,
+    })
+  }
+
+  await database.delete(schema.contractSignatures).where(eq(schema.contractSignatures.contractId, id))
+
+  await database.update(schema.contractSigners).set({
+    status: 'pending',
+    signedAt: null,
+    signatureId: null,
+    updatedAt: now,
+  }).where(and(
+    eq(schema.contractSigners.contractId, id),
+    ne(schema.contractSigners.status, 'pending'),
+  ))
+
   await database.update(schema.contractDocuments).set({
     publicShareToken: null,
     publicSharedAt: null,
     status: 'draft',
     sentAt: null,
-    updatedAt: new Date().toISOString(),
+    signedAt: null,
+    finalHash: null,
+    updatedAt: now,
   }).where(eq(schema.contractDocuments.id, id))
+
   return NextResponse.json({ success: true })
 }

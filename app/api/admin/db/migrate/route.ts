@@ -2236,6 +2236,13 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE proposal_acceptances ADD COLUMN accepted_currency text`,
     ],
   },
+  {
+    name: '0099',
+    description: 'contract_signatures.body_hash: the tamper-evident anchor between a signature and the exact body it was taken against. The hash chain in app/api/public/contracts/[token]/sign/[signerId]/route.ts already proved signature N came after signature N-1 and that no signature record had since been altered, but proved nothing about contract_documents.body_html, which stayed a plain text column with no write-lock: a signed contract\'s body could be edited after every signer had signed it and the chain still verified clean. body_hash is sha256(body_html) computed at the moment of that signature and folded into its own chainHash as the new final input, so a body edit after signing makes the live body\'s hash stop matching every prior signature\'s stored body_hash (lib/contract-chain.ts#bodyMatchesSignedHash), and the admin PATCH route separately refuses a body or variableValues edit on anything past draft status. Nullable and forward-only: every signature taken before this column existed has no historic body snapshot to hash, so it reads as unverifiable rather than a false pass or a false tamper flag; already-signed contracts cannot retroactively gain the anchor. No index: read per-signature-row alongside a contract id lookup that is already indexed, never searched on directly. Additive and idempotent; the duplicate-column error is swallowed upstream so re-runs are safe. Apply BEFORE deploying the code that reads it, because Drizzle expands a bare select on contract_signatures into an explicit column list.',
+    statements: [
+      `ALTER TABLE contract_signatures ADD COLUMN body_hash text`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

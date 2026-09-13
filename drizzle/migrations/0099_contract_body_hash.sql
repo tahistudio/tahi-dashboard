@@ -1,0 +1,62 @@
+-- Migration 0099: contract_signatures.body_hash, the tamper-evident anchor
+-- between a signature and the exact body it was taken against.
+--
+-- Why this exists. The signature hash chain
+-- (app/api/public/contracts/[token]/sign/[signerId]/route.ts) already proves
+-- that signature N was taken after signature N-1 and that neither signature
+-- record has since been altered: chainHash = sha256(prevChainHash || signerId
+-- || signatureDataUrl || timestamp). It proves nothing about the CONTRACT
+-- BODY. contract_documents.body_html stays a plain text column with no
+-- write-lock, so before this migration a signed contract's body could be
+-- edited after every signer had already signed it, and the chain would still
+-- verify clean: "this is what you signed" had no anchor to check the words
+-- against.
+--
+-- body_hash is sha256(contract_documents.body_html) computed at the moment
+-- of THAT signature and folded into its own chainHash as the new final input:
+-- sha256(prevChainHash || signerId || signatureDataUrl || timestamp ||
+-- bodyHash). A body edit after signing therefore does two independent things
+-- an auditor can check: the live body's hash stops matching every prior
+-- signature's stored body_hash (lib/contract-chain.ts#bodyMatchesSignedHash),
+-- and the admin PATCH route now refuses a body or variableValues edit on
+-- anything past draft status in the first place
+-- (app/api/admin/contracts/[id]/route.ts), so the mismatch should never
+-- happen going forward and is a tamper signal on any row where it does.
+--
+-- NULLABLE ON PURPOSE, FORWARD-ONLY. Every signature taken before this column
+-- existed has body_hash = NULL: there is no historic snapshot of the body at
+-- that moment to hash, so backfilling a value would be inventing an anchor
+-- that never existed and asserting a stronger guarantee than the record
+-- actually has. bodyMatchesSignedHash treats NULL as "unverifiable", never as
+-- a silent pass and never as a false tamper flag. This is forward-only by
+-- design: already-signed contracts cannot retroactively gain the anchor.
+--
+-- No index: body_hash is read per-signature-row alongside a contract id
+-- lookup that is already indexed (idx_contract_signatures_contract), never
+-- searched on directly.
+--
+-- ALTER TABLE ADD COLUMN cannot use IF NOT EXISTS in SQLite; the runtime
+-- runner (app/api/admin/db/migrate) swallows the "duplicate column name"
+-- error so re-running this file, or re-running the runner's '0099' entry, is
+-- safe either way.
+--
+-- MERGE ORDER. Apply this to staging and then production D1 BEFORE the code
+-- that writes body_hash is deployed, same rule as every additive column in
+-- this tree: Drizzle expands a bare .select() on contract_signatures into an
+-- explicit column list, so the moment the new schema ships, any bare select
+-- on that table fails with "no such column: body_hash" against a database
+-- that has not been migrated yet. The column being additive and nullable
+-- means applying it AHEAD of the deploy is harmless to the code running
+-- today, which reads and writes contract_signatures but never names this
+-- column.
+--   1. wrangler d1 execute tahi-db-staging --remote --file=drizzle/migrations/0099_contract_body_hash.sql
+--   2. deploy, then smoke: sign a two-signer test contract on staging (both
+--      signers on tahi.studio addresses, the allowlist stays closed) and
+--      confirm both signatures carry a non-null body_hash
+--   3. wrangler d1 execute tahi-db --remote --file=drizzle/migrations/0099_contract_body_hash.sql
+--   4. approve the production deploy, then repeat the same smoke there
+--
+-- POST /api/admin/db/migrate {"name":"0099"} is the after-the-fact fallback,
+-- usable once the deploy that carries the entry in
+-- app/api/admin/db/migrate/route.ts is live.
+ALTER TABLE contract_signatures ADD COLUMN body_hash text;

@@ -61,12 +61,14 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   const now = new Date().toISOString()
   const updates: Record<string, unknown> = { updatedAt: now }
 
-  // Read current state so we can log link/unlink activity if dealId changes.
+  // Read current state so we can log link/unlink activity if dealId changes
+  // and refuse a body edit once the contract has left draft.
   const [current] = await database
     .select({
       orgId: schema.contractDocuments.orgId,
       dealId: schema.contractDocuments.dealId,
       name: schema.contractDocuments.name,
+      status: schema.contractDocuments.status,
     })
     .from(schema.contractDocuments)
     .where(eq(schema.contractDocuments.id, id))
@@ -74,6 +76,25 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
   const denied = await requireArtifactAccess(database, { userId, orgId }, current)
   if (denied) return denied
+
+  // Body lock: once a contract has been sent, its bodyHtml is what every
+  // signature's hash chain anchors to (lib/contract-chain.ts). Editing it
+  // after that point would silently invalidate what "this is what you
+  // signed" means for every signature already taken, so any change to the
+  // body or the values that produced it is refused outright rather than
+  // accepted and left undetectable. Revoke puts the contract back in draft
+  // (app/api/admin/contracts/[id]/send/route.ts DELETE) and clears every
+  // signature first, which is the supported way to edit it again.
+  if (
+    current &&
+    current.status !== 'draft' &&
+    (body.bodyHtml !== undefined || body.variableValues !== undefined)
+  ) {
+    return NextResponse.json(
+      { error: 'A sent contract cannot be edited. Revoke it first.' },
+      { status: 400 },
+    )
+  }
 
   // Re-linking has to land on a client the caller can also reach, so a scoped
   // member cannot move a contract into or out of an org outside their scope.

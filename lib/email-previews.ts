@@ -67,6 +67,7 @@ import { STUDIO_TIME_ZONE } from '@/lib/kickoff-slot'
 import AnnouncementEmail from '@/emails/announcement'
 import { ClientInviteEmail } from '@/emails/client-invite'
 import { ContractFullySignedEmail } from '@/emails/contract-fully-signed'
+import { ContractPartiallySignedEmail } from '@/emails/contract-partially-signed'
 import { ContractSignEmail } from '@/emails/contract-sign'
 import { InvoiceOverdueEmail } from '@/emails/invoice-overdue'
 import { InvoiceSentEmail } from '@/emails/invoice-sent'
@@ -108,6 +109,7 @@ export const EMAIL_PREVIEW_ENTRIES = [
   { key: 'client-invite', template: 'client-invite', liveSender: true },
   { key: 'contract-fully-signed', template: 'contract-fully-signed', liveSender: true },
   { key: 'contract-fully-signed-observer', template: 'contract-fully-signed', liveSender: true },
+  { key: 'contract-partially-signed', template: 'contract-partially-signed', liveSender: true },
   { key: 'contract-sign', template: 'contract-sign', liveSender: true },
   { key: 'contract-sign-tahi', template: 'contract-sign', liveSender: true },
   // Not yet called by any route: built here (S2, T3.3) for the contract sign
@@ -613,6 +615,27 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
         Contract: contractName,
         Signers: `${LIAM}, ${CLIENT_CONTACT}`,
         'PDF attached': 'copy only, the preview send carries no attachment by design',
+      },
+    },
+
+    // lib/contract-signature-notify.ts: `${signerName} signed ${contract.name}`.
+    // Studio-facing, sent on a mid-flight signature before the contract is
+    // fully executed; the final signature keeps the fully-signed template above.
+    'contract-partially-signed': {
+      subject: `${CLIENT_CONTACT} signed ${contractName}`,
+      react: createElement(ContractPartiallySignedEmail, {
+        contractName,
+        contractType: 'msa',
+        signerName: CLIENT_CONTACT,
+        signedCount: 1,
+        totalSigners: 2,
+        viewerUrl: publicUrl('/contracts/prv_c41d90ab7e26'),
+      }),
+      personalisation: {
+        Signer: CLIENT_CONTACT,
+        Contract: contractName,
+        Type: 'Master services agreement',
+        'Signed so far': '1 of 2',
       },
     },
 
