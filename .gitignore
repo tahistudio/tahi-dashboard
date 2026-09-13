@@ -64,6 +64,10 @@ playwright/.cache/
 # ShipStudio metadata
 .shipstudio/
 
+# Ad-hoc QA/design screenshot scratch dirs — never committed
+.qa-screens/
+.sa-shots/
+
 # design-sync (claude.ai/design) — build artifacts only.
 # Durable inputs ARE committed: design-sync.config.json, tsconfig.dssync.json,
 # .design-sync/{setup.mjs,compile-css.mjs,ds-entry.tsx,stubs/,docs/,groups/,previews/,overrides/,NOTES.md}
