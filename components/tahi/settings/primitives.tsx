@@ -148,15 +148,43 @@ export function useManaged<T extends Record<string, unknown>>(init: T[]): Manage
 export interface RowActionsProps {
   onEdit?: () => void
   onDelete?: () => void
+  /** Disables the edit button in place of omitting onEdit, so a native title
+   *  tooltip can explain why (e.g. read-only in a studio Client view preview)
+   *  rather than the control silently doing nothing. */
+  editDisabled?: boolean
+  deleteDisabled?: boolean
+  editTitle?: string
+  deleteTitle?: string
 }
 
-export function RowActions({ onEdit, onDelete }: RowActionsProps) {
+export function RowActions({
+  onEdit,
+  onDelete,
+  editDisabled,
+  deleteDisabled,
+  editTitle,
+  deleteTitle,
+}: RowActionsProps) {
   return (
     <div className="lrow-acts">
-      <button type="button" className="ta-icobtn sm" aria-label="Edit" onClick={onEdit}>
+      <button
+        type="button"
+        className="ta-icobtn sm"
+        aria-label="Edit"
+        title={editTitle}
+        onClick={onEdit}
+        disabled={editDisabled}
+      >
         <Pencil size={15} />
       </button>
-      <button type="button" className="ta-icobtn sm" aria-label="Delete" onClick={onDelete}>
+      <button
+        type="button"
+        className="ta-icobtn sm"
+        aria-label="Delete"
+        title={deleteTitle}
+        onClick={onDelete}
+        disabled={deleteDisabled}
+      >
         <Trash2 size={15} />
       </button>
     </div>

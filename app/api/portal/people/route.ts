@@ -1,6 +1,7 @@
 import { createElement } from 'react'
 import { getPortalAuth } from '@/lib/server-auth'
 import { isOrgAdmin, isPortalAdminContact } from '@/lib/portal-access'
+import { isClerkNotFoundError } from '@/lib/clerk-errors'
 import { clerkClient } from '@clerk/nextjs/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -27,7 +28,14 @@ export const dynamic = 'force-dynamic'
  *          last admin cannot be demoted.
  * DELETE - remove a teammate (client admin only). A pending invite has its
  *          live token expired and any Clerk invitation from before this change
- *          revoked; an active member loses their Clerk org membership.
+ *          revoked; an active member loses their Clerk org membership. Either
+ *          branch also expires any unused app invite token for that email, since
+ *          a contact can carry a clerkUserId (linked by verified email, see
+ *          lib/contact-link-server.ts) while never having accepted this org's
+ *          own invite. If Clerk already does not count the member as belonging
+ *          to this organisation (not-found from deleteOrganizationMembership,
+ *          lib/clerk-errors.ts isClerkNotFoundError), that counts as removed
+ *          rather than a failure; only a genuine Clerk error keeps the 502.
  *          You cannot remove yourself or the primary contact.
  *
  * Scope: getPortalAuth resolves the caller to their D1 org; queries filter by
@@ -341,6 +349,18 @@ export async function DELETE(req: NextRequest) {
   // Detach from Clerk FIRST so the roster never claims someone is gone while
   // they can still sign in. Pending invite: revoke it; active member: remove
   // the org membership.
+  //
+  // A contact can carry a clerkUserId while Clerk itself no longer counts
+  // them as a member of this organisation: lib/contact-link-server.ts and the
+  // Clerk webhook both link clerkUserId purely off a VERIFIED EMAIL MATCH, with
+  // no requirement that the person ever accepted this org's own invite flow
+  // (app/api/portal/accept-invite/route.ts, the only place that calls
+  // createOrganizationMembership). Someone who was invited, then signed up in
+  // Clerk by hand instead of following the invite link, ends up exactly there:
+  // linked, but never a member. deleteOrganizationMembership then fails with a
+  // not-found shape, and that failure means the state we wanted ("this person
+  // cannot use this org in Clerk") is already true, not that the removal
+  // failed. Only a genuine Clerk failure on a real membership keeps the 502.
   try {
     const clerk = await clerkClient()
     if (!target.clerkUserId) {
@@ -359,10 +379,16 @@ export async function DELETE(req: NextRequest) {
         })
       }
     } else {
-      await clerk.organizations.deleteOrganizationMembership({
-        organizationId: clerkOrgId,
-        userId: target.clerkUserId,
-      })
+      try {
+        await clerk.organizations.deleteOrganizationMembership({
+          organizationId: clerkOrgId,
+          userId: target.clerkUserId,
+        })
+      } catch (err) {
+        if (!isClerkNotFoundError(err)) throw err
+        // Already not a member. The removal this button promises is already
+        // true in Clerk, so continue rather than blocking the roster delete.
+      }
     }
   } catch (err) {
     return NextResponse.json(
@@ -371,24 +397,24 @@ export async function DELETE(req: NextRequest) {
     )
   }
 
-  // A pending seat carries a live app invite token (lib/onboarding-invites.ts).
-  // Expire it so a removed teammate's old email link cannot rejoin the
-  // workspace later. Best effort: the roster delete below is the record that
-  // matters, and a D1 hiccup here must not block it.
-  if (!target.clerkUserId) {
-    try {
-      const now = new Date().toISOString()
-      await drizzle
-        .update(schema.onboardingInvites)
-        .set({ expiresAt: now, updatedAt: now })
-        .where(and(
-          eq(schema.onboardingInvites.orgId, orgId),
-          eq(schema.onboardingInvites.contactEmail, target.email.toLowerCase()),
-          isNull(schema.onboardingInvites.usedAt),
-        ))
-    } catch {
-      // non-fatal
-    }
+  // A pending seat, OR a seat that was claimed by a verified-email link
+  // without ever going through our own accept-invite flow (the case above),
+  // can still carry a live app invite token (lib/onboarding-invites.ts).
+  // Expire it in EITHER case so a removed teammate's old email link cannot
+  // rejoin the workspace later. Best effort: the roster delete below is the
+  // record that matters, and a D1 hiccup here must not block it.
+  try {
+    const now = new Date().toISOString()
+    await drizzle
+      .update(schema.onboardingInvites)
+      .set({ expiresAt: now, updatedAt: now })
+      .where(and(
+        eq(schema.onboardingInvites.orgId, orgId),
+        eq(schema.onboardingInvites.contactEmail, target.email.toLowerCase()),
+        isNull(schema.onboardingInvites.usedAt),
+      ))
+  } catch {
+    // non-fatal
   }
 
   await drizzle

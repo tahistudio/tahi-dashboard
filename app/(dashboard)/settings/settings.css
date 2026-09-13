@@ -162,6 +162,8 @@
 .lrow-acts { display: flex; gap: 4px; }
 .ta-icobtn { width: 36px; height: 36px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg); color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background .14s, color .14s; }
 .ta-icobtn:hover { background: var(--bg-secondary); color: var(--text); }
+.ta-icobtn:disabled { opacity: .45; cursor: not-allowed; }
+.ta-icobtn:disabled:hover { background: var(--bg); color: var(--text-muted); }
 .ta-icobtn.sm { width: 30px; height: 30px; }
 .btn2.sm { height: 30px; padding: 0 11px; font-size: 12px; }
 .danger-card { border-color: rgba(192, 57, 46, .28); }

@@ -21,21 +21,7 @@
 
 import { clerkClient } from '@clerk/nextjs/server'
 import type { ClerkExistence, ClerkOrgDeleter, ClerkPresence } from '@/lib/org-lifecycle'
-
-/** True for the one Clerk error that means "there is nothing there". */
-function isNotFound(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false
-  const status = (error as { status?: unknown }).status
-  if (status === 404) return true
-  const errors = (error as { errors?: unknown }).errors
-  if (Array.isArray(errors)) {
-    return errors.some((entry) => {
-      const code = (entry as { code?: unknown })?.code
-      return code === 'resource_not_found' || code === 'organization_not_found'
-    })
-  }
-  return false
-}
+import { isClerkNotFoundError as isNotFound } from '@/lib/clerk-errors'
 
 /**
  * Does this id still name something in Clerk? Cached per instance, so one
