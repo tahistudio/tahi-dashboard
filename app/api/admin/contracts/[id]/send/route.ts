@@ -16,7 +16,7 @@ function mintToken(): string {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-// POST /api/admin/contracts/documents/[id]/send — mint share token + flip status.
+// POST /api/admin/contracts/documents/[id]/send, mint share token + flip status.
 //
 // Note: this does NOT trigger Resend emails. Email send is a separate
 // concern (operator can paste signer URLs from the response into their
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   })
 }
 
-// DELETE — revoke: back to draft, clear token, and actually undo every
+// DELETE, revoke: back to draft, clear token, and actually undo every
 // signature rather than only resetting the document. Before this a revoke on
 // a partly-signed contract left the document reading 'draft' while its
 // signers still read 'signed' and its signatures still existed, chained
