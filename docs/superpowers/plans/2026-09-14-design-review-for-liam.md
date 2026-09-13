@@ -2,6 +2,8 @@
 
 Every dashboard surface was designed in Claude Design from the requirement documents under docs/superpowers/design/requirements, by an opus designer, then screenshot-critiqued at 1440 and 375 in light and dark by a sonnet critic, then revised once where the critic said FIX or REDO. Nothing is ported. Tick a module once you have looked at it; mark it SHIP (port as is), FIX (list what to change) or REDO.
 
+Capture caveat: the app shell scrolls inside its own container, so the critics' full-page screenshots covered the first 900px of each page at 1440 and the first 812px at 375; anything below that was checked against the source, not the pixels. When you review, scroll each page.
+
 Project: https://claude.ai/design/p/57bf60cf-5e6d-450f-9e2f-e25c8d12fd66 (open a file with ?file=<name>; the app shell is "Tahi App Shell.html", audience and device through the Tweaks pill). Preview pages per module are listed below; open them the same way.
 
 ## Summary
@@ -9,7 +11,7 @@ Project: https://claude.ai/design/p/57bf60cf-5e6d-450f-9e2f-e25c8d12fd66 (open a
 | | Module | Pages | First verdict | Final verdict |
 |---|---|---|---|---|
 | [ ] | auth | 28 | FIX | SHIP |
-| [ ] | calculator-analytics | 24 | not critiqued | not critiqued |
+| [ ] | calculator-analytics | 24 | FIX | FIX (standalone critic, 07:00) |
 | [ ] | clients | 40 | FIX | SHIP |
 | [ ] | content-marketing | 59 | FIX | SHIP |
 | [ ] | finance | 18 | FIX | SHIP |
@@ -58,6 +60,13 @@ Project: https://claude.ai/design/p/57bf60cf-5e6d-450f-9e2f-e25c8d12fd66 (open a
   - Affiliates honesty in the interim. The design marks the page 'Connected, and not syncing' and keeps the totals blank rather than showing zeroes, on the reasoning that a zero is a claim. Confirm that framing is what you want a team member to see, rather than hiding the page from the nav until N6 lands.
   - Calculator recompute affordance. The code comment says it recomputes on blur; it actually debounces 400ms on every keystroke. The design assumes the debounce is the truth and shows a save state that moves on every change, plus a 'Recomputing, these are the last figures' line on the rail. Confirm the debounce stays, because a blur trigger would want a quieter header.
   - Not a design question, but it came out of this pass: /api/admin/deals is never run through lib/access-scoping.ts, so a team member scoped to specific clients who holds the deals and sales_analytics grants sees studio-wide pipeline value. Same class of leak the catalogue calls out for /reports. Worth a backlog line before anyone but you holds the sales_analytics grant.
+- Critic: FIX (standalone, 72 screenshots at 1440 light and dark and 375 phone, plus a source read)
+- Still open:
+  - calc, calc-computing, calc-oneoff, calc-deal, calc-org, calc-capacity, calc-error, calc-draft (FIX): at 375 the editable calculation title input clips the title mid-word with no ellipsis ("Giant Group, Webflow rebuil"); one CSS fix on the cal-head-in input.
+  - analytics-loading (FIX): the Pipeline snapshot and Next to close tile descriptions render final copy while the figure above is still a skeleton; gate the paragraph behind the loading flag.
+  - calculator.css (FIX): one dark-mode hex on the active project-shape pill (.cal-pill.on) should become a token.
+  - Unverified below the fold (see the capture caveat at the top): the capacity meter colours in dark, the CT.19 sections, the affiliates table rows at 375.
+  - SHIP as captured: calc-denied, calc-blocked, analytics, analytics-empty, analytics-denied, affiliates and its connect, rows, filtered, error, denied and codes states.
 
 ## clients
 
