@@ -51,6 +51,7 @@ import {
   type HomeDestination,
 } from '@/lib/client-home-signals'
 import { isOwedInvoice } from '@/lib/invoice-status'
+import { cadenceWord } from '@/lib/next-invoice-date'
 import type { OverviewCtx } from '@/components/tahi/overview/ctx'
 import { portalStatusMeta, portalStageFraction, type PortalChipTone } from '@/lib/portal-status'
 import { WaitingOnYou, type WaitingItem } from '@/components/tahi/portal/home/waiting-on-you'
@@ -157,7 +158,10 @@ interface SubscriptionResp {
     planType: string
     planLabel: string
     status: string
+    billingInterval: string
     nextInvoiceDate: string | null
+    /** 'stripe' | 'xero': which rail this client is actually billed on. */
+    invoiceChannel: string
     /** In `currency`, which is the negotiated currency for a custom rate. */
     monthlyRate: number
     currency: string
@@ -1277,6 +1281,16 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   }, [ro, go])
 
   const planLabel = subData?.subscription?.planLabel ?? null
+  // "TBC" used to be the only fallback here, which read as an operational gap
+  // even for a Xero-rail client whose retainer has no Stripe period to point
+  // at by design. The API now projects a real date from the cadence when it
+  // can (see lib/next-invoice-date.ts); only when it truly cannot does this
+  // name the rail rather than leaving the reader guessing.
+  const nextInvoiceLabel = subData?.subscription?.nextInvoiceDate
+    ? shortDate(subData.subscription.nextInvoiceDate)
+    : subData?.subscription?.invoiceChannel === 'xero'
+      ? `Invoiced ${cadenceWord(subData.subscription.billingInterval)} through Xero`
+      : 'TBC'
   const firstName = firstNameOf(ctx.userName)
   const [today, setToday] = useState('')
   useEffect(() => {
@@ -1646,7 +1660,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
             <div className="ov-subrows">
               <div className="ov-subrow">
                 <span>Next invoice</span>
-                <b>{subData?.subscription?.nextInvoiceDate ? shortDate(subData.subscription.nextInvoiceDate) : 'TBC'}</b>
+                <b>{nextInvoiceLabel}</b>
               </div>
               <div className="ov-subrow">
                 <span>Tracks</span>

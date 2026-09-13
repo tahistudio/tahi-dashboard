@@ -14,6 +14,8 @@ import {
 } from '@/lib/billing'
 import { getPlanLabel, resolveTracksConfig } from '@/lib/plan-utils'
 import { loadPlanCatalog } from '@/lib/plan-catalog'
+import { INVOICE_CHANNEL_SETTING_KEY, resolveInvoiceChannel } from '@/lib/invoice-channel'
+import { projectNextInvoiceDate } from '@/lib/next-invoice-date'
 
 // ── GET /api/portal/subscription ────────────────────────────────────────────
 // Returns the client's active subscription with billing tier details, plus
@@ -81,6 +83,7 @@ export async function GET(req: NextRequest) {
         tracksMode: string | null
         customSmallTracks: number | null
         customLargeTracks: number | null
+        invoiceChannel: string | null
       }
     | undefined
   try {
@@ -91,6 +94,7 @@ export async function GET(req: NextRequest) {
         tracksMode: schema.organisations.tracksMode,
         customSmallTracks: schema.organisations.customSmallTracks,
         customLargeTracks: schema.organisations.customLargeTracks,
+        invoiceChannel: schema.organisations.invoiceChannel,
       })
       .from(schema.organisations)
       .where(eq(schema.organisations.id, orgId))
@@ -98,6 +102,24 @@ export async function GET(req: NextRequest) {
   } catch {
     org = undefined
   }
+
+  // Which rail this client is actually billed on, so the "Next invoice"
+  // fallback can name it ("Invoiced monthly through Xero") instead of
+  // printing TBC when there is no currentPeriodEnd to show. Failure here
+  // (settings table missing) falls back to the hardcoded studio default, the
+  // same as every other reader of this setting.
+  let studioDefaultChannel: string | null = null
+  try {
+    const [row] = await drizzle
+      .select({ value: schema.settings.value })
+      .from(schema.settings)
+      .where(eq(schema.settings.key, INVOICE_CHANNEL_SETTING_KEY))
+      .limit(1)
+    studioDefaultChannel = row?.value ?? null
+  } catch {
+    studioDefaultChannel = null
+  }
+  const invoiceChannel = resolveInvoiceChannel(org?.invoiceChannel ?? null, studioDefaultChannel)
 
   let customMrr: number | null = null
   let customMrrCurrency: string | null = null
@@ -161,6 +183,15 @@ export async function GET(req: NextRequest) {
     ? trackRows.length
     : tracksConfig.smallTracks + tracksConfig.largeTracks
 
+  // The real date wins when Stripe (or an admin edit) has set it. Otherwise,
+  // a known period start plus a known cadence still projects an actual
+  // expected date rather than admitting nothing at all: a Xero-rail client
+  // whose retainer started 3 months ago on a monthly cadence has a next
+  // invoice date, it is just never written back to currentPeriodEnd. Only
+  // when neither is known does the caller fall back to naming the rail.
+  const nextInvoiceDate =
+    sub.currentPeriodEnd ?? projectNextInvoiceDate(sub.currentPeriodStart, interval)
+
   return NextResponse.json({
     // Active retainer -> TrackBoard / "Your plan". The overview home reads this
     // signal (present subscription => retainer) to branch the client home.
@@ -182,9 +213,17 @@ export async function GET(req: NextRequest) {
       // in `currency`, which is the negotiated currency when customRate is
       // true and NZD otherwise, so consumers must render it with
       // <Money native currency> rather than converting it as if it were NZD.
-      // nextInvoiceDate is the current period end, i.e. when the next retainer
-      // invoice falls due.
-      nextInvoiceDate: sub.currentPeriodEnd ?? null,
+      // nextInvoiceDate is the current period end when Stripe (or an admin)
+      // has set one, else a projection from currentPeriodStart + the billing
+      // cadence. Null only when neither is known, in which case the caller
+      // falls back to naming the rail (see invoiceChannel below) rather than
+      // printing an unexplained TBC.
+      nextInvoiceDate,
+      // 'stripe' | 'xero': which rail this client is actually billed on,
+      // resolved the same way app/api/admin/clients/[id]/route.ts does, so a
+      // client with no channel of its own inherits the studio default rather
+      // than the UI guessing one.
+      invoiceChannel,
       monthlyRate,
       currency,
       customRate,
