@@ -1650,6 +1650,11 @@ export const TOOLS: ToolDef[] = [
     month: prop('string', 'Month to invoice (YYYY-MM), defaults to previous month'),
     dryRun: prop('boolean', 'Preview only. Defaults to TRUE: pass false to actually raise the invoices and push them to Xero.'),
   }),
+  tool('stamp_time_invoiced', 'IC.8, the pre-cutover step for auto_generate_invoices: before the FIRST non-dry hourly Xero export over a historical period, mark hours that were already invoiced by hand (the old ManyRequests flow, or typed straight into Xero) as accounted for, so that export cannot bill them a second time. Plans, per organisation, every billable time entry on or before `before` (inclusive): entries that already carry a local invoice come back under `skipped` with reason already_invoiced and are never touched, entries an earlier run of this same tool already marked come back as already_stamped, and everything else is reported as a plan with total hours and a rate breakdown. Applying stamps `invoiced_at` to now on the eligible entries and writes one audit log row; `invoice_id` is deliberately left NULL, because there is no local invoice for hours billed outside this app. Never touches Xero and never raises an invoice. DEFAULTS TO A DRY RUN: pass dryRun false to actually stamp the rows. Calling it twice with the same before date stamps nothing new the second time.', {
+    orgId: prop('string', 'Limit to one client. Omit to plan across every client.'),
+    before: prop('string', 'Cutoff date, YYYY-MM-DD, inclusive. Required.'),
+    dryRun: prop('boolean', 'Preview only. Defaults to TRUE: pass false to actually stamp invoiced_at on the eligible entries.'),
+  }, ['before']),
   tool('match_xero_contacts', 'List Xero contacts with suggested dashboard client matches'),
   tool('import_stripe_invoices', 'Import all invoices from Stripe into dashboard'),
   tool('import_stripe_payments', 'Import one-off Stripe payments (charges without invoices) as paid records'),
@@ -2906,6 +2911,11 @@ async function executeTool(
       return json(await apiGet('/api/admin/integrations/xero/bank-summary', token))
     case 'auto_generate_invoices':
       return json(await apiWrite('/api/admin/billing/xero-export', token, 'POST', args as Record<string, unknown>))
+    case 'stamp_time_invoiced':
+      return json(await apiWrite('/api/admin/time/stamp-invoiced', token, 'POST', {
+        ...args,
+        dryRun: args.dryRun !== false,
+      }))
     case 'match_xero_contacts':
       return json(await apiGet('/api/admin/integrations/xero/match-contacts', token))
     case 'import_stripe_invoices':
