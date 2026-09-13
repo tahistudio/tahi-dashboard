@@ -143,7 +143,7 @@ export interface ContactRefColumn {
  * six columns somebody remembered. A static test re-derives the candidates
  * from db/schema.ts and fails when a new one appears unlisted.
  *
- * Four columns are DELIBERATELY absent, and each for a reason:
+ * Five columns are DELIBERATELY absent, and each for a reason:
  *
  *   audit_log.actor_id          The audit log is immutable by design. A merge
  *                               records what it did; it never rewrites what
@@ -157,6 +157,17 @@ export interface ContactRefColumn {
  *                               nothing on the row says which.
  *   announcements.target_ids    A JSON blob of org ids on a broadcast that has
  *                               already been sent. History, not a live link.
+ *   feedback_comments.user_id   Unlike every entry above the line, this DOES
+ *                               have a type sibling (user_type: admin |
+ *                               team_member | contact), but the value is
+ *                               always the caller's Clerk user id
+ *                               (app/api/feedback/route.ts resolves identity
+ *                               from getRequestAuth / getPortalAuth and writes
+ *                               auth.userId regardless of userType), never a
+ *                               contacts.id. Re-pointing it on a contact merge
+ *                               would corrupt a different identity space, the
+ *                               same reason message_reactions.user_id is
+ *                               excluded above.
  */
 export const CONTACT_REFERENCE_COLUMNS: readonly ContactRefColumn[] = [
   { schemaKey: 'requests', table: 'requests', column: 'submittedById', sqlColumn: 'submitted_by_id', typeColumn: 'submittedByType', typeValue: 'contact' },

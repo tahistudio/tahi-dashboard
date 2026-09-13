@@ -3761,3 +3761,51 @@ export const sitemapNodeReviews = sqliteTable('sitemap_node_reviews', {
   reviewerIdx: index('idx_sitemap_node_reviews_reviewer').on(table.reviewerKey),
 }))
 
+// ============================================================
+// FEEDBACK COMMENTS (beta feedback floating comment ball)
+// ============================================================
+// Liam's stripped-back beta feedback tool: a draggable floating ball with a
+// comment icon that opens a free-text panel from any screen, for the Tahi
+// team and clients alike. No inbox UI yet: rows are written by
+// POST /api/feedback and read back only through GET /api/admin/feedback
+// (admin only) and the MCP tool list_feedback_comments.
+//
+// orgId is nullable on purpose: a Tahi team member or admin has no single
+// client the comment is about, so their rows carry NULL; a client contact's
+// row carries the D1 organisations.id resolved server-side from their
+// session, never from the request body (see app/api/feedback/route.ts).
+// userType records which identity wrote it: 'admin' | 'team_member' for a
+// Tahi org caller (decided by that person's team_members.role), 'contact'
+// for a client.
+//
+// context is a JSON blob gathered client-side at send time
+// (lib/feedback-context.ts): the last 20 console errors/warnings, the last
+// 20 failed fetches (method, url, status), the visible headings on the page,
+// and the impersonation state (Client view) when relevant. Everything else
+// (route, pageTitle, viewport, breakpoint, theme, userAgent) is its own
+// column so the admin GET can filter on them without parsing JSON.
+export const feedbackComments = sqliteTable('feedback_comments', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  orgId: text('org_id'),
+  userId: text('user_id').notNull(),
+  // 'contact' | 'team_member' | 'admin'
+  userType: text('user_type').notNull(),
+  userEmail: text('user_email'),
+  route: text('route'),
+  pageTitle: text('page_title'),
+  viewportWidth: integer('viewport_width'),
+  viewportHeight: integer('viewport_height'),
+  // 'phone' | 'tablet' | 'desktop'
+  breakpoint: text('breakpoint'),
+  // 'light' | 'dark'
+  theme: text('theme'),
+  userAgent: text('user_agent'),
+  body: text('body').notNull(),
+  // JSON: { consoleErrors, failedFetches, headings, impersonation }
+  context: text('context'),
+  createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  index('idx_feedback_comments_org').on(table.orgId),
+  index('idx_feedback_comments_created').on(table.createdAt),
+])
+

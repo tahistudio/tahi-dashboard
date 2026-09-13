@@ -13,6 +13,7 @@ import { ToastProvider } from '@/components/tahi/toast'
 import { KeyboardShortcuts } from '@/components/tahi/keyboard-shortcuts'
 import { SidebarProvider } from '@/components/tahi/sidebar-context'
 import { SkipToContent } from '@/components/tahi/skip-to-content'
+import { FeedbackBall } from '@/components/tahi/feedback-ball'
 // Two imports on purpose, and they must stay apart. This file is a SERVER
 // component: a component may cross the client boundary, a plain function may
 // not. Next replaces every export of a 'use client' module with a stub that
@@ -360,6 +361,7 @@ export default async function DashboardLayout({
           <MobileBottomNav isAdmin={isAdmin} features={perms.features} clientPortalRole={clientPortalRole} />
           <ProductTour isAdmin={isAdmin} />
           <KeyboardShortcuts />
+          <FeedbackBall />
         </div>
       </SidebarProvider>
       </PrivateModeProvider>

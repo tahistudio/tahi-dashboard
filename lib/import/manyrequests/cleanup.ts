@@ -179,6 +179,13 @@ export const ORG_SCOPED_TABLES: readonly OrgScopedTable[] = [
   // tree: a dummy org's suppressions name dummy addresses, and the dry run
   // still lists the table before anyone confirms a hard delete.
   { schemaKey: 'emailSuppressions', table: 'email_suppressions', policy: 'delete' },
+  // Beta feedback ball rows (migration 0100). 'delete', not 'refuse': a
+  // client's own comment about their portal has no independent value once
+  // that client is gone, matching email_suppressions above. A Tahi team/admin
+  // comment always carries org_id NULL (there is no client it is about), so it
+  // never counts against any organisation and is never in scope here either
+  // way.
+  { schemaKey: 'feedbackComments', table: 'feedback_comments', policy: 'delete' },
 ]
 
 interface OrgTableHandle {
