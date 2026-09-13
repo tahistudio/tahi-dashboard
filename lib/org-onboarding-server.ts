@@ -85,10 +85,48 @@ export async function resolveAndStampOrgOnboarding(
       hasProjectEngagement = false
     }
 
+    // A request authored by one of the org's OWN contacts (submitted through
+    // the portal). `submittedByType = 'contact'` is not enough on its own: a
+    // studio-created request can carry that value by column DEFAULT while
+    // submittedById is actually the STUDIO caller's Clerk id (see
+    // app/api/admin/requests/route.ts, which never sets submittedByType and
+    // stamps submittedById with the admin's own userId). So the id is proven
+    // against the org's own contacts table before it counts as a portal
+    // submission; a Clerk user id will never coincide with a contacts.id
+    // (a separate crypto.randomUUID() space).
+    let hasPortalContactRequest = false
+    try {
+      const rows = await database
+        .select({ submittedById: schema.requests.submittedById })
+        .from(schema.requests)
+        .where(and(
+          eq(schema.requests.orgId, org.id),
+          eq(schema.requests.submittedByType, 'contact'),
+        ))
+        .limit(200)
+      const candidateIds = [...new Set(
+        rows.map(r => r.submittedById).filter((v): v is string => !!v),
+      )]
+      if (candidateIds.length > 0) {
+        const [contact] = await database
+          .select({ id: schema.contacts.id })
+          .from(schema.contacts)
+          .where(and(
+            eq(schema.contacts.orgId, org.id),
+            inArray(schema.contacts.id, candidateIds),
+          ))
+          .limit(1)
+        hasPortalContactRequest = !!contact
+      }
+    } catch {
+      hasPortalContactRequest = false
+    }
+
     const onboarded = isOrgOnboarded({
       onboardingState: parseOnboardingState(org.onboardingState),
       hasLiveSubscription,
       hasProjectEngagement,
+      hasPortalContactRequest,
     })
     if (!onboarded) return false
 

@@ -13,6 +13,7 @@ import {
   stampOrgOnboarded,
   ORG_ONBOARDED_KEY,
   LIVE_SUBSCRIPTION_STATUSES,
+  CLIENT_HOME_CHECKLIST_KEYS,
   type OrgOnboardingSignals,
 } from '@/lib/org-onboarding'
 
@@ -20,6 +21,21 @@ const blank: OrgOnboardingSignals = {
   onboardingState: {},
   hasLiveSubscription: false,
   hasProjectEngagement: false,
+  hasPortalContactRequest: false,
+}
+
+/**
+ * Company Inc: Liam's dummy org, the exact shape that slipped through the
+ * first three clauses. Custom plan (no subscriptions row), no projects row,
+ * and its first contact finished the wizard before ORG_ONBOARDED_KEY existed
+ * - so hasLiveSubscription, hasProjectEngagement and the stamp are all false
+ * for a client everyone agrees is long since onboarded.
+ */
+const companyIncBlank: OrgOnboardingSignals = {
+  onboardingState: {},
+  hasLiveSubscription: false,
+  hasProjectEngagement: false,
+  hasPortalContactRequest: false,
 }
 
 describe('isOrgOnboarded', () => {
@@ -50,14 +66,66 @@ describe('isOrgOnboarded', () => {
     expect(isOrgOnboarded({ ...blank, hasProjectEngagement: true })).toBe(true)
   })
 
-  it('is false when neither the stamp nor any engagement is present', () => {
+  it('is true for an org with a request authored by one of its own contacts', () => {
+    expect(isOrgOnboarded({ ...blank, hasPortalContactRequest: true })).toBe(true)
+  })
+
+  it('is false when nothing at all is present, checklist included', () => {
     expect(
       isOrgOnboarded({
-        onboardingState: { welcomeVideoWatched: true },
+        onboardingState: {},
         hasLiveSubscription: false,
         hasProjectEngagement: false,
+        hasPortalContactRequest: false,
       }),
     ).toBe(false)
+  })
+
+  describe('Company Inc: custom plan, no subscription, no project row, checklist keys present', () => {
+    it('is true once the checklist has ANY key at all, even a single false one', () => {
+      // The client toggled "watch the welcome video" off again, or the PATCH
+      // route simply recorded false the first time. Presence is the signal,
+      // not the boolean value: only a contact who already reached the
+      // post-onboarding client home could have written this key at all.
+      expect(
+        isOrgOnboarded({ ...companyIncBlank, onboardingState: { welcomeVideoWatched: false } }),
+      ).toBe(true)
+    })
+
+    it('is true for each individual checklist key on its own', () => {
+      for (const key of CLIENT_HOME_CHECKLIST_KEYS) {
+        expect(
+          isOrgOnboarded({ ...companyIncBlank, onboardingState: { [key]: true } }),
+          `expected key "${key}" alone to mark the org onboarded`,
+        ).toBe(true)
+      }
+    })
+
+    it('is true for the realistic Company Inc blob: some steps done, none of the newer signals set', () => {
+      expect(
+        isOrgOnboarded({
+          ...companyIncBlank,
+          onboardingState: {
+            welcomeVideoWatched: true,
+            brandAssetsUploaded: true,
+            firstRequestSubmitted: false,
+            billingSetUp: false,
+          },
+        }),
+      ).toBe(true)
+    })
+
+    it('is true purely from a portal-submitted request, with an entirely empty checklist blob', () => {
+      expect(
+        isOrgOnboarded({ ...companyIncBlank, hasPortalContactRequest: true }),
+      ).toBe(true)
+    })
+
+    it('is still false for Company Inc\'s shape with no checklist activity and no portal request either', () => {
+      // The negative control: none of the four signals hold, which is the
+      // genuinely-new-org case this function must still refuse.
+      expect(isOrgOnboarded(companyIncBlank)).toBe(false)
+    })
   })
 })
 
