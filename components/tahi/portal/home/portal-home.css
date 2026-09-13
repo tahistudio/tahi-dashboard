@@ -300,39 +300,30 @@
   color: #ffffff;
 }
 
-/* ---------- the calm empty card (light, token-driven) ---------- */
+/* ---------- the empty body, on the SAME dark tile (no light card) ----------
+   This used to be a separate calm LIGHT card with its own leaf badge, so the
+   one surface meant to stay fixed-dark in both themes went pale the moment a
+   client had nothing waiting: the header band of the home flipped light on
+   an empty account. It is the .pfh-tile shell now (same clip, same "Waiting
+   on you" heading, same read-only footer), just with this body swapped in
+   for the row list, so nothing here needs its own colour handling: it sits
+   on the fixed forest gradient exactly like the rows do. */
 
-.pfh-quiet {
-  padding: 1.375rem 1.5rem;
-  background: var(--bg);
-  border: 0.0625rem solid var(--border);
-  border-radius: 0.875rem;
-  box-shadow: var(--shadow);
-  display: flex;
-  align-items: flex-start;
-  gap: 0.875rem;
+.pfh-quiet-body {
+  position: relative;
+  z-index: 1;
+  margin-top: 0.875rem;
 }
-.pfh-quiet-leaf {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 0 0.625rem 0 0.625rem;
-  background: var(--brand-100);
-  color: var(--brand-strong);
-}
-.pfh-quiet-t { flex: 1; min-width: 0; }
-.pfh-quiet-t b {
+.pfh-quiet-body b {
   display: block;
   font: 700 0.9375rem 'Manrope', sans-serif;
-  color: var(--text);
+  color: #ffffff;
 }
-.pfh-quiet-t p {
-  margin: 0.25rem 0 0;
+.pfh-quiet-body p {
+  margin: 0.3125rem 0 0;
+  max-width: 34rem;
   font: 500 0.8125rem/1.5 'Manrope', sans-serif;
-  color: var(--text-muted);
+  color: rgba(238, 246, 233, 0.86);
   text-wrap: pretty;
 }
 /* A plain text link, not a button: the masthead already carries the one
@@ -347,14 +338,14 @@
   border: none;
   background: none;
   font: 600 0.8125rem 'Manrope', sans-serif;
-  color: var(--brand-strong);
+  color: #ffffff;
   text-decoration: underline;
   text-underline-offset: 0.1875rem;
   cursor: pointer;
-  transition: color 0.15s;
+  transition: opacity 0.15s;
 }
-.pfh-quiet-link:hover:not(:disabled) { color: var(--brand); }
-.pfh-quiet-link:focus-visible { outline: 0.125rem solid var(--brand); outline-offset: 0.125rem; border-radius: 0.25rem; }
+.pfh-quiet-link:hover:not(:disabled) { opacity: 0.8; }
+.pfh-quiet-link:focus-visible { outline: 0.125rem solid #ffffff; outline-offset: 0.125rem; border-radius: 0.25rem; }
 .pfh-quiet-link:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ---------- a read that failed ----------
@@ -508,7 +499,6 @@
   .pfh-acts .pfh-btn { flex: 1; height: 2.75rem; }
   .pfh-more { min-height: 2.75rem; }
   .pfh-open { min-height: 2.75rem; }
-  .pfh-quiet { flex-direction: column; }
   .pfh-quiet-link { min-height: 2.75rem; }
   .pfh-err-cta { min-height: 2.75rem; }
 }

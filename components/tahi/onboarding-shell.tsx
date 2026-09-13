@@ -22,6 +22,7 @@
  */
 
 import * as React from 'react'
+import { useClerk } from '@clerk/nextjs'
 import { cn } from '@/lib/utils'
 import { TahiStudioWordmark, LeafIcon } from '@/components/tahi/tahi-glyphs'
 
@@ -192,9 +193,37 @@ function NeonLeaf() {
   return <canvas className="ta-neon" ref={ref} aria-hidden="true" />
 }
 
+// ── the quiet way out ───────────────────────────────────────────────────
+/**
+ * "return to sign in", reached via an invite meant for someone else, or
+ * signed into the wrong account. Every onboarding surface used to be a one
+ * way door: no menu, no sign-out, nothing but the stepped form, so a visitor
+ * in that spot had to close the tab and hope. Lives here, once, inside
+ * <SceneShell>, which every step of both onboarding flows and the team
+ * welcome flow already renders unchanged, so it appears on every step, the
+ * chooser and the enquiry sub-screens without any of those call sites
+ * needing their own copy of it.
+ *
+ * Clerk owns the sign-out; this only points it at /sign-in afterwards.
+ */
+function ReturnToSignIn() {
+  const { signOut } = useClerk()
+  return (
+    <button
+      type="button"
+      className="ta-signout"
+      onClick={() => { void signOut({ redirectUrl: '/sign-in' }) }}
+    >
+      Not you, or wrong account? <span>Sign out and return to sign in</span>
+    </button>
+  )
+}
+
 // ── left panel ─────────────────────────────────────────────────────────
 /** Decorative forest scene shell: neon leaf, grain, bloom, wordmark, then
- *  whatever scene content the flow passes (pill, headline, ledger, buddy). */
+ *  whatever scene content the flow passes (pill, headline, ledger, buddy),
+ *  then the quiet way out, which every scene carries regardless of what the
+ *  flow above it passed in. */
 export function SceneShell({ children }: { children: React.ReactNode }) {
   return (
     <aside className="tahi-auth-scene">
@@ -206,7 +235,7 @@ export function SceneShell({ children }: { children: React.ReactNode }) {
           <TahiStudioWordmark height={28} title="Tahi Studio" />
         </div>
         <div>{children}</div>
-        <div />
+        <ReturnToSignIn />
       </div>
     </aside>
   )
@@ -401,6 +430,13 @@ export const ONBOARDING_CSS = `
 .ta-pill{ display:inline-flex; align-self:flex-start; width:fit-content; align-items:center; gap:8px; height:28px; padding:0 12px; border-radius:0 .625rem 0 .625rem; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); font-size:13px; font-weight:600; color:#DCE8D9; }
 .ta-pill-leaf{ display:inline-flex; color:#7aab6b; }
 .ta-headline{ margin:22px 0 0; font-size:27px; line-height:1.08; font-weight:700; letter-spacing:-0.025em; color:#FDFDFC; max-width:22ch; text-wrap:balance; }
+
+/* ---- the quiet way out (every scene, every step) ---- */
+.ta-signout{ display:flex; align-items:center; flex-wrap:wrap; column-gap:0.25rem; width:fit-content; min-height:2.75rem; margin:0; padding:0.5rem 0.125rem; border:none; background:none; text-align:left; font:500 0.8125rem 'Manrope',sans-serif; color:rgba(253,253,252,0.45); cursor:pointer; transition:color .15s; }
+.ta-signout span{ color:rgba(253,253,252,0.72); text-decoration:underline; text-underline-offset:0.1875rem; transition:color .15s; }
+.ta-signout:hover{ color:rgba(253,253,252,0.65); }
+.ta-signout:hover span{ color:#FDFDFC; }
+.ta-signout:focus-visible{ outline:0.125rem solid #7aab6b; outline-offset:0.1875rem; border-radius:0.25rem; }
 
 /* ---- scene ledger ---- */
 .ob-ledger{ list-style:none; margin:30px 0 0; padding:0; display:flex; flex-direction:column; }
