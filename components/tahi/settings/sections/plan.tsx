@@ -14,8 +14,15 @@
  *     entry; a human confirms before anything is billed.
  *
  * Only a workspace admin (isClientAdmin) may request changes or manage
- * billing; members get a read-only view. Admin Client-view is read-only
- * server-side (impersonating -> 403).
+ * billing. A member seat is not given a read-only view of the real numbers:
+ * GET /api/portal/subscription withholds the plan name, rate, add-ons and
+ * invoice channel server-side for a member (the `seat` field says so), and
+ * this section shows the same honest "ask your admin" card /invoices and
+ * /billing already show for the same seat, rather than the load-failure
+ * message a plain 403 used to produce here. Admin Client-view reads as an
+ * admin (see app/api/portal/subscription/route.ts); every write route it
+ * touches (change-request, billing/session) is still read-only server-side
+ * (impersonating -> 403).
  */
 
 import { useState } from 'react'
@@ -25,6 +32,7 @@ import { SectionShell, Chip } from '@/components/tahi/settings/primitives'
 import { Money } from '@/components/tahi/money'
 import { useResource } from '@/lib/use-resource'
 import { apiPath } from '@/lib/api'
+import { portalAdminLabel, type PortalPersonSummary } from '@/lib/portal-admin-label'
 
 interface SubscriptionData {
   id: string
@@ -74,6 +82,10 @@ interface SubscriptionResponse {
   subscription: SubscriptionData | null
   billing?: BillingData
   plans?: CatalogPlan[]
+  /** 'member' means the server withheld every field above on purpose (see
+   *  app/api/portal/subscription/route.ts); absent (an older deploy) reads as
+   *  'admin', matching a subscription payload that is trustworthy on its own. */
+  seat?: 'admin' | 'member'
 }
 
 function formatDate(iso: string | null): string {
@@ -97,6 +109,15 @@ export function PlanBillingSection({ isClientAdmin }: { isClientAdmin?: boolean 
   const { data, error, isLoading } = useResource<SubscriptionResponse>('/api/portal/subscription')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
+
+  // The server's own verdict, not a re-derivation of it: a member seat always
+  // gets `subscription: null` back (see the route), and this is why. Naming
+  // the real org admin, so "ask your admin" is a person, not a shrug.
+  const isMemberSeat = data?.seat === 'member'
+  const { data: peopleData } = useResource<{ items?: PortalPersonSummary[] }>(
+    isMemberSeat ? '/api/portal/people' : null,
+  )
+  const adminLabel = portalAdminLabel(peopleData?.items)
 
   const sub = data?.subscription ?? null
   const billing = data?.billing ?? null
@@ -215,6 +236,18 @@ export function PlanBillingSection({ isClientAdmin }: { isClientAdmin?: boolean 
                 We could not load your plan right now. Please refresh, or contact your studio contact if this keeps
                 happening.
               </small>
+            </div>
+          </div>
+        </div>
+      ) : isMemberSeat ? (
+        // A rule, not a failure: withheld server-side, same as /invoices and
+        // /billing for this seat. Never the generic load-failure copy above,
+        // which used to be what a plain member 403 produced here.
+        <div className="set-card">
+          <div className="set-row">
+            <div className="sr-t">
+              <b>Billing</b>
+              <small>Your account admin looks after billing. Ask {adminLabel} if you need anything.</small>
             </div>
           </div>
         </div>
@@ -362,7 +395,7 @@ export function PlanBillingSection({ isClientAdmin }: { isClientAdmin?: boolean 
 
       {note && <div className="plan-note" role="status">{note}</div>}
 
-      {!isLoading && !error && plans.length > 0 && (
+      {!isLoading && !error && !isMemberSeat && plans.length > 0 && (
         <>
           <div className="set-sub-label">{sub ? 'Change plan' : 'Plans we offer'}</div>
           <div className="plan-grid">
