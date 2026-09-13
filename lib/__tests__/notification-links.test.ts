@@ -70,3 +70,34 @@ describe('request_assigned', () => {
     expect(notificationHref('request', 'req_9', 'team')).toBe('/requests/req_9')
   })
 })
+
+describe('proposal_declined and proposal_question (S2, T3.3)', () => {
+  /**
+   * Both are siblings of the existing 'proposal_signed': a shared proposal's
+   * own decision, told to the studio. Neither needs a notificationHref case
+   * of its own because they carry entityType 'proposal', which already has
+   * one (the case above resolves accept/decline/question alike).
+   */
+  it('resolve through the existing proposal case for both audiences', () => {
+    expect(notificationHref('proposal', 'prop_1', 'team')).toBe('/proposals/prop_1')
+    // No client-facing proposal page exists; a client's bell just marks the
+    // row read rather than bouncing them somewhere that would 403.
+    expect(notificationHref('proposal', 'prop_1', 'client')).toBeNull()
+  })
+})
+
+describe('contract_partially_signed (S2, T3.3)', () => {
+  /**
+   * One signer of a multi-party e-sign contract has signed, others are still
+   * pending. No route fires this yet (a later slice wires the contract sign
+   * route to it); this pins that its entityType stays 'contract', so the day
+   * it is wired it deep-links exactly where 'contract_signed' already does.
+   */
+  it('resolves through the existing contract case for the studio', () => {
+    expect(notificationHref('contract', 'con_1', 'team')).toBe('/contracts/con_1')
+  })
+
+  it('is not a client-facing surface', () => {
+    expect(notificationHref('contract', 'con_1', 'client')).toBeNull()
+  })
+})

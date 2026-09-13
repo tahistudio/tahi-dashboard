@@ -2226,6 +2226,16 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_services_org ON services(org_id)`,
     ],
   },
+  {
+    name: '0098',
+    description: 'proposal_acceptances gains accepted_variant_name, accepted_one_off_amount, accepted_monthly_amount and accepted_currency, copied from the published snapshot at the moment of accept rather than the live proposal_variants row. POST /api/public/proposals/[token]/accept used to validate a variantId against the live table and store only the id, so if the admin edited a variant\'s price after sharing (the Phase 9 draft/publish model means the public viewer reads publishedSnapshot, not the live tables), a client could accept the number they actually saw while the acceptance record ended up pointing at whatever the variant reads as today. These four columns freeze what was shown and agreed at accept time, immune to every edit that comes after. All four are nullable and additive: every existing row keeps them NULL, and a decline or a question never populates them because there is no accepted variant to freeze. Additive and idempotent; the duplicate-column error is swallowed upstream so re-runs are safe.',
+    statements: [
+      `ALTER TABLE proposal_acceptances ADD COLUMN accepted_variant_name text`,
+      `ALTER TABLE proposal_acceptances ADD COLUMN accepted_one_off_amount real`,
+      `ALTER TABLE proposal_acceptances ADD COLUMN accepted_monthly_amount real`,
+      `ALTER TABLE proposal_acceptances ADD COLUMN accepted_currency text`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

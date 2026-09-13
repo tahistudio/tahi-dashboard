@@ -105,8 +105,10 @@ describe('email preview registry', () => {
     const dark = previews.filter((p) => !p.liveSender).map((p) => p.key)
     // Both invoice-overdue variants: the chaser that would send them does not
     // exist yet, so neither the pay-link nor the bank-transfer layout has ever
-    // reached a client.
-    expect(dark).toEqual(['invoice-overdue', 'invoice-overdue-bank', 'review-request'])
+    // reached a client. contract-signature is built for the contract sign
+    // route to call once a signer signs while others are still pending (S2,
+    // T3.3), but nothing calls it yet.
+    expect(dark).toEqual(['contract-signature', 'invoice-overdue', 'invoice-overdue-bank', 'review-request'])
   })
 
   it('summarises to { key, template, liveSender, subject } without the element', () => {
@@ -163,9 +165,13 @@ describe('email preview samples', () => {
     const noGreeting = new Set([
       'announcement',
       'announcement-info',
+      'contract-signature',
       'new-request',
       'pre-call-digest',
       'project-enquiry',
+      'proposal-decision-accepted',
+      'proposal-decision-declined',
+      'proposal-decision-question',
     ])
     for (const preview of previews) {
       if (noGreeting.has(preview.key)) continue
@@ -180,9 +186,17 @@ describe('email preview samples', () => {
     for (const preview of previews) {
       const html = await render(preview.react)
       const hits = html.split(FIRST_NAME).length - 1
-      const greets = !['announcement', 'announcement-info', 'new-request', 'pre-call-digest', 'project-enquiry'].includes(
-        preview.key,
-      )
+      const greets = ![
+        'announcement',
+        'announcement-info',
+        'contract-signature',
+        'new-request',
+        'pre-call-digest',
+        'project-enquiry',
+        'proposal-decision-accepted',
+        'proposal-decision-declined',
+        'proposal-decision-question',
+      ].includes(preview.key)
       expect(hits > 0, `${preview.key}`).toBe(greets)
     }
   })

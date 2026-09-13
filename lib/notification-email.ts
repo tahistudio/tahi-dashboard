@@ -55,6 +55,8 @@ import RequestDeliveredEmail from '@/emails/request-delivered'
 import RequestClientReviewEmail from '@/emails/request-client-review'
 import NewMessageEmail from '@/emails/new-message'
 import NewChannelMessageEmail from '@/emails/new-channel-message'
+import ProposalDecisionEmail from '@/emails/proposal-decision'
+import ContractSignatureEmail from '@/emails/contract-signature'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -97,6 +99,8 @@ export const EMAIL_TEMPLATE_THREAD_REPLY = 'request-thread-reply'
 export const EMAIL_TEMPLATE_CHANNEL_MESSAGE = 'org-channel-message'
 export const EMAIL_TEMPLATE_REQUEST_STATUS = 'request-status-client'
 export const EMAIL_TEMPLATE_STUDIO_NEW_REQUEST = 'studio-new-request'
+export const EMAIL_TEMPLATE_PROPOSAL_DECISION = 'proposal-decision'
+export const EMAIL_TEMPLATE_CONTRACT_SIGNATURE = 'contract-signature'
 
 /**
  * One event, rendered per recipient. The subject is shared (it names the
@@ -794,6 +798,83 @@ export function studioNewRequestEmailPlan(input: {
         dashboardUrl: appOrigin(),
         requestId: input.requestId,
         requestNumber: input.requestNumber,
+      }),
+  }
+}
+
+/**
+ * (4) A prospect acted on a shared proposal link: accepted, declined, or left
+ * a question instead. Studio audience, same as (3): the proposal viewer
+ * promises a reply within one business day, and this is the only signal that
+ * tells the studio the clock has started.
+ */
+export function studioProposalDecisionEmailPlan(input: {
+  decision: 'accepted' | 'declined' | 'question'
+  proposalId: string
+  proposalTitle: string
+  /** The client the proposal belongs to, for the delivery gate. */
+  orgId: string | null
+  clientName: string
+  /** The variant they accepted, when the decision is 'accepted'. */
+  variantName?: string | null
+  /** The prospect's own words, present on a question and optional elsewhere. */
+  comment?: string | null
+  acceptorName?: string | null
+}): NotificationEmailPlan {
+  const subject =
+    input.decision === 'accepted'
+      ? `${input.clientName} accepted "${input.proposalTitle}"`
+      : input.decision === 'declined'
+        ? `${input.clientName} declined "${input.proposalTitle}"`
+        : `${input.clientName} has a question on "${input.proposalTitle}"`
+  return {
+    subject,
+    template: EMAIL_TEMPLATE_PROPOSAL_DECISION,
+    orgId: input.orgId,
+    render: () =>
+      createElement(ProposalDecisionEmail, {
+        decision: input.decision,
+        proposalId: input.proposalId,
+        proposalTitle: input.proposalTitle,
+        clientName: input.clientName,
+        dashboardUrl: appOrigin(),
+        variantName: input.variantName ?? undefined,
+        comment: input.comment ?? undefined,
+        acceptorName: input.acceptorName ?? undefined,
+      }),
+  }
+}
+
+/**
+ * (5) One signer of a multi-party e-sign contract has signed while others are
+ * still pending. Studio audience. Built here, alongside (4), so this slice and
+ * the one that wires the contract sign route to it never both edit this file;
+ * not yet called by any route.
+ */
+export function studioContractSignatureEmailPlan(input: {
+  contractId: string
+  contractName: string
+  /** The client the contract belongs to, for the delivery gate. */
+  orgId: string | null
+  clientName: string
+  signerName: string
+  signerRole?: string | null
+  /** How many signers are still pending after this one. */
+  remainingSigners: number
+}): NotificationEmailPlan {
+  return {
+    subject: `${input.signerName} signed "${input.contractName}"`,
+    template: EMAIL_TEMPLATE_CONTRACT_SIGNATURE,
+    orgId: input.orgId,
+    render: () =>
+      createElement(ContractSignatureEmail, {
+        contractId: input.contractId,
+        contractName: input.contractName,
+        clientName: input.clientName,
+        signerName: input.signerName,
+        signerRole: input.signerRole ?? undefined,
+        remainingSigners: input.remainingSigners,
+        dashboardUrl: appOrigin(),
       }),
   }
 }

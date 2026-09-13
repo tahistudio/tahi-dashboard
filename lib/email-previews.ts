@@ -84,7 +84,9 @@ import { buildHowToPay } from '@/lib/invoice-how-to-pay'
 import {
   channelMessageEmailPlan,
   clientStatusEmailPlan,
+  studioContractSignatureEmailPlan,
   studioNewRequestEmailPlan,
+  studioProposalDecisionEmailPlan,
   threadReplyEmailPlan,
   type EmailTarget,
 } from '@/lib/notification-email'
@@ -108,6 +110,9 @@ export const EMAIL_PREVIEW_ENTRIES = [
   { key: 'contract-fully-signed-observer', template: 'contract-fully-signed', liveSender: true },
   { key: 'contract-sign', template: 'contract-sign', liveSender: true },
   { key: 'contract-sign-tahi', template: 'contract-sign', liveSender: true },
+  // Not yet called by any route: built here (S2, T3.3) for the contract sign
+  // route to fire once a signer signs while others are still pending.
+  { key: 'contract-signature', template: 'contract-signature', liveSender: false },
   { key: 'invoice-overdue', template: 'invoice-overdue', liveSender: false },
   { key: 'invoice-overdue-bank', template: 'invoice-overdue', liveSender: false },
   { key: 'invoice-sent', template: 'invoice-sent', liveSender: true },
@@ -121,6 +126,13 @@ export const EMAIL_PREVIEW_ENTRIES = [
   { key: 'new-request', template: 'new-request', liveSender: true },
   { key: 'pre-call-digest', template: 'pre-call-digest', liveSender: true },
   { key: 'project-enquiry', template: 'project-enquiry', liveSender: true },
+  // POST /api/public/proposals/[token]/accept (S2, T3.3): a prospect's own
+  // decision on a shared proposal, told to the studio. Three variants, one
+  // template, because the banner tone, the subject and the presence of a
+  // comment all differ between them.
+  { key: 'proposal-decision-accepted', template: 'proposal-decision', liveSender: true },
+  { key: 'proposal-decision-declined', template: 'proposal-decision', liveSender: true },
+  { key: 'proposal-decision-question', template: 'proposal-decision', liveSender: true },
   { key: 'proposal-share', template: 'proposal-share', liveSender: true },
   { key: 'request-client-review', template: 'request-client-review', liveSender: true },
   { key: 'request-delivered', template: 'request-delivered', liveSender: true },
@@ -438,6 +450,50 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
 
   const contractName = `${CLIENT_ORG} Master Services Agreement`
 
+  // (S2, T3.3) POST /api/public/proposals/[token]/accept: a prospect's own
+  // decision on a shared proposal, told to the studio. Same real plan
+  // builder the route calls, so the subject and props here cannot drift.
+  const proposalTitle = `${CLIENT_ORG} spring campaign`
+  const proposalAccepted = studioProposalDecisionEmailPlan({
+    decision: 'accepted',
+    proposalId: 'prop_8ad4e21f60b9',
+    proposalTitle,
+    orgId: PREVIEW_ORG_ID,
+    clientName: CLIENT_ORG,
+    variantName: 'Full campaign + platform tidy-up',
+    acceptorName: CLIENT_CONTACT,
+  })
+  const proposalDeclined = studioProposalDecisionEmailPlan({
+    decision: 'declined',
+    proposalId: 'prop_8ad4e21f60b9',
+    proposalTitle,
+    orgId: PREVIEW_ORG_ID,
+    clientName: CLIENT_ORG,
+    acceptorName: CLIENT_CONTACT,
+  })
+  const proposalQuestion = studioProposalDecisionEmailPlan({
+    decision: 'question',
+    proposalId: 'prop_8ad4e21f60b9',
+    proposalTitle,
+    orgId: PREVIEW_ORG_ID,
+    clientName: CLIENT_ORG,
+    comment: 'Does the booking flow price include the Klaviyo integration, or is that separate?',
+    acceptorName: CLIENT_CONTACT,
+  })
+
+  // (S2, T3.3) Not yet called by any route: built alongside the above so this
+  // slice and the one that wires the contract sign route to it never both
+  // edit lib/notification-email.ts.
+  const contractSignature = studioContractSignatureEmailPlan({
+    contractId: 'con_c41d90ab7e26',
+    contractName,
+    orgId: PREVIEW_ORG_ID,
+    clientName: CLIENT_ORG,
+    signerName: CLIENT_CONTACT,
+    signerRole: 'client',
+    remainingSigners: 1,
+  })
+
   return {
     // lib/announcement-emails.ts: subject is the announcement title verbatim.
     // The amber half of the tone map: `maintenance` and `warning` share the
@@ -607,6 +663,20 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
         Type: 'Master services agreement',
         From: LIAM,
         'Custom message': 'present (two lines from Liam)',
+      },
+    },
+
+    // No live sender yet (S2, T3.3): built for the contract sign route to
+    // call once a signer signs while others are still pending. Studio
+    // audience, so no greeting: same reasoning as 'new-request' below.
+    'contract-signature': {
+      subject: contractSignature.subject,
+      react: contractSignature.render(target),
+      personalisation: {
+        Contract: contractName,
+        Client: CLIENT_ORG,
+        'Signed by': `${CLIENT_CONTACT} (client)`,
+        'Remaining signers': '1',
       },
     },
 
@@ -919,6 +989,43 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
         Budget: 'NZD 15,000 to 25,000',
         Disciplines: 'Web design, Webflow build, email templates',
         'Open button': '"Open the lead", the lead record in the dashboard',
+      },
+    },
+
+    // app/api/public/proposals/[token]/accept/route.ts (S2, T3.3). Studio
+    // audience, so no greeting: same reasoning as 'new-request' above.
+    'proposal-decision-accepted': {
+      subject: proposalAccepted.subject,
+      react: proposalAccepted.render(target),
+      personalisation: {
+        Proposal: proposalTitle,
+        Client: CLIENT_ORG,
+        'Left by': CLIENT_CONTACT,
+        Variant: 'Full campaign + platform tidy-up',
+      },
+    },
+
+    // Same route, the decline branch: no variant, no comment required.
+    'proposal-decision-declined': {
+      subject: proposalDeclined.subject,
+      react: proposalDeclined.render(target),
+      personalisation: {
+        Proposal: proposalTitle,
+        Client: CLIENT_ORG,
+        'Left by': CLIENT_CONTACT,
+      },
+    },
+
+    // Same route, the question branch: the prospect's own words render in a
+    // note box, and the proposal is not decided.
+    'proposal-decision-question': {
+      subject: proposalQuestion.subject,
+      react: proposalQuestion.render(target),
+      personalisation: {
+        Proposal: proposalTitle,
+        Client: CLIENT_ORG,
+        'Left by': CLIENT_CONTACT,
+        'Their question': 'Does the booking flow price include the Klaviyo integration, or is that separate?',
       },
     },
 
