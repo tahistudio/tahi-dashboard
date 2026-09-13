@@ -293,12 +293,20 @@ export async function POST(req: NextRequest) {
     const nowIso = new Date().toISOString()
 
     if (existing) {
+      // A Teams or Zoom link pasted straight onto the row (there is no
+      // Google conferenceData for those) must survive the next poll. Google
+      // only ever tells us about its OWN Meet link, so a null here means
+      // "Google has nothing to say", not "the link was removed" - keep
+      // whatever is already on the row and only ever move forward to a
+      // fresh non-null value from Google itself.
+      const nextMeetUrl = meetUrl ?? existing.googleMeetUrl ?? null
+
       // Update title / scheduledAt / status if changed
       const changed =
         existing.title !== summary
         || existing.scheduledAt !== startIso
         || existing.durationMinutes !== durationMinutes
-        || existing.googleMeetUrl !== meetUrl
+        || existing.googleMeetUrl !== nextMeetUrl
         || existing.meetingType !== meetingType
       if (changed) {
         await database
@@ -307,7 +315,7 @@ export async function POST(req: NextRequest) {
             title: summary,
             scheduledAt: startIso,
             durationMinutes,
-            googleMeetUrl: meetUrl,
+            googleMeetUrl: nextMeetUrl,
             attendees: attendeesJson,
             meetingType,
             updatedAt: nowIso,
