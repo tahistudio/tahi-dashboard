@@ -77,6 +77,7 @@ import ProjectEnquiryEmail from '@/emails/project-enquiry'
 import { ProposalShareEmail } from '@/emails/proposal-share'
 import { ReviewRequestEmail } from '@/emails/review-request'
 import { ScheduleShareEmail } from '@/emails/schedule-share'
+import { SeatInviteEmail } from '@/emails/seat-invite'
 import WelcomeEmail from '@/emails/welcome'
 
 import { appOrigin, publicUrl } from '@/lib/app-url'
@@ -140,6 +141,8 @@ export const EMAIL_PREVIEW_ENTRIES = [
   { key: 'request-delivered', template: 'request-delivered', liveSender: true },
   { key: 'review-request', template: 'review-request', liveSender: false },
   { key: 'schedule-share', template: 'schedule-share', liveSender: true },
+  { key: 'seat-invite-client', template: 'seat-invite', liveSender: true },
+  { key: 'seat-invite-team', template: 'seat-invite', liveSender: true },
   { key: 'welcome', template: 'welcome', liveSender: true },
 ] as const
 
@@ -1137,6 +1140,50 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
         From: STACI,
         'Custom message': 'present',
         'Target launch': nzDate(isoFromNow(42)),
+      },
+    },
+
+    // app/api/portal/invites/route.ts + app/api/portal/people/route.ts: a
+    // client workspace admin adding a colleague to their own organisation.
+    'seat-invite-client': {
+      subject: `${LIAM} invited you to ${CLIENT_ORG} on Tahi`,
+      react: createElement(SeatInviteEmail, {
+        contactName: firstName,
+        inviterName: LIAM,
+        orgName: CLIENT_ORG,
+        inviteUrl: publicUrl('/accept-invite?token=prv_9f2c41a7d8e3'),
+        boundEmail: to,
+        expiresAt: isoFromNow(14),
+        audience: 'client',
+      }),
+      personalisation: {
+        Greeting: firstName,
+        'Invited by': LIAM,
+        Joining: CLIENT_ORG,
+        'Bound address': to,
+        Expires: nzLongDateZoned(isoFromNow(14)),
+      },
+    },
+
+    // app/api/admin/team/[id]/invite/route.ts: a Tahi admin adding a new hire
+    // to the Tahi Studio workspace itself.
+    'seat-invite-team': {
+      subject: `${LIAM} invited you to Tahi Studio on Tahi`,
+      react: createElement(SeatInviteEmail, {
+        contactName: firstName,
+        inviterName: LIAM,
+        orgName: 'Tahi Studio',
+        inviteUrl: publicUrl('/welcome?token=prv_7c1a90de24f6'),
+        boundEmail: to,
+        expiresAt: isoFromNow(14),
+        audience: 'team',
+      }),
+      personalisation: {
+        Greeting: firstName,
+        'Invited by': LIAM,
+        Joining: 'Tahi Studio',
+        'Bound address': to,
+        Expires: nzLongDateZoned(isoFromNow(14)),
       },
     },
 

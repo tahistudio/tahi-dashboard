@@ -1,21 +1,27 @@
 /**
  * POST /api/portal/invites - the contact row a second seat later claims.
  *
- * Inviting a colleague only ever created a Clerk organization invitation, so
- * the person arrived with a login and no `contacts` row to be. Nothing then
- * linked them: no portal role, no notifications, messages stamped with a raw
- * Clerk id. The route now writes the waiting row, deny by default, which is
- * what lib/contact-link-server.ts claims on their first dashboard load.
+ * Inviting a colleague used to only ever create a Clerk organization
+ * invitation, so the person arrived with a login and no `contacts` row to be.
+ * Nothing then linked them: no portal role, no notifications, messages
+ * stamped with a raw Clerk id. The route now mints its own app invite token
+ * (lib/onboarding-invites.ts, mocked here) and sends it through sendEmail
+ * (lib/email.ts), and writes the waiting row, deny by default, which is what
+ * lib/contact-link-server.ts claims on their first dashboard load.
  *
  * Pinned: a row per newly invited address, no duplicate for someone already on
- * the org, no row for an address Clerk refused, the write scoped to the
- * caller's own org, and a D1 failure never losing an invitation Clerk has
- * already sent.
+ * the org, no row for an address the send failed for, the write scoped to the
+ * caller's own org, and a D1 failure never losing an invite the email has
+ * already carried.
  *
  * Also pinned, and the reason this route is no longer the soft way in: it is
  * WORKSPACE ADMIN ONLY, the same gate POST /api/portal/people applies. The two
  * routes now do the same thing, so a plain member could otherwise add an
  * outsider to the roster here and get exactly what the sibling route refuses.
+ *
+ * The allowlist edge (a withheld address gets no row, and the batch reports it
+ * as such) has its own spec in app/api/__tests__/clerk-invite-allowlist.test.ts,
+ * alongside the two sibling routes that dropped the same Clerk call.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -29,17 +35,26 @@ vi.mock('@/lib/server-auth', () => ({
   getPortalAuth: vi.fn(),
 }))
 
-const clerkState = { failFor: new Set<string>(), calls: [] as Record<string, unknown>[] }
+vi.mock('@/lib/onboarding-invites', () => ({
+  ensureClientInvite: vi.fn().mockResolvedValue({
+    id: 'inv_1',
+    token: 'tok_1',
+    path: '/onboarding?token=tok_1',
+    link: 'https://portal.tahi.studio/onboarding?token=tok_1',
+    expiresAt: '2026-10-01T00:00:00.000Z',
+    reused: false,
+  }),
+}))
 
-vi.mock('@clerk/nextjs/server', () => ({
-  clerkClient: vi.fn().mockResolvedValue({
-    organizations: {
-      createOrganizationInvitation: vi.fn().mockImplementation((arg: { emailAddress: string }) => {
-        clerkState.calls.push(arg)
-        if (clerkState.failFor.has(arg.emailAddress)) return Promise.reject(new Error('already a member'))
-        return Promise.resolve(undefined)
-      }),
-    },
+const sendState = { failFor: new Set<string>(), calls: [] as Record<string, unknown>[] }
+
+vi.mock('@/lib/email', () => ({
+  sendEmail: vi.fn().mockImplementation((to: string, subject: string, react: unknown, text: unknown, context: Record<string, unknown>) => {
+    sendState.calls.push({ to, subject, context })
+    if (sendState.failFor.has(to)) {
+      return Promise.resolve({ success: false, error: 'Failed to send' })
+    }
+    return Promise.resolve({ success: true })
   }),
 }))
 
@@ -48,25 +63,10 @@ vi.mock('drizzle-orm', () => {
   return { eq: stub, and: stub, inArray: stub, desc: stub }
 })
 
-// The delivery allowlist, opened. This spec is about the contact row a second
-// seat later claims, not about who Clerk may write to; the gate on this route
-// has its own spec in app/api/__tests__/clerk-invite-allowlist.test.ts. Left
-// real, every fixture address here is an outside domain and every case would
-// answer 409.
-vi.mock('@/lib/email-gate', () => ({
-  resolveDeliveryPolicy: vi.fn().mockResolvedValue({
-    mode: 'all',
-    allowedDomains: [],
-    allowedOrgIds: [],
-    allowedAddresses: [],
-    blockedAddresses: [],
-  }),
-  guardOutboundAddress: vi.fn().mockResolvedValue({ allowed: true, reason: '' }),
-}))
-
 vi.mock('@/db/d1', () => ({
   schema: {
-    contacts: { __table: 'contacts', id: 'id', orgId: 'org_id', email: 'email', portalRole: 'portal_role', clerkUserId: 'clerk_user_id' },
+    contacts: { __table: 'contacts', id: 'id', orgId: 'org_id', email: 'email', name: 'name', portalRole: 'portal_role', clerkUserId: 'clerk_user_id' },
+    organisations: { __table: 'organisations', id: 'id', name: 'name' },
   },
 }))
 
@@ -74,7 +74,8 @@ vi.mock('@/lib/db', () => {
   const answer = () => Promise.resolve(captured.selectRows.length ? captured.selectRows.shift()! : [])
   const chain: Record<string, unknown> = {}
   chain.from = vi.fn(() => chain)
-  // Terminal at `where` (the roster read) or at `limit` (the admin-gate probe).
+  // Terminal at `where` (the roster read) or at `limit` (the admin-gate probe,
+  // the org-name read, the caller-name read).
   chain.where = vi.fn(() => {
     const promise = answer() as Promise<unknown[]> & { limit?: unknown }
     return Object.assign(promise, { limit: vi.fn(() => promise) })
@@ -121,10 +122,15 @@ function makeRequest(emails: string[]): NextRequest {
 
 const contacts = () => captured.inserts.filter(r => r.__table === 'contacts')
 
-/** The admin-gate probe answers first, then the roster read. */
+/**
+ * The admin-gate probe answers first, then the roster read, then the org-name
+ * and caller-name reads the email needs for its subject and "invited by" line.
+ */
 const ADMIN_CALLER = [{ portalRole: 'admin' }]
+const ORG_ROW = [{ name: 'Acme Co' }]
+const CALLER_NAME = [{ name: 'Ana Owner' }]
 function queue(roster: Record<string, unknown>[] = [], caller = ADMIN_CALLER) {
-  captured.selectRows = [caller, roster]
+  captured.selectRows = [caller, roster, ORG_ROW, CALLER_NAME]
 }
 
 describe('POST /api/portal/invites', () => {
@@ -133,8 +139,8 @@ describe('POST /api/portal/invites', () => {
     captured.selectRows = []
     captured.inserts = []
     captured.insertThrows = false
-    clerkState.failFor = new Set()
-    clerkState.calls = []
+    sendState.failFor = new Set()
+    sendState.calls = []
     process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
     vi.mocked(getPortalAuth).mockResolvedValue(portalAuth())
   })
@@ -167,9 +173,9 @@ describe('POST /api/portal/invites', () => {
     expect(rows[0].email).toBe('sam@acme.com')
   })
 
-  it('writes no row for an address Clerk refused', async () => {
+  it('writes no row for an address the send failed for', async () => {
     queue()
-    clerkState.failFor = new Set(['sam@acme.com'])
+    sendState.failFor = new Set(['sam@acme.com'])
 
     const res = await POST(makeRequest(['raj@acme.com', 'sam@acme.com']))
     const json = await res.json() as { invited: number }
@@ -177,7 +183,7 @@ describe('POST /api/portal/invites', () => {
     expect(contacts().map(r => r.email)).toEqual(['raj@acme.com'])
   })
 
-  it('keeps the invitations Clerk already sent when the contact write fails', async () => {
+  it('keeps the invite the email has already carried when the contact write fails', async () => {
     queue()
     captured.insertThrows = true
 
@@ -214,8 +220,8 @@ describe('POST /api/portal/invites', () => {
     expect(res.status).toBe(403)
     const json = await res.json() as { error: string }
     expect(json.error).toContain('admin')
-    // Neither half of the invitation happened: no Clerk invite, no roster row.
-    expect(clerkState.calls).toHaveLength(0)
+    // Neither half of the invitation happened: no email sent, no roster row.
+    expect(sendState.calls).toHaveLength(0)
     expect(contacts()).toHaveLength(0)
   })
 
@@ -224,7 +230,7 @@ describe('POST /api/portal/invites', () => {
 
     const res = await POST(makeRequest(['outsider@x.com']))
     expect(res.status).toBe(403)
-    expect(clerkState.calls).toHaveLength(0)
+    expect(sendState.calls).toHaveLength(0)
     expect(contacts()).toHaveLength(0)
   })
 
@@ -236,20 +242,27 @@ describe('POST /api/portal/invites', () => {
     const res = await POST(makeRequest(['Raj@Acme.com', 'sam@acme.com']))
     const json = await res.json() as { invited: number; results: { email: string; invited: boolean }[] }
     expect(json.invited).toBe(1)
-    expect(clerkState.calls.map(c => c.emailAddress)).toEqual(['sam@acme.com'])
+    expect(sendState.calls.map(c => c.to)).toEqual(['sam@acme.com'])
     expect(contacts().map(r => r.email)).toEqual(['sam@acme.com'])
   })
 
   it('still invites a roster entry that has never signed in', async () => {
     // A contact the studio added by hand has a row but no login. Sending them
-    // the invitation is the whole point of this route.
+    // the invite is the whole point of this route.
     queue([{ email: 'raj@acme.com', clerkUserId: null }])
 
     const res = await POST(makeRequest(['raj@acme.com']))
     const json = await res.json() as { invited: number }
     expect(json.invited).toBe(1)
-    expect(clerkState.calls.map(c => c.emailAddress)).toEqual(['raj@acme.com'])
+    expect(sendState.calls.map(c => c.to)).toEqual(['raj@acme.com'])
     // No second row: the one already there is what they will claim.
     expect(contacts()).toHaveLength(0)
+  })
+
+  it('sends with the seat-invite template and this org, whatever the address', async () => {
+    queue()
+
+    await POST(makeRequest(['raj@acme.com']))
+    expect(sendState.calls[0].context).toMatchObject({ template: 'seat-invite', orgId: 'org_acme' })
   })
 })

@@ -2,15 +2,22 @@
  * ONE DOOR, AND NO SIDE DOOR.
  *
  * Two invariants live here. The first is about Resend and is described below.
- * The second is about CLERK, which is a mail transport nobody thought of as
- * one: `createOrganizationInvitation` sends an invitation email from Clerk's
- * own systems to whatever address it is handed, so lib/email-delivery.ts never
- * sees it. Three routes mint those, and every one of them was a live path from
- * an authenticated session to a real person's inbox while the studio believed
- * the blackout was total. There is no way to funnel Clerk through the one
- * door, so the rule is not an allowance list (which is how a choke point rots)
- * but a requirement: a file that mints an invitation must also ask
- * `guardOutboundAddress` from lib/email-gate.ts.
+ * The second is about CLERK, which used to be a mail transport nobody thought
+ * of as one: `createOrganizationInvitation` sends an invitation email from
+ * Clerk's own systems to whatever address it is handed, so
+ * lib/email-delivery.ts never saw it. Three routes minted those, and every one
+ * of them was a live path from an authenticated session to a real person's
+ * inbox while the studio believed the blackout was total.
+ *
+ * There turned out to be no way to funnel that call through the one door (the
+ * Backend API's org-invitation params carry no `notify` flag to suppress
+ * Clerk's own email, unlike the plain Invitation API), so the fix was not a
+ * gate in front of the call, it was removing the call: every seat invite now
+ * mints its own app token (lib/onboarding-invites.ts) and sends the Studio
+ * Ledger email through the one door below instead. The rule pinned here is
+ * therefore a requirement that stays a requirement even with nothing left to
+ * gate: NOTHING in product code may call `createOrganizationInvitation` again,
+ * because the moment one does, Clerk is emailing that person a second time.
  *
  * lib/email-delivery.ts applies the tahi.studio allowlist to every send. That
  * is worth nothing the moment a second file constructs its own Resend client
@@ -146,36 +153,29 @@ describe('the Resend client lives in exactly one file', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Clerk, the transport nobody counted
+// Clerk never emails a seat invite again
 // ---------------------------------------------------------------------------
 
-/** Minting an organisation invitation, or any Clerk invitation. */
-const MINTS_AN_INVITATION = /createOrganizationInvitation|\.invitations\s*\.\s*create/
+/**
+ * An actual Clerk organization-invitation CALL (requires the trailing `(`),
+ * not a doc comment explaining why a route no longer makes one. Several
+ * routes carry exactly that explanatory comment (search this string in
+ * app/api/portal/invites, app/api/portal/people, app/api/admin/team/[id]/invite,
+ * emails/seat-invite.tsx), and none of them follow it with an open paren.
+ */
+const CALLS_CREATE_ORG_INVITATION = /createOrganizationInvitation\s*\(|\.invitations\s*\.\s*create\s*\(/
 
-/** Having asked the delivery gate about the address first. */
-const ASKS_THE_GATE = /guardOutboundAddress/
-
-describe('a Clerk invitation is gated like any other email', () => {
+describe('no seat invite asks Clerk to email it', () => {
   const files = sourceFiles()
 
-  it('every file that mints one also asks guardOutboundAddress', () => {
+  it('nothing in product code still calls createOrganizationInvitation', () => {
     const offenders: string[] = []
     for (const file of files) {
       const rel = relative(ROOT, file).split('/').join(sep)
       if (TEST_FILES.has(rel) || rel.includes(`__tests__${sep}`)) continue
       const source = readFileSync(file, 'utf8')
-      if (!MINTS_AN_INVITATION.test(source)) continue
-      if (!ASKS_THE_GATE.test(source)) offenders.push(rel)
+      if (CALLS_CREATE_ORG_INVITATION.test(source)) offenders.push(rel)
     }
     expect(offenders).toEqual([])
-  })
-
-  it('finds the three known minting routes, so the rule is not passing on an empty set', () => {
-    const minting = files.filter((file) => {
-      const rel = relative(ROOT, file).split('/').join(sep)
-      if (TEST_FILES.has(rel) || rel.includes(`__tests__${sep}`)) return false
-      return MINTS_AN_INVITATION.test(readFileSync(file, 'utf8'))
-    })
-    expect(minting.length).toBeGreaterThanOrEqual(3)
   })
 })

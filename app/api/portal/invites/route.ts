@@ -1,12 +1,15 @@
+import { createElement } from 'react'
 import { getPortalAuth } from '@/lib/server-auth'
 import { isOrgAdmin } from '@/lib/portal-access'
-import { clerkClient } from '@clerk/nextjs/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 
-import { guardOutboundAddress, resolveDeliveryPolicy } from '@/lib/email-gate'
+import { ensureClientInvite } from '@/lib/onboarding-invites'
+import { sendEmail } from '@/lib/email'
+import { SeatInviteEmail } from '@/emails/seat-invite'
+import { resolveDeliveryPolicy } from '@/lib/email-gate'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,11 +18,23 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 /**
  * POST /api/portal/invites
  * Invite colleagues to the authenticated client's org. Body: { emails: string[] }.
- * Each becomes a Clerk organization invitation (role org:member); they get an
- * email immediately. Returns a per-email result so the UI can report failures.
+ * Each gets our own app invite token (lib/onboarding-invites.ts, the same one
+ * the client's own first-contact welcome email carries) and a Studio Ledger
+ * email through lib/email-delivery.ts. Returns a per-email result so the UI
+ * can report failures.
+ *
+ * WHY NOT A CLERK ORGANIZATION INVITATION. This route used to call
+ * `clerk.organizations.createOrganizationInvitation`, which fires an email
+ * from Clerk's own systems the moment it is called. The Backend API's
+ * org-invitation params carry no `notify` flag (unlike the plain, non-org
+ * Invitation API), so there is no supported way to keep that call from
+ * emailing. Minting our own token and joining an EXISTING Clerk org via
+ * `createOrganizationMembership` at accept time
+ * (app/api/portal/accept-invite/route.ts) sends no Clerk mail at all, so the
+ * Studio Ledger email below is the only email the colleague receives.
  *
  * WORKSPACE ADMIN ONLY, exactly like its sibling POST /api/portal/people. The
- * two routes now do the same thing (Clerk invitation plus a roster row), so a
+ * two routes now do the same thing (an invite token plus a roster row), so a
  * weaker gate here would simply be the way round the gate there: a plain member
  * seat could add an outsider to the roster and, once the contact link claims
  * the row on first sign-in, hand them a full portal identity. The self-serve
@@ -29,14 +44,13 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  * the primary contact as an admin, so nobody legitimate loses the ability to
  * invite.
  *
- * A successful invitation also writes the waiting `contacts` row, deny by
- * default (portalRole 'member', clerkUserId still null). That row is the thing
- * the colleague CLAIMS on their first dashboard load
- * (lib/contact-link-server.ts), which is what gives them an identity in the
- * product rather than a bare login: without it they had no portal role, no
- * notifications, and their messages were stamped with a raw Clerk id.
- * Contact writes are best effort: a D1 hiccup must not lose an invitation that
- * Clerk has already sent.
+ * A successful send also writes the waiting `contacts` row, deny by default
+ * (portalRole 'member', clerkUserId still null). That row is the thing the
+ * colleague CLAIMS on their first dashboard load (lib/contact-link-server.ts),
+ * which is what gives them an identity in the product rather than a bare
+ * login: without it they had no portal role, no notifications, and their
+ * messages were stamped with a raw Clerk id. Contact writes are best effort: a
+ * D1 hiccup must not lose an invite the email has already carried.
  */
 export async function POST(req: NextRequest) {
   const { orgId, clerkOrgId, userId, impersonating } = await getPortalAuth(req)
@@ -102,46 +116,71 @@ export async function POST(req: NextRequest) {
       .filter((e): e is string => !!e),
   )
 
-  // CLERK IS A SECOND MAIL TRANSPORT, and this route is the batch version of
-  // it: a client admin types addresses and Clerk emails every one of them from
-  // Clerk's own systems, so lib/email-delivery.ts never sees them. The same
-  // rule is asked per address, once against a policy read once, and a withheld
-  // address is logged to email_suppressions before this answers. Withheld is
-  // reported per address rather than failing the batch, because a list mixing
-  // one allowed colleague with three outsiders should still invite the one.
+  // Who is sending this, and what they are named, for the email's greeting and
+  // its "invited by" line. The caller is already proven to be this org's admin
+  // above, so a contact row for them exists.
+  const [org] = await database
+    .select({ name: schema.organisations.name })
+    .from(schema.organisations)
+    .where(eq(schema.organisations.id, orgId))
+    .limit(1)
+  const orgName = org?.name?.trim() || 'your workspace'
+
+  const [caller] = await database
+    .select({ name: schema.contacts.name })
+    .from(schema.contacts)
+    .where(and(eq(schema.contacts.orgId, orgId), eq(schema.contacts.clerkUserId, userId)))
+    .limit(1)
+  const inviterName = caller?.name?.trim() || 'A teammate'
+
+  // Resolved once, ahead of the fan-out: sendEmail would otherwise pay a
+  // settings read per recipient.
   const policy = await resolveDeliveryPolicy()
   const suppressed: string[] = []
 
-  const clerk = await clerkClient()
   const results = await Promise.all(
     emails.map(async emailAddress => {
       if (alreadyIn.has(emailAddress.toLowerCase())) {
         return { email: emailAddress, invited: false, error: 'Already has access to this workspace' }
       }
-      const gate = await guardOutboundAddress(
+
+      // Mint (or reuse) our own invite token instead of a Clerk organization
+      // invitation. Accepting it (app/api/portal/accept-invite/route.ts) joins
+      // this EXISTING Clerk org via createOrganizationMembership, which sends
+      // no email of its own, so the Studio Ledger email below is the only mail
+      // this colleague receives.
+      const invite = await ensureClientInvite(database, {
+        flow: 'client',
+        orgId,
+        contactEmail: emailAddress,
+        contactName: emailAddress.split('@')[0],
+        createdById: userId,
+      })
+
+      const outcome = await sendEmail(
         emailAddress,
-        {
-          template: 'clerk-org-invite',
-          subject: 'Clerk invitation to a client workspace',
-          orgId,
-        },
-        policy,
+        `${inviterName} invited you to ${orgName} on Tahi`,
+        createElement(SeatInviteEmail, {
+          contactName: emailAddress.split('@')[0],
+          inviterName,
+          orgName,
+          inviteUrl: invite.link,
+          boundEmail: emailAddress.toLowerCase(),
+          expiresAt: invite.expiresAt,
+          audience: 'client',
+        }),
+        undefined,
+        { template: 'seat-invite', orgId, policy },
       )
-      if (!gate.allowed) {
-        suppressed.push(emailAddress)
-        return { email: emailAddress, invited: false, withheld: true, error: gate.reason }
+
+      if (!outcome.success) {
+        if (outcome.suppressedCount && outcome.suppressedCount > 0) {
+          suppressed.push(emailAddress)
+          return { email: emailAddress, invited: false, withheld: true, error: outcome.error }
+        }
+        return { email: emailAddress, invited: false, error: outcome.error ?? 'Failed to send' }
       }
-      try {
-        await clerk.organizations.createOrganizationInvitation({
-          organizationId: clerkOrgId,
-          inviterUserId: userId,
-          emailAddress,
-          role: 'org:member',
-        })
-        return { email: emailAddress, invited: true }
-      } catch (err) {
-        return { email: emailAddress, invited: false, error: err instanceof Error ? err.message : 'Failed' }
-      }
+      return { email: emailAddress, invited: true }
     }),
   )
 
@@ -152,7 +191,7 @@ export async function POST(req: NextRequest) {
   if (invitedEmails.length === 0 && suppressed.length > 0) {
     return NextResponse.json({
       error: 'Held back by the email allowlist',
-      message: 'Clerk would email these invitations itself, and none of these addresses are on the delivery allowlist.',
+      message: 'None of these addresses are on the delivery allowlist.',
       results,
       suppressed,
       invited: 0,

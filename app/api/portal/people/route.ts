@@ -1,11 +1,14 @@
+import { createElement } from 'react'
 import { getPortalAuth } from '@/lib/server-auth'
 import { isOrgAdmin, isPortalAdminContact } from '@/lib/portal-access'
 import { clerkClient } from '@clerk/nextjs/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, asc } from 'drizzle-orm'
-import { guardOutboundAddress } from '@/lib/email-gate'
+import { eq, and, asc, isNull } from 'drizzle-orm'
+import { ensureClientInvite } from '@/lib/onboarding-invites'
+import { sendEmail } from '@/lib/email'
+import { SeatInviteEmail } from '@/emails/seat-invite'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,13 +18,16 @@ export const dynamic = 'force-dynamic'
  *
  * GET    - list the org's contacts (name, email, portalRole, isPrimary, pending).
  *          Any signed-in org member may read the roster.
- * POST   - invite a teammate (client admin only). Creates a Clerk organization
- *          invitation first, then, only on success, records a pending contact row
- *          so a "Pending" chip always corresponds to a real invitation.
+ * POST   - invite a teammate (client admin only). Mints (or reuses) our own
+ *          app invite token and emails it with the Studio Ledger kit through
+ *          lib/email-delivery.ts, then, only on success, records a pending
+ *          contact row so a "Pending" chip always corresponds to a real
+ *          invite. See the WHY NOT A CLERK ORGANIZATION INVITATION note below.
  * PATCH  - edit a teammate's name / permission level (client admin only). The
  *          last admin cannot be demoted.
- * DELETE - remove a teammate (client admin only). Pending invites are revoked
- *          in Clerk first; active members lose their Clerk org membership.
+ * DELETE - remove a teammate (client admin only). A pending invite has its
+ *          live token expired and any Clerk invitation from before this change
+ *          revoked; an active member loses their Clerk org membership.
  *          You cannot remove yourself or the primary contact.
  *
  * Scope: getPortalAuth resolves the caller to their D1 org; queries filter by
@@ -123,39 +129,66 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'That email is already on your roster' }, { status: 409 })
   }
 
-  // CLERK IS A SECOND MAIL TRANSPORT. createOrganizationInvitation sends its
-  // own email, from Clerk, to whatever address a client admin typed into this
-  // form, so it never passes through lib/email-delivery.ts and the allowlist
-  // could not see it. That made this the shortest path in the product from an
-  // authenticated session to a real person's inbox while the studio believed
-  // the blackout was total. The same rule is asked here, scoped to this
-  // client's org so an exempted client's own people still come through, and a
-  // withheld address is logged before we answer.
-  const gate = await guardOutboundAddress(email, {
-    template: 'clerk-org-invite',
-    subject: 'Clerk invitation to a client workspace',
-    orgId,
-  })
-  if (!gate.allowed) {
-    return NextResponse.json({
-      error: 'Held back by the email allowlist',
-      message: `We cannot invite ${email} yet. ${gate.reason}`,
-    }, { status: 409 })
-  }
+  // WHY NOT A CLERK ORGANIZATION INVITATION. createOrganizationInvitation
+  // sends its own email, from Clerk, to whatever address a client admin typed
+  // into this form, and there is no `notify` flag on the org-invitation params
+  // to stop it (unlike the plain, non-org Invitation API), so it never passed
+  // through lib/email-delivery.ts and the allowlist could not see it. That
+  // made this the shortest path in the product from an authenticated session
+  // to a real person's inbox while the studio believed the blackout was
+  // total. Minting our own token instead and joining this EXISTING Clerk org
+  // via createOrganizationMembership at accept time
+  // (app/api/portal/accept-invite/route.ts) sends no Clerk mail at all, so
+  // the Studio Ledger email below is the only email this colleague receives,
+  // through the one door (lib/email-delivery.ts) that already enforces the
+  // allowlist and logs a withheld address.
+  const [org] = await drizzle
+    .select({ name: schema.organisations.name })
+    .from(schema.organisations)
+    .where(eq(schema.organisations.id, orgId))
+    .limit(1)
+  const orgName = org?.name?.trim() || 'your workspace'
 
-  // Send the Clerk invitation FIRST. Only record the pending contact if it
-  // succeeds, so a "Pending" chip always maps to a real invitation.
-  try {
-    const clerk = await clerkClient()
-    await clerk.organizations.createOrganizationInvitation({
-      organizationId: clerkOrgId,
-      inviterUserId: userId,
-      emailAddress: email,
-      role: 'org:member',
-    })
-  } catch (err) {
+  const [caller] = await drizzle
+    .select({ name: schema.contacts.name })
+    .from(schema.contacts)
+    .where(and(eq(schema.contacts.orgId, orgId), eq(schema.contacts.clerkUserId, userId)))
+    .limit(1)
+  const inviterName = caller?.name?.trim() || 'A teammate'
+
+  const invite = await ensureClientInvite(drizzle, {
+    flow: 'client',
+    orgId,
+    contactEmail: email,
+    contactName: name || email,
+    createdById: userId,
+  })
+
+  const outcome = await sendEmail(
+    email,
+    `${inviterName} invited you to ${orgName} on Tahi`,
+    createElement(SeatInviteEmail, {
+      contactName: name || email,
+      inviterName,
+      orgName,
+      inviteUrl: invite.link,
+      boundEmail: email,
+      expiresAt: invite.expiresAt,
+      audience: 'client',
+    }),
+    undefined,
+    { template: 'seat-invite', orgId },
+  )
+
+  if (!outcome.success) {
+    if (outcome.suppressedCount && outcome.suppressedCount > 0) {
+      return NextResponse.json({
+        error: 'Held back by the email allowlist',
+        message: `We cannot invite ${email} yet. ${outcome.error ?? ''}`.trim(),
+      }, { status: 409 })
+    }
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Could not send the invitation' },
+      { error: outcome.error ?? 'Could not send the invitation' },
       { status: 502 },
     )
   }
@@ -336,6 +369,26 @@ export async function DELETE(req: NextRequest) {
       { error: err instanceof Error ? err.message : 'Could not remove the teammate from sign-in' },
       { status: 502 },
     )
+  }
+
+  // A pending seat carries a live app invite token (lib/onboarding-invites.ts).
+  // Expire it so a removed teammate's old email link cannot rejoin the
+  // workspace later. Best effort: the roster delete below is the record that
+  // matters, and a D1 hiccup here must not block it.
+  if (!target.clerkUserId) {
+    try {
+      const now = new Date().toISOString()
+      await drizzle
+        .update(schema.onboardingInvites)
+        .set({ expiresAt: now, updatedAt: now })
+        .where(and(
+          eq(schema.onboardingInvites.orgId, orgId),
+          eq(schema.onboardingInvites.contactEmail, target.email.toLowerCase()),
+          isNull(schema.onboardingInvites.usedAt),
+        ))
+    } catch {
+      // non-fatal
+    }
   }
 
   await drizzle

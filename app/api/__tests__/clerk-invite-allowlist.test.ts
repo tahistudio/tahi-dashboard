@@ -1,28 +1,34 @@
 /**
- * Clerk is a second mail transport, and these three routes are where it fires.
- *
- * `clerk.organizations.createOrganizationInvitation` sends an invitation email
- * FROM CLERK'S OWN SYSTEMS to whatever address it is handed. It never touches
- * lib/email-delivery.ts, so the tahi.studio allowlist could not see it and did
- * not apply. That left three live paths from an authenticated session to a real
- * person's inbox while the studio believed the blackout was total:
+ * Every seat invite now goes through the ONE email door, not Clerk.
  *
  *   - POST /api/admin/team/[id]/invite   any Tahi admin, address off the roster
  *   - POST /api/portal/people            any client admin, address typed in
  *   - POST /api/portal/invites           the same, in bulk
  *
- * Liam's rule, 2026-09-06: no real client and no teammate receives anything
- * from this system until he has verified it, staci@ and nathan@ included. That
- * has to be true of an invitation as much as of an invoice.
+ * These three routes used to call `clerk.organizations.createOrganizationInvitation`,
+ * which sends an email FROM CLERK'S OWN SYSTEMS the moment it is called, with
+ * no way to suppress it (the Backend API's org-invitation params carry no
+ * `notify` flag, unlike the plain Invitation API). That made them a live path
+ * from an authenticated session to a real person's inbox while Liam's rule,
+ * 2026-09-06, said no real client and no teammate receives anything from this
+ * system until he has verified it.
  *
- * Pinned here: each route asks the gate BEFORE minting, refuses with 409 rather
- * than a 502 (nothing is broken and retrying changes nothing), writes the
- * suppression row that makes the refusal provable, and lets an allowed address
- * through untouched.
+ * The fix was not a gate in front of that call: it was removing the call.
+ * Every one of these routes now mints its own app invite token
+ * (lib/onboarding-invites.ts, mocked here) and sends the Studio Ledger
+ * seat-invite email through sendEmail (lib/email.ts -> the one door,
+ * lib/email-delivery.ts). Pinned here: each route
  *
- * lib/__tests__/no-resend-bypass.test.ts holds the structural half: any file
- * that mints an invitation must also call guardOutboundAddress, so a fourth
- * route cannot appear without one.
+ *   1. never calls a Clerk invitation endpoint at all,
+ *   2. sends through sendEmail with template 'seat-invite' and the right
+ *      orgId (the client's org for the two portal routes, null for the
+ *      studio's own workspace),
+ *   3. reports the allowlist holding an address back as the same 409 shape
+ *      the rest of the product uses, and writes no roster/roster-adjacent row
+ *      when that happens.
+ *
+ * lib/__tests__/no-resend-bypass.test.ts holds the structural half: nothing in
+ * product code may call createOrganizationInvitation again, full stop.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -31,16 +37,7 @@ type Row = Record<string, unknown>
 const state = {
   selectRows: [] as unknown[][],
   inserts: [] as Row[],
-  clerkCalls: [] as Row[],
-}
-
-/** The live policy these specs run against: the shipped default. */
-const CLOSED_POLICY = {
-  mode: 'allowlist' as const,
-  allowedDomains: ['tahi.studio'],
-  allowedOrgIds: [] as string[],
-  allowedAddresses: ['business@tahi.studio'],
-  blockedAddresses: ['staci@tahi.studio', 'nathan@tahi.studio'],
+  clerkOrgCalls: [] as Row[],
 }
 
 vi.mock('@/lib/server-auth', () => ({
@@ -49,28 +46,61 @@ vi.mock('@/lib/server-auth', () => ({
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org_tahi'),
 }))
 
+// No organizations.createOrganizationInvitation mock at all: if any of the
+// three routes under test still called it, this suite would throw
+// "clerk.organizations.createOrganizationInvitation is not a function" rather
+// than silently pass.
 vi.mock('@clerk/nextjs/server', () => ({
   clerkClient: vi.fn().mockResolvedValue({
-    organizations: {
-      createOrganizationInvitation: vi.fn().mockImplementation((arg: Row) => {
-        state.clerkCalls.push(arg)
-        return Promise.resolve(undefined)
-      }),
+    users: {
+      getUser: vi.fn().mockResolvedValue({ firstName: 'Liam', lastName: 'Miller' }),
     },
+    organizations: {},
   }),
 }))
 
+vi.mock('@/lib/onboarding-invites', () => ({
+  createInvite: vi.fn().mockResolvedValue({
+    id: 'inv_1',
+    token: 'tok_1',
+    path: '/onboarding?token=tok_1',
+    link: 'https://portal.tahi.studio/onboarding?token=tok_1',
+    expiresAt: '2026-10-01T00:00:00.000Z',
+    reused: false,
+  }),
+  ensureClientInvite: vi.fn().mockResolvedValue({
+    id: 'inv_1',
+    token: 'tok_1',
+    path: '/onboarding?token=tok_1',
+    link: 'https://portal.tahi.studio/onboarding?token=tok_1',
+    expiresAt: '2026-10-01T00:00:00.000Z',
+    reused: false,
+  }),
+}))
+
+vi.mock('@/lib/email', () => ({
+  sendEmail: vi.fn().mockResolvedValue({ success: true }),
+}))
+
+vi.mock('@/lib/require-permission', () => ({
+  requireManagePermissions: vi.fn().mockResolvedValue({ denied: null }),
+}))
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
+vi.mock('@/lib/audit', () => ({ logAudit: vi.fn().mockResolvedValue(undefined) }))
+
 vi.mock('drizzle-orm', () => {
   const stub = (...args: unknown[]) => ({ args })
-  return { eq: stub, and: stub, asc: stub, inArray: stub, desc: stub }
+  return { eq: stub, and: stub, asc: stub, desc: stub, inArray: stub, isNull: stub }
 })
 
 vi.mock('@/db/d1', () => ({
   schema: {
-    contacts: { __table: 'contacts', id: 'id', orgId: 'org_id', email: 'email', portalRole: 'portal_role', clerkUserId: 'clerk_user_id', name: 'name', isPrimary: 'is_primary' },
+    contacts: {
+      __table: 'contacts', id: 'id', orgId: 'org_id', email: 'email', name: 'name',
+      portalRole: 'portal_role', isPrimary: 'is_primary', clerkUserId: 'clerk_user_id',
+    },
+    organisations: { __table: 'organisations', id: 'id', name: 'name' },
     teamMembers: { __table: 'team_members', id: 'id', name: 'name', email: 'email', clerkUserId: 'clerk_user_id' },
-    settings: { __table: 'settings', key: 'key', value: 'value' },
-    emailSuppressions: { __table: 'email_suppressions', createdAt: 'created_at' },
   },
 }))
 
@@ -98,18 +128,10 @@ vi.mock('@/lib/db', () => {
   }
 })
 
-// The policy itself is read for real from lib/email-gate.ts against the mocked
-// D1 above, which answers no settings rows, so the CLOSED DEFAULT applies. That
-// is the point: these specs run against what ships, not against a fixture.
-vi.mock('@/lib/require-permission', () => ({
-  requireManagePermissions: vi.fn().mockResolvedValue({ denied: null }),
-}))
-vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
-vi.mock('@/lib/audit', () => ({ logAudit: vi.fn().mockResolvedValue(undefined) }))
-vi.mock('@/lib/app-url', () => ({ publicUrl: (p: string) => `https://portal.tahi.studio${p}` }))
-
 import { NextRequest } from 'next/server'
 import { getPortalAuth } from '@/lib/server-auth'
+import { sendEmail } from '@/lib/email'
+import { logAudit } from '@/lib/audit'
 import { POST as teamInvite } from '@/app/api/admin/team/[id]/invite/route'
 import { POST as portalPeople } from '@/app/api/portal/people/route'
 import { POST as portalInvites } from '@/app/api/portal/invites/route'
@@ -135,16 +157,19 @@ function jsonReq(path: string, body: unknown): NextRequest {
   })
 }
 
-const suppressions = () => state.inserts.filter(r => r.__table === 'email_suppressions')
+function sendEmailCalls() {
+  return vi.mocked(sendEmail).mock.calls
+}
+
 const contactRows = () => state.inserts.filter(r => r.__table === 'contacts')
 
 beforeEach(() => {
   vi.clearAllMocks()
   state.selectRows = []
   state.inserts = []
-  state.clerkCalls = []
   process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
   vi.mocked(getPortalAuth).mockResolvedValue(portalAuth())
+  vi.mocked(sendEmail).mockResolvedValue({ success: true })
 })
 
 // ---------------------------------------------------------------------------
@@ -155,53 +180,53 @@ describe('POST /api/admin/team/[id]/invite', () => {
   const params = { params: Promise.resolve({ id: 'tm-1' }) }
   const post = () => jsonReq('/api/admin/team/tm-1/invite', {})
 
-  function roster(email: string) {
-    state.selectRows = [[{ id: 'tm-1', name: 'Nathan', email, clerkUserId: null }]]
+  function roster(email: string, clerkUserId: string | null = null) {
+    state.selectRows = [[{ id: 'tm-1', name: 'Nathan', email, clerkUserId }]]
   }
 
-  it('refuses to mint an invitation for an address the gate withholds', async () => {
+  it('sends the Studio Ledger email instead of minting a Clerk invitation', async () => {
     roster('nathan@tahi.studio')
-
-    const res = await teamInvite(post(), params)
-
-    expect(res.status).toBe(409)
-    expect(state.clerkCalls).toHaveLength(0)
-    const body = await res.json() as { error: string; message: string }
-    expect(body.error).toBe('Held back by the email allowlist')
-    expect(body.message).toContain('Clerk would email')
-  })
-
-  it('writes the suppression row that proves the refusal', async () => {
-    roster('nathan@tahi.studio')
-
-    await teamInvite(post(), params)
-
-    expect(suppressions()).toHaveLength(1)
-    expect(suppressions()[0]).toMatchObject({
-      to: 'nathan@tahi.studio',
-      template: 'clerk-org-invite',
-      reason: 'address_blocked',
-    })
-  })
-
-  it('refuses a teammate who is merely not on the address list', async () => {
-    roster('someone@tahi.studio')
-
-    const res = await teamInvite(post(), params)
-
-    expect(res.status).toBe(409)
-    expect(suppressions()[0]).toMatchObject({ reason: 'not_in_allowlist' })
-  })
-
-  it('mints the invitation for an allowed address', async () => {
-    roster('business@tahi.studio')
 
     const res = await teamInvite(post(), params)
 
     expect(res.status).toBe(200)
-    expect(state.clerkCalls).toHaveLength(1)
-    expect(state.clerkCalls[0]).toMatchObject({ emailAddress: 'business@tahi.studio' })
-    expect(suppressions()).toHaveLength(0)
+    const body = await res.json() as { success: boolean; status: string }
+    expect(body).toMatchObject({ success: true, status: 'invited' })
+
+    expect(sendEmailCalls()).toHaveLength(1)
+    const [to, subject, , , context] = sendEmailCalls()[0]
+    expect(to).toBe('nathan@tahi.studio')
+    expect(subject).toContain('invited you to Tahi Studio on Tahi')
+    // The studio's own workspace, not a client: no orgId on this send.
+    expect(context).toMatchObject({ template: 'seat-invite', orgId: null })
+
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'team_member.invited' }),
+    )
+  })
+
+  it('reports the allowlist holding the address back, the same 409 shape as any other send', async () => {
+    roster('nathan@tahi.studio')
+    vi.mocked(sendEmail).mockResolvedValue({ success: false, error: 'Held back by the email allowlist (1 recipient).', suppressedCount: 1 })
+
+    const res = await teamInvite(post(), params)
+
+    expect(res.status).toBe(409)
+    const body = await res.json() as { error: string }
+    expect(body.error).toBe('Held back by the email allowlist')
+    expect(logAudit).not.toHaveBeenCalled()
+  })
+
+  it('does not send for a hire already linked to a login', async () => {
+    roster('nathan@tahi.studio', 'user_existing')
+
+    const res = await teamInvite(post(), params)
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as { status: string }
+    expect(body.status).toBe('already_linked')
+    expect(sendEmailCalls()).toHaveLength(0)
   })
 })
 
@@ -210,12 +235,17 @@ describe('POST /api/admin/team/[id]/invite', () => {
 // ---------------------------------------------------------------------------
 
 describe('POST /api/portal/people', () => {
-  /** The admin-gate probe answers first, then the duplicate-email probe. */
+  /** admin-gate probe, dedupe probe, org name, caller name, in that order. */
   function primed() {
-    state.selectRows = [[{ portalRole: 'admin' }], []]
+    state.selectRows = [
+      [{ portalRole: 'admin' }],
+      [],
+      [{ name: 'Acme Co' }],
+      [{ name: 'Ana Owner' }],
+    ]
   }
 
-  it('refuses a colleague at the client own domain, and mints nothing', async () => {
+  it('sends the Studio Ledger email and rosters the invite, with no Clerk call anywhere', async () => {
     primed()
 
     const res = await portalPeople(jsonReq('/api/portal/people', {
@@ -223,38 +253,25 @@ describe('POST /api/portal/people', () => {
       email: 'sam@acme.com',
     }))
 
+    expect(res.status).toBe(201)
+    expect(sendEmailCalls()).toHaveLength(1)
+    const [to, subject, , , context] = sendEmailCalls()[0]
+    expect(to).toBe('sam@acme.com')
+    expect(subject).toBe('Ana Owner invited you to Acme Co on Tahi')
+    expect(context).toMatchObject({ template: 'seat-invite', orgId: 'org_acme' })
+    expect(contactRows()).toHaveLength(1)
+  })
+
+  it('409s and rosters nothing when the allowlist holds the address back', async () => {
+    primed()
+    vi.mocked(sendEmail).mockResolvedValue({ success: false, error: 'Held back by the email allowlist (1 recipient).', suppressedCount: 1 })
+
+    const res = await portalPeople(jsonReq('/api/portal/people', { email: 'sam@acme.com' }))
+
     expect(res.status).toBe(409)
-    expect(state.clerkCalls).toHaveLength(0)
-    // No roster row either: a "Pending" chip must always map to a real
-    // invitation, and there is not one.
-    expect(contactRows()).toHaveLength(0)
     const body = await res.json() as { error: string }
     expect(body.error).toBe('Held back by the email allowlist')
-  })
-
-  it('logs it against the client, so the log answers "what have we withheld from them"', async () => {
-    primed()
-
-    await portalPeople(jsonReq('/api/portal/people', { email: 'sam@acme.com' }))
-
-    expect(suppressions()[0]).toMatchObject({
-      to: 'sam@acme.com',
-      orgId: 'org_acme',
-      template: 'clerk-org-invite',
-    })
-  })
-
-  it('mints and rosters an allowed address', async () => {
-    primed()
-
-    const res = await portalPeople(jsonReq('/api/portal/people', {
-      name: 'Liam',
-      email: 'business@tahi.studio',
-    }))
-
-    expect(res.status).toBe(201)
-    expect(state.clerkCalls).toHaveLength(1)
-    expect(contactRows()).toHaveLength(1)
+    expect(contactRows()).toHaveLength(0)
   })
 })
 
@@ -263,37 +280,40 @@ describe('POST /api/portal/people', () => {
 // ---------------------------------------------------------------------------
 
 describe('POST /api/portal/invites', () => {
-  /** The admin-gate probe answers first, then the roster read. */
+  /** admin-gate probe, roster, org name, caller name, in that order. */
   function primed(roster: Row[] = []) {
-    state.selectRows = [[{ portalRole: 'admin' }], roster]
+    state.selectRows = [[{ portalRole: 'admin' }], roster, [{ name: 'Acme Co' }], [{ name: 'Ana Owner' }]]
   }
 
   it('409s when the whole batch is withheld, so an empty result cannot read as success', async () => {
     primed()
+    vi.mocked(sendEmail).mockResolvedValue({ success: false, error: 'Held back by the email allowlist (2 recipients).', suppressedCount: 2 })
 
     const res = await portalInvites(jsonReq('/api/portal/invites', {
       emails: ['sam@acme.com', 'raj@acme.com'],
     }))
 
     expect(res.status).toBe(409)
-    expect(state.clerkCalls).toHaveLength(0)
     expect(contactRows()).toHaveLength(0)
     const body = await res.json() as { suppressed: string[] }
     expect(body.suppressed).toEqual(['sam@acme.com', 'raj@acme.com'])
-    expect(suppressions()).toHaveLength(2)
   })
 
-  it('invites the address that passes and withholds the rest, rather than failing whole', async () => {
+  it('invites the address that sends and withholds the rest, rather than failing whole', async () => {
     primed()
+    vi.mocked(sendEmail).mockImplementation(async (to) => {
+      const address = Array.isArray(to) ? to[0] : to
+      if (address === 'sam@acme.com') {
+        return { success: false, error: 'Held back by the email allowlist (1 recipient).', suppressedCount: 1 }
+      }
+      return { success: true }
+    })
 
     const res = await portalInvites(jsonReq('/api/portal/invites', {
       emails: ['business@tahi.studio', 'sam@acme.com'],
     }))
 
     expect(res.status).toBe(200)
-    expect(state.clerkCalls).toHaveLength(1)
-    expect(state.clerkCalls[0]).toMatchObject({ emailAddress: 'business@tahi.studio' })
-
     const body = await res.json() as {
       invited: number
       suppressed: string[]
@@ -306,5 +326,11 @@ describe('POST /api/portal/invites', () => {
     // Only the invited colleague gets a waiting contact row.
     expect(contactRows()).toHaveLength(1)
     expect(contactRows()[0]).toMatchObject({ email: 'business@tahi.studio' })
+
+    // Every send named the org and the seat-invite template, whether it was
+    // withheld or not: the allowlist decides delivery, not what we tried to send.
+    for (const [, , , , context] of sendEmailCalls()) {
+      expect(context).toMatchObject({ template: 'seat-invite', orgId: 'org_acme' })
+    }
   })
 })

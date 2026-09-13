@@ -19,6 +19,7 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
+import { useClerk } from '@clerk/nextjs'
 import { cn } from '@/lib/utils'
 import {
   SceneShell,
@@ -82,17 +83,59 @@ export function TeamWelcomeContent({
   hire,
   buddy,
   redirectTo,
+  inviteToken,
 }: {
   hire: TeamHire
   buddy: TeamBuddy
   redirectTo: string
+  /** An app invite token (flow 'team'), when this visit carries a live one. */
+  inviteToken?: string
 }) {
   const router = useRouter()
+  const { setActive } = useClerk()
+  const [joinError, setJoinError] = React.useState<string | null>(null)
   const onComplete = () => {
     // Best-effort: mark onboarding done so re-entry skips to the dashboard.
     fetch('/api/onboarding/complete', { method: 'POST' }).catch(() => {})
     router.push(redirectTo)
   }
+
+  // A hire invited via our own token (rather than Clerk's own organization
+  // invitation, which used to grant the membership as part of accepting it)
+  // has no Tahi org membership yet. Consume the token once on mount and
+  // activate the Tahi org for this session, so lib/team-link.ts can claim the
+  // roster row once redirectTo lands on a dashboard page. A ref guards
+  // against a double run; mirrors components/tahi/onboarding-content.tsx.
+  const inviteHandledRef = React.useRef(false)
+  React.useEffect(() => {
+    if (!inviteToken || inviteHandledRef.current) return
+    inviteHandledRef.current = true
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/admin/team/accept-invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: inviteToken }),
+        })
+        const json = (await res.json()) as { clerkOrgId?: string; error?: string }
+        if (cancelled) return
+        if (res.ok && json.clerkOrgId) {
+          if (setActive) await setActive({ organization: json.clerkOrgId })
+        } else {
+          inviteHandledRef.current = false // allow a retry on a transient failure
+          setJoinError(json.error ?? 'We could not add you to the Tahi workspace. Please contact the studio.')
+        }
+      } catch {
+        if (!cancelled) {
+          inviteHandledRef.current = false
+          setJoinError('We could not add you to the Tahi workspace. Please contact the studio.')
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [inviteToken, setActive])
+
   const [idx, setIdx] = React.useState(0)
   const [dir, setDir] = React.useState(1)
   const [photo, setPhoto] = React.useState<string | null>(null)
@@ -177,6 +220,7 @@ export function TeamWelcomeContent({
                 <div className={cn('ob-body', dir > 0 ? 'ob-in-up' : 'ob-in-down')} key={stepId} ref={growInner}>
                   <h1 className="ob-h1">{title}</h1>
                   <p className="ob-sub">{sub}</p>
+                  {joinError && <div className="ob-decline" role="alert">{joinError}</div>}
                   {body}
                 </div>
               </div>
