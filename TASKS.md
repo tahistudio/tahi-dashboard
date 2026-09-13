@@ -164,6 +164,14 @@ seen on production.
   contacts); the dashboard gate and the wizard both consult it and stamp the
   user.
 
+## Liam's morning asks (2026-09-14, after the review)
+
+- [~] LW.21 - [FE] Requests kanban shows two vertical scrollbars; one page scrollbar only. Agent requests-ui-fixes.
+- [~] LW.22 - [FE/BE] Files have no way to remove or delete a file: a Delete action on the client Files page, the request Files panel and the admin list, R2 object first then the row, confirm dialog, MCP delete_file. Agent files-delete.
+- [~] LW.23 - [BE/FE] Services hidden for clients for now, the way Messages is (client default deny, nav, page guard, portal API 403, per-org override still possible). Agent hide-services-clients. Note: this reverses the 2026-09-12 direction that clients compare plans on Services; Liam's call today.
+- [~] LW.24 - [FE] AI request wizard composer shows two focus rings; keep only the outer composer ring. Agent requests-ui-fixes.
+- [x] LW.25 - Comment ball: click, then pick the element the comment is about; soft snap to the nearest edge (b0b5eb17, live, migration 0101 applied).
+
 ## Liam's late-evening asks, for the beta
 
 - [~] PM.1 (MERGED e9feda94, live, both defaults set to Liam on production 2026-09-14 00:05 NZ; Liam to confirm from Settings) - [BE/FE] **Default project manager for new clients, by engagement
