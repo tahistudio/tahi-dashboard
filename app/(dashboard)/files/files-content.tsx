@@ -16,11 +16,12 @@
  */
 
 import { useCallback, useRef, useState } from 'react'
-import { Download, FolderOpen, Upload } from 'lucide-react'
+import { Download, FolderOpen, Trash2, Upload } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useResource } from '@/lib/use-resource'
 import { Callout } from '@/components/tahi/callout'
 import { Card } from '@/components/tahi/card'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { DataTable } from '@/components/tahi/data-table'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { PageHeader } from '@/components/tahi/page-header'
@@ -39,6 +40,10 @@ export interface PortalFile {
   uploadedBy: string
   ago: string
   url: string
+  /** From the route: your own upload, not attached to a message. Only files
+   *  meeting both are deletable from this list; a studio deliverable or a
+   *  message attachment is not, whatever the client's org otherwise sees. */
+  deletable: boolean
 }
 
 interface PresignResponse {
@@ -48,47 +53,92 @@ interface PresignResponse {
 }
 
 /** Below md the five-column table becomes a card list (CLAUDE.md rules out a
- *  sideways-scrolling table on a 375px phone). The whole card is the download
- *  target, so the touch area is the row rather than a small trailing button. */
-function FileMobileCard({ file }: { file: PortalFile }) {
+ *  sideways-scrolling table on a 375px phone). Download stays a full-width
+ *  anchor target; Delete, when this file is deletable, is its own 44px
+ *  button beside it rather than nested inside the anchor. */
+function FileMobileCard({
+  file,
+  onRequestDelete,
+  deleteDisabled,
+}: {
+  file: PortalFile
+  onRequestDelete: (file: PortalFile) => void
+  deleteDisabled: boolean
+}) {
   return (
-    <a
-      href={apiPath(file.url)}
-      download
-      className="tahi-focus-ring"
+    <div
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '0.75rem',
-        minHeight: '2.75rem',
+        gap: '0.5rem',
         padding: 'var(--space-3)',
         border: '1px solid var(--color-border)',
         borderRadius: 'var(--radius-leaf-sm)',
         background: 'var(--color-bg)',
-        textDecoration: 'none',
       }}
     >
-      <span style={{ flex: 1, minWidth: 0 }}>
-        <span
-          data-private
+      <a
+        href={apiPath(file.url)}
+        download
+        className="tahi-focus-ring"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+          flex: 1,
+          minWidth: 0,
+          minHeight: '2.75rem',
+          textDecoration: 'none',
+        }}
+      >
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span
+            data-private
+            style={{
+              display: 'block',
+              color: 'var(--color-text)',
+              fontWeight: 600,
+              fontSize: 'var(--text-base)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {file.name}
+          </span>
+          <span style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
+            {[file.type, file.uploadedBy, file.ago].filter(Boolean).join(' · ')}
+          </span>
+        </span>
+        <Download className="w-4 h-4" aria-hidden="true" style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
+      </a>
+      {file.deletable && (
+        <button
+          type="button"
+          onClick={() => onRequestDelete(file)}
+          disabled={deleteDisabled}
+          aria-label={`Delete ${file.name}`}
+          title={deleteDisabled ? 'Read-only client view' : 'Delete'}
+          className="tahi-focus-ring"
           style={{
-            display: 'block',
-            color: 'var(--color-text)',
-            fontWeight: 600,
-            fontSize: 'var(--text-base)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
+            flexShrink: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: '2.75rem',
+            minWidth: '2.75rem',
+            borderRadius: 'var(--radius-leaf-sm)',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg)',
+            color: 'var(--color-danger)',
+            cursor: deleteDisabled ? 'not-allowed' : 'pointer',
+            opacity: deleteDisabled ? 0.5 : 1,
           }}
         >
-          {file.name}
-        </span>
-        <span style={{ display: 'block', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
-          {[file.type, file.uploadedBy, file.ago].filter(Boolean).join(' · ')}
-        </span>
-      </span>
-      <Download className="w-4 h-4" aria-hidden="true" style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
-    </a>
+          <Trash2 className="w-4 h-4" aria-hidden="true" />
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -105,7 +155,7 @@ export function FilesContent() {
   // quietly not be there. Naming the previewed org is what a studio-side
   // upload to a client already does; the resolver validates and access-scopes
   // it, and ignores it entirely for a real client session.
-  const { impersonatedOrgId } = useImpersonation()
+  const { impersonatedOrgId, previewIsReadOnly } = useImpersonation()
 
   const files = data?.items ?? []
   // SWR keeps the previous payload across a failed revalidation, so a failure
@@ -114,6 +164,30 @@ export function FilesContent() {
   // upload is the likely one) gets a banner above the table it still has.
   const failed = !!error && !data
   const staleWarning = !!error && !!data
+
+  const [deleteTarget, setDeleteTarget] = useState<PortalFile | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const handleDelete = useCallback(async () => {
+    if (!deleteTarget) return
+    const target = deleteTarget
+    const previous = data
+    setDeleting(true)
+    // Optimistic removal, no revalidation yet: the row is gone from the list
+    // the instant Delete is confirmed, and rolled back if the write fails.
+    await mutate(previous ? { items: previous.items.filter(f => f.id !== target.id) } : previous, false)
+    try {
+      const res = await fetch(apiPath(`/api/uploads/${target.id}`), { method: 'DELETE' })
+      if (!res.ok) throw new Error('delete failed')
+      showToast('File deleted', 'success')
+      setDeleteTarget(null)
+    } catch {
+      await mutate(previous, false)
+      showToast('Could not delete the file. Please try again.', 'error')
+    } finally {
+      setDeleting(false)
+    }
+  }, [deleteTarget, data, mutate, showToast])
 
   const uploadOne = useCallback(async (file: File) => {
     const mime = file.type || 'application/octet-stream'
@@ -310,12 +384,49 @@ export function FilesContent() {
                   </a>
                 ),
               },
+              {
+                key: 'delete',
+                header: '',
+                align: 'right',
+                width: '3.5rem',
+                render: r => r.deletable ? (
+                  <button
+                    type="button"
+                    onClick={() => setDeleteTarget(r)}
+                    disabled={previewIsReadOnly}
+                    aria-label={`Delete ${r.name}`}
+                    title={previewIsReadOnly ? 'Read-only client view' : 'Delete'}
+                    className="tahi-focus-ring"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      minHeight: '2.75rem',
+                      minWidth: '2.75rem',
+                      borderRadius: 'var(--radius-leaf-sm)',
+                      border: '1px solid var(--color-border)',
+                      background: 'var(--color-bg)',
+                      color: 'var(--color-danger)',
+                      cursor: previewIsReadOnly ? 'not-allowed' : 'pointer',
+                      opacity: previewIsReadOnly ? 0.5 : 1,
+                    }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                ) : null,
+              },
             ]}
             rows={files}
             getRowId={r => r.id}
             loading={isLoading}
             ariaLabel="Your files"
-            mobileCard={r => <FileMobileCard file={r} />}
+            mobileCard={r => (
+              <FileMobileCard
+                file={r}
+                onRequestDelete={setDeleteTarget}
+                deleteDisabled={previewIsReadOnly}
+              />
+            )}
             empty={
               <EmptyState
                 icon={<FolderOpen className="w-7 h-7" aria-hidden="true" />}
@@ -327,6 +438,16 @@ export function FilesContent() {
           />
         )}
       </Card>
+
+      <ConfirmDialog
+        open={deleteTarget != null}
+        title={`Delete ${deleteTarget?.name ?? 'this file'}?`}
+        description="This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => { if (!deleting) setDeleteTarget(null) }}
+      />
     </div>
   )
 }

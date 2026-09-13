@@ -6,6 +6,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  decideUploadDelete,
   decideUploadRead,
   resolveD1OrgId,
   resolveTargetOrgId,
@@ -110,6 +111,50 @@ describe('decideUploadRead', () => {
       const d = decideUploadRead({ ...base, keyOrgId: 'org_other' })
       expect(d).toEqual({ outcome: 'deny', status: 403, error: 'Forbidden' })
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// decideUploadDelete: the delete-only tightening over decideUploadRead
+// ---------------------------------------------------------------------------
+describe('decideUploadDelete', () => {
+  const base = {
+    isAdmin: false,
+    uploadedByType: 'contact',
+    fileOrgId: 'org_d1' as string | null,
+    keyOrgId: null as string | null,
+    requesterClerkOrgId: 'org_clerk' as string | null,
+    requesterD1OrgId: 'org_d1' as string | null,
+  }
+
+  it('allows a contact to delete a file their own org uploaded', () => {
+    const d = decideUploadDelete({ ...base, uploadedByType: 'contact' })
+    expect(d.outcome).toBe('allow')
+  })
+
+  it('refuses a contact deleting a studio deliverable in their own org', () => {
+    const d = decideUploadDelete({ ...base, uploadedByType: 'team_member' })
+    expect(d).toEqual({ outcome: 'deny', status: 403, error: 'Only files you uploaded yourself can be deleted' })
+  })
+
+  it('still refuses cross-org before it ever looks at the uploader', () => {
+    const d = decideUploadDelete({ ...base, uploadedByType: 'contact', fileOrgId: 'org_other' })
+    expect(d).toEqual({ outcome: 'deny', status: 403, error: 'Forbidden' })
+  })
+
+  it('lets an admin delete any uploader\'s file, subject to org scoping', () => {
+    const d = decideUploadDelete({ ...base, isAdmin: true, uploadedByType: 'team_member' })
+    expect(d).toEqual({ outcome: 'admin_scope_check', targetOrgId: 'org_d1' })
+  })
+
+  it('legacy key-prefix fallback: a contact may still not delete a team upload', () => {
+    const d = decideUploadDelete({
+      ...base,
+      uploadedByType: 'team_member',
+      fileOrgId: null,
+      keyOrgId: 'org_d1',
+    })
+    expect(d.outcome).toBe('deny')
   })
 })
 

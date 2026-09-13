@@ -501,6 +501,9 @@ export const TOOLS: ToolDef[] = [
   tool('list_request_files', 'List the files attached to one request, with uploader and size', {
     requestId: prop('string', 'Request ID'),
   }, ['requestId']),
+  tool('delete_file', 'Hard-delete a file: removes the R2 object first, then the files row. Runs as admin (any file, scoped by team-member access to its org), so this can remove a studio deliverable a client could not. If the R2 delete fails the row is left in place and this answers with an error rather than silently orphaning the row.', {
+    fileId: prop('string', 'File ID (the files table row, not the storage key)'),
+  }, ['fileId']),
 
   // ── Kanban columns ────────────────────────────────────────────────────
   tool('list_kanban_columns', 'List the request board columns. Pass orgId for one client\'s board; it falls back to the global set with inherited:true when that client has none of its own.', {

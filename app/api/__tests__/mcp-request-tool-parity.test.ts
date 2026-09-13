@@ -100,6 +100,14 @@ describe('request reads', () => {
   })
 })
 
+describe('delete_file', () => {
+  it('DELETEs the shared uploads route by file id', () => {
+    const mapped = call('delete_file', { fileId: 'file_1' })
+    expect(mapped.path).toBe('/api/uploads/file_1')
+    expect(mapped.method).toBe('DELETE')
+  })
+})
+
 describe('request steps', () => {
   it('posts a new step under the request', () => {
     const mapped = call('create_request_step', { requestId: 'r1', title: 'Wireframes' })

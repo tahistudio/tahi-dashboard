@@ -2715,6 +2715,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                viewer's lens, because the upload and the delete behind it land
                as the real super admin and genuinely mutate the row. */
             canMutate={!isViewerImpersonation}
+            isAdmin={isAdmin}
           />
 
           {/* Activity log - collapsed by default at the bottom */}
@@ -4547,13 +4548,18 @@ interface FilesPanelProps {
   /** False under a viewer's lens: view and download stay open, attaching and
    *  deleting do not. Defaults to true so any other caller is unaffected. */
   canMutate?: boolean
+  /** Studio session vs a real client. Gates which files a non-admin may
+   *  delete: DELETE /api/uploads/[fileId] refuses a contact deleting a
+   *  studio deliverable, so the row hides the button rather than offering
+   *  an action the API will 403. */
+  isAdmin: boolean
 }
 
 // Files are attachable by both studio and client: uploads authorise non-admins
 // server-side, so there is no ADMIN gate on this panel. There is a write gate,
 // because a super admin standing in a viewer's shoes must not be able to
 // attach or destroy a file from a page they are only reading.
-function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint, canMutate = true }: FilesPanelProps) {
+function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint, canMutate = true, isAdmin }: FilesPanelProps) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -4789,7 +4795,11 @@ function FilesPanel({ files, onRefresh, requestId, orgId, emptyHint, canMutate =
               <FileActions
                 file={f}
                 onDeleted={onRefresh}
-                canDelete={canMutate}
+                /* A client may only delete a file their own org uploaded
+                   (uploadedByType 'contact'), never a studio deliverable -
+                   see DELETE /api/uploads/[fileId]. Admins are unrestricted
+                   by uploader, same as the route. */
+                canDelete={canMutate && (isAdmin || f.uploadedByType === 'contact')}
               />
             </div>
           ))}

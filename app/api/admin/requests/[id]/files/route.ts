@@ -49,6 +49,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       mimeType: schema.files.mimeType,
       sizeBytes: schema.files.sizeBytes,
       uploadedByType: schema.files.uploadedByType,
+      messageId: schema.files.messageId,
       createdAt: schema.files.createdAt,
       // Uploader name : join team_members if uploaded by team
       uploaderName: schema.teamMembers.name,
