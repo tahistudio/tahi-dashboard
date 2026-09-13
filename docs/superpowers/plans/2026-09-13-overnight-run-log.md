@@ -63,6 +63,11 @@ Merged to main and pushed as 66b18917 (full suite 4080 green, lint zero, build c
 
 - GI.3 calls link and purpose editable: merged ef2feca0 after a blocking review (relink scope) was fixed; live look pending.
 
+## Catalogue Batch A (afternoon)
+
+- Merged 40f93fe6, f972f66b, a20ea023, faf6f286 (suite 4180): kickoff booking reaches Google Calendar; auth path verified plus e2e/auth-path.spec.ts; client home next-invoice date instead of TBC; tenancy proof CI workflow with a clean skip until Liam adds CLERK_PUBLISHABLE_KEY_DEV and CLERK_SECRET_KEY_DEV. Live smoke of the next-invoice copy pending the deploy.
+- Catalogue Batch B (money path) started: B1 services plan ladder port, B2 /billing lap and CT.16 default, B3 client invoices at 375, B5 IC.8 hourly export backfill stamp. B4 (studio invoices port) waits on the critic FIX and Liam's design review.
+
 ## In flight
 
 - Workflow `giant-group-batch-a` (run wf_3b66e233-82b): parser, then one builder per slice S1 to S8 from docs/superpowers/audits/2026-09-13-giant-group-readiness-plan.md in its own worktree, then one reviewer per slice. When it returns: the lead reads each review, merges non-blocking slices into main one at a time (renumber colliding migrations; apply any migration to staging and production D1 before the push), gates each merge (type-check, lint, touched vitest, next build if a route changed), pushes, watches the deploy, runs the slice's read-only live smoke on production, updates TASKS.md and STATUS.md and this log.
