@@ -13,6 +13,8 @@ import { createInvite, personaForPlanType } from '@/lib/onboarding-invites'
 import { sendEmail } from '@/lib/email'
 import { ClientInviteEmail } from '@/emails/client-invite'
 import { PLAN_TYPE_ERROR, isRetainerPlanType, normalisePlanType } from '@/lib/plan-type'
+import { assignDefaultProjectManager } from '@/lib/default-project-manager-server'
+import type { ClientEngagementType } from '@/lib/studio-project-manager'
 
 // ── GET /api/admin/clients ──────────────────────────────────────────────────
 // Query params: ?status=active&plan=maintain&search=acme&page=1
@@ -320,6 +322,16 @@ export async function POST(req: NextRequest) {
       updatedAt: now,
     })
   }
+
+  // The studio default project manager for this engagement type, if one is
+  // configured (Settings > Studio details). A retainer plan type (maintain,
+  // scale) resolves to 'retainer'; a one-off plan or no plan at all is a
+  // deliberate, known choice here (the admin either named a plan or left it
+  // blank on purpose), so it resolves to 'project' rather than the "nothing
+  // known yet" fallback. Never blocks client creation; see
+  // lib/default-project-manager-server.ts.
+  const engagementType: ClientEngagementType = isRetainerPlanType(planType) ? 'retainer' : 'project'
+  await assignDefaultProjectManager(drizzle, id, engagementType)
 
   // Fire the domain event (automations + outgoing webhooks). Non-blocking.
   await dispatchDomainEvent(drizzle, {

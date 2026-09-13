@@ -32,7 +32,11 @@ import {
   type InvoiceBankDetails,
   type InvoiceCurrency,
 } from '@/lib/invoice-pay-settings'
-import { STUDIO_PROJECT_MANAGER_SETTING_KEY } from '@/lib/studio-project-manager'
+import {
+  DEFAULT_PROJECT_MANAGER_PROJECT_SETTING_KEY,
+  DEFAULT_PROJECT_MANAGER_RETAINER_SETTING_KEY,
+  STUDIO_PROJECT_MANAGER_SETTING_KEY,
+} from '@/lib/studio-project-manager'
 import { SegmentedControl } from '@/components/tahi/segmented-control'
 
 type SettingsMap = Record<string, string | null>
@@ -139,8 +143,10 @@ function accountIsSet(account: InvoiceBankAccount | undefined): boolean {
  * studio_gst_number, studio_address, studio_billing_currency,
  * invoice_number_prefix, invoicing.defaultChannel, invoice_footer_note,
  * invoicing.bankDetails, invoicing.bankDetailsByCurrency,
- * invoicing.xeroPaymentAccountCode, invoicing.xeroEmailMode) via
- * PATCH /api/admin/settings, one call per key.
+ * invoicing.xeroPaymentAccountCode, invoicing.xeroEmailMode,
+ * studio.projectManagerId, studio.defaultProjectManagerId.retainer,
+ * studio.defaultProjectManagerId.project) via PATCH /api/admin/settings, one
+ * call per key.
  *
  * The Email delivery card below the form is a separate concern on the same
  * page (components/tahi/settings/sections/email-delivery.tsx): which addresses
@@ -187,6 +193,12 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
   // the future we'll add more." Empty means today's per-client assignments;
   // see lib/studio-project-manager.ts.
   const [projectManagerId, setProjectManagerId] = useState('')
+  // "project manager for all clients... and is the default for all new ones.
+  // this can be set in settings... by type of project/retainer." Applied only
+  // at client creation (lib/default-project-manager-server.ts); the override
+  // above still wins over everyone, new or old, while it is set.
+  const [defaultPmRetainerId, setDefaultPmRetainerId] = useState('')
+  const [defaultPmProjectId, setDefaultPmProjectId] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -218,6 +230,8 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
       // The GET fills this one too, so an absent row still reads as a choice.
       setXeroEmailMode(resolveXeroEmailMode(data.settings[XERO_EMAIL_MODE_SETTING_KEY]))
       setProjectManagerId(data.settings[STUDIO_PROJECT_MANAGER_SETTING_KEY] ?? '')
+      setDefaultPmRetainerId(data.settings[DEFAULT_PROJECT_MANAGER_RETAINER_SETTING_KEY] ?? '')
+      setDefaultPmProjectId(data.settings[DEFAULT_PROJECT_MANAGER_PROJECT_SETTING_KEY] ?? '')
     }
   }, [data])
 
@@ -330,6 +344,8 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
         saveKey(XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY, xeroAccountCode.trim()),
         saveKey(XERO_EMAIL_MODE_SETTING_KEY, xeroEmailMode),
         saveKey(STUDIO_PROJECT_MANAGER_SETTING_KEY, projectManagerId.trim()),
+        saveKey(DEFAULT_PROJECT_MANAGER_RETAINER_SETTING_KEY, defaultPmRetainerId.trim()),
+        saveKey(DEFAULT_PROJECT_MANAGER_PROJECT_SETTING_KEY, defaultPmProjectId.trim()),
       ])
       setSaved(true)
       await mutate()
@@ -510,6 +526,64 @@ export function StudioDetailsSection({ isAdmin }: { isAdmin?: boolean } = {}) {
               }}
             >
               Leave empty to use per-client assignments.
+            </small>
+          </div>
+          <div className="set-field" style={{ gridColumn: '1 / -1' }}>
+            <label htmlFor="studio-default-pm-retainer">Project manager for new retainer clients</label>
+            <select
+              id="studio-default-pm-retainer"
+              className="set-input"
+              value={defaultPmRetainerId}
+              onChange={(e) => setDefaultPmRetainerId(e.target.value)}
+              aria-describedby="studio-default-pm-retainer-help"
+            >
+              <option value="">No default</option>
+              {teamOptions.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+            <small
+              id="studio-default-pm-retainer-help"
+              style={{
+                display: 'block',
+                marginTop: 5,
+                color: 'var(--text-faint)',
+                font: '500 12px Manrope',
+              }}
+            >
+              Assigned when a client is created; the setting above overrides everyone while it is
+              set.
+            </small>
+          </div>
+          <div className="set-field" style={{ gridColumn: '1 / -1' }}>
+            <label htmlFor="studio-default-pm-project">Project manager for new project clients</label>
+            <select
+              id="studio-default-pm-project"
+              className="set-input"
+              value={defaultPmProjectId}
+              onChange={(e) => setDefaultPmProjectId(e.target.value)}
+              aria-describedby="studio-default-pm-project-help"
+            >
+              <option value="">No default</option>
+              {teamOptions.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+            <small
+              id="studio-default-pm-project-help"
+              style={{
+                display: 'block',
+                marginTop: 5,
+                color: 'var(--text-faint)',
+                font: '500 12px Manrope',
+              }}
+            >
+              Assigned when a client is created; the setting above overrides everyone while it is
+              set.
             </small>
           </div>
 

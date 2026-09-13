@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { dispatchDomainEvent } from '@/lib/events'
+import { assignDefaultProjectManager } from '@/lib/default-project-manager-server'
 
 type EventsDb = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -153,6 +154,13 @@ export async function POST(req: NextRequest) {
       updatedAt: now,
     })
   }
+
+  // The studio default project manager, if one is configured. A self-serve
+  // signup has not picked a plan yet (planType is 'none' above), which is
+  // exactly the "nothing known yet" case: default to retainer rather than
+  // project, same as every other caller with no engagement signal at all.
+  // Never blocks provisioning; see lib/default-project-manager-server.ts.
+  await assignDefaultProjectManager(database as EventsDb, id, 'retainer')
 
   // Fire the domain event (automations + outgoing webhooks). Non-blocking.
   await dispatchDomainEvent(database as EventsDb, {
