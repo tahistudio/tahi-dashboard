@@ -3,7 +3,7 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, gte, lt, inArray, isNull, isNotNull, sql } from 'drizzle-orm'
+import { eq, and, or, gte, lt, inArray, isNull, isNotNull, sql } from 'drizzle-orm'
 import { callXeroAPI } from '@/lib/xero'
 import {
   planHourlyExport,
@@ -23,10 +23,14 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  * Xero. Four guards stand between the time sheet and a client's bill, and each
  * one names itself in the response rather than skipping quietly:
  *
- *  1. Idempotency. Only entries with time_entries.invoice_id IS NULL are
- *     candidates, and every entry billed is stamped with the invoice it landed
- *     on inside the same run (migration 0095). Re-running the same period
- *     produces zero new lines and says which clients were already exported.
+ *  1. Idempotency. Only entries with time_entries.invoice_id IS NULL AND
+ *     invoiced_at IS NULL are candidates, and every entry billed is stamped
+ *     with the invoice it landed on inside the same run (migration 0095).
+ *     Re-running the same period produces zero new lines and says which
+ *     clients were already exported. invoiced_at without invoice_id is IC.8's
+ *     pre-cutover stamp (POST /api/admin/time/stamp-invoiced): hours already
+ *     invoiced by hand before this export existed, marked as accounted for
+ *     with no local invoice to point at.
  *  2. Billing model. Only organisations.billing_model = 'hourly' is eligible.
  *     A retainer client's hours are already paid for by the retainer, and a
  *     project client's by the project, so billing them per hour charges twice.
@@ -94,9 +98,17 @@ export async function POST(req: NextRequest) {
     eq(schema.timeEntries.billable, true),
   )
 
-  // Candidates: billable, in the month, never exported. The requests join
-  // carries the org that OWNS the work, which is not always the org being
-  // billed and is the only per-entry currency signal that exists.
+  // Candidates: billable, in the month, never exported AND never stamped.
+  // invoiced_at is the second half of the idempotency key, added for IC.8
+  // (POST /api/admin/time/stamp-invoiced): an entry billed by hand before this
+  // export existed carries invoice_id NULL forever (migration 0095 shipped
+  // with no backfill), so invoice_id alone cannot tell "never billed" apart
+  // from "billed outside this app before the export could know." The stamp
+  // route marks the second case with invoiced_at and leaves invoice_id NULL on
+  // purpose (there is no local invoice for it), so both columns have to read
+  // NULL for an entry to be a candidate here. The requests join carries the
+  // org that OWNS the work, which is not always the org being billed and is
+  // the only per-entry currency signal that exists.
   const entryRows = await database
     .select({
       id: schema.timeEntries.id,
@@ -107,18 +119,26 @@ export async function POST(req: NextRequest) {
     })
     .from(schema.timeEntries)
     .leftJoin(schema.requests, eq(schema.timeEntries.requestId, schema.requests.id))
-    .where(and(inWindow, isNull(schema.timeEntries.invoiceId)))
+    .where(and(
+      inWindow,
+      isNull(schema.timeEntries.invoiceId),
+      isNull(schema.timeEntries.invoicedAt),
+    ))
 
-  // The other half of the same window: what an earlier run already billed. Read
-  // so a re-run can say why it is doing nothing instead of returning an empty
-  // list that looks like a broken query.
+  // The other half of the same window: what an earlier run already billed, or
+  // what IC.8's stamp route already marked as accounted for. Read so a re-run
+  // can say why it is doing nothing instead of returning an empty list that
+  // looks like a broken query.
   const exportedRows = await database
     .select({
       id: schema.timeEntries.id,
       orgId: schema.timeEntries.orgId,
     })
     .from(schema.timeEntries)
-    .where(and(inWindow, isNotNull(schema.timeEntries.invoiceId)))
+    .where(and(
+      inWindow,
+      or(isNotNull(schema.timeEntries.invoiceId), isNotNull(schema.timeEntries.invoicedAt)),
+    ))
 
   const entries: HourlyExportEntry[] = entryRows.map(row => ({
     id: row.id,
