@@ -60,6 +60,31 @@ Eight auditors found 9 blockers, 17 majors and 6 minors on Giant Group's path; t
 - [x] Portal home truth (5829bf0d): the client team card reads the assigned project manager first (teamMemberAccess, the table assign_client_pm writes) and falls back to the studio default owner, so "Your team is being assigned" no longer shows for Giant Group; the Google Calendar sync cron no longer overwrites a manually pasted Teams or Zoom link with null on its next 15 minute tick (this is why the N8N Content Engine call lost its Join link within minutes of being set). Restore the link once, after the deploy.
 - [ ] CB4 studio invoices port waits on the critic FIX (MR.6) and Liam's design review.
 
+## Liam's dummy-client walk-through, every message tracked (2026-09-13 afternoon to evening)
+
+Liam walked the portal as a dummy client (Company Inc, contacts on liammiller.dev) and sent these in order. Each line names where it stands. Nothing here flips to [x] until it is merged, deployed and seen on production.
+
+- [x] LW.1 liammiller.dev addresses receive client emails. Applied on production 2026-09-13: email.allowedDomains adds liammiller.dev, email.allowedAddresses cleared (the address list narrows the domain list). Side effect: every tahi.studio mailbox passes too; re-narrow when the test is over.
+- [~] LW.2 Hide the video part of the onboarding flow. Agent onboarding-lead-video-2: ONBOARDING_VIDEO_ENABLED = false gates the VideoModal and the checklist video step.
+- [~] LW.3 Liam is the project manager and lead for every client, no matter what, for now. Agent onboarding-lead-video-2: setting studio.projectManagerId read by one resolver; onboarding lead card, "30 min with X", "Grab a time with X", portal team card, kickoff host. LIAM sets the value once from Settings after deploy.
+- [~] LW.4 "Staci is your lead. Reach him any time" -> Liam, and pronoun-free copy. Same agent.
+- [~] LW.5 "30 min with Staci" and "Grab a time with Staci to set direction" -> Liam. Same agent, same resolver.
+- [~] LW.6 Kickoff times synced to Liam's calendar, and the client's timezone named. Agent kickoff-slots-2: GET /api/portal/kickoff-slots (NZ window minus Google free/busy), SlotPicker fetches it, "Times shown in <zone> (your time)". Needs LW.8b.
+- [x] LW.7 Every kickoff slot failed with "We could not hold that time" in the admin browser. Cause: read-only Client view, where the booking POST answers 403 by design. Booking works in a real client session (Kickoff call for Company Inc, Monday 09:30 NZ). [~] The wizard now says so and disables Book in Client view (agent kickoff-slots-2).
+- [~] LW.8 "The call went through, just wasn't booked" (no calendar event, no meet link). Cause: the production Google grant holds only calendar.events.readonly, so the event insert was refused and swallowed without a log. 03406711 requests calendar.events and calendar.freebusy and logs the failure. LW.8b LIAM: after the deploy, Settings > Integrations > Google > reconnect, then book a kickoff again and confirm the event and Join link.
+- [~] LW.9 Hide the onboarding checklist card on the client home for now (it will come back). Agent onboarding-lead-video-2: CLIENT_HOME_ONBOARDING_CHECKLIST_ENABLED = false.
+- [~] LW.10 Client home shows three New request CTAs. Agent client-home-2: one primary CTA.
+- [~] LW.11 "Your project, phase by phase" shown to a custom-price retainer; custom plan type means custom price, not a project. Agent client-home-2: presentation keyed on the engagement, not the plan type.
+- [~] LW.12 Request detail (admin): two side cards collapse to a sliver at mid widths and trap wheel scroll. Agent request-detail-rail-fix-2.
+- [~] LW.13 AI request wizard prints raw markdown (** and 1.). Agent ai-wizard-2: safe renderer plus a tighter prompt.
+- [~] LW.14 AI wizard composer: focus state too small, does not grow with the text. Same agent: auto-growing textarea with the shared focus state.
+- [~] LW.15 AI wizard: only one of three drafts can be added; "Create 3 requests" must create all. Same agent.
+- [~] LW.16 AI wizard agrees to impossible timelines ("days" for a 15 to 20 page site) and flat 8h estimates. Same agent: honesty rule, scope-based estimates from the studio's own numbers.
+- [~] LW.17 AI wizard should use what the studio already knows about the client (profile, brands, past requests) and ask which brand or website when there are several. Same agent.
+- [~] LW.18 Seat invites arrive as Clerk's default email; they should be Tahi's own email. Agent invite-email.
+- [~] LW.19 BIG BUG: accepting a seat invite to an onboarded org lands on the onboarding wizard ("Welcome to Tahi... Staci is your lead") instead of inside the org. Cause: app/(dashboard)/layout.tsx reads onboarding completion off the individual user's Clerk metadata. Agent seat-landing: completion is a property of the organisation.
+- [x] LW.20 Teams link on the N8N Content Engine call restored after the calendar sync fix (5829bf0d) stopped wiping it.
+
 ## Client integrations (Giant Group asks, Liam 2026-09-13)
 
 - [ ] GI.1 - [Design first, then BE] **Chat bot into Tahi.** A WhatsApp or Slack bot the client types or voice-notes to; the message (voice transcribed) becomes a request on the client's organisation with the sender as the contact, and the studio gets the normal request_created notification. Needs: a channel adapter per platform, sender-to-contact matching, transcription, an idempotency key per message, the same intake validation as the New request dialog. Memory: project_client_integrations_ideas_2026_09_13.
