@@ -127,6 +127,9 @@ interface SubscriptionBody {
     customRate: boolean
     canManagePayment: boolean
     trackCount: number
+    nextInvoiceDate: string | null
+    invoiceChannel: string
+    billingInterval: string
   } | null
   billing?: { monthlyRate: number; currency: string; cycleTotal: number }
   plans: Array<{ id: string; monthlyRate: number }>
@@ -150,12 +153,13 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 describe('GET /api/portal/subscription plan truth', () => {
   it('serves the negotiated rate in its own currency, and the configured track count', async () => {
-    // Reads, in order: settings (plan catalogue), subscription, org, raw
-    // custom_mrr, tracks.
+    // Reads, in order: settings (plan catalogue), subscription, org, settings
+    // (studio default invoice channel), raw custom_mrr, tracks.
     const { handle, entries } = makeDb([
       [],
       [SUB_ROW],
       [ORG_CUSTOM_TRACKS],
+      [],
       [{ custom_mrr: 2000, custom_mrr_currency: 'GBP' }],
       [SMALL_TRACK_ROW],
     ])
@@ -180,7 +184,7 @@ describe('GET /api/portal/subscription plan truth', () => {
     expect(body.billing?.cycleTotal).toBe(2000)
     // The catalogue is untouched: those are studio list prices in NZD.
     expect(body.plans.find(p => p.id === 'scale')?.monthlyRate).toBe(4000)
-    expect(entries).toEqual(['select', 'select', 'select', 'all', 'select'])
+    expect(entries).toEqual(['select', 'select', 'select', 'select', 'all', 'select'])
   })
 
   it('falls back to the catalogue rate in NZD when the client has no negotiated rate', async () => {
@@ -188,6 +192,7 @@ describe('GET /api/portal/subscription plan truth', () => {
       [],
       [SUB_ROW],
       [{ preferredCurrency: 'NZD', stripeCustomerId: 'cus_123', tracksMode: 'auto', customSmallTracks: 0, customLargeTracks: 0 }],
+      [],
       [{ custom_mrr: null, custom_mrr_currency: null }],
       [SMALL_TRACK_ROW],
     ])
@@ -210,6 +215,7 @@ describe('GET /api/portal/subscription plan truth', () => {
       [],
       [SUB_ROW],
       [ORG_CUSTOM_TRACKS],
+      [],
       new Error('no such column: custom_mrr'),
       [SMALL_TRACK_ROW],
     ])
@@ -224,6 +230,81 @@ describe('GET /api/portal/subscription plan truth', () => {
     expect(body.subscription?.customRate).toBe(false)
     // The tracks override is a different migration (0079) and still resolves.
     expect(body.subscription?.trackCount).toBe(2)
+  })
+
+  it('names the Xero rail instead of TBC when there is no period date at all', async () => {
+    // A Xero-rail client whose retainer has no currentPeriodEnd (Xero owns
+    // the period, never Stripe) and no currentPeriodStart to project from
+    // either: the only honest answer is naming the rail and the cadence.
+    const { handle } = makeDb([
+      [],
+      [{ ...SUB_ROW, currentPeriodStart: null, currentPeriodEnd: null }],
+      [{ ...ORG_CUSTOM_TRACKS, invoiceChannel: 'xero' }],
+      [],
+      [{ custom_mrr: 2000, custom_mrr_currency: 'GBP' }],
+      [SMALL_TRACK_ROW],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (await portalSubscription(req('/api/portal/subscription'))).json() as SubscriptionBody
+
+    expect(body.subscription?.nextInvoiceDate).toBeNull()
+    expect(body.subscription?.invoiceChannel).toBe('xero')
+  })
+
+  it('projects an expected next invoice date from a known period start and cadence', async () => {
+    // No currentPeriodEnd, but a currentPeriodStart plus the (default)
+    // monthly cadence is enough to name an actual expected date rather than
+    // falling all the way back to prose.
+    const { handle } = makeDb([
+      [],
+      [{ ...SUB_ROW, currentPeriodStart: '2026-08-01T00:00:00.000Z', currentPeriodEnd: null }],
+      [{ ...ORG_CUSTOM_TRACKS, invoiceChannel: 'xero' }],
+      [],
+      [{ custom_mrr: 2000, custom_mrr_currency: 'GBP' }],
+      [SMALL_TRACK_ROW],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (await portalSubscription(req('/api/portal/subscription'))).json() as SubscriptionBody
+
+    expect(body.subscription?.nextInvoiceDate).not.toBeNull()
+    expect(body.subscription?.invoiceChannel).toBe('xero')
+  })
+
+  it('resolves to the studio default channel when the org carries none of its own', async () => {
+    const { handle } = makeDb([
+      [],
+      [{ ...SUB_ROW, currentPeriodStart: null, currentPeriodEnd: null }],
+      [ORG_CUSTOM_TRACKS],
+      // Studio-wide default read from settings.
+      [{ value: 'xero' }],
+      [{ custom_mrr: 2000, custom_mrr_currency: 'GBP' }],
+      [SMALL_TRACK_ROW],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (await portalSubscription(req('/api/portal/subscription'))).json() as SubscriptionBody
+
+    expect(body.subscription?.invoiceChannel).toBe('xero')
+  })
+
+  it('keeps Stripe as the resolved channel when nothing says otherwise', async () => {
+    const { handle } = makeDb([
+      [],
+      [SUB_ROW],
+      [ORG_CUSTOM_TRACKS],
+      [],
+      [{ custom_mrr: 2000, custom_mrr_currency: 'GBP' }],
+      [SMALL_TRACK_ROW],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const body = await (await portalSubscription(req('/api/portal/subscription'))).json() as SubscriptionBody
+
+    expect(body.subscription?.invoiceChannel).toBe('stripe')
+    // SUB_ROW carries a real currentPeriodEnd, so the date wins outright.
+    expect(body.subscription?.nextInvoiceDate).toBe('2026-10-01T00:00:00.000Z')
   })
 })
 
