@@ -51,7 +51,7 @@ import {
 } from '@/components/tahi/onboarding-shell'
 import { OnboardingPayment } from '@/components/tahi/onboarding-payment'
 import { formatSlotSummary, slotIso, visitorTimeZone } from '@/lib/kickoff-slot'
-import { buildSteps } from '@/lib/onboarding-steps'
+import { buildSteps, ONBOARDING_VIDEO_ENABLED } from '@/lib/onboarding-steps'
 import type { ClientEntry } from '@/lib/onboarding-entry'
 
 export interface OnboardingLead {
@@ -514,11 +514,13 @@ export function OnboardingContent({
             <div><b>{lead.name}</b><small>{lead.role}</small></div>
           </div>
           <p className="ob-wc-note">{note}</p>
-          <button className="ob-loom" onClick={e => { e.preventDefault(); setVideoOpen(true) }}>
-            <span className="ob-loom-play"><PlayFill size={13} /></span>
-            <span className="ob-loom-t"><b>Watch a 60-second hello</b><small>How your studio works, from {lead.first}.</small></span>
-            <span className="ob-loom-dur">1:02</span>
-          </button>
+          {ONBOARDING_VIDEO_ENABLED && (
+            <button className="ob-loom" onClick={e => { e.preventDefault(); setVideoOpen(true) }}>
+              <span className="ob-loom-play"><PlayFill size={13} /></span>
+              <span className="ob-loom-t"><b>Watch a 60-second hello</b><small>How your studio works, from {lead.first}.</small></span>
+              <span className="ob-loom-dur">1:02</span>
+            </button>
+          )}
         </div>
       )
     }
@@ -653,14 +655,14 @@ export function OnboardingContent({
               <ScenePill>Welcome to Tahi</ScenePill>
               <h2 className="ta-headline">Ongoing or one-off, shaped around you.</h2>
               <Ledger steps={[{ id: 'a', label: 'Retainers start in minutes' }, { id: 'b', label: 'Projects start with a quick call' }, { id: 'c', label: 'Then your studio opens' }]} idx={0} staticList />
-              <LeadCard lead={lead} note="He'll look after you either way." />
+              <LeadCard lead={lead} note={`${lead.first} will look after you either way.`} />
             </SceneShell>
           ) : (
             <SceneShell>
               <ScenePill>{clientType === 'existing' ? 'Your studio' : 'Your studio'}</ScenePill>
               <h2 className="ta-headline">{sceneHeadline}</h2>
               <Ledger steps={ledgerSteps} idx={idx} />
-              <LeadCard lead={lead} note="Reach him any time in the portal." />
+              <LeadCard lead={lead} note={`Reach ${lead.first} any time in the portal.`} />
             </SceneShell>
           )}
 
@@ -691,7 +693,9 @@ export function OnboardingContent({
           </main>
         </div>
       </div>
-      <VideoModal open={videoOpen} onClose={() => setVideoOpen(false)} lead={lead} />
+      {ONBOARDING_VIDEO_ENABLED && (
+        <VideoModal open={videoOpen} onClose={() => setVideoOpen(false)} lead={lead} />
+      )}
     </div>
   )
 }

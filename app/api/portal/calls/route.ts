@@ -10,6 +10,7 @@ import { publicUrl } from '@/lib/app-url'
 import { formatSlotSummary, resolveTimeZone } from '@/lib/kickoff-slot'
 import { normalizeCallInstant } from '@/lib/call-time'
 import { mergeUpcomingCalls, type RawPortalCall } from '@/lib/portal-calls'
+import { resolveProjectManager, STUDIO_PROJECT_MANAGER_SETTING_KEY } from '@/lib/studio-project-manager'
 import KickoffBookedEmail from '@/emails/kickoff-booked'
 
 export const dynamic = 'force-dynamic'
@@ -53,6 +54,63 @@ function pickWith(attendees: AttendeeLite[]): AttendeeLite | null {
   if (host?.name) return host
   const named = attendees.find((a) => !!a.name)
   return named ?? null
+}
+
+// The studio-wide override: settings key studio.projectManagerId, resolved to
+// a real team member. Null when the setting is empty, unreadable, or names
+// somebody who no longer exists - resolveProjectManager treats that the same
+// as unset and falls through to the org's own PM. See
+// lib/studio-project-manager.ts.
+async function findStudioProjectManagerHost(
+  drizzle: D1,
+): Promise<{ id: string; name: string; email: string } | null> {
+  const [setting] = await drizzle
+    .select({ value: schema.settings.value })
+    .from(schema.settings)
+    .where(eq(schema.settings.key, STUDIO_PROJECT_MANAGER_SETTING_KEY))
+    .limit(1)
+  const id = setting?.value?.trim()
+  if (!id) return null
+
+  const [row] = await drizzle
+    .select({
+      id: schema.teamMembers.id,
+      name: schema.teamMembers.name,
+      email: schema.teamMembers.email,
+    })
+    .from(schema.teamMembers)
+    .where(eq(schema.teamMembers.id, id))
+    .limit(1)
+  return row ?? null
+}
+
+// The org's own assigned PM, read through the same team_member_access /
+// team_member_access_orgs join /api/admin/clients/[id]/pm reads.
+async function findOrgPmHost(
+  drizzle: D1,
+  orgRef: string,
+): Promise<{ id: string; name: string; email: string } | null> {
+  const [row] = await drizzle
+    .select({
+      id: schema.teamMembers.id,
+      name: schema.teamMembers.name,
+      email: schema.teamMembers.email,
+    })
+    .from(schema.teamMemberAccess)
+    .innerJoin(
+      schema.teamMemberAccessOrgs,
+      eq(schema.teamMemberAccessOrgs.accessId, schema.teamMemberAccess.id),
+    )
+    .innerJoin(
+      schema.teamMembers,
+      eq(schema.teamMembers.id, schema.teamMemberAccess.teamMemberId),
+    )
+    .where(and(
+      eq(schema.teamMemberAccess.role, 'project_manager'),
+      eq(schema.teamMemberAccessOrgs.orgId, orgRef),
+    ))
+    .limit(1)
+  return row ?? null
 }
 
 // ── GET /api/portal/calls ────────────────────────────────────────────────────
@@ -310,31 +368,23 @@ export async function POST(req: NextRequest) {
     // fall back to the generic label
   }
 
-  // The studio host: the org's project manager, resolved through the same join
+  // The studio host: the studio-wide project manager override when one is set
+  // (settings key studio.projectManagerId, see lib/studio-project-manager.ts -
+  // "make Liam Miller as the project manager for everyone no matter what"),
+  // else the org's own project manager, resolved through the same join
   // /api/admin/clients/[id]/pm reads. Absent is fine, the studio triages it.
   let host: { id: string; name: string; email: string } | null = null
   try {
-    const [pm] = await drizzle
-      .select({
-        id: schema.teamMembers.id,
-        name: schema.teamMembers.name,
-        email: schema.teamMembers.email,
-      })
-      .from(schema.teamMemberAccess)
-      .innerJoin(
-        schema.teamMemberAccessOrgs,
-        eq(schema.teamMemberAccessOrgs.accessId, schema.teamMemberAccess.id),
-      )
-      .innerJoin(
-        schema.teamMembers,
-        eq(schema.teamMembers.id, schema.teamMemberAccess.teamMemberId),
-      )
-      .where(and(
-        eq(schema.teamMemberAccess.role, 'project_manager'),
-        eq(schema.teamMemberAccessOrgs.orgId, orgId),
-      ))
-      .limit(1)
-    host = pm ?? null
+    host = await resolveProjectManager<{ id: string; name: string; email: string }>(
+      {
+        findStudioOverride: () => findStudioProjectManagerHost(drizzle),
+        findPerClientPm: (org) => findOrgPmHost(drizzle, org),
+        // No caller-level fallback existed before this override either: an
+        // absent host is fine here, the studio triages it.
+        findFallback: () => Promise.resolve(null),
+      },
+      orgId,
+    )
   } catch {
     host = null
   }

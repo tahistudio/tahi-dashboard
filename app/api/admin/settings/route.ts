@@ -31,6 +31,10 @@ import {
 } from '@/lib/email-allowlist'
 import { resolvePermissions } from '@/lib/permissions'
 import { logAudit } from '@/lib/audit'
+import {
+  STUDIO_PROJECT_MANAGER_SETTING_KEY,
+  validateStudioProjectManagerSetting,
+} from '@/lib/studio-project-manager'
 import type { DB } from '@/db/d1'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -175,6 +179,19 @@ export async function PATCH(req: NextRequest) {
   const deliveryCheck = validateEmailDeliverySetting(body.key.trim(), body.value)
   if (!deliveryCheck.ok) {
     return NextResponse.json({ error: deliveryCheck.error }, { status: 400 })
+  }
+
+  // The studio-wide project manager override (lib/studio-project-manager.ts -
+  // "make Liam Miller as the project manager for everyone no matter what").
+  // Deliberately permissive about WHICH id: resolveProjectManager already
+  // treats an id that does not resolve to a real team member as unset, so
+  // only a value that would look "set" while actually being blank whitespace
+  // is rejected here.
+  if (body.key.trim() === STUDIO_PROJECT_MANAGER_SETTING_KEY) {
+    const pmCheck = validateStudioProjectManagerSetting(body.value)
+    if (!pmCheck.ok) {
+      return NextResponse.json({ error: pmCheck.error }, { status: 400 })
+    }
   }
 
   const database = await db()

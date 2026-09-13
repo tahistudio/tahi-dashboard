@@ -105,6 +105,7 @@ vi.mock('@/db/d1', () => ({
     teamMembers: { _table: 'team_members', id: 'id', name: 'name', email: 'email', avatarUrl: 'avatar_url' },
     teamMemberAccess: { _table: 'team_member_access', id: 'id', teamMemberId: 'team_member_id', role: 'role' },
     teamMemberAccessOrgs: { _table: 'team_member_access_orgs', accessId: 'access_id', orgId: 'org_id' },
+    settings: { _table: 'settings', key: 'key', value: 'value' },
   },
 }))
 
@@ -380,6 +381,51 @@ describe('POST /api/portal/calls - booking', () => {
     const mirrored = dbMock.state.inserts.find(i => i.table === 'discovery_calls')
     expect(mirrored).toBeDefined()
     expect(mirrored!.values.id).toBe('call_existing')
+  })
+})
+
+// "make Liam Miller as the project manager for everyone no matter what."
+// studio.projectManagerId (lib/studio-project-manager.ts) decides who is put
+// on the kickoff call as the host, ahead of the org's own assigned PM.
+describe('POST /api/portal/calls - kickoff host', () => {
+  it('the studio-wide override becomes the host, even when the org has its own assigned PM', async () => {
+    dbMock.state.queues = {
+      contacts: [[{ id: 'ct_1', name: 'Ava Reid', email: 'ava@acme.test' }]],
+      organisations: [[{ name: 'Acme Co' }]],
+      settings: [[{ value: 'tm_liam' }]],
+      team_members: [[{ id: 'tm_liam', name: 'Liam Miller', email: 'liam@tahi.studio' }]],
+      // Never consumed: the override wins before the org's own PM is looked up.
+      team_member_access: [[{ id: 'tm_other_pm', name: 'Someone Else', email: 'someone@tahi.studio' }]],
+      scheduled_calls: [[]],
+      discovery_calls: [[]],
+    }
+    await POST(bookRequest({ scheduledAt: inFuture(24) }))
+    const call = dbMock.state.inserts.find(i => i.table === 'scheduled_calls')!
+    const attendees = JSON.parse(call.values.attendees as string) as Array<Record<string, string>>
+    expect(attendees[1]).toMatchObject({
+      type: 'team_member', name: 'Liam Miller', email: 'liam@tahi.studio', role: 'host',
+    })
+  })
+
+  it('falls through to the org PM when no override is set (today\'s behaviour, unchanged)', async () => {
+    seedLookups()
+    const call = dbMock.state.queues
+    call.settings = [[]]
+    await POST(bookRequest({ scheduledAt: inFuture(24) }))
+    const inserted = dbMock.state.inserts.find(i => i.table === 'scheduled_calls')!
+    const attendees = JSON.parse(inserted.values.attendees as string) as Array<Record<string, string>>
+    expect(attendees[1]).toMatchObject({ type: 'team_member', name: 'Liam Miller', role: 'host' })
+  })
+
+  it('an override id that does not resolve to a real member falls through to the org PM', async () => {
+    seedLookups()
+    dbMock.state.queues.settings = [[{ value: 'tm_ghost' }]]
+    dbMock.state.queues.team_members = [[]]
+    await POST(bookRequest({ scheduledAt: inFuture(24) }))
+    const call = dbMock.state.inserts.find(i => i.table === 'scheduled_calls')!
+    const attendees = JSON.parse(call.values.attendees as string) as Array<Record<string, string>>
+    // seedLookups' team_member_access row is the fallback PM, also named Liam Miller.
+    expect(attendees[1]).toMatchObject({ type: 'team_member', name: 'Liam Miller', role: 'host' })
   })
 })
 

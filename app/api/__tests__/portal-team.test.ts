@@ -180,11 +180,15 @@ describe('GET /api/portal/team', () => {
     expect(json.items).toEqual([])
   })
 
-  it('falls back to the studio default owner when nobody is assigned', async () => {
+  it('falls back to the studio default owner when nobody is assigned or overridden', async () => {
     dbMock.state.queues = {
+      // First read: the studio-wide override (studio.projectManagerId),
+      // unset. Second read, only reached once the PM, the org PM and the
+      // request-derived roster have all come up empty: the studio's default
+      // owner (leads.defaultLeadOwnerId).
+      settings: [[], [{ value: 'tm-staci' }]],
       team_member_access: [[]],
       requests: [[]],
-      settings: [[{ value: 'tm-staci' }]],
       team_members: [[{ id: 'tm-staci', name: 'Staci Bonnie', avatarUrl: null }]],
     }
 
@@ -192,6 +196,37 @@ describe('GET /api/portal/team', () => {
     expect(res.status).toBe(200)
     const json = await res.json() as { items: TeamItem[] }
     expect(json.items).toHaveLength(1)
+    expect(json.items[0]).toEqual({ id: 'tm-staci', name: 'Staci Bonnie', role: 'Your project manager', avatarUrl: null })
+  })
+
+  // "make Liam Miller as the project manager for everyone no matter what."
+  it('the studio-wide override becomes the lead, even when the org has its own assigned PM', async () => {
+    dbMock.state.queues = {
+      settings: [[{ value: 'tm-liam' }]],
+      team_members: [[{ id: 'tm-liam', name: 'Liam Miller', avatarUrl: null }]],
+      // Never consumed: the override wins before the org's own PM is looked up.
+      team_member_access: [[{ id: 'tm-staci', name: 'Staci Bonnie', title: null, department: null, avatarUrl: null }]],
+      requests: [[]],
+    }
+
+    const res = await GET(teamRequest())
+    expect(res.status).toBe(200)
+    const json = await res.json() as { items: TeamItem[] }
+    expect(json.items).toHaveLength(1)
+    expect(json.items[0]).toEqual({ id: 'tm-liam', name: 'Liam Miller', role: 'Your project manager', avatarUrl: null })
+  })
+
+  it('an override id that does not resolve to a real member falls through to the org PM', async () => {
+    dbMock.state.queues = {
+      settings: [[{ value: 'tm-ghost' }]],
+      team_members: [[]],
+      team_member_access: [[{ id: 'tm-staci', name: 'Staci Bonnie', title: null, department: null, avatarUrl: null }]],
+      requests: [[]],
+    }
+
+    const res = await GET(teamRequest())
+    expect(res.status).toBe(200)
+    const json = await res.json() as { items: TeamItem[] }
     expect(json.items[0]).toEqual({ id: 'tm-staci', name: 'Staci Bonnie', role: 'Your project manager', avatarUrl: null })
   })
 })

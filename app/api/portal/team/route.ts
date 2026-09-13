@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, inArray, isNull } from 'drizzle-orm'
+import { resolveProjectManager, STUDIO_PROJECT_MANAGER_SETTING_KEY } from '@/lib/studio-project-manager'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,12 +29,15 @@ const PM_LABEL = 'Your project manager'
 // ── GET /api/portal/team ─────────────────────────────────────────────────────
 // The Tahi team assigned to this org, the client's "Your team" card.
 //
-// First item, when there is one: the org's assigned project manager, read
-// through the same team_member_access / team_member_access_orgs join that
+// First item, when there is one: the studio-wide project manager override
+// (settings key studio.projectManagerId, see lib/studio-project-manager.ts)
+// when one is set - "make Liam Miller as the project manager for everyone no
+// matter what" - otherwise the org's assigned project manager, read through
+// the same team_member_access / team_member_access_orgs join that
 // POST /api/admin/clients/[id]/pm writes (role='project_manager',
-// scopeType='specific_clients'). This is the only "who owns this client"
-// signal that does not depend on the org having any requests yet, so a
-// freshly onboarded client with a PM but zero requests still sees a name
+// scopeType='specific_clients'). The org PM is the only "who owns this
+// client" signal that does not depend on the org having any requests yet, so
+// a freshly onboarded client with a PM but zero requests still sees a name
 // instead of "being assigned".
 //
 // After the PM: everyone derived from the org's external requests (PM +
@@ -60,32 +64,19 @@ export async function GET(req: NextRequest) {
   const database = await db()
   const drizzle = database as D1
 
-  // ── The org's assigned PM ──────────────────────────────────────────────────
+  // ── The lead: the studio override, else the org's assigned PM ─────────────
   let pm: MemberRow | null = null
   try {
-    const [row] = await drizzle
-      .select({
-        id: schema.teamMembers.id,
-        name: schema.teamMembers.name,
-        title: schema.teamMembers.title,
-        department: schema.teamMembers.department,
-        avatarUrl: schema.teamMembers.avatarUrl,
-      })
-      .from(schema.teamMemberAccess)
-      .innerJoin(
-        schema.teamMemberAccessOrgs,
-        eq(schema.teamMemberAccessOrgs.accessId, schema.teamMemberAccess.id),
-      )
-      .innerJoin(
-        schema.teamMembers,
-        eq(schema.teamMembers.id, schema.teamMemberAccess.teamMemberId),
-      )
-      .where(and(
-        eq(schema.teamMemberAccess.role, 'project_manager'),
-        eq(schema.teamMemberAccessOrgs.orgId, orgId),
-      ))
-      .limit(1)
-    pm = row ?? null
+    pm = await resolveProjectManager<MemberRow>(
+      {
+        findStudioOverride: () => findStudioProjectManagerRow(drizzle),
+        findPerClientPm: (org) => findOrgPmRow(drizzle, org),
+        // No further fallback here: "truly nobody" (no override, no PM, no
+        // request-derived roster) is decided below, once the roster is known.
+        findFallback: () => Promise.resolve(null),
+      },
+      orgId,
+    )
   } catch {
     pm = null
   }
@@ -223,4 +214,60 @@ async function resolveDefaultOwner(drizzle: D1): Promise<TeamItem | null> {
   } catch {
     return null
   }
+}
+
+// The studio-wide override: settings key studio.projectManagerId, resolved to
+// a real team member. Null when the setting is empty, unreadable, or names
+// somebody who no longer exists - resolveProjectManager treats that the same
+// as unset and falls through to the org's own PM. See
+// lib/studio-project-manager.ts.
+async function findStudioProjectManagerRow(drizzle: D1): Promise<MemberRow | null> {
+  const [setting] = await drizzle
+    .select({ value: schema.settings.value })
+    .from(schema.settings)
+    .where(eq(schema.settings.key, STUDIO_PROJECT_MANAGER_SETTING_KEY))
+    .limit(1)
+  const id = setting?.value?.trim()
+  if (!id) return null
+
+  const [row] = await drizzle
+    .select({
+      id: schema.teamMembers.id,
+      name: schema.teamMembers.name,
+      title: schema.teamMembers.title,
+      department: schema.teamMembers.department,
+      avatarUrl: schema.teamMembers.avatarUrl,
+    })
+    .from(schema.teamMembers)
+    .where(eq(schema.teamMembers.id, id))
+    .limit(1)
+  return row ?? null
+}
+
+// The org's own assigned PM, read through the same team_member_access /
+// team_member_access_orgs join POST /api/admin/clients/[id]/pm writes.
+async function findOrgPmRow(drizzle: D1, orgRef: string): Promise<MemberRow | null> {
+  const [row] = await drizzle
+    .select({
+      id: schema.teamMembers.id,
+      name: schema.teamMembers.name,
+      title: schema.teamMembers.title,
+      department: schema.teamMembers.department,
+      avatarUrl: schema.teamMembers.avatarUrl,
+    })
+    .from(schema.teamMemberAccess)
+    .innerJoin(
+      schema.teamMemberAccessOrgs,
+      eq(schema.teamMemberAccessOrgs.accessId, schema.teamMemberAccess.id),
+    )
+    .innerJoin(
+      schema.teamMembers,
+      eq(schema.teamMembers.id, schema.teamMemberAccess.teamMemberId),
+    )
+    .where(and(
+      eq(schema.teamMemberAccess.role, 'project_manager'),
+      eq(schema.teamMemberAccessOrgs.orgId, orgRef),
+    ))
+    .limit(1)
+  return row ?? null
 }
