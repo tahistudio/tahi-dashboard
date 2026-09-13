@@ -3,11 +3,16 @@
 /**
  * People (client portal). The org's real teammate roster from the `contacts`
  * table (GET /api/portal/people). A workspace admin (isClientAdmin) can invite
- * (Clerk organization invitation + pending contact row), edit a teammate's
- * name / permission level (PATCH), and remove a teammate (DELETE revokes the
- * Clerk invitation or membership first). Members get a read-only view; the
- * sub-nav also hides this tab from them (settings-shell clientAdminOnly), and
- * every write endpoint re-checks admin server-side.
+ * (mints an app invite token, pending contact row), edit a teammate's
+ * name / permission level (PATCH), and remove a teammate behind a
+ * <ConfirmDialog> (DELETE revokes the Clerk invitation or membership first,
+ * tolerating a membership Clerk already does not recognise). Members get a
+ * read-only view; the sub-nav also hides this tab from them (settings-shell
+ * clientAdminOnly), and every write endpoint re-checks admin server-side. The
+ * bin is disabled with a title note, rather than left to fail with a 400,
+ * while a studio session previews this client (Client view / isImpersonatingClient):
+ * that Clerk session belongs to the operator, not this workspace, in both
+ * view and act mode.
  *
  * Permission levels shown are the real ones: Owner (the primary contact),
  * Admin, Member. The design's Viewer level has no portalRole backing, so it
@@ -18,6 +23,8 @@ import { useState } from 'react'
 import { Plus } from 'lucide-react'
 import { useResource } from '@/lib/use-resource'
 import { apiPath } from '@/lib/api'
+import { useImpersonation } from '@/components/tahi/impersonation-banner'
+import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import {
   SectionShell,
   EmptyRow,
@@ -89,15 +96,24 @@ function LoadingShell() {
 
 export function PeopleSection({ isClientAdmin }: { isClientAdmin?: boolean }) {
   const canManage = !!isClientAdmin
+  // A studio session previewing this client (Client view) has no client Clerk
+  // session behind it, so DELETE /api/portal/people 400s unconditionally, in
+  // both view and act mode (see the route's own comment). Gating on
+  // isImpersonatingClient rather than the act-mode-aware previewIsReadOnly is
+  // deliberate: unlike most portal writes, removing a teammate stays refused
+  // in act mode too, so the bin must stay disabled there as well.
+  const { isImpersonatingClient } = useImpersonation()
   const { data, error, isLoading, mutate } = useResource<PeopleResponse>('/api/portal/people')
   const [inviting, setInviting] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [newId, setNewId] = useState<string | null>(null)
   const { toasts, toast } = useToasts()
 
   const people = data?.items ?? []
   const editing = editingId ? people.find((p) => p.id === editingId) : null
+  const confirmDeleteTarget = confirmDeleteId ? people.find((p) => p.id === confirmDeleteId) : null
 
   if (isLoading && !data) return <LoadingShell />
 
@@ -170,7 +186,7 @@ export function PeopleSection({ isClientAdmin }: { isClientAdmin?: boolean }) {
   }
 
   async function remove(p: Person) {
-    if (!window.confirm(`Remove ${p.name} from your workspace?`)) return
+    setConfirmDeleteId(null)
     setBusy(true)
     try {
       const res = await fetch(apiPath(`/api/portal/people?id=${encodeURIComponent(p.id)}`), {
@@ -228,7 +244,12 @@ export function PeopleSection({ isClientAdmin }: { isClientAdmin?: boolean }) {
                   {p.pending && <Chip tone="neutral">Pending invite</Chip>}
                   <Chip tone={level.tone}>{level.label}</Chip>
                   {canManage && (
-                    <RowActions onEdit={() => setEditingId(p.id)} onDelete={() => remove(p)} />
+                    <RowActions
+                      onEdit={() => setEditingId(p.id)}
+                      onDelete={() => setConfirmDeleteId(p.id)}
+                      deleteDisabled={isImpersonatingClient}
+                      deleteTitle={isImpersonatingClient ? 'Read-only in Client view' : 'Delete'}
+                    />
                   )}
                 </div>
               </div>
@@ -284,6 +305,16 @@ export function PeopleSection({ isClientAdmin }: { isClientAdmin?: boolean }) {
           onClose={() => (busy ? undefined : setEditingId(null))}
         />
       )}
+
+      <ConfirmDialog
+        open={!!confirmDeleteTarget}
+        title={`Remove ${confirmDeleteTarget?.name ?? 'this teammate'} from your workspace?`}
+        description="They lose access straight away."
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={() => (confirmDeleteTarget ? remove(confirmDeleteTarget) : undefined)}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
 
       <Toasts toasts={toasts} />
     </SectionShell>
