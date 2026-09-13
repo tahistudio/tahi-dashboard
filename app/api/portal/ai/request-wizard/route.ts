@@ -24,7 +24,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { estimateRequestHours, wizardHourEstimatesPromptBlock } from '@/lib/wizard-hour-estimates'
-import { loadRequestOrgContext } from '@/lib/ai-request-org-context'
+import { loadRequestOrgContext, CLIENT_HISTORY_PROMPT_RULES } from '@/lib/ai-request-org-context'
 import { resolveD1OrgId } from '@/lib/upload-access'
 
 export const dynamic = 'force-dynamic'
@@ -177,6 +177,7 @@ TIMELINE HONESTY (critical, read carefully):
 CLIENT CONTEXT:
 - If a CONTEXT section below names this client's industry, brands, or past requests, treat that as already known. Never ask a question whose answer is already listed there.
 - If the CONTEXT section says this client has more than one brand or website on file, ask which one this request is for before drafting. Never guess or split the difference.
+${CLIENT_HISTORY_PROMPT_RULES}
 
 YOUR JOB:
 1. When the user describes what they need, ask 2-3 focused questions to scope it properly: what specifically they want delivered, which pages or sections are affected, any assets they'll provide, and deadline.

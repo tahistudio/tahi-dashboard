@@ -59,9 +59,18 @@ vi.mock('@/lib/require-access', () => ({
   requireAccessToOrg: vi.fn().mockResolvedValue(null),
 }))
 
-vi.mock('@/lib/ai-request-org-context', () => ({
-  loadRequestOrgContext: vi.fn().mockResolvedValue(''),
-}))
+// CLIENT_HISTORY_PROMPT_RULES is left at its real value (importOriginal):
+// the coverage-gap tests below assert this rule is actually in the system
+// prompt sent to the model, which would pass for the wrong reason against a
+// stubbed string that drifted from the real one. Only the DB-backed loader
+// is replaced.
+vi.mock('@/lib/ai-request-org-context', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ai-request-org-context')>()
+  return {
+    ...actual,
+    loadRequestOrgContext: vi.fn().mockResolvedValue(''),
+  }
+})
 
 import { POST as adminPost } from '@/app/api/admin/ai/request-wizard/route'
 import { POST as portalPost } from '@/app/api/portal/ai/request-wizard/route'
@@ -189,6 +198,21 @@ describe('POST /api/admin/ai/request-wizard', () => {
     expect(body.degraded).toBeUndefined()
   })
 
+  // GI.4 step one: the wizard learns the client deeply. The rule is static
+  // (lib/ai-request-org-context.ts CLIENT_HISTORY_PROMPT_RULES), so it is
+  // always in the system prompt sent to the model, whether or not this turn
+  // actually carries a CLIENT HISTORY block.
+  it('always tells the model to answer coverage-gap questions from CLIENT HISTORY, then keep drafting', async () => {
+    asAdmin()
+    createMessage.mockResolvedValueOnce({ content: [{ type: 'text', text: 'Sure thing' }] })
+    await adminPost(makeRequest('/api/admin/ai/request-wizard'))
+    const [[sentPayload]] = createMessage.mock.calls
+    const system = (sentPayload as { system: string }).system
+    expect(system).toContain('CLIENT HISTORY')
+    expect(system).toContain('coverage gaps')
+    expect(system).toContain('two sentences')
+  })
+
   // CLAUDE.md rule 11: this route returns client details (org name, industry,
   // website, brands, recent request titles) once context.orgId is supplied.
   // Without a scope check a team member restricted to specific clients could
@@ -237,6 +261,17 @@ describe('POST /api/admin/ai/request-wizard', () => {
 })
 
 describe('POST /api/portal/ai/request-wizard', () => {
+  it('always tells the model to answer coverage-gap questions from CLIENT HISTORY, then keep drafting', async () => {
+    asClient()
+    createMessage.mockResolvedValueOnce({ content: [{ type: 'text', text: 'Sure thing' }] })
+    await portalPost(makeRequest('/api/portal/ai/request-wizard'))
+    const [[sentPayload]] = createMessage.mock.calls
+    const system = (sentPayload as { system: string }).system
+    expect(system).toContain('CLIENT HISTORY')
+    expect(system).toContain('coverage gaps')
+    expect(system).toContain('two sentences')
+  })
+
   it('502s when the model call throws, on the client-facing route too', async () => {
     asClient()
     createMessage.mockRejectedValueOnce(anthropicError(500))
