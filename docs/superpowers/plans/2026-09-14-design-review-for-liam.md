@@ -371,4 +371,6 @@ Project: https://claude.ai/design/p/57bf60cf-5e6d-450f-9e2f-e25c8d12fd66 (open a
 
 ## Shell wiring
 
-The wiring step did not return; the new modules may not be in the shell yet.
+Verified at 06:30 NZ: every module the review lists is registered in app-mount.jsx and reachable from the shell nav for its audience (owner 31 of 33 nav ids land on a module, teammate 6 of 7, client 14 of 14; the misses are the legacy shims, not new pages); the command palette indexes them from the nav groups. Zero console errors, zero failed requests across all three audiences. "Tahi App Shell.html" was repaired: ten stylesheets that loaded twice now carry the ids the modules check for, head-band.css moved to sit right after app-shell.css so modules override it rather than the other way round, requests-focus.css precedes requests-detail.css, sales-pipeline-kit.css follows the band sheet. Captures in .qa-screens/design: owner overview, owner messages (light and dark), owner reports, owner calculator, owner invoices, owner proposals, client messages, client invoices, owner requests at 375.
+
+How to look: open https://claude.ai/design/p/57bf60cf-5e6d-450f-9e2f-e25c8d12fd66?file=Tahi+App+Shell.html, use the Tweaks pill (bottom right) for audience, theme and device, and the command palette (Ctrl or Cmd plus K) to jump to any page by its nav label.
