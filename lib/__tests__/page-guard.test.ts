@@ -118,6 +118,20 @@ describe('requirePageFeature', () => {
     })
     expect(await redirectedTo(() => requirePageFeature('messages', '/requests'))).toBe('/requests')
   })
+
+  it('services also bounces a denied client to /requests, same as messages', async () => {
+    // The services page passes the same fallback for the same reason: it is
+    // hidden for clients by default (CLIENT_DEFAULT_DENY), and /requests is
+    // their actual channel, not /overview.
+    vi.mocked(resolvePermissions).mockResolvedValue({
+      ...base(),
+      level: 'client',
+      audience: 'client',
+      viewableResources: null,
+      overrides: new Map(),
+    })
+    expect(await redirectedTo(() => requirePageFeature('services', '/requests'))).toBe('/requests')
+  })
 })
 
 describe('requirePageAnyGrant', () => {

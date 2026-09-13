@@ -98,6 +98,21 @@ describe('portal routes enforce client feature_visibility', () => {
     expect((await portalServices(req('/api/portal/services'))).status).toBe(403)
   })
 
+  it('403s a client org with no override at all: Services is denied by default (2026-09-14 decision)', async () => {
+    // Unlike Tracks (below), Services has no rows here at all and still 403s:
+    // CLIENT_DEFAULT_DENY flips the resolver's default for this one key, the
+    // same way it already does for Messages.
+    vi.mocked(db).mockResolvedValue(makeDb([]) as never)
+    const res = await portalServices(req('/api/portal/services'))
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: 'Forbidden', code: 'feature_disabled' })
+  })
+
+  it('an explicit org allow override opts one client back into Services', async () => {
+    vi.mocked(db).mockResolvedValue(makeDb([{ featureKey: 'services', effect: 'allow' }]) as never)
+    expect((await portalServices(req('/api/portal/services'))).status).toBe(200)
+  })
+
   it('403s the request intake form when Requests is denied', async () => {
     vi.mocked(db).mockResolvedValue(makeDb([{ featureKey: 'requests', effect: 'deny' }]) as never)
     expect((await portalRequestForms(req('/api/portal/request-forms'))).status).toBe(403)

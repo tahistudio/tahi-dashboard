@@ -67,7 +67,11 @@ export const FEATURE_TREE: ReadonlyArray<FeatureNode> = [
   },
   { key: 'files', label: 'Files', description: 'Client file browser (R2 uploads).', parent: null, appliesTo: ['client'], route: '/files' },
   { key: 'invoices', label: 'Invoices', description: 'Billing records.', parent: null, appliesTo: ['team', 'client'], route: '/invoices' },
-  { key: 'services', label: 'Services', description: 'Client portal service catalogue.', parent: null, appliesTo: ['client'], route: '/services' },
+  // CLIENT DEFAULT (Liam, 2026-09-14): denied, same mechanism as `messages`
+  // above. No nav entry, no mobile tab, the page bounces to /requests, and the
+  // portal API 403s, until a per-organisation or per-contact feature_visibility
+  // ALLOW opts one client back in (`CLIENT_DEFAULT_DENY` in lib/permissions.ts).
+  { key: 'services', label: 'Services', description: 'Client portal service catalogue. Hidden for clients by default; an explicit allow override can turn it back on for one client. Off means the page is hidden, the route redirects and the API 403s.', parent: null, appliesTo: ['client'], route: '/services' },
   { key: 'tracks', label: 'Tracks', description: 'Retainer capacity tracks + queue.', parent: null, appliesTo: ['client'], route: '/tracks' },
   { key: 'schedules', label: 'Schedules', description: 'Project schedules / gantt (client can view shared).', parent: null, appliesTo: ['team', 'client'], route: '/schedules' },
   { key: 'contracts', label: 'Contracts', description: 'Contract tracking + signing.', parent: null, appliesTo: ['team', 'client'], route: '/contracts' },
