@@ -48,6 +48,15 @@ export type NotificationEventType =
   | 'daily_summary'
   | 'content_ideation'
   | 'cron_failed'
+  // A shared proposal's own decision, told to the studio (S2, T3.3). Accept
+  // reuses 'proposal_signed' above; these are its siblings for the other two
+  // outcomes a prospect can leave on a public link.
+  | 'proposal_declined'
+  | 'proposal_question'
+  // One signer of a multi-party e-sign contract has signed, others are still
+  // pending. Distinct from 'contract_signed' (every signer done). No route
+  // fires this yet; wired by the contract sign route in a later slice.
+  | 'contract_partially_signed'
 
 export type NotificationEntityType =
   | 'request'

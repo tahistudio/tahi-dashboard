@@ -7,6 +7,21 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ token: string }> }
 
 /**
+ * True once a proposal is unacceptable on the clock alone: either the status
+ * already flipped to 'expired' (the accept route does this lazily, on the
+ * first write attempt after the deadline), or it is still 'shared' but the
+ * deadline has already passed and nobody has tried to act on it yet. A
+ * decided proposal (accepted/declined) is never "expired" — the decision
+ * already happened, so the clock stopped mattering.
+ */
+function isPastExpiry(status: string, expiresAt: string | null): boolean {
+  if (status === 'expired') return true
+  if (status !== 'shared') return false
+  if (!expiresAt) return false
+  return new Date(expiresAt).getTime() < Date.now()
+}
+
+/**
  * Public read-only proposal endpoint. No auth — token validates access.
  * 404s on missing/revoked/non-shared tokens to avoid leaking existence.
  */
@@ -82,6 +97,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         sections: snapshot.sections ?? [],
         variants: snapshot.variants ?? [],
         analyticsResourceId: proposal.id,
+        expired: isPastExpiry(merged.status, merged.expiresAt),
       })
     } catch {
       // Corrupt snapshot — fall through to live data so the viewer still works.
@@ -128,5 +144,6 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     sections,
     variants,
     analyticsResourceId: internalId,
+    expired: isPastExpiry(safeProposal.status, safeProposal.expiresAt),
   })
 }

@@ -1,0 +1,47 @@
+-- Migration 0098: freeze what the client actually accepted
+--
+-- proposal_acceptances gains four columns:
+--   accepted_variant_name    text  -- the variant's name at the moment of accept
+--   accepted_one_off_amount  real  -- the one-off price at the moment of accept
+--   accepted_monthly_amount  real  -- the monthly price at the moment of accept
+--   accepted_currency        text  -- the currency at the moment of accept
+--
+-- Why this exists. POST /api/public/proposals/[token]/accept validated a
+-- variantId against the LIVE proposal_variants table and stored only the id.
+-- The admin can edit a variant's price after sharing (Phase 9 draft/publish
+-- model: publishedSnapshot is what the public viewer actually reads), so a
+-- client could accept the number they saw on screen while the live row had
+-- already moved, and the acceptance record would carry only an id pointing at
+-- whatever the variant reads as today, not what was agreed. These four
+-- columns are copied from the PUBLISHED SNAPSHOT at the moment of acceptance
+-- (falling back to the live table only for a legacy proposal published before
+-- the snapshot model existed), so the acceptance row is a receipt of what was
+-- actually shown and agreed, immune to every edit that comes after it.
+--
+-- All four are nullable and additive: every existing acceptance row keeps them
+-- NULL, which is honest (nothing was snapshotted for a decision already made),
+-- and a decline or a question never populates them because there is no
+-- accepted variant to freeze.
+--
+-- ALTER TABLE ADD COLUMN cannot carry IF NOT EXISTS in SQLite; the runtime
+-- runner (app/api/admin/db/migrate) swallows the "duplicate column name" error
+-- so re-running this file, or re-running the runtime entry below, is safe.
+-- There is no index in this migration, so there is nothing that would need
+-- CREATE INDEX IF NOT EXISTS.
+--
+-- These columns are additive and nothing reads them until the deploy lands, so
+-- applying this ahead of the deploy is harmless to the running code.
+--
+-- wrangler.json carries both database ids (staging b91cd27f, production
+-- 3bfa4848), so the names below resolve without any extra flags:
+--   1. wrangler d1 execute tahi-db-staging --remote --file=drizzle/migrations/0098_proposal_accepted_amounts.sql
+--   2. deploy, then smoke a shared proposal's accept flow on staging
+--   3. wrangler d1 execute tahi-db --remote --file=drizzle/migrations/0098_proposal_accepted_amounts.sql
+--   4. approve the production deploy, then smoke the same flow on production
+--
+-- POST /api/admin/db/migrate {"name":"0098"} is the after-the-fact fallback,
+-- usable once the deploy that carries the entry is live.
+ALTER TABLE proposal_acceptances ADD COLUMN accepted_variant_name text;
+ALTER TABLE proposal_acceptances ADD COLUMN accepted_one_off_amount real;
+ALTER TABLE proposal_acceptances ADD COLUMN accepted_monthly_amount real;
+ALTER TABLE proposal_acceptances ADD COLUMN accepted_currency text;

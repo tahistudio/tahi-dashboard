@@ -2773,6 +2773,15 @@ export const proposalAcceptances = sqliteTable('proposal_acceptances', {
   acceptorCountry: text('acceptor_country'),
   acceptorUa: text('acceptor_ua'),
   acceptedAt: text('accepted_at').notNull(),
+  // Frozen from the published snapshot at accept time (migration 0098), not
+  // the live proposalVariants row, so an admin editing a price after sharing
+  // can never change what an already-accepted acceptance says was agreed.
+  // Null on a decline, a question, or a legacy row from before this column
+  // existed.
+  acceptedVariantName: text('accepted_variant_name'),
+  acceptedOneOffAmount: real('accepted_one_off_amount'),
+  acceptedMonthlyAmount: real('accepted_monthly_amount'),
+  acceptedCurrency: text('accepted_currency'),
   ...timestamps,
 }, (table) => [
   index('idx_proposal_acceptances_proposal').on(table.proposalId),
