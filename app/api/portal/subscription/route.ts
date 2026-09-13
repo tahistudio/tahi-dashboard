@@ -78,6 +78,7 @@ export async function GET(req: NextRequest) {
   //      500ing, exactly as app/api/portal/capacity/route.ts does.
   let org:
     | {
+        name: string
         preferredCurrency: string | null
         stripeCustomerId: string | null
         tracksMode: string | null
@@ -89,6 +90,7 @@ export async function GET(req: NextRequest) {
   try {
     ;[org] = await drizzle
       .select({
+        name: schema.organisations.name,
         preferredCurrency: schema.organisations.preferredCurrency,
         stripeCustomerId: schema.organisations.stripeCustomerId,
         tracksMode: schema.organisations.tracksMode,
@@ -232,6 +234,10 @@ export async function GET(req: NextRequest) {
       canManagePayment: !!org?.stripeCustomerId,
       trackCount,
       createdAt: sub.createdAt,
+      // The client's own company name, read off the same organisations row
+      // this handler already fetches above, so the ladder's intro sentence
+      // can name them without a second request.
+      orgName: org?.name ?? null,
     },
     billing: {
       monthlyRate,

@@ -9,10 +9,13 @@
  *                 next invoice falls, and the add ons the client is already
  *                 paying for. The only money on this page, because it is a
  *                 fact of their own bill rather than a pitch.
+ *   where it sits the plan ladder: their own rung, plus the one below and the
+ *                 one above, in words and with no price on any of them. The
+ *                 upsell underneath it appears only when their own usage says
+ *                 the plan is full (lib/plan-ladder.ts).
  *   what we do    the catalogue, led by the outcome, then what is included,
  *                 then a typical timeline. No prices anywhere: everything is
- *                 scoped and quoted before an hour is booked, and Liam still
- *                 owes the upsell brief, so nothing here pushes.
+ *                 scoped and quoted before an hour is booked.
  *   one soft ask  per card, plus one at the foot. Each ask says out loud
  *                 whether it puts work in the client's queue.
  *
@@ -37,6 +40,15 @@ import {
 } from '@/lib/portal-service-view'
 import { formatPortalDateLong } from '@/lib/portal-invoice-view'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
+import {
+  isLadderPlanName,
+  ladder,
+  planPressure,
+  rungLive,
+  type PlanNameOverrides,
+} from '@/lib/plan-ladder'
+import { trackDeliveredStats } from '@/lib/track-stats'
+import { PlanLadder, PlanLadderSkeleton } from '@/components/tahi/portal/services/plan-ladder'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
 import { Money } from '@/components/tahi/money'
@@ -56,6 +68,8 @@ interface AddonDetail {
 }
 
 interface PortalSubscription {
+  /** maintain | scale | tune | launch | hourly | custom. Drives the ladder. */
+  planType: string
   planLabel: string
   /** In `currency`, which is the negotiated currency for a custom rate. */
   monthlyRate: number
@@ -65,11 +79,22 @@ interface PortalSubscription {
   nextInvoiceDate: string | null
   createdAt: string | null
   addonDetails: AddonDetail[]
+  /** The client's own company name, for the ladder's intro sentence. */
+  orgName?: string | null
 }
 
 interface SubscriptionResponse {
   clientType?: 'retainer' | 'project'
   subscription?: PortalSubscription | null
+  /** The studio catalogue, so a plan renamed in settings renames on the ladder. */
+  plans?: Array<{ id: string; name: string }>
+}
+
+/** The slice of /api/portal/capacity the ladder's pressure rule reads. */
+interface CapacityResponse {
+  tracks?: Array<{ id: string; currentRequest: { id: string } | null }>
+  queue?: Array<{ id: string }>
+  delivered?: Array<{ createdAt?: string | null; deliveredAt?: string | null }>
 }
 
 interface AskState {
@@ -113,10 +138,60 @@ export function PortalServices({ preview = false }: { preview?: boolean }) {
   const planDenied = planError instanceof ApiError && planError.status === 403
   const subscription = planDenied ? null : (planData?.subscription ?? null)
 
+  // Usage, for the one pressure signal the portal can actually source. The
+  // read is feature gated ('tracks') and money gated the same way the plan is,
+  // so a denial is a rule and not a failure: the ladder simply renders with no
+  // nudge rather than an error.
+  const { data: capacity } = useSWR<CapacityResponse>(
+    subscription ? '/api/portal/capacity' : null,
+  )
+
+  // A plan the studio renamed in Settings > Client plans renames on the ladder.
+  const planNames = React.useMemo<PlanNameOverrides>(() => {
+    const out: Record<string, string> = {}
+    for (const plan of planData?.plans ?? []) {
+      if (plan?.id && plan?.name) out[plan.id] = plan.name
+    }
+    return out
+  }, [planData])
+
+  const ladderView = React.useMemo(
+    () => ladder(subscription?.planType, planNames),
+    [subscription, planNames],
+  )
+
+  // Only the client's own figures reach the middle rung, and only when the
+  // portal could measure them. Nothing delivered yet leaves the rung's words.
+  const live = React.useMemo(() => rungLive({
+    trackCount: subscription?.trackCount ?? null,
+    avgTurnaroundDays: capacity
+      ? trackDeliveredStats(capacity.delivered ?? [], new Date().toISOString()).avgTurnaroundDays
+      : null,
+  }), [subscription, capacity])
+
+  const pressure = React.useMemo(() => {
+    if (!capacity) return []
+    // Everything open and client visible: what is on a track plus what waits.
+    const onTracks = (capacity.tracks ?? []).filter(track => track.currentRequest).length
+    return planPressure({
+      trackCount: subscription?.trackCount ?? null,
+      openCount: onTracks + (capacity.queue?.length ?? 0),
+    })
+  }, [capacity, subscription])
+
   const failed = !!fetchError
-  const cards = React.useMemo(
+  const allCards = React.useMemo(
     () => (failed ? [] : (data?.items ?? []).map(toServiceCard)),
     [data, failed],
+  )
+  // The studio's Maintain and Scale rows live in `services` so they can carry
+  // copy, and the ladder above already tells that story. A card leaves the
+  // grid only when it is one of THIS client's own rendered rungs, so a
+  // Maintain client's real one-off Launch service card stays, and a member
+  // seat or a custom-plan client still sees the whole catalogue.
+  const cards = React.useMemo(
+    () => (ladderView ? allCards.filter(card => !isLadderPlanName(card.name, ladderView)) : allCards),
+    [allCards, ladderView],
   )
   const filters = React.useMemo(() => deliveryFilters(cards), [cards])
   const shown = filter === 'all' ? cards : cards.filter(card => card.delivery === filter)
@@ -133,13 +208,16 @@ export function PortalServices({ preview = false }: { preview?: boolean }) {
       {/* Your plan. A member seat is denied this read by design, so the panel
           simply is not there for them: a rule, never an error. */}
       {planLoading && !planData ? (
-        <Card padding="lg">
-          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
-            <PortalSkeleton width="10rem" height="1.125rem" />
-            <PortalSkeleton width="100%" height="0.75rem" />
-            <PortalSkeleton width="60%" height="0.75rem" />
-          </div>
-        </Card>
+        <>
+          <Card padding="lg">
+            <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+              <PortalSkeleton width="10rem" height="1.125rem" />
+              <PortalSkeleton width="100%" height="0.75rem" />
+              <PortalSkeleton width="60%" height="0.75rem" />
+            </div>
+          </Card>
+          <PlanLadderSkeleton />
+        </>
       ) : subscription ? (
         <PlanPanel
           subscription={subscription}
@@ -153,6 +231,28 @@ export function PortalServices({ preview = false }: { preview?: boolean }) {
           })}
         />
       ) : null}
+
+      {/* Where this sits. Absent for a project client, an hourly client and a
+          custom plan: none of them is standing on a standard step, and a row
+          of rungs they are not on would be an invention. */}
+      {ladderView && (
+        <PlanLadder
+          view={ladderView}
+          live={live}
+          pressure={pressure}
+          orgName={subscription?.orgName}
+          readOnly={readOnly}
+          readOnlyReason={READ_ONLY_REASON}
+          onTalk={() => askAbout({
+            title: ladderView.up ? 'Talk about moving up' : 'Talk about how this is running',
+            subtitle: 'Nothing changes on your bill from here. We confirm with you first, every time.',
+            seed: `About our ${ladderView.here.name} plan: `,
+            requestTitle: `Talk about our ${ladderView.here.name} plan`,
+            emailSubject: `Talk about our ${ladderView.here.name} plan`,
+            placeholder: 'What is piling up at your end?',
+          })}
+        />
+      )}
 
       {/* Catalogue intro + filters */}
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between" style={{ gap: 'var(--space-3)' }}>
