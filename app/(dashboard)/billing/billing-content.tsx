@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
-import { CreditCard, ExternalLink, FileText, RefreshCw, Lock } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { CreditCard, ExternalLink, FileText, RefreshCw, Lock, AlertTriangle } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
@@ -17,8 +18,28 @@ import {
   type PortalPersonSummary,
 } from '@/lib/portal-admin-label'
 import { invoiceReference } from '@/lib/invoice-billing'
+import { Card } from '@/components/tahi/card'
+import { Badge, type BadgeTone } from '@/components/tahi/badge'
+import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
+import { KPICard } from '@/components/tahi/kpi-card'
 import { Money } from '@/components/tahi/money'
 import { isOwedInvoice } from '@/lib/invoice-status'
+import { formatCurrency } from '@/lib/currency'
+import { cadenceWord } from '@/lib/next-invoice-date'
+import {
+  PORTAL_INVOICE_STATE_COPY,
+  formatPortalDate,
+  formatPortalMoney,
+  portalDueLabel,
+  portalInvoiceLabel,
+  portalInvoiceState,
+} from '@/lib/portal-invoice-view'
+import { PortalMoney, PortalStatusPill, PortalLeafIcon } from '@/components/tahi/portal/portal-money-kit'
+// Shared with the invoices list and detail so a subscription-adjacent invoice
+// pill never disagrees with the one on /invoices. Relative import: this
+// component lives at app/(dashboard)/billing, the shared vocabulary at
+// app/(dashboard)/invoices.
+import { InvoiceStatusBadge, isInvoiceOverdue } from '../invoices/invoice-status'
 
 interface InvoiceRow {
   id: string
@@ -30,8 +51,14 @@ interface InvoiceRow {
   totalAmount?: number
   currency: string
   dueDate: string | null
+  sentAt?: string | null
   paidAt: string | null
   createdAt: string
+}
+
+/** Either amount field, whichever the endpoint that raised this row carries. */
+function invoiceAmount(inv: InvoiceRow): number {
+  return inv.totalUsd ?? inv.totalAmount ?? 0
 }
 
 interface SubscriptionRow {
@@ -44,6 +71,12 @@ interface SubscriptionRow {
   addonDetails?: Array<{ key: string; label: string; monthlyValue: number }>
   currentPeriodEnd: string | null
   commitmentEndDate?: string | null
+  /** 'stripe' | 'xero': which rail this client actually bills on. Used only
+   *  to name the rail when there is no real or projected next-invoice date. */
+  invoiceChannel?: string | null
+  /** The real currentPeriodEnd, or a cadence projection from
+   *  currentPeriodStart. Null only when neither is known. */
+  nextInvoiceDate?: string | null
   /** False when the org has no Stripe customer: nothing to open, so no button. */
   canManagePayment?: boolean
 }
@@ -58,25 +91,6 @@ interface PortalBilling {
   cycleSavings: number
 }
 
-function formatCurrency(amount: number, currency: string): string {
-  const cur = currency || 'NZD'
-  return new Intl.NumberFormat('en-NZ', {
-    style: 'currency',
-    currency: cur,
-    minimumFractionDigits: 2,
-  }).format(amount)
-}
-
-/**
- * Past due and still owed. A draft is never overdue: it has not been issued,
- * so nobody has missed a deadline. Delegates the vocabulary to
- * lib/invoice-status.ts so this page and the aggregations agree.
- */
-function isOverdue(dueDate: string | null, status: string): boolean {
-  if (!dueDate || !isOwedInvoice(status)) return false
-  return new Date(dueDate + 'T23:59:59') < new Date()
-}
-
 const INTERVAL_LABELS: Record<string, string> = {
   monthly: 'Monthly',
   quarterly: '3-Month',
@@ -84,15 +98,24 @@ const INTERVAL_LABELS: Record<string, string> = {
 }
 
 export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
+  const router = useRouter()
   const [portalLoading, setPortalLoading] = useState(false)
   const [portalError, setPortalError] = useState('')
 
   // Portal-only fetches. Keys are null for admins so SWR skips them;
   // the admin path renders <AdminBillingView /> before these values are used.
-  const { data: invoicesData, isLoading: invoicesLoading, error: invoicesError, mutate: mutateInvoices } = useSWR<{ items: InvoiceRow[] }>(
-    !isAdmin ? '/api/portal/invoices?status=all' : null
-  )
-  const { data: subData, isLoading: subLoading, error: subError, mutate: mutateSub } = useSWR<{ subscription?: SubscriptionRow; billing?: PortalBilling }>(
+  const {
+    data: invoicesData,
+    isLoading: invoicesLoading,
+    error: invoicesError,
+    mutate: mutateInvoices,
+  } = useSWR<{ items: InvoiceRow[] }>(!isAdmin ? '/api/portal/invoices?status=all' : null)
+  const {
+    data: subData,
+    isLoading: subLoading,
+    error: subError,
+    mutate: mutateSub,
+  } = useSWR<{ subscription?: SubscriptionRow; billing?: PortalBilling }>(
     !isAdmin ? '/api/portal/subscription' : null
   )
 
@@ -112,6 +135,11 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
   const denialCopy = denial
     ? portalInvoiceDenialCopy(denial, portalAdminLabel(peopleData?.items))
     : null
+
+  // A failure that is not a denial is honest, not silent: without this the
+  // page used to fall straight through to "No active subscription found" and
+  // "No invoices yet" on a load that never actually answered.
+  const failed = !isAdmin && !!moneyError && !denial
 
   const invoices = invoicesData?.items ?? []
   const subscription = subData?.subscription ?? null
@@ -159,16 +187,82 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
     return (
       <div className="space-y-6">
         <PageHeader title="Billing" subtitle="Your plan and invoices." />
-        <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl">
+        <Card padding="none">
           <EmptyState
             icon={<Lock className="w-6 h-6" />}
             title={denialCopy.title}
             description={denialCopy.description}
           />
-        </div>
+        </Card>
       </div>
     )
   }
+
+  // "TBC" used to be the only fallback here, which read as an operational gap
+  // even for a Xero-rail client whose retainer has no Stripe period to point
+  // at by design. The API projects a real date from the cadence when it can
+  // (lib/next-invoice-date.ts); only when it truly cannot does this name the
+  // rail instead, exactly like the client home does.
+  const nextInvoiceLabel = subscription?.nextInvoiceDate
+    ? formatPortalDate(subscription.nextInvoiceDate)
+    : subscription?.invoiceChannel === 'xero'
+      ? `Invoiced ${cadenceWord(subscription.billingInterval)} through Xero`
+      : 'TBC'
+
+  const invoiceHistoryColumns: DataTableColumn<InvoiceRow>[] = [
+    {
+      key: 'invoice',
+      header: 'Invoice',
+      sortable: true,
+      sortValue: r => r.dueDate ?? r.createdAt,
+      minWidth: '11rem',
+      render: r => (
+        <div style={{ display: 'grid', gap: '0.125rem' }}>
+          <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>
+            {portalInvoiceLabel(r)}
+          </span>
+          <span data-private style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
+            {invoiceReference(r.id, r.number)}
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      sortValue: r => portalInvoiceState(r),
+      width: '9rem',
+      render: r => {
+        const copy = PORTAL_INVOICE_STATE_COPY[portalInvoiceState(r)]
+        return <PortalStatusPill label={copy.label} tone={copy.tone} />
+      },
+    },
+    {
+      key: 'due',
+      header: 'Due',
+      sortable: true,
+      sortValue: r => r.dueDate ?? '',
+      width: '9rem',
+      render: r => (
+        <span style={{
+          fontSize: '0.8125rem',
+          color: portalInvoiceState(r) === 'overdue' ? 'var(--color-danger)' : 'var(--color-text-muted)',
+        }}>
+          {portalDueLabel(r)}
+        </span>
+      ),
+    },
+    {
+      key: 'amount',
+      header: 'Amount',
+      sortable: true,
+      sortValue: r => invoiceAmount(r),
+      align: 'right',
+      width: '8rem',
+      render: r => <PortalMoney>{formatPortalMoney(invoiceAmount(r), r.currency)}</PortalMoney>,
+    },
+  ]
 
   return (
     <div className="space-y-6">
@@ -183,10 +277,23 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
 
       {loading ? (
         <LoadingSkeleton rows={5} />
+      ) : failed ? (
+        <Card padding="none">
+          <EmptyState
+            icon={<AlertTriangle className="w-6 h-6" />}
+            title="We could not load your billing"
+            description="This one is on us. Nothing has changed on your account. Try again in a moment."
+            action={
+              <TahiButton size="sm" variant="secondary" iconLeft={<RefreshCw className="w-3.5 h-3.5" />} onClick={() => void refresh()}>
+                Try again
+              </TahiButton>
+            }
+          />
+        </Card>
       ) : (
         <div className="space-y-6">
           {/* Current Plan */}
-          <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl p-6">
+          <Card padding="md">
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
                 <h2 className="text-lg font-semibold text-[var(--color-text)] mb-1">Current Plan</h2>
@@ -196,32 +303,21 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
                       <span className="text-sm font-medium text-[var(--color-text)] capitalize">
                         {subscription.planLabel ?? subscription.planType}
                       </span>
-                      <span
-                        className="text-xs px-2 py-0.5 rounded-full font-medium"
-                        style={{
-                          background: subscription.status === 'active' ? 'var(--color-success-bg)' : 'var(--color-bg-tertiary)',
-                          color: subscription.status === 'active' ? 'var(--color-success)' : 'var(--color-text-muted)',
-                        }}
-                      >
+                      <Badge tone={subscription.status === 'active' ? 'positive' : 'neutral'} variant="soft" size="sm">
                         {subscription.status}
-                      </span>
+                      </Badge>
                       {subscription.billingInterval && subscription.billingInterval !== 'monthly' && (
-                        <span
-                          className="text-xs px-2 py-0.5 rounded-full font-medium"
-                          style={{ background: 'var(--color-brand-50)', color: 'var(--color-brand)' }}
-                        >
+                        <Badge tone="brand" variant="soft" size="sm">
                           {INTERVAL_LABELS[subscription.billingInterval] ?? subscription.billingInterval}
-                        </span>
+                        </Badge>
                       )}
                     </div>
 
                     {/* Billing details */}
                     <div className="flex flex-col gap-1 text-xs text-[var(--color-text-muted)]">
-                      {subscription.currentPeriodEnd && (
-                        <p>
-                          Renewal date: <span className="text-[var(--color-text)]">{new Date(subscription.currentPeriodEnd).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                        </p>
-                      )}
+                      <p>
+                        Next invoice: <span className="text-[var(--color-text)]">{nextInvoiceLabel}</span>
+                      </p>
                       {billing && billing.monthlyRate > 0 && (
                         <p>
                           {billing.cycleMonths > 1 ? `${billing.cycleMonths}-month` : 'Monthly'} total:{' '}
@@ -245,13 +341,17 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
                           {subscription.addonDetails.map(addon => (
                             <div key={addon.key} className="flex items-center justify-between text-xs">
                               <span style={{ color: 'var(--color-brand)' }}>{addon.label}</span>
-                              <span className="text-[var(--color-text-muted)]">${addon.monthlyValue}/mo value</span>
+                              {/* Add-on values are the studio's estimated NZD
+                                  worth (lib/billing.ts ADDON_VALUES), not a
+                                  figure this client was ever billed, so it is
+                                  never converted to their negotiated currency. */}
+                              <span className="text-[var(--color-text-muted)]">{formatCurrency(addon.monthlyValue, 'NZD')}/mo value</span>
                             </div>
                           ))}
                         </div>
                         {billing && billing.monthlySavings > 0 && (
                           <p className="text-xs font-medium mt-2" style={{ color: 'var(--color-brand)' }}>
-                            You save ${(billing.monthlySavings * 12).toLocaleString()}/yr vs paying monthly for add-ons
+                            You save {formatCurrency(billing.monthlySavings * 12, 'NZD')}/yr vs paying monthly for add-ons
                           </p>
                         )}
                       </div>
@@ -280,55 +380,31 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
                 {portalError}
               </p>
             )}
-          </div>
+          </Card>
 
           {/* Invoice History */}
           <div>
             <h2 className="text-lg font-semibold text-[var(--color-text)] mb-4">Invoice History</h2>
-            {invoices.length === 0 ? (
-              <EmptyState
-                icon={<FileText className="w-8 h-8 text-white" />}
-                title="No invoices yet"
-                description="Your invoice history will appear here once invoices are generated."
+            <Card padding="none">
+              <DataTable<InvoiceRow>
+                ariaLabel="Invoice history"
+                columns={invoiceHistoryColumns}
+                rows={invoices}
+                getRowId={r => r.id}
+                defaultSort={{ key: 'due', dir: 'desc' }}
+                mobileCard={inv => (
+                  <InvoiceHistoryMobileCard invoice={inv} onOpen={() => router.push(`/invoices/${inv.id}`)} />
+                )}
+                onRowClick={r => router.push(`/invoices/${r.id}`)}
+                empty={
+                  <EmptyState
+                    icon={<PortalLeafIcon />}
+                    title="No invoices yet"
+                    description="Your invoice history will appear here once invoices are generated."
+                  />
+                }
               />
-            ) : (
-              <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-xl overflow-hidden">
-                <div className="h-scroll">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-[var(--color-border-subtle)]">
-                        <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">ID</th>
-                        <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Amount</th>
-                        <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Status</th>
-                        <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Due Date</th>
-                        <th className="text-left px-4 py-3 font-medium text-[var(--color-text-muted)]">Paid</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {invoices.map(inv => (
-                        <tr key={inv.id} className="border-b border-[var(--color-border-subtle)] last:border-0">
-                          <td className="px-4 py-3 font-mono text-xs text-[var(--color-text)]">
-                            {invoiceReference(inv.id, inv.number)}
-                          </td>
-                          <td className="px-4 py-3 font-medium text-[var(--color-text)]">
-                            {formatCurrency(inv.totalUsd ?? inv.totalAmount ?? 0, inv.currency)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <InvoiceStatusBadge status={isOverdue(inv.dueDate, inv.status) ? 'overdue' : inv.status} />
-                          </td>
-                          <td className="px-4 py-3 text-[var(--color-text-muted)]">
-                            {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : '-'}
-                          </td>
-                          <td className="px-4 py-3 text-[var(--color-text-muted)]">
-                            {inv.paidAt ? new Date(inv.paidAt).toLocaleDateString() : '-'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+            </Card>
           </div>
         </div>
       )}
@@ -336,10 +412,64 @@ export function BillingContent({ isAdmin }: { isAdmin: boolean }) {
   )
 }
 
+/**
+ * One invoice, as a full-width tappable card. The four-column table
+ * (Invoice, Status, Due, Amount) clears about 37rem before it needs to
+ * scroll, well past a 375px phone, so below md this replaces the table
+ * entirely rather than handing the client a horizontal scrollbar.
+ */
+function InvoiceHistoryMobileCard({
+  invoice,
+  onOpen,
+}: {
+  invoice: InvoiceRow
+  onOpen: () => void
+}) {
+  const state = portalInvoiceState(invoice)
+  const copy = PORTAL_INVOICE_STATE_COPY[state]
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="tahi-focus-ring w-full text-left min-h-11"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.5rem',
+        padding: '0.875rem',
+        border: 'none',
+        borderBottom: '1px solid var(--color-border-subtle)',
+        background: 'none',
+        cursor: 'pointer',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+        <span style={{ fontSize: '0.9375rem', fontWeight: 600, color: 'var(--color-text)' }}>
+          {portalInvoiceLabel(invoice)}
+        </span>
+        <PortalMoney>{formatPortalMoney(invoiceAmount(invoice), invoice.currency)}</PortalMoney>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.625rem' }}>
+        <PortalStatusPill label={copy.label} tone={copy.tone} />
+        <span data-private style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)' }}>
+          {invoiceReference(invoice.id, invoice.number)}
+        </span>
+      </div>
+      <span style={{
+        fontSize: '0.75rem',
+        color: state === 'overdue' ? 'var(--color-danger)' : 'var(--color-text-muted)',
+      }}>
+        {portalDueLabel(invoice)}
+      </span>
+    </button>
+  )
+}
+
 // -- Admin Billing View --
 
 interface AdminSubscription {
   id: string
+  orgId: string
   orgName: string
   planType: string
   status: string
@@ -348,13 +478,60 @@ interface AdminSubscription {
   billingInterval?: string
 }
 
+/**
+ * The subscription lifecycle vocabulary (active / trialing / past_due /
+ * paused / cancelled), distinct from an invoice's own six-word vocabulary.
+ * The old badge here read every subscription status through
+ * INVOICE_STATUS_TONE, which has no 'active' key, so a healthy retainer
+ * silently fell back to the Draft tone (neutral grey) while still printing
+ * the word "active": right label, wrong colour, on every row.
+ */
+const SUBSCRIPTION_STATUS_CONFIG: Record<string, { label: string; tone: BadgeTone }> = {
+  active:    { label: 'Active',    tone: 'positive' },
+  trialing:  { label: 'Trialing',  tone: 'info'      },
+  past_due:  { label: 'Past due',  tone: 'danger'    },
+  paused:    { label: 'Paused',    tone: 'warning'   },
+  cancelled: { label: 'Cancelled', tone: 'neutral'   },
+}
+
+function SubscriptionStatusBadge({ status }: { status: string }) {
+  const cfg = SUBSCRIPTION_STATUS_CONFIG[status]
+    ?? { label: status.replace(/_/g, ' '), tone: 'neutral' as BadgeTone }
+  return <Badge tone={cfg.tone} variant="soft" size="sm">{cfg.label}</Badge>
+}
+
+/** Whole-dollar, matching /invoices' own admin Amount column (Decision #045). */
+function formatInvoiceCurrency(amount: number, currency: string | null): string {
+  return formatCurrency(amount, currency ?? 'NZD')
+}
+
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return '-'
+  try {
+    const d = new Date(dateStr.includes('T') ? dateStr : dateStr + 'T00:00:00')
+    return d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
+  } catch { return '-' }
+}
+
 function AdminBillingView() {
-  const { data: subsData, isLoading: subsLoading, mutate: mutateSubs } = useSWR<{ items: AdminSubscription[] }>('/api/admin/subscriptions')
-  const { data: invData, isLoading: invLoading, mutate: mutateInv } = useSWR<{ items: InvoiceRow[] }>('/api/admin/invoices?limit=10')
+  const router = useRouter()
+  const {
+    data: subsData,
+    isLoading: subsLoading,
+    error: subsError,
+    mutate: mutateSubs,
+  } = useSWR<{ items: AdminSubscription[] }>('/api/admin/subscriptions')
+  const {
+    data: invData,
+    isLoading: invLoading,
+    error: invError,
+    mutate: mutateInv,
+  } = useSWR<{ items: InvoiceRow[] }>('/api/admin/invoices?limit=10')
 
   const subs = subsData?.items ?? []
   const recentInvoices = invData?.items ?? []
   const loading = subsLoading || invLoading
+  const failed = !loading && (!!subsError || !!invError)
 
   async function refresh() {
     await Promise.all([mutateSubs(), mutateInv()])
@@ -369,6 +546,117 @@ function AdminBillingView() {
     intervalCounts[interval] = (intervalCounts[interval] ?? 0) + 1
   }
 
+  const outstandingTotal = recentInvoices
+    .filter(i => isOwedInvoice(i.status))
+    .reduce((s, i) => s + invoiceAmount(i), 0)
+
+  const subscriptionColumns: DataTableColumn<AdminSubscription>[] = [
+    {
+      key: 'client',
+      header: 'Client',
+      sortable: true,
+      sortValue: r => r.orgName.toLowerCase(),
+      minWidth: '12rem',
+      link: { href: r => `/clients/${r.orgId}` },
+      render: r => (
+        <span style={{ fontWeight: 500, color: 'var(--color-text)' }}>{r.orgName}</span>
+      ),
+    },
+    {
+      key: 'plan',
+      header: 'Plan',
+      sortable: true,
+      sortValue: r => r.planType,
+      width: '8rem',
+      render: r => (
+        <span className="capitalize" style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>
+          {r.planType}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      sortValue: r => r.status,
+      width: '8rem',
+      render: r => <SubscriptionStatusBadge status={r.status} />,
+    },
+    {
+      key: 'interval',
+      header: 'Interval',
+      width: '8rem',
+      render: r => (
+        <Badge tone="neutral" variant="soft" size="sm">
+          {INTERVAL_LABELS[r.billingInterval ?? 'monthly'] ?? 'Monthly'}
+        </Badge>
+      ),
+    },
+    {
+      key: 'priority',
+      header: 'Priority',
+      width: '6rem',
+      render: r => (
+        <span style={{ color: 'var(--color-text-muted)' }}>{r.hasPrioritySupport ? 'Yes' : 'No'}</span>
+      ),
+    },
+    {
+      key: 'nextBilling',
+      header: 'Next Billing',
+      sortable: true,
+      sortValue: r => r.currentPeriodEnd ?? '',
+      width: '8rem',
+      render: r => (
+        <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+          {formatDate(r.currentPeriodEnd)}
+        </span>
+      ),
+    },
+  ]
+
+  const recentInvoiceColumns: DataTableColumn<InvoiceRow>[] = [
+    {
+      key: 'number',
+      header: 'Invoice',
+      width: '10rem',
+      render: r => (
+        <span style={{ fontFamily: 'var(--font-mono, ui-monospace, monospace)', fontSize: '0.78125rem', color: 'var(--color-text)' }}>
+          {invoiceReference(r.id, r.number)}
+        </span>
+      ),
+    },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      width: '8rem',
+      render: r => (
+        <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>
+          {formatInvoiceCurrency(invoiceAmount(r), r.currency)}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      width: '8rem',
+      render: r => <InvoiceStatusBadge status={r.status} dueDate={r.dueDate} />,
+    },
+    {
+      key: 'dueDate',
+      header: 'Due Date',
+      width: '8rem',
+      render: r => (
+        <span style={{
+          fontSize: '0.8125rem',
+          color: isInvoiceOverdue(r.dueDate, r.status) ? 'var(--color-danger)' : 'var(--color-text-muted)',
+        }}>
+          {formatDate(r.dueDate)}
+        </span>
+      ),
+    },
+  ]
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       <PageHeader
@@ -382,22 +670,27 @@ function AdminBillingView() {
 
       {loading ? (
         <LoadingSkeleton rows={6} />
+      ) : failed ? (
+        <Card padding="none">
+          <EmptyState
+            icon={<AlertTriangle className="w-6 h-6" />}
+            title="We could not load billing"
+            description="Nothing has changed on any account. Try again in a moment."
+            action={
+              <TahiButton size="sm" variant="secondary" iconLeft={<RefreshCw className="w-3.5 h-3.5" />} onClick={() => void refresh()}>
+                Try again
+              </TahiButton>
+            }
+          />
+        </Card>
       ) : (
         <>
           {/* KPI Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <BillingKPI label="Active Subscriptions" value={activeSubs.length} />
-            <BillingKPI label="Total Clients" value={subs.length} />
-            <BillingKPI label="Recent Invoices" value={recentInvoices.length} />
-            <BillingKPI
-              label="Outstanding"
-              value={formatCurrency(
-                recentInvoices
-                  .filter(i => isOwedInvoice(i.status))
-                  .reduce((s, i) => s + (i.totalUsd ?? i.totalAmount ?? 0), 0),
-                'NZD'
-              )}
-            />
+            <KPICard label="Active Subscriptions" value={activeSubs.length} />
+            <KPICard label="Total Clients" value={subs.length} />
+            <KPICard label="Recent Invoices" value={recentInvoices.length} />
+            <KPICard label="Outstanding" value={formatInvoiceCurrency(outstandingTotal, 'NZD')} />
           </div>
 
           {/* Billing Interval Summary (T470) */}
@@ -410,15 +703,7 @@ function AdminBillingView() {
                 {(['monthly', 'quarterly', 'annual'] as const).map(interval => {
                   const count = intervalCounts[interval] ?? 0
                   return (
-                    <div
-                      key={interval}
-                      style={{
-                        background: 'var(--color-bg)',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius-card)',
-                        padding: '1.25rem',
-                      }}
-                    >
+                    <Card key={interval} padding="md">
                       <div className="flex items-center gap-3">
                         <div
                           className="flex items-center justify-center flex-shrink-0"
@@ -441,7 +726,7 @@ function AdminBillingView() {
                           </p>
                         </div>
                       </div>
-                    </div>
+                    </Card>
                   )
                 })}
               </div>
@@ -453,60 +738,22 @@ function AdminBillingView() {
             <h2 className="text-base font-semibold mb-3" style={{ color: 'var(--color-text)' }}>
               Active Subscriptions
             </h2>
-            {subs.length === 0 ? (
-              <EmptyState
-                icon={<CreditCard className="w-8 h-8 text-white" />}
-                title="No subscriptions"
-                description="Client subscriptions will appear here."
+            <Card padding="none">
+              <DataTable<AdminSubscription>
+                ariaLabel="Active subscriptions"
+                columns={subscriptionColumns}
+                rows={subs}
+                getRowId={r => r.id}
+                defaultSort={{ key: 'client', dir: 'asc' }}
+                empty={
+                  <EmptyState
+                    icon={<CreditCard className="w-6 h-6" />}
+                    title="No subscriptions"
+                    description="Client subscriptions will appear here."
+                  />
+                }
               />
-            ) : (
-              <div style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-card)', overflow: 'hidden' }}>
-                <div className="h-scroll">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
-                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Client</th>
-                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Plan</th>
-                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Status</th>
-                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Interval</th>
-                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Priority</th>
-                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Next Billing</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {subs.map(sub => (
-                        <tr key={sub.id} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
-                          <td style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text)' }}>{sub.orgName}</td>
-                          <td style={{ padding: '0.75rem 1rem' }}>
-                            <span className="capitalize text-sm" style={{ color: 'var(--color-text)' }}>{sub.planType}</span>
-                          </td>
-                          <td style={{ padding: '0.75rem 1rem' }}>
-                            <InvoiceStatusBadge status={sub.status} />
-                          </td>
-                          <td style={{ padding: '0.75rem 1rem' }}>
-                            <span
-                              className="text-xs px-2 py-0.5 rounded-full font-medium"
-                              style={{
-                                background: 'var(--color-bg-tertiary)',
-                                color: 'var(--color-text-muted)',
-                              }}
-                            >
-                              {INTERVAL_LABELS[sub.billingInterval ?? 'monthly'] ?? 'Monthly'}
-                            </span>
-                          </td>
-                          <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>
-                            {sub.hasPrioritySupport ? 'Yes' : 'No'}
-                          </td>
-                          <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>
-                            {sub.currentPeriodEnd ? new Date(sub.currentPeriodEnd).toLocaleDateString() : '-'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+            </Card>
           </div>
 
           {/* Recent Invoices */}
@@ -519,85 +766,25 @@ function AdminBillingView() {
                 View all
               </Link>
             </div>
-            {recentInvoices.length === 0 ? (
-              <EmptyState
-                icon={<FileText className="w-8 h-8 text-white" />}
-                title="No invoices yet"
-                description="Invoices will appear here once created."
+            <Card padding="none">
+              <DataTable<InvoiceRow>
+                ariaLabel="Recent invoices"
+                columns={recentInvoiceColumns}
+                rows={recentInvoices}
+                getRowId={r => r.id}
+                onRowClick={r => router.push(`/invoices/${r.id}`)}
+                empty={
+                  <EmptyState
+                    icon={<FileText className="w-6 h-6" />}
+                    title="No invoices yet"
+                    description="Invoices will appear here once created."
+                  />
+                }
               />
-            ) : (
-              <div style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-card)', overflow: 'hidden' }}>
-                <div className="h-scroll">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
-                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>ID</th>
-                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Amount</th>
-                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Status</th>
-                        <th className="text-left" style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Due Date</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {recentInvoices.map(inv => (
-                        <tr key={inv.id} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
-                          <td className="font-mono text-xs" style={{ padding: '0.75rem 1rem', color: 'var(--color-text)' }}>
-                            {invoiceReference(inv.id, inv.number)}
-                          </td>
-                          <td className="font-medium" style={{ padding: '0.75rem 1rem', color: 'var(--color-text)' }}>
-                            {formatCurrency(inv.totalUsd ?? inv.totalAmount ?? 0, inv.currency)}
-                          </td>
-                          <td style={{ padding: '0.75rem 1rem' }}>
-                            <InvoiceStatusBadge status={isOverdue(inv.dueDate, inv.status) ? 'overdue' : inv.status} />
-                          </td>
-                          <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>
-                            {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : '-'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+            </Card>
           </div>
         </>
       )}
     </div>
-  )
-}
-
-function BillingKPI({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div style={{
-      background: 'var(--color-bg)',
-      border: '1px solid var(--color-border)',
-      borderRadius: 'var(--radius-card)',
-      padding: '1.25rem',
-    }}>
-      <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{label}</p>
-      <p className="text-2xl font-bold" style={{ color: 'var(--color-text)', marginTop: '0.25rem' }}>{value}</p>
-    </div>
-  )
-}
-
-function InvoiceStatusBadge({ status }: { status: string }) {
-  const config: Record<string, { bg: string; text: string }> = {
-    paid: { bg: 'var(--color-success-bg)', text: 'var(--color-success)' },
-    sent: { bg: 'var(--status-submitted-bg)', text: 'var(--status-submitted-text)' },
-    viewed: { bg: 'var(--status-submitted-bg)', text: 'var(--status-submitted-text)' },
-    draft: { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-muted)' },
-    overdue: { bg: 'var(--color-danger-bg)', text: 'var(--color-danger)' },
-    written_off: { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-subtle)' },
-  }
-
-  const c = config[status] ?? config.draft
-
-  return (
-    <span
-      className="text-xs px-2 py-0.5 rounded-full font-medium capitalize"
-      style={{ background: c.bg, color: c.text }}
-    >
-      {status.replace('_', ' ')}
-    </span>
   )
 }
