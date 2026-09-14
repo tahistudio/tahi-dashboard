@@ -601,7 +601,7 @@ function DailyBrief({ go, ro }: { go: (id: string) => void; ro: boolean }) {
       : `${urgent.length} ${urgent.length === 1 ? 'thing needs' : 'things need'} you today, ${week.length} this week.`
 
   return (
-    <div className="ov-brief">
+    <div className="ov-brief" data-section="Daily brief">
       <div className="ov-brief-h">
         <h3>Daily brief</h3>
         {timeStr && <span className="ov-brief-time">{timeStr}</span>}
@@ -688,7 +688,7 @@ function TakeHomeInk() {
   const hasData = !!data && !error && total > 0
 
   return (
-    <Card span={5} tone="ink">
+    <Card section="Take-home" span={5} tone="ink">
       <CardH ic="wallet" title="Take-home" />
       {!data && !error ? (
         <Shim h={120} />
@@ -786,7 +786,7 @@ function CashRunway({
 }) {
   const { moneyCompact } = useOvFormat()
   return (
-    <Card span={7}>
+    <Card section="Cash runway" span={7}>
       <CardH ic="chart" title="Cash runway" link="Open books" onLink={() => go('financialreports')} />
       {loading ? (
         <Shim h={90} />
@@ -828,7 +828,7 @@ function CashFlowRibbon({ go }: { go: (id: string) => void }) {
   }, [months])
 
   return (
-    <Card span={7}>
+    <Card section="Cash-flow ribbon" span={7}>
       <CardH ic="chart" title="Cash-flow ribbon" link="Open books" onLink={() => go('financialreports')} />
       {!data ? (
         <Shim h={64} />
@@ -858,7 +858,7 @@ function Receivables({ arAging, loading }: { arAging: ArAging | null; loading: b
   const overdue = arAging ? arAging.d30Nzd + arAging.d60Nzd + arAging.d90Nzd : 0
   const healthy = !arAging || arAging.totalNzd <= 0
   return (
-    <Card span={5} edge="risk">
+    <Card section="Receivables" span={5} edge="risk">
       <CardH ic="receipt" title="Receivables" />
       {loading ? (
         <Shim h={80} />
@@ -978,7 +978,7 @@ function PipelineAhead({ go }: { go: (id: string) => void }) {
   }).length
 
   return (
-    <Card span={7}>
+    <Card section="Pipeline ahead" span={7}>
       <CardH ic="funnel" title="Pipeline ahead" link="View pipeline" onLink={() => go('deals')} />
       {loading ? (
         <>
@@ -1031,7 +1031,7 @@ function StudioCapacity({ go }: { go: (id: string) => void }) {
     data && data.totalCapacity > 0 ? Math.round((data.totalAllocated / data.totalCapacity) * 100) : 0
 
   return (
-    <Card span={5}>
+    <Card section="Studio capacity" span={5}>
       <CardH ic="gauge" title="Studio capacity" link="Capacity" onLink={() => go('capacity')} />
       {!data ? (
         <Shim h={120} />
@@ -1105,7 +1105,7 @@ function HotLeads({ go }: { go: (id: string) => void }) {
   const warm = leads.filter(l => (l.aiScore ?? 0) >= 60).length
 
   return (
-    <Card span={6}>
+    <Card section="Hot leads" span={6}>
       <CardH
         ic="spark"
         title="Hot leads"
@@ -1170,7 +1170,7 @@ function ProposalsLive({ go }: { go: (id: string) => void }) {
   }, [data])
 
   return (
-    <Card span={6}>
+    <Card section="Proposals live" span={6}>
       <CardH ic="file" title="Proposals live" link="All proposals" onLink={() => go('proposals')} />
       {!data ? (
         <Shim h={90} />
@@ -1207,7 +1207,7 @@ function InTheStudio({
   const nowMs = useNow().getTime()
   const rows = requests ?? []
   return (
-    <Card span={7}>
+    <Card section="In the studio" span={7}>
       <CardH ic="tasks" title="In the studio" link="All requests" onLink={() => go('requests')} />
       {loading ? (
         <Shim h={120} />
@@ -1260,7 +1260,7 @@ function TodaysCalls({ go }: { go: (id: string) => void }) {
   }
 
   return (
-    <Card span={5}>
+    <Card section="Today's calls" span={5}>
       <CardH ic="phone" title="Today's calls" link="Calendar" onLink={() => go('calls')} />
       {!data || !mounted ? (
         <Shim h={90} />
@@ -1345,7 +1345,7 @@ function ClientReplies({ go }: { go: (id: string) => void }) {
   const { data, error } = useResource<{ threads: ReplyThread[] }>('/api/admin/overview/replies-waiting?scope=me')
   const threads = (data?.threads ?? []).filter(t => t.kind === 'request').slice(0, 3)
   return (
-    <Card span={7}>
+    <Card section="Client replies waiting" span={7}>
       <CardH ic="msg" title="Client replies waiting" link="All requests" onLink={() => go('requests')} />
       {!data && error ? (
         <EmptyLine>Could not load client replies. Try again shortly.</EmptyLine>
@@ -1390,7 +1390,7 @@ function Worklog({ go }: { go: (id: string) => void }) {
   const members = data?.members ?? []
   const maxTracked = Math.max(1, ...members.map(m => m.trackedHours))
   return (
-    <Card span={5}>
+    <Card section="Worklog this week" span={5}>
       <CardH ic="clock" title="Worklog this week" link="Time" onLink={() => go('time')} />
       {!data ? (
         <Shim h={120} />
@@ -1458,7 +1458,7 @@ function RetainerHealth({ go }: { go: (id: string) => void }) {
   const flagged = [...attention, ...atRisk]
 
   return (
-    <Card span={7} edge="warn">
+    <Card section="Retainer health" span={7} edge="warn">
       <CardH ic="users" title="Retainer health" link="All clients" onLink={() => go('clients')} />
       {!data ? (
         <Shim h={120} />
@@ -1547,7 +1547,7 @@ function Contracts({ go }: { go: (id: string) => void }) {
   }
 
   return (
-    <Card span={5} edge="warn">
+    <Card section="Contracts" span={5} edge="warn">
       <CardH ic="file" title="Contracts" link="All contracts" onLink={() => go('contracts')} />
       {!data ? (
         <Shim h={100} />
@@ -1616,7 +1616,7 @@ function ContentEngine({ go }: { go: (id: string) => void }) {
   const hasAny = (counts?.total ?? 0) > 0 || history.length > 0
 
   return (
-    <Card span={7}>
+    <Card section="Content engine" span={7}>
       <CardH ic="pen" title="Content engine" link="Content studio" onLink={() => go('content')} />
       {loading ? (
         <Shim h={90} />
@@ -1675,7 +1675,7 @@ function SocialCadence({ go }: { go: (id: string) => void }) {
   const cadence = useMemo(() => weeklyBuckets(posts.map(p => p.sentAt ?? p.createdAt), 8), [posts])
 
   return (
-    <Card span={5}>
+    <Card section="Social cadence" span={5}>
       <CardH ic="share" title="Social cadence" link="Social" onLink={() => go('social')} />
       {!status ? (
         <Shim h={80} />
@@ -1729,7 +1729,7 @@ function Reviews({ go }: { go: (id: string) => void }) {
   const { data } = useResource<{ reviews: Review[] }>('/api/admin/reviews')
   const active = (data?.reviews ?? []).filter(r => REVIEW_ACTIVE.has(r.outreachStatus))
   return (
-    <Card span={7}>
+    <Card section="Reviews & case studies" span={7}>
       <CardH ic="star" title="Reviews & case studies" link="Reviews" onLink={() => go('reviews')} />
       {!data ? (
         <Shim h={90} />
@@ -1764,7 +1764,7 @@ function DocsHub({ go }: { go: (id: string) => void }) {
   const { data } = useResource<{ pages: DocPage[] }>('/api/admin/docs')
   const pages = data?.pages ?? []
   return (
-    <Card span={5}>
+    <Card section="Docs hub" span={5}>
       <CardH ic="book" title="Docs hub" link="All docs" onLink={() => go('docs')} />
       {!data ? (
         <Shim h={90} />

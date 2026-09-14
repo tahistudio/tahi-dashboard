@@ -1400,7 +1400,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       </Zone>
 
       <Zone label="Activity">
-        <Card span={7}>
+        <Card section="Recent requests" span={7}>
           <CardH ic="tasks" title="Recent requests" link="All requests" onLink={() => go('requests')} />
           {requestsFailed ? (
             <CardError what="Your requests" onRetry={retryRequests} />
@@ -1436,7 +1436,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
             </div>
           )}
         </Card>
-        <Card span={5}>
+        <Card section="Next call" span={5}>
           <CardH ic="phone" title="Next call" />
           {callsFailed ? (
             <CardError what="Your calls" onRetry={() => { void mutateCalls() }} />
@@ -1484,7 +1484,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       </Zone>
 
       <Zone label="Library">
-        <Card span={6}>
+        <Card section="Recent files" span={6}>
           <CardH ic="file" title="Recent files" link="All files" onLink={() => go('files')} />
           {filesFailed ? (
             <CardError what="Your files" onRetry={() => { void mutateFiles() }} />
@@ -1506,7 +1506,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
             <div className="ov-mini">No files shared yet.</div>
           )}
         </Card>
-        <Card span={6}>
+        <Card section="Your team" span={6}>
           <CardH ic="users" title="Your team" />
           {teamFailed ? (
             <CardError what="Your team" onRetry={() => { void mutateTeam() }} />
@@ -1550,7 +1550,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
             stop. While the read is in flight this renders the plain admin
             shape below (a brief shimmer, never the wrong final state). */}
         {isMemberSeat ? (
-          <Card span={12}>
+          <Card section="Billing" span={12}>
             <CardH ic="wallet" title="Billing" />
             <div className="ov-mini">Billing is handled by your account admin.</div>
           </Card>
@@ -1564,7 +1564,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
             span, so the answer arrives without the plan card jumping from 5 to
             12 and back under the reader. */}
         {!invoicesSettled && (
-          <Card span={7} edge="warn">
+          <Card section="Invoices" span={7} edge="warn">
             <CardH ic="receipt" title="Invoices" />
             <div className="tahi-shimmer" style={{ height: '5.5rem', borderRadius: '0.625rem' }} />
           </Card>
@@ -1619,7 +1619,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         )}
 
         {isProject ? (
-          <Card span={invoicesDenied ? 12 : 5}>
+          <Card section="Your project" span={invoicesDenied ? 12 : 5}>
             {/* No "Details" link: /proposals redirects a client to /requests,
                 and this branch removed it from the client nav for that reason. */}
             <CardH ic="wallet" title="Your project" />
@@ -1654,7 +1654,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
             </div>
           </Card>
         ) : (
-          <Card span={invoicesDenied ? 12 : 5}>
+          <Card section="Your plan" span={invoicesDenied ? 12 : 5}>
             {/* No "Manage" link: it went to /billing, a page that is not in the
                 client nav, so a client who pressed it had no way back. Another
                 track is a conversation, so the card asks for one instead. */}

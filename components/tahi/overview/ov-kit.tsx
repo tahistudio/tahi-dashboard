@@ -379,14 +379,18 @@ export interface CardProps {
   style?: CSSProperties
   tone?: 'ink' | 'sand' | 'quiet'
   edge?: 'warn' | 'risk'
+  /** Human name for this card, mirroring its <CardH> title. Read off the DOM
+   *  by the feedback ball (lib/feedback-anchor.ts#nearestSectionContext) so a
+   *  comment picked anywhere inside knows which card it landed on. */
+  section?: string
 }
 
 /** The ledger card. `span` = 12-col grid span, `tone` re-themes local tokens
  *  (ink = dark forest), `edge` = subtle attention border. */
-export function Card({ span, className = '', children, style, tone, edge }: CardProps) {
+export function Card({ span, className = '', children, style, tone, edge, section }: CardProps) {
   const cls = 'ov-card ' + (span ? 'ov-col-' + span : '') + (tone ? ' ' + tone : '') + (edge ? ' edge-' + edge : '') + ' ' + className
   return (
-    <div className={cls} style={style}>
+    <div className={cls} style={style} data-section={section}>
       {children}
     </div>
   )
@@ -731,7 +735,7 @@ export function NeedsYou({ items, quiet, ro, onMore }: NeedsYouProps) {
   const live = items && items.length > 0
   const extra = live ? items.length - 3 : 0
   return (
-    <div className={'ov-needs' + (live ? ' live' : '')}>
+    <div className={'ov-needs' + (live ? ' live' : '')} data-section="Needs you">
       <div className="ov-needs-head">
         <h3>Needs you</h3>
         {live && <span className="ov-needs-count">{items.length}</span>}
@@ -849,7 +853,7 @@ export function TheWire({ events }: { events: WireEvent[] }) {
  *  12-col grid. Cards inside use `span` for their column width. */
 export function Zone({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
-    <section className="ov-zone">
+    <section className="ov-zone" data-section={typeof label === 'string' ? label : undefined}>
       <div className="ov-zone-rail">
         <span>{label}</span>
         <i className="zr-line" />

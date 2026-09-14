@@ -7,9 +7,12 @@ import { describe, it, expect } from 'vitest'
 import {
   buildSelectorPath,
   describeElement,
+  findScrollState,
   nearestSectionContext,
-  rectOnPage,
+  rectInScroller,
   type AnchorElementLike,
+  type ScrollerElementLike,
+  type ScrollState,
 } from '@/lib/feedback-anchor'
 
 /** A minimal double satisfying AnchorElementLike. Attributes default empty. */
@@ -167,19 +170,104 @@ describe('nearestSectionContext', () => {
   })
 })
 
-describe('rectOnPage', () => {
-  it('adds scroll offset to translate viewport rect to page rect', () => {
-    const result = rectOnPage({ x: 10, y: 20, width: 100, height: 50 }, { x: 0, y: 200 }, 900)
+/** A minimal double satisfying ScrollerElementLike. Not scrollable unless
+ *  scrollHeight is given above clientHeight. */
+function scroller(overrides: Partial<ScrollerElementLike> = {}): ScrollerElementLike {
+  return {
+    scrollLeft: 0,
+    scrollTop: 0,
+    scrollHeight: 100,
+    clientHeight: 100,
+    parentElement: null,
+    getBoundingClientRect: () => ({ x: 0, y: 0, width: 0, height: 0 }),
+    ...overrides,
+  }
+}
+
+const DOC: ScrollState = { originX: 0, originY: 0, scrollX: 0, scrollY: 0, scrollHeight: 800 }
+const alwaysAuto = () => 'auto'
+const alwaysVisible = () => 'visible'
+
+describe('findScrollState', () => {
+  it('falls back to the document when nothing up the tree scrolls', () => {
+    const el = scroller({ parentElement: scroller({ parentElement: null }) })
+    expect(findScrollState(el, alwaysVisible, DOC)).toEqual(DOC)
+  })
+
+  it('ignores an ancestor whose content fits, even when overflow allows scrolling', () => {
+    const el = scroller({ parentElement: scroller({ scrollHeight: 400, clientHeight: 400 }) })
+    expect(findScrollState(el, alwaysAuto, DOC)).toEqual(DOC)
+  })
+
+  it('finds the nearest scrolling ancestor and reads its origin, offset and height', () => {
+    const main = scroller({
+      scrollHeight: 4200,
+      clientHeight: 700,
+      scrollTop: 1200,
+      scrollLeft: 5,
+      getBoundingClientRect: () => ({ x: 0, y: 64, width: 384, height: 700 }),
+    })
+    const el = scroller({ parentElement: main })
+    expect(findScrollState(el, alwaysAuto, DOC)).toEqual({
+      originX: 0,
+      originY: 64,
+      scrollX: 5,
+      scrollY: 1200,
+      scrollHeight: 4200,
+    })
+  })
+
+  it('stops at the nearest scroller, ignoring scrollers further up', () => {
+    const outer = scroller({ scrollHeight: 9000, clientHeight: 500, scrollTop: 3000 })
+    const inner = scroller({ scrollHeight: 2000, clientHeight: 400, scrollTop: 100, parentElement: outer })
+    const el = scroller({ parentElement: inner })
+    expect(findScrollState(el, alwaysAuto, DOC).scrollHeight).toBe(2000)
+  })
+
+  it('never treats the picked element itself as its own scroller', () => {
+    const el = scroller({ scrollHeight: 5000, clientHeight: 300, parentElement: null })
+    expect(findScrollState(el, alwaysAuto, DOC)).toEqual(DOC)
+  })
+
+  it('is the document state for a null element', () => {
+    expect(findScrollState(null, alwaysAuto, DOC)).toEqual(DOC)
+  })
+
+  it('only counts overflow values that actually scroll', () => {
+    const parent = scroller({ scrollHeight: 900, clientHeight: 300 })
+    const el = scroller({ parentElement: parent })
+    expect(findScrollState(el, () => 'hidden', DOC)).toEqual(DOC)
+    expect(findScrollState(el, () => 'clip', DOC)).toEqual(DOC)
+    expect(findScrollState(el, () => 'scroll', DOC).scrollHeight).toBe(900)
+  })
+})
+
+describe('rectInScroller', () => {
+  it('adds scroll offset to translate viewport rect to content rect', () => {
+    const result = rectInScroller({ x: 10, y: 20, width: 100, height: 50 }, { ...DOC, scrollY: 200, scrollHeight: 900 })
     expect(result).toEqual({ x: 10, y: 220, width: 100, height: 50, scrollHeight: 900 })
   })
 
   it('rounds every field to the nearest integer', () => {
-    const result = rectOnPage({ x: 10.6, y: 20.4, width: 99.5, height: 49.49 }, { x: 0.5, y: 0.4 }, 900.9)
+    const result = rectInScroller(
+      { x: 10.6, y: 20.4, width: 99.5, height: 49.49 },
+      { originX: 0, originY: 0, scrollX: 0.5, scrollY: 0.4, scrollHeight: 900.9 },
+    )
     expect(result).toEqual({ x: 11, y: 21, width: 100, height: 49, scrollHeight: 901 })
   })
 
   it('handles zero scroll', () => {
-    const result = rectOnPage({ x: 5, y: 5, width: 10, height: 10 }, { x: 0, y: 0 }, 500)
+    const result = rectInScroller({ x: 5, y: 5, width: 10, height: 10 }, { ...DOC, scrollHeight: 500 })
     expect(result).toEqual({ x: 5, y: 5, width: 10, height: 10, scrollHeight: 500 })
+  })
+
+  it('subtracts the scroller origin so the rect is content-relative, not viewport-relative', () => {
+    // <main> starts 64px down the viewport and is scrolled 1200px. A card
+    // sitting 300px down the screen is 1436px down the scrollable content.
+    const result = rectInScroller(
+      { x: 33, y: 300, width: 313, height: 52 },
+      { originX: 0, originY: 64, scrollX: 0, scrollY: 1200, scrollHeight: 4200 },
+    )
+    expect(result).toEqual({ x: 33, y: 1436, width: 313, height: 52, scrollHeight: 4200 })
   })
 })

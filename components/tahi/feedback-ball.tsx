@@ -46,10 +46,13 @@ import { installFeedbackContextRecorder, getFeedbackContextSnapshot } from '@/li
 import {
   buildSelectorPath,
   describeElement,
+  findScrollState,
   nearestSectionContext,
-  rectOnPage,
+  rectInScroller,
   type AnchorElementLike,
   type AnchorRect,
+  type ScrollerElementLike,
+  type ScrollState,
 } from '@/lib/feedback-anchor'
 import {
   clampBallPosition,
@@ -154,6 +157,28 @@ function effectiveViewport(): Size {
  *  parentElement / previousElementSibling links is safer made explicit. */
 function toAnchorElementLike(el: HTMLElement): AnchorElementLike {
   return el as unknown as AnchorElementLike
+}
+
+function toScrollerElementLike(el: HTMLElement): ScrollerElementLike {
+  return el as unknown as ScrollerElementLike
+}
+
+/** Overflow as the browser computes it, for the scroller walk. */
+function readOverflowY(el: ScrollerElementLike): string {
+  return window.getComputedStyle(el as unknown as Element).overflowY
+}
+
+/** The document's own scroll, used when nothing between the picked element
+ *  and the root scrolls. On a dashboard screen this is the fallback, not the
+ *  answer: the shell scrolls inside <main class="overflow-y-auto">. */
+function documentScrollState(): ScrollState {
+  return {
+    originX: 0,
+    originY: 0,
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+    scrollHeight: document.documentElement.scrollHeight,
+  }
 }
 
 function rectFromElement(el: HTMLElement): ViewportRect {
@@ -274,15 +299,14 @@ export function FeedbackBall() {
     const el = toAnchorElementLike(target)
     const described = describeElement(el)
     const viewportRect = target.getBoundingClientRect()
-    const scroll = { x: window.scrollX, y: window.scrollY }
-    const scrollHeight = document.documentElement.scrollHeight
+    const scroll = findScrollState(toScrollerElementLike(target), readOverflowY, documentScrollState())
 
     pickedElRef.current = target
     setPickedAnchor({
       selector: buildSelectorPath(el),
       tag: described.tag,
       text: described.text,
-      rect: rectOnPage(viewportRect, scroll, scrollHeight),
+      rect: rectInScroller(viewportRect, scroll),
       context: nearestSectionContext(el),
     })
     setPickedRect(rectFromElement(target))

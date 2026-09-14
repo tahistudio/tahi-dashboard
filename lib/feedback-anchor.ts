@@ -5,7 +5,7 @@
  * (components/tahi/feedback-ball.tsx). Given the element a user clicked on
  * while picking, these build the anchor payload POSTed alongside the
  * comment: a CSS-ish selector path, a short description, and its bounding
- * rect relative to the page.
+ * rect relative to whatever scrolls it.
  *
  * Every helper takes a minimal structural interface (AnchorElementLike)
  * rather than a real DOM Element so it can be unit tested with plain object
@@ -30,14 +30,32 @@ export interface RectLike {
   height: number
 }
 
-export interface ScrollLike {
-  x: number
-  y: number
+/** The structural slice of a DOM element the scroller walk reads. A real
+ *  HTMLElement satisfies this as-is. */
+export interface ScrollerElementLike {
+  scrollLeft: number
+  scrollTop: number
+  scrollHeight: number
+  clientHeight: number
+  parentElement: ScrollerElementLike | null
+  getBoundingClientRect(): RectLike
+}
+
+/** Where the picked element's scroll container is and how far it is scrolled.
+ *  `originX/originY` are viewport coordinates of the scroller's own box (0,0
+ *  when the document itself is what scrolls). */
+export interface ScrollState {
+  originX: number
+  originY: number
+  scrollX: number
+  scrollY: number
+  scrollHeight: number
 }
 
 /** The bounding rect the anchor stores: the element's box relative to the
- *  page (not the viewport) plus the page's total scroll size, all rounded to
- *  integers. Five integer fields, matching the server's validation. */
+ *  content box of whatever scrolls it (not the viewport) plus that
+ *  scroller's total scroll size, all rounded to integers. Five integer
+ *  fields, matching the server's validation. */
 export interface AnchorRect extends RectLike {
   scrollHeight: number
 }
@@ -126,16 +144,54 @@ export function nearestSectionContext(el: AnchorElementLike | null): string | nu
   return null
 }
 
-/** The picked element's bounding rect translated from viewport-relative
- *  (what getBoundingClientRect returns) to page-relative (adding the current
- *  scroll offset), plus the page's total scroll height, all rounded to
- *  integers so every stored field is a plain integer. */
-export function rectOnPage(rect: RectLike, scroll: ScrollLike, scrollHeight: number): AnchorRect {
+/** Which overflow values actually scroll. `visible` and `hidden` do not, and
+ *  `clip` cannot scroll at all. */
+const SCROLLABLE_OVERFLOW = new Set(['auto', 'scroll', 'overlay'])
+
+/** The element whose scrolling moves the picked element, and where it sits.
+ *  `originX/originY` is that scroller's own box in viewport coordinates, which
+ *  is what has to come back off the picked element's rect before the scroll
+ *  offset goes on. The document case is origin 0,0. */
+export function findScrollState(
+  el: ScrollerElementLike | null,
+  readOverflowY: (el: ScrollerElementLike) => string,
+  documentState: ScrollState,
+): ScrollState {
+  let current = el?.parentElement ?? null
+  while (current) {
+    if (current.scrollHeight > current.clientHeight && SCROLLABLE_OVERFLOW.has(readOverflowY(current))) {
+      const box = current.getBoundingClientRect()
+      return {
+        originX: box.x,
+        originY: box.y,
+        scrollX: current.scrollLeft,
+        scrollY: current.scrollTop,
+        scrollHeight: current.scrollHeight,
+      }
+    }
+    current = current.parentElement
+  }
+  return documentState
+}
+
+/** The picked element's bounding rect translated from viewport-relative (what
+ *  getBoundingClientRect returns) to content-relative: relative to the top of
+ *  whatever actually scrolls it, with that scroller's total scroll height as
+ *  the denominator. All rounded to integers so every stored field is a plain
+ *  integer, matching the server's validation.
+ *
+ *  Not `window.scrollY` + `document.documentElement.scrollHeight`, which is
+ *  what this did until 2026-09-14 and which is wrong on every dashboard
+ *  screen: the shell scrolls inside <main class="overflow-y-auto">, so the
+ *  document never scrolls, window.scrollY is always 0 and the document's
+ *  scrollHeight is just the viewport height. Anchors picked below the fold
+ *  came back with their on-screen y, not their position in the page. */
+export function rectInScroller(rect: RectLike, scroll: ScrollState): AnchorRect {
   return {
-    x: Math.round(rect.x + scroll.x),
-    y: Math.round(rect.y + scroll.y),
+    x: Math.round(rect.x - scroll.originX + scroll.scrollX),
+    y: Math.round(rect.y - scroll.originY + scroll.scrollY),
     width: Math.round(rect.width),
     height: Math.round(rect.height),
-    scrollHeight: Math.round(scrollHeight),
+    scrollHeight: Math.round(scroll.scrollHeight),
   }
 }

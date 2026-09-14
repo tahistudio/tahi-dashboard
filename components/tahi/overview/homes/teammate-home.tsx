@@ -412,7 +412,7 @@ export function TeammateHome({ ctx }: { ctx: OverviewCtx }) {
 
       {/* ---- My day ---- */}
       <Zone label="My day">
-        <Card span={7} edge={overdueTasks.length > 0 ? 'risk' : undefined}>
+        <Card section="My work" span={7} edge={overdueTasks.length > 0 ? 'risk' : undefined}>
           <CardH ic="tasks" title="My work" link="My queue" onLink={() => go('tasks')} />
           {tasksRes.isLoading && !tasksRes.data ? (
             <RowsSkeleton n={4} />
@@ -438,7 +438,7 @@ export function TeammateHome({ ctx }: { ctx: OverviewCtx }) {
           )}
         </Card>
 
-        <Card span={5}>
+        <Card section="Today's calls" span={5}>
           <CardH ic="phone" title="Today's calls" link="Calendar" onLink={() => go('calls')} />
           {callsRes.isLoading && !callsRes.data ? (
             <RowsSkeleton n={2} />
@@ -477,7 +477,7 @@ export function TeammateHome({ ctx }: { ctx: OverviewCtx }) {
 
       {/* ---- Waiting ---- */}
       <Zone label="Waiting">
-        <Card span={12}>
+        <Card section="Client replies waiting" span={12}>
           <CardH ic="msg" title="Client replies waiting" link="All requests" onLink={() => go('requests')} />
           {repliesRes.isLoading && !repliesRes.data ? (
             <RowsSkeleton n={3} />
@@ -590,7 +590,7 @@ function MyTimeCard({
   const round1 = (n: number) => Math.round(n * 10) / 10
 
   return (
-    <Card span={6}>
+    <Card section="Time tracking" span={6}>
       <CardH ic="clock" title="Time tracking" link="Timesheet" onLink={() => go('time')} />
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
         <span
@@ -656,7 +656,7 @@ function RecentDocsCard({ go }: { go: (id: string) => void }) {
   const docsRes = useResource<{ pages: DocRow[] }>('/api/admin/docs')
   const docs = (docsRes.data?.pages ?? []).slice(0, 4)
   return (
-    <Card span={6}>
+    <Card section="Studio docs" span={6}>
       <CardH ic="book" title="Studio docs" link="Docs hub" onLink={() => go('docs')} />
       {docsRes.isLoading && !docsRes.data ? (
         <RowsSkeleton n={3} />
