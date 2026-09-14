@@ -129,4 +129,69 @@ describe('importStripeInvoice', () => {
     expect(set).not.toHaveProperty('stripeHostedInvoiceUrl')
     expect(set.status).toBe('paid')
   })
+
+  it('never demotes a written-off invoice back to sent (the write-off re-import bug)', async () => {
+    // The dummy Stripe invoice: written off locally, still 'open' in Stripe.
+    // A daily sync must not flip it back onto the daily brief.
+    const { handle, queries } = makeDb([[{ id: 'inv-local', orgId: 'org-a', status: 'written_off' }]])
+
+    const res = await importStripeInvoice(
+      handle as unknown as Db,
+      { ...STRIPE_INVOICE, status: 'open' },
+    )
+    expect(res).toMatchObject({ created: false })
+
+    const set = argOf(byEntry(queries, 'update')[0], 'set') as Record<string, unknown>
+    expect(set).not.toHaveProperty('status')
+  })
+
+  it('never demotes a paid invoice back to sent', async () => {
+    const { handle, queries } = makeDb([[{ id: 'inv-local', orgId: 'org-a', status: 'paid' }]])
+
+    await importStripeInvoice(
+      handle as unknown as Db,
+      { ...STRIPE_INVOICE, status: 'open' },
+    )
+
+    const set = argOf(byEntry(queries, 'update')[0], 'set') as Record<string, unknown>
+    expect(set).not.toHaveProperty('status')
+  })
+
+  it('still refreshes the pay link and paid date on a row whose status write is blocked', async () => {
+    // Amounts and dates still refresh even though the status write is
+    // skipped, so a stale pay link on a write-off does not linger forever.
+    const { handle, queries } = makeDb([[{ id: 'inv-local', orgId: 'org-a', status: 'written_off' }]])
+
+    await importStripeInvoice(
+      handle as unknown as Db,
+      { ...STRIPE_INVOICE, status: 'open', hosted_invoice_url: 'https://invoice.stripe.com/i/acct_1/refreshed' },
+    )
+
+    const set = argOf(byEntry(queries, 'update')[0], 'set') as Record<string, unknown>
+    expect(set).not.toHaveProperty('status')
+    expect(set.stripeHostedInvoiceUrl).toBe('https://invoice.stripe.com/i/acct_1/refreshed')
+  })
+
+  it('still lets a Stripe paid promote a local sent to paid', async () => {
+    const { handle, queries } = makeDb([[{ id: 'inv-local', orgId: 'org-a', status: 'sent' }]])
+
+    await importStripeInvoice(
+      handle as unknown as Db,
+      { ...STRIPE_INVOICE, status: 'paid', status_transitions: { paid_at: 1_760_000_500 } },
+    )
+
+    const set = argOf(byEntry(queries, 'update')[0], 'set') as Record<string, unknown>
+    expect(set.status).toBe('paid')
+    expect(set.paidAt).toBe(new Date(1_760_000_500 * 1000).toISOString())
+  })
+
+  it('still maps a Stripe void or uncollectible invoice to written_off', async () => {
+    const { handle: voidHandle, queries: voidQueries } = makeDb([[{ id: 'inv-local', orgId: 'org-a', status: 'sent' }]])
+    await importStripeInvoice(voidHandle as unknown as Db, { ...STRIPE_INVOICE, status: 'void' })
+    expect((argOf(byEntry(voidQueries, 'update')[0], 'set') as Record<string, unknown>).status).toBe('written_off')
+
+    const { handle: uncHandle, queries: uncQueries } = makeDb([[{ id: 'inv-local', orgId: 'org-a', status: 'sent' }]])
+    await importStripeInvoice(uncHandle as unknown as Db, { ...STRIPE_INVOICE, status: 'uncollectible' })
+    expect((argOf(byEntry(uncQueries, 'update')[0], 'set') as Record<string, unknown>).status).toBe('written_off')
+  })
 })

@@ -11,6 +11,9 @@
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { importedInvoiceNumber } from '@/lib/invoice-number'
+import { mapStripeStatus, decideStripeStatus } from '@/lib/stripe-status'
+
+export { mapStripeStatus } from '@/lib/stripe-status'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -35,17 +38,6 @@ export interface StripeInvoiceLike {
   created?: number
   status_transitions?: { paid_at?: number | null } | null
   lines?: { data?: Array<{ description?: string | null; quantity?: number | null; amount?: number }> }
-}
-
-export function mapStripeStatus(status: string | null | undefined): string {
-  switch (status) {
-    case 'draft': return 'draft'
-    case 'open': return 'sent'
-    case 'paid': return 'paid'
-    case 'void': return 'written_off'
-    case 'uncollectible': return 'written_off'
-    default: return 'draft'
-  }
 }
 
 export interface ImportResult {
@@ -77,20 +69,23 @@ export async function importStripeInvoice(
 
   // 1. Existing local row? Update in place.
   const existing = await database
-    .select({ id: schema.invoices.id, orgId: schema.invoices.orgId })
+    .select({ id: schema.invoices.id, orgId: schema.invoices.orgId, status: schema.invoices.status })
     .from(schema.invoices)
     .where(eq(schema.invoices.stripeInvoiceId, inv.id))
     .limit(1)
 
   if (existing.length > 0) {
-    const localStatus = mapStripeStatus(inv.status)
+    // A local 'written_off' or 'paid' row is never demoted by this read: see
+    // lib/stripe-status.ts. Null means "leave invoices.status alone", which
+    // still lets the paid date and the pay link below refresh on the same row.
+    const nextStatus = decideStripeStatus(existing[0].status, inv.status)
     const paidAt = inv.status === 'paid' && inv.status_transitions?.paid_at
       ? new Date(inv.status_transitions.paid_at * 1000).toISOString()
       : undefined
     await database
       .update(schema.invoices)
       .set({
-        status: localStatus,
+        ...(nextStatus ? { status: nextStatus } : {}),
         ...(paidAt ? { paidAt } : {}),
         // Refresh the client's pay link, but never clobber a stored one with a
         // null (a webhook payload for a paid invoice may omit it).
