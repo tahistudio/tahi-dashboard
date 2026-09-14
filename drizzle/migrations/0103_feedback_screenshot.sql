@@ -1,0 +1,25 @@
+-- Migration 0103: feedback_comments gains screenshot_key.
+--
+-- The anchor added in 0101 records WHICH element a comment is about, but
+-- never what it looked like. The first two comments through the ball were
+-- both visual judgements ("these look a bit cluttered on mobile"), which is
+-- exactly the kind a selector path cannot answer.
+--
+-- The value is an R2 object key minted SERVER-SIDE by POST
+-- /api/feedback/screenshot, always of the form
+-- `feedback/<uuid>.webp`. It is never taken from the client as a free
+-- string: the POST /api/feedback handler re-validates the shape before
+-- storing it, so a caller cannot point this column at another client's
+-- object and have the admin-only viewer stream it back.
+--
+-- Nullable, and expected to be null often: the capture is strictly
+-- best-effort (it is a DOM rasterisation via html-to-image, dynamically
+-- imported at send time, behind a timeout) and a failed or slow capture
+-- sends the comment without one rather than losing it.
+--
+-- Additive, ALTER TABLE ADD COLUMN. SQLite has no IF NOT EXISTS for ADD
+-- COLUMN; the runner in app/api/admin/db/migrate/route.ts swallows
+-- "duplicate column name" so re-running is safe. Apply BEFORE deploying the
+-- code that reads it: GET /api/admin/feedback is a bare select() and Drizzle
+-- expands that into an explicit column list.
+ALTER TABLE feedback_comments ADD COLUMN screenshot_key text;

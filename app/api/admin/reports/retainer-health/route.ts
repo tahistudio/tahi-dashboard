@@ -37,8 +37,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ clients: [] })
   }
 
-  // Load all active orgs with their mrr + status (raw SQL so we can LEFT JOIN
-  // subscriptions and pull custom_mrr in one pass).
+  // Load every org still in a retainer relationship, with its mrr + status
+  // (raw SQL so we can LEFT JOIN subscriptions and pull custom_mrr in one
+  // pass). 'churned' and 'completed' are excluded alongside 'archived':
+  // ending a retainer does not zero custom_mrr, so a churned client kept its
+  // last MRR and sailed through the retainer filter below, which asks only
+  // for MRR or an active sub. Physitrack (churned May 2026) and Dante were
+  // both being scored for churn risk months after they had already churned
+  // (beta feedback, 2026-09-15). 'paused' stays: it is a live retainer on
+  // hold, and is deliberately scored +40 churn risk further down.
   type RawRow = {
     id: string
     name: string
@@ -66,7 +73,7 @@ export async function GET(req: NextRequest) {
       FROM organisations o
       LEFT JOIN subscriptions s
         ON s.org_id = o.id AND s.status = 'active'
-      WHERE o.status != 'archived'
+      WHERE o.status NOT IN ('archived', 'churned', 'completed')
     `)
   } catch {
     // billing_model / retainer_end_date columns don't exist yet (pre-0016)
@@ -78,7 +85,7 @@ export async function GET(req: NextRequest) {
       FROM organisations o
       LEFT JOIN subscriptions s
         ON s.org_id = o.id AND s.status = 'active'
-      WHERE o.status != 'archived'
+      WHERE o.status NOT IN ('archived', 'churned', 'completed')
     `)
   }
 

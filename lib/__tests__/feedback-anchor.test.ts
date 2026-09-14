@@ -95,6 +95,34 @@ describe('buildSelectorPath - preference order', () => {
   })
 })
 
+describe('buildSelectorPath - data-section as a root', () => {
+  it('roots on an ancestor data-section when no ancestor has an id', () => {
+    const card = nodeWithAttrs('DIV', { 'data-section': 'Retainer health' })
+    const row = node({ tagName: 'DIV', parentElement: card })
+    const b = node({ tagName: 'B', parentElement: row })
+    expect(buildSelectorPath(b)).toBe('[data-section="Retainer health"] > div:nth-of-type(1) > b:nth-of-type(1)')
+  })
+
+  it('prefers an id over a data-section when the id is reached first', () => {
+    const shell = node({ tagName: 'DIV', id: 'main-content' })
+    const inner = node({ tagName: 'DIV', parentElement: shell })
+    expect(buildSelectorPath(inner)).toBe('#main-content > div:nth-of-type(1)')
+  })
+
+  it('stops at the nearest data-section, ignoring one further up', () => {
+    const zone = nodeWithAttrs('SECTION', { 'data-section': 'Clients' })
+    const card = nodeWithAttrs('DIV', { 'data-section': 'Retainer health' }, { parentElement: zone })
+    const b = node({ tagName: 'B', parentElement: card })
+    expect(buildSelectorPath(b)).toBe('[data-section="Retainer health"] > b:nth-of-type(1)')
+  })
+
+  it('keeps the bare path when neither an id nor a data-section is above', () => {
+    const outer = node({ tagName: 'DIV' })
+    const b = node({ tagName: 'B', parentElement: outer })
+    expect(buildSelectorPath(b)).toBe('div:nth-of-type(1) > b:nth-of-type(1)')
+  })
+})
+
 describe('buildSelectorPath - capped at 8 segments', () => {
   it('never exceeds 8 tag segments when no ancestor has an id', () => {
     // Build a chain of 12 nested divs with no id anywhere.

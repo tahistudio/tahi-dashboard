@@ -14,6 +14,11 @@
  * NULL org_id; a client contact's row carries the D1 organisations.id
  * getPortalAuth already resolved for their session.
  *
+ * An optional `screenshotKey` names an object already stored by POST
+ * /api/feedback/screenshot; it is re-validated against the exact shape that
+ * route mints rather than trusted, and absent on any comment whose capture
+ * failed, timed out or was never attempted.
+ *
  * An optional `anchor` object (built client-side by
  * lib/feedback-anchor.ts, see components/tahi/feedback-ball.tsx's pick
  * mode) describes a specific element the comment is about: a selector path,
@@ -41,6 +46,11 @@ const MAX_ANCHOR_TEXT_LENGTH = 200
 const MAX_ANCHOR_CONTEXT_LENGTH = 200
 const MAX_ANCHOR_TAG_LENGTH = 50
 
+/** Exactly what POST /api/feedback/screenshot mints, and nothing else. The
+ *  column is read back by an admin-only viewer, so a free-string key here
+ *  would let a caller aim that viewer at another client's object. */
+const SCREENSHOT_KEY = /^feedback\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.webp$/
+
 interface FeedbackBody {
   body?: unknown
   route?: unknown
@@ -52,6 +62,7 @@ interface FeedbackBody {
   userAgent?: unknown
   context?: unknown
   anchor?: unknown
+  screenshotKey?: unknown
 }
 
 interface AnchorRectValue {
@@ -168,6 +179,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid anchor' }, { status: 400 })
   }
 
+  // A screenshot is optional and best-effort, but a malformed key is a 400
+  // rather than a quiet null: it means the sender and this route disagree
+  // about what /api/feedback/screenshot returned, which is worth surfacing.
+  let screenshotKey: string | null = null
+  if (body?.screenshotKey !== undefined && body?.screenshotKey !== null) {
+    if (typeof body.screenshotKey !== 'string' || !SCREENSHOT_KEY.test(body.screenshotKey)) {
+      return NextResponse.json({ error: 'invalid screenshotKey' }, { status: 400 })
+    }
+    screenshotKey = body.screenshotKey
+  }
+
   const database = (await db()) as D1
 
   let orgId: string | null = null
@@ -238,6 +260,7 @@ export async function POST(req: NextRequest) {
     anchorText: anchor?.text ?? null,
     anchorRect: anchor ? JSON.stringify(anchor.rect) : null,
     anchorContext: anchor?.context ?? null,
+    screenshotKey,
   })
 
   return NextResponse.json({ ok: true, stored: true, id }, { status: 201 })

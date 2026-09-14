@@ -364,6 +364,59 @@ describe('POST /api/feedback - anchor (pick mode)', () => {
   })
 })
 
+describe('POST /api/feedback - screenshotKey', () => {
+  const VALID = 'feedback/3f2504e0-4f89-11d3-9a0c-0305e82c3301.webp'
+  const team = () => ({ team_members: [[{ email: 'liam@tahi.studio', role: 'admin' }]], feedback_comments: [[]] })
+
+  it('stores a key matching exactly what the screenshot route mints', async () => {
+    dbMock.state.queues = team()
+    const res = await POST(feedbackRequest({ body: 'Look at this', screenshotKey: VALID }))
+    expect(res.status).toBe(201)
+    const row = dbMock.state.inserts.find((i) => i.table === 'feedback_comments')!
+    expect(row.values.screenshotKey).toBe(VALID)
+  })
+
+  it('stores null when no key is sent, which is the common case', async () => {
+    dbMock.state.queues = team()
+    const res = await POST(feedbackRequest({ body: 'No picture' }))
+    expect(res.status).toBe(201)
+    const row = dbMock.state.inserts.find((i) => i.table === 'feedback_comments')!
+    expect(row.values.screenshotKey).toBeNull()
+  })
+
+  it('rejects a key pointing outside the feedback prefix', async () => {
+    // The whole point of validating: this column is read back by an
+    // admin-only viewer, so an arbitrary key would aim it at another
+    // client's object.
+    dbMock.state.queues = team()
+    const res = await POST(feedbackRequest({
+      body: 'Sneaky',
+      screenshotKey: 'aa80a2d6-0494-424d-8ccc-9af524c31fa7/general/1757800000-contract.webp',
+    }))
+    expect(res.status).toBe(400)
+    expect(dbMock.state.inserts.find((i) => i.table === 'feedback_comments')).toBeUndefined()
+  })
+
+  it('rejects traversal dressed up as a feedback key', async () => {
+    dbMock.state.queues = team()
+    const res = await POST(feedbackRequest({ body: 'x', screenshotKey: 'feedback/../secrets/report.webp' }))
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects a non-uuid name and a non-webp extension', async () => {
+    dbMock.state.queues = team()
+    expect((await POST(feedbackRequest({ body: 'x', screenshotKey: 'feedback/not-a-uuid.webp' }))).status).toBe(400)
+    dbMock.state.queues = team()
+    expect((await POST(feedbackRequest({ body: 'x', screenshotKey: 'feedback/3f2504e0-4f89-11d3-9a0c-0305e82c3301.svg' }))).status).toBe(400)
+  })
+
+  it('rejects a non-string key', async () => {
+    dbMock.state.queues = team()
+    const res = await POST(feedbackRequest({ body: 'x', screenshotKey: 42 }))
+    expect(res.status).toBe(400)
+  })
+})
+
 describe('POST /api/feedback - rate limiting', () => {
   it('ignores (not errors) a request past 30 in the trailing hour', async () => {
     const thirty = Array.from({ length: 30 }, (_, i) => ({ id: `fb_${i}` }))

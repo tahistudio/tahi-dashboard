@@ -47,7 +47,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No admin team members with clerkUserId — nothing to notify' }, { status: 400 })
   }
 
-  // Same retainer set as /reports/retainer-health
+  // Same retainer set as /reports/retainer-health, including its exclusion of
+  // churned and completed orgs: this route raises the alerts for that card, so
+  // a churned client left in here nags about a retainer that already ended.
   type RawRow = {
     id: string; name: string; status: string; health_status: string | null
     preferred_currency: string | null; custom_mrr: number | null
@@ -59,7 +61,7 @@ export async function POST(req: NextRequest) {
       o.custom_mrr, s.plan_type, s.status as sub_status
     FROM organisations o
     LEFT JOIN subscriptions s ON s.org_id = o.id AND s.status = 'active'
-    WHERE o.status != 'archived'
+    WHERE o.status NOT IN ('archived', 'churned', 'completed')
   `)
   const retainerOrgs = (orgsRaw ?? []).filter(o =>
     (o.custom_mrr && o.custom_mrr > 0) || o.sub_status === 'active'

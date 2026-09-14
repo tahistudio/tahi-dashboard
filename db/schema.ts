@@ -3818,6 +3818,11 @@ export const feedbackComments = sqliteTable('feedback_comments', {
   // JSON: { x, y, width, height, scrollHeight }, see lib/feedback-anchor.ts
   anchorRect: text('anchor_rect'),
   anchorContext: text('anchor_context'),
+  // R2 object key for the best-effort screenshot taken at send time
+  // (migration 0103). Always `feedback/<uuid>.webp`, minted server-side by
+  // POST /api/feedback/screenshot, never accepted as a free string. Null
+  // whenever the capture failed, timed out, or was not attempted.
+  screenshotKey: text('screenshot_key'),
   createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
 }, (table) => [
   index('idx_feedback_comments_org').on(table.orgId),

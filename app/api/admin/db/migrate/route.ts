@@ -2286,6 +2286,13 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE discovery_calls ADD COLUMN prep_note text`,
     ],
   },
+  {
+    name: '0103',
+    description: 'feedback_comments.screenshot_key: what the commenter was actually looking at. The anchor columns from 0101 record WHICH element a comment is about but never what it looked like, and the first two comments through the ball were both visual judgements ("these look a bit cluttered on mobile"), the kind a selector path cannot answer. The value is an R2 object key minted server-side by POST /api/feedback/screenshot, always of the form `feedback/<uuid>.webp`, and POST /api/feedback re-validates that shape before storing it: the column is never filled from a free client string, so a caller cannot point it at another client\'s object and have the admin-only viewer (GET /api/admin/feedback/[id]/screenshot) stream it back. Nullable and often null on purpose: the capture is a DOM rasterisation via html-to-image, dynamically imported at send time and behind a timeout, and a failed or slow capture sends the comment without one rather than losing the comment. Additive and idempotent; the duplicate-column error is swallowed upstream. Apply BEFORE deploying the code that reads it, because GET /api/admin/feedback is a bare select() and Drizzle expands that into an explicit column list.',
+    statements: [
+      `ALTER TABLE feedback_comments ADD COLUMN screenshot_key text`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

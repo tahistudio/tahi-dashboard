@@ -528,6 +528,15 @@ export function FeedbackBall() {
       const snapshot = getFeedbackContextSnapshot()
       const width = typeof window !== 'undefined' ? window.innerWidth : 0
       const height = typeof window !== 'undefined' ? window.innerHeight : 0
+      // Best-effort and deliberately awaited before the comment POST so the
+      // key can ride along on it: the capture carries its own timeout and
+      // resolves null rather than throwing, so the worst case is a comment
+      // that lands a few seconds later without a picture.
+      const { captureAndStoreScreenshot } = await import('@/lib/feedback-screenshot')
+      const screenshotKey = await captureAndStoreScreenshot(
+        pickedElRef.current,
+        apiPath('/api/feedback/screenshot'),
+      )
       const res = await fetch(apiPath('/api/feedback'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -544,6 +553,7 @@ export function FeedbackBall() {
           userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
           context: snapshot,
           anchor: pickedAnchor ?? undefined,
+          screenshotKey: screenshotKey ?? undefined,
         }),
       })
       if (!res.ok) throw new Error(`Feedback POST failed: ${res.status}`)
@@ -565,6 +575,7 @@ export function FeedbackBall() {
     <>
       {mode === 'picking' && hoverRect && hoverInfo && (
         <div
+          data-feedback-ball="true"
           aria-hidden="true"
           style={{
             position: 'fixed',
@@ -604,6 +615,7 @@ export function FeedbackBall() {
 
       {mode === 'panel' && pickedAnchor && pickedRect && (
         <div
+          data-feedback-ball="true"
           aria-hidden="true"
           style={{
             position: 'fixed',
@@ -630,6 +642,7 @@ export function FeedbackBall() {
       )}
 
       <button
+        data-feedback-ball="true"
         ref={ballRef}
         type="button"
         aria-label="Leave feedback"
@@ -667,6 +680,7 @@ export function FeedbackBall() {
 
       {mode === 'picking' && (
         <div
+          data-feedback-ball="true"
           role="status"
           aria-live="polite"
           style={{
@@ -690,6 +704,7 @@ export function FeedbackBall() {
 
       <Popover anchorRef={anchorRef} open={mode === 'panel'} onClose={resetAll} label="Leave a comment" bare width="20rem" offset={10}>
         <div
+          data-feedback-ball="true"
           ref={panelRef}
           style={{
             width: '20rem',

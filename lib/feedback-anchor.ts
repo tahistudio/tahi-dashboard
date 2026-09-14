@@ -90,9 +90,16 @@ function tagSegment(el: AnchorElementLike): string {
  *   2. The element's own `data-testid`, then `aria-label`, as an attribute
  *      selector.
  *   3. Otherwise, a `tag:nth-of-type(n)` path walking up from the element,
- *      stopping at the nearest ancestor with an id (prefixed as `#id`), and
- *      capped at 8 tag segments so a deeply nested pick still produces a
- *      short, readable path even with no id anywhere nearby.
+ *      stopping at the nearest ancestor that roots it: an id (prefixed as
+ *      `#id`) or a `data-section` (prefixed as `[data-section="..."]`),
+ *      whichever is reached first, and capped at 8 tag segments so a deeply
+ *      nested pick still produces a short, readable path.
+ *
+ * data-section is a root because the dashboard has very few ids but every
+ * overview card, zone and hero block carries one. Without it a pick deep
+ * inside a card (a <b> in a row in a list in a card) burns all 8 segments
+ * before reaching #main-content and comes back anchored to nothing, which is
+ * what happened to the 2026-09-15 Retainer health comment.
  */
 export function buildSelectorPath(el: AnchorElementLike): string {
   if (el.id) return `#${el.id}`
@@ -105,20 +112,26 @@ export function buildSelectorPath(el: AnchorElementLike): string {
 
   const segments: string[] = []
   let current: AnchorElementLike | null = el
-  let ancestorId: string | null = null
+  let root: string | null = null
 
   while (current && segments.length < MAX_SELECTOR_SEGMENTS) {
     segments.unshift(tagSegment(current))
     const parent: AnchorElementLike | null = current.parentElement
-    if (parent?.id) {
-      ancestorId = parent.id
+    if (!parent) break
+    if (parent.id) {
+      root = `#${parent.id}`
+      break
+    }
+    const section = parent.getAttribute('data-section')
+    if (section) {
+      root = `[data-section="${section}"]`
       break
     }
     current = parent
   }
 
   const path = segments.join(' > ')
-  return ancestorId ? `#${ancestorId} > ${path}` : path
+  return root ? `${root} > ${path}` : path
 }
 
 /** The picked element's tag name and its visible text, trimmed and collapsed
