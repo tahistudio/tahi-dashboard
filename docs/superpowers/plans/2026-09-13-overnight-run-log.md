@@ -180,3 +180,8 @@ Read STATUS.md, TASKS.md and this file. `git log --oneline -15` for what landed.
 
 - Member seats no longer see the plan or billing on the client home (62cb00a2, LW.32; the subscription route answers a member with seat: member and no money fields, the billing zone collapses to one line). Prep notes on every call (7f851a56, LW.31): discovery_calls.prep_note through migration 0102 applied on production through wrangler before the push, scheduled calls reuse notes; the brief links to /calls?call=<id>&focus=prep, the slide-over autosaves, the digest carries the note, MCP fields added.
 - The full suite went red once on nine tests the member-seat slice never touched (middleware.test.ts, utils formatDate), green in isolation and on the re-run: logged as LW.34 to harden.
+
+## 2026-09-15 morning: two phantoms
+
+- Comment ball failing with "Something went wrong sending that": a later session shipped screenshots on comments (75932933) with migration 0103 in the repo and the runner, but nobody applied it; the deployed insert wrote screenshot_key into a table without the column. Applied through POST /api/admin/db/migrate {"name":"0103"} as Liam; a probe POST /api/feedback answered 201. Rule for every agent from now on: a migration shipped in a commit is applied on production (wrangler or the runner) before or immediately after that deploy, and the run log records it.
+- "test manual · NZ$350 overdue" kept returning on the brief: the invoice (f3b75b6e, Stripe id on the row, source stripe) is open in Stripe and the sync-stripe cron re-imports it, flipping written_off back to sent at 07:41 NZ. Written off again and the brief recomputed; the importer is being taught the Xero rule (never demote written_off or paid); Liam voids it in Stripe.
