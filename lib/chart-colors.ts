@@ -39,12 +39,13 @@ export const CHART = {
     '#9ca3af', // gray
   ] as const,
 
-  // Aging buckets : 0-30 -> 30-60 -> 60-90 -> 90+ (green to red gradient)
+  // Aging buckets : not due -> 1-30 -> 31-60 -> 61+ (green to red gradient)
   aging: {
     current: '#5A824E',
     thirtyDays: '#fbbf24',
     sixtyDays: '#fb923c',
     ninetyPlus: '#dc2626',
+    noDueDate: '#9ca3af',
   },
 }
 

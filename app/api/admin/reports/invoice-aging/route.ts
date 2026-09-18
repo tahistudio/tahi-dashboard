@@ -7,6 +7,7 @@ import { eq, inArray } from 'drizzle-orm'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
 import { resolvePermissions, can } from '@/lib/permissions'
 import { draftStatusList, owedStatusList } from '@/lib/invoice-status'
+import { daysPastDue as computeDaysPastDue } from '@/lib/overview-aggregates'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -92,22 +93,21 @@ export async function GET(req: NextRequest) {
   const makeBucket = (): AgingBucket => ({ count: 0, totalUsd: 0, totalNzd: 0, invoices: [] })
 
   const aging = {
+    // Has a due date, not yet due. A no-due-date invoice is never "current" -
+    // it has nothing to be current against - so it lives in its own bucket.
     current: makeBucket(),
-    thirtyDays: makeBucket(),
-    sixtyDays: makeBucket(),
-    ninetyPlus: makeBucket(),
+    thirtyDays: makeBucket(),  // 1..30 days late
+    sixtyDays: makeBucket(),   // 31..60 days late
+    ninetyPlus: makeBucket(),  // 61+ days late
+    noDueDate: makeBucket(),
   }
 
   let totalOutstanding = 0
   let oldestDaysPastDue = 0
 
   for (const row of rows) {
-    let daysPastDue = 0
-    if (row.dueDate) {
-      const due = new Date(row.dueDate)
-      const diffMs = now.getTime() - due.getTime()
-      daysPastDue = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-    }
+    const hasDueDate = Boolean(row.dueDate)
+    const daysPastDue = computeDaysPastDue(row.dueDate ?? null, now)
 
     const currency = row.currency ?? 'USD'
     const nzdAmount = toNzd(row.totalUsd, currency, rateMap)
@@ -123,11 +123,13 @@ export async function GET(req: NextRequest) {
     }
 
     let bucket: AgingBucket
-    if (daysPastDue <= 30) {
+    if (!hasDueDate) {
+      bucket = aging.noDueDate
+    } else if (daysPastDue <= 0) {
       bucket = aging.current
-    } else if (daysPastDue <= 60) {
+    } else if (daysPastDue <= 30) {
       bucket = aging.thirtyDays
-    } else if (daysPastDue <= 90) {
+    } else if (daysPastDue <= 60) {
       bucket = aging.sixtyDays
     } else {
       bucket = aging.ninetyPlus
@@ -139,7 +141,9 @@ export async function GET(req: NextRequest) {
     bucket.invoices.push(invoice)
 
     totalOutstanding += nzdAmount
-    if (daysPastDue > oldestDaysPastDue) {
+    // A no-due-date invoice can never be "the oldest": there is nothing to
+    // measure its age against.
+    if (hasDueDate && daysPastDue > oldestDaysPastDue) {
       oldestDaysPastDue = daysPastDue
     }
   }

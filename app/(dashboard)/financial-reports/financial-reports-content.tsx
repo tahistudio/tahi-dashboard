@@ -93,7 +93,7 @@ interface SummaryResponse {
     top3Share: number
     top: Array<{ name: string; mrr: number }>
   }
-  arAging: { current: number; days30: number; days60: number; days90: number; days90plus: number }
+  arAging: { current: number; days30: number; days60: number; days90: number; days90plus: number; noDueDate: number; noDueDateCount: number }
   taxes: {
     gstOwedYtd: number
     corpTaxOwedYtd: number
@@ -694,11 +694,20 @@ export function FinancialReportsContent() {
           <div className="p-4 sm:p-6">
             <SubSectionHeader title="AR aging" meta={`${toCur(data.outstandingAr, data.primaryCurrency)} outstanding · ${data.overdueCount} overdue`} />
             <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(8rem, 1fr))', gap: '1rem' }}>
-              <ArBucket label="Current" amount={data.arAging.current} cur={data.primaryCurrency} toCur={toCur} tone="positive" />
+              <ArBucket label="Not due" amount={data.arAging.current} cur={data.primaryCurrency} toCur={toCur} tone="positive" />
               <ArBucket label="1 to 30 days" amount={data.arAging.days30} cur={data.primaryCurrency} toCur={toCur} tone="warning" />
               <ArBucket label="31 to 60 days" amount={data.arAging.days60} cur={data.primaryCurrency} toCur={toCur} tone="warning" />
               <ArBucket label="61 to 90 days" amount={data.arAging.days90} cur={data.primaryCurrency} toCur={toCur} tone="danger" />
               <ArBucket label="90+ days" amount={data.arAging.days90plus} cur={data.primaryCurrency} toCur={toCur} tone="danger" />
+              {data.arAging.noDueDateCount > 0 && (
+                <ArBucket
+                  label={`No due date (${data.arAging.noDueDateCount})`}
+                  amount={data.arAging.noDueDate}
+                  cur={data.primaryCurrency}
+                  toCur={toCur}
+                  tone="warning"
+                />
+              )}
             </div>
             {/* Drafts, beside the buckets and in none of them. The studio
                 raises them in Xero as placeholders and as tests, so they are

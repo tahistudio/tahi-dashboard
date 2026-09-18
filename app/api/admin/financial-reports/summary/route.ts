@@ -601,16 +601,19 @@ export async function GET(req: NextRequest) {
   // ── AR aging buckets ──────────────────────────────────────────────
   // Outstanding invoices (sent + overdue) grouped by days since due.
   // Convert each amount to NZD via its native currency so a £1,250
-  // invoice doesn't show as $1,250 NZD in the bucket.
-  const arAging = { current: 0, days30: 0, days60: 0, days90: 0, days90plus: 0 }
+  // invoice doesn't show as $1,250 NZD in the bucket. An invoice with no
+  // due date can never be "current" (there is nothing to be current
+  // against) and can never age, so it gets its own bucket rather than
+  // being folded into current.
+  const arAging = { current: 0, days30: 0, days60: 0, days90: 0, days90plus: 0, noDueDate: 0, noDueDateCount: 0 }
   for (const r of arRows) {
     const amt = toNzd(Number(r.totalUsd ?? 0), r.currency ?? 'NZD')
-    if (!r.dueDate) { arAging.current += amt; continue }
+    if (!r.dueDate) { arAging.noDueDate += amt; arAging.noDueDateCount += 1; continue }
     const overdueMs = Date.now() - new Date(r.dueDate).getTime()
-    if (overdueMs < 0) arAging.current += amt
-    else if (overdueMs < 30 * 86400_000) arAging.days30 += amt
-    else if (overdueMs < 60 * 86400_000) arAging.days60 += amt
-    else if (overdueMs < 90 * 86400_000) arAging.days90 += amt
+    if (overdueMs <= 0) arAging.current += amt
+    else if (overdueMs <= 30 * 86400_000) arAging.days30 += amt
+    else if (overdueMs <= 60 * 86400_000) arAging.days60 += amt
+    else if (overdueMs <= 90 * 86400_000) arAging.days90 += amt
     else arAging.days90plus += amt
   }
 

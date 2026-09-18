@@ -10,6 +10,7 @@ import { BRIEF_FEATURES, briefCacheKeyForFingerprint, briefScopeFingerprint } fr
 import { overnightCutoff, daysPastDue } from '@/lib/overview-aggregates'
 import { owedStatusList } from '@/lib/invoice-status'
 import { formatCallPrepBriefRow } from '@/lib/call-brief-item'
+import { formatCurrency } from '@/lib/currency'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,9 +44,12 @@ interface CachedBrief extends BriefResult {
 }
 
 // Server-side NZD formatting. Amounts are already converted to NZD upstream
-// (this is presentation, NOT an FX rate). Mirrors TheWire's NZD-baked labels.
+// (this is presentation, NOT an FX rate). Uses the same lib/currency.ts
+// formatter the overview cards format through (via useOvFormat -> format ->
+// formatCurrency), so the brief reads "NZ$3,668" like every card beside it,
+// not the bare "$3,668" a hand-rolled formatter used to print.
 function fmtNzd(n: number): string {
-  return '$' + Math.round(n).toLocaleString('en-NZ')
+  return formatCurrency(Math.round(n), 'NZD')
 }
 
 function plural(n: number, one: string, many: string): string {

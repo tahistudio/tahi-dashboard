@@ -71,6 +71,8 @@ interface OverviewData {
     mrr?: number
   }
   mrrDeltaPct?: number | null
+  /** monthKey (YYYY-MM) of the prior snapshot mrrDeltaPct is computed against. */
+  mrrDeltaBasisMonth?: string | null
   recentRequests: RecentRequest[]
   monthlyRevenue: { month: string; total: number }[]
   cash: { totalNzd: number; runwayMonths: number | null; burnNzd: number } | null
@@ -85,6 +87,8 @@ interface ArAging {
   d30Nzd: number
   d60Nzd: number
   d90Nzd: number
+  noDueDateNzd: number
+  noDueDateCount: number
   totalNzd: number
   oldest: { clientName: string | null; daysPastDue: number; amountNzd: number } | null
 }
@@ -190,6 +194,30 @@ function shortMonth(ym: string): string {
   const [y, m] = ym.split('-').map(Number)
   if (!y || !m) return ym
   return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-NZ', { month: 'short', timeZone: 'UTC' })
+}
+
+/** monthKey (YYYY-MM, UTC) `monthsBack` calendar months before `now`. */
+function monthKeyBefore(now: Date, monthsBack: number): string {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsBack, 1))
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+/**
+ * Label for the MRR Hero's "vs ..." sub-line under the delta chip.
+ *
+ * `basisMonth` is the monthKey of the financial_snapshots row the delta was
+ * computed against (mrrDeltaBasisMonth from the overview route). When it is
+ * exactly last calendar month this reads "vs Jul" - a real month-over-month
+ * comparison. When the snapshot cron skipped a month (or several) the basis
+ * is older than that, and the label says so rather than silently passing an
+ * unlabelled percentage off as "vs last month" when it may be vs two months
+ * ago.
+ */
+export function mrrDeltaLabel(basisMonth: string | null | undefined, now: Date = new Date()): string {
+  if (!basisMonth) return 'vs last month'
+  const expected = monthKeyBefore(now, 1)
+  if (basisMonth === expected) return `vs ${shortMonth(basisMonth)}`
+  return `vs ${shortMonth(basisMonth)} (no ${shortMonth(expected)} snapshot)`
 }
 
 function initials(s: string | null): string {
@@ -305,7 +333,7 @@ export function OwnerHome({ ctx }: { ctx: OverviewCtx }) {
           label="Monthly recurring revenue"
           value={mrr != null ? mrr : <span style={{ fontSize: 34 }}>&middot;</span>}
           format={v => money(v)}
-          sub={mrr != null ? (delta != null ? 'vs last month' : 'this month') : 'MRR not configured'}
+          sub={mrr != null ? (delta != null ? mrrDeltaLabel(ov?.mrrDeltaBasisMonth) : 'this month') : 'MRR not configured'}
           delta={mrr != null && delta != null ? `${Math.abs(delta)}%` : undefined}
           deltaDir={delta != null && delta < 0 ? 'down' : 'up'}
           action={<NewMenu items={newItems} ro={ro} variant="hero" />}
@@ -873,10 +901,20 @@ function Receivables({ arAging, loading }: { arAging: ArAging | null; loading: b
             </div>
           </div>
           <MicroBar segs={agedBar(arAging!)} />
+          <div className="ov-mini" style={{ marginTop: 4, opacity: 0.7 }}>
+            Not due, 1 to 30, 31 to 60, 61+
+          </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }} className="ov-mini">
             <span>Current {money(arAging!.currentNzd)}</span>
             <span style={{ color: '#C0392E' }}>Overdue {money(overdue)}</span>
           </div>
+          {arAging!.noDueDateCount > 0 && (
+            <div className="ov-mini" style={{ marginTop: 4, opacity: 0.7 }}>
+              {arAging!.noDueDateCount === 1
+                ? '1 invoice has no due date'
+                : `${arAging!.noDueDateCount} invoices have no due date`}
+            </div>
+          )}
         </>
       )}
     </Card>

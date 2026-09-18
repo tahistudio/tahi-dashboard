@@ -44,8 +44,12 @@ export function daysPastDue(dueDate: string | null, now: Date = new Date()): num
 export interface ArAgingInput {
   /** NZD amount for this invoice (already converted upstream). */
   amountNzd: number
-  /** Whole days past due (see daysPastDue). */
+  /** Whole days past due (see daysPastDue). Meaningless when hasDueDate is false. */
   daysPastDue: number
+  /** Whether this invoice has a due date at all. An invoice with no due date
+   *  can never be "current" (there is nothing to be current against) and
+   *  can never age, so it is counted separately from every dated bucket. */
+  hasDueDate: boolean
   /** Display name for the oldest-invoice callout. */
   clientName: string | null
 }
@@ -55,19 +59,24 @@ export interface ArAging {
   d30Nzd: number
   d60Nzd: number
   d90Nzd: number
+  /** Sum of invoices with no due date at all. Never folded into currentNzd. */
+  noDueDateNzd: number
+  /** Count of invoices with no due date at all. */
+  noDueDateCount: number
   totalNzd: number
   oldest: { clientName: string | null; daysPastDue: number; amountNzd: number } | null
 }
 
 /**
- * Bucket sent invoices into the standard AR aging buckets and find the
- * single oldest one (by daysPastDue) for the headline callout.
+ * Bucket owed invoices into the standard AR aging buckets and find the
+ * single oldest overdue one (by daysPastDue) for the headline callout.
  *
  * Buckets (matching reports/invoice-aging):
- *   current : 0..30 days past due
- *   d30     : 31..60
- *   d60     : 61..90
- *   d90     : 91+
+ *   current    : has a due date, not yet due (daysPastDue <= 0)
+ *   d30        : 1..30 days late
+ *   d60        : 31..60 days late
+ *   d90        : 61+ days late
+ *   noDueDate  : no due date at all - can never be current, never ages
  */
 export function bucketArAging(invoices: ArAgingInput[]): ArAging {
   const aging: ArAging = {
@@ -75,6 +84,8 @@ export function bucketArAging(invoices: ArAgingInput[]): ArAging {
     d30Nzd: 0,
     d60Nzd: 0,
     d90Nzd: 0,
+    noDueDateNzd: 0,
+    noDueDateCount: 0,
     totalNzd: 0,
     oldest: null,
   }
@@ -82,18 +93,23 @@ export function bucketArAging(invoices: ArAgingInput[]): ArAging {
   let oldestDays = -1
   for (const inv of invoices) {
     const amount = Number.isFinite(inv.amountNzd) ? inv.amountNzd : 0
-    if (inv.daysPastDue <= 30) {
+    if (!inv.hasDueDate) {
+      aging.noDueDateNzd += amount
+      aging.noDueDateCount += 1
+    } else if (inv.daysPastDue <= 0) {
       aging.currentNzd += amount
-    } else if (inv.daysPastDue <= 60) {
+    } else if (inv.daysPastDue <= 30) {
       aging.d30Nzd += amount
-    } else if (inv.daysPastDue <= 90) {
+    } else if (inv.daysPastDue <= 60) {
       aging.d60Nzd += amount
     } else {
       aging.d90Nzd += amount
     }
     aging.totalNzd += amount
 
-    if (inv.daysPastDue > oldestDays) {
+    // Only a dated, overdue invoice can be the headline "oldest" callout - a
+    // no-due-date row has nothing to be measured against.
+    if (inv.hasDueDate && inv.daysPastDue > oldestDays) {
       oldestDays = inv.daysPastDue
       aging.oldest = {
         clientName: inv.clientName,
@@ -107,6 +123,7 @@ export function bucketArAging(invoices: ArAgingInput[]): ArAging {
   aging.d30Nzd = Math.round(aging.d30Nzd)
   aging.d60Nzd = Math.round(aging.d60Nzd)
   aging.d90Nzd = Math.round(aging.d90Nzd)
+  aging.noDueDateNzd = Math.round(aging.noDueDateNzd)
   aging.totalNzd = Math.round(aging.totalNzd)
 
   return aging
