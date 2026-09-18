@@ -1733,6 +1733,7 @@ export const TOOLS: ToolDef[] = [
   tool('get_utilization', 'Per-team-member billable hours / capacity utilisation over a rolling window', {
     weeks: prop('number', 'Window length in weeks (default 4)'),
   }),
+  tool('get_studio_capacity', 'Per-active-team-member booked capacity for the current week (Monday to Sunday). "Booked" is work assigned for the week ahead, not hours already logged: assignedHours sums estimatedHours from open tasks (status not done) due this week or overdue, plus open requests (not delivered/archived) with an estimate. loggedHours is a separate figure from timeEntries logged this week. Only active team members are returned: not on the email.blockedAddresses setting and weeklyCapacityHours greater than zero. Returns { teamMembers: [{id, name, avatarUrl, title, weeklyCapacityHours, assignedHours, loggedHours, utilization}], totalCapacity, totalAssignedHours, totalLoggedHours, availableCapacity, weekRange: {start, end} }.'),
 
   // ── Client costs ──────────────────────────────────────────────────
   tool('list_client_costs', 'List logged costs for a specific client', {
@@ -3031,6 +3032,8 @@ async function executeTool(
       const w = args.weeks ? String(args.weeks) : '4'
       return json(await apiGet(`/api/admin/reports/utilization`, token, { weeks: w }))
     }
+    case 'get_studio_capacity':
+      return json(await apiGet('/api/admin/pipeline/capacity', token))
 
     // ── Client costs ──────────────────────────────────────────────────
     case 'list_client_costs': {

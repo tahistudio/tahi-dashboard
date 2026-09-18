@@ -100,6 +100,7 @@ export async function GET(req: NextRequest) {
       expiresAt: schema.proposals.expiresAt,
       status: schema.proposals.status,
       publicShareToken: schema.proposals.publicShareToken,
+      publicSharedAt: schema.proposals.publicSharedAt,
       decidedAt: schema.proposals.decidedAt,
       decidedVariantId: schema.proposals.decidedVariantId,
       createdAt: schema.proposals.createdAt,

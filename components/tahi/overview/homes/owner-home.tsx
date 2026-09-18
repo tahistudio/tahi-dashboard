@@ -25,9 +25,12 @@ import { apiPath } from '@/lib/api'
 import { stageColour } from '@/lib/chart-colors'
 import {
   buildPipelineStageChart,
+  splitClosingDeals,
   type PipelineChartStage,
   type PipelineStageChart,
 } from '@/lib/pipeline-stage-chart'
+import { healthBucket } from '@/lib/retainer-health-bucket'
+import { isProposalLiveStatus } from '@/lib/proposal-live-status'
 import type { OverviewCtx } from '@/components/tahi/overview/ctx'
 import {
   Icon,
@@ -986,7 +989,7 @@ function PipelineStages({
           </span>
           {/* On a count chart the length means deals, so a money figure beside
               it would read as a contradiction: every row would show NZ$0. */}
-          {chart.basis === 'value' && <b style={{ flex: '0 0 auto' }}>{moneyCompact(bar.weightedNzd)}</b>}
+          {chart.basis === 'value' && <b style={{ flex: '0 0 auto' }}>{moneyCompact(bar.weightedUpfrontNzd)}</b>}
         </div>
       ))}
     </div>
@@ -1001,19 +1004,17 @@ function PipelineAhead({ go }: { go: (id: string) => void }) {
 
   // Headline, bars and open-deal count all come off the forecast's own
   // per-stage rows, so the money above the bars is the sum of the bars by
-  // construction. GET /api/admin/deals is access scoped, hides archived deals
-  // and pages at 100 rows, so it cannot answer for the whole pipeline. It is
-  // read here only for expected close dates, which the forecast does not carry.
+  // construction, and matches weightedUpfrontNzd exactly as the forecast API
+  // and the deals page report it (monthly value is shown separately below,
+  // never rolled into this number). GET /api/admin/deals is access scoped,
+  // hides archived deals and pages at 100 rows, so it cannot answer for the
+  // whole pipeline. It is read here only for expected close dates, which the
+  // forecast does not carry.
   const chart = useMemo(() => buildPipelineStageChart(forecast?.byStage), [forecast])
-  const weighted = chart.totalWeightedNzd
+  const weightedUpfront = chart.totalWeightedUpfrontNzd
+  const weightedMonthly = chart.totalWeightedMonthlyNzd
 
-  const now = new Date()
-  const closing = (dealsData?.items ?? []).filter(d => {
-    if (d.stageIsClosedWon || d.stageIsClosedLost) return false
-    if (!d.expectedCloseDate) return false
-    const c = new Date(d.expectedCloseDate)
-    return c.getMonth() === now.getMonth() && c.getFullYear() === now.getFullYear()
-  }).length
+  const closingSplit = useMemo(() => splitClosingDeals(dealsData?.items), [dealsData])
 
   return (
     <Card section="Pipeline ahead" span={7}>
@@ -1031,16 +1032,30 @@ function PipelineAhead({ go }: { go: (id: string) => void }) {
         <>
           <div className="ov-statrow">
             <div className="ov-stat">
-              <div className="st-num">{moneyCompact(weighted)}</div>
-              <div className="st-lbl">weighted</div>
+              <div className="st-num">{moneyCompact(weightedUpfront)}</div>
+              <div className="st-lbl">
+                weighted
+                {weightedMonthly > 0 && (
+                  <span style={{ display: 'block', marginTop: 2 }}>
+                    + {moneyCompact(weightedMonthly)} a month
+                  </span>
+                )}
+              </div>
             </div>
             <div className="ov-stat">
               <div className="st-num">{chart.totalDeals}</div>
               <div className="st-lbl">open deals</div>
             </div>
             <div className="ov-stat">
-              <div className="st-num">{closing}</div>
-              <div className="st-lbl">closing this month</div>
+              <div className="st-num">{closingSplit.closingThisMonth}</div>
+              <div className="st-lbl">
+                closing this month
+                {closingSplit.pastCloseDate > 0 && (
+                  <span style={{ display: 'block', marginTop: 2, color: '#C0392E' }}>
+                    {closingSplit.pastCloseDate} past its close date
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           <PipelineStages chart={chart} moneyCompact={moneyCompact} />
@@ -1053,20 +1068,34 @@ function PipelineAhead({ go }: { go: (id: string) => void }) {
 interface CapacityMember {
   id: string
   name: string
+  weeklyCapacityHours: number
+  assignedHours: number
+  loggedHours: number
   utilization: number
 }
 interface CapacityData {
   teamMembers: CapacityMember[]
   totalCapacity: number
-  totalAllocated: number
+  totalAssignedHours: number
+  totalLoggedHours: number
   availableCapacity: number
 }
 
+/**
+ * "Booked" is work assigned for the week ahead, not hours already typed into
+ * a timesheet: the gauge and the per-person rows below both read off
+ * `assignedHours` (open tasks due this week or overdue, plus open requests
+ * with an estimate), while `loggedHours` gets its own row rather than being
+ * folded into either figure (beta audit, 2026-09-19: the card read "0%
+ * booked" every Monday because it only ever looked at hours already logged).
+ * Only active team members reach this card at all - see
+ * lib/capacity-active-members.ts.
+ */
 function StudioCapacity({ go }: { go: (id: string) => void }) {
   const { data } = useResource<CapacityData>('/api/admin/pipeline/capacity')
   const members = data?.teamMembers ?? []
   const util =
-    data && data.totalCapacity > 0 ? Math.round((data.totalAllocated / data.totalCapacity) * 100) : 0
+    data && data.totalCapacity > 0 ? Math.round((data.totalAssignedHours / data.totalCapacity) * 100) : 0
 
   return (
     <Card section="Studio capacity" span={5}>
@@ -1082,14 +1111,21 @@ function StudioCapacity({ go }: { go: (id: string) => void }) {
             <div className="ov-gauge-legend">
               <div>
                 <b style={{ color: 'var(--text)', font: '700 17px Manrope' }}>{util}%</b>
-                <div className="ov-mini">booked capacity</div>
+                <div className="ov-mini">booked</div>
               </div>
               <div className="ov-mini lg-row">
                 <span>
                   <i style={{ background: '#B0761F' }} />
-                  Allocated
+                  Assigned
                 </span>
-                <b>{Math.round(data.totalAllocated)}h</b>
+                <b>{Math.round(data.totalAssignedHours)}h</b>
+              </div>
+              <div className="ov-mini lg-row">
+                <span>
+                  <i style={{ background: 'var(--text-faint)' }} />
+                  Logged
+                </span>
+                <b>{Math.round(data.totalLoggedHours)}h</b>
               </div>
               <div className="ov-mini lg-row">
                 <span>
@@ -1198,13 +1234,22 @@ function proposalChip(status: string | null): ReactNode {
 function ProposalsLive({ go }: { go: (id: string) => void }) {
   const nowMs = useNow().getTime()
   const { data } = useResource<{ items: ProposalRow[] }>('/api/admin/proposals')
-  const rows = useMemo(() => {
+
+  // Only proposals a client has actually seen (shared / published / accepted)
+  // get a row. A draft has never left the studio, so it is counted in one
+  // summary line instead of showing up as if it were live work (beta audit,
+  // 2026-09-19: the card listed drafts alongside shared proposals).
+  const { liveRows, draftCount } = useMemo(() => {
     const items = data?.items ?? []
-    return [...items].sort((a, b) => {
-      const at = a.publicSharedAt ? Date.parse(a.publicSharedAt) : 0
-      const bt = b.publicSharedAt ? Date.parse(b.publicSharedAt) : 0
-      return bt - at
-    })
+    const live = items
+      .filter(p => isProposalLiveStatus(p.status))
+      .sort((a, b) => {
+        const at = a.publicSharedAt ? Date.parse(a.publicSharedAt) : 0
+        const bt = b.publicSharedAt ? Date.parse(b.publicSharedAt) : 0
+        return bt - at
+      })
+    const drafts = items.filter(p => p.status === 'draft' || p.status == null).length
+    return { liveRows: live, draftCount: drafts }
   }, [data])
 
   return (
@@ -1212,20 +1257,30 @@ function ProposalsLive({ go }: { go: (id: string) => void }) {
       <CardH ic="file" title="Proposals live" link="All proposals" onLink={() => go('proposals')} />
       {!data ? (
         <Shim h={90} />
-      ) : rows.length === 0 ? (
+      ) : liveRows.length === 0 && draftCount === 0 ? (
         <EmptyLine>No proposals yet.</EmptyLine>
       ) : (
-        <div className="ov-rows">
-          {rows.slice(0, 3).map(p => (
-            <Row
-              key={p.id}
-              title={p.orgName || p.dealTitle || p.title || 'Proposal'}
-              sub={p.publicSharedAt ? `Shared ${relTime(p.publicSharedAt, nowMs)} ago` : 'Draft'}
-              right={proposalChip(p.status)}
-              onClick={() => go('proposals')}
-            />
-          ))}
-        </div>
+        <>
+          {liveRows.length > 0 && (
+            <div className="ov-rows">
+              {liveRows.slice(0, 3).map(p => (
+                <Row
+                  key={p.id}
+                  title={p.orgName || p.dealTitle || p.title || 'Proposal'}
+                  sub={p.publicSharedAt ? `Shared ${relTime(p.publicSharedAt, nowMs)} ago` : 'Shared'}
+                  right={proposalChip(p.status)}
+                  onClick={() => go('proposals')}
+                />
+              ))}
+            </div>
+          )}
+          {draftCount > 0 && (
+            <button className="ov-card-more" onClick={() => go('proposals')}>
+              {draftCount} {draftCount === 1 ? 'draft' : 'drafts'}
+              <Icon n="arrow" s={12} />
+            </button>
+          )}
+        </>
       )}
     </Card>
   )
@@ -1481,12 +1536,6 @@ interface RetainerClient {
   churnRiskScore: number
   healthStatus: string | null
 }
-type HealthBucket = 'healthy' | 'atrisk' | 'attention'
-function healthBucket(c: RetainerClient): HealthBucket {
-  if (c.healthStatus === 'red' || c.churnRiskScore >= 60) return 'attention'
-  if (c.healthStatus === 'amber' || c.churnRiskScore >= 35) return 'atrisk'
-  return 'healthy'
-}
 function RetainerHealth({ go }: { go: (id: string) => void }) {
   const { data } = useResource<{ clients: RetainerClient[] }>('/api/admin/reports/retainer-health')
   const clients = data?.clients ?? []
@@ -1498,6 +1547,9 @@ function RetainerHealth({ go }: { go: (id: string) => void }) {
   return (
     <Card section="Retainer health" span={7} edge="warn">
       <CardH ic="users" title="Retainer health" link="All clients" onLink={() => go('clients')} />
+      <p className="ov-mini" style={{ marginTop: '-0.25rem', marginBottom: '0.5rem' }}>
+        By health status, not churn score
+      </p>
       {!data ? (
         <Shim h={120} />
       ) : clients.length === 0 ? (
