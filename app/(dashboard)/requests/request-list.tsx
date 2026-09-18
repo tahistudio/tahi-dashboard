@@ -11,6 +11,7 @@ import {
   Zap, Download,
   CheckSquare, Square, Users, Loader2, X, Sparkles,
   Palette, Code2, FileText, Compass, Briefcase, Bug, Megaphone, Tag,
+  Handshake,
 } from 'lucide-react'
 import { NewRequestDialog } from '@/components/tahi/new-request-dialog'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
@@ -55,6 +56,7 @@ import {
   type BoardViewKey,
 } from '@/components/tahi/board-view'
 import { PARTICIPANT_ROLE_LABEL, type RequestParticipant } from '@/lib/request-participants'
+import { waitingChipText, type WaitingOnSummary } from '@/lib/request-handoff-types'
 import { RequestsTimeline } from '@/components/tahi/requests/requests-timeline'
 import { RequestsViewSwitcher } from '@/components/tahi/requests/requests-view-switcher'
 import { RequestsHeaderActions } from '@/components/tahi/requests/requests-header-actions'
@@ -123,12 +125,41 @@ interface Request {
   /** Open blockers. Admin list only: the portal route never returns it, and
    *  the client saved views never offer the Blocked cut (Decision 13). */
   blockedByCount?: number
+  /** Client hand-off pointer (H2). Absent on today's payloads until H1's
+   *  schema and API land; typed here so the chip is ready the moment it
+   *  shows up. */
+  waitingOn?: WaitingOnSummary | null
 }
 
 /** The blocked glyph's label, shared by its aria-label and its title so the
  *  pointer and the screen reader are told the same thing. */
 function blockedGlyphLabel(count: number): string {
   return `Blocked by ${count} item${count === 1 ? '' : 's'}`
+}
+
+/** The row and board card's "Waiting on <name> · <reason> · <n>d" chip.
+ *  Read-only everywhere it appears in a list: the studio changes or clears
+ *  it from the request detail rail, not from here. */
+function WaitingOnChip({ waitingOn }: { waitingOn: WaitingOnSummary }) {
+  return (
+    <span
+      className="inline-flex items-center"
+      style={{
+        flexShrink: 0,
+        gap: '0.3125rem',
+        padding: '0.1875rem 0.5rem',
+        borderRadius: 'var(--radius-sm)',
+        background: 'var(--color-brand-50)',
+        color: 'var(--color-brand-dark)',
+        fontSize: '0.6875rem',
+        fontWeight: 600,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <Handshake size={11} aria-hidden="true" style={{ flexShrink: 0 }} />
+      {waitingChipText(waitingOn)}
+    </span>
+  )
 }
 
 /** Parse an org's tags JSON column into a clean string[]. */
@@ -455,6 +486,8 @@ function RequestMobileCard({
           <StatusBadgeCell status={request.status} audience={audience} />
         </span>
       </div>
+
+      {request.waitingOn && <WaitingOnChip waitingOn={request.waitingOn} />}
 
       <Link
         data-private
@@ -1203,6 +1236,18 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
           tags.push({ id: `tag-${t}`, label: t, clickable: false })
         }
       }
+      // The hand-off chip, first in the row so a card waiting on a client
+      // reads that way before anything else on it.
+      if (r.waitingOn) {
+        tags.unshift({
+          id: 'waiting-on',
+          label: waitingChipText(r.waitingOn),
+          color: 'var(--color-brand-dark)',
+          background: 'var(--color-brand-50)',
+          icon: <Handshake size={12} strokeWidth={2.2} aria-hidden="true" />,
+          clickable: false,
+        })
+      }
       const overdue = getDueDateState(r.dueDate, r.status) === 'overdue'
 
       // People stack: project manager, assignee, then followers, in the
@@ -1447,6 +1492,7 @@ export function RequestList({ isAdmin: isAdminProp }: { isAdmin: boolean }) {
             >
               {r.title}
             </Link>
+            {r.waitingOn && <WaitingOnChip waitingOn={r.waitingOn} />}
           </div>
         ),
       },

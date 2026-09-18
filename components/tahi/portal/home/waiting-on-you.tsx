@@ -53,7 +53,12 @@ export interface WaitingAction {
 export interface WaitingItem {
   /** Stable key: the request / invoice / call id. */
   key: string
-  kind: 'review' | 'invoice' | 'call'
+  /** 'handoff' is Liam's client hand-off feature: a request the studio has
+   *  explicitly handed to this contact for a reason (approval, content,
+   *  access, a decision, a file, or something else). Distinct from 'review',
+   *  which is always the client_review status regardless of who it is
+   *  addressed to. */
+  kind: 'review' | 'invoice' | 'call' | 'handoff'
   ic: IconName
   title: string
   sub: string
@@ -289,5 +294,131 @@ function WaitingButton({
     >
       {action.label}
     </button>
+  )
+}
+
+// ── "Also waiting on your team" ─────────────────────────────────────────────
+
+/**
+ * <WaitingOnTeam>. The org admin's quiet sibling to <WaitingOnYou>: the same
+ * hand-off pointers, but addressed to a colleague at the same org rather
+ * than to the caller. Read-only and informational, so it is a plain light
+ * card under the dark forest hero rather than a second dark tile competing
+ * with it, and it carries no action buttons of its own: an org admin can see
+ * what the team is waiting on, not act on somebody else's behalf.
+ *
+ * Renders nothing while loading and nothing when the list is empty, since an
+ * "also waiting" card with zero rows under a tile that has already said "All
+ * quiet" or listed the caller's own items would only repeat the page.
+ */
+export interface WaitingOnTeamItem {
+  /** Stable key: the request id. */
+  key: string
+  /** The colleague this item is addressed to, first name is enough. */
+  contactName: string
+  requestTitle: string
+  /** Short reason word ("approval", "content", ...), not the full sentence:
+   *  this list is a scan, not a read. */
+  reasonLabel: string
+  daysWaiting: number
+  onOpen?: () => void
+}
+
+export interface WaitingOnTeamProps {
+  items: WaitingOnTeamItem[]
+  loading?: boolean
+}
+
+export function WaitingOnTeam({ items, loading }: WaitingOnTeamProps) {
+  if (loading) {
+    return (
+      <section
+        aria-busy="true"
+        aria-label="Also waiting on your team, loading"
+        style={{
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-lg)',
+          background: 'var(--color-bg)',
+          padding: '0.875rem 1rem',
+          marginTop: '0.75rem',
+        }}
+      >
+        <div className="flex flex-col animate-pulse" style={{ gap: '0.375rem' }}>
+          <span style={{ height: '0.75rem', width: '40%', borderRadius: '0.25rem', background: 'var(--color-bg-tertiary)' }} />
+          <span style={{ height: '0.75rem', width: '70%', borderRadius: '0.25rem', background: 'var(--color-bg-tertiary)' }} />
+        </div>
+      </section>
+    )
+  }
+
+  if (items.length === 0) return null
+
+  return (
+    <section
+      aria-label="Also waiting on your team"
+      style={{
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-lg)',
+        background: 'var(--color-bg)',
+        padding: '0.875rem 1rem',
+        marginTop: '0.75rem',
+      }}
+    >
+      <h3
+        style={{
+          margin: '0 0 0.5rem',
+          fontSize: '0.71875rem',
+          fontWeight: 700,
+          letterSpacing: '0.03em',
+          textTransform: 'uppercase',
+          color: 'var(--color-text-subtle)',
+        }}
+      >
+        Also waiting on your team
+      </h3>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+        {items.map(it => (
+          <li key={it.key}>
+            <button
+              type="button"
+              onClick={it.onOpen}
+              disabled={!it.onOpen}
+              className="tahi-focus-ring"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                width: '100%',
+                minHeight: '2.75rem',
+                gap: '0.5rem',
+                padding: '0.375rem 0.5rem',
+                border: 'none',
+                borderRadius: 'var(--radius-md)',
+                background: 'transparent',
+                cursor: it.onOpen ? 'pointer' : 'default',
+                textAlign: 'left',
+              }}
+            >
+              <span
+                style={{
+                  fontSize: '0.8125rem',
+                  fontWeight: 600,
+                  color: 'var(--color-text)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  flex: 1,
+                  minWidth: 0,
+                }}
+              >
+                {it.requestTitle}
+              </span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', flexShrink: 0 }}>
+                {it.contactName} · {it.reasonLabel} · {it.daysWaiting}d
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }

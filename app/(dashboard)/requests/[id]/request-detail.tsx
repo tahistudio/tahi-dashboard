@@ -65,6 +65,11 @@ import {
 } from '@/components/tahi/requests/activity-feed'
 import { RequestActionsMenu } from '@/components/tahi/requests/request-actions-menu'
 import { ClientReviewBar } from '@/components/tahi/requests/client-review-bar'
+import { WaitingOnCard } from '@/components/tahi/requests/waiting-on-card'
+import {
+  waitingBannerText, waitingBlockedByLine, waitingActionVerb,
+  type WaitingOnSummary,
+} from '@/lib/request-handoff-types'
 import {
   InlineDateField, InlineMenuField, InlineNone, InlineNumberField, type InlineMenuOption,
 } from '@/components/tahi/inline-field'
@@ -390,6 +395,10 @@ interface Request {
   createdAt: string
   updatedAt: string
   deliveredAt: string | null
+  // Client hand-off (H2, contract only until H1's schema + API land). Absent
+  // or undefined on today's payloads; typed here so the UI can read it the
+  // moment the field shows up without a second reconciliation pass.
+  waitingOn?: WaitingOnSummary | null
 }
 
 interface ParentRequestRef {
@@ -589,6 +598,7 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
   // Client Approve / Request-a-change (only meaningful while status is
   // client_review and the viewer is a client).
   const [approving, setApproving] = useState(false)
+  const [handingBack, setHandingBack] = useState(false)
   const composerWrapRef = useRef<HTMLDivElement>(null)
   // "Request changes" seeds the composer rather than posting straight away,
   // so the client says what needs adjusting in their own words. Bumping the
@@ -1105,6 +1115,33 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
       showToast(err instanceof Error ? err.message : 'Network error - try again')
     } finally {
       setApproving(false)
+    }
+  }
+
+  // Hand it back (client side): the named contact, or an org admin, clears
+  // the waiting-on pointer themselves rather than waiting for the studio to
+  // notice they answered. Server-enforced (403 for anyone else on the org);
+  // this button is shown to any client viewing a request that is waiting on
+  // someone, since who exactly is allowed is the server's call to make.
+  async function handleHandBack() {
+    if (!request || handingBack) return
+    setHandingBack(true)
+    const previous = request
+    setRequest({ ...previous, waitingOn: null })
+    try {
+      const res = await fetch(apiPath(`/api/portal/requests/${requestId}/handback`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (!res.ok) throw new Error('failed')
+      showToast('Handed back to the studio.')
+      await mutateRequest()
+    } catch {
+      setRequest(previous)
+      showToast('Could not hand this back - try again')
+    } finally {
+      setHandingBack(false)
     }
   }
 
@@ -2207,6 +2244,107 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
         )
       )}
 
+      {/* "This is with you" banner - client only. Renders whenever the
+          request carries a waiting-on pointer, independent of status: a
+          client can be waiting on a decision mid-build just as easily as at
+          review time. The action verb comes straight off the reason
+          (approval routes through the same approve the review bar below
+          already uses; every other reason is a reply, with content and file
+          additionally inviting an upload). "Hand it back" is deliberately
+          quiet - a text link, not a button, so it never competes with the
+          real action for attention. */}
+      {!isAdmin && request.waitingOn && (
+        <div
+          role="region"
+          aria-label="This request is with you"
+          style={{
+            border: '1px solid var(--color-brand)',
+            background: 'var(--color-brand-50)',
+            borderRadius: 'var(--radius-leaf, 0 16px 0 16px)',
+            padding: '1rem 1.125rem',
+          }}
+        >
+          <div className="flex items-start flex-wrap" style={{ gap: '0.75rem' }}>
+            <div
+              className="flex items-center justify-center flex-shrink-0"
+              style={{
+                width: '1.75rem', height: '1.75rem',
+                borderRadius: '0 0.5rem 0 0.5rem',
+                background: 'linear-gradient(135deg, var(--color-brand), var(--color-brand-dark))',
+              }}
+            >
+              <User size={14} style={{ color: '#ffffff' }} aria-hidden="true" />
+            </div>
+            <div className="flex-1" style={{ minWidth: '12rem' }}>
+              <p className="text-sm font-semibold" style={{ color: 'var(--color-brand-dark)', margin: 0 }}>
+                {waitingBannerText(request.waitingOn.reason)}
+              </p>
+              {request.waitingOn.note && (
+                <p className="text-xs" style={{ color: 'var(--color-text-muted)', margin: '0.1875rem 0 0' }}>
+                  {request.waitingOn.note}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center flex-wrap" style={{ gap: '0.75rem' }}>
+              {request.waitingOn.reason === 'approval' && request.status === 'client_review' ? (
+                <button
+                  type="button"
+                  onClick={handleReviewApprove}
+                  disabled={approving || previewIsReadOnly}
+                  className="inline-flex items-center transition-colors"
+                  style={{
+                    gap: '0.375rem',
+                    padding: '0.4375rem 0.875rem',
+                    fontSize: '0.8125rem',
+                    fontWeight: 600,
+                    borderRadius: 'var(--radius-button)',
+                    border: 'none',
+                    background: approving || previewIsReadOnly ? 'var(--color-bg-tertiary)' : 'var(--color-brand)',
+                    color: approving || previewIsReadOnly ? 'var(--color-text-subtle)' : '#ffffff',
+                    cursor: approving || previewIsReadOnly ? 'not-allowed' : 'pointer',
+                    minHeight: '2.25rem',
+                  }}
+                >
+                  {approving
+                    ? <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                    : <Check size={14} aria-hidden="true" />}
+                  {waitingActionVerb(request.waitingOn.reason)}
+                </button>
+              ) : (
+                <span
+                  className="text-xs font-semibold"
+                  style={{ color: 'var(--color-brand-dark)' }}
+                >
+                  {waitingActionVerb(request.waitingOn.reason)} below
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={handleHandBack}
+                disabled={handingBack || previewIsReadOnly}
+                className="tahi-focus-ring"
+                style={{
+                  padding: '0.4375rem 0',
+                  fontSize: '0.75rem',
+                  fontWeight: 500,
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--color-text-muted)',
+                  textDecoration: 'underline',
+                  cursor: handingBack || previewIsReadOnly ? 'not-allowed' : 'pointer',
+                  minHeight: '2.25rem',
+                }}
+                title={previewIsReadOnly
+                  ? `You are reading this as ${request.orgName ?? 'the client'}. Hand back is read-only in client view.`
+                  : undefined}
+              >
+                {handingBack ? 'Handing back…' : 'Hand it back'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Client review actions - client only. Sits directly under the pipeline
           bar so approving a delivery is the obvious next step. Approve routes
           through the whitelisted portal PATCH (client_review -> delivered);
@@ -2761,7 +2899,23 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
           {/* Blocked by (admin only, Decision 13). A blocker is a reason the
               work is not moving, so it sits beside the time and the status
               rather than below the checklists. */}
-          {isAdmin && <RequestBlockersCard requestId={requestId} canWrite={canWrite} />}
+          {isAdmin && <RequestBlockersCard requestId={requestId} canWrite={canWrite} waitingOn={request.waitingOn ?? null} />}
+
+          {/* Waiting on (admin only, Liam's client hand-off feature): who this
+              request is currently handed to, why, and the Hand back / Change
+              commands. Sits directly under Blocked by since both answer the
+              same question, "why is this not moving", from two different
+              directions (an internal dependency versus a client we are
+              waiting on). */}
+          {isAdmin && (
+            <WaitingOnCard
+              requestId={requestId}
+              orgId={request.orgId}
+              canWrite={canWrite}
+              waitingOn={request.waitingOn ?? null}
+              onChange={next => setRequest(prev => (prev ? { ...prev, waitingOn: next } : prev))}
+            />
+          )}
 
           {/* Calls: kickoff, scope review, mid-build check-ins. The ported
               rail puts Actions directly under Time, so a phone-width column
@@ -3834,7 +3988,20 @@ function countOpenBlockers(rows: readonly BlockerRow[] | undefined): number {
  * Its own SWR key rather than a field on the detail payload: the card
  * revalidates on its own writes and that payload is already large.
  */
-function RequestBlockersCard({ requestId, canWrite }: { requestId: string; canWrite: boolean }) {
+function RequestBlockersCard({
+  requestId,
+  canWrite,
+  waitingOn,
+}: {
+  requestId: string
+  canWrite: boolean
+  /** The client hand-off pointer, when one is set. No work_blockers row is
+   *  ever written for it: this card reads it straight off the request and
+   *  prints one synthetic line, same visual language as a real blocker row
+   *  but nothing here can be unlinked from this card (Hand back lives on the
+   *  Waiting on card, which owns the write). */
+  waitingOn?: WaitingOnSummary | null
+}) {
   const { showToast } = useToast()
   const { data, isLoading, mutate } = useSWR<RequestBlockersPayload>(requestBlockersKey(requestId))
   const blockers = useMemo(() => data?.blockedBy ?? [], [data])
@@ -3938,8 +4105,9 @@ function RequestBlockersCard({ requestId, canWrite }: { requestId: string; canWr
   }
 
   // Nothing to show and nothing to do: an empty read-only card is noise on a
-  // rail that already runs past the fold.
-  if (!canWrite && blockers.length === 0) return null
+  // rail that already runs past the fold. A waiting-on pointer counts as
+  // something to show even with zero real blocker rows.
+  if (!canWrite && blockers.length === 0 && !waitingOn) return null
 
   return (
     <SidebarCard
@@ -3947,6 +4115,22 @@ function RequestBlockersCard({ requestId, canWrite }: { requestId: string; canWr
       icon={<AlertTriangle size={14} />}
       count={openCount > 0 ? openCount : undefined}
     >
+      {/* The synthetic line. No work_blockers row backs it: the Waiting on
+          card owns the pointer and its Hand back button, so this line is
+          read-only and exists purely so "why is this stuck" is answered in
+          one place even when the only reason is a client, not a dependency. */}
+      {waitingOn && (
+        <p
+          style={{
+            margin: blockers.length > 0 || isLoading ? '0 0 0.5rem' : 0,
+            fontSize: '0.78125rem',
+            fontWeight: 500,
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          {waitingBlockedByLine(waitingOn)} since {formatDate(waitingOn.since)}
+        </p>
+      )}
       {isLoading && blockers.length === 0 ? (
         <div className="flex flex-col animate-pulse" style={{ gap: '0.375rem' }}>
           {[0, 1].map(i => (
@@ -3958,9 +4142,11 @@ function RequestBlockersCard({ requestId, canWrite }: { requestId: string; canWr
           ))}
         </div>
       ) : blockers.length === 0 ? (
-        <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
-          Nothing is holding this up.
-        </p>
+        !waitingOn && (
+          <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-text-subtle)' }}>
+            Nothing is holding this up.
+          </p>
+        )
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
           {blockers.map(b => (
