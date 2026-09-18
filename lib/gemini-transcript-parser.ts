@@ -96,9 +96,20 @@ export function parseGeminiTitle(title: string): GeminiTitleParsed {
   return { shortTitle, attendeeGuess, scheduledAt }
 }
 
-// The divider is the "Transcript" heading on a line of its own, with or
-// without the markdown hash and the emoji, so a plain-text export splits too.
-const TRANSCRIPT_DIVIDER = /\n(?:#+\s*)?[^\n\w]{0,4}Transcript\*?\s*\n/i
+// A heading line, in every shape the export has used: "### Summary",
+// "### **Summary**" (the markdown export since 2026-09 bolds every heading),
+// "# **📖 Transcript**" (an emoji before the word), or the bare word on a
+// line of its own in a plain-text export. Words before the label ("Meeting
+// records Transcript") do not count.
+const HEAD_PREFIX = String.raw`(?:#{1,6}\s*)?(?:\*\*|__)?\s*(?:[^\n\w*_]{1,3}\s*)?`
+const HEAD_SUFFIX = String.raw`\s*(?:\*\*|__)?\s*\n`
+const escapeRe = (s: string) => s.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
+function headingRe(label: string, flags = 'i'): RegExp {
+  return new RegExp(`(?:^|\n)${HEAD_PREFIX}${escapeRe(label)}${HEAD_SUFFIX}`, flags)
+}
+
+// The divider is the "Transcript" heading on a line of its own.
+const TRANSCRIPT_DIVIDER = headingRe('Transcript')
 const NOTES_HEADER = /^#\s*[^\n]*Notes[^\n]*$/im
 
 // Since 2026-09 the doc opens with a "Quick notes" block (its own summary
@@ -106,7 +117,7 @@ const NOTES_HEADER = /^#\s*[^\n]*Notes[^\n]*$/im
 // carries the Summary, Next steps and Details the parser wants. When that
 // heading is present the notes start there, so the quick block's duplicate
 // "Next steps" is never the one read.
-const FULL_NOTES_HEADING = /(?:^|\n)(?:#+\s*)?[^\n\w]{0,4}Full notes\s*\n/i
+const FULL_NOTES_HEADING = headingRe('Full notes')
 
 export function parseGeminiTranscript(rawText: string): GeminiTranscriptParsed {
   // Split notes vs transcript halves. The transcript divider includes
@@ -133,13 +144,12 @@ export function parseGeminiTranscript(rawText: string): GeminiTranscriptParsed {
  * bare word on its own line, so both count as the heading, and the section
  * ends at the next hashed heading or at the next known bare heading.
  */
-const BARE_HEADINGS = ['Summary', 'Next steps', 'Details', 'Suggested next steps', 'Transcript', 'Full notes', 'Quick notes']
-const escapeRe = (s: string) => s.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
+const BARE_HEADINGS = ['Summary', 'Decisions', 'Next steps', 'Details', 'Suggested next steps', 'Transcript', 'Full notes', 'Quick notes']
 function extractSection(text: string, label: string): string | null {
   const escaped = escapeRe(label)
   const others = BARE_HEADINGS.filter(h => h.toLowerCase() !== label.toLowerCase()).map(escapeRe).join('|')
   const re = new RegExp(
-    `(?:^|\\n)(?:#{1,6}\\s+)?${escaped}\\s*\\n([\\s\\S]*?)(?=\\n#{1,6}\\s|\\n(?:#+\\s*)?[^\\n\\w]{0,4}(?:${others})\\s*\\n|$)`,
+    `(?:^|\\n)${HEAD_PREFIX}${escaped}${HEAD_SUFFIX}([\\s\\S]*?)(?=\\n#{1,6}\\s|\\n${HEAD_PREFIX}(?:${others})${HEAD_SUFFIX}|$)`,
     'i',
   )
   const m = text.match(re)
@@ -205,7 +215,7 @@ export function describeUnparsedDoc(rawText: string): string {
   const headings = lines
     .map(l => l.trim())
     .filter(l => l.length > 0 && l.length <= 80 && (/^#{1,6}\s/.test(l) || /summary|transcript|notes|details|next steps|meeting records/i.test(l)))
-    .slice(0, 12)
+    .slice(0, 20)
   const start = rawText.replace(/\s+/g, ' ').trim().slice(0, 300)
   return `${rawText.length} chars, ${lines.length} lines. Headings: ${headings.length ? headings.join(' | ') : 'none'}. Starts: ${start || '(empty)'}`
 }

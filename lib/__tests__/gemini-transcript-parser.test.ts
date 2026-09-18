@@ -220,6 +220,74 @@ describe('parseGeminiTranscript, plain-text export', () => {
   })
 })
 
+describe('parseGeminiTranscript, markdown export with bold headings (2026-09)', () => {
+  const md = [
+    '# **\u270D\uFE0F Quick notes**',
+    '',
+    'Please rate the new Quick notes tab by taking a short survey.',
+    '',
+    '## **Elevate x Tahi Studio**',
+    '',
+    'Campaign launch updates and website spam issues.',
+    '',
+    '## **Next steps**',
+    '',
+    '- Liam to send the proposal.',
+    '',
+    '**Want to see more?** [View the full notes](https://docs.google.com/x)',
+    '',
+    '# **\uD83D\uDCDD Full notes**',
+    '',
+    '## **Elevate x Tahi Studio**',
+    '',
+    'Invited <ella@example.com> [Liam from Tahi Studio](mailto:business@tahi.studio)',
+    '',
+    'Meeting records [Transcript](https://docs.google.com/y)',
+    '',
+    '### **Summary**',
+    '',
+    'The white paper launches next week and the web form spam needs a fix.',
+    '',
+    '### **Decisions**',
+    '',
+    '- Keep Pardot for the launch.',
+    '',
+    '### **Next steps**',
+    '',
+    '- \\[Liam\\] Add the honeypot to the web form.',
+    '- \\[Ella\\] Send the white paper copy.',
+    '',
+    '### **Details**',
+    '',
+    '- **Web form spam**: bots are hitting the contact form.',
+    '',
+    '# **\uD83D\uDCD6 Transcript**',
+    '',
+    '## **Elevate x Tahi Studio - Transcript**',
+    '',
+    '### 00:00:00',
+    '',
+    '**Ella:** the spam started on Monday.',
+    '',
+    'Transcription ended after 00:44:10',
+  ].join('\n')
+
+  it('reads the bold-wrapped headings and starts at Full notes', () => {
+    const r = parseGeminiTranscript(md)
+    expect(r.summary).toBe('The white paper launches next week and the web form spam needs a fix.')
+    expect(r.nextSteps).toEqual(['[Liam] Add the honeypot to the web form.', '[Ella] Send the white paper copy.'])
+    expect(r.details).toEqual(['**Web form spam**: bots are hitting the contact form.'])
+    expect(r.transcript).toContain('**Ella:** the spam started on Monday.')
+    expect(r.transcript?.startsWith('## **Elevate x Tahi Studio - Transcript**')).toBe(true)
+    expect(r.durationFormatted).toBe('00:44:10')
+    expect(r.invitedEmails).toEqual(['ella@example.com', 'business@tahi.studio'])
+  })
+
+  it('ends the summary at the Decisions heading', () => {
+    expect(parseGeminiTranscript(md).summary).not.toContain('Pardot')
+  })
+})
+
 describe('describeUnparsedDoc', () => {
   it('reports size, heading-looking lines and how the text starts, never the whole doc', () => {
     const doc = ['Meeting notes', '', '## Summary', 'Agreed the homepage scope. '.repeat(40), '# Transcript', 'Tim: hello'].join('\n')
