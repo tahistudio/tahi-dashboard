@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { parseGeminiTitle, parseGeminiTranscript } from '../gemini-transcript-parser'
+import { describeUnparsedDoc, parseGeminiTitle, parseGeminiTranscript } from '../gemini-transcript-parser'
 
 describe('parseGeminiTitle', () => {
   it('extracts short title and attendee from standard format', () => {
@@ -149,5 +149,21 @@ May 22, 2026
     expect(r.summary).toBeNull()
     expect(r.nextSteps).toEqual([])
     expect(r.transcript).toBeNull()
+  })
+})
+
+describe('describeUnparsedDoc', () => {
+  it('reports size, heading-looking lines and how the text starts, never the whole doc', () => {
+    const doc = ['Meeting notes', '', '## Summary', 'Agreed the homepage scope. '.repeat(40), '# Transcript', 'Tim: hello'].join('\n')
+    const out = describeUnparsedDoc(doc)
+    expect(out).toContain(doc.length + ' chars')
+    expect(out).toContain('Meeting notes | ## Summary | # Transcript')
+    expect(out).toContain('Starts: Meeting notes ## Summary')
+    expect(out.length).toBeLessThan(doc.length)
+  })
+
+  it('says so when the export is empty', () => {
+    expect(describeUnparsedDoc('')).toContain('Headings: none')
+    expect(describeUnparsedDoc('')).toContain('(empty)')
   })
 })

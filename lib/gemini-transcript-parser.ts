@@ -170,3 +170,19 @@ function cleanTranscript(raw: string | null): string | null {
   const cleaned = raw.replace(trailerRe, '').trim()
   return cleaned || null
 }
+
+/**
+ * What the parser saw in a doc it could not read. Surfaced on a dry run of
+ * the Drive sync so a change in Gemini's export format is diagnosable from
+ * the dashboard: the size, every heading-looking line, and how the text
+ * starts. Never the whole doc.
+ */
+export function describeUnparsedDoc(rawText: string): string {
+  const lines = rawText.split(/\r?\n/)
+  const headings = lines
+    .map(l => l.trim())
+    .filter(l => l.length > 0 && l.length <= 80 && (/^#{1,6}\s/.test(l) || /summary|transcript|notes|details|next steps|meeting records/i.test(l)))
+    .slice(0, 12)
+  const start = rawText.replace(/\s+/g, ' ').trim().slice(0, 300)
+  return `${rawText.length} chars, ${lines.length} lines. Headings: ${headings.length ? headings.join(' | ') : 'none'}. Starts: ${start || '(empty)'}`
+}

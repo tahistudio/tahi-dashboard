@@ -46,7 +46,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { getGoogleAccessToken, listDriveFiles, exportDriveDocAsText } from '@/lib/google'
-import { parseGeminiTitle, parseGeminiTranscript } from '@/lib/gemini-transcript-parser'
+import { describeUnparsedDoc, parseGeminiTitle, parseGeminiTranscript } from '@/lib/gemini-transcript-parser'
 import { logCronRun } from '@/lib/cron-runs'
 import { MATCH_WINDOW_MS, findCallMatch, findFiledTranscript, parseCallKind, upsertTranscript } from '@/lib/call-transcripts'
 
@@ -185,7 +185,14 @@ export async function POST(req: NextRequest) {
 
     const parsed = parseGeminiTranscript(docText)
     if (!parsed.transcript && !parsed.summary) {
-      results.push({ fileId: file.id, title: file.name, status: 'no_transcript' })
+      results.push({
+        fileId: file.id,
+        title: file.name,
+        status: 'no_transcript',
+        // A dry run says what the parser saw, so a change in Gemini's export
+        // format shows up in the dashboard instead of as silence.
+        detail: dryRun ? describeUnparsedDoc(docText) : undefined,
+      })
       continue
     }
 
