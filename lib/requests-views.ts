@@ -38,6 +38,10 @@ export interface RequestRow {
    *  older caller, which reads as not blocked. Never present on a portal
    *  payload: a client does not see a blocker, not even the count. */
   blockedByCount?: number
+  /** The client hand-off pointer (H2), computed server-side. Truthy iff the
+   *  request is currently waiting on a named client contact; the saved view
+   *  below reads presence only, never the reason or who. */
+  waitingOn?: unknown
 }
 
 /** Who is looking. `admin` is the Tahi org, `team_member` is a scoped
@@ -133,6 +137,10 @@ export const TEAM_SAVED_VIEWS: readonly RequestsSavedView[] = [
   { key: 'mine',      label: 'Assigned to me',  test: (r, c) => !!c.assigneeId && r.assigneeId === c.assigneeId },
   { key: 'overdue',   label: 'Overdue',         test: (r, c) => isOverdue(r, c.now ?? new Date()) },
   { key: 'blocked',   label: 'Blocked',         test: r => isRequestBlocked(r) },
+  // Liam's client hand-off feature: a request currently handed to a named
+  // client contact. Studio-only, same reasoning as Blocked: a client never
+  // needs a saved view for "requests waiting on some OTHER client".
+  { key: 'waiting_on_clients', label: 'Waiting on clients', test: r => r.waitingOn != null },
   { key: 'week',      label: 'Due this week',   test: (r, c) => isDueWithin(r, 7, c.now ?? new Date()) },
   { key: 'awaiting',  label: 'Awaiting client', test: r => r.status === 'client_review' },
   { key: 'delivered', label: 'Delivered',       test: r => r.status === 'delivered' },

@@ -104,13 +104,13 @@ describe('normaliseViewKey', () => {
 describe('savedViewsFor', () => {
   it('gives an admin the team set without "Assigned to me"', () => {
     expect(savedViewsFor('admin').map(v => v.key)).toEqual([
-      'active', 'triage', 'overdue', 'blocked', 'week', 'awaiting', 'delivered',
+      'active', 'triage', 'overdue', 'blocked', 'waiting_on_clients', 'week', 'awaiting', 'delivered',
     ])
   })
 
   it('adds "Assigned to me" for a non-admin team member', () => {
     expect(savedViewsFor('team_member').map(v => v.key)).toEqual([
-      'active', 'triage', 'mine', 'overdue', 'blocked', 'week', 'awaiting', 'delivered',
+      'active', 'triage', 'mine', 'overdue', 'blocked', 'waiting_on_clients', 'week', 'awaiting', 'delivered',
     ])
   })
 
@@ -197,6 +197,18 @@ describe('team saved view predicates', () => {
     // Decision 13: the key is not in the client set, so matchesSavedView
     // treats it as no narrowing rather than leaking a filtered list.
     expect(matchesSavedView(req({ blockedByCount: 0 }), 'blocked', 'client', { now: NOW })).toBe(true)
+  })
+
+  it('waiting_on_clients matches presence of a hand-off pointer, and nothing else', () => {
+    expect(test('waiting_on_clients', req({ waitingOn: { contactId: 'c1' } }))).toBe(true)
+    expect(test('waiting_on_clients', req({ waitingOn: null }))).toBe(false)
+    expect(test('waiting_on_clients', req())).toBe(false)
+  })
+
+  it('a client never gets the "Waiting on clients" view: it is studio-only', () => {
+    expect(savedViewsFor('client').map(v => v.key)).not.toContain('waiting_on_clients')
+    expect(CLIENT_SAVED_VIEWS.map(v => v.key)).not.toContain('waiting_on_clients')
+    expect(TEAM_SAVED_VIEWS.map(v => v.key)).toContain('waiting_on_clients')
   })
 
   it('awaiting client is client_review, delivered is delivered', () => {

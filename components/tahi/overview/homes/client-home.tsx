@@ -56,7 +56,11 @@ import { cadenceWord } from '@/lib/next-invoice-date'
 import { CLIENT_HOME_ONBOARDING_CHECKLIST_ENABLED } from '@/lib/onboarding-steps'
 import type { OverviewCtx } from '@/components/tahi/overview/ctx'
 import { portalStatusMeta, portalStageFraction, type PortalChipTone } from '@/lib/portal-status'
-import { WaitingOnYou, type WaitingItem } from '@/components/tahi/portal/home/waiting-on-you'
+import { WaitingOnYou, WaitingOnTeam, type WaitingItem } from '@/components/tahi/portal/home/waiting-on-you'
+import {
+  daysWaiting as daysWaitingOn, waitingActionVerb, waitingReasonSentence, waitingReasonShortLabel,
+  type WaitingOnRequestItem,
+} from '@/lib/request-handoff-types'
 import { Money } from '@/components/tahi/money'
 import {
   Icon,
@@ -93,6 +97,16 @@ interface RequestsResp {
   requests: ReqRow[]
   page: number
   limit: number
+  /**
+   * Liam's client hand-off feature (H2). Neither field exists on today's
+   * `/api/portal/requests` payload; both are typed and read defensively so
+   * the panel lights up the moment H1's schema and API land, with no second
+   * wiring pass. `waitingOnYou` is scoped to the caller's own contact id by
+   * the server; `waitingOnOrg` is the org-wide list, present only when the
+   * caller is a workspace admin (mirrors `subData.seat`).
+   */
+  waitingOnYou?: WaitingOnRequestItem[]
+  waitingOnOrg?: WaitingOnRequestItem[]
 }
 
 interface TrackReq {
@@ -1090,13 +1104,39 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
     when: e.when,
   }))
 
-  // -- waiting on you (ranked: review > invoice > call) ------------------------
+  // -- hand-off items (Liam's client hand-off feature) -------------------------
+  // waitingOnYou is already scoped to the caller's own contact id by the
+  // server, so no client-side identity check is needed here: every row in it
+  // is addressed to whoever is reading this page. Ranked ahead of review,
+  // invoice and call, because a named hand-off with a reason attached is a
+  // more specific ask than a generic "ready for your review".
+  const handoffItems = requestsData?.waitingOnYou ?? []
+  const handoffRequestIds = new Set(handoffItems.map(h => h.requestId))
+
+  // -- waiting on you (ranked: hand-offs > review > invoice > call) ------------
   // Every row here is a door. A review opens that request on its approve view,
   // an invoice opens the payment page, a call opens the meeting. The tile shows
   // three and expands to the rest, so a fourth thing waiting is never a count
   // with nowhere to go.
   const waiting: WaitingItem[] = []
+  for (const h of handoffItems) {
+    const reason = h.waitingOn.reason
+    const verb = waitingActionVerb(reason)
+    waiting.push({
+      key: `handoff-${h.requestId}`,
+      kind: 'handoff',
+      ic: 'users',
+      title: h.requestTitle,
+      sub: `${waitingReasonSentence(reason)}${h.waitingOn.note ? `. ${h.waitingOn.note}` : ''}`,
+      open: { label: 'Open request', onOpen: () => go(requestRouteId(h.requestId)) },
+      primary: { label: verb, onAct: () => go(requestRouteId(h.requestId)) },
+    })
+  }
+  // A request already carrying a hand-off card is never ALSO shown as a plain
+  // review row: the hand-off card already names the reason and the verb, and
+  // a second, blander row for the same request would read as a duplicate.
   for (const r of inReview) {
+    if (handoffRequestIds.has(r.id)) continue
     waiting.push({
       key: r.id,
       kind: 'review',
@@ -1142,6 +1182,20 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       primary: { label: 'Join', onAct: () => window.open(joinUrl, '_blank', 'noopener,noreferrer') },
     })
   }
+  // -- also waiting on your team (org admin only) -------------------------------
+  // The org-wide list is only ever present on the payload when the server has
+  // already decided the caller is a workspace admin, mirroring the same
+  // `seat` gate the Billing zone uses (isClientHomeMemberSeat). No second
+  // client-side admin check: a member seat simply never receives the array.
+  const waitingOnTeamItems = (requestsData?.waitingOnOrg ?? []).map(item => ({
+    key: item.requestId,
+    contactName: firstNameOf(item.waitingOn.contactName),
+    requestTitle: item.requestTitle,
+    reasonLabel: waitingReasonShortLabel(item.waitingOn.reason),
+    daysWaiting: item.waitingOn.daysWaiting ?? daysWaitingOn(item.waitingOn.since),
+    onOpen: () => go(requestRouteId(item.requestId)),
+  }))
+
   // The tile may only claim "All quiet in the studio." once every read behind
   // it has answered: saying that to somebody with two deliveries waiting, for
   // the length of a round trip, is the exact lie this pass set out to remove.
@@ -1374,6 +1428,14 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
             a bordered hairline with nothing in it. */}
         {vitals.length > 0 && <Vitals items={vitals} />}
       </div>
+
+      {/* Also waiting on your team: an org admin's read-only view of hand-offs
+          addressed to a colleague at the same org. Sits directly under the
+          hero. No loading state wired here on purpose: `waitingOnOrg` does
+          not exist on the payload yet (H1's schema + API), so `items` is
+          always [] today and the card renders nothing rather than flashing a
+          skeleton on every client's home for a feature that is not live. */}
+      <WaitingOnTeam items={waitingOnTeamItems} />
 
       <Zone label="Your work">
         <div className="ov-col-12">
