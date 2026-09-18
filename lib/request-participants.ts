@@ -20,7 +20,25 @@ import { and, eq, inArray, isNull } from 'drizzle-orm'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-export type RequestParticipantRole = 'pm' | 'assignee' | 'follower'
+/**
+ * The cast a request can carry.
+ *
+ * The first three are the studio's own staffing, and predate everything else.
+ * The last three arrived with the client hand-off (migration 0104,
+ * lib/request-handoff.ts) and describe what a CLIENT contact is on a request
+ * for: an 'approver' was asked to sign something off, a 'contributor' was
+ * asked for content, access, a decision or a file, and a 'watcher' only
+ * follows. Appended rather than folded into 'follower' because the hand-off
+ * has to be able to say WHY a person is there, and because "a client who has
+ * to approve this" and "a client who is cc'd" are not the same fact.
+ */
+export type RequestParticipantRole =
+  | 'pm'
+  | 'assignee'
+  | 'follower'
+  | 'approver'
+  | 'contributor'
+  | 'watcher'
 
 export interface RequestParticipant {
   id: string
@@ -32,13 +50,21 @@ export interface RequestParticipant {
 
 /** PM first, then the assignee, then followers. A card shows three and folds
  *  the rest into a "+N", so this order decides who stays visible. */
-const ROLE_ORDER: Record<RequestParticipantRole, number> = { pm: 0, assignee: 1, follower: 2 }
+const ROLE_ORDER: Record<RequestParticipantRole, number> = {
+  pm: 0,
+  assignee: 1,
+  approver: 2,
+  contributor: 3,
+  follower: 4,
+  watcher: 5,
+}
 
 /** How many request ids go into one IN clause. Kept well under D1's cap on
  *  bound parameters per query. */
 const ID_BATCH_SIZE = 80
 
-export const ALL_PARTICIPANT_ROLES: readonly RequestParticipantRole[] = ['pm', 'assignee', 'follower']
+export const ALL_PARTICIPANT_ROLES: readonly RequestParticipantRole[] =
+  ['pm', 'assignee', 'follower', 'approver', 'contributor', 'watcher']
 
 /** What a client is allowed to see of the internal cast. Followers are held
  *  back, so an internal watcher never leaks into the portal. */
@@ -56,7 +82,7 @@ export interface LoadParticipantsOptions {
 }
 
 function isParticipantRole(value: string): value is RequestParticipantRole {
-  return value === 'pm' || value === 'assignee' || value === 'follower'
+  return Object.prototype.hasOwnProperty.call(ROLE_ORDER, value)
 }
 
 export async function loadRequestParticipants(
@@ -161,4 +187,7 @@ export const PARTICIPANT_ROLE_LABEL: Record<RequestParticipantRole, string> = {
   pm: 'Project manager',
   assignee: 'Assignee',
   follower: 'Follower',
+  approver: 'Approver',
+  contributor: 'Contributor',
+  watcher: 'Watcher',
 }

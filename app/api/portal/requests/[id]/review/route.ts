@@ -39,6 +39,7 @@ import {
   reviewDecisionToStatus,
   type ReviewDecision,
 } from '@/lib/request-review'
+import { handBackOnClientAction } from '@/lib/request-handoff'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -138,8 +139,9 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     // Post the decision to the thread as the client. The body is built from
     // escaped text, never raw client HTML, so nothing needs sanitising here.
+    // The name also signs the auto hand-back's notification below.
     const [contact] = await drizzle
-      .select({ id: schema.contacts.id })
+      .select({ id: schema.contacts.id, name: schema.contacts.name })
       .from(schema.contacts)
       .where(eq(schema.contacts.clerkUserId, userId))
       .limit(1)
@@ -155,6 +157,20 @@ export async function POST(req: NextRequest, { params }: Params) {
       body: buildReviewMessageHtml(decision, note),
       isInternal: false,
     })
+
+    // The request hands itself back if it was sitting with this person waiting
+    // on exactly this (migration 0104). Approving IS the action a hand-off for
+    // 'approval' asked for, so making the client also press "hand it back"
+    // would be asking them to do the same thing twice. No-ops for everyone
+    // else, and never throws (lib/request-handoff.ts).
+    if (decision === 'approve') {
+      await handBackOnClientAction(drizzle, {
+        requestId: id,
+        contactId: contact?.id ?? null,
+        contactName: contact?.name ?? null,
+        trigger: 'review_approved',
+      })
+    }
 
     // Best-effort side effects. Neither may fail the review itself.
     try {

@@ -8,6 +8,7 @@ import { resolveOwnerOrgForUpload } from '@/lib/upload-access'
 import { ACTING_AUDIT_PREFIX } from '@/lib/acting-as'
 import { resolveActEligibility } from '@/lib/acting-eligibility'
 import { logAuditStrict } from '@/lib/audit'
+import { handBackOnClientAction } from '@/lib/request-handoff'
 import {
   IMPERSONATE_MODE_COOKIE,
   IMPERSONATE_ORG_COOKIE,
@@ -86,6 +87,11 @@ export async function POST(req: NextRequest) {
 
     const uploaderType = isAdmin ? 'team_member' : 'contact'
     let uploaderId = userId
+    // The client contact who uploaded, when it is one. Kept beside uploaderId
+    // because the auto hand-back below has to be sure it is acting for a
+    // CONTACT and not a studio member whose teamMembers.id happens to collide
+    // with the pointer, and because its name signs the studio's notification.
+    let uploaderContact: { id: string; name: string | null } | null = null
     if (isAdmin) {
       const [member] = await drizzle
         .select({ id: schema.teamMembers.id })
@@ -95,11 +101,14 @@ export async function POST(req: NextRequest) {
       if (member) uploaderId = member.id
     } else {
       const [contact] = await drizzle
-        .select({ id: schema.contacts.id })
+        .select({ id: schema.contacts.id, name: schema.contacts.name })
         .from(schema.contacts)
         .where(eq(schema.contacts.clerkUserId, userId))
         .limit(1)
-      if (contact) uploaderId = contact.id
+      if (contact) {
+        uploaderId = contact.id
+        uploaderContact = contact
+      }
     }
 
     const id = body.fileId ?? crypto.randomUUID()
@@ -144,6 +153,24 @@ export async function POST(req: NextRequest) {
       mimeType: body.mimeType ?? null,
       sizeBytes: body.sizeBytes ?? null,
     })
+
+    // If this file landed on a request that was sitting with the person who
+    // uploaded it, the request hands itself back (migration 0104). Uploading
+    // IS the action a 'file' or 'content' hand-off asked for, and a client who
+    // has just sent the thing should not also have to tell us they sent it.
+    //
+    // Only for a CLIENT upload: the studio attaching a file to a request it is
+    // waiting on the client for has not satisfied anything. Never throws, so a
+    // stuck pointer can never cost the client their upload
+    // (lib/request-handoff.ts).
+    if (!isAdmin && body.requestId && uploaderContact) {
+      await handBackOnClientAction(drizzle, {
+        requestId: body.requestId,
+        contactId: uploaderContact.id,
+        contactName: uploaderContact.name,
+        trigger: 'file_uploaded',
+      })
+    }
 
     // This route is the one write path that already behaved like Act as
     // client: it is admin-authenticated, it lets an admin name the owning org,

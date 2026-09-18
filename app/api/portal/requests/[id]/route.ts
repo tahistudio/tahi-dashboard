@@ -10,6 +10,7 @@ import { actingByline, actingIdentity, recordActingWrite, refusePreviewWrite } f
 import { notifyTeamMember } from '@/lib/notifications'
 import { dispatchDomainEvent } from '@/lib/events'
 import { chunkThreadIds } from '@/lib/request-thread'
+import { loadWaitingOnOne } from '@/lib/request-handoff'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -215,7 +216,22 @@ export async function GET(req: NextRequest, { params }: Params) {
     }
   })
 
-  return NextResponse.json({ request, messages })
+  // The hand-off pointer, for the client's "This is with you" banner and its
+  // hand-back link. Only ever resolved for a request already scoped to the
+  // caller's own org above, so no other client's pointer can reach this
+  // payload. `isYours` saves the UI from comparing ids it should not have to
+  // know about, and is false for a colleague reading the same request.
+  const waitingOn = await loadWaitingOnOne(drizzle, id)
+
+  return NextResponse.json({
+    request: {
+      ...request,
+      waitingOn: waitingOn
+        ? { ...waitingOn, isYours: selfContactId != null && waitingOn.contactId === selfContactId }
+        : null,
+    },
+    messages,
+  })
 }
 
 // ── PATCH /api/portal/requests/[id] ──────────────────────────────────────────

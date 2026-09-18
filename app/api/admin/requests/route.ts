@@ -2,13 +2,14 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, ne, inArray, isNull, sql } from 'drizzle-orm'
+import { eq, desc, and, ne, inArray, isNull, isNotNull, lte, sql } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { emitRequestCreated } from '@/lib/request-status-effects'
 import { loadRequestParticipants } from '@/lib/request-participants'
 import { openBlockerCounts } from '@/lib/blockers-server'
 import { CREATABLE_STATUSES, isCreatableStatus } from '@/lib/request-vocabulary'
+import { loadWaitingOn } from '@/lib/request-handoff'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
 
 // ── GET /api/admin/requests ─────────────────────────────────────────────────
@@ -46,6 +47,25 @@ export async function GET(req: NextRequest) {
     conditions.push(inArray(schema.requests.orgId, scopedOrgIds))
   }
   if (clientId) conditions.push(eq(schema.requests.orgId, clientId))
+
+  // `?waitingOn=client`: only requests currently handed to somebody at the
+  // client (migration 0104). This is what the rail's "Waiting on clients"
+  // saved view and the MCP's list_requests_waiting_on_clients both ask, and it
+  // is a WHERE rather than a client-side filter because the answer is usually
+  // a handful of rows out of hundreds.
+  //
+  // `?waitingOlderThanDays=N` narrows that to the ones that have gone quiet.
+  // Compared against an ISO cutoff rather than SQLite date arithmetic because
+  // waiting_since is a stored ISO string, which sorts and compares correctly
+  // as text.
+  if (url.searchParams.get('waitingOn') === 'client') {
+    conditions.push(isNotNull(schema.requests.waitingOnContactId))
+    const olderThan = Number.parseInt(url.searchParams.get('waitingOlderThanDays') ?? '', 10)
+    if (Number.isFinite(olderThan) && olderThan > 0) {
+      const cutoff = new Date(Date.now() - olderThan * 86_400_000).toISOString()
+      conditions.push(lte(schema.requests.waitingSince, cutoff))
+    }
+  }
 
   if (status === 'active') {
     // "Active" = not archived, not delivered
@@ -128,11 +148,22 @@ export async function GET(req: NextRequest) {
     requests.map((r) => r.id),
   )
 
+  // Who each request is currently sitting with at the client, if anyone.
+  // Its own query rather than six more columns on the select above: the
+  // pointer ships behind migration 0104 and a bare select of a column that
+  // does not exist yet would 500 the whole list. Here a missing column costs
+  // the chip and nothing else (lib/request-handoff.ts).
+  const waitingByRequest = await loadWaitingOn(
+    database as ReturnType<typeof import('drizzle-orm/d1').drizzle>,
+    requests.map((r) => r.id),
+  )
+
   return NextResponse.json({
     requests: requests.map((r) => ({
       ...r,
       participants: participantsByRequest.get(r.id) ?? [],
       blockedByCount: blockedByCounts[r.id] ?? 0,
+      waitingOn: waitingByRequest.get(r.id) ?? null,
     })),
     page,
     limit,
