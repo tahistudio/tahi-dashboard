@@ -152,6 +152,61 @@ May 22, 2026
   })
 })
 
+describe('parseGeminiTranscript, plain-text export', () => {
+  const plain = [
+    'Notes',
+    '',
+    'Sep 17, 2026',
+    '',
+    'Meeting (Bharat Kochar)',
+    '',
+    'Invited bharat@example.com business@tahi.studio',
+    '',
+    'Meeting records Transcript',
+    '',
+    'Summary',
+    '',
+    'Bharat wants the booking flow rebuilt before the season starts.',
+    '',
+    'Next steps',
+    '',
+    '- [Liam] Send the revised proposal by Friday.',
+    '- [Bharat] Share the current booking analytics.',
+    '',
+    'Details',
+    '',
+    '- Booking flow: three screens, one payment step.',
+    '',
+    'Transcript',
+    '',
+    'Meeting (Bharat Kochar) - Transcript',
+    '',
+    '00:00:00',
+    '',
+    'Bharat: The booking flow is where we lose people.',
+    'Liam: Understood, we can rebuild it in three screens.',
+    '',
+    'Transcription ended after 00:31:12',
+  ].join('\n')
+
+  it('reads the summary, next steps, details and transcript without markdown headings', () => {
+    const r = parseGeminiTranscript(plain)
+    expect(r.summary).toBe('Bharat wants the booking flow rebuilt before the season starts.')
+    expect(r.nextSteps).toEqual(['[Liam] Send the revised proposal by Friday.', '[Bharat] Share the current booking analytics.'])
+    expect(r.details).toEqual(['Booking flow: three screens, one payment step.'])
+    expect(r.transcript).toContain('Bharat: The booking flow is where we lose people.')
+    expect(r.transcript).not.toContain('Summary')
+    expect(r.durationFormatted).toBe('00:31:12')
+    expect(r.invitedEmails).toEqual(['bharat@example.com', 'business@tahi.studio'])
+  })
+
+  it('does not treat the "Meeting records Transcript" line as the divider', () => {
+    const r = parseGeminiTranscript(plain)
+    expect(r.summary).not.toBeNull()
+    expect(r.transcript?.startsWith('Meeting (Bharat Kochar) - Transcript')).toBe(true)
+  })
+})
+
 describe('describeUnparsedDoc', () => {
   it('reports size, heading-looking lines and how the text starts, never the whole doc', () => {
     const doc = ['Meeting notes', '', '## Summary', 'Agreed the homepage scope. '.repeat(40), '# Transcript', 'Tim: hello'].join('\n')

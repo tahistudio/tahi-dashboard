@@ -374,7 +374,9 @@ export async function exportDriveDocAsText(
   fileId: string,
 ): Promise<string> {
   const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text/plain`,
+    // Markdown, not plain text: the Gemini parser keys on the "### Summary" and
+    // "# Transcript" headings, which a plain-text export flattens into bare lines.
+    `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text/markdown`,
     { headers: { Authorization: `Bearer ${accessToken}` } },
   )
   if (!res.ok) {

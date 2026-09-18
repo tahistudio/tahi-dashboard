@@ -96,7 +96,9 @@ export function parseGeminiTitle(title: string): GeminiTitleParsed {
   return { shortTitle, attendeeGuess, scheduledAt }
 }
 
-const TRANSCRIPT_DIVIDER = /\n#\s*[^\n]*Transcript\*?\s*\n/i
+// The divider is the "Transcript" heading on a line of its own, with or
+// without the markdown hash and the emoji, so a plain-text export splits too.
+const TRANSCRIPT_DIVIDER = /\n(?:#+\s*)?[^\n\w]{0,4}Transcript\*?\s*\n/i
 const NOTES_HEADER = /^#\s*[^\n]*Notes[^\n]*$/im
 
 export function parseGeminiTranscript(rawText: string): GeminiTranscriptParsed {
@@ -116,10 +118,21 @@ export function parseGeminiTranscript(rawText: string): GeminiTranscriptParsed {
   }
 }
 
-/** Extract everything under "### {label}" up to the next ### or # header. */
+/**
+ * Extract everything under the "{label}" heading up to the next heading.
+ * The markdown export writes "### Summary"; a plain-text export writes the
+ * bare word on its own line, so both count as the heading, and the section
+ * ends at the next hashed heading or at the next known bare heading.
+ */
+const BARE_HEADINGS = ['Summary', 'Next steps', 'Details', 'Suggested next steps', 'Transcript']
+const escapeRe = (s: string) => s.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
 function extractSection(text: string, label: string): string | null {
-  const escaped = label.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
-  const re = new RegExp(`###\\s+${escaped}\\s*\\n([\\s\\S]*?)(?=\\n###\\s|\\n##\\s|\\n#\\s|$)`, 'i')
+  const escaped = escapeRe(label)
+  const others = BARE_HEADINGS.filter(h => h.toLowerCase() !== label.toLowerCase()).map(escapeRe).join('|')
+  const re = new RegExp(
+    `(?:^|\\n)(?:#{1,6}\\s+)?${escaped}\\s*\\n([\\s\\S]*?)(?=\\n#{1,6}\\s|\\n(?:#+\\s*)?[^\\n\\w]{0,4}(?:${others})\\s*\\n|$)`,
+    'i',
+  )
   const m = text.match(re)
   if (!m) return null
   // Drop the "Rate this Summary" / survey trailers Gemini adds.
