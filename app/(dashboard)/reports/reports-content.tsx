@@ -479,14 +479,16 @@ interface AgingData {
     thirtyDays: AgingBucket
     sixtyDays: AgingBucket
     ninetyPlus: AgingBucket
+    noDueDate: AgingBucket
   }
 }
 
 const AGING_BUCKETS = [
-  { key: 'current' as const,    label: 'Current (0-30d)', color: CHART.aging.current,    bgColor: 'var(--color-brand-50)'         },
-  { key: 'thirtyDays' as const, label: '30-60 days',      color: CHART.aging.thirtyDays, bgColor: 'var(--status-in-review-bg)'    },
-  { key: 'sixtyDays' as const,  label: '60-90 days',      color: CHART.aging.sixtyDays,  bgColor: 'var(--color-warning-bg)'       },
-  { key: 'ninetyPlus' as const, label: '90+ days',        color: CHART.aging.ninetyPlus, bgColor: 'var(--color-danger-bg)'        },
+  { key: 'current' as const,    label: 'Not due',    color: CHART.aging.current,    bgColor: 'var(--color-brand-50)'         },
+  { key: 'thirtyDays' as const, label: '1-30 days',  color: CHART.aging.thirtyDays, bgColor: 'var(--status-in-review-bg)'    },
+  { key: 'sixtyDays' as const,  label: '31-60 days', color: CHART.aging.sixtyDays,  bgColor: 'var(--color-warning-bg)'       },
+  { key: 'ninetyPlus' as const, label: '61+ days',   color: CHART.aging.ninetyPlus, bgColor: 'var(--color-danger-bg)'        },
+  { key: 'noDueDate' as const,  label: 'No due date', color: CHART.aging.noDueDate,  bgColor: 'var(--color-bg-tertiary)'      },
 ]
 
 function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProps) {
@@ -848,13 +850,13 @@ function FinancialHealthSection({ displayCurrency, exchangeRates }: CurrencyProp
                                 className="text-sm text-right font-medium"
                                 style={{
                                   padding: '0.375rem 0.75rem',
-                                  color: inv.daysPastDue > 90 ? CHART.aging.ninetyPlus
-                                    : inv.daysPastDue > 60 ? CHART.aging.sixtyDays
-                                    : inv.daysPastDue > 30 ? CHART.aging.thirtyDays
+                                  color: inv.daysPastDue > 60 ? CHART.aging.ninetyPlus
+                                    : inv.daysPastDue > 30 ? CHART.aging.sixtyDays
+                                    : inv.daysPastDue > 0 ? CHART.aging.thirtyDays
                                     : 'var(--color-text-muted)',
                                 }}
                               >
-                                {inv.daysPastDue > 0 ? `${inv.daysPastDue}d` : 'Current'}
+                                {!inv.dueDate ? 'No due date' : inv.daysPastDue > 0 ? `${inv.daysPastDue}d` : 'Not due'}
                               </td>
                             </tr>
                           ))}

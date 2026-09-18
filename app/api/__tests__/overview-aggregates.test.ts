@@ -63,6 +63,14 @@ describe('bucketArAging', () => {
   const mk = (amountNzd: number, days: number, clientName: string | null): ArAgingInput => ({
     amountNzd,
     daysPastDue: days,
+    hasDueDate: true,
+    clientName,
+  })
+
+  const mkNoDue = (amountNzd: number, clientName: string | null): ArAgingInput => ({
+    amountNzd,
+    daysPastDue: 0,
+    hasDueDate: false,
     clientName,
   })
 
@@ -73,6 +81,8 @@ describe('bucketArAging', () => {
       d30Nzd: 0,
       d60Nzd: 0,
       d90Nzd: 0,
+      noDueDateNzd: 0,
+      noDueDateCount: 0,
       totalNzd: 0,
       oldest: null,
     })
@@ -80,24 +90,34 @@ describe('bucketArAging', () => {
 
   it('places invoices into the correct buckets by days past due', () => {
     const aging = bucketArAging([
-      mk(100, 0, 'A'),    // current (0..30)
-      mk(200, 30, 'B'),   // current (boundary)
-      mk(400, 45, 'C'),   // d30 (31..60)
-      mk(800, 75, 'D'),   // d60 (61..90)
-      mk(1600, 120, 'E'), // d90 (91+)
+      mk(100, 0, 'A'),    // current: not yet due
+      mk(200, 1, 'B'),    // d30 boundary (1..30)
+      mk(300, 30, 'F'),   // d30 boundary
+      mk(400, 31, 'C'),   // d60 boundary (31..60)
+      mk(800, 60, 'D'),   // d60 boundary
+      mk(1600, 61, 'E'),  // d90 boundary (61+)
     ])
-    expect(aging.currentNzd).toBe(300)
-    expect(aging.d30Nzd).toBe(400)
-    expect(aging.d60Nzd).toBe(800)
+    expect(aging.currentNzd).toBe(100)
+    expect(aging.d30Nzd).toBe(500)
+    expect(aging.d60Nzd).toBe(1200)
     expect(aging.d90Nzd).toBe(1600)
-    expect(aging.totalNzd).toBe(3100)
+    expect(aging.totalNzd).toBe(3400)
   })
 
-  it('reports the single oldest invoice as the callout', () => {
+  it('never counts a no-due-date invoice as current, buckets it separately', () => {
+    const aging = bucketArAging([mk(100, 0, 'Dated Co'), mkNoDue(500, 'Greyhive')])
+    expect(aging.currentNzd).toBe(100)
+    expect(aging.noDueDateNzd).toBe(500)
+    expect(aging.noDueDateCount).toBe(1)
+    expect(aging.totalNzd).toBe(600)
+  })
+
+  it('reports the single oldest OVERDUE invoice as the callout, ignoring no-due-date rows', () => {
     const aging = bucketArAging([
       mk(100, 5, 'Recent Co'),
       mk(999, 200, 'Stale Co'),
       mk(50, 40, 'Middle Co'),
+      mkNoDue(999999, 'Greyhive'),
     ])
     expect(aging.oldest).toEqual({
       clientName: 'Stale Co',
@@ -107,14 +127,14 @@ describe('bucketArAging', () => {
   })
 
   it('rounds bucket totals to whole NZD', () => {
-    const aging = bucketArAging([mk(100.4, 10, 'A'), mk(100.4, 10, 'B')])
+    const aging = bucketArAging([mk(100.4, 0, 'A'), mk(100.4, 0, 'B')])
     // 200.8 rounds to 201
     expect(aging.currentNzd).toBe(201)
     expect(aging.totalNzd).toBe(201)
   })
 
   it('coerces non-finite amounts to 0', () => {
-    const aging = bucketArAging([mk(Number.NaN, 10, 'A'), mk(50, 10, 'B')])
+    const aging = bucketArAging([mk(Number.NaN, 0, 'A'), mk(50, 0, 'B')])
     expect(aging.currentNzd).toBe(50)
     expect(aging.totalNzd).toBe(50)
   })
