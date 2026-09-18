@@ -36,6 +36,7 @@
 import { and, asc, desc, eq, gte, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { schema } from '@/db/d1'
 import { chunkThreadIds } from '@/lib/request-thread'
+import { TAHI_BOT } from '@/lib/tahi-bot'
 import {
   countUnread,
   inboxSnippet,
@@ -143,14 +144,16 @@ const WINDOW_COLUMNS = {
 
 // ── Names ────────────────────────────────────────────────────────────────────
 
-interface NameBook {
+export interface NameBook {
   team: Map<string, { name: string; avatarUrl: string | null }>
   contact: Map<string, string>
 }
 
 async function loadNames(database: DrizzleDB, messages: readonly WindowMessage[]): Promise<NameBook> {
   const teamIds = [...new Set(messages.filter(m => m.authorType === 'team_member').map(m => m.authorId))]
-  const contactIds = [...new Set(messages.filter(m => m.authorType !== 'team_member').map(m => m.authorId))]
+  // 'bot' is excluded here, not swept into the contact bucket: it has no
+  // contacts row, and authorName below answers it from TAHI_BOT directly.
+  const contactIds = [...new Set(messages.filter(m => m.authorType === 'contact').map(m => m.authorId))]
 
   const team = new Map<string, { name: string; avatarUrl: string | null }>()
   const contact = new Map<string, string>()
@@ -172,7 +175,10 @@ async function loadNames(database: DrizzleDB, messages: readonly WindowMessage[]
   return { team, contact }
 }
 
-function authorName(book: NameBook, m: { authorId: string; authorType: string }): string | null {
+export function authorName(book: NameBook, m: { authorId: string; authorType: string }): string | null {
+  // Never a person: the fixed automation identity answers itself, before
+  // either lookup table is consulted.
+  if (m.authorType === 'bot') return TAHI_BOT.name
   if (m.authorType === 'team_member') return book.team.get(m.authorId)?.name ?? null
   return book.contact.get(m.authorId) ?? null
 }

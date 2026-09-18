@@ -79,6 +79,7 @@ import {
   RAIL_ACTION_STYLE,
 } from '@/components/tahi/rail/sidebar-card'
 import type { ReviewDecision } from '@/lib/request-review'
+import { TAHI_BOT } from '@/lib/tahi-bot'
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -410,7 +411,7 @@ interface ParentRequestRef {
 interface Message {
   id: string
   authorId: string
-  authorType: 'team_member' | 'contact'
+  authorType: 'team_member' | 'contact' | 'bot'
   body: string
   isInternal: boolean
   editedAt: string | null
@@ -3273,7 +3274,7 @@ function ActivityLog({
         createdAt: m.createdAt,
         authorName: m.teamMemberName
           ?? m.authorName
-          ?? (m.authorType === 'contact' ? 'Client' : null),
+          ?? (m.authorType === 'bot' ? TAHI_BOT.name : m.authorType === 'contact' ? 'Client' : null),
       })),
       files.map(f => ({
         id: f.id,

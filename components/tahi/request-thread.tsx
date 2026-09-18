@@ -5,6 +5,8 @@ import { Lock, Paperclip, User } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { apiPath } from '@/lib/api'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
+import { BotAvatarMark } from '@/components/tahi/bot-mark'
+import { TAHI_BOT } from '@/lib/tahi-bot'
 
 /** One file stamped with a message id. Both thread routes return these. */
 interface MessageFile {
@@ -18,7 +20,7 @@ interface MessageFile {
 interface Message {
   id: string
   authorId: string
-  authorType: 'team_member' | 'contact'
+  authorType: 'team_member' | 'contact' | 'bot'
   body: string          // HTML from Tiptap
   isInternal: boolean
   editedAt: string | null
@@ -66,10 +68,13 @@ export function RequestThread({ messages, currentUserId }: RequestThreadProps) {
 }
 
 function MessageBubble({ msg, isOwn }: { msg: Message; isOwn: boolean }) {
+  const isBot = msg.authorType === 'bot'
   const isTeam = msg.authorType === 'team_member'
-  const authorName = isTeam
-    ? (msg.teamMemberName ?? 'Tahi Team')
-    : (msg.authorName ?? 'Client')
+  const authorName = isBot
+    ? TAHI_BOT.name
+    : isTeam
+      ? (msg.teamMemberName ?? 'Tahi Team')
+      : (msg.authorName ?? 'Client')
 
   const timeAgo = (() => {
     try {
@@ -86,20 +91,26 @@ function MessageBubble({ msg, isOwn }: { msg: Message; isOwn: boolean }) {
         isOwn ? 'flex-row-reverse' : 'flex-row',
       )}
     >
-      {/* Avatar */}
-      <div className={cn(
-        'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold',
-        isTeam
-          ? 'bg-[var(--color-brand)] text-white'
-          : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]',
-      )}>
-        {msg.teamMemberAvatar ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={msg.teamMemberAvatar} alt={authorName} className="w-8 h-8 rounded-full object-cover" />
-        ) : (
-          <User size={14} />
-        )}
-      </div>
+      {/* Avatar. A bot line always gets the leaf mark, never the round
+          team/client tile: it is automation, not a person, and must never
+          be mistaken for one at a glance. */}
+      {isBot ? (
+        <BotAvatarMark size={32} />
+      ) : (
+        <div className={cn(
+          'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold',
+          isTeam
+            ? 'bg-[var(--color-brand)] text-white'
+            : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]',
+        )}>
+          {msg.teamMemberAvatar ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={msg.teamMemberAvatar} alt={authorName} className="w-8 h-8 rounded-full object-cover" />
+          ) : (
+            <User size={14} />
+          )}
+        </div>
+      )}
 
       {/* Bubble */}
       <div className={cn('flex flex-col gap-1 max-w-[75%]', isOwn ? 'items-end' : 'items-start')}>

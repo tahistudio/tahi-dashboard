@@ -95,6 +95,7 @@ import {
   TaskStatusBadge,
   TaskTick,
 } from '@/components/tahi/tasks/task-chips'
+import { TaskThread } from '@/components/tahi/tasks/task-thread'
 // All five come from Slice 1's shared module, never from a sibling leaf.
 import type {
   TaskSubtask,
@@ -1060,6 +1061,10 @@ function TaskDetailBody({
           onChange={e => setDescDraft(e.target.value)}
           onBlur={commitDescription}
         />
+
+        {/* Thread. Automation notes and the studio's own replies, in the
+            order the conversation happened. */}
+        <TaskThread taskId={task.id} readOnly={readOnly} />
 
         {/* 1. Waiting on. */}
         {(blockers.length > 0 || !readOnly) && (
