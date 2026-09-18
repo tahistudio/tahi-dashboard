@@ -10,12 +10,10 @@ import {
   overnightCutoff,
   daysPastDue,
   bucketArAging,
-  computeRunwayMonths,
-  aggregateCashNzd,
-  trailingThreeMonthKey,
   activeTimerLabel,
   type ArAging,
 } from '@/lib/overview-aggregates'
+import { computeCashPosition } from '@/lib/cash-position'
 import { elapsedSeconds } from '@/lib/timer-helpers'
 
 export const dynamic = 'force-dynamic'
@@ -238,52 +236,33 @@ export async function GET(req: NextRequest) {
 
   const since = overnightCutoff(now)
 
-  // Cash + runway (gated on financial_reports). Uses the same Airwallex-first
-  // aggregation as /financial-reports so the Cash card shows real bank cash,
-  // not Xero's BankSummary (which overstates foreign accounts by counting
-  // invoiced-but-unsettled amounts as cash).
-  let cash: { totalNzd: number; runwayMonths: number | null; burnNzd: number } | null = null
+  // Cash, burn, surplus and runway (gated on financial_reports). Every figure
+  // comes from lib/cash-position.ts, which is also what /financial-reports
+  // reads, so the Cash card and the finance page can never disagree.
+  let cash: {
+    totalNzd: number
+    runwayMonths: number | null
+    burnNzd: number
+    monthlySurplusNzd: number
+    disposableNzd: number
+  } | null = null
   if (canSeeMrr) {
     try {
-      let airwallexBalances: Array<{ currency: string | null; availableBalance: number }> = []
-      try {
-        airwallexBalances = await drizzle.select().from(schema.airwallexBalances)
-      } catch {
-        // Airwallex table missing — fall back to Xero-only via empty array.
-      }
-      const xeroBalances = await drizzle.select().from(schema.xeroBankBalances)
-      const totalNzd = aggregateCashNzd(
-        airwallexBalances,
-        xeroBalances,
-        (amount, currency) => toNzd(amount, currency, rateMap),
-      )
-
-      let burnNzd = 0
-      try {
-        const threeMonthsAgo = trailingThreeMonthKey(now)
-        const snapshots = await drizzle
-          .select()
-          .from(schema.xeroPnlSnapshots)
-          .where(gte(schema.xeroPnlSnapshots.monthKey, threeMonthsAgo))
-          .orderBy(desc(schema.xeroPnlSnapshots.monthKey))
-        if (snapshots.length > 0) {
-          const total = snapshots.reduce((sum, snap) => {
-            const burn = snap.totalExpenses + snap.totalCostOfSales
-            return sum + toNzd(burn, snap.currency ?? 'NZD', rateMap)
-          }, 0)
-          burnNzd = total / snapshots.length
-        }
-      } catch {
-        // P&L snapshots table missing — leave burn at 0 (runway becomes null).
-      }
-
+      // One source for every money card: lib/cash-position.ts. The card used to
+      // average three months of Xero P&L here while /financial-reports summed
+      // the expense commitments, so the same screen printed two burns.
+      const position = await computeCashPosition(drizzle, { rateMap })
       cash = {
-        totalNzd: Math.round(totalNzd),
-        runwayMonths: computeRunwayMonths(totalNzd, burnNzd),
-        burnNzd: Math.round(burnNzd),
+        totalNzd: Math.round(position.totalCashNzd),
+        // Gross runway: "if revenue stopped", on cash the IRD bill is already
+        // taken out of. Not cash divided by burn.
+        runwayMonths: position.grossRunwayMonths,
+        burnNzd: Math.round(position.recurringBurnNzd),
+        monthlySurplusNzd: Math.round(position.monthlySurplusNzd),
+        disposableNzd: Math.round(position.disposableNzd),
       }
     } catch {
-      // Bank balances table missing — degrade to null.
+      // Bank balances table missing, so degrade to null.
       cash = null
     }
   }

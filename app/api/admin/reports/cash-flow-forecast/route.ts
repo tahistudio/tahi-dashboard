@@ -5,6 +5,8 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { sql, eq, and } from 'drizzle-orm'
 import { buildRateMap, toNzd } from '@/lib/currency'
+import { assembleForecastMonths } from '@/lib/cash-flow-forecast'
+import { cashFlowBasisLine, computeCashPosition } from '@/lib/cash-position'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -14,10 +16,14 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  * 6-month (configurable) cash flow projection for the studio.
  *
  * Revenue projection per month =
- *   recurring MRR (sum of active clients' customMrr → NZD)
- *   + weighted pipeline value where expected close date falls in that month
- *     (value × probability for each deal, discounted for deals without
- *      closeDate by smearing across remaining months)
+ *   revenueRetainer: recurring MRR (sum of active clients' customMrr, NZD)
+ *   + revenueProject: the trailing five-month project run-rate, flat across
+ *     the window. About two thirds of what Tahi invoices is project work that
+ *     never shows up as MRR; leaving it out is what made every forecast month
+ *     negative for a studio that was in surplus.
+ *   + revenuePipeline: weighted pipeline value where the expected close date
+ *     falls in that month (value x probability per deal, smeared across the
+ *     window for deals with no close date)
  *
  * Cost projection per month =
  *   recurring client_costs entries (category monthly)
@@ -26,8 +32,9 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  * Net position = running balance per month (starts at 0, adds delta each month).
  *
  * Response: {
- *   months: [{ month: 'YYYY-MM', revenue, cost, net, cumulative }],
- *   summary: { totalRevenue, totalCost, totalNet }
+ *   months: [{ month, revenueRetainer, revenueProject, revenuePipeline,
+ *              revenue, cost, net, cumulative }],
+ *   summary: { totalRevenue, totalCost, totalNet, basis, ... }
  * }
  */
 export async function GET(req: NextRequest) {
@@ -280,22 +287,26 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ── Assemble monthly forecast ──────────────────────────────────────────────
-  let cumulative = 0
-  let totalRevenue = 0
-  let totalCost = 0
+  // ── Project run-rate ────────────────────────────────────
+  // Trailing five months of non-retainer invoiced revenue, per month, from the
+  // same source the finance page and the studio home read.
+  const position = await computeCashPosition(drizzle, { rateMap })
+  const projectRunRateNzd = position.projectRunRateNzd
 
-  const monthlyRows = monthKeys.map(month => {
-    // Revenue = per-month MRR (respects churn dates) + weighted pipeline
-    const revenue = (mrrByMonth[month] ?? 0) + (pipelineByMonth[month] ?? 0)
-    // Cost = per-month commitments + the xero-recurring fallback + dated one-offs
-    const cost = (commitmentByMonth[month] ?? 0) + recurringCostNzd + (oneOffCostByMonth[month] ?? 0)
-    const net = revenue - cost
-    cumulative += net
-    totalRevenue += revenue
-    totalCost += cost
-    return { month, revenue, cost, net, cumulative }
+  // ── Assemble monthly forecast ─────────────────────────────
+  const costByMonth: Record<string, number> = {}
+  for (const m of monthKeys) {
+    costByMonth[m] = (commitmentByMonth[m] ?? 0) + recurringCostNzd + (oneOffCostByMonth[m] ?? 0)
+  }
+  const monthlyRows = assembleForecastMonths({
+    monthKeys,
+    retainerByMonth: mrrByMonth,
+    pipelineByMonth,
+    costByMonth,
+    projectRunRateNzd,
   })
+  const totalRevenue = monthlyRows.reduce((s, m) => s + m.revenue, 0)
+  const totalCost = monthlyRows.reduce((s, m) => s + m.cost, 0)
 
   // Average monthly commitment cost across the window (for the summary card)
   const avgCommitmentCostNzd = monthKeys.length > 0
@@ -314,6 +325,13 @@ export async function GET(req: NextRequest) {
       recurringCostNzd: avgCommitmentCostNzd > 0 ? avgCommitmentCostNzd : recurringCostNzd,
       commitmentCount: activeCommitments.length,
       commitmentSource: activeCommitments.length > 0 ? 'commitments' : 'xero_recurring',
+      projectRunRateNzd,
+      // One line naming every component of the projection, so the ribbon on the
+      // studio home and the forecast on the finance page describe it the same.
+      basis: cashFlowBasisLine({
+        retainerNzd: recurringMrrNzd,
+        projectRunRateNzd,
+      }),
     },
   })
 }
