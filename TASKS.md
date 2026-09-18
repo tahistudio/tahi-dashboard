@@ -177,7 +177,7 @@ Audit by the lead against production payloads; every card traced to its route. W
 - [~] HA.7 - [FE] Proposals live listed drafts. Shared, published or accepted only; drafts as a count. Slice A2.
 - [~] HA.8 - [BE/FE] Money cards on one source: cash position computed once (total cash all currencies, tax owed NZ$24,242.68 as the IRD balance with the 15k pot counted toward it and never on top, recurring burn, project run-rate, surplus, gross and net runway); the Cash runway card reads "+NZ$13.2k a month net, 3.6 months if revenue stopped"; Take-home reads about NZ$51.9k disposable instead of NZ$0; the finance page reads the same. Slice B. LEAD: set the tax owed setting to 24242.68 on production after the deploy.
 - [~] HA.9 - [BE/FE] Cash-flow ribbon full picture: retainers plus the trailing project run-rate plus weighted pipeline, minus commitments, with the basis stated under the card. Slice B.
-- [ ] HA.10 - [Liam] Greyhive INV-2025000024 (GBP 1,279.60, status sent) has no due date, so it can never age; set a due date, mark it paid, or write it off.
+- [x] HA.10 - Greyhive INV-2025000024 (GBP 1,279.60, imported from ManyRequests, issued December 2025, no due date) written off as Liam on 2026-09-19: Greyhive will not pay, a debt collector is engaged. Outstanding now NZ$21,394 across 6 invoices.
 - Right as traced: outstanding NZ$24,328 across 7 invoices, cash NZ$76.1k (Airwallex, 17 Sep), Needs you and the brief items, open requests, contracts, calls, replies, worklog, content counts.
 
 ## Client hand-offs on requests (Liam, 2026-09-18)
