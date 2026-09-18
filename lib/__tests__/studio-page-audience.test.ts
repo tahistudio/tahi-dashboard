@@ -66,6 +66,10 @@ const DUAL_AUDIENCE = new Set([
   'app/(dashboard)/invoices/[id]/page.tsx',
   'app/(dashboard)/files/page.tsx',
   'app/(dashboard)/services/page.tsx',
+  // Branches on isAdmin to pick the team or client slice of GUIDE_SECTIONS;
+  // never redirects a client away, so the raw org comparison is the audience
+  // switch itself, same shape as the other rows in this set.
+  'app/(dashboard)/help/page.tsx',
 ])
 
 /**

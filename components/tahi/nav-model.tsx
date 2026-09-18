@@ -111,6 +111,10 @@ export const ADMIN_NAV: NavGroup[] = [
     group: 'Knowledge',
     items: [
       { label: 'Docs Hub', href: '/docs', icon: 'docs', adminOnly: true },
+      // Bottom of the studio nav on purpose: a reference page, not a workflow
+      // surface. Reuses the 'docs' icon rather than adding a new one to
+      // shell-icons.tsx for a single entry.
+      { label: 'How this works', href: '/help', icon: 'docs' },
     ],
   },
 ]
@@ -152,6 +156,10 @@ export const CLIENT_NAV: NavGroup[] = [
       // override brings the item straight back for one client. Same page,
       // same feature key (see app/(dashboard)/services/page.tsx).
       { label: 'Services', href: '/services', icon: 'services', clientOnly: true, clientVisible: true },
+      // Reuses the 'docs' icon rather than adding a new one to shell-icons.tsx
+      // for a single entry. Visible by default (lib/feature-tree.ts 'help'):
+      // not in CLIENT_DEFAULT_DENY, unlike Services above.
+      { label: 'How this works', href: '/help', icon: 'docs', clientVisible: true },
     ],
   },
   {

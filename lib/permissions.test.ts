@@ -442,7 +442,7 @@ describe('nav model - messaging is live for both audiences', () => {
     }))
     expect(visible).toEqual([
       '/overview', '/requests', '/notifications', '/messages',
-      '/files', '/services',
+      '/files', '/services', '/help',
       '/invoices',
     ])
   })
@@ -465,7 +465,7 @@ describe('nav model - Messages is hidden for a client by default, restorable per
     const features = featureMap(access('client'))
     const visible = navHrefs(filterNav(CLIENT_NAV, { ...clientOpts, features }))
     expect(visible).not.toContain('/messages')
-    expect(visible).toEqual(['/overview', '/requests', '/notifications', '/files', '/invoices'])
+    expect(visible).toEqual(['/overview', '/requests', '/notifications', '/files', '/help', '/invoices'])
   })
 
   it('an explicit allow override restores the /messages nav item for that one client', () => {
@@ -501,7 +501,7 @@ describe('nav model - Services is hidden for a client by default, restorable per
     const features = featureMap(access('client'))
     const visible = navHrefs(filterNav(CLIENT_NAV, { ...clientOpts, features }))
     expect(visible).not.toContain('/services')
-    expect(visible).toEqual(['/overview', '/requests', '/notifications', '/files', '/invoices'])
+    expect(visible).toEqual(['/overview', '/requests', '/notifications', '/files', '/help', '/invoices'])
   })
 
   it('an explicit allow override restores the /services nav item for that one client', () => {
@@ -539,6 +539,9 @@ describe('client nav - no dead ends (Tier 1 item 10)', () => {
       // the 'messages' feature key, which is a deliberate hide rather than a
       // dead end: the nav reads the same key, so off means the item is gone.
       '/messages',
+      // app/(dashboard)/help/page.tsx branches on isAdmin (like /overview)
+      // and never redirects a client away.
+      '/help',
     ])
     for (const href of navHrefs(CLIENT_NAV)) {
       expect(CLIENT_RENDERABLE.has(href)).toBe(true)
