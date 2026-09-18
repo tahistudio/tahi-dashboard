@@ -164,6 +164,22 @@ seen on production.
   contacts); the dashboard gate and the wizard both consult it and stamp the
   user.
 
+## Studio home accuracy (Liam, 2026-09-19: "check my home page for accuracy")
+
+Audit by the lead against production payloads; every card traced to its route. Workflow home-accuracy-fixes builds the fixes in three slices (A1 sonnet, A2 sonnet, B opus), each reviewed.
+
+- [~] HA.1 - [BE/FE] Receivables read "Overdue NZ$0" with three invoices past due (about NZ$16.1k): the aging buckets called 0 to 30 days late "current". Buckets become not due, 1 to 30, 31 to 60, 61+, with a count for invoices lacking a due date. Slice A1.
+- [~] HA.2 - [BE] Daily brief prints "$3,668" where the cards print "NZ$3,668". Slice A1.
+- [~] HA.3 - [BE/FE] MRR "down 40%" compares to July because there is no August snapshot; label the basis month and make the snapshot writer upsert every month. Slice A1.
+- [~] HA.4 - [FE] Pipeline ahead annualises monthly deal value (NZ$6.2k) while the forecast and deals page say NZ$3.2k plus NZ$250 a month; "closing this month" counts a deal whose close date passed. Same basis as the forecast; past-due closes counted apart. Slice A2.
+- [~] HA.5 - [BE/FE] Studio capacity: "booked" was hours already logged, and an inactive member counted as a third of capacity. Booked = assigned open work this week; active members only. Slice A2.
+- [~] HA.6 - [BE/FE] Retainer health called quiet retainers "at risk" from a churn score while the API says green; the test org counted as a retainer. Bucket follows the API; no MRR, not a retainer. Slice A2.
+- [~] HA.7 - [FE] Proposals live listed drafts. Shared, published or accepted only; drafts as a count. Slice A2.
+- [~] HA.8 - [BE/FE] Money cards on one source: cash position computed once (total cash all currencies, tax owed NZ$24,242.68 as the IRD balance with the 15k pot counted toward it and never on top, recurring burn, project run-rate, surplus, gross and net runway); the Cash runway card reads "+NZ$13.2k a month net, 3.6 months if revenue stopped"; Take-home reads about NZ$51.9k disposable instead of NZ$0; the finance page reads the same. Slice B. LEAD: set the tax owed setting to 24242.68 on production after the deploy.
+- [~] HA.9 - [BE/FE] Cash-flow ribbon full picture: retainers plus the trailing project run-rate plus weighted pipeline, minus commitments, with the basis stated under the card. Slice B.
+- [ ] HA.10 - [Liam] Greyhive INV-2025000024 (GBP 1,279.60, status sent) has no due date, so it can never age; set a due date, mark it paid, or write it off.
+- Right as traced: outstanding NZ$24,328 across 7 invoices, cash NZ$76.1k (Airwallex, 17 Sep), Needs you and the brief items, open requests, contracts, calls, replies, worklog, content counts.
+
 ## Client hand-offs on requests (Liam, 2026-09-18)
 
 - [~] HO.1 (MERGED d8d9355e model, acdb8942 UI; migration 0104 applied on production first; deployed 89b312b4; seen live: Waiting on card and the Hand off to a client dialog on a request, waitingOn on payloads, the waitingOn=client filter; a real hand-off with a client is Liam's first use) - [BE/FE] **Hand a request to a named client contact.** A request keeps its Tahi owner; it can be handed to one contact with a reason (approval, content, access, decision, file, other), a note and an optional date; the contact sees it first in their personal Waiting on you with the one action verb; the org admin sees the org-wide list; the studio sees a chip on rows and cards, a "Waiting on clients" rail view and a Waiting on card on the detail; the Blocked by card shows the hand-off as a synthetic line; the request hands itself back when the person approves, uploads or replies; a nudge email goes out after requests.handoffNudgeDays (default 3), never more than once per 3 days; a contact without a seat is invited in the same email. Migration 0104 (waiting_on_* columns on requests). Workflow client-handoff-build: H1 model and routes (opus), H2 UI (sonnet), H3 MCP and guide (sonnet), each reviewed, then merged in order.
