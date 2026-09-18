@@ -22,6 +22,7 @@ import {
   timingSafeEquals,
   type ApprovalAttempts,
 } from './oauth-approval'
+import { coerceBoolean, coerceSubtasks } from './coerce'
 
 interface Env {
   TAHI_API_TOKEN: string
@@ -2176,16 +2177,26 @@ async function executeTool(
       if (s('type')) p.type = s('type')!
       return json(await apiGet('/api/admin/task-templates', token, p))
     }
-    case 'create_task':
-      return json(await apiWrite('/api/admin/tasks', token, 'POST', args as Record<string, unknown>))
+    case 'create_task': {
+      // Connectors send subtasks as an array of strings, an array of objects
+      // or one newline separated string; the route only reads string[].
+      const { subtasks, ...rest } = args as Record<string, unknown>
+      const titles = coerceSubtasks(subtasks)
+      return json(await apiWrite('/api/admin/tasks', token, 'POST', titles ? { ...rest, subtasks: titles } : rest))
+    }
     case 'update_task': {
       const { taskId, ...body } = args
       return json(await apiWrite(`/api/admin/tasks/${taskId}`, token, 'PATCH', body))
     }
     case 'create_task_subtask':
       return json(await apiWrite(`/api/admin/tasks/${s('taskId')}/subtasks`, token, 'POST', { title: s('title') }))
-    case 'toggle_task_subtask':
-      return json(await apiWrite(`/api/admin/tasks/${s('taskId')}/subtasks/${s('subId')}`, token, 'PATCH', { isCompleted: args.isCompleted }))
+    case 'toggle_task_subtask': {
+      // The route is strict (a 400 for anything but a real boolean); connectors
+      // often send "true". Read it leniently here, refuse only the unreadable.
+      const isCompleted = coerceBoolean(args.isCompleted)
+      if (isCompleted === undefined) throw new Error('isCompleted must be true or false')
+      return json(await apiWrite(`/api/admin/tasks/${need('taskId')}/subtasks/${need('subId')}`, token, 'PATCH', { isCompleted }))
+    }
     case 'list_blockers':
       return json(await apiGet(`/api/admin/${blockerSegment(s('subjectType'))}/${s('subjectId')}/blockers`, token))
     case 'add_blocker':
