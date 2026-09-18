@@ -27,6 +27,7 @@ import { useToast } from '@/components/tahi/toast'
 import { apiPath } from '@/lib/api'
 import { MEETING_TYPES } from '@/lib/calls'
 import { parseCallFocusParams } from '@/lib/call-deep-link'
+import { UnlinkedCallNotes } from './unlinked-call-notes'
 
 interface CallRow {
   id: string
@@ -309,6 +310,8 @@ export function CallsContent() {
           Sync calendar
         </TahiButton>
       </PageHeader>
+
+      <UnlinkedCallNotes onAttached={() => void mutateItems()} />
 
       <div className="flex" style={{ gap: '0.375rem' }}>
         {([

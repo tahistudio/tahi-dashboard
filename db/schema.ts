@@ -1996,6 +1996,66 @@ export const scheduledCalls = sqliteTable('scheduled_calls', {
 ])
 
 // ============================================================
+// CALL TRANSCRIPTS (one row per transcribed set of call notes)
+// ============================================================
+//
+// Phase 0 of "call notes to tasks". Until now a Gemini notes doc could only
+// land on discovery_calls: scheduled_calls (client kickoffs and check-ins)
+// had nowhere to put one, and a doc the matcher could not place was dropped
+// on the floor with nothing for a human to pick up. This table is the
+// landing strip for every transcript, linked or not.
+//
+//   callKind / callId  The call it belongs to. BOTH null while unlinked,
+//                      which is a normal, expected state: the matcher parks
+//                      anything it cannot place with a 20 point lead rather
+//                      than guessing (see lib/call-transcripts.ts).
+//   source             'gemini_drive' (the Drive sync) or 'manual'.
+//   externalId         The Drive file id. Unique per source, so a cron that
+//                      re-reads the same doc updates its row instead of
+//                      writing a second one.
+//   title              The doc title as Drive reports it, kept so the
+//                      "Unlinked call notes" list on /calls can name a doc
+//                      a human has to place by hand.
+//   receivedAt         The doc's modified time (not the row's createdAt),
+//                      so the list sorts by when the notes were written.
+//   hash               Non-cryptographic digest of `text`, for change
+//                      detection on re-sync. Never a security boundary.
+//   text               The full transcript prose.
+//   summary            The Gemini Summary section on its own.
+//   wrapUp             The wrap up as written: summary plus next steps plus
+//                      details, the part Liam reads instead of the whole
+//                      transcript.
+//   matchedBy          How the link was made: 'gemini_title_time' (the
+//                      matcher) or 'manual' (attached from /calls).
+//   unlinkedReason     'no_match' | 'ambiguous' while callId is null.
+//
+// discovery_calls keeps its own transcript / summary / outcome_notes columns
+// and the sync keeps writing them for a discovery match, so nothing that
+// reads those today changes behaviour.
+export const callTranscripts = sqliteTable('call_transcripts', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  callKind: text('call_kind'),
+  callId: text('call_id'),
+  source: text('source').notNull(),
+  externalId: text('external_id').notNull(),
+  title: text('title'),
+  receivedAt: text('received_at').notNull(),
+  hash: text('hash').notNull(),
+  text: text('text').notNull(),
+  summary: text('summary'),
+  wrapUp: text('wrap_up'),
+  matchedBy: text('matched_by'),
+  unlinkedReason: text('unlinked_reason'),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  uniqueIndex('idx_call_transcripts_source_external').on(table.source, table.externalId),
+  index('idx_call_transcripts_call').on(table.callKind, table.callId),
+  index('idx_call_transcripts_received').on(table.receivedAt),
+])
+
+// ============================================================
 // SERVICES (Service catalogue)
 // ============================================================
 
@@ -2444,6 +2504,8 @@ export type RequestForm = typeof requestForms.$inferSelect
 export type KanbanColumn = typeof kanbanColumns.$inferSelect
 export type Contract = typeof contracts.$inferSelect
 export type NewContract = typeof contracts.$inferInsert
+export type CallTranscript = typeof callTranscripts.$inferSelect
+export type NewCallTranscript = typeof callTranscripts.$inferInsert
 export type ScheduledCall = typeof scheduledCalls.$inferSelect
 export type NewScheduledCall = typeof scheduledCalls.$inferInsert
 export type CaseStudySubmission = typeof caseStudySubmissions.$inferSelect
