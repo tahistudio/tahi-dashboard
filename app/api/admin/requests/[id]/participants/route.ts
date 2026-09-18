@@ -3,9 +3,15 @@
  *
  *   GET    → list active participants (excludes soft-deleted rows)
  *   POST   → add a participant. Body: { participantId, participantType, role }
- *            - role: 'pm' | 'assignee' | 'follower'
+ *            - role: 'pm' | 'assignee' | 'follower' | 'approver' | 'contributor' | 'watcher'
+ *              (the full request_participants vocabulary, lib/request-participants.ts)
  *            - participantType: 'team_member' | 'contact'
- *            - Clients (contacts) can only be followers.
+ *            - Contacts may be a follower, watcher, approver or contributor:
+ *              the last two are what a client hand-off writes
+ *              (lib/request-handoff.ts, handoffParticipantRole), and this
+ *              route lets the studio set them by hand too.
+ *            - Team members may be pm, assignee or follower: the studio's own
+ *              staffing, never the client hand-off roles.
  *            - Only one 'pm' per request (replaces any existing PM).
  *            - De-dupes : if the same (id, type, role) already exists and
  *              isn't soft-deleted, returns the existing row.
@@ -23,12 +29,21 @@ import { schema } from '@/db/d1'
 import { and, eq, isNull, desc, inArray as inList } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { notifyTeamMember, requestParticipantTitle } from '@/lib/notifications'
+import { ALL_PARTICIPANT_ROLES, type RequestParticipantRole } from '@/lib/request-participants'
 
 type Params = { params: Promise<{ id: string }> }
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-const VALID_ROLES = ['pm', 'assignee', 'follower'] as const
+const VALID_ROLES = ALL_PARTICIPANT_ROLES
 const VALID_TYPES = ['team_member', 'contact'] as const
+
+/** What a contact may be set to by hand. Mirrors what a client hand-off
+ *  itself ever writes (approver / contributor), plus the two roles that
+ *  already worked here (follower, watcher). */
+const CONTACT_ROLES: readonly RequestParticipantRole[] = ['follower', 'watcher', 'approver', 'contributor']
+/** What a team member may be set to. The studio's own staffing only, never
+ *  the client hand-off roles. */
+const TEAM_ROLES: readonly RequestParticipantRole[] = ['pm', 'assignee', 'follower']
 
 export async function GET(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
@@ -97,14 +112,20 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!body?.participantId || !body.participantType || !body.role) {
     return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
   }
-  if (!VALID_ROLES.includes(body.role as typeof VALID_ROLES[number])) {
+  if (!VALID_ROLES.includes(body.role as RequestParticipantRole)) {
     return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
   }
   if (!VALID_TYPES.includes(body.participantType as typeof VALID_TYPES[number])) {
     return NextResponse.json({ error: 'Invalid participant type' }, { status: 400 })
   }
-  if (body.participantType === 'contact' && body.role !== 'follower') {
-    return NextResponse.json({ error: 'Contacts can only be followers' }, { status: 400 })
+  const role = body.role as RequestParticipantRole
+  const allowedRoles = body.participantType === 'contact' ? CONTACT_ROLES : TEAM_ROLES
+  if (!allowedRoles.includes(role)) {
+    return NextResponse.json({
+      error: body.participantType === 'contact'
+        ? 'Contacts can only be a follower, watcher, approver or contributor'
+        : 'Team members can only be a pm, assignee or follower',
+    }, { status: 400 })
   }
 
   const database = await db()

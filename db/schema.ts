@@ -589,7 +589,8 @@ export const requestParticipants = sqliteTable('request_participants', {
   participantId: text('participant_id').notNull(),
   // 'team_member' | 'contact'
   participantType: text('participant_type').notNull(),
-  // 'pm' | 'assignee' | 'follower'
+  // 'pm' | 'assignee' | 'follower' | 'approver' | 'contributor' | 'watcher'
+  // (lib/request-participants.ts)
   role: text('role').notNull(),
   addedById: text('added_by_id'),
   addedByType: text('added_by_type'),
