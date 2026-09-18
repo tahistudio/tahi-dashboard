@@ -2331,6 +2331,23 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_call_transcripts_received ON call_transcripts(received_at)`,
     ],
   },
+  {
+    name: '0106',
+    description: 'task_comments: the task thread (F2, call notes to tasks Phase 0). A task carries no conversation row of its own, so this is a purpose-built second thread rather than a reuse of `messages`: id, task_id (cascades with the task), author_type (\'team_member\' | \'contact\' | \'bot\'), author_id (nullable: the fixed Tahi bot identity, lib/tahi-bot.ts#TAHI_BOT, has no roster row), body, quote (a verbatim line the comment rests on, rendered as a quiet blockquote, null for an ordinary reply), source_ref (free text: a call id or a later suggestion id, null for a human comment) and created_at. lib/task-comments.ts#postTaskComment is the one writer: it inserts here and, when the task carries a requestId, mirrors the line into that request\'s thread as an internal `messages` row, so the studio sees automation and hand-off notes where the client-facing work lives. Additive; the duplicate-table error is swallowed upstream so re-running is safe.',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS task_comments (
+        id text PRIMARY KEY NOT NULL,
+        task_id text NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        author_type text NOT NULL,
+        author_id text,
+        body text NOT NULL,
+        quote text,
+        source_ref text,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments(task_id)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

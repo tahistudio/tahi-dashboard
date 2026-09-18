@@ -768,7 +768,10 @@ export const messages = sqliteTable('messages', {
   // Link to the new conversations model (nullable for legacy rows)
   conversationId: text('conversation_id'),
   authorId: text('author_id').notNull(),
-  // team_member | contact
+  // team_member | contact | bot. 'bot' is the fixed Tahi bot identity
+  // (lib/tahi-bot.ts#TAHI_BOT): an automation mirroring a task comment into a
+  // request thread, never a real person. Every reader that maps authorType
+  // to a name and an avatar must answer 'bot' with "Tahi bot" and its mark.
   authorType: text('author_type').notNull(),
   // Tiptap JSON stored as text
   body: text('body').notNull(),
@@ -1151,6 +1154,39 @@ export const taskSubtasks = sqliteTable('task_subtasks', {
   createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
 }, (table) => [
   index('idx_task_subtasks_task').on(table.taskId),
+])
+
+// ============================================================
+// TASK COMMENTS (the task thread, F2)
+// ============================================================
+//
+// A task has no conversation row of its own (tasks are never a
+// `conversations` type, see the Batch 1 messaging note above), so this is a
+// second, purpose-built thread rather than a reuse of `messages`. Posting
+// through `lib/task-comments.ts#postTaskComment` also mirrors the line into
+// the linked request's thread (an internal `messages` row) when the task
+// carries a `requestId`, so the studio sees automation and hand-off notes
+// where the client-facing work actually lives.
+
+export const taskComments = sqliteTable('task_comments', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  taskId: text('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  // team_member | contact | bot. 'bot' is the one fixed automation identity,
+  // lib/tahi-bot.ts#TAHI_BOT, and never renders as a person.
+  authorType: text('author_type').notNull(),
+  // Null for a 'bot' comment: the bot has no roster row.
+  authorId: text('author_id'),
+  body: text('body').notNull(),
+  // A verbatim quote the comment rests on (a call transcript line, for
+  // example). Rendered as a quiet blockquote above the body; null for an
+  // ordinary human reply.
+  quote: text('quote'),
+  // Free text pointer to whatever produced this comment when it was not
+  // typed by a person: a call id, a suggestion id. Null for a human comment.
+  sourceRef: text('source_ref'),
+  createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  index('idx_task_comments_task').on(table.taskId),
 ])
 
 // ============================================================

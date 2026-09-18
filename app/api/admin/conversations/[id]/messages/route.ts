@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import { eq, desc, and, ne, inArray } from 'drizzle-orm'
 import { createNotifications, notifyMentionedPerson, resolveParticipants } from '@/lib/notifications'
 import { parseMentions } from '@/lib/parse-mentions'
+import { TAHI_BOT } from '@/lib/tahi-bot'
 import { requireConversationAccess } from '../../_access'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -64,7 +65,7 @@ export async function GET(
     messages.filter(m => m.authorType === 'team_member').map(m => m.authorId)
   )]
   const contactAuthorIds = [...new Set(
-    messages.filter(m => m.authorType !== 'team_member').map(m => m.authorId)
+    messages.filter(m => m.authorType === 'contact').map(m => m.authorId)
   )]
 
   const [tmAuthorRows, contactAuthorRows] = await Promise.all([
@@ -90,7 +91,11 @@ export async function GET(
     let authorName = 'Unknown'
     let authorAvatarUrl: string | null = null
 
-    if (msg.authorType === 'team_member') {
+    if (msg.authorType === 'bot') {
+      // Never a person, whichever bucket a stray row would otherwise fall
+      // into below.
+      authorName = TAHI_BOT.name
+    } else if (msg.authorType === 'team_member') {
       const tm = tmAuthorById.get(msg.authorId)
       if (tm) {
         authorName = tm.name

@@ -8,6 +8,7 @@
  */
 
 import { requestToolCall } from './request-tools'
+import { taskCommentToolCall } from './task-comment-tools'
 import {
   APPROVAL_ATTEMPT_LIMIT,
   APPROVAL_ATTEMPT_WINDOW_MS,
@@ -559,6 +560,9 @@ export const TOOLS: ToolDef[] = [
     orgId: prop('string', 'Only the templates for this client, plus the global ones'),
     type: prop('string', 'Filter by level: client_task, internal_client_task or tahi_internal'),
   }),
+  tool('list_task_comments', "List a task's thread: every comment, oldest first, with the author's name, the quote it rests on (if any) and where it came from.", {
+    task_id: prop('string', 'Task ID'),
+  }, ['task_id']),
 
   // ── Write: Tasks ──────────────────────────────────────────────────────
   tool('create_task', 'Create a task. A task may be about a client or about nothing; it is never visible to a client either way.', {
@@ -593,6 +597,11 @@ export const TOOLS: ToolDef[] = [
     taskId: prop('string', 'Parent task ID'),
     title: prop('string', 'Subtask title'),
   }, ['taskId', 'title']),
+  tool('post_task_comment', "Post a comment on a task's thread. This is the tool for automations: a call transcript suggestion, a synced note, anything posted on the studio's behalf rather than typed by a person should set as_bot true, which posts it as \"Tahi bot\" rather than as whichever identity this server authenticates with. When the task carries a requestId, the comment also mirrors into that request's thread as an internal message.", {
+    task_id: prop('string', 'Task ID'),
+    body: prop('string', 'The comment text'),
+    as_bot: prop('boolean', 'Post as "Tahi bot" rather than as a person. Default false.'),
+  }, ['task_id', 'body']),
   tool('toggle_task_subtask', 'Toggle the completion status of a subtask', {
     taskId: prop('string', 'Parent task ID'),
     subId: prop('string', 'Subtask ID'),
@@ -2058,6 +2067,17 @@ async function executeTool(
       requestCall.method === 'GET'
         ? await apiGet(requestCall.path, token, requestCall.query)
         : await apiWrite(requestCall.path, token, requestCall.method, requestCall.body),
+    )
+  }
+
+  // The task thread tools are the same pure-lookup pattern as the request
+  // surface above.
+  const taskCommentCall = taskCommentToolCall(name, args)
+  if (taskCommentCall) {
+    return json(
+      taskCommentCall.method === 'GET'
+        ? await apiGet(taskCommentCall.path, token)
+        : await apiWrite(taskCommentCall.path, token, taskCommentCall.method, taskCommentCall.body),
     )
   }
 
