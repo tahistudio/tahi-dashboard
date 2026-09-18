@@ -195,12 +195,22 @@ function extractDuration(transcriptText: string): string | null {
   return m ? m[1] : null
 }
 
-/** Strip the survey trailer + heading clutter from the transcript half. */
+/**
+ * Strip the survey trailer and heading clutter from the transcript half, and
+ * flatten markdown links to their text. The markdown export wraps every
+ * timestamp in a link back to the doc, which more than doubles the size of
+ * an hour-long call (one September call exported at 540k characters) and
+ * buys nothing here: the transcript is read by people and by the suggester,
+ * never rendered as markdown.
+ */
 function cleanTranscript(raw: string | null): string | null {
   if (!raw) return null
   // Drop the "*This editable transcript was computer generated..." trailer
   const trailerRe = /\*This editable transcript was computer generated[\s\S]*$/i
-  const cleaned = raw.replace(trailerRe, '').trim()
+  const cleaned = raw
+    .replace(trailerRe, '')
+    .replace(/\[([^\]\n]*)\]\((?:https?:|mailto:)[^)\s]*\)/g, '$1')
+    .trim()
   return cleaned || null
 }
 

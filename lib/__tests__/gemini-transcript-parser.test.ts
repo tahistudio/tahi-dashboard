@@ -286,6 +286,13 @@ describe('parseGeminiTranscript, markdown export with bold headings (2026-09)', 
   it('ends the summary at the Decisions heading', () => {
     expect(parseGeminiTranscript(md).summary).not.toContain('Pardot')
   })
+
+  it('flattens the timestamp links the markdown export wraps every turn in', () => {
+    const linked = md.replace('### 00:00:00', '### [00:00:00](https://docs.google.com/document/d/abc?tab=t.0#heading=h.1)')
+    const r = parseGeminiTranscript(linked)
+    expect(r.transcript).toContain('### 00:00:00')
+    expect(r.transcript).not.toContain('docs.google.com')
+  })
 })
 
 describe('describeUnparsedDoc', () => {
