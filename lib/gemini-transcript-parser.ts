@@ -101,11 +101,20 @@ export function parseGeminiTitle(title: string): GeminiTitleParsed {
 const TRANSCRIPT_DIVIDER = /\n(?:#+\s*)?[^\n\w]{0,4}Transcript\*?\s*\n/i
 const NOTES_HEADER = /^#\s*[^\n]*Notes[^\n]*$/im
 
+// Since 2026-09 the doc opens with a "Quick notes" block (its own summary
+// and next steps, plus survey lines) before the "Full notes" block that
+// carries the Summary, Next steps and Details the parser wants. When that
+// heading is present the notes start there, so the quick block's duplicate
+// "Next steps" is never the one read.
+const FULL_NOTES_HEADING = /(?:^|\n)(?:#+\s*)?[^\n\w]{0,4}Full notes\s*\n/i
+
 export function parseGeminiTranscript(rawText: string): GeminiTranscriptParsed {
   // Split notes vs transcript halves. The transcript divider includes
   // an emoji char and the literal word "Transcript" on its own line.
   const parts = rawText.split(TRANSCRIPT_DIVIDER)
-  const notesPart = parts[0] ?? ''
+  const wholeNotes = parts[0] ?? ''
+  const fullNotesAt = wholeNotes.search(FULL_NOTES_HEADING)
+  const notesPart = fullNotesAt >= 0 ? wholeNotes.slice(fullNotesAt) : wholeNotes
   const transcriptPart = parts.slice(1).join('\n') || null
 
   return {
@@ -124,7 +133,7 @@ export function parseGeminiTranscript(rawText: string): GeminiTranscriptParsed {
  * bare word on its own line, so both count as the heading, and the section
  * ends at the next hashed heading or at the next known bare heading.
  */
-const BARE_HEADINGS = ['Summary', 'Next steps', 'Details', 'Suggested next steps', 'Transcript']
+const BARE_HEADINGS = ['Summary', 'Next steps', 'Details', 'Suggested next steps', 'Transcript', 'Full notes', 'Quick notes']
 const escapeRe = (s: string) => s.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
 function extractSection(text: string, label: string): string | null {
   const escaped = escapeRe(label)
@@ -149,8 +158,9 @@ function extractBulletList(text: string, label: string): string[] {
   const lines = section.split('\n')
   const items: string[] = []
   for (const line of lines) {
-    // Gemini bullets are like "  - \[Owner\] Action: text"
-    const m = line.match(/^\s*-\s+(.+)$/)
+    // Gemini bullets are "  - \[Owner\] Action: text" in the markdown
+    // export and "* text" in a plain-text one.
+    const m = line.match(/^\s*[-*•]\s+(.+)$/)
     if (m) {
       // Unescape backslashed brackets that markdown adds
       const cleaned = m[1]

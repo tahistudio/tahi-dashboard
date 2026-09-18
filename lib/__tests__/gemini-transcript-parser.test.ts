@@ -153,32 +153,33 @@ May 22, 2026
 })
 
 describe('parseGeminiTranscript, plain-text export', () => {
+  // The shape of a text export as of 2026-09: a Quick notes block with its
+  // own next steps and survey lines, then the Full notes block, then the
+  // transcript behind an emoji heading.
   const plain = [
-    'Notes',
-    '',
-    'Sep 17, 2026',
-    '',
+    '\u270D\uFE0F Quick notes',
+    'Please rate the new Quick notes tab by taking a short survey.',
     'Meeting (Bharat Kochar)',
-    '',
-    'Invited bharat@example.com business@tahi.studio',
-    '',
-    'Meeting records Transcript',
-    '',
-    'Summary',
-    '',
-    'Bharat wants the booking flow rebuilt before the season starts.',
-    '',
+    'Sep 16, 2026',
+    'bharat@example.com Liam from Tahi Studio',
+    'Meeting covered the booking flow and the season timeline.',
     'Next steps',
-    '',
-    '- [Liam] Send the revised proposal by Friday.',
-    '- [Bharat] Share the current booking analytics.',
-    '',
+    '* Liam to send a proposal.',
+    'Want to see more? View the full notes',
+    'Tip: You can always access your full notes from the left sidebar.',
+    '\uD83D\uDCDD Full notes',
+    'Meeting (Bharat Kochar)',
+    'Sep 16, 2026',
+    'Invited bharat@example.com business@tahi.studio',
+    'Meeting records Transcript',
+    'Summary',
+    'Bharat wants the booking flow rebuilt before the season starts.',
+    'Next steps',
+    '* [Liam] Send the revised proposal by Friday.',
+    '* [Bharat] Share the current booking analytics.',
     'Details',
-    '',
-    '- Booking flow: three screens, one payment step.',
-    '',
-    'Transcript',
-    '',
+    '* Booking flow: three screens, one payment step.',
+    '\uD83D\uDCD6 Transcript',
     'Meeting (Bharat Kochar) - Transcript',
     '',
     '00:00:00',
@@ -204,6 +205,18 @@ describe('parseGeminiTranscript, plain-text export', () => {
     const r = parseGeminiTranscript(plain)
     expect(r.summary).not.toBeNull()
     expect(r.transcript?.startsWith('Meeting (Bharat Kochar) - Transcript')).toBe(true)
+  })
+
+  it('reads the Full notes block, not the Quick notes duplicate', () => {
+    const r = parseGeminiTranscript(plain)
+    expect(r.nextSteps).not.toContain('Liam to send a proposal.')
+    expect(r.summary).not.toContain('Meeting covered')
+  })
+
+  it('still reads a doc without a Full notes block from the top', () => {
+    const r = parseGeminiTranscript(plain.slice(plain.indexOf('Invited')))
+    expect(r.summary).toBe('Bharat wants the booking flow rebuilt before the season starts.')
+    expect(r.nextSteps).toHaveLength(2)
   })
 })
 
