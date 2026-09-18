@@ -164,6 +164,11 @@ seen on production.
   contacts); the dashboard gate and the wizard both consult it and stamp the
   user.
 
+## Client hand-offs on requests (Liam, 2026-09-18)
+
+- [~] HO.1 - [BE/FE] **Hand a request to a named client contact.** A request keeps its Tahi owner; it can be handed to one contact with a reason (approval, content, access, decision, file, other), a note and an optional date; the contact sees it first in their personal Waiting on you with the one action verb; the org admin sees the org-wide list; the studio sees a chip on rows and cards, a "Waiting on clients" rail view and a Waiting on card on the detail; the Blocked by card shows the hand-off as a synthetic line; the request hands itself back when the person approves, uploads or replies; a nudge email goes out after requests.handoffNudgeDays (default 3), never more than once per 3 days; a contact without a seat is invited in the same email. Migration 0104 (waiting_on_* columns on requests). Workflow client-handoff-build: H1 model and routes (opus), H2 UI (sonnet), H3 MCP and guide (sonnet), each reviewed, then merged in order.
+- [~] HO.2 - [MCP/Docs] **MCP for hand-offs and a "how this works" guide.** Tools hand_off_request, hand_back_request, list_requests_waiting_on_clients, and get_dashboard_guide backed by lib/dashboard-guide.ts (short sections: what the dashboard is for, requests versus tasks, statuses, tracks and plans, hand-offs, blockers, participants and roles, comments, invoices, what the MCP can do and why), served at /help for both audiences and through GET /api/admin/guide and /api/portal/guide; a test checks every tool the guide names exists on the worker.
+
 ## Liam's morning asks (2026-09-14, after the review)
 
 - [~] LW.21 - [FE] Requests kanban shows two vertical scrollbars; one page scrollbar only. Agent requests-ui-fixes.
