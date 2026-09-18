@@ -2412,6 +2412,9 @@ function RetainerHealthSection({ displayCurrency, exchangeRates }: CurrencyProps
 
 interface CashFlowMonth {
   month: string
+  revenueRetainer: number
+  revenueProject: number
+  revenuePipeline: number
   revenue: number
   cost: number
   net: number
@@ -2419,7 +2422,16 @@ interface CashFlowMonth {
 }
 interface CashFlowData {
   months: CashFlowMonth[]
-  summary: { totalRevenue: number; totalCost: number; totalNet: number; recurringMrrNzd: number; recurringCostNzd: number }
+  summary: {
+    totalRevenue: number
+    totalCost: number
+    totalNet: number
+    recurringMrrNzd: number
+    recurringCostNzd: number
+    projectRunRateNzd?: number
+    /** One line naming every component of the projection. Same text as the studio home ribbon. */
+    basis?: string
+  }
 }
 
 function CashFlowForecastSection({ displayCurrency, exchangeRates }: CurrencyProps) {
@@ -2441,6 +2453,9 @@ function CashFlowForecastSection({ displayCurrency, exchangeRates }: CurrencyPro
   const chartData = data.months.map(m => ({
     name: formatMonthLabel(m.month),
     revenue: convertNzd(m.revenue, displayCurrency, exchangeRates),
+    revenueRetainer: convertNzd(m.revenueRetainer, displayCurrency, exchangeRates),
+    revenueProject: convertNzd(m.revenueProject, displayCurrency, exchangeRates),
+    revenuePipeline: convertNzd(m.revenuePipeline, displayCurrency, exchangeRates),
     cost: convertNzd(m.cost, displayCurrency, exchangeRates),
     net: convertNzd(m.net, displayCurrency, exchangeRates),
     cumulative: convertNzd(m.cumulative, displayCurrency, exchangeRates),
@@ -2451,11 +2466,14 @@ function CashFlowForecastSection({ displayCurrency, exchangeRates }: CurrencyPro
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-lg font-semibold text-[var(--color-text)]">Cash Flow Forecast</h2>
-          <p className="text-xs text-[var(--color-text-muted)] mt-1">6 months ahead. Revenue = recurring MRR + weighted pipeline. Cost = recurring and dated client costs.</p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1">
+            6 months ahead. {data.summary.basis ?? 'Retainers + project run-rate + weighted pipeline, minus commitments'}.
+          </p>
         </div>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <MiniMetric label="Projected revenue" value={formatInCur(data.summary.totalRevenue, displayCurrency, exchangeRates)} colour="var(--color-brand)" />
+        <MiniMetric label="Project run-rate / mo" value={formatInCur(data.summary.projectRunRateNzd ?? 0, displayCurrency, exchangeRates)} colour="var(--color-brand)" />
         <MiniMetric label="Projected cost" value={formatInCur(data.summary.totalCost, displayCurrency, exchangeRates)} colour="var(--color-danger)" />
         <MiniMetric label="Net position" value={formatInCur(data.summary.totalNet, displayCurrency, exchangeRates)} colour={data.summary.totalNet >= 0 ? 'var(--color-brand)' : 'var(--color-danger)'} />
       </div>
@@ -2469,7 +2487,9 @@ function CashFlowForecastSection({ displayCurrency, exchangeRates }: CurrencyPro
               contentStyle={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: '0.5rem' }}
               formatter={(v: number) => formatInCur(v, displayCurrency, exchangeRates)}
             />
-            <Bar dataKey="revenue" fill={CHART.positive} radius={[4, 4, 0, 0]} name="Revenue" />
+            <Bar dataKey="revenueRetainer" stackId="revenue" fill={CHART.positive} name="Retainers" />
+            <Bar dataKey="revenueProject" stackId="revenue" fill={CHART.categorical[1]} name="Project run-rate" />
+            <Bar dataKey="revenuePipeline" stackId="revenue" fill={CHART.categorical[2]} radius={[4, 4, 0, 0]} name="Weighted pipeline" />
             <Bar dataKey="cost" fill={CHART.negative} radius={[4, 4, 0, 0]} name="Cost" />
           </BarChart>
         </ResponsiveContainer>

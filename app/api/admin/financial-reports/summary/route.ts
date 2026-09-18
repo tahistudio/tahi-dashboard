@@ -22,6 +22,7 @@ import { schema } from '@/db/d1'
 import { and, eq, gte, inArray, sql } from 'drizzle-orm'
 import { buildRateMap, toNzd as toNzdHelper } from '@/lib/currency'
 import { draftStatusList, issuedStatusList, owedStatusList } from '@/lib/invoice-status'
+import { derivePosition } from '@/lib/cash-position'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -215,7 +216,11 @@ export async function GET(req: NextRequest) {
       FROM invoices
       WHERE ${inArray(schema.invoices.status, owedStatusList())} AND paid_at IS NULL
     `),
-    // expense commitments
+    // Expense commitments. "Active" means active RIGHT NOW: started, and not
+    // yet ended. lib/cash-position.ts uses the same window, so the burn on the
+    // studio home's Cash runway card and the burn on this page are the same
+    // set of rows. The end-date bound used to be the tax-year start, which kept
+    // commitments that had already lapsed in the monthly burn.
     database.all<{
       category: string
       amount: number
@@ -227,7 +232,7 @@ export async function GET(req: NextRequest) {
       FROM expense_commitments
       WHERE active = 1
         AND (start_date IS NULL OR start_date <= datetime('now'))
-        AND (end_date IS NULL OR end_date >= ${taxYearStart})
+        AND (end_date IS NULL OR end_date >= datetime('now'))
     `),
     // tax-year revenue invoices
     database.all<{ amount: number; currency: string }>(sql`
@@ -733,58 +738,61 @@ export async function GET(req: NextRequest) {
   const hoursLast90d = Number(hoursRows[0]?.totalHours ?? 0)
   const revenuePerHour = hoursLast90d > 0 ? collected90 / hoursLast90d : null
 
-  // ── Disposable cash math ──────────────────────────────────────────
-  // Primary currency for the headline number: prefer NZD if present,
-  // else first available. (Multi-currency is shown per-currency below.)
+  // ── Cash position: the one money source ────────────────────
+  // Every figure below comes out of lib/cash-position.ts, which the studio
+  // home's Cash runway and Take-home cards read too. Two corrections Liam
+  // called for live on it:
+  //   1. The tax reserve pot is savings TOWARD the IRD bill, not a separate
+  //      liability. The old line subtracted the 15k pot AND the tax owed, and
+  //      only from the thin NZD account, which is how the Take-home card came
+  //      to print "NZ$0 disposable" on a 76k bank.
+  //   2. Runway divides total cash net of the IRD ring-fence, not the primary
+  //      account, so cash sitting in GBP/USD counts.
   const primaryCurrency = balancesByCurrency.has('NZD') ? 'NZD'
     : Array.from(balancesByCurrency.keys())[0] ?? 'NZD'
   const primaryBalance = balancesByCurrency.get(primaryCurrency)?.available ?? 0
-  // Disposable = primary bank − reserve pots − last-year tax. The reserve
-  // pot total + last-year tax both come out of what's safe to spend right
-  // now. (Reserve target is a target, not a deduction.)
-  const disposableCash = Math.max(0, primaryBalance - reservesTotal - lastYearTaxOwed)
+  const totalCashNzd = Array.from(balancesByCurrency.entries())
+    .reduce((sum, [cur, v]) => sum + toNzd(v.available, cur), 0)
 
-  // Reserve target = months × burn + last-year tax pot. Burn precedence:
-  //   1. Operator's manual override (`finance.monthlyBurnNzd`) — null when unset
-  //   2. Auto = sum of active commitments in NZD/mo (`totalMonthlyBurnNzd`)
-  //   3. Revenue × 0.5 as a last-ditch proxy (only when no commitments configured)
-  // The page exposes both manual + auto so the operator can flip between
+  // Reserve pots, currency-converted and split by whether they are saving
+  // toward the IRD bill (ring-fenced against it) or anything else (deducted
+  // on top of it).
+  const taxReserveAccruedNzd = reserves
+    .filter(r => r.category === 'tax')
+    .reduce((sum, r) => sum + toNzd(r.accruedAmount, r.currency ?? 'NZD'), 0)
+  const otherReservesNzd = reserves
+    .filter(r => r.category !== 'tax')
+    .reduce((sum, r) => sum + toNzd(r.accruedAmount, r.currency ?? 'NZD'), 0)
+
+  // Burn precedence:
+  //   1. Operator's manual override (`finance.monthlyBurnNzd`), null when unset
+  //   2. Auto = sum of active recurring commitments in NZD/mo
+  //   3. Revenue x 0.5 as a last-ditch proxy (only when no commitments exist)
+  // The page exposes both manual and auto so the operator can flip between
   // the two without losing their saved value.
   const autoBurnNzd = totalMonthlyBurnNzd
   const reserveTargetBurn = monthlyBurnNzd
     ?? (autoBurnNzd > 0 ? autoBurnNzd : (effectiveMonthlyRevenue > 0 ? effectiveMonthlyRevenue * 0.5 : 0))
-  const reserveTargetAmount = reserveTargetBurn * reserveTargetMonths + lastYearTaxOwed
 
-  // ── Runway: two distinct concepts ─────────────────────────────────
-  // GROSS runway answers "if every client vanished today, how long
-  // does the cash last?" Used as the worst-case figure.
-  //   = total cash (multi-currency, NZD-equivalent) / total burn
-  // NET runway answers "at the current burn-vs-revenue gap, how long
-  // before reserves are gone?" Only meaningful when we're spending
-  // more than we earn — when net burn is 0 or negative we're profitable
-  // and the figure is null (UI shows "profitable" instead).
-  //   = total cash / max(0, burn − revenue)
-  // Both use total cash converted to NZD, not just the primary (NZD)
-  // pot, so a Tahi sitting on 5k GBP isn't underestimated to zero
-  // runway because of a thin NZD account.
-  const totalCashNzd = Array.from(balancesByCurrency.entries())
-    .reduce((sum, [cur, v]) => sum + toNzd(v.available, cur), 0)
-  // Tax-honest cash for runway. The corp tax YTD figure is an accrued
-  // liability the operator hasn't necessarily ring-fenced in a reserve pot
-  // yet. Subtract the unreserved portion from total cash so runway doesn't
-  // flatter the picture by spending money that's earmarked for IRD.
-  const taxReserveAccruedNzd = reserves
-    .filter(r => r.category === 'tax')
-    .reduce((sum, r) => sum + toNzd(r.accruedAmount, r.currency ?? 'NZD'), 0)
-  const unreservedTaxNzd = Math.max(0, corpTaxOwedYtd - taxReserveAccruedNzd)
-  const taxAdjustedCashNzd = Math.max(0, totalCashNzd - unreservedTaxNzd)
-  const netMonthlyBurnNzd = Math.max(0, reserveTargetBurn - effectiveMonthlyRevenue)
-  // Runway uses the tax-adjusted cash so the figure reflects what's
-  // actually safe to draw down on. Worst case still divides by burn; net
-  // burn still divides by burn minus revenue.
-  const grossRunwayMonths = reserveTargetBurn > 0 ? taxAdjustedCashNzd / reserveTargetBurn : null
-  const netRunwayMonths = netMonthlyBurnNzd > 0 ? taxAdjustedCashNzd / netMonthlyBurnNzd : null
-  const monthlySurplusNzd = effectiveMonthlyRevenue - reserveTargetBurn  // positive = profitable
+  const position = derivePosition({
+    totalCashNzd,
+    taxOwedNzd: lastYearTaxOwed,
+    taxPotNzd: taxReserveAccruedNzd,
+    otherReservesNzd,
+    recurringBurnNzd: reserveTargetBurn,
+    projectRunRateNzd: trailing5moProjectRevenue,
+    retainerMrrNzd: retainerMrr,
+  })
+
+  const disposableCash = position.disposableNzd
+  const unreservedTaxNzd = position.unreservedTaxNzd
+  const taxAdjustedCashNzd = position.taxAdjustedCashNzd
+  const netMonthlyBurnNzd = position.netMonthlyBurnNzd
+  const grossRunwayMonths = position.grossRunwayMonths
+  const netRunwayMonths = position.netRunwayMonths
+  const monthlySurplusNzd = position.monthlySurplusNzd
+  // Reserve target = months x burn + the IRD bill still to be covered.
+  const reserveTargetAmount = reserveTargetBurn * reserveTargetMonths + lastYearTaxOwed
   const reserveTargetMonthsOfRunway = reserveTargetBurn > 0 ? primaryBalance / reserveTargetBurn : null
 
   // ── Status traffic lights ─────────────────────────────────────────
@@ -851,22 +859,32 @@ export async function GET(req: NextRequest) {
       targetMonths: reserveTargetMonths,
       monthlyBurnNzd,                   // operator's manual override (null = use auto)
       autoBurnNzd,                      // sum of active commitments in NZD/mo
-      lastYearTaxOwed,
+      lastYearTaxOwed,                  // total balance owed to IRD (settings: finance.lastYearTaxOwed)
       targetAmount: reserveTargetAmount,
       targetBurn: reserveTargetBurn,    // effective burn after manual/auto/fallback
       monthsOfRunway: reserveTargetMonthsOfRunway,
-      // Runway breakdown — primary figures for the "how long do we last" question.
-      // totalCashNzd is the raw bank cash; taxAdjustedCashNzd subtracts
-      // unreservedTaxNzd (corp tax YTD not yet ring-fenced in a reserve pot)
-      // so the runway figures are honest about money already earmarked
-      // for IRD. Runway figures use the tax-adjusted figure.
+      // Runway breakdown: the primary figures for "how long do we last".
+      // totalCashNzd is the raw bank cash across every currency;
+      // ringFencedTaxNzd is max(bill, tax pot), never the sum of the two,
+      // because the pot is savings toward that same bill; taxAdjustedCashNzd
+      // is what is left once IRD is honoured, and every runway figure divides
+      // that.
       totalCashNzd,                     // sum of bank balances across currencies, NZD-equivalent
-      unreservedTaxNzd,                 // corp tax YTD that isn't covered by a tax reserve pot yet
-      taxAdjustedCashNzd,               // totalCashNzd minus unreservedTaxNzd
-      grossRunwayMonths,                // worst case: zero revenue, tax-adjusted cash, all burn
+      taxOwedNzd: position.taxOwedNzd,  // total balance owed to IRD
+      taxPotNzd: position.taxPotNzd,    // accrued in reserve pots with category 'tax'
+      otherReservesNzd: position.otherReservesNzd,
+      ringFencedTaxNzd: position.ringFencedTaxNzd,
+      unreservedTaxNzd,                 // still to save toward the bill: max(0, owed - pot)
+      taxAdjustedCashNzd,               // totalCashNzd minus the IRD ring-fence
+      disposableNzd: position.disposableNzd,
+      grossRunwayMonths,                // if revenue stopped: tax-adjusted cash / burn
       netRunwayMonths,                  // current trajectory: tax-adjusted cash / (burn minus revenue). null = profitable
-      netMonthlyBurnNzd,                // max(0, burn − revenue). 0 = breakeven or better
-      monthlySurplusNzd,                // revenue − burn. Positive = profitable, negative = burning
+      netMonthlyBurnNzd,                // max(0, burn minus revenue). 0 = breakeven or better
+      monthlySurplusNzd,                // revenue minus burn. Positive = profitable, negative = burning
+      recurringBurnNzd: position.recurringBurnNzd,
+      projectRunRateNzd: position.projectRunRateNzd,
+      retainerMrrNzd: position.retainerMrrNzd,
+      effectiveMonthlyRevenueNzd: position.effectiveMonthlyRevenueNzd,
     },
     mrr: {
       retainer: retainerMrr,
@@ -942,6 +960,14 @@ export async function GET(req: NextRequest) {
       targetEach: takeHomeTargetEach,
       gapEach: Math.max(0, takeHomeTargetEach - liamTakeHome),
       gapCombined: Math.max(0, (takeHomeTargetEach * 2) - (liamTakeHome + staciTakeHome)),
+      // What the Take-home card on the studio home draws its gauge from. Share
+      // is disposable over (disposable + IRD ring-fence + other pots), so the
+      // two slices always add to the cash the studio actually holds.
+      disposableNzd: position.disposableNzd,
+      ringFencedTaxNzd: position.ringFencedTaxNzd,
+      otherReservesNzd: position.otherReservesNzd,
+      taxOwedNzd: position.taxOwedNzd,
+      taxPotNzd: position.taxPotNzd,
     },
     yearEnd: {
       // Honest projection: YTD + (effective monthly revenue × months

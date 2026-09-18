@@ -59,6 +59,9 @@ interface SummaryResponse {
     targetBurn: number
     monthsOfRunway: number | null
     totalCashNzd: number
+    /** max(tax owed, tax pot). The pot is savings toward the bill, never extra to it. */
+    ringFencedTaxNzd: number
+    /** Still to save toward the bill: max(0, owed - pot). */
     unreservedTaxNzd: number
     taxAdjustedCashNzd: number
     grossRunwayMonths: number | null
@@ -1316,9 +1319,9 @@ function HeroCashCard({
               label="Worst case runway"
               value={grossLabel}
               sub={grossRunway != null
-                ? (reserveConfig.unreservedTaxNzd > 0
-                  ? `After ${formatNative(reserveConfig.unreservedTaxNzd, 'NZD')} tax set aside`
-                  : 'Tax-adjusted cash ÷ burn, no income')
+                ? (reserveConfig.ringFencedTaxNzd > 0
+                  ? `After ${formatNative(reserveConfig.ringFencedTaxNzd, 'NZD')} IRD set aside`
+                  : 'Cash divided by burn, no income')
                 : 'Set burn to compute'}
               compact
             />
@@ -1327,8 +1330,8 @@ function HeroCashCard({
               value={netLabel}
               sub={netRunway == null
                 ? 'Revenue exceeds burn'
-                : (reserveConfig.unreservedTaxNzd > 0
-                  ? `After ${formatNative(reserveConfig.unreservedTaxNzd, 'NZD')} tax set aside`
+                : (reserveConfig.ringFencedTaxNzd > 0
+                  ? `After ${formatNative(reserveConfig.ringFencedTaxNzd, 'NZD')} IRD set aside`
                   : 'At current burn vs revenue')}
               compact
             />
@@ -3491,6 +3494,7 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
     targetAmount: number
     monthsOfRunway: number | null
     totalCashNzd: number
+    ringFencedTaxNzd: number
     unreservedTaxNzd: number
     taxAdjustedCashNzd: number
     grossRunwayMonths: number | null
@@ -3571,7 +3575,7 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
             Reserve target
           </div>
           <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
-            Target = months × burn + last-year tax. Drives the Cash runway traffic light.
+            Target = months x burn + tax owed to IRD. Drives the Cash runway traffic light.
           </div>
         </div>
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
@@ -3649,16 +3653,21 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
             </div>
           </div>
           <div>
-            <label style={labelStyle}>Last year tax owed (NZD)</label>
+            <label style={labelStyle} htmlFor="finance-tax-owed">Tax owed to IRD, total balance (NZD)</label>
             <input
+              id="finance-tax-owed"
               type="number"
               min={0}
               step="100"
               value={tax}
               onChange={e => { setTax(e.target.value); setDirty(true) }}
-              placeholder="e.g. 20000"
+              placeholder="e.g. 24242.68"
               style={inputStyle}
             />
+            <div style={{ fontSize: '0.625rem', color: 'var(--color-text-subtle)', marginTop: '0.25rem', lineHeight: 1.45 }}>
+              The whole balance IRD shows, terminal plus provisional. The tax reserve
+              pot is savings toward this, so it is never deducted on top of it.
+            </div>
           </div>
           <div>
             <label style={labelStyle}>Target amount</label>
@@ -3675,10 +3684,10 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))', gap: '0.75rem', marginBottom: '0.75rem' }}>
           <RunwayTile
             label="Worst case runway"
-            sub={`Tax-adjusted cash ÷ burn · zero revenue`}
+            sub={`Cash after IRD ÷ burn · zero revenue`}
             value={config.grossRunwayMonths != null ? `${config.grossRunwayMonths.toFixed(1)} mo` : 'n/a'}
-            detail={config.unreservedTaxNzd > 0
-              ? `${formatNative(config.taxAdjustedCashNzd, 'NZD')} after setting aside ${formatNative(config.unreservedTaxNzd, 'NZD')} tax ÷ ${formatNative(previewBurn, 'NZD')}/mo`
+            detail={config.ringFencedTaxNzd > 0
+              ? `${formatNative(config.taxAdjustedCashNzd, 'NZD')} after setting aside ${formatNative(config.ringFencedTaxNzd, 'NZD')} for IRD ÷ ${formatNative(previewBurn, 'NZD')}/mo`
               : `${formatNative(config.taxAdjustedCashNzd, 'NZD')} cash ÷ ${formatNative(previewBurn, 'NZD')}/mo`}
             tone={config.grossRunwayMonths == null ? 'neutral'
               : config.grossRunwayMonths >= config.targetMonths ? 'positive'
@@ -3692,8 +3701,8 @@ function ReserveTargetCard({ config, formatNative, onSaved }: {
               : config.netRunwayMonths > 999 ? '∞' : `${config.netRunwayMonths.toFixed(1)} mo`}
             detail={config.netRunwayMonths == null
               ? `+${formatNative(Math.max(0, config.monthlySurplusNzd), 'NZD')}/mo surplus`
-              : config.unreservedTaxNzd > 0
-                ? `${formatNative(config.taxAdjustedCashNzd, 'NZD')} after ${formatNative(config.unreservedTaxNzd, 'NZD')} tax ÷ ${formatNative(config.netMonthlyBurnNzd, 'NZD')}/mo net`
+              : config.ringFencedTaxNzd > 0
+                ? `${formatNative(config.taxAdjustedCashNzd, 'NZD')} after ${formatNative(config.ringFencedTaxNzd, 'NZD')} for IRD ÷ ${formatNative(config.netMonthlyBurnNzd, 'NZD')}/mo net`
                 : `${formatNative(config.taxAdjustedCashNzd, 'NZD')} cash ÷ ${formatNative(config.netMonthlyBurnNzd, 'NZD')}/mo net`}
             tone={config.netRunwayMonths == null ? 'positive'
               : config.netRunwayMonths >= config.targetMonths ? 'positive'

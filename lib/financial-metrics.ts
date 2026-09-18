@@ -7,10 +7,17 @@
  * financial_snapshots so we keep monthly history for trends and honest
  * month-over-month deltas.
  *
- * The math here MUST stay in lockstep with app/api/admin/overview/route.ts
- * so a stored snapshot is directly comparable to the live number. Each
- * metric mirrors the corresponding block there; see the inline notes. If
- * you change how a metric is computed in one place, change it in both.
+ * Cash, owed, MRR and active clients stay in lockstep with
+ * app/api/admin/overview/route.ts so a stored snapshot is directly comparable
+ * to the live number. If you change one of those in one place, change it in
+ * both.
+ *
+ * `burnNzd` / `runwayMonths` are the exception, and deliberately so. The live
+ * cards read lib/cash-position.ts (commitment-based burn, cash net of the IRD
+ * bill). These two stay on the trailing Xero P&L average because the stored
+ * series goes back months and rewriting its definition would make the history
+ * incomparable with itself. Read them as "what the P&L said", not as the
+ * figure on the Cash runway card.
  */
 import { schema } from '@/db/d1'
 import { eq, gte, inArray, sql, desc, count } from 'drizzle-orm'

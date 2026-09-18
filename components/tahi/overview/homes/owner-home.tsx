@@ -23,6 +23,7 @@ import type { ReactNode } from 'react'
 import { useResource } from '@/lib/use-resource'
 import { apiPath } from '@/lib/api'
 import { stageColour } from '@/lib/chart-colors'
+import { cashFlowBasisLine } from '@/lib/cash-position'
 import {
   buildPipelineStageChart,
   splitClosingDeals,
@@ -78,11 +79,24 @@ interface OverviewData {
   mrrDeltaBasisMonth?: string | null
   recentRequests: RecentRequest[]
   monthlyRevenue: { month: string; total: number }[]
-  cash: { totalNzd: number; runwayMonths: number | null; burnNzd: number } | null
+  cash: CashBlock | null
   arAging: ArAging | null
   activeTimer: { running: boolean; label: string | null }
   openByStatus: Record<string, number>
   clientsByPlan: Record<string, number>
+}
+
+/** The studio's cash position, straight from lib/cash-position.ts. */
+interface CashBlock {
+  totalNzd: number
+  /** "If revenue stopped": cash net of the IRD bill, divided by burn. */
+  runwayMonths: number | null
+  /** Active recurring commitments per month. */
+  burnNzd: number
+  /** Effective revenue minus burn. Positive = the studio is making money. */
+  monthlySurplusNzd?: number
+  /** Cash free to spend once IRD and the other reserve pots are honoured. */
+  disposableNzd?: number
 }
 
 interface ArAging {
@@ -150,6 +164,11 @@ const DOMAIN_INK: Record<string, string> = {
   client: 'var(--domain-clients)',
   ops: 'var(--domain-ops)',
 }
+
+// Risk ink for money that is going the wrong way (overdue AR, negative net).
+// Hardcoded per the styling rules: the overview surface defines no --danger
+// token, and .ov-card.edge-risk already reads this exact value.
+const RISK_INK = '#C0392E'
 
 const STATUS_DOT: Record<string, string> = {
   submitted: 'var(--brand)',
@@ -405,7 +424,7 @@ function agedBar(a: ArAging): MicroBarSegment[] {
   return [
     { v: a.currentNzd, color: '#5A824E' },
     { v: a.d30Nzd, color: '#C9A227' },
-    { v: a.d60Nzd + a.d90Nzd, color: '#C0392E' },
+    { v: a.d60Nzd + a.d90Nzd, color: RISK_INK },
   ]
 }
 
@@ -705,17 +724,37 @@ interface SummaryData {
   disposableCash?: number
   reserves?: { total: number; items: { id: string; name: string; category: string | null; accruedAmount: number }[] }
   bankBalances?: { currency: string }[]
+  takeHome?: {
+    disposableNzd?: number
+    ringFencedTaxNzd?: number
+    otherReservesNzd?: number
+    taxOwedNzd?: number
+    taxPotNzd?: number
+  }
 }
 
 function TakeHomeInk() {
   const { money, moneyCompact } = useOvFormat()
   const { data, error } = useResource<SummaryData>('/api/admin/financial-reports/summary')
 
-  const disposable = data?.disposableCash ?? 0
-  const reservesTotal = data?.reserves?.total ?? 0
-  const total = disposable + reservesTotal
+  // Every figure comes from the summary's cash position (lib/cash-position.ts),
+  // the same one the finance page renders. This card used to read
+  // `disposableCash` when that was the NZD account minus the reserve pots minus
+  // the tax bill, which double-charged the tax pot against the bill it is
+  // saving toward and printed "NZ$0 disposable, 0% take-home" on a healthy
+  // account. Nothing here is computed locally on purpose.
+  const th = data?.takeHome
+  const disposable = th?.disposableNzd ?? data?.disposableCash ?? 0
+  const ringFencedTax = th?.ringFencedTaxNzd ?? 0
+  const otherReserves = th?.otherReservesNzd ?? 0
+  const taxOwed = th?.taxOwedNzd ?? 0
+  const taxPot = th?.taxPotNzd ?? 0
+  const total = disposable + ringFencedTax + otherReserves
   const takeHomePct = total > 0 ? Math.round((disposable / total) * 100) : 0
-  const pots = (data?.reserves?.items ?? []).slice(0, 3)
+  // The IRD line replaces the tax pot's own row, so it is never listed twice.
+  const pots = (data?.reserves?.items ?? [])
+    .filter(p => !(taxOwed > 0 && p.category === 'tax'))
+    .slice(0, 3)
   const hasData = !!data && !error && total > 0
 
   return (
@@ -732,7 +771,7 @@ function TakeHomeInk() {
             <div className="ov-gauge-legend">
               <div>
                 <b style={{ color: 'var(--text)', font: '700 17px Manrope' }}>{moneyCompact(disposable)}</b>
-                <div className="ov-mini">disposable this month</div>
+                <div className="ov-mini">free to spend now</div>
               </div>
               <div className="ov-mini lg-row">
                 <span>
@@ -750,8 +789,14 @@ function TakeHomeInk() {
               </div>
             </div>
           </div>
-          {pots.length > 0 && (
+          {(taxOwed > 0 || pots.length > 0) && (
             <div className="ov-subrows">
+              {taxOwed > 0 && (
+                <div className="ov-subrow">
+                  <span>Tax</span>
+                  <b>{money(taxPot)} of {money(taxOwed)}</b>
+                </div>
+              )}
               {pots.map(p => (
                 <div className="ov-subrow" key={p.id}>
                   <span>{p.name}</span>
@@ -811,11 +856,15 @@ function CashRunway({
   loading,
   go,
 }: {
-  cash: { totalNzd: number; runwayMonths: number | null; burnNzd: number } | null
+  cash: CashBlock | null
   loading: boolean
   go: (id: string) => void
 }) {
   const { moneyCompact } = useOvFormat()
+  // Nothing on this card computes its own burn. `cash` is the studio's one
+  // cash position (lib/cash-position.ts), so "3.6 months if revenue stopped"
+  // here and the worst-case runway on /financial-reports are the same number.
+  const surplus = cash?.monthlySurplusNzd ?? null
   return (
     <Card section="Cash runway" span={7}>
       <CardH ic="chart" title="Cash runway" link="Open books" onLink={() => go('financialreports')} />
@@ -831,11 +880,20 @@ function CashRunway({
               <div className="st-lbl">in the bank</div>
             </div>
             <div className="ov-stat">
+              <div
+                className="st-num"
+                style={{ color: surplus != null && surplus < 0 ? RISK_INK : undefined }}
+              >
+                {surplus != null ? (surplus >= 0 ? '+' : '-') + moneyCompact(Math.abs(surplus)) : '·'}
+              </div>
+              <div className="st-lbl">a month net</div>
+            </div>
+            <div className="ov-stat">
               <div className="st-num">
                 {cash.runwayMonths != null ? cash.runwayMonths.toFixed(1) : '·'}
                 <span style={{ fontSize: 14, color: 'var(--text-faint)' }}>mo</span>
               </div>
-              <div className="st-lbl">runway at burn</div>
+              <div className="st-lbl">if revenue stopped</div>
             </div>
           </div>
           <HorizonStrip runway={cash.runwayMonths} />
@@ -847,6 +905,7 @@ function CashRunway({
 
 interface CashFlowData {
   months?: { month: string; net: number }[]
+  summary?: { basis?: string; recurringMrrNzd?: number; projectRunRateNzd?: number }
 }
 function CashFlowRibbon({ go }: { go: (id: string) => void }) {
   const { moneyCompact } = useOvFormat()
@@ -857,6 +916,15 @@ function CashFlowRibbon({ go }: { go: (id: string) => void }) {
     const step = Math.max(1, Math.ceil(months.length / 6))
     return months.filter((_, i) => i % step === 0).map(m => shortMonth(m.month))
   }, [months])
+  // The route already names its own basis in NZD; re-render it in the display
+  // currency when it hands over the parts, so the switcher moves this line too.
+  const sum = data?.summary
+  const basis = sum?.recurringMrrNzd != null && sum?.projectRunRateNzd != null
+    ? cashFlowBasisLine(
+        { retainerNzd: sum.recurringMrrNzd, projectRunRateNzd: sum.projectRunRateNzd },
+        moneyCompact,
+      )
+    : sum?.basis ?? null
 
   return (
     <Card section="Cash-flow ribbon" span={7}>
@@ -867,6 +935,7 @@ function CashFlowRibbon({ go }: { go: (id: string) => void }) {
         <EmptyLine>Add MRR, pipeline and commitments to project cash flow.</EmptyLine>
       ) : (
         <>
+          {basis && <div className="ov-mini" style={{ marginBottom: 10 }}>{basis}</div>}
           <Ribbon
             data={months.map(m => m.net)}
             labels={months.map(m => shortMonth(m.month))}
@@ -909,7 +978,7 @@ function Receivables({ arAging, loading }: { arAging: ArAging | null; loading: b
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }} className="ov-mini">
             <span>Current {money(arAging!.currentNzd)}</span>
-            <span style={{ color: '#C0392E' }}>Overdue {money(overdue)}</span>
+            <span style={{ color: RISK_INK }}>Overdue {money(overdue)}</span>
           </div>
           {arAging!.noDueDateCount > 0 && (
             <div className="ov-mini" style={{ marginTop: 4, opacity: 0.7 }}>
