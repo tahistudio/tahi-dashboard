@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest'
 import {
   MATCH_WINDOW_MS,
   findCallMatch,
+  findFiledTranscript,
   hashTranscript,
   pickCallMatch,
   upsertTranscript,
@@ -240,6 +241,20 @@ describe('upsertTranscript', () => {
       callId: 'sched-1',
       matchedBy: 'gemini_title_time',
       unlinkedReason: null,
+    })
+  })
+})
+
+describe('findFiledTranscript', () => {
+  it('returns null when nothing is filed for the doc', async () => {
+    const { handle } = makeDb([[]])
+    expect(await findFiledTranscript(handle as never, 'gemini_drive', 'drive-x')).toBeNull()
+  })
+
+  it('returns the filed row with its link and received time', async () => {
+    const { handle } = makeDb([[{ id: 'ct-1', callKind: 'scheduled', callId: 'sched-1', receivedAt: '2026-09-18T03:30:00Z' }]])
+    expect(await findFiledTranscript(handle as never, 'gemini_drive', 'drive-x')).toEqual({
+      id: 'ct-1', callKind: 'scheduled', callId: 'sched-1', receivedAt: '2026-09-18T03:30:00Z',
     })
   })
 })

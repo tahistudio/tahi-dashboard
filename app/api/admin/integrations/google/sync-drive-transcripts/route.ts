@@ -48,7 +48,7 @@ import { eq } from 'drizzle-orm'
 import { getGoogleAccessToken, listDriveFiles, exportDriveDocAsText } from '@/lib/google'
 import { parseGeminiTitle, parseGeminiTranscript } from '@/lib/gemini-transcript-parser'
 import { logCronRun } from '@/lib/cron-runs'
-import { MATCH_WINDOW_MS, findCallMatch, upsertTranscript } from '@/lib/call-transcripts'
+import { MATCH_WINDOW_MS, findCallMatch, findFiledTranscript, parseCallKind, upsertTranscript } from '@/lib/call-transcripts'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,7 +57,7 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 interface DocResult {
   fileId: string
   title: string
-  status: 'matched' | 'no_match' | 'multiple_matches' | 'already_synced' | 'parse_failed' | 'skipped' | 'no_transcript'
+  status: 'matched' | 'no_match' | 'multiple_matches' | 'already_synced' | 'already_filed' | 'parse_failed' | 'skipped' | 'no_transcript'
   callKind?: 'discovery' | 'scheduled'
   callId?: string
   /** The call_transcripts row written for this doc, linked or parked. */
@@ -107,6 +107,9 @@ export async function POST(req: NextRequest) {
   // `parked` counts the subset still waiting for a human to attach them.
   let filed = 0
   let parked = 0
+  // `unchanged` counts docs already filed on an earlier pass that Drive has
+  // not modified since: nothing exported, nothing written.
+  let unchanged = 0
 
   for (const file of files) {
     const titleParsed = parseGeminiTitle(file.name)
@@ -132,23 +135,37 @@ export async function POST(req: NextRequest) {
       attendeeGuess: titleParsed.attendeeGuess,
     })
 
-    // Already synced onto its discovery call: nothing to fetch, and the
-    // transcripts row was written on the run that first matched it.
-    if (
-      match.status === 'matched'
-      && match.candidate.kind === 'discovery'
-      && match.candidate.transcriptSource === 'gemini_drive'
-      && match.candidate.transcript
-    ) {
+    // A row already filed for this doc on an earlier pass, matched or
+    // parked. Unless Drive says the doc changed since, there is nothing to
+    // export. This is what stops a parked doc costing a Drive export every
+    // 30 minutes until someone attaches it.
+    const filedRow = await findFiledTranscript(database as unknown as D1, 'gemini_drive', file.id)
+    const docModifiedAt = file.modifiedTime ?? file.createdTime ?? null
+    if (filedRow && (!docModifiedAt || docModifiedAt <= filedRow.receivedAt)) {
+      unchanged++
       results.push({
         fileId: file.id,
         title: file.name,
-        status: 'already_synced',
-        callKind: 'discovery',
-        callId: match.candidate.id,
+        status: 'already_filed',
+        callKind: parseCallKind(filedRow.callKind) ?? undefined,
+        callId: filedRow.callId ?? undefined,
+        transcriptId: filedRow.id,
+        detail: filedRow.callId
+          ? 'Filed on an earlier pass and unchanged since'
+          : 'Parked on an earlier pass, waiting to be attached',
       })
       continue
     }
+
+    // Synced onto its discovery call before the transcripts table existed.
+    // The discovery columns are left exactly as they are (Liam may have
+    // edited them); the only thing still owed is the transcripts row, so the
+    // doc is exported once more to backfill it and never again after that.
+    const alreadySynced =
+      match.status === 'matched'
+      && match.candidate.kind === 'discovery'
+      && match.candidate.transcriptSource === 'gemini_drive'
+      && !!match.candidate.transcript
 
     // The body is fetched on EVERY remaining path, matched or not. Parked
     // notes with no text would be nothing a human could act on, which is the
@@ -199,10 +216,10 @@ export async function POST(req: NextRequest) {
       results.push({
         fileId: file.id,
         title: file.name,
-        status: matchedCall ? 'matched' : (unlinkedReason === 'ambiguous' ? 'multiple_matches' : 'no_match'),
+        status: alreadySynced ? 'already_synced' : matchedCall ? 'matched' : (unlinkedReason === 'ambiguous' ? 'multiple_matches' : 'no_match'),
         callKind: matchedCall?.kind,
         callId: matchedCall?.id,
-        detail: `Would file: ${parsed.summary?.length ?? 0}-char summary, ${parsed.transcript?.length ?? 0}-char transcript, ${parsed.nextSteps.length} next steps`,
+        detail: `${alreadySynced ? 'Would backfill the transcripts row only' : 'Would file'}: ${parsed.summary?.length ?? 0}-char summary, ${parsed.transcript?.length ?? 0}-char transcript, ${parsed.nextSteps.length} next steps`,
       })
       continue
     }
@@ -232,6 +249,21 @@ export async function POST(req: NextRequest) {
         detail: match.status === 'ambiguous'
           ? `Top ${match.top.candidate.kind}/${match.top.candidate.id} (${match.top.score}) vs runner-up ${match.runnerUp.candidate.kind}/${match.runnerUp.candidate.id} (${match.runnerUp.score}), too close. Parked for manual attach.`
           : 'No candidate call scored. Parked for manual attach.',
+      })
+      continue
+    }
+
+    if (alreadySynced) {
+      results.push({
+        fileId: file.id,
+        title: file.name,
+        status: 'already_synced',
+        callKind: 'discovery',
+        callId: matchedCall.id,
+        transcriptId,
+        detail: filedRow
+          ? 'Doc changed since it was filed: transcripts row refreshed, discovery call left as it was'
+          : 'Backfilled the transcripts row; discovery call left as it was',
       })
       continue
     }
@@ -300,6 +332,7 @@ export async function POST(req: NextRequest) {
     written,
     filed,
     parked,
+    unchanged,
     results,
   }
   await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'sync-drive-transcripts', 'success', Date.now() - t0, summary, null)

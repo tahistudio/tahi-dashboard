@@ -36,7 +36,7 @@ vi.mock('@/lib/gemini-transcript-parser', async (importOriginal) => ({
 }))
 
 import { db } from '@/lib/db'
-import { listDriveFiles } from '@/lib/google'
+import { listDriveFiles, exportDriveDocAsText } from '@/lib/google'
 import { parseGeminiTranscript } from '@/lib/gemini-transcript-parser'
 import { NextRequest } from 'next/server'
 import { POST } from '@/app/api/admin/integrations/google/sync-drive-transcripts/route'
@@ -215,32 +215,59 @@ describe('sync-drive-transcripts, unmatched docs', () => {
 })
 
 describe('sync-drive-transcripts, idempotence', () => {
-  it('skips a discovery call already stamped, writing no second row', async () => {
+  it('backfills the transcripts row for a discovery call stamped before the table existed, touching nothing else', async () => {
     const { handle, queries } = makeDb([
       [{ id: 'disc-1', title: 'Discovery (Tim Lyons)', scheduledAt: CALL_TIME, attendees: '[]', orgId: null, transcript: 'already here', transcriptSource: 'gemini_drive' }],
+      [],
+      // filed lookup: no row yet for this doc
+      [],
+      // upsert lookup: still nothing
       [],
     ])
     vi.mocked(db).mockResolvedValue(handle as never)
 
     const res = await POST(request())
-    const body = await res.json() as { filed: number; results: Array<{ status: string }> }
+    const body = await res.json() as { written: number; filed: number; results: Array<{ status: string; transcriptId?: string }> }
     expect(body.results[0].status).toBe('already_synced')
-    expect(body.filed).toBe(0)
-    expect(queries.some(q => q[0].method === 'insert')).toBe(false)
+    expect(body.results[0].transcriptId).toBeTruthy()
+    expect(body).toMatchObject({ written: 0, filed: 1 })
+    expect(insertedValues(queries)).toMatchObject({ callKind: 'discovery', callId: 'disc-1', matchedBy: 'gemini_title_time' })
+    // Only the integrations last-synced stamp: the discovery call is left as Liam had it.
+    expect(queries.filter(q => q[0].method === 'update')).toHaveLength(1)
   })
 
-  it('updates the existing row when the same doc comes round again', async () => {
+  it('exports nothing for a doc already filed that Drive has not changed since', async () => {
     const { handle, queries } = makeDb([
       [],
       [],
-      // upsert lookup finds the row filed on the previous run
+      // filed lookup: parked on an earlier pass, same modifiedTime
+      [{ id: 'ct-1', callKind: null, callId: null, receivedAt: DOC.modifiedTime }],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await POST(request())
+    const body = await res.json() as { filed: number; unchanged: number; results: Array<{ status: string; transcriptId?: string }> }
+    expect(body.results[0]).toMatchObject({ status: 'already_filed', transcriptId: 'ct-1' })
+    expect(body).toMatchObject({ filed: 0, unchanged: 1 })
+    expect(exportDriveDocAsText).not.toHaveBeenCalled()
+    expect(queries.some(q => q[0].method === 'insert')).toBe(false)
+  })
+
+  it('re-exports and updates the row when Drive says the doc changed', async () => {
+    const { handle, queries } = makeDb([
+      [],
+      [],
+      // filed lookup: the row from the previous run, older than the doc
+      [{ id: 'ct-1', callKind: null, callId: null, receivedAt: '2026-09-18T01:00:00Z' }],
+      // upsert lookup finds the same row
       [{ id: 'ct-1', callId: null }],
     ])
     vi.mocked(db).mockResolvedValue(handle as never)
 
     const res = await POST(request())
-    const body = await res.json() as { filed: number }
-    expect(body.filed).toBe(1)
+    const body = await res.json() as { filed: number; unchanged: number }
+    expect(body).toMatchObject({ filed: 1, unchanged: 0 })
+    expect(exportDriveDocAsText).toHaveBeenCalledTimes(1)
     expect(queries.some(q => q[0].method === 'insert')).toBe(false)
   })
 })

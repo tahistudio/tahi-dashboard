@@ -316,6 +316,41 @@ export async function upsertTranscript(
   return { id, created: true }
 }
 
+export interface FiledTranscript {
+  id: string
+  callKind: string | null
+  callId: string | null
+  receivedAt: string
+}
+
+/**
+ * The row already filed for a (source, externalId), if any. The Drive sync
+ * asks this before exporting a doc: one it has already filed, matched or
+ * parked, and that Drive has not modified since, costs nothing on the next
+ * pass. Without this a parked doc was exported again every 30 minutes until
+ * someone attached it.
+ */
+export async function findFiledTranscript(
+  database: DrizzleDB,
+  source: TranscriptSource,
+  externalId: string,
+): Promise<FiledTranscript | null> {
+  const [row] = await database
+    .select({
+      id: schema.callTranscripts.id,
+      callKind: schema.callTranscripts.callKind,
+      callId: schema.callTranscripts.callId,
+      receivedAt: schema.callTranscripts.receivedAt,
+    })
+    .from(schema.callTranscripts)
+    .where(and(
+      eq(schema.callTranscripts.source, source),
+      eq(schema.callTranscripts.externalId, externalId),
+    ))
+    .limit(1)
+  return row ?? null
+}
+
 /** Attach a parked transcript to a call. Clears the unlinked reason. */
 export async function linkTranscript(
   database: DrizzleDB,
