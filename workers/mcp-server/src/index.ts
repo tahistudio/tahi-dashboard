@@ -22,7 +22,7 @@ import {
   timingSafeEquals,
   type ApprovalAttempts,
 } from './oauth-approval'
-import { coerceBoolean, coerceSubtasks } from './coerce'
+import { coerceArgs, coerceBoolean, coerceSubtasks } from './coerce'
 
 interface Env {
   TAHI_API_TOKEN: string
@@ -3383,9 +3383,12 @@ async function handleJsonRpc(body: JsonRpcRequest, env: Env): Promise<Response> 
       }
 
       try {
+        // Normalise once against the tool's own schema: connectors send
+        // booleans as strings and arrays as one string, and every dispatcher
+        // below reads arguments as typed.
         const text = await executeTool(
           toolParams.name,
-          toolParams.arguments ?? {},
+          coerceArgs(toolDef.inputSchema, toolParams.arguments ?? {}),
           env.TAHI_API_TOKEN,
           mrConfigFromEnv(env),
         )

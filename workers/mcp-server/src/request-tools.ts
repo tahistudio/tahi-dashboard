@@ -21,6 +21,8 @@
  * a portal impersonation token exists, not merely unwritten.
  */
 
+import { coerceBoolean } from './coerce'
+
 export type McpMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
 
 export interface McpApiCall {
@@ -110,7 +112,10 @@ export function requestToolCall(
       // Checklists travel as a JSON string, the shape the detail rail PATCHes.
       if (typeof args.checklists === 'string') patch.checklists = args.checklists
       // Client visibility: true removes the request from the client portal.
-      if (typeof args.isInternal === 'boolean') patch.isInternal = args.isInternal
+      // Connectors send booleans as "true" and "false"; read them leniently so
+      // a visibility flip never reads as "no field to update".
+      const isInternal = coerceBoolean(args.isInternal)
+      if (isInternal !== undefined) patch.isInternal = isInternal
       if (Object.keys(patch).length === 0) throw new Error('Pass at least one field to update')
       return { path: `/api/admin/requests/${s('requestId')}`, method: 'PATCH', body: patch }
     }
@@ -121,7 +126,7 @@ export function requestToolCall(
       return {
         path: `/api/admin/requests/${s('requestId')}/messages`,
         method: 'POST',
-        body: { body: s('content'), isInternal: args.isInternal ?? false },
+        body: { body: s('content'), isInternal: coerceBoolean(args.isInternal) ?? false },
       }
 
     // ── Workflow steps ────────────────────────────────────────────────
@@ -140,7 +145,8 @@ export function requestToolCall(
       const patch: Record<string, unknown> = {}
       if (s('title')) patch.title = s('title')
       if (typeof args.description === 'string') patch.description = args.description || null
-      if (typeof args.completed === 'boolean') patch.completed = args.completed
+      const completed = coerceBoolean(args.completed)
+      if (completed !== undefined) patch.completed = completed
       if (typeof args.orderIndex === 'number') patch.orderIndex = args.orderIndex
       // '' lifts the step to the top level.
       if (typeof args.parentStepId === 'string') patch.parentStepId = args.parentStepId || null
@@ -169,7 +175,7 @@ export function requestToolCall(
         body: {
           hours: args.hours,
           description: s('description'),
-          billable: args.billable ?? true,
+          billable: coerceBoolean(args.billable) ?? true,
           teamMemberId: s('teamMemberId'),
           // Omitted leaves the route on its own rule: the client's
           // default_hourly_rate, else no rate. Sending undefined here is not

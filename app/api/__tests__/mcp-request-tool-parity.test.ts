@@ -247,3 +247,26 @@ describe('tools held back', () => {
     expect(requestToolCall('ai_suggest', {})).toBeNull()
   })
 })
+
+describe('stringy booleans from connectors', () => {
+  it('update_request_fields reads isInternal sent as a string', () => {
+    expect(requestToolCall('update_request_fields', { requestId: 'r1', isInternal: 'false' })?.body)
+      .toEqual({ isInternal: false })
+    expect(requestToolCall('update_request_fields', { requestId: 'r1', isInternal: 'true' })?.body)
+      .toEqual({ isInternal: true })
+  })
+
+  it('post_request_message reads isInternal sent as a string', () => {
+    expect(requestToolCall('post_request_message', { requestId: 'r1', content: 'hi', isInternal: 'true' })?.body)
+      .toEqual({ body: 'hi', isInternal: true })
+    expect(requestToolCall('post_request_message', { requestId: 'r1', content: 'hi' })?.body)
+      .toEqual({ body: 'hi', isInternal: false })
+  })
+
+  it('update_request_step and log_request_time read their booleans sent as strings', () => {
+    expect(requestToolCall('update_request_step', { requestId: 'r1', stepId: 's1', completed: 'true' })?.body)
+      .toEqual({ completed: true })
+    expect(requestToolCall('log_request_time', { requestId: 'r1', hours: 2, billable: 'false' })?.body)
+      .toMatchObject({ billable: false })
+  })
+})

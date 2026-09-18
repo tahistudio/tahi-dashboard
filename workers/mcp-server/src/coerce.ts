@@ -50,3 +50,55 @@ export function coerceSubtasks(value: unknown): string[] | undefined {
   }
   return titles.length ? titles : undefined
 }
+
+/** The slice of a tool's JSON Schema the coercion reads. */
+export interface ArgSchema {
+  properties?: Record<string, unknown>
+}
+
+function schemaType(def: unknown): unknown {
+  return def && typeof def === 'object' ? (def as { type?: unknown }).type : undefined
+}
+
+/**
+ * Normalise a tool call's arguments against the tool's own schema, once, at
+ * the dispatch boundary. Booleans arrive as "true" or "false", numbers as
+ * "12", arrays as one string; every dispatcher downstream still reads the
+ * argument the way it always did (=== true, typeof === 'boolean', ?? false),
+ * so fixing it here fixes every tool at once. A boolean that cannot be read
+ * is removed rather than passed through as a truthy string, which is the
+ * failure that made `rotate: "false"` rotate a share token. Other values pass
+ * untouched.
+ */
+export function coerceArgs(schema: ArgSchema | undefined, args: Record<string, unknown>): Record<string, unknown> {
+  const props = schema?.properties
+  if (!props) return args
+  const out: Record<string, unknown> = { ...args }
+  for (const [key, def] of Object.entries(props)) {
+    if (!(key in out) || out[key] === undefined || out[key] === null) continue
+    const type = schemaType(def)
+    const value = out[key]
+    if (type === 'boolean') {
+      const b = coerceBoolean(value)
+      if (b === undefined) delete out[key]
+      else out[key] = b
+    } else if ((type === 'number' || type === 'integer') && typeof value === 'string') {
+      const trimmed = value.trim()
+      const n = trimmed === '' ? Number.NaN : Number(trimmed)
+      if (Number.isFinite(n)) out[key] = n
+    } else if (type === 'array' && typeof value === 'string') {
+      const trimmed = value.trim()
+      if (trimmed.startsWith('[')) {
+        try {
+          const parsed: unknown = JSON.parse(trimmed)
+          if (Array.isArray(parsed)) out[key] = parsed
+          continue
+        } catch {
+          // fall through to the split below
+        }
+      }
+      out[key] = trimmed.split(/\r?\n|,/).map(p => p.trim()).filter(Boolean)
+    }
+  }
+  return out
+}

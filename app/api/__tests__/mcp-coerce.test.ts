@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { coerceBoolean, coerceSubtasks } from '../../../workers/mcp-server/src/coerce'
+import { coerceArgs, coerceBoolean, coerceSubtasks } from '../../../workers/mcp-server/src/coerce'
 
 describe('coerceBoolean (MCP argument coercion)', () => {
   it('passes real booleans through', () => {
@@ -49,5 +49,50 @@ describe('coerceSubtasks (MCP argument coercion)', () => {
     expect(coerceSubtasks([])).toBeUndefined()
     expect(coerceSubtasks('')).toBeUndefined()
     expect(coerceSubtasks(42)).toBeUndefined()
+  })
+})
+
+describe('coerceArgs (schema-driven, at the dispatch boundary)', () => {
+  const schema = {
+    properties: {
+      rotate: { type: 'boolean' },
+      dryRun: { type: 'boolean' },
+      limit: { type: 'number' },
+      hours: { type: 'number' },
+      subtasks: { type: 'array', items: { type: 'string' } },
+      title: { type: 'string' },
+    },
+  }
+
+  it('turns stringy booleans into real ones, both ways', () => {
+    const out = coerceArgs(schema, { rotate: 'false', dryRun: 'true', title: 'x' })
+    expect(out.rotate).toBe(false)
+    expect(out.dryRun).toBe(true)
+    expect(out.title).toBe('x')
+  })
+
+  it('drops a boolean it cannot read instead of passing a truthy string', () => {
+    const out = coerceArgs(schema, { rotate: 'maybe' })
+    expect('rotate' in out).toBe(false)
+  })
+
+  it('turns numeric strings into numbers and leaves the rest', () => {
+    const out = coerceArgs(schema, { limit: '12', hours: '1.5', title: '7' })
+    expect(out.limit).toBe(12)
+    expect(out.hours).toBe(1.5)
+    expect(out.title).toBe('7')
+  })
+
+  it('turns a string array argument into a list, JSON or separated', () => {
+    expect(coerceArgs(schema, { subtasks: '["One","Two"]' }).subtasks).toEqual(['One', 'Two'])
+    expect(coerceArgs(schema, { subtasks: 'One\nTwo, Three' }).subtasks).toEqual(['One', 'Two', 'Three'])
+  })
+
+  it('leaves real values and unknown keys alone, and never mutates the input', () => {
+    const input = { rotate: true, limit: 3, subtasks: ['a'], extra: 'kept' }
+    const out = coerceArgs(schema, input)
+    expect(out).toEqual(input)
+    expect(out).not.toBe(input)
+    expect(coerceArgs(undefined, input)).toBe(input)
   })
 })
