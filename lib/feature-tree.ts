@@ -104,6 +104,13 @@ export const FEATURE_TREE: ReadonlyArray<FeatureNode> = [
   { key: 'settings', label: 'Settings', description: 'Account + workspace settings.', parent: null, appliesTo: ['team'], route: '/settings' },
   { key: 'settings.integrations', label: 'Settings: integrations', description: 'Connected services + webhooks.', parent: 'settings', appliesTo: ['team'] },
   { key: 'settings.permissions', label: 'Settings: permissions', description: 'The permissions builder itself.', parent: 'settings', appliesTo: ['team'] },
+
+  // ── Shared: the "how this works" guide ─────────────────────────────────────
+  // Deliberately unmapped to any FEATURE_RESOURCE, so a scoped team_member's
+  // role baseline (decideFeature's `if (!resource) return true`) allows it the
+  // same as an admin, and it is not in CLIENT_DEFAULT_DENY, so a client allows
+  // it too: allowed for everyone by default, as the guide is meant to be.
+  { key: 'help', label: 'How this works', description: 'Short guide to requests, tasks, hand-offs, blockers and (for the studio) the MCP server.', parent: null, appliesTo: ['team', 'client'], route: '/help' },
 ]
 
 const BY_KEY = new Map(FEATURE_TREE.map(n => [n.key, n]))

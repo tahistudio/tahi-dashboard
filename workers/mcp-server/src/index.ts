@@ -279,6 +279,9 @@ const mrListProps = {
 export const TOOLS: ToolDef[] = [
   // ── Read: Overview & Reports ──────────────────────────────────────────
   tool('get_overview', 'Get dashboard overview: KPIs, recent requests, revenue summary'),
+  tool('get_dashboard_guide', 'Read the short "how this works" guide: what the dashboard is for, requests versus tasks, request statuses, tracks and plans, hand-offs, blockers, participants and roles, comments, invoices, and what this MCP server can do. Returns every section, or one section when topic names its key.', {
+    topic: prop('string', 'One section key (e.g. "hand-offs", "request-statuses"). Omit for every section'),
+  }),
   tool('get_reports', 'Get aggregate reports: total clients, requests, billable hours, trends'),
   tool('get_billing_summary', 'Per-client billable and total hours for a month, with an indicative amount at the studio hourly rate. Reads time_entries only, never the invoices table, so no invoice status (draft included) can reach this figure.'),
   tool('get_response_time', 'Get response time report with averages and breakdowns'),
@@ -1833,6 +1836,23 @@ export const TOOLS: ToolDef[] = [
     requestId: prop('string', 'Request ID'),
     participantRowId: prop('string', 'requestParticipants row ID (from list_request_participants)'),
   }, ['requestId', 'participantRowId']),
+
+  // ── Request hand-offs: waiting on a client contact ────────────────────
+  tool('hand_off_request', 'Hand a request to one named client contact: they see it in their own Waiting on you list with one action, get notified (in-app and by email), and the studio is nudged once if nobody acts after a few days. The request keeps its Tahi owner throughout. Refused with 404 if the contact does not belong to the request\'s organisation.', {
+    request_id: prop('string', 'Request ID'),
+    contact_id: prop('string', 'The client contact this request is handed to. Must belong to the request\'s organisation'),
+    reason: prop('string', 'Why the studio is waiting on them', { enum: ['approval', 'content', 'access', 'decision', 'file', 'other'] }),
+    note: prop('string', 'Optional note giving the contact more context'),
+    due_at: prop('string', 'Optional ISO date the studio needs an answer by'),
+  }, ['request_id', 'contact_id', 'reason']),
+  tool('hand_back_request', 'Hand a request back from the client contact it is waiting on: clears the pointer and notifies the Tahi owner. Also happens automatically when the named contact approves, uploads a file, or replies on the request.', {
+    request_id: prop('string', 'Request ID'),
+    note: prop('string', 'Optional note explaining the hand-back'),
+  }, ['request_id']),
+  tool('list_requests_waiting_on_clients', 'List every request currently handed to a client contact (waitingOn is set), newest first. Pass older_than_days to keep only the ones that have been waiting at least that long, using each request\'s own daysWaiting.', {
+    org_id: prop('string', 'Limit to one client organisation'),
+    older_than_days: prop('number', 'Only requests that have been waiting at least this many days'),
+  }),
   tool('list_sub_requests', "List a request's sub-requests (direct children) ordered by subPosition", {
     requestId: prop('string', 'Parent request ID'),
   }, ['requestId']),
@@ -2029,6 +2049,8 @@ async function executeTool(
     // ── Overview & Reports ────────────────────────────────────────────
     case 'get_overview':
       return json(await apiGet('/api/admin/overview', token))
+    case 'get_dashboard_guide':
+      return json(await apiGet('/api/admin/guide', token, s('topic') ? { key: s('topic')! } : undefined))
     case 'get_reports':
       return json(await apiGet('/api/admin/reports/overview', token))
     case 'get_billing_summary':
@@ -3090,6 +3112,44 @@ async function executeTool(
       }))
     case 'remove_request_participant':
       return json(await apiWrite(`/api/admin/requests/${s('requestId')}/participants/${s('participantRowId')}`, token, 'DELETE'))
+
+    // ── Request hand-offs: waiting on a client contact ──────────────────
+    case 'hand_off_request': {
+      const requestId = s('request_id')
+      if (!requestId) throw new Error('request_id is required')
+      return json(await apiWrite(`/api/admin/requests/${requestId}/handoff`, token, 'POST', {
+        contactId: s('contact_id'),
+        reason: s('reason'),
+        note: s('note'),
+        dueAt: s('due_at'),
+      }))
+    }
+    case 'hand_back_request': {
+      const requestId = s('request_id')
+      if (!requestId) throw new Error('request_id is required')
+      return json(await apiWrite(`/api/admin/requests/${requestId}/handoff`, token, 'DELETE', {
+        note: s('note'),
+      }))
+    }
+    case 'list_requests_waiting_on_clients': {
+      const p: Record<string, string> = { waitingOn: 'client' }
+      if (s('org_id')) p.orgId = s('org_id')!
+      const result = await apiGet('/api/admin/requests', token, p)
+      const olderThanDays = args.older_than_days
+      if (olderThanDays !== undefined && olderThanDays !== null && result && typeof result === 'object') {
+        const minDays = Number(olderThanDays)
+        const body = result as { requests?: Array<Record<string, unknown>> }
+        if (Array.isArray(body.requests) && Number.isFinite(minDays)) {
+          body.requests = body.requests.filter((r) => {
+            const waitingOn = r.waitingOn as { daysWaiting?: number } | null | undefined
+            return !!waitingOn && typeof waitingOn.daysWaiting === 'number' && waitingOn.daysWaiting >= minDays
+          })
+        }
+        return json(body)
+      }
+      return json(result)
+    }
+
     case 'list_sub_requests':
       return json(await apiGet(`/api/admin/requests/${s('requestId')}/sub-requests`, token))
     case 'create_sub_request': {
