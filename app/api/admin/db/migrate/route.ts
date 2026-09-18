@@ -2306,6 +2306,31 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_requests_waiting_on ON requests(waiting_on_contact_id) WHERE waiting_on_contact_id IS NOT NULL`,
     ],
   },
+  {
+    name: '0105',
+    description: `call_transcripts: the landing strip for call notes, phase 0 of "call notes to tasks". Until now a "Notes by Gemini" doc could only land on discovery_calls: scheduled_calls (client kickoffs and check-ins) has no transcript columns at all, so the notes from a client call were discarded, and a doc the matcher could not place with a 20 point lead was dropped with nothing left behind for a human to rescue. Every parsed doc now gets a row, linked when a call wins clearly and parked when it does not. call_kind ('discovery' | 'scheduled') and call_id both stay NULL while the notes are unplaced, which is a normal state and not an error: the matcher parks rather than guesses, because a wrong match writes one client's conversation onto another client's call. source is 'gemini_drive' or 'manual'; external_id is the Drive file id and is UNIQUE WITH source, which is what makes the 30-minute cron idempotent (re-reading the same doc updates its row rather than filling the unlinked list with copies). title is the doc title as Drive reports it, kept because the "Unlinked call notes" list on /calls has to name a doc a human is being asked to place and external_id is an opaque id. received_at is the doc's modified time, not this row's created_at, so the list sorts by when the notes were written. hash is a non-cryptographic FNV-1a of the body for change detection on re-sync only. text is the full transcript, summary the Gemini Summary section, wrap_up the wrap up as written (summary plus next steps plus details), the part Liam reads instead of the whole transcript. matched_by is 'gemini_title_time' or 'manual'; unlinked_reason is 'no_match' | 'ambiguous' while call_id is NULL. No REFERENCES on call_id: it is polymorphic across two tables, and notes should outlive a deleted call rather than vanish with it. discovery_calls keeps its own transcript / summary / outcome_notes columns and the sync keeps writing them for a discovery match, so nothing reading those today changes behaviour; a scheduled match writes ONLY the transcripts row, because scheduled_calls.notes is the prep note (see 0102) and must not be clobbered with a transcript. Additive and idempotent, IF NOT EXISTS throughout. Apply BEFORE deploying: the new routes select these columns directly and the Drive sync writes a row for every doc it parses.`,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS call_transcripts (
+        id text PRIMARY KEY NOT NULL,
+        call_kind text,
+        call_id text,
+        source text NOT NULL,
+        external_id text NOT NULL,
+        title text,
+        received_at text NOT NULL,
+        hash text NOT NULL,
+        text text NOT NULL,
+        summary text,
+        wrap_up text,
+        matched_by text,
+        unlinked_reason text,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_call_transcripts_source_external ON call_transcripts(source, external_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_call_transcripts_call ON call_transcripts(call_kind, call_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_call_transcripts_received ON call_transcripts(received_at)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

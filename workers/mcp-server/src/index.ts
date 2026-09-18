@@ -1153,11 +1153,25 @@ export const TOOLS: ToolDef[] = [
   tool('cron_delivery_watch', 'Delivery spine: scans active engagements and pushes a notification to the default owner for each client whose delivery rollup is off track (blocked / delayed / at_risk). One ping per off-track client per 23h.'),
 
   // ── Google Drive: Gemini transcript autopull ─────────────────────────
-  tool('drive_sync_gemini_transcripts', 'Scan Google Drive for "Notes by Gemini" docs modified in the last N hours, parse the summary + transcript + next steps, and write them to matching discovery_calls. Matches by parsed meeting time (±2h) + attendee name in the call title or attendees JSON. Idempotent — already-synced calls are skipped.', {
+  tool('drive_sync_gemini_transcripts', 'Scan Google Drive for "Notes by Gemini" docs modified in the last N hours, parse the summary + transcript + next steps, and file each one as a call_transcripts row. Matches by parsed meeting time (within 2h) + attendee name in the call title or attendees JSON, scored across BOTH discovery_calls and scheduled_calls; a winner needs a 20 point lead or the notes are parked as unlinked for a human to attach. A discovery match also writes transcript + summary + outcome notes onto the call as before; a scheduled match writes the transcripts row only. Idempotent: already-synced calls are skipped and a re-read of the same doc updates its row. Returns { scanned, written, filed, parked, results }.', {
     sinceHours: prop('number', 'Only consider docs modified in the last N hours (default 72)'),
     limit: prop('number', 'Cap docs processed per call (default 20, max 50)'),
     dryRun: prop('boolean', 'Parse + report matches without writing (default false)'),
   }),
+
+  // ── Call transcripts (the landing strip for call notes) ──────────────
+  tool('list_call_transcripts', 'List call notes that have landed, newest first. Pass unlinked=true for only the ones still waiting to be attached to a call (the matcher parks anything it cannot place with a 20 point lead). Each row: id, callKind, callId, source, title, receivedAt, summary, unlinkedReason, a 160-char preview and the full text length.', {
+    unlinked: prop('boolean', 'Only notes not yet attached to a call (default false)'),
+    limit: prop('number', 'Cap (default 20, max 100)'),
+  }),
+  tool('get_call_transcript', 'Get one set of call notes in full: the transcript text and the wrap up (summary plus next steps plus details).', {
+    id: prop('string', 'Call transcript id'),
+  }, ['id']),
+  tool('link_call_transcript', 'Attach parked call notes to a call. Validates the call exists and that you have access to its client. Attaching to a discovery call with no transcript of its own also copies the text and summary onto that call, exactly as the Drive sync would have.', {
+    id: prop('string', 'Call transcript id'),
+    call_kind: prop('string', "'discovery' (discovery_calls) or 'scheduled' (scheduled_calls)"),
+    call_id: prop('string', 'Id of the call in that table'),
+  }, ['id', 'call_kind', 'call_id']),
 
   // ── Lead rescore (batched, ICP-aware) ────────────────────────────────
   tool('leads_rescore_batch', 'Force-rescore a batch of leads with Haiku using the current ICP-aware rubric. Loop until scored=0 to drain the backlog. Any lead scoring >= enrichThreshold (default 60) gets queued for Sonnet full enrichment on the next cron tick. Use after the ICP doc is updated or the scoring prompt changes.', {
@@ -2624,6 +2638,21 @@ async function executeTool(
       const qs = params.toString()
       return json(await apiWrite(`/api/admin/integrations/google/sync-drive-transcripts${qs ? `?${qs}` : ''}`, token, 'POST', {}))
     }
+
+    // ── Call transcripts ──────────────────────────────────────────────
+    case 'list_call_transcripts': {
+      const params: Record<string, string> = {}
+      if (args.unlinked === true) params.unlinked = '1'
+      if (typeof args.limit === 'number') params.limit = String(args.limit)
+      return json(await apiGet('/api/admin/call-transcripts', token, params))
+    }
+    case 'get_call_transcript':
+      return json(await apiGet(`/api/admin/call-transcripts/${s('id')}`, token))
+    case 'link_call_transcript':
+      return json(await apiWrite(`/api/admin/call-transcripts/${s('id')}`, token, 'PATCH', {
+        callKind: args.call_kind,
+        callId: args.call_id,
+      }))
 
     // ── Lead rescore ──────────────────────────────────────────────────
     case 'leads_rescore_batch': {

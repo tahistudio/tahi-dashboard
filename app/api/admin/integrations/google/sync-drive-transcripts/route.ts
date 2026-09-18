@@ -1,8 +1,20 @@
 /**
  * POST /api/admin/integrations/google/sync-drive-transcripts
  *
- * Pulls "Notes by Gemini" docs from Drive and writes their summary +
- * transcript + next steps back to matching discovery_calls rows.
+ * Pulls "Notes by Gemini" docs from Drive, files each one as a
+ * call_transcripts row, and (for a discovery match) keeps writing the
+ * summary + transcript + next steps back onto the discovery_calls row
+ * exactly as it always did.
+ *
+ * WHAT CHANGED IN PHASE 0. The matcher now scores discovery_calls AND
+ * scheduled_calls together, so the notes from a client kickoff or check-in
+ * stop being thrown away, and EVERY parsed doc leaves a row behind:
+ * linked when a call wins by the required lead, parked with an
+ * unlinked_reason ('no_match' | 'ambiguous') when it does not, so a human
+ * can attach it from /calls instead of the notes disappearing. A scheduled
+ * match writes the transcripts row ONLY: scheduled_calls has no transcript
+ * column and its `notes` column is the prep note (migration 0102), which a
+ * transcript must not clobber.
  *
  * Matching strategy:
  *   1. Parse the doc title to extract scheduled time + attendee guess
@@ -32,20 +44,24 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { and, eq, gte, isNull, lte, or } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { getGoogleAccessToken, listDriveFiles, exportDriveDocAsText } from '@/lib/google'
 import { parseGeminiTitle, parseGeminiTranscript } from '@/lib/gemini-transcript-parser'
 import { logCronRun } from '@/lib/cron-runs'
+import { MATCH_WINDOW_MS, findCallMatch, upsertTranscript } from '@/lib/call-transcripts'
 
 export const dynamic = 'force-dynamic'
 
-const MATCH_WINDOW_MS = 2 * 60 * 60_000  // ±2 hours
+type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 interface DocResult {
   fileId: string
   title: string
   status: 'matched' | 'no_match' | 'multiple_matches' | 'already_synced' | 'parse_failed' | 'skipped' | 'no_transcript'
+  callKind?: 'discovery' | 'scheduled'
   callId?: string
+  /** The call_transcripts row written for this doc, linked or parked. */
+  transcriptId?: string
   detail?: string
 }
 
@@ -87,6 +103,10 @@ export async function POST(req: NextRequest) {
 
   const results: DocResult[] = []
   let written = 0
+  // `filed` counts call_transcripts rows written (matched or parked);
+  // `parked` counts the subset still waiting for a human to attach them.
+  let filed = 0
+  let parked = 0
 
   for (const file of files) {
     const titleParsed = parseGeminiTitle(file.name)
@@ -95,86 +115,44 @@ export async function POST(req: NextRequest) {
       continue
     }
 
-    // Candidate calls within the time window. If scheduledAt couldn't
-    // be parsed, fall back to a 7-day window centred on the doc's
-    // modifiedTime (a fuzzy "around this week" heuristic).
+    // Candidate window. If scheduledAt couldn't be parsed, fall back to a
+    // 7-day window centred on the doc's modifiedTime (a fuzzy "around this
+    // week" heuristic).
     const centre = titleParsed.scheduledAt
       ? new Date(titleParsed.scheduledAt).getTime()
       : new Date(file.modifiedTime ?? file.createdTime ?? Date.now()).getTime()
     const windowMs = titleParsed.scheduledAt ? MATCH_WINDOW_MS : 3.5 * 24 * 60 * 60_000
-    const windowStart = new Date(centre - windowMs).toISOString()
-    const windowEnd = new Date(centre + windowMs).toISOString()
 
-    const candidates = await database
-      .select({
-        id: schema.discoveryCalls.id,
-        title: schema.discoveryCalls.title,
-        scheduledAt: schema.discoveryCalls.scheduledAt,
-        transcript: schema.discoveryCalls.transcript,
-        transcriptSource: schema.discoveryCalls.transcriptSource,
-        attendees: schema.discoveryCalls.attendees,
-      })
-      .from(schema.discoveryCalls)
-      .where(and(
-        gte(schema.discoveryCalls.scheduledAt, windowStart),
-        lte(schema.discoveryCalls.scheduledAt, windowEnd),
-      ))
+    // One pass over BOTH call tables. The 20 point lead rule lives in
+    // lib/call-transcripts.ts and is unchanged: a near-tie is parked, never
+    // guessed, which matters more now the field is twice as wide.
+    const match = await findCallMatch(database as unknown as D1, {
+      centre,
+      windowMs,
+      attendeeGuess: titleParsed.attendeeGuess,
+    })
 
-    if (candidates.length === 0) {
-      results.push({ fileId: file.id, title: file.name, status: 'no_match', detail: `No call in ±${Math.round(windowMs / 60 / 60_000)}h window` })
-      continue
-    }
-
-    // Score each candidate by attendee/title match.
-    const guess = titleParsed.attendeeGuess?.toLowerCase() ?? ''
-    const scored = candidates.map(c => {
-      let score = 0
-      // Time proximity bonus — closer in time = higher score
-      const callTime = new Date(c.scheduledAt).getTime()
-      const deltaMin = Math.abs(callTime - centre) / 60_000
-      if (deltaMin < 15) score += 30
-      else if (deltaMin < 60) score += 15
-      else if (deltaMin < 180) score += 5
-
-      // Attendee name match in attendees JSON OR in call title
-      if (guess) {
-        const callTitleLower = c.title.toLowerCase()
-        if (callTitleLower.includes(guess)) score += 40
-        try {
-          const att = JSON.parse(c.attendees) as Array<{ name?: string; email?: string }>
-          for (const a of att) {
-            if (a.name?.toLowerCase().includes(guess)) { score += 30; break }
-            if (a.email?.toLowerCase().split('@')[0].includes(guess.split(' ')[0])) { score += 15; break }
-          }
-        } catch { /* ignore */ }
-      }
-      return { call: c, score }
-    }).sort((a, b) => b.score - a.score)
-
-    const top = scored[0]
-    const runnerUp = scored[1]
-    if (!top || top.score === 0) {
-      results.push({ fileId: file.id, title: file.name, status: 'no_match', detail: 'No candidate scored > 0' })
-      continue
-    }
-    // Require a clear winner — at least 20 points lead over runner-up
-    if (runnerUp && top.score - runnerUp.score < 20) {
+    // Already synced onto its discovery call: nothing to fetch, and the
+    // transcripts row was written on the run that first matched it.
+    if (
+      match.status === 'matched'
+      && match.candidate.kind === 'discovery'
+      && match.candidate.transcriptSource === 'gemini_drive'
+      && match.candidate.transcript
+    ) {
       results.push({
         fileId: file.id,
         title: file.name,
-        status: 'multiple_matches',
-        detail: `Top ${top.call.id} (${top.score}) vs runner-up ${runnerUp.call.id} (${runnerUp.score}) — too close`,
+        status: 'already_synced',
+        callKind: 'discovery',
+        callId: match.candidate.id,
       })
       continue
     }
 
-    // Already synced from this source — skip
-    if (top.call.transcriptSource === 'gemini_drive' && top.call.transcript) {
-      results.push({ fileId: file.id, title: file.name, status: 'already_synced', callId: top.call.id })
-      continue
-    }
-
-    // Fetch + parse the doc
+    // The body is fetched on EVERY remaining path, matched or not. Parked
+    // notes with no text would be nothing a human could act on, which is the
+    // whole point of parking them.
     let docText = ''
     try {
       docText = await exportDriveDocAsText(accessToken, file.id)
@@ -190,23 +168,12 @@ export async function POST(req: NextRequest) {
 
     const parsed = parseGeminiTranscript(docText)
     if (!parsed.transcript && !parsed.summary) {
-      results.push({ fileId: file.id, title: file.name, status: 'no_transcript', callId: top.call.id })
+      results.push({ fileId: file.id, title: file.name, status: 'no_transcript' })
       continue
     }
 
-    if (dryRun) {
-      results.push({
-        fileId: file.id,
-        title: file.name,
-        status: 'matched',
-        callId: top.call.id,
-        detail: `Would write: ${parsed.summary?.length ?? 0}-char summary, ${parsed.transcript?.length ?? 0}-char transcript, ${parsed.nextSteps.length} next steps`,
-      })
-      continue
-    }
-
-    // Compose outcomeNotes from Next steps + Details (only if no
-    // existing outcomeNotes — never clobber a Liam-edited value).
+    // Compose outcomeNotes from Next steps + Details (only written to a
+    // discovery call when it has none, never clobbering a Liam-edited value).
     const outcomeBits: string[] = []
     if (parsed.nextSteps.length > 0) {
       outcomeBits.push('NEXT STEPS\n' + parsed.nextSteps.map(s => `- ${s}`).join('\n'))
@@ -216,13 +183,81 @@ export async function POST(req: NextRequest) {
     }
     const outcomeNotes = outcomeBits.length > 0 ? outcomeBits.join('\n\n') : null
 
+    // The wrap up as written: the Summary section plus next steps plus
+    // details. This is the part Liam reads instead of the whole transcript.
+    const wrapUpBits: string[] = []
+    if (parsed.summary) wrapUpBits.push('SUMMARY\n' + parsed.summary)
+    if (outcomeNotes) wrapUpBits.push(outcomeNotes)
+    const wrapUp = wrapUpBits.length > 0 ? wrapUpBits.join('\n\n') : null
+
+    const matchedCall = match.status === 'matched' ? match.candidate : null
+    const unlinkedReason = match.status === 'ambiguous'
+      ? 'ambiguous' as const
+      : match.status === 'no_match' ? 'no_match' as const : null
+
+    if (dryRun) {
+      results.push({
+        fileId: file.id,
+        title: file.name,
+        status: matchedCall ? 'matched' : (unlinkedReason === 'ambiguous' ? 'multiple_matches' : 'no_match'),
+        callKind: matchedCall?.kind,
+        callId: matchedCall?.id,
+        detail: `Would file: ${parsed.summary?.length ?? 0}-char summary, ${parsed.transcript?.length ?? 0}-char transcript, ${parsed.nextSteps.length} next steps`,
+      })
+      continue
+    }
+
+    const { id: transcriptId } = await upsertTranscript(database as unknown as D1, {
+      source: 'gemini_drive',
+      externalId: file.id,
+      title: file.name,
+      receivedAt: file.modifiedTime ?? file.createdTime ?? new Date().toISOString(),
+      text: parsed.transcript ?? '',
+      summary: parsed.summary,
+      wrapUp,
+      callKind: matchedCall?.kind ?? null,
+      callId: matchedCall?.id ?? null,
+      matchedBy: matchedCall ? 'gemini_title_time' : null,
+      unlinkedReason,
+    })
+    filed++
+
+    if (!matchedCall) {
+      parked++
+      results.push({
+        fileId: file.id,
+        title: file.name,
+        status: unlinkedReason === 'ambiguous' ? 'multiple_matches' : 'no_match',
+        transcriptId,
+        detail: match.status === 'ambiguous'
+          ? `Top ${match.top.candidate.kind}/${match.top.candidate.id} (${match.top.score}) vs runner-up ${match.runnerUp.candidate.kind}/${match.runnerUp.candidate.id} (${match.runnerUp.score}), too close. Parked for manual attach.`
+          : 'No candidate call scored. Parked for manual attach.',
+      })
+      continue
+    }
+
+    // A scheduled call has no transcript column, and its `notes` column is
+    // the prep note (migration 0102). The transcripts row IS the write.
+    if (matchedCall.kind === 'scheduled') {
+      results.push({
+        fileId: file.id,
+        title: file.name,
+        status: 'matched',
+        callKind: 'scheduled',
+        callId: matchedCall.id,
+        transcriptId,
+        detail: 'Filed against the scheduled call; scheduled_calls columns left untouched',
+      })
+      continue
+    }
+
+    // Discovery: the mirror onto discovery_calls, byte for byte what this
+    // route did before the transcripts table existed.
     const updates: Record<string, string | null> = {
       transcriptSource: 'gemini_drive',
       updatedAt: new Date().toISOString(),
     }
-    // Only write transcript if not already set (Liam might have pasted
-    // their own). Same for summary + outcomeNotes.
-    if (parsed.transcript && !top.call.transcript) {
+    if (parsed.transcript && !matchedCall.transcript) {
       updates.transcript = parsed.transcript.slice(0, 250_000)  // matches the discovery-calls PATCH cap
     }
     if (parsed.summary) {
@@ -235,14 +270,16 @@ export async function POST(req: NextRequest) {
     await database
       .update(schema.discoveryCalls)
       .set(updates)
-      .where(eq(schema.discoveryCalls.id, top.call.id))
+      .where(eq(schema.discoveryCalls.id, matchedCall.id))
 
     written++
     results.push({
       fileId: file.id,
       title: file.name,
       status: 'matched',
-      callId: top.call.id,
+      callKind: 'discovery',
+      callId: matchedCall.id,
+      transcriptId,
       detail: `Wrote ${parsed.transcript ? `${parsed.transcript.length}-char transcript, ` : ''}${parsed.summary ? `${parsed.summary.length}-char summary, ` : ''}${parsed.nextSteps.length} next steps`,
     })
   }
@@ -261,10 +298,10 @@ export async function POST(req: NextRequest) {
     dryRun,
     scanned: files.length,
     written,
+    filed,
+    parked,
     results,
   }
   await logCronRun(database as unknown as Parameters<typeof logCronRun>[0], 'sync-drive-transcripts', 'success', Date.now() - t0, summary, null)
   return NextResponse.json(summary)
-  void isNull
-  void or
 }
