@@ -67,13 +67,15 @@ Phase 3, keeping in sync (later, about 3 days)
 
 Total for phases 0 to 2: about 11 days of build, in that order. Phase 1 already pays off without Slack: the inbox alone turns every transcribed call into reviewed tasks.
 
-## 5. Decisions for Liam
+## 5. Decisions (Liam, 2026-09-19)
 
-1. Slack destination: your direct messages, or a #tahi-approvals channel Staci also sees?
-2. Your own typed or voice notes: gate them like everything else, or create immediately with an undo in the thread?
-3. Transcript source to wire first: Gemini Drive (exists) or the inbox? If the inbox, which service sends the emails (Fathom, Otter, Fireflies, Teams), so the parser is built to its format.
-4. Task threads: fine to mirror bot lines into the request thread when the task has one, and use the new task thread otherwise?
-5. Snooze times: tonight 7 pm NZ and this week Friday 9 am NZ as the defaults?
+1. Slack destination: the #founders channel (Staci and Liam). Call suggestions go there; the first founder to click decides, and the message shows who decided.
+2. Typed and voice notes work like the AI request wizard: the bot replies "Here's what I understood" with the draft, and the sender approves their own. Staci's notes go to Staci, not Liam. A client using the bot gets "Is this the request?" and approves their own draft, which then lands as a normal new request for the studio. So the approver of a note is its sender; the approver of a call suggestion is either founder.
+3. Source: Gemini transcripts through Google Drive, which carry the full transcript and the wrap-up. The Gmail copy carries only the wrap-up and a link to the doc, so Drive stays the source and the inbox branch is dropped from Phase 0.
+4. Task threads: as proposed, bot lines mirror into the request thread when the task has one, and use the task thread otherwise.
+5. Snooze: kept, minimal (tonight, this week), low priority.
+
+Consequence for the model: task_suggestions gains approverType and approverId (a founder pair for call suggestions, the sender for notes, the contact for a client's request draft), and the Slack layer routes each suggestion to its approver: #founders for calls, a direct message for a member's own note, the client's channel for a client's draft.
 
 ## 6. Risks and how the design handles them
 
