@@ -22,15 +22,23 @@ import { notifyRequestTeam } from '@/lib/notify-request-team'
 import { logAudit } from '@/lib/audit'
 import {
   HANDOFF_REASONS,
+  HANDOFF_REASON_OPTIONS,
   HANDOFF_REASON_SENTENCE,
   HANDOFF_ACTION_VERB,
   HANDOFF_CLEARED_COLUMNS,
   buildWaitingOn,
   daysWaiting,
   handBackOnClientAction,
+  handoffActionVerb,
   handoffParticipantRole,
+  handoffReasonLabel,
+  handoffReasonShortLabel,
   isHandoffReason,
+  waitingBannerText,
+  waitingBlockedByLine,
   waitingChipLabel,
+  waitingChipText,
+  type WaitingOnPayload,
 } from '@/lib/request-handoff'
 
 type QueryRecord = { method: string; args: unknown[] }
@@ -112,6 +120,72 @@ describe('the reason vocabulary', () => {
     expect(isHandoffReason(null)).toBe(false)
     expect(isHandoffReason(3)).toBe(false)
   })
+
+  it('accepts every known reason', () => {
+    for (const reason of HANDOFF_REASONS) expect(isHandoffReason(reason)).toBe(true)
+  })
+
+  it('has exactly six reasons, in contract order', () => {
+    expect(HANDOFF_REASONS).toEqual(['approval', 'content', 'access', 'decision', 'file', 'other'])
+  })
+})
+
+// Ported from the UI slice's lib/request-handoff-types.ts (HO.3): that file
+// typed the same contract locally so the UI could build ahead of this one.
+// Reconciled here onto this file's actual vocabulary, which differs from the
+// local copy for 'decision', 'file' and 'other' (the chip reads "a decision"
+// / "a file" / "something", not the bare noun) - the assertions below use
+// the real words, not the superseded ones.
+describe('handoffReasonLabel', () => {
+  it('matches the agreed copy for every reason', () => {
+    expect(handoffReasonLabel('approval')).toBe('Needs your approval')
+    expect(handoffReasonLabel('content')).toBe('Needs content from you')
+    expect(handoffReasonLabel('access')).toBe('Needs access from you')
+    expect(handoffReasonLabel('decision')).toBe('Needs a decision from you')
+    expect(handoffReasonLabel('file')).toBe('Needs a file from you')
+    expect(handoffReasonLabel('other')).toBe('Needs something from you')
+  })
+
+  it('falls back to "other" for an unknown or missing reason', () => {
+    expect(handoffReasonLabel('urgent')).toBe('Needs something from you')
+    expect(handoffReasonLabel(null)).toBe('Needs something from you')
+    expect(handoffReasonLabel(undefined)).toBe('Needs something from you')
+  })
+})
+
+describe('handoffReasonShortLabel', () => {
+  it('returns the bare word for approval, content and access', () => {
+    expect(handoffReasonShortLabel('approval')).toBe('approval')
+    expect(handoffReasonShortLabel('content')).toBe('content')
+    expect(handoffReasonShortLabel('access')).toBe('access')
+  })
+
+  it('returns the grammatical phrase for decision, file and other', () => {
+    expect(handoffReasonShortLabel('decision')).toBe('a decision')
+    expect(handoffReasonShortLabel('file')).toBe('a file')
+    expect(handoffReasonShortLabel('other')).toBe('something')
+  })
+})
+
+describe('handoffActionVerb', () => {
+  it('maps every reason the same way HANDOFF_ACTION_VERB does', () => {
+    for (const reason of HANDOFF_REASONS) {
+      expect(handoffActionVerb(reason)).toBe(HANDOFF_ACTION_VERB[reason])
+    }
+  })
+})
+
+describe('HANDOFF_REASON_OPTIONS', () => {
+  it('has one option per reason with a capitalised label and the full sentence', () => {
+    expect(HANDOFF_REASON_OPTIONS).toHaveLength(6)
+    const approval = HANDOFF_REASON_OPTIONS.find(o => o.value === 'approval')
+    expect(approval?.label).toBe('Approval')
+    expect(approval?.sentence).toBe('Needs your approval')
+    const decision = HANDOFF_REASON_OPTIONS.find(o => o.value === 'decision')
+    // The picker label is the plain noun ("Decision"), not the chip's
+    // grammatical phrase ("A decision") - see handoffReasonShortLabel.
+    expect(decision?.label).toBe('Decision')
+  })
 })
 
 describe('daysWaiting', () => {
@@ -189,6 +263,51 @@ describe('waitingChipLabel', () => {
 
   it('falls back to "a client" with no name', () => {
     expect(waitingChipLabel(null, 'file', 1)).toBe('Waiting on a client · a file · 1d')
+  })
+})
+
+describe('waitingChipText', () => {
+  const now = new Date('2026-09-18T12:00:00.000Z')
+
+  const base = {
+    contactId: 'c1',
+    contactName: 'Jordan Reyes',
+    reason: 'approval',
+    reasonLabel: 'Needs your approval',
+    since: '2026-09-15T12:00:00.000Z',
+    dueAt: null,
+    note: null,
+    daysWaiting: 3,
+  } as WaitingOnPayload
+
+  it('formats as "Waiting on <first name> · <reason> · <n>d"', () => {
+    expect(waitingChipText(base, now)).toBe('Waiting on Jordan · approval · 3d')
+  })
+
+  it('prefers a precomputed daysWaiting over recomputing from since', () => {
+    expect(waitingChipText({ ...base, daysWaiting: 9 }, now)).toBe('Waiting on Jordan · approval · 9d')
+  })
+
+  it('uses the first name only for a multi-word contact name', () => {
+    expect(waitingChipText({ ...base, contactName: 'Staci Bonnie Miller' }, now))
+      .toBe('Waiting on Staci · approval · 3d')
+  })
+})
+
+describe('waitingBlockedByLine', () => {
+  it('reads "Waiting on <name> for <reason>", with the reason\'s grammatical phrase', () => {
+    const waitingOn = { contactName: 'Jordan Reyes', reason: 'decision' }
+    expect(waitingBlockedByLine(waitingOn)).toBe('Waiting on Jordan Reyes for a decision')
+  })
+
+  it('falls back to "a client" with no name', () => {
+    expect(waitingBlockedByLine({ contactName: null, reason: 'approval' })).toBe('Waiting on a client for approval')
+  })
+})
+
+describe('waitingBannerText', () => {
+  it('prefixes the reason sentence with "This is with you: "', () => {
+    expect(waitingBannerText('content')).toBe('This is with you: Needs content from you')
   })
 })
 

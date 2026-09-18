@@ -56,7 +56,7 @@ import {
   type BoardViewKey,
 } from '@/components/tahi/board-view'
 import { PARTICIPANT_ROLE_LABEL, type RequestParticipant } from '@/lib/request-participants'
-import { waitingChipText, type WaitingOnSummary } from '@/lib/request-handoff-types'
+import { waitingChipText, type WaitingOnPayload } from '@/lib/request-handoff-copy'
 import { RequestsTimeline } from '@/components/tahi/requests/requests-timeline'
 import { RequestsViewSwitcher } from '@/components/tahi/requests/requests-view-switcher'
 import { RequestsHeaderActions } from '@/components/tahi/requests/requests-header-actions'
@@ -128,7 +128,7 @@ interface Request {
   /** Client hand-off pointer (H2). Absent on today's payloads until H1's
    *  schema and API land; typed here so the chip is ready the moment it
    *  shows up. */
-  waitingOn?: WaitingOnSummary | null
+  waitingOn?: WaitingOnPayload | null
 }
 
 /** The blocked glyph's label, shared by its aria-label and its title so the
@@ -140,7 +140,7 @@ function blockedGlyphLabel(count: number): string {
 /** The row and board card's "Waiting on <name> · <reason> · <n>d" chip.
  *  Read-only everywhere it appears in a list: the studio changes or clears
  *  it from the request detail rail, not from here. */
-function WaitingOnChip({ waitingOn }: { waitingOn: WaitingOnSummary }) {
+function WaitingOnChip({ waitingOn }: { waitingOn: WaitingOnPayload }) {
   return (
     <span
       className="inline-flex items-center"

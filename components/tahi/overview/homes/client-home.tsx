@@ -58,9 +58,9 @@ import type { OverviewCtx } from '@/components/tahi/overview/ctx'
 import { portalStatusMeta, portalStageFraction, type PortalChipTone } from '@/lib/portal-status'
 import { WaitingOnYou, WaitingOnTeam, type WaitingItem } from '@/components/tahi/portal/home/waiting-on-you'
 import {
-  daysWaiting as daysWaitingOn, waitingActionVerb, waitingReasonSentence, waitingReasonShortLabel,
+  daysWaiting as daysWaitingOn, handoffActionVerb, handoffReasonLabel, handoffReasonShortLabel,
   type WaitingOnRequestItem,
-} from '@/lib/request-handoff-types'
+} from '@/lib/request-handoff-copy'
 import { Money } from '@/components/tahi/money'
 import {
   Icon,
@@ -405,7 +405,7 @@ function todayLabel(): string {
 
 /** First name only, for the greeting. Falls back to no name rather than to a
  *  placeholder that reads like a mail merge. */
-function firstNameOf(name: string | undefined): string {
+function firstNameOf(name: string | null | undefined): string {
   const first = (name ?? '').trim().split(/\s+/)[0] ?? ''
   return first
 }
@@ -1121,13 +1121,13 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   const waiting: WaitingItem[] = []
   for (const h of handoffItems) {
     const reason = h.waitingOn.reason
-    const verb = waitingActionVerb(reason)
+    const verb = handoffActionVerb(reason)
     waiting.push({
       key: `handoff-${h.requestId}`,
       kind: 'handoff',
       ic: 'users',
       title: h.requestTitle,
-      sub: `${waitingReasonSentence(reason)}${h.waitingOn.note ? `. ${h.waitingOn.note}` : ''}`,
+      sub: `${handoffReasonLabel(reason)}${h.waitingOn.note ? `. ${h.waitingOn.note}` : ''}`,
       open: { label: 'Open request', onOpen: () => go(requestRouteId(h.requestId)) },
       primary: { label: verb, onAct: () => go(requestRouteId(h.requestId)) },
     })
@@ -1191,7 +1191,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
     key: item.requestId,
     contactName: firstNameOf(item.waitingOn.contactName),
     requestTitle: item.requestTitle,
-    reasonLabel: waitingReasonShortLabel(item.waitingOn.reason),
+    reasonLabel: handoffReasonShortLabel(item.waitingOn.reason),
     daysWaiting: item.waitingOn.daysWaiting ?? daysWaitingOn(item.waitingOn.since),
     onOpen: () => go(requestRouteId(item.requestId)),
   }))

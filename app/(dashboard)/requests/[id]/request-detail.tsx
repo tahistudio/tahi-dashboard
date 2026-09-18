@@ -67,9 +67,9 @@ import { RequestActionsMenu } from '@/components/tahi/requests/request-actions-m
 import { ClientReviewBar } from '@/components/tahi/requests/client-review-bar'
 import { WaitingOnCard } from '@/components/tahi/requests/waiting-on-card'
 import {
-  waitingBannerText, waitingBlockedByLine, waitingActionVerb,
-  type WaitingOnSummary,
-} from '@/lib/request-handoff-types'
+  waitingBannerText, waitingBlockedByLine, handoffActionVerb,
+  type WaitingOnPayload,
+} from '@/lib/request-handoff-copy'
 import {
   InlineDateField, InlineMenuField, InlineNone, InlineNumberField, type InlineMenuOption,
 } from '@/components/tahi/inline-field'
@@ -398,7 +398,7 @@ interface Request {
   // Client hand-off (H2, contract only until H1's schema + API land). Absent
   // or undefined on today's payloads; typed here so the UI can read it the
   // moment the field shows up without a second reconciliation pass.
-  waitingOn?: WaitingOnSummary | null
+  waitingOn?: WaitingOnPayload | null
 }
 
 interface ParentRequestRef {
@@ -2308,14 +2308,14 @@ export function RequestDetail({ requestId, isAdmin: isAdminProp, currentUserId }
                   {approving
                     ? <Loader2 size={14} className="animate-spin" aria-hidden="true" />
                     : <Check size={14} aria-hidden="true" />}
-                  {waitingActionVerb(request.waitingOn.reason)}
+                  {handoffActionVerb(request.waitingOn.reason)}
                 </button>
               ) : (
                 <span
                   className="text-xs font-semibold"
                   style={{ color: 'var(--color-brand-dark)' }}
                 >
-                  {waitingActionVerb(request.waitingOn.reason)} below
+                  {handoffActionVerb(request.waitingOn.reason)} below
                 </span>
               )}
               <button
@@ -4000,7 +4000,7 @@ function RequestBlockersCard({
    *  prints one synthetic line, same visual language as a real blocker row
    *  but nothing here can be unlinked from this card (Hand back lives on the
    *  Waiting on card, which owns the write). */
-  waitingOn?: WaitingOnSummary | null
+  waitingOn?: WaitingOnPayload | null
 }) {
   const { showToast } = useToast()
   const { data, isLoading, mutate } = useSWR<RequestBlockersPayload>(requestBlockersKey(requestId))

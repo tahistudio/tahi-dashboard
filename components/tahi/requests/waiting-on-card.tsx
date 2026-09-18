@@ -28,12 +28,12 @@ import {
   focusablesIn, isOrphanedFocus, lockBodyScroll, overlayLayers, shouldHandleEscape,
 } from '@/components/tahi/overlay-stack'
 import {
-  WAITING_REASON_OPTIONS,
+  HANDOFF_REASON_OPTIONS,
   daysWaiting,
-  waitingReasonSentence,
-  type WaitingOnSummary,
-  type WaitingReason,
-} from '@/lib/request-handoff-types'
+  handoffReasonLabel,
+  type WaitingOnPayload,
+  type HandoffReason,
+} from '@/lib/request-handoff-copy'
 
 export interface ContactOption {
   id: string
@@ -45,11 +45,11 @@ export interface WaitingOnCardProps {
   requestId: string
   orgId: string
   canWrite: boolean
-  waitingOn: WaitingOnSummary | null
+  waitingOn: WaitingOnPayload | null
   /** Fired after a successful hand off, hand back, or change so the caller
    *  can update the request it holds (and, once H1 ships the field on the
    *  detail payload, drop this in favour of a plain SWR revalidate). */
-  onChange: (next: WaitingOnSummary | null) => void
+  onChange: (next: WaitingOnPayload | null) => void
 }
 
 export function WaitingOnCard({ requestId, orgId, canWrite, waitingOn, onChange }: WaitingOnCardProps) {
@@ -86,7 +86,7 @@ export function WaitingOnCard({ requestId, orgId, canWrite, waitingOn, onChange 
               {waitingOn.contactName}
             </p>
             <p style={{ margin: '0.125rem 0 0', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-              {waitingReasonSentence(waitingOn.reason)}
+              {handoffReasonLabel(waitingOn.reason)}
             </p>
           </div>
           <div
@@ -198,9 +198,9 @@ interface HandoffDialogProps {
   open: boolean
   orgId: string
   requestId: string
-  initial: WaitingOnSummary | null
+  initial: WaitingOnPayload | null
   onClose: () => void
-  onSaved: (next: WaitingOnSummary) => void
+  onSaved: (next: WaitingOnPayload) => void
 }
 
 /**
@@ -217,7 +217,7 @@ function HandoffDialog({ open, orgId, requestId, initial, onClose, onSaved }: Ha
 
   const [contacts, setContacts] = useState<ContactOption[]>([])
   const [contactId, setContactId] = useState<string | null>(initial?.contactId ?? null)
-  const [reason, setReason] = useState<WaitingReason>(initial?.reason ?? 'approval')
+  const [reason, setReason] = useState<HandoffReason>(initial?.reason ?? 'approval')
   const [note, setNote] = useState(initial?.note ?? '')
   const [dueAt, setDueAt] = useState(initial?.dueAt ? initial.dueAt.slice(0, 10) : '')
   const [saving, setSaving] = useState(false)
@@ -308,7 +308,7 @@ function HandoffDialog({ open, orgId, requestId, initial, onClose, onSaved }: Ha
     [contacts],
   )
   const reasonOptions = useMemo(
-    () => WAITING_REASON_OPTIONS.map(r => ({ value: r.value, label: r.label, subtitle: r.sentence })),
+    () => HANDOFF_REASON_OPTIONS.map(r => ({ value: r.value, label: r.label, subtitle: r.sentence })),
     [],
   )
 
@@ -337,15 +337,17 @@ function HandoffDialog({ open, orgId, requestId, initial, onClose, onSaved }: Ha
         const body = await res.json().catch(() => null) as { error?: string } | null
         throw new Error(body?.error ?? 'Could not hand this off')
       }
-      const json = await res.json() as { request?: { waitingOn?: WaitingOnSummary } }
+      const json = await res.json() as { request?: { waitingOn?: WaitingOnPayload } }
       const next = json.request?.waitingOn ?? {
         contactId,
         contactName: selectedContact?.name ?? 'this contact',
         contactEmail: selectedContact?.email ?? null,
         reason,
+        reasonLabel: handoffReasonLabel(reason),
         since: new Date().toISOString(),
         dueAt: dueAt ? new Date(`${dueAt}T00:00:00.000Z`).toISOString() : null,
         note: note.trim() || null,
+        daysWaiting: 0,
       }
       onSaved(next)
     } catch (err) {
@@ -423,7 +425,7 @@ function HandoffDialog({ open, orgId, requestId, initial, onClose, onSaved }: Ha
         <SearchableSelect
           options={reasonOptions}
           value={reason}
-          onChange={v => { if (v) setReason(v as WaitingReason) }}
+          onChange={v => { if (v) setReason(v as HandoffReason) }}
           placeholder="Pick a reason"
         />
 
