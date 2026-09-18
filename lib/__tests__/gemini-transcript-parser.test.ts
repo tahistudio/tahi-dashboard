@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { describeUnparsedDoc, parseGeminiTitle, parseGeminiTranscript } from '../gemini-transcript-parser'
+import { describeUnparsedDoc, parseGeminiTitle, parseGeminiTranscript, transcriptPreview } from '../gemini-transcript-parser'
 
 describe('parseGeminiTitle', () => {
   it('extracts short title and attendee from standard format', () => {
@@ -292,6 +292,25 @@ describe('parseGeminiTranscript, markdown export with bold headings (2026-09)', 
     const r = parseGeminiTranscript(linked)
     expect(r.transcript).toContain('### 00:00:00')
     expect(r.transcript).not.toContain('docs.google.com')
+  })
+
+  it('drops heading anchors, entities and backslash escapes from the transcript', () => {
+    const noisy = md
+      .replace('## **Elevate x Tahi Studio - Transcript**', '## **Elevate x Tahi Studio \\- Transcript**')
+      .replace('### 00:00:00', '### **00:00:00** {#00:00:00} &nbsp;')
+    const r = parseGeminiTranscript(noisy)
+    expect(r.transcript).toContain('## **Elevate x Tahi Studio - Transcript**')
+    expect(r.transcript).toContain('### **00:00:00**')
+    expect(r.transcript).not.toContain('{#')
+    expect(r.transcript).not.toContain('&nbsp;')
+  })
+})
+
+describe('transcriptPreview', () => {
+  it('reads as prose and caps the length', () => {
+    const p = transcriptPreview('## **Weekly catchup \\- Transcript** ### **00:00:25** {#00:00:25} &nbsp; **Liam:** Hello. [00:01](https://x.y/z) **Nathan:** Hi.', 60)
+    expect(p).toBe('Weekly catchup - Transcript 00:00:25 Liam: Hello. 00:01 Nathan')
+    expect(p.length).toBeLessThanOrEqual(60)
   })
 })
 

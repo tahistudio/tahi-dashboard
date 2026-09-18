@@ -171,6 +171,7 @@ export function UnlinkedCallNotes({ onAttached }: { onAttached?: () => void }) {
               <TahiButton
                 variant="secondary"
                 size="sm"
+                className="min-h-[2.75rem]"
                 onClick={() => setPicking(note)}
                 iconLeft={<Link2 className="w-3.5 h-3.5" />}
               >

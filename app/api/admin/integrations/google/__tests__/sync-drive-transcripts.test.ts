@@ -96,8 +96,8 @@ const PARSED = {
   durationFormatted: null,
 }
 
-function request() {
-  return new NextRequest('http://localhost:3000/api/admin/integrations/google/sync-drive-transcripts', {
+function request(query = '') {
+  return new NextRequest('http://localhost:3000/api/admin/integrations/google/sync-drive-transcripts' + query, {
     method: 'POST',
   })
 }
@@ -250,6 +250,24 @@ describe('sync-drive-transcripts, idempotence', () => {
     expect(body.results[0]).toMatchObject({ status: 'already_filed', transcriptId: 'ct-1' })
     expect(body).toMatchObject({ filed: 0, unchanged: 1 })
     expect(exportDriveDocAsText).not.toHaveBeenCalled()
+    expect(queries.some(q => q[0].method === 'insert')).toBe(false)
+  })
+
+  it('re-exports a filed unchanged doc when force=1, so a parser change catches up', async () => {
+    const { handle, queries } = makeDb([
+      [],
+      [],
+      // filed lookup: parked on an earlier pass, same modifiedTime
+      [{ id: 'ct-1', callKind: null, callId: null, receivedAt: DOC.modifiedTime }],
+      // upsert lookup finds the same row
+      [{ id: 'ct-1', callId: null }],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await POST(request('?force=1'))
+    const body = await res.json() as { filed: number; unchanged: number }
+    expect(body).toMatchObject({ filed: 1, unchanged: 0 })
+    expect(exportDriveDocAsText).toHaveBeenCalledTimes(1)
     expect(queries.some(q => q[0].method === 'insert')).toBe(false)
   })
 

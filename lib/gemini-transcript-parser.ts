@@ -210,8 +210,33 @@ function cleanTranscript(raw: string | null): string | null {
   const cleaned = raw
     .replace(trailerRe, '')
     .replace(/\[([^\]\n]*)\]\((?:https?:|mailto:)[^)\s]*\)/g, '$1')
+    // Heading anchors ("{#00:00:25}"), non-breaking-space entities and the
+    // backslash escapes the markdown export adds are noise to a reader.
+    .replace(/\s*\{#[^}\n]*\}/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\\([-[\]*_#.()])/g, '$1')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim()
   return cleaned || null
+}
+
+/**
+ * The first characters of a transcript or summary as plain text, for a list
+ * row. Markdown is flattened (headings, bold, links, anchors, entities) so
+ * the preview reads as prose rather than as markup.
+ */
+export function transcriptPreview(text: string, max = 160): string {
+  const plain = text
+    .replace(/\[([^\]\n]*)\]\([^)\s]*\)/g, '$1')
+    .replace(/\s*\{#[^}\n]*\}/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/(^|\s)#{1,6}\s*/g, '$1')
+    .replace(/\*\*|__/g, '')
+    .replace(/\\([-[\]*_#.()])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return plain.slice(0, max)
 }
 
 /**

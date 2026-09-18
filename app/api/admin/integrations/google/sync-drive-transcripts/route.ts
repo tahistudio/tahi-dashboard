@@ -86,6 +86,9 @@ export async function POST(req: NextRequest) {
   const limitRaw = parseInt(url.searchParams.get('limit') ?? '', 10)
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 50) : 20
   const dryRun = url.searchParams.get('dryRun') === '1' || url.searchParams.get('dryRun') === 'true'
+  // force=1 re-exports docs already filed and unchanged, for the pass after a
+  // parser change so the stored text catches up. Links are never touched.
+  const force = url.searchParams.get('force') === '1' || url.searchParams.get('force') === 'true'
 
   const database = await db()
   const { accessToken } = await getGoogleAccessToken(database)
@@ -141,7 +144,7 @@ export async function POST(req: NextRequest) {
     // 30 minutes until someone attaches it.
     const filedRow = await findFiledTranscript(database as unknown as D1, 'gemini_drive', file.id)
     const docModifiedAt = file.modifiedTime ?? file.createdTime ?? null
-    if (filedRow && (!docModifiedAt || docModifiedAt <= filedRow.receivedAt)) {
+    if (!force && filedRow && (!docModifiedAt || docModifiedAt <= filedRow.receivedAt)) {
       unchanged++
       results.push({
         fileId: file.id,

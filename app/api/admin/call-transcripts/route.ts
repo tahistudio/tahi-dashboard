@@ -17,6 +17,7 @@
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { transcriptPreview } from '@/lib/gemini-transcript-parser'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -108,7 +109,7 @@ export async function GET(req: NextRequest) {
     // A doc can parse to a summary with no transcript (Gemini sometimes
     // writes notes without one), so the preview falls back rather than
     // rendering an empty row a human cannot judge.
-    preview: (r.text || r.summary || '').slice(0, PREVIEW_CHARS),
+    preview: transcriptPreview(r.text || r.summary || '', PREVIEW_CHARS),
     textLength: r.text.length,
   }))
 
