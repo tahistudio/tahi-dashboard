@@ -164,6 +164,15 @@ seen on production.
   contacts); the dashboard gate and the wizard both consult it and stamp the
   user.
 
+## Call notes to tasks with an approval gate (Liam, 2026-09-19; scope in docs/superpowers/plans/2026-09-19-call-notes-to-tasks-scope.md)
+
+One table, task_suggestions, sits between "something was said" and "a task changed"; every source feeds it, the dashboard inbox and Slack read it, applying is one server function, approved updates post as "Tahi bot". Waiting on Liam's five decisions in the scope (Slack destination, gating his own notes, first transcript source, task threads, snooze times).
+
+- [ ] CN.0 - [BE/FE] Foundations (about 3 days): call_transcripts for every call kind (Drive sync writes there; a transcript branch in the email intake with an inbox address, sender allowlist, match by subject, attendees and time, unlinked notes parked for Liam to attach); the Tahi bot actor (authorType bot); task_comments and a Task thread on the task detail, mirrored into the request thread when the task has one.
+- [ ] CN.1 - [BE/FE/MCP] Suggestions and the dashboard gate (about 4 days): the suggester (Sonnet, the org's open tasks and requests as context, a verbatim quote or the suggestion is dropped, never applies); the Suggestions view on /tasks and a studio home card; Approve, Tweak, Snooze (tonight, this week), Reject, Approve all; one idempotent apply function; MCP list_task_suggestions and decide_task_suggestion.
+- [ ] CN.2 - [BE/Slack] The Slack app (about 4 days): interactivity and events with a signing secret, app/api/webhooks/slack/interactive and /events (acknowledge in three seconds, work after), Block Kit approval messages updated in place from either surface, snooze cron, typed and voice notes in (Whisper on Workers AI), client messages as create_request suggestions (GI.1).
+- [ ] CN.3 - [BE] Keeping in sync (later, about 3 days): dashboard task changes post to the Slack thread, a weekly digest of unreviewed suggestions, rejections as negative examples, GI.4 learns from applied suggestions.
+
 ## Studio home accuracy (Liam, 2026-09-19: "check my home page for accuracy")
 
 Audit by the lead against production payloads; every card traced to its route. Workflow home-accuracy-fixes builds the fixes in three slices (A1 sonnet, A2 sonnet, B opus), each reviewed.
