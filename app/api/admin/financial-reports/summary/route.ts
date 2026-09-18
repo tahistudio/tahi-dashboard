@@ -6,7 +6,8 @@
  *
  * - bankBalances: sum across Airwallex + Xero accounts, currency-grouped
  * - reserves: total accrued + per-pot breakdown
- * - disposableCash: bankBalances - reserves - 30-day expected outflows
+ * - disposableCash: total cash in NZD minus the larger of the IRD balance owed
+ *   and the tax pot, minus the other reserve pots (lib/cash-position.ts)
  * - mrr: { retainer, project, combined } + 12-month rolling history
  * - arr: combined MRR × 12
  * - ytdRevenue: actual cash collected in current calendar year

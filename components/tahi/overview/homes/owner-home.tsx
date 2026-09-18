@@ -421,10 +421,12 @@ function WireStrip() {
 }
 
 function agedBar(a: ArAging): MicroBarSegment[] {
+  // One segment per legend entry: not due, 1 to 30, 31 to 60, 61+ days late.
   return [
     { v: a.currentNzd, color: '#5A824E' },
     { v: a.d30Nzd, color: '#C9A227' },
-    { v: a.d60Nzd + a.d90Nzd, color: RISK_INK },
+    { v: a.d60Nzd, color: '#D9822B' },
+    { v: a.d90Nzd, color: RISK_INK },
   ]
 }
 

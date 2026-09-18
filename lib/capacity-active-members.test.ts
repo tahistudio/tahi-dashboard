@@ -36,3 +36,18 @@ describe('isActiveTeamMember', () => {
     expect(isActiveTeamMember({ email: 'staci@tahi.studio', weeklyCapacityHours: 40 }, [])).toBe(true)
   })
 })
+
+import { resolveInactiveMemberEmails } from '@/lib/capacity-active-members'
+
+describe('resolveInactiveMemberEmails', () => {
+  it('reads a JSON array of addresses and drops blanks', () => {
+    expect(resolveInactiveMemberEmails('["nathan@tahi.studio", "", 3]')).toEqual(['nathan@tahi.studio'])
+  })
+
+  it('is empty for a missing, blank or corrupt row, never a coded default', () => {
+    expect(resolveInactiveMemberEmails(null)).toEqual([])
+    expect(resolveInactiveMemberEmails('')).toEqual([])
+    expect(resolveInactiveMemberEmails('not json')).toEqual([])
+    expect(resolveInactiveMemberEmails('{"a":1}')).toEqual([])
+  })
+})

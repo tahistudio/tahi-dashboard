@@ -69,7 +69,7 @@ vi.mock('@/lib/db', () => {
         case 'team_members':
           return chainable(() => Promise.resolve(state.teamMembers))
         case 'settings':
-          return chainable(() => Promise.resolve(state.settings.filter(s => s.key === 'email.blockedAddresses')))
+          return chainable(() => Promise.resolve(state.settings.filter(s => s.key === 'team.inactiveMemberEmails')))
         case 'time_entries':
           return chainable(() => Promise.resolve(state.timeEntries))
         case 'tasks':
@@ -155,12 +155,12 @@ describe('GET /api/admin/pipeline/capacity', () => {
     expect(json.teamMembers[0].utilization).toBe(0)
   })
 
-  it('excludes a team member on email.blockedAddresses from the response entirely', async () => {
+  it('excludes a team member on team.inactiveMemberEmails from the response entirely', async () => {
     dbMock.state.teamMembers = [
       { id: 'liam', name: 'Liam', avatarUrl: null, title: null, email: 'liam@tahi.studio', weeklyCapacityHours: 40 },
       { id: 'nathan', name: 'Nathan Day', avatarUrl: null, title: null, email: 'nathan@tahi.studio', weeklyCapacityHours: 40 },
     ]
-    dbMock.state.settings = [{ key: 'email.blockedAddresses', value: JSON.stringify(['nathan@tahi.studio']) }]
+    dbMock.state.settings = [{ key: 'team.inactiveMemberEmails', value: JSON.stringify(['nathan@tahi.studio']) }]
     dbMock.state.tasks = [{ assigneeId: 'nathan', totalHours: 10 }]
 
     const res = await GET(makeRequest())
@@ -201,10 +201,10 @@ describe('GET /api/admin/pipeline/capacity', () => {
   })
 
   it('sums totals across every active member', async () => {
-    // email.blockedAddresses is set explicitly here (rather than left to the
+    // team.inactiveMemberEmails is set explicitly here (rather than left to the
     // coded default) so this test is about summation, not the blocklist -
     // see the dedicated default-blocklist test below for that interaction.
-    dbMock.state.settings = [{ key: 'email.blockedAddresses', value: JSON.stringify([]) }]
+    dbMock.state.settings = [{ key: 'team.inactiveMemberEmails', value: JSON.stringify([]) }]
     dbMock.state.teamMembers = [
       { id: 'liam', name: 'Liam', avatarUrl: null, title: null, email: 'liam@tahi.studio', weeklyCapacityHours: 40 },
       { id: 'staci', name: 'Staci', avatarUrl: null, title: null, email: 'staci@tahi.studio', weeklyCapacityHours: 30 },
@@ -223,13 +223,10 @@ describe('GET /api/admin/pipeline/capacity', () => {
     expect(json.availableCapacity).toBe(50)
   })
 
-  it('falls back to the coded default blocklist (staci@tahi.studio, nathan@tahi.studio) when the setting row is unset', async () => {
-    // Documents a real interaction this fix inherits from
-    // lib/email-allowlist.ts's DEFAULT_BLOCKED_ADDRESSES, which this route
-    // did not previously consult at all: with no email.blockedAddresses row
-    // in the settings table, resolveBlockedAddresses falls back to BOTH
-    // staci@tahi.studio and nathan@tahi.studio, so Staci drops out of this
-    // card too, not only Nathan, until that setting is written explicitly.
+  it('counts every member with capacity when the inactive-member setting is unset', async () => {
+    // team.inactiveMemberEmails has no coded default on purpose: the email
+    // block list's default names two people, and reusing it here once hid a
+    // working member from the roster. Unset means nobody is inactive.
     dbMock.state.settings = []
     dbMock.state.teamMembers = [
       { id: 'liam', name: 'Liam', avatarUrl: null, title: null, email: 'liam@tahi.studio', weeklyCapacityHours: 40 },
@@ -239,7 +236,7 @@ describe('GET /api/admin/pipeline/capacity', () => {
     const res = await GET(makeRequest())
     const json = await res.json() as CapacityResponse
 
-    expect(json.teamMembers.map(m => m.id)).toEqual(['liam'])
+    expect(json.teamMembers.map(m => m.id)).toEqual(['liam', 'staci'])
   })
 
   it('never lets available capacity go negative when the studio is overbooked', async () => {

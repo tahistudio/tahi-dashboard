@@ -3,8 +3,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, gte, lte, ne, sql, inArray } from 'drizzle-orm'
-import { BLOCKED_ADDRESSES_SETTING_KEY, resolveBlockedAddresses } from '@/lib/email-allowlist'
-import { isActiveTeamMember } from '@/lib/capacity-active-members'
+import {
+  INACTIVE_MEMBER_EMAILS_SETTING_KEY,
+  isActiveTeamMember,
+  resolveInactiveMemberEmails,
+} from '@/lib/capacity-active-members'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -23,8 +26,8 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  * rather than being folded into "booked".
  *
  * teamMembers carries no active/status column, so a member only counts here
- * when they are not on `email.blockedAddresses` and carry a positive
- * weeklyCapacityHours. See lib/capacity-active-members.ts.
+ * when they are not on the `team.inactiveMemberEmails` setting and carry a
+ * positive weeklyCapacityHours. See lib/capacity-active-members.ts.
  */
 export async function GET(req: NextRequest) {
   const { orgId } = await getRequestAuth(req)
@@ -34,7 +37,7 @@ export async function GET(req: NextRequest) {
 
   const database = await db() as unknown as D1
 
-  const [allMembers, blockedRows] = await Promise.all([
+  const [allMembers, inactiveRows] = await Promise.all([
     database
       .select({
         id: schema.teamMembers.id,
@@ -48,12 +51,12 @@ export async function GET(req: NextRequest) {
     database
       .select({ value: schema.settings.value })
       .from(schema.settings)
-      .where(eq(schema.settings.key, BLOCKED_ADDRESSES_SETTING_KEY))
+      .where(eq(schema.settings.key, INACTIVE_MEMBER_EMAILS_SETTING_KEY))
       .limit(1),
   ])
 
-  const blockedAddresses = resolveBlockedAddresses(blockedRows[0]?.value ?? null)
-  const activeMembers = allMembers.filter(m => isActiveTeamMember(m, blockedAddresses))
+  const inactiveAddresses = resolveInactiveMemberEmails(inactiveRows[0]?.value ?? null)
+  const activeMembers = allMembers.filter(m => isActiveTeamMember(m, inactiveAddresses))
 
   // Current week range (Monday to Sunday), same window as timeEntries logged.
   const now = new Date()

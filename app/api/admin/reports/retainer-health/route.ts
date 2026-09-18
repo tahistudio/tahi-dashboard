@@ -14,7 +14,9 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  * GET /api/admin/reports/retainer-health
  *
  * Per retainer client returns health metrics plus a churn risk score.
- * Retainer = org with customMrr > 0 OR an active subscription row.
+ * Retainer = org with customMrr > 0 (lib/retainer-org-filter.ts). An active
+ * subscription row with no custom MRR is not a retainer here: no MRR, no
+ * retainer, so the test org never counts.
  *
  * Response: { clients: [{
  *   orgId, orgName, status, healthStatus, mrrNzd, monthsActive,
