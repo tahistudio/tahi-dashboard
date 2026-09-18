@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildPipelineStageChart,
-  RECURRING_MONTHS,
+  splitClosingDeals,
   type PipelineChartStage,
+  type ClosingDealRow,
 } from '@/lib/pipeline-stage-chart'
 
 /** A row shaped like the pipeline-forecast route's `byStage`, wider than the
@@ -50,7 +51,8 @@ describe('buildPipelineStageChart: empty pipeline', () => {
   it('returns no bars and zero totals for an empty stage list', () => {
     const chart = buildPipelineStageChart([])
     expect(chart.bars).toEqual([])
-    expect(chart.totalWeightedNzd).toBe(0)
+    expect(chart.totalWeightedUpfrontNzd).toBe(0)
+    expect(chart.totalWeightedMonthlyNzd).toBe(0)
     expect(chart.totalDeals).toBe(0)
     expect(chart.basis).toBe('count')
   })
@@ -132,17 +134,19 @@ describe('buildPipelineStageChart: grouping and order', () => {
   })
 })
 
-describe('buildPipelineStageChart: the headline is the sum of the bars', () => {
-  it('rolls the monthly portion up over the recurring window, per stage', () => {
+describe('buildPipelineStageChart: the headline never annualises monthly value', () => {
+  it('bars carry weighted upfront and weighted monthly separately, with no rollup', () => {
     const chart = buildPipelineStageChart([
       lead({ dealCount: 2, weightedUpfrontNzd: 2_000 }),
       proposal({ dealCount: 3, weightedUpfrontNzd: 16_000, weightedMonthlyNzd: 400 }),
     ])
-    expect(chart.bars[0].weightedNzd).toBe(2_000)
-    expect(chart.bars[1].weightedNzd).toBe(16_000 + 400 * RECURRING_MONTHS)
+    expect(chart.bars[0].weightedUpfrontNzd).toBe(2_000)
+    expect(chart.bars[0].weightedMonthlyNzd).toBe(0)
+    expect(chart.bars[1].weightedUpfrontNzd).toBe(16_000)
+    expect(chart.bars[1].weightedMonthlyNzd).toBe(400)
   })
 
-  it('totals exactly what the card prints above the bars', () => {
+  it('totals exactly what the forecast route reports, matching the deals page', () => {
     const rows = [
       lead({ dealCount: 2, weightedUpfrontNzd: 2_000 }),
       discovery({ dealCount: 1, weightedUpfrontNzd: 4_000, weightedMonthlyNzd: 100 }),
@@ -152,21 +156,25 @@ describe('buildPipelineStageChart: the headline is the sum of the bars', () => {
       won({ dealCount: 5, weightedUpfrontNzd: 90_000 }),
     ]
     const chart = buildPipelineStageChart(rows)
-    const headline =
-      (2_000 + 4_000 + 16_000) + (0 + 100 + 400) * RECURRING_MONTHS
-    expect(chart.totalWeightedNzd).toBe(headline)
-    expect(chart.totalWeightedNzd).toBe(chart.bars.reduce((s, b) => s + b.weightedNzd, 0))
+    expect(chart.totalWeightedUpfrontNzd).toBe(2_000 + 4_000 + 16_000)
+    expect(chart.totalWeightedMonthlyNzd).toBe(0 + 100 + 400)
+    expect(chart.totalWeightedUpfrontNzd).toBe(chart.bars.reduce((s, b) => s + b.weightedUpfrontNzd, 0))
     expect(chart.totalDeals).toBe(6)
   })
 
-  it('takes a shorter recurring window when it is given one', () => {
-    const chart = buildPipelineStageChart([proposal({ dealCount: 1, weightedMonthlyNzd: 500 })], 3)
-    expect(chart.bars[0].weightedNzd).toBe(1_500)
-  })
-
-  it('falls back to the standard window when handed a broken one', () => {
-    const chart = buildPipelineStageChart([proposal({ dealCount: 1, weightedMonthlyNzd: 500 })], Number.NaN)
-    expect(chart.bars[0].weightedNzd).toBe(500 * RECURRING_MONTHS)
+  it('reproduces the live forecast figures exactly (beta audit, 2026-09-19)', () => {
+    // MediTrain Discovery (20% prob): upfront weighted contribution unknown
+    // here, only the monthly leg matters for this regression; UoA Verbal
+    // Commit (90% prob) carries the upfront leg. Old code annualised the
+    // monthly figure into a 12-month rollup and printed NZ$6.2k; the
+    // forecast route itself reported weightedUpfrontNzd 3230 and
+    // weightedMonthlyNzd 250.
+    const chart = buildPipelineStageChart([
+      discovery({ dealCount: 1, probability: 20, weightedUpfrontNzd: 80, weightedMonthlyNzd: 250 }),
+      proposal({ stageId: 'verbal', name: 'Verbal Commit', position: 5, dealCount: 1, probability: 90, weightedUpfrontNzd: 3_150, weightedMonthlyNzd: 0 }),
+    ])
+    expect(chart.totalWeightedUpfrontNzd).toBe(3_230)
+    expect(chart.totalWeightedMonthlyNzd).toBe(250)
   })
 
   it('ignores null and non-finite money on a row', () => {
@@ -177,13 +185,14 @@ describe('buildPipelineStageChart: the headline is the sum of the bars', () => {
         weightedMonthlyNzd: Number.NaN,
       }),
     ])
-    expect(chart.bars[0].weightedNzd).toBe(0)
+    expect(chart.bars[0].weightedUpfrontNzd).toBe(0)
+    expect(chart.bars[0].weightedMonthlyNzd).toBe(0)
   })
 
   it('never carries a negative bar into the total', () => {
     const chart = buildPipelineStageChart([proposal({ dealCount: 1, weightedUpfrontNzd: -10_000 })])
-    expect(chart.bars[0].weightedNzd).toBe(0)
-    expect(chart.totalWeightedNzd).toBe(0)
+    expect(chart.bars[0].weightedUpfrontNzd).toBe(0)
+    expect(chart.totalWeightedUpfrontNzd).toBe(0)
   })
 })
 
@@ -199,26 +208,110 @@ describe('buildPipelineStageChart: bar length', () => {
     expect(chart.bars[0].pct).toBeLessThan(20)
   })
 
-  it('draws a stage that holds deals but no value as a muted minimum bar', () => {
+  it('draws a stage that holds deals but no upfront value as a muted minimum bar', () => {
     // The normal early-stage case: deals logged before anyone has priced them.
     const chart = buildPipelineStageChart([
       lead({ dealCount: 2, weightedUpfrontNzd: 0 }),
       proposal({ dealCount: 1, weightedUpfrontNzd: 40_000 }),
     ])
     expect(chart.basis).toBe('value')
-    expect(chart.bars[0].weightedNzd).toBe(0)
+    expect(chart.bars[0].weightedUpfrontNzd).toBe(0)
     expect(chart.bars[0].pct).toBeGreaterThan(0)
     expect(chart.bars[0].unvalued).toBe(true)
     expect(chart.bars[1].unvalued).toBe(false)
   })
 
+  it('a stage with only monthly value (no upfront) still reads as unvalued for bar length', () => {
+    // Bar length's basis is upfront only, so monthly-only pipeline still
+    // floors at the minimum and is inked muted rather than looking priced.
+    const chart = buildPipelineStageChart([
+      lead({ dealCount: 1, weightedUpfrontNzd: 0, weightedMonthlyNzd: 250 }),
+      proposal({ dealCount: 1, weightedUpfrontNzd: 40_000 }),
+    ])
+    expect(chart.bars[0].unvalued).toBe(true)
+  })
+
   it('falls back to deal count for bar length when nothing is valued', () => {
     const chart = buildPipelineStageChart([lead({ dealCount: 2 }), proposal({ dealCount: 1 })])
     expect(chart.basis).toBe('count')
-    expect(chart.totalWeightedNzd).toBe(0)
+    expect(chart.totalWeightedUpfrontNzd).toBe(0)
     expect(chart.bars[0].pct).toBe(100)
     expect(chart.bars[1].pct).toBe(50)
     // Nothing is muted on a count chart: the length means deals, not money.
     expect(chart.bars.every(b => b.unvalued === false)).toBe(true)
+  })
+})
+
+describe('splitClosingDeals', () => {
+  const now = new Date('2026-09-19T12:00:00Z')
+
+  const deal = (over: Partial<ClosingDealRow> = {}): ClosingDealRow => ({
+    stageIsClosedWon: false,
+    stageIsClosedLost: false,
+    expectedCloseDate: null,
+    ...over,
+  })
+
+  it('counts an open deal closing later this month as closing this month', () => {
+    const split = splitClosingDeals([deal({ expectedCloseDate: '2026-09-25' })], now)
+    expect(split).toEqual({ closingThisMonth: 1, pastCloseDate: 0 })
+  })
+
+  it('counts a deal closing today as closing this month', () => {
+    const split = splitClosingDeals([deal({ expectedCloseDate: '2026-09-19' })], now)
+    expect(split.closingThisMonth).toBe(1)
+    expect(split.pastCloseDate).toBe(0)
+  })
+
+  it('moves a deal whose close date already passed this month into past-close-date, never dropping it', () => {
+    // The live beta bug: UoA Verbal Commit, expectedCloseDate 2026-09-15,
+    // already past when today is 2026-09-19. Old code still counted it as
+    // "closing this month" because it only matched on month/year.
+    const split = splitClosingDeals([deal({ expectedCloseDate: '2026-09-15' })], now)
+    expect(split).toEqual({ closingThisMonth: 0, pastCloseDate: 1 })
+  })
+
+  it('keeps a deal overdue from an earlier month in past-close-date, so it never disappears', () => {
+    const split = splitClosingDeals([deal({ expectedCloseDate: '2026-07-01' })], now)
+    expect(split).toEqual({ closingThisMonth: 0, pastCloseDate: 1 })
+  })
+
+  it('counts neither bucket for a deal closing next month', () => {
+    const split = splitClosingDeals([deal({ expectedCloseDate: '2026-10-05' })], now)
+    expect(split).toEqual({ closingThisMonth: 0, pastCloseDate: 0 })
+  })
+
+  it('drops closed-won and closed-lost deals from both counts', () => {
+    const split = splitClosingDeals([
+      deal({ expectedCloseDate: '2026-09-01', stageIsClosedWon: true }),
+      deal({ expectedCloseDate: '2026-09-01', stageIsClosedLost: true }),
+    ], now)
+    expect(split).toEqual({ closingThisMonth: 0, pastCloseDate: 0 })
+  })
+
+  it('ignores a deal with no expected close date', () => {
+    const split = splitClosingDeals([deal({ expectedCloseDate: null })], now)
+    expect(split).toEqual({ closingThisMonth: 0, pastCloseDate: 0 })
+  })
+
+  it('ignores an unparsable close date rather than throwing', () => {
+    const split = splitClosingDeals([deal({ expectedCloseDate: 'not-a-date' })], now)
+    expect(split).toEqual({ closingThisMonth: 0, pastCloseDate: 0 })
+  })
+
+  it('survives missing data', () => {
+    expect(splitClosingDeals(null, now)).toEqual({ closingThisMonth: 0, pastCloseDate: 0 })
+    expect(splitClosingDeals(undefined, now)).toEqual({ closingThisMonth: 0, pastCloseDate: 0 })
+  })
+
+  it('tallies a mixed set of deals across both buckets', () => {
+    const split = splitClosingDeals([
+      deal({ expectedCloseDate: '2026-09-30' }),
+      deal({ expectedCloseDate: '2026-09-19' }),
+      deal({ expectedCloseDate: '2026-09-15' }),
+      deal({ expectedCloseDate: '2026-08-01' }),
+      deal({ expectedCloseDate: '2026-10-01' }),
+    ], now)
+    expect(split).toEqual({ closingThisMonth: 2, pastCloseDate: 2 })
   })
 })

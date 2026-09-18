@@ -6,6 +6,7 @@ import { schema } from '@/db/d1'
 import { and, gte, sql, inArray } from 'drizzle-orm'
 import { buildRateMap, toNzd } from '@/lib/currency'
 import { getOrgScope } from '@/lib/require-access'
+import { isRetainerOrg } from '@/lib/retainer-org-filter'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -94,12 +95,16 @@ export async function GET(req: NextRequest) {
   // Hourly clients (Elevate) should NOT appear here even if they have
   // customMrr set for forecast purposes (their MRR is an estimated average,
   // not a contractual commitment).
-  const retainerOrgs = (orgsRaw ?? []).filter(o => {
-    // Explicitly hourly or project = never show in retainer health
-    if (o.billing_model === 'hourly' || o.billing_model === 'project') return false
-    // Must have MRR or active subscription to be a retainer
-    return (o.custom_mrr && o.custom_mrr > 0) || o.sub_status === 'active'
-  })
+  //
+  // customMrr null or 0 is excluded outright, even with an active
+  // subscription row. An active subscription with no MRR attached is how
+  // Tahi Test Client (Liam's own test org, customMrr 0) used to slip in here
+  // and get scored for churn risk like a real client (beta audit,
+  // 2026-09-19). MRR is what makes a client a retainer for this card's
+  // purposes; a subscription row alone is not a commitment to bill.
+  const retainerOrgs = (orgsRaw ?? []).filter(o =>
+    isRetainerOrg({ billingModel: o.billing_model, customMrr: o.custom_mrr }),
+  )
   const scopedOrgs = scope === null
     ? retainerOrgs
     : retainerOrgs.filter(o => scope.includes(o.id))
