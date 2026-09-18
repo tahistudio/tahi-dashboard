@@ -20,6 +20,7 @@ import {
   truncate,
 } from '@/lib/notification-email'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
+import { handBackOnClientAction } from '@/lib/request-handoff'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -131,6 +132,19 @@ export async function POST(req: NextRequest, { params }: Params) {
       .update(schema.requests)
       .set({ updatedAt: new Date().toISOString() })
       .where(eq(schema.requests.id, id))
+
+    // If this request was sitting with THIS person, replying is the action the
+    // hand-off asked for and the request hands itself back (migration 0104).
+    // Only for the named person: a colleague at the same client replying is an
+    // ordinary reply, and clearing the pointer there would tell the studio the
+    // work was unblocked when it is not. Never throws, so a stuck pointer can
+    // never cost a client their message (lib/request-handoff.ts).
+    await handBackOnClientAction(drizzle, {
+      requestId: id,
+      contactId: contact?.id ?? null,
+      contactName: contact?.name ?? null,
+      trigger: 'thread_message',
+    })
 
     // Tell the studio, in the bell and in the inbox, off one resolved audience.
     // Fan out to the assignee, every team participant and the client's PM,

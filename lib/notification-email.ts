@@ -56,6 +56,7 @@ import RequestClientReviewEmail from '@/emails/request-client-review'
 import NewMessageEmail from '@/emails/new-message'
 import NewChannelMessageEmail from '@/emails/new-channel-message'
 import ProposalDecisionEmail from '@/emails/proposal-decision'
+import RequestWaitingOnYouEmail from '@/emails/request-waiting-on-you'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -99,6 +100,7 @@ export const EMAIL_TEMPLATE_CHANNEL_MESSAGE = 'org-channel-message'
 export const EMAIL_TEMPLATE_REQUEST_STATUS = 'request-status-client'
 export const EMAIL_TEMPLATE_STUDIO_NEW_REQUEST = 'studio-new-request'
 export const EMAIL_TEMPLATE_PROPOSAL_DECISION = 'proposal-decision'
+export const EMAIL_TEMPLATE_WAITING_ON_YOU = 'request-waiting-on-you'
 
 /**
  * One event, rendered per recipient. The subject is shared (it names the
@@ -839,6 +841,75 @@ export function studioProposalDecisionEmailPlan(input: {
         variantName: input.variantName ?? undefined,
         comment: input.comment ?? undefined,
         acceptorName: input.acceptorName ?? undefined,
+      }),
+  }
+}
+
+/**
+ * (5) A request has been handed to ONE named person at the client, and does
+ * not move until they act.
+ *
+ * The client-facing half of the hand-off (migration 0104,
+ * lib/request-handoff.ts). Unlike (2) it can arrive at any point in a
+ * request's life, not only at the end, so it leads with the REASON rather than
+ * the status and carries exactly one button, labelled with the one verb that
+ * reason maps to.
+ *
+ * The strings arrive already resolved, never a reason slug: this module sits
+ * under lib/notifications.ts, which lib/request-handoff.ts reaches through
+ * notify-request-team, so importing the vocabulary back the other way would
+ * close a cycle. The caller reads HANDOFF_REASON_SENTENCE and
+ * HANDOFF_ACTION_VERB and hands the two strings in.
+ *
+ * `actionUrl` is the request for somebody who already has a seat, and the
+ * minted app invite link for somebody who does not: a button that lands a
+ * person on a sign-in wall they have no account for is a button that ends the
+ * hand-off. The admin route decides which and passes it in.
+ *
+ * `isNudge` is the same ask a few days later. Deliberately the same template
+ * and the same event type, so a person who mutes this event is muted for both
+ * and the reminder cannot read as a different request.
+ */
+export function waitingOnYouEmailPlan(input: {
+  requestId: string
+  requestTitle: string
+  requestNumber: number | null
+  /** The client this request belongs to, for the delivery gate. */
+  orgId: string | null
+  /** The reason sentence, e.g. "Needs your approval". */
+  reasonLabel: string
+  /** The one verb for that reason, e.g. "Approve". */
+  actionVerb: string
+  /** Who at the studio handed it over. */
+  fromName: string
+  /** The studio's note. Plain text already, never raw composer HTML. */
+  note?: string | null
+  /** The date the studio asked for, ISO. Rendered in the studio's zone. */
+  dueAt?: string | null
+  /** The request, or the invite link when the contact has no seat yet. */
+  actionUrl: string
+  isNudge?: boolean
+}): NotificationEmailPlan {
+  const subject = requestEmailSubject(
+    input.requestNumber,
+    `${input.reasonLabel}: "${input.requestTitle}"`,
+  )
+  return {
+    subject,
+    template: EMAIL_TEMPLATE_WAITING_ON_YOU,
+    orgId: input.orgId,
+    render: (target) =>
+      createElement(RequestWaitingOnYouEmail, {
+        recipientName: greetingName(target.name, 'there'),
+        requestTitle: input.requestTitle,
+        requestNumber: input.requestNumber,
+        reasonLabel: input.reasonLabel,
+        actionVerb: input.actionVerb,
+        fromName: input.fromName,
+        note: input.note?.trim() ? truncate(input.note.trim(), 600) : null,
+        dueDate: input.dueAt ? formatDeliveredAt(input.dueAt) : null,
+        actionUrl: input.actionUrl,
+        isNudge: input.isNudge ?? false,
       }),
   }
 }

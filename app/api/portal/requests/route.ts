@@ -18,6 +18,8 @@ import { dispatchDomainEvent } from '@/lib/events'
 import { notifyAllAdmins } from '@/lib/notifications'
 import { studioNewRequestEmailPlan } from '@/lib/notification-email'
 import { loadRequestParticipants, CLIENT_VISIBLE_TEAM_ROLES } from '@/lib/request-participants'
+import { loadWaitingOn, type WaitingOnPayload } from '@/lib/request-handoff'
+import { isPortalAdminContact } from '@/lib/portal-access'
 import {
   isRequestCategory,
   isRequestType,
@@ -61,8 +63,16 @@ export async function GET(req: NextRequest) {
   // the preview saw every brand's requests where the person being previewed
   // sees only their own. `contactIdentityWhere` stands the read in that seat
   // (lib/portal-identity.ts).
+  // The same read also carries the seat (portalRole / isPrimary), because the
+  // hand-off lists below are split by it: everybody sees what is waiting on
+  // THEM, and only a workspace admin also sees what is waiting on their
+  // colleagues.
   const [contact] = await drizzle
-    .select({ id: schema.contacts.id })
+    .select({
+      id: schema.contacts.id,
+      portalRole: schema.contacts.portalRole,
+      isPrimary: schema.contacts.isPrimary,
+    })
     .from(schema.contacts)
     .where(contactIdentityWhere(orgId, userId, previewContactId))
     .limit(1)
@@ -150,11 +160,62 @@ export async function GET(req: NextRequest) {
     { teamRoles: CLIENT_VISIBLE_TEAM_ROLES, contactOrgId: orgId },
   )
 
+  // The hand-off pointer, and the two lists the portal home draws off it.
+  //
+  // Every row that is with somebody carries `waitingOn`, because the request
+  // card says so whoever is reading it. The two lists are the split that
+  // matters: `waitingOnYou` is PERSONAL, the caller's own contact id and
+  // nobody else's, so the home's prompt is a list of things this person can
+  // actually do. `waitingOnOrg` is everything else the studio is waiting on
+  // from this client, and it is only built for a workspace admin, because a
+  // member seeing their colleagues' asks turns a to-do list into a roster.
+  //
+  // Both are bounded by the page that was just read (the home asks for 200),
+  // matching every other derived number on this route. The pointer is only
+  // ever resolved for requests already scoped to the caller's own org, which
+  // is what keeps CLAUDE.md rule 12 true here.
+  const waitingByRequest = await loadWaitingOn(drizzle, requests.map((r) => r.id))
+
+  const selfContactId = contact?.id ?? null
+  const isWorkspaceAdmin = isPortalAdminContact(contact)
+
+  interface WaitingItem {
+    requestId: string
+    title: string
+    requestNumber: number | null
+    status: string
+    waitingOn: WaitingOnPayload
+  }
+  const waitingOnYou: WaitingItem[] = []
+  const waitingOnOrg: WaitingItem[] = []
+  for (const r of requests) {
+    const waitingOn = waitingByRequest.get(r.id)
+    if (!waitingOn) continue
+    const item: WaitingItem = {
+      requestId: r.id,
+      title: r.title,
+      requestNumber: r.requestNumber,
+      status: r.status,
+      waitingOn,
+    }
+    if (selfContactId && waitingOn.contactId === selfContactId) waitingOnYou.push(item)
+    else if (isWorkspaceAdmin) waitingOnOrg.push(item)
+  }
+  // Longest wait first in both lists: the one that has been sitting a week is
+  // the one costing the studio time.
+  const byLongestWait = (a: WaitingItem, b: WaitingItem) =>
+    b.waitingOn.daysWaiting - a.waitingOn.daysWaiting
+  waitingOnYou.sort(byLongestWait)
+  waitingOnOrg.sort(byLongestWait)
+
   return NextResponse.json({
     requests: requests.map((r) => ({
       ...r,
       participants: participantsByRequest.get(r.id) ?? [],
+      waitingOn: waitingByRequest.get(r.id) ?? null,
     })),
+    waitingOnYou,
+    waitingOnOrg,
     page,
     limit,
   })

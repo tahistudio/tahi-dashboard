@@ -61,6 +61,15 @@ export type NotificationEventType =
   // already signed. Carries entityType 'contract' like its sibling, so it
   // deep-links and folds into the 'document' kind for free.
   | 'contract_partially_signed'
+  // A request has been handed to ONE named contact at the client, and will not
+  // move until that person acts (migration 0104, lib/request-handoff.ts). Its
+  // own event rather than 'request_assigned': that one is a studio-side toggle
+  // ("no client is ever assigned a request", see PREF_EVENT_TYPES) and muting
+  // studio staffing chatter must not silence the one message that tells a
+  // client the work is stuck on them. Carries entityType 'request', so the
+  // deep link is the request case below for both audiences, and the nudge a
+  // few days later re-sends on this same event.
+  | 'request_waiting_on_you'
 
 export type NotificationEntityType =
   | 'request'

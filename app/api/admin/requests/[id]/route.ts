@@ -10,6 +10,7 @@ import { requireAccessToOrg } from '@/lib/require-access'
 import { isPatchableStatus, isRequestPriority } from '@/lib/request-vocabulary'
 import { emitRequestStatusChanged } from '@/lib/request-status-effects'
 import { notifyTeamMember, requestParticipantTitle } from '@/lib/notifications'
+import { loadWaitingOnOne } from '@/lib/request-handoff'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -186,8 +187,14 @@ export async function GET(req: NextRequest, { params }: Params) {
     activeTimer = t ?? null
   }
 
+  // The hand-off pointer, for the rail's "Waiting on" card and the synthetic
+  // line the Blocked by card draws. Folded onto `request` so the detail page
+  // reads it in the same place the list rows do. Its own tolerant query for
+  // the migration-0104 reason spelled out in lib/request-handoff.ts.
+  const waitingOn = await loadWaitingOnOne(drizzle, id)
+
   return NextResponse.json({
-    request,
+    request: { ...request, waitingOn },
     participants,
     subRequests,
     parent,

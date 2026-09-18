@@ -523,9 +523,35 @@ export const requests = sqliteTable('requests', {
   // hand-typed Stride rows that already duplicate ManyRequests 335 to 346, so
   // the import ADOPTS them instead of inserting a second copy.
   manyrequestsId: text('manyrequests_id'),
+  // ── The client hand-off pointer (migration 0104) ──────────────────────────
+  // A request keeps its Tahi owner. At any moment it can ALSO be handed to one
+  // named contact at the client, with a reason and an optional date, and it
+  // hands itself back the moment that person acts on it (approves in client
+  // review, uploads a file, or posts on the thread). Zero or one person, which
+  // is why this is a pointer on the row rather than a table; who it has sat
+  // with over its life is the audit_log trail
+  // ('request.handed_off' / 'request.handed_back'), which nothing can edit.
+  //
+  // The vocabulary and every piece of copy derived from it live in one place,
+  // lib/request-handoff.ts. Nothing else should type these slugs.
+  /** contacts.id. NULL = with the studio, which is the normal state. */
+  waitingOnContactId: text('waiting_on_contact_id'),
+  /** 'approval' | 'content' | 'access' | 'decision' | 'file' | 'other'. */
+  waitingReason: text('waiting_reason'),
+  /** ISO, stamped at hand-off. Drives the "3d" on the chip and the nudge. */
+  waitingSince: text('waiting_since'),
+  /** ISO, nullable. The date the studio asked for. */
+  waitingDueAt: text('waiting_due_at'),
+  /** Free text from the studio, nullable. */
+  waitingNote: text('waiting_note'),
+  /** ISO, nullable. Last reminder, so the cron holds to one nudge per 3 days. */
+  waitingNudgedAt: text('waiting_nudged_at'),
   ...timestamps,
 }, (table) => [
   index('idx_requests_org').on(table.orgId),
+  // "Everything waiting on a client", which is both the studio rail view and
+  // the nudge step's scan, over a column that is NULL on almost every row.
+  index('idx_requests_waiting_on').on(table.waitingOnContactId),
   uniqueIndex('idx_requests_manyrequests').on(table.manyrequestsId),
   index('idx_requests_status').on(table.status),
   index('idx_requests_assignee').on(table.assigneeId),

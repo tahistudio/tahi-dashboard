@@ -89,8 +89,13 @@ import {
   studioNewRequestEmailPlan,
   studioProposalDecisionEmailPlan,
   threadReplyEmailPlan,
+  waitingOnYouEmailPlan,
   type EmailTarget,
 } from '@/lib/notification-email'
+import {
+  HANDOFF_ACTION_VERB,
+  HANDOFF_REASON_SENTENCE,
+} from '@/lib/request-handoff'
 
 // ─── The registry index ──────────────────────────────────────────────────────
 
@@ -135,6 +140,13 @@ export const EMAIL_PREVIEW_ENTRIES = [
   { key: 'proposal-share', template: 'proposal-share', liveSender: true },
   { key: 'request-client-review', template: 'request-client-review', liveSender: true },
   { key: 'request-delivered', template: 'request-delivered', liveSender: true },
+  // POST /api/admin/requests/[id]/handoff: the studio has handed a request to
+  // one named person at the client. Two keys, one template: the nudge a few
+  // days later (the delivery-watch cron's hand-off step) is the same ask with
+  // a different kicker and opening line, and previewing only the first would
+  // leave the reminder every stalled hand-off actually sends unread.
+  { key: 'request-waiting-on-you', template: 'request-waiting-on-you', liveSender: true },
+  { key: 'request-waiting-on-you-nudge', template: 'request-waiting-on-you', liveSender: true },
   { key: 'review-request', template: 'review-request', liveSender: false },
   { key: 'schedule-share', template: 'schedule-share', liveSender: true },
   { key: 'seat-invite-client', template: 'seat-invite', liveSender: true },
@@ -436,6 +448,38 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
     orgId: PREVIEW_ORG_ID,
     clientName: CLIENT_ORG,
     deliveredAt: isoFromNow(-1, 4, 10),
+  })
+
+  // (2b) The hand-off, and the same ask a few days later. Built through the
+  //      real plan builder and the real vocabulary maps, so a reworded reason
+  //      or a changed verb shows up here instead of only in a client's inbox.
+  const waitingOnYou = waitingOnYouEmailPlan({
+    requestId: REQUEST_ID,
+    requestTitle: REQUEST_TITLE,
+    requestNumber: REQUEST_NUMBER,
+    orgId: PREVIEW_ORG_ID,
+    reasonLabel: HANDOFF_REASON_SENTENCE.approval,
+    actionVerb: HANDOFF_ACTION_VERB.approval,
+    fromName: STACI,
+    note:
+      'The hero copy and the pick-up window wording are the two bits I cannot decide for you. '
+      + 'Once you are happy with those I can push the rest live the same day.',
+    dueAt: isoFromNow(4),
+    actionUrl: requestUrl,
+  })
+
+  const waitingNudge = waitingOnYouEmailPlan({
+    requestId: REQUEST_ID,
+    requestTitle: REQUEST_TITLE,
+    requestNumber: REQUEST_NUMBER,
+    orgId: PREVIEW_ORG_ID,
+    reasonLabel: HANDOFF_REASON_SENTENCE.content,
+    actionVerb: HANDOFF_ACTION_VERB.content,
+    fromName: LIAM,
+    note: 'Still after the four orchard photos for the regions strip whenever you have a minute.',
+    dueAt: isoFromNow(-1),
+    actionUrl: requestUrl,
+    isNudge: true,
   })
 
   const newRequest = studioNewRequestEmailPlan({
@@ -1068,6 +1112,38 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
         Request: `REQ-${REQUEST_NUMBER} ${REQUEST_TITLE}`,
         Client: CLIENT_ORG,
         Delivered: isoFromNow(-1, 4, 10).slice(0, 10),
+      },
+    },
+
+    // lib/notification-email.ts waitingOnYouEmailPlan, from POST
+    // /api/admin/requests/[id]/handoff.
+    'request-waiting-on-you': {
+      subject: waitingOnYou.subject,
+      react: waitingOnYou.render(target),
+      personalisation: {
+        Greeting: firstName,
+        Request: `REQ-${REQUEST_NUMBER} ${REQUEST_TITLE}`,
+        Reason: HANDOFF_REASON_SENTENCE.approval,
+        Action: HANDOFF_ACTION_VERB.approval,
+        From: STACI,
+        'Needed by': nzDate(isoFromNow(4)),
+        Note: 'present (two lines from Staci)',
+      },
+    },
+
+    // The same template on the reminder path: the delivery-watch cron re-sends
+    // this once a hand-off has sat past requests.handoffNudgeDays.
+    'request-waiting-on-you-nudge': {
+      subject: waitingNudge.subject,
+      react: waitingNudge.render(target),
+      personalisation: {
+        Greeting: firstName,
+        Request: `REQ-${REQUEST_NUMBER} ${REQUEST_TITLE}`,
+        Reason: HANDOFF_REASON_SENTENCE.content,
+        Action: HANDOFF_ACTION_VERB.content,
+        From: LIAM,
+        Kicker: 'Still waiting (amber)',
+        'Needed by': `${nzDate(isoFromNow(-1))} (already passed)`,
       },
     },
 

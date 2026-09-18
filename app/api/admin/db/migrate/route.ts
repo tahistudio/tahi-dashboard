@@ -2293,6 +2293,19 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE feedback_comments ADD COLUMN screenshot_key text`,
     ],
   },
+  {
+    name: '0104',
+    description: 'requests gains the client hand-off pointer: waiting_on_contact_id, waiting_reason, waiting_since, waiting_due_at, waiting_note, waiting_nudged_at. Liam: "occasionally I\'ll need a client to help with a request (a person on the org), or I\'ll be blocked by them for something, so I should be able to assign clients to requests." A request keeps its Tahi owner; at any moment it can ALSO be handed to one named contact at the client with a reason (\'approval\' | \'content\' | \'access\' | \'decision\' | \'file\' | \'other\') and an optional date, and it hands itself back the moment that person approves in client review, uploads a file to it, or posts on its thread. Zero or one person at a time, which is why this is a pointer on the row rather than a table; the history of who it sat with is the audit_log trail (request.handed_off / request.handed_back), which nothing can edit. No work_blockers row is written either: the Blocked by card renders a synthetic line off these columns, so a hand-off cannot leave a stale blocker behind when the client acts. The partial index serves the one question both the studio rail view and the nudge step ask ("everything waiting on a client") over a column that is NULL on almost every row. All six are nullable and additive; the duplicate-column error is swallowed upstream so re-running is safe. The READ paths tolerate a missing column (lib/request-handoff.ts wraps its one query in a try/catch and returns an empty map), so deploying ahead of this degrades to "nothing is waiting on anyone" rather than 500ing a list, but apply it before the hand-off button is used: the WRITE paths select and set these columns directly.',
+    statements: [
+      `ALTER TABLE requests ADD COLUMN waiting_on_contact_id text`,
+      `ALTER TABLE requests ADD COLUMN waiting_reason text`,
+      `ALTER TABLE requests ADD COLUMN waiting_since text`,
+      `ALTER TABLE requests ADD COLUMN waiting_due_at text`,
+      `ALTER TABLE requests ADD COLUMN waiting_note text`,
+      `ALTER TABLE requests ADD COLUMN waiting_nudged_at text`,
+      `CREATE INDEX IF NOT EXISTS idx_requests_waiting_on ON requests(waiting_on_contact_id) WHERE waiting_on_contact_id IS NOT NULL`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {
