@@ -65,7 +65,42 @@ describe('decide_task_suggestion', () => {
 
   it('rejects an unknown action', () => {
     expect(() => call('decide_task_suggestion', { id: 's1', action: 'delete' }))
-      .toThrow("action must be 'approve', 'reject' or 'snooze'")
+      .toThrow("action must be 'approve', 'reject', 'snooze' or 'attach'")
+  })
+
+  it('forces an approve past the duplicate guard only when asked to', () => {
+    const forced = call('decide_task_suggestion', { id: 's1', action: 'approve', force: true })
+    expect(forced.body).toEqual({ action: 'approve', force: true })
+
+    // Anything but a literal true is the absence of force. An assistant that
+    // passed `force: 'no'` along must not disarm the guard.
+    expect(call('decide_task_suggestion', { id: 's1', action: 'approve', force: false }).body)
+      .toEqual({ action: 'approve' })
+    expect(call('decide_task_suggestion', { id: 's1', action: 'approve', force: 'yes' }).body)
+      .toEqual({ action: 'approve' })
+  })
+
+  it('never carries force on anything but an approve', () => {
+    expect(call('decide_task_suggestion', { id: 's1', action: 'reject', force: true }).body)
+      .toEqual({ action: 'reject' })
+  })
+
+  it('attaches a create suggestion to a request or a task', () => {
+    const toRequest = call('decide_task_suggestion', { id: 's1', action: 'attach', target_kind: 'request', target_id: 'r1' })
+    expect(toRequest.path).toBe('/api/admin/task-suggestions/s1/decide')
+    expect(toRequest.body).toEqual({ action: 'attach', target: { kind: 'request', id: 'r1' } })
+
+    const toTask = call('decide_task_suggestion', { id: 's1', action: 'attach', target_kind: 'task', target_id: 't1' })
+    expect(toTask.body).toEqual({ action: 'attach', target: { kind: 'task', id: 't1' } })
+  })
+
+  it('refuses an attach that names nothing to attach to', () => {
+    expect(() => call('decide_task_suggestion', { id: 's1', action: 'attach', target_id: 'r1' }))
+      .toThrow("target_kind must be 'request' or 'task'")
+    expect(() => call('decide_task_suggestion', { id: 's1', action: 'attach', target_kind: 'invoice', target_id: 'i1' }))
+      .toThrow("target_kind must be 'request' or 'task'")
+    expect(() => call('decide_task_suggestion', { id: 's1', action: 'attach', target_kind: 'request' }))
+      .toThrow('target_id is required')
   })
 
   it('rejects a snooze action with no preset, or an unknown one', () => {
@@ -131,5 +166,20 @@ describe('the registered tool descriptions list the CN.1b request kinds', () => 
     const desc = description('decide_task_suggestion')
     expect(desc).toContain('hand_off_request')
     expect(desc).toContain('contact_required')
+  })
+
+  it('decide_task_suggestion documents the duplicate guard and the way past it', () => {
+    const desc = description('decide_task_suggestion')
+    expect(desc).toContain('possible_duplicate')
+    expect(desc).toContain('attach')
+    expect(desc).toContain('force')
+  })
+
+  it('decide_task_suggestion takes the attach arguments', () => {
+    const tool = TOOLS.find(t => t.name === 'decide_task_suggestion')
+    const properties = tool?.inputSchema.properties as Record<string, unknown> | undefined
+    expect(properties).toHaveProperty('target_kind')
+    expect(properties).toHaveProperty('target_id')
+    expect(properties).toHaveProperty('force')
   })
 })

@@ -26,7 +26,7 @@
  */
 
 import { NextResponse } from 'next/server'
-import { and, eq, inArray, isNull, or, desc } from 'drizzle-orm'
+import { and, eq, gte, inArray, isNull, ne, notInArray, or, desc, sql, type SQL } from 'drizzle-orm'
 import { schema, type DB } from '@/db/d1'
 import { logAudit } from '@/lib/audit'
 import { normalizeCallInstant, STUDIO_TIME_ZONE } from '@/lib/call-time'
@@ -41,6 +41,7 @@ import {
 } from '@/lib/request-writes'
 import { TAHI_BOT } from '@/lib/tahi-bot'
 import { postRequestBotMessage, postTaskComment } from '@/lib/task-comments'
+import { SIMILAR_BLOCK, SIMILAR_WARN, findSimilar } from '@/lib/text-similarity'
 import { createTaskRecord, updateTaskRecord, type TaskPatchInput } from '@/lib/task-writes'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -109,10 +110,17 @@ export type DecisionVia = 'dashboard' | 'slack' | 'mcp'
  * verb: the row records what was actually applied rather than what the model
  * first wrote.
  */
+/** What an attach points a create suggestion at (CN.1d section 3). */
+export interface AttachTarget {
+  kind: 'request' | 'task'
+  id: string
+}
+
 export type DecisionInput =
-  | { action: 'approve'; proposalOverride?: unknown }
+  | { action: 'approve'; proposalOverride?: unknown; force?: boolean }
   | { action: 'reject' }
   | { action: 'snooze'; until: string }
+  | { action: 'attach'; target: AttachTarget }
 
 export interface DecisionContext {
   actorId: string
@@ -152,6 +160,22 @@ export interface SuggestionRow {
   updatedAt: string
 }
 
+/**
+ * Something that already exists and looks like what a create row proposes
+ * (CN.1d section 2). Computed on read from live rows, never stored, so the
+ * warning can never be stale and no rebuild is needed to refresh it.
+ */
+export interface SimilarMatch {
+  kind: 'request' | 'task' | 'suggestion'
+  id: string
+  /** The request number, for the one kind a human names by number. */
+  number: number | null
+  title: string
+  status: string
+  /** 0 to 1, from lib/text-similarity.ts. */
+  score: number
+}
+
 /** A row with the names a reader needs, resolved once on the server. */
 export interface DecoratedSuggestion extends Omit<SuggestionRow, 'proposal'> {
   /** The stored JSON, parsed once at the boundary so readers see the shapes in the contract. */
@@ -165,6 +189,12 @@ export interface DecoratedSuggestion extends Omit<SuggestionRow, 'proposal'> {
   targetRequestNumber: number | null
   targetRequestTitle: string | null
   targetRequestStatus: string | null
+  /**
+   * What this row would duplicate, best first, at most three, only at or
+   * above SIMILAR_WARN. Always an array: empty on every kind but an open
+   * create_request or create_task.
+   */
+  similar: SimilarMatch[]
 }
 
 /** A suggestion on its way in, before it has an id or a dedupe key. */
@@ -192,10 +222,14 @@ export interface DecisionResult {
   appliedRequestId?: string | null
   /**
    * Why an approve came back unchanged, when the reason is something the
-   * human can fix rather than a fault. The one value today is
-   * 'contact_required': a hand-off the model could not resolve to a person.
+   * human can fix rather than a fault. 'contact_required' is a hand-off the
+   * model could not resolve to a person; 'possible_duplicate' is a create
+   * that already exists (CN.1d); the two attach refusals name a target the
+   * gate will not convert a row onto.
    */
   error?: string
+  /** What the refused create would have duplicated, best first. */
+  similar?: SimilarMatch[]
 }
 
 export interface ApplyOutcome {
@@ -208,9 +242,198 @@ export interface ApplyOutcome {
 /** The refusal an approve gets when a hand-off names nobody the gate can use. */
 export const CONTACT_REQUIRED = 'contact_required'
 
+/** The refusal an approve gets when the client already has this work (CN.1d). */
+export const POSSIBLE_DUPLICATE = 'possible_duplicate'
+
+/** An attach on a row that does not create anything, so has nothing to move. */
+export const ATTACH_NOT_ALLOWED = 'attach_not_allowed'
+
+/** An attach onto a request or task that does not exist, or is another client's. */
+export const ATTACH_TARGET_INVALID = 'attach_target_invalid'
+
+/** The two kinds that bring something new into existence, and so can duplicate. */
+export const CREATE_KINDS: readonly SuggestionKind[] = ['create_request', 'create_task']
+
+/** How far back a delivered request is still worth warning about. */
+const SIMILAR_REQUEST_DAYS = 90
+
+/** How far back a finished task is still worth warning about. */
+const SIMILAR_TASK_DAYS = 30
+
+/** Rows read per source when looking for a twin. The inbox is small; this is a ceiling, not a target. */
+const SIMILAR_SCAN_LIMIT = 200
+
+/** How many matches a reader is shown. findSimilar caps at five; three is a line, not a list. */
+export const MAX_SIMILAR_SHOWN = 3
+
 /** The current timestamp, in the shape every other writer in this repo stamps. */
 function now(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+}
+
+// ── the duplicate guard (CN.1d) ──────────────────────────────────────────────
+//
+// The suggester is TOLD to prefer an update over a create, and mostly obeys.
+// Mostly is not a guard. Two calls a month apart about the same footer tag
+// produce two create_request rows that share no transcript, no dedupe key and
+// no exact title, so the dedupe key cannot see it and neither could a human
+// reading one call's inbox. What follows is the machinery for seeing it: a
+// set of live candidates per client, and a score against each one.
+
+/** A candidate before it has been scored against anything. */
+type SimilarCandidate = Omit<SimilarMatch, 'score'>
+
+/** Null is the studio itself, which has tasks and suggestions but no requests. */
+function orgKeyOf(orgId: string | null): string {
+  return orgId ?? ''
+}
+
+function isoDaysBefore(at: Date, days: number): string {
+  return new Date(at.getTime() - days * 86_400_000).toISOString().replace(/\.\d{3}Z$/, 'Z')
+}
+
+/** The title a create proposal is judged on, from a parsed proposal. */
+function proposalTitleOf(proposal: unknown): string {
+  const record = (proposal && typeof proposal === 'object' ? proposal : {}) as Record<string, unknown>
+  return typeof record.title === 'string' ? record.title : ''
+}
+
+function isCreateKind(kind: string): boolean {
+  return (CREATE_KINDS as readonly string[]).includes(kind)
+}
+
+/**
+ * Everything one client already has that a new create could duplicate,
+ * grouped by client.
+ *
+ * THREE SOURCES, because a duplicate hides in three places. The client's own
+ * requests, open or lately delivered, are the obvious one. Their tasks catch
+ * the studio's own follow-up proposed twice. Other PENDING create suggestions
+ * catch the case no stored row can: two calls swept in the same hour, neither
+ * decided yet, each proposing the same thing.
+ *
+ * The windows are deliberately generous on the closed rows. A request
+ * delivered six weeks ago is exactly the thing a client re-mentions, and
+ * proposing it again as new work is how a studio bills twice for one job.
+ */
+async function loadSimilarCandidates(
+  drizzle: Drizzle,
+  orgIds: ReadonlyArray<string | null>,
+  at: Date,
+): Promise<Map<string, SimilarCandidate[]>> {
+  const grouped = new Map<string, SimilarCandidate[]>()
+  const add = (orgId: string | null, candidate: SimilarCandidate): void => {
+    const key = orgKeyOf(orgId)
+    const list = grouped.get(key)
+    if (list) list.push(candidate)
+    else grouped.set(key, [candidate])
+  }
+
+  const realOrgIds = unique(orgIds.map(id => id ?? null))
+  const hasStudio = orgIds.some(id => id === null)
+
+  // Requests: open, or delivered inside the window. Archived, cancelled and
+  // draft rows are not work anybody is waiting on, so they never warn.
+  const requestSince = isoDaysBefore(at, SIMILAR_REQUEST_DAYS)
+  for (const batch of chunk(realOrgIds)) {
+    const rows = await drizzle
+      .select({
+        id: schema.requests.id,
+        orgId: schema.requests.orgId,
+        requestNumber: schema.requests.requestNumber,
+        title: schema.requests.title,
+        status: schema.requests.status,
+      })
+      .from(schema.requests)
+      .where(and(
+        inArray(schema.requests.orgId, batch),
+        notInArray(schema.requests.status, ['archived', 'cancelled', 'draft']),
+        or(
+          ne(schema.requests.status, 'delivered'),
+          gte(sql`coalesce(${schema.requests.deliveredAt}, ${schema.requests.updatedAt})`, requestSince),
+        ),
+      ))
+      .orderBy(desc(schema.requests.updatedAt))
+      .limit(SIMILAR_SCAN_LIMIT)
+
+    for (const row of rows) {
+      if (!row.title) continue
+      add(row.orgId, { kind: 'request', id: row.id, number: row.requestNumber ?? null, title: row.title, status: row.status })
+    }
+  }
+
+  // Tasks: not done, or done inside the window. A studio row (no client) is
+  // matched against the studio's own tasks, the same answer guardTask gives.
+  const taskSince = isoDaysBefore(at, SIMILAR_TASK_DAYS)
+  const taskLive = or(
+    ne(schema.tasks.status, 'done'),
+    gte(sql`coalesce(${schema.tasks.completedAt}, ${schema.tasks.updatedAt})`, taskSince),
+  )
+  const taskBatches: Array<string[] | null> = realOrgIds.length > 0 ? chunk(realOrgIds) : []
+  if (hasStudio) taskBatches.push(null)
+
+  for (const batch of taskBatches) {
+    const scope = batch === null ? isNull(schema.tasks.orgId) : inArray(schema.tasks.orgId, batch)
+    const rows = await drizzle
+      .select({
+        id: schema.tasks.id,
+        orgId: schema.tasks.orgId,
+        title: schema.tasks.title,
+        status: schema.tasks.status,
+      })
+      .from(schema.tasks)
+      .where(and(scope, taskLive))
+      .orderBy(desc(schema.tasks.updatedAt))
+      .limit(SIMILAR_SCAN_LIMIT)
+
+    for (const row of rows) {
+      if (!row.title) continue
+      add(row.orgId ?? null, { kind: 'task', id: row.id, number: null, title: row.title, status: row.status })
+    }
+  }
+
+  // Other pending create suggestions, which is the source no stored row can
+  // stand in for: a second call proposing the same thing before the first has
+  // been decided.
+  for (const batch of taskBatches) {
+    const scope = batch === null
+      ? isNull(schema.taskSuggestions.orgId)
+      : inArray(schema.taskSuggestions.orgId, batch)
+    const rows = await drizzle
+      .select({
+        id: schema.taskSuggestions.id,
+        orgId: schema.taskSuggestions.orgId,
+        status: schema.taskSuggestions.status,
+        proposal: schema.taskSuggestions.proposal,
+      })
+      .from(schema.taskSuggestions)
+      .where(and(
+        scope,
+        eq(schema.taskSuggestions.status, 'pending'),
+        inArray(schema.taskSuggestions.kind, [...CREATE_KINDS]),
+      ))
+      .orderBy(desc(schema.taskSuggestions.createdAt))
+      .limit(SIMILAR_SCAN_LIMIT)
+
+    for (const row of rows) {
+      const title = proposalTitleOf(parseProposalLoose(row.proposal ?? ''))
+      if (!title) continue
+      add(row.orgId ?? null, { kind: 'suggestion', id: row.id, number: null, title, status: row.status })
+    }
+  }
+
+  return grouped
+}
+
+/** The matches for one title, itself excluded, best first, capped for a reader. */
+function matchesFor(
+  title: string,
+  candidates: readonly SimilarCandidate[] | undefined,
+  excludeId: string,
+): SimilarMatch[] {
+  if (!title.trim() || !candidates || candidates.length === 0) return []
+  return findSimilar(title, candidates.filter(candidate => candidate.id !== excludeId), SIMILAR_WARN)
+    .slice(0, MAX_SIMILAR_SHOWN)
 }
 
 // ── the dedupe key ───────────────────────────────────────────────────────────
@@ -301,11 +524,30 @@ export async function buildDedupeKey(input: DedupeInput): Promise<string> {
  * a transcript it has already seen is the normal case, not a fault, and the
  * summary reads better for saying so.
  */
+/**
+ * The pending create suggestions that could be the twin of a batch of drafts:
+ * the same clients, plus the studio itself when the batch has a client-less
+ * draft. Null when there is nothing to scope to.
+ */
+function pendingCreateScope(orgIds: ReadonlyArray<string | null>): SQL | null {
+  const scopes: SQL[] = []
+  const named = unique(orgIds.map(id => id ?? null))
+  if (named.length > 0) scopes.push(inArray(schema.taskSuggestions.orgId, named))
+  if (orgIds.some(id => id === null)) scopes.push(isNull(schema.taskSuggestions.orgId))
+  if (scopes.length === 0) return null
+
+  return and(
+    scopes.length === 1 ? scopes[0] : or(...scopes)!,
+    eq(schema.taskSuggestions.status, 'pending'),
+    inArray(schema.taskSuggestions.kind, [...CREATE_KINDS]),
+  )!
+}
+
 export async function insertSuggestions(
   drizzle: Drizzle,
   drafts: readonly SuggestionDraft[],
-): Promise<{ inserted: number; duplicates: number }> {
-  if (drafts.length === 0) return { inserted: 0, duplicates: 0 }
+): Promise<{ inserted: number; duplicates: number; similarDropped: number }> {
+  if (drafts.length === 0) return { inserted: 0, duplicates: 0, similarDropped: 0 }
 
   const keyed = await Promise.all(drafts.map(async draft => ({
     draft,
@@ -319,23 +561,73 @@ export async function insertSuggestions(
     }),
   })))
 
+  // ONE READ FOR BOTH GUARDS. The dedupe keys already on the table and the
+  // pending create rows this batch might repeat come back from the same
+  // statement: they are the same table, and a second round trip per sweep
+  // buys nothing. Rows arrive tagged by which half matched them.
+  const wantedKeys = new Set(keyed.map(entry => entry.dedupeKey))
+  const pendingScope = keyed.some(entry => isCreateKind(entry.draft.kind))
+    ? pendingCreateScope(keyed.map(entry => entry.draft.orgId))
+    : null
+
   const existing = new Set<string>()
+  const pending: SimilarCandidate[] = []
+  const pendingOrg = new Map<string, string>()
   for (const batch of chunk(keyed.map(entry => entry.dedupeKey))) {
+    const keyMatch = inArray(schema.taskSuggestions.dedupeKey, batch)
     const rows = await drizzle
-      .select({ dedupeKey: schema.taskSuggestions.dedupeKey })
+      .select({
+        id: schema.taskSuggestions.id,
+        orgId: schema.taskSuggestions.orgId,
+        kind: schema.taskSuggestions.kind,
+        status: schema.taskSuggestions.status,
+        proposal: schema.taskSuggestions.proposal,
+        dedupeKey: schema.taskSuggestions.dedupeKey,
+      })
       .from(schema.taskSuggestions)
-      .where(inArray(schema.taskSuggestions.dedupeKey, batch))
-    for (const row of rows) existing.add(row.dedupeKey)
+      .where(pendingScope ? or(keyMatch, pendingScope) : keyMatch)
+
+    for (const row of rows) {
+      if (row.dedupeKey && wantedKeys.has(row.dedupeKey)) existing.add(row.dedupeKey)
+      if (row.status !== 'pending' || !isCreateKind(row.kind ?? '') || pendingOrg.has(row.id)) continue
+      const title = proposalTitleOf(parseProposalLoose(row.proposal ?? ''))
+      if (!title) continue
+      pendingOrg.set(row.id, orgKeyOf(row.orgId ?? null))
+      pending.push({ kind: 'suggestion', id: row.id, number: null, title, status: row.status })
+    }
   }
 
   const stamp = now()
   let inserted = 0
   let duplicates = 0
+  let similarDropped = 0
 
   for (const entry of keyed) {
     if (existing.has(entry.dedupeKey)) {
       duplicates++
       continue
+    }
+
+    // A create that repeats something already waiting for the same client is
+    // dropped here rather than filed: two rows proposing one thing make the
+    // inbox longer and the decision no easier. A match against an existing
+    // REQUEST or TASK is deliberately NOT dropped: the human may still want
+    // it, and the read-time warning will say so.
+    if (isCreateKind(entry.draft.kind)) {
+      const key = orgKeyOf(entry.draft.orgId)
+      const mine = pending.filter(candidate => pendingOrg.get(candidate.id) === key)
+      const title = proposalTitleOf(entry.draft.proposal)
+      const twin = title.trim() ? findSimilar(title, mine, SIMILAR_BLOCK)[0] : undefined
+      if (twin) {
+        similarDropped++
+        continue
+      }
+      if (title.trim()) {
+        // Added before the write, so a batch proposing one thing twice in two
+        // wordings inserts it once.
+        pendingOrg.set(`draft:${entry.dedupeKey}`, key)
+        pending.push({ kind: 'suggestion', id: `draft:${entry.dedupeKey}`, number: null, title, status: 'pending' })
+      }
     }
     // Added to the seen set before the write, so a batch proposing the same
     // change twice inserts it once.
@@ -365,7 +657,7 @@ export async function insertSuggestions(
     inserted++
   }
 
-  return { inserted, duplicates }
+  return { inserted, duplicates, similarDropped }
 }
 
 // ── reading ──────────────────────────────────────────────────────────────────
@@ -502,7 +794,7 @@ function parseProposalLoose(proposal: string): unknown {
   }
 }
 
-async function decorate(drizzle: Drizzle, rows: SuggestionRow[]): Promise<DecoratedSuggestion[]> {
+async function decorate(drizzle: Drizzle, rows: SuggestionRow[], at: Date = new Date()): Promise<DecoratedSuggestion[]> {
   if (rows.length === 0) return []
 
   const orgIds = unique(rows.map(row => row.orgId))
@@ -564,13 +856,27 @@ async function decorate(drizzle: Drizzle, rows: SuggestionRow[]): Promise<Decora
     for (const row of found) calls.set(`scheduled:${row.id}`, { title: row.title, scheduledAt: row.scheduledAt })
   }
 
+  // The duplicate warning (CN.1d section 2), for the open create rows only:
+  // a kind that names what it changes cannot duplicate anything, and a
+  // decided row is history. One candidate read per client, shared by every
+  // row of that client in this page.
+  const guarded = rows.filter(row => OPEN_STATUSES.includes(row.status) && isCreateKind(row.kind))
+  const candidates = guarded.length > 0
+    ? await loadSimilarCandidates(drizzle, guarded.map(row => row.orgId), at)
+    : new Map<string, SimilarCandidate[]>()
+  const guardedIds = new Set(guarded.map(row => row.id))
+
   return rows.map(row => {
     const call = row.callKind && row.callId ? calls.get(`${row.callKind}:${row.callId}`) ?? null : null
     const task = row.targetTaskId ? tasks.get(row.targetTaskId) ?? null : null
     const request = row.targetRequestId ? requests.get(row.targetRequestId) ?? null : null
+    const proposal = parseProposalLoose(row.proposal)
     return {
       ...row,
-      proposal: parseProposalLoose(row.proposal),
+      similar: guardedIds.has(row.id)
+        ? matchesFor(proposalTitleOf(proposal), candidates.get(orgKeyOf(row.orgId)), row.id)
+        : [],
+      proposal,
       callTitle: call?.title ?? null,
       callScheduledAt: call?.scheduledAt ?? null,
       orgName: row.orgId ? orgNames.get(row.orgId) ?? null : null,
@@ -1069,6 +1375,85 @@ export async function applySuggestion(
 const OPEN_STATUSES: readonly string[] = ['pending', 'snoozed']
 
 /**
+ * "Use #226 instead": a create suggestion, re-pointed at work that already
+ * exists (CN.1d section 3).
+ *
+ * The row is not decided and nothing is written to the request or the task.
+ * What changes is what the row PROPOSES: a create becomes a note on the thing
+ * the human picked, carrying the same words, the same quote, the same
+ * rationale and the same confidence, still pending. The human then approves
+ * it like any other note, and the note lands through exactly the code every
+ * other approve goes through.
+ *
+ * THE TARGET DECIDES THE KIND, not the source. A create_request the human
+ * recognised as a studio task attaches as a task note, and a create_task they
+ * recognised as client work attaches as a request note, because what the
+ * reader wanted was "this belongs over there" and over there is where the
+ * thread lives.
+ *
+ * The dedupe key is deliberately left as it was. It is the identity of the
+ * proposal the model made, and keeping it is what stops the next sweep over
+ * the same transcript from re-proposing the create this attach just retired.
+ */
+async function attachSuggestion(
+  drizzle: Drizzle,
+  row: SuggestionRow,
+  target: AttachTarget,
+): Promise<DecisionResult> {
+  const refuse = (error: string): DecisionResult => (
+    { suggestion: row, changed: false, error, appliedTaskId: null, appliedRequestId: null }
+  )
+
+  if (!isCreateKind(row.kind)) return refuse(ATTACH_NOT_ALLOWED)
+
+  const proposal = parseProposal(row.proposal)
+  const body = [text(proposal.title), text(proposal.description)].filter(Boolean).join('\n\n')
+  if (!body) return refuse(ATTACH_NOT_ALLOWED)
+
+  const updates: Record<string, unknown> = {
+    proposal: JSON.stringify({ body }),
+    updatedAt: now(),
+  }
+
+  if (target.kind === 'request') {
+    const [request] = await drizzle
+      .select({ id: schema.requests.id, orgId: schema.requests.orgId })
+      .from(schema.requests)
+      .where(eq(schema.requests.id, target.id))
+      .limit(1)
+    // A request always belongs to a client, so a studio row (no client) can
+    // never attach to one, and one client's suggestion can never land on
+    // another client's thread.
+    if (!request || (request.orgId ?? null) !== row.orgId) return refuse(ATTACH_TARGET_INVALID)
+    updates.kind = 'request_note'
+    updates.targetRequestId = request.id
+    updates.targetTaskId = null
+  } else {
+    const [task] = await drizzle
+      .select({ id: schema.tasks.id, orgId: schema.tasks.orgId })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.id, target.id))
+      .limit(1)
+    if (!task || (task.orgId ?? null) !== row.orgId) return refuse(ATTACH_TARGET_INVALID)
+    updates.kind = 'note'
+    updates.targetTaskId = task.id
+    updates.targetRequestId = null
+  }
+
+  await drizzle
+    .update(schema.taskSuggestions)
+    .set(updates)
+    .where(eq(schema.taskSuggestions.id, row.id))
+
+  return {
+    suggestion: { ...row, ...updates } as SuggestionRow,
+    changed: true,
+    appliedTaskId: null,
+    appliedRequestId: null,
+  }
+}
+
+/**
  * Record a decision once, whoever made it and wherever.
  *
  * A row that is already applied, rejected or expired comes back unchanged
@@ -1093,6 +1478,32 @@ export async function decideSuggestion(
       changed: false,
       appliedTaskId: row.appliedTaskId,
       appliedRequestId: row.appliedRequestId,
+    }
+  }
+
+  // Attaching is not deciding: it rewrites what the row proposes onto
+  // something that already exists and leaves it pending, so the human still
+  // presses the button. It therefore returns before any decision is stamped.
+  if (decision.action === 'attach') {
+    return attachSuggestion(drizzle, row, decision.target)
+  }
+
+  // A create that the client demonstrably already has is refused BEFORE
+  // anything is written (CN.1d section 3). Re-run against LIVE rows rather
+  // than trusting the warning computed when the inbox was read: the human may
+  // have created it by hand ten seconds ago. `force` is the human saying they
+  // looked and want it anyway, which is a thing they are allowed to want.
+  if (decision.action === 'approve' && isCreateKind(row.kind) && decision.force !== true) {
+    const effective = decision.proposalOverride !== undefined
+      ? decision.proposalOverride
+      : parseProposal(row.proposal)
+    const title = proposalTitleOf(effective)
+    if (title.trim()) {
+      const candidates = await loadSimilarCandidates(drizzle, [row.orgId], new Date())
+      const similar = matchesFor(title, candidates.get(orgKeyOf(row.orgId)), row.id)
+      if (similar.length > 0 && similar[0].score >= SIMILAR_BLOCK) {
+        return { suggestion: row, changed: false, error: POSSIBLE_DUPLICATE, similar, appliedTaskId: null, appliedRequestId: null }
+      }
     }
   }
 

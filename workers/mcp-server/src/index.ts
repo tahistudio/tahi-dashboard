@@ -608,11 +608,14 @@ export const TOOLS: ToolDef[] = [
     body: prop('string', 'The comment text'),
     as_bot: prop('boolean', 'Post as "Tahi bot" rather than as a person. Default false.'),
   }, ['task_id', 'body']),
-  tool('decide_task_suggestion', 'Record a decision on one call suggestion: approve (creates or updates the task or request, hands a request to a client contact, or posts a thread note, then posts the "Tahi bot" thread line), reject, or snooze. Approving with a proposal is a Tweak: the edited proposal replaces the suggested one before it is applied. A hand_off_request approved with no contact resolved returns changed false and error contact_required. Guarded: deciding an already-decided suggestion again is a no-op.', {
+  tool('decide_task_suggestion', 'Record a decision on one call suggestion: approve (creates or updates the task or request, hands a request to a client contact, or posts a thread note, then posts the "Tahi bot" thread line), reject, snooze, or attach. Approving with a proposal is a Tweak: the edited proposal replaces the suggested one before it is applied. A hand_off_request approved with no contact resolved returns changed false and error contact_required. A create_request or create_task whose title closely matches an existing request, task or pending suggestion for the same client returns changed false, error possible_duplicate and the matches in similar: attach it to the match instead, or send force true to create it anyway. attach turns the create suggestion into a note on the request or task named by target_kind and target_id, keeping it pending for a human to approve. Guarded: deciding an already-decided suggestion again is a no-op.', {
     id: prop('string', 'Suggestion ID'),
-    action: prop('string', "'approve', 'reject' or 'snooze'"),
+    action: prop('string', "'approve', 'reject', 'snooze' or 'attach'"),
     proposal: { type: 'object', description: 'An edited proposal to apply instead of the suggested one. Only read when action is approve.' },
     snooze: prop('string', "'tonight' or 'this_week'. Required when action is snooze."),
+    target_kind: prop('string', "'request' or 'task': what to attach this create suggestion to. Required when action is attach."),
+    target_id: prop('string', 'The request or task ID to attach to. Required when action is attach.'),
+    force: prop('boolean', 'Create it even though it looks like a duplicate. Only read when action is approve, and only after reading what it matched.'),
   }, ['id', 'action']),
   tool('rebuild_task_suggestions', "Re-read call transcripts the suggester has already looked at. Expires their still-undecided suggestions (applied and rejected ones are left alone: those are decisions) and clears the transcripts' read mark, so the next sweep proposes against them again. This is the cutover tool for a change to what the suggester knows how to propose, not a routine one: it costs another model pass over every transcript it names.", {
     transcript_ids: { type: 'array', items: { type: 'string' }, description: 'The transcripts to re-read' },

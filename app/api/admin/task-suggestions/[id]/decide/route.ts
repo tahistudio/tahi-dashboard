@@ -9,6 +9,11 @@
  * Two founders clicking Approve on the same row is expected rather than an
  * error: the second click comes back `changed: false` with the row as it
  * stands. See lib/task-suggestions.ts#decideSuggestion.
+ *
+ * FOUR ACTIONS since CN.1d. `attach` re-points a create suggestion at work
+ * that already exists and leaves it pending, and an approve may carry
+ * `force: true`, which is the human saying they have read the duplicate
+ * warning and want the row created anyway.
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -30,9 +35,17 @@ interface DecideBody {
   snooze?: 'tonight' | 'this_week' | { until?: string }
   /** The surface the decision was made on. Defaults to the dashboard. */
   via?: string
+  /**
+   * "Approve anyway" (CN.1d section 3). Only read on an approve, and only
+   * ever sent after the human has been shown what it would duplicate.
+   */
+  force?: boolean
+  /** The request or task an attach points this create suggestion at. */
+  target?: { kind?: string; id?: string }
 }
 
 const VIAS: readonly string[] = ['dashboard', 'slack', 'mcp']
+const TARGET_KINDS: readonly string[] = ['request', 'task']
 
 export async function POST(
   req: NextRequest,
@@ -57,9 +70,21 @@ export async function POST(
 
   let decision: DecisionInput
   if (body.action === 'approve') {
-    decision = body.proposal !== undefined
-      ? { action: 'approve', proposalOverride: body.proposal }
-      : { action: 'approve' }
+    // `force` is only ever added when it is true: an approve that carries
+    // `force: false` and one that carries nothing are the same decision, and
+    // the row should record the same thing for both.
+    decision = {
+      action: 'approve',
+      ...(body.proposal !== undefined ? { proposalOverride: body.proposal } : {}),
+      ...(body.force === true ? { force: true } : {}),
+    }
+  } else if (body.action === 'attach') {
+    const kind = body.target?.kind
+    const targetId = typeof body.target?.id === 'string' ? body.target.id.trim() : ''
+    if (!kind || !TARGET_KINDS.includes(kind) || !targetId) {
+      return NextResponse.json({ error: 'An attach needs a request or task to attach to' }, { status: 400 })
+    }
+    decision = { action: 'attach', target: { kind: kind as 'request' | 'task', id: targetId } }
   } else if (body.action === 'reject') {
     decision = { action: 'reject' }
   } else if (body.action === 'snooze') {
@@ -87,8 +112,11 @@ export async function POST(
     // never both, so exactly one of the two is ever non-null.
     appliedRequestId: result.appliedRequestId ?? null,
     // Why an approve came back unchanged when the human can fix it:
-    // 'contact_required' on a hand-off with nobody named yet.
+    // 'contact_required' on a hand-off with nobody named yet,
+    // 'possible_duplicate' on a create the client already has (CN.1d).
     error: result.error ?? null,
+    // What that duplicate is, so the inbox can name it without a second read.
+    similar: result.similar ?? null,
   })
 }
 

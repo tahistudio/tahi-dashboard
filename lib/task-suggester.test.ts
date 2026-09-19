@@ -109,7 +109,7 @@ const CONTEXT: SuggestionContext = {
     { id: 'task-1', title: 'Rebuild the pricing page', status: 'in_progress', assigneeName: 'Liam', dueDate: null, updatedAt: '2026-09-10T00:00:00Z' },
     { id: 'task-2', title: 'Write the launch email', status: 'todo', assigneeName: null, dueDate: '2026-09-25', updatedAt: '2026-09-12T00:00:00Z' },
   ],
-  requests: [{ id: 'req-1', number: 42, title: 'Spring landing page', status: 'in_progress', waitingOn: false }],
+  requests: [{ id: 'req-1', number: 42, title: 'Spring landing page', status: 'in_progress', waitingOn: false, delivered: false }],
   members: [{ id: 'tm-1', name: 'Liam' }, { id: 'tm-2', name: 'Staci' }],
   contacts: [
     { id: 'con-1', name: 'Ella Brown', email: 'ella@elevate.uk' },
@@ -130,6 +130,10 @@ describe('suggestionContextWindows', () => {
     const w = suggestionContextWindows(new Date('2026-09-19T00:00:00Z'))
     expect(w.updatedSince).toBe('2026-07-21T00:00:00Z')
     expect(w.doneSince).toBe('2026-09-05T00:00:00Z')
+  })
+
+  it('looks back ninety days for delivered work, which is what gets re-asked for', () => {
+    expect(suggestionContextWindows(new Date('2026-09-19T00:00:00Z')).deliveredSince).toBe('2026-06-21T00:00:00Z')
   })
 })
 
@@ -171,6 +175,25 @@ describe('buildSuggestionContext', () => {
 
     const limits = selects.flatMap(s => s.args[s.methods.indexOf('limit') - 1] ?? [])
     expect(limits).toContain(CONTEXT_CONTACT_LIMIT)
+  })
+
+  it('shows work delivered lately, marked delivered, so it is not proposed again', async () => {
+    // The commonest duplicate there is: a client mentions the thing the studio
+    // finished six weeks ago, the model sees nothing like it in a list of open
+    // work, and proposes it as new. Delivered rows are in the list, and say so.
+    const { handle } = makeDb([
+      [{ id: 'tm-1', name: 'Liam' }],
+      [],
+      [
+        { id: 'req-1', requestNumber: 42, title: 'Spring landing page', status: 'delivered', waitingOnContactId: null },
+        { id: 'req-2', requestNumber: 43, title: 'Careers page', status: 'in_review', waitingOnContactId: null },
+      ],
+      [],
+    ])
+
+    const ctx = await buildSuggestionContext(handle, 'org-a')
+
+    expect(ctx.requests.map(r => r.delivered)).toEqual([true, false])
   })
 
   it('asks for no requests at all when the transcript is studio housekeeping', async () => {
@@ -868,6 +891,27 @@ describe('runSuggestionSweep', () => {
       targetRequestId: 'req-1',
       targetTaskId: null,
     })
+  })
+
+  it('drops a create this client already has waiting, and says so in the run log', async () => {
+    const { handle, inserts } = makeDb([
+      [TRANSCRIPT_ROW],
+      [{ orgId: 'org-9', meetingType: 'client', dealId: null, attendees: '[]' }],
+      ...contextSelects(),
+      // One pending create suggestion for this client, from an earlier call,
+      // saying the same thing in different words.
+      [{ id: 'sug-9', orgId: 'org-9', kind: 'create_task', status: 'pending', proposal: JSON.stringify({ title: 'FAQ section on the pricing page' }), dedupeKey: 'zzz' }],
+      [],                                   // resurfaceSnoozed
+      [],                                   // repair: nothing orgless
+    ])
+
+    const summary = await runSuggestionSweep(handle, { suggest: okSuggest, now: new Date('2026-09-19T00:00:00Z') })
+
+    expect(summary.inserted).toBe(0)
+    expect(summary.dropReasons.similar_pending).toBe(1)
+    // The model's own drop plus this one: "proposed but not kept" is one number.
+    expect(summary.dropped).toBe(2)
+    expect(inserts.find(i => i.table === schema.taskSuggestions)).toBeUndefined()
   })
 })
 

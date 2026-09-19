@@ -82,6 +82,10 @@ export function parseSweepLimit(raw: string | null): number {
 
 const TASK_ACTIVITY_DAYS = 60
 const TASK_DONE_DAYS = 14
+/** How long a delivered request stays in the context, marked delivered, so a
+ *  re-mention of finished work is proposed as a note rather than as new work
+ *  (CN.1d section 2). */
+const REQUEST_DELIVERED_DAYS = 90
 const MAX_OUTPUT_TOKENS = 3000
 const MAX_TRANSCRIPT_CHARS = 60_000
 
@@ -133,6 +137,10 @@ export interface SuggestionContextRequest {
    *  hand-off on the same request is nearly always the model repeating one
    *  that is already live. */
   waitingOn: boolean
+  /** True for work already delivered inside the window (CN.1d section 2). The
+   *  model is shown these so a client re-mentioning finished work produces a
+   *  note on it, not a second request for it. */
+  delivered: boolean
 }
 
 export interface SuggestionContextMember {
@@ -227,10 +235,11 @@ function asString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-export function suggestionContextWindows(at: Date): { updatedSince: string; doneSince: string } {
+export function suggestionContextWindows(at: Date): { updatedSince: string; doneSince: string; deliveredSince: string } {
   return {
     updatedSince: daysBefore(at, TASK_ACTIVITY_DAYS),
     doneSince: daysBefore(at, TASK_DONE_DAYS),
+    deliveredSince: daysBefore(at, REQUEST_DELIVERED_DAYS),
   }
 }
 
@@ -249,7 +258,7 @@ export async function buildSuggestionContext(
   orgId: string | null,
   at: Date = new Date(),
 ): Promise<SuggestionContext> {
-  const { updatedSince, doneSince } = suggestionContextWindows(at)
+  const { updatedSince, doneSince, deliveredSince } = suggestionContextWindows(at)
 
   const memberRows = await database
     .select({ id: schema.teamMembers.id, name: schema.teamMembers.name })
@@ -294,6 +303,10 @@ export async function buildSuggestionContext(
 
   if (!orgId) return { tasks, requests: [], members, contacts: [] }
 
+  // Open work, plus anything DELIVERED inside the window. The delivered half
+  // is what stops the commonest duplicate there is: a client mentioning the
+  // thing the studio finished six weeks ago, and the model, seeing nothing
+  // like it in the list, proposing it again as new work (CN.1d section 2).
   const requestRows = await database
     .select({
       id: schema.requests.id,
@@ -305,9 +318,12 @@ export async function buildSuggestionContext(
     .from(schema.requests)
     .where(and(
       eq(schema.requests.orgId, orgId),
-      ne(schema.requests.status, 'delivered'),
       ne(schema.requests.status, 'archived'),
       ne(schema.requests.status, 'draft'),
+      or(
+        ne(schema.requests.status, 'delivered'),
+        gte(sql`coalesce(${schema.requests.deliveredAt}, ${schema.requests.updatedAt})`, deliveredSince),
+      ),
     ))
     .orderBy(desc(schema.requests.updatedAt))
     .limit(CONTEXT_REQUEST_LIMIT)
@@ -318,6 +334,7 @@ export async function buildSuggestionContext(
     title: r.title,
     status: r.status,
     waitingOn: Boolean(r.waitingOnContactId),
+    delivered: r.status === 'delivered',
   }))
 
   const contactRows = await database
@@ -658,7 +675,7 @@ function buildUserMessage(input: SuggestFromTranscriptInput): string {
 
   if (input.context.requests.length > 0) {
     parts.push(['REQUESTS (the only request ids you may name):', ...input.context.requests.map(r =>
-      `- ${r.id} | #${r.number ?? '?'} ${r.title} | status ${r.status}${r.waitingOn ? ' | already waiting on the client' : ''}`,
+      `- ${r.id} | #${r.number ?? '?'} ${r.title} | status ${r.status}${r.delivered ? ' | DELIVERED, this work is finished' : ''}${r.waitingOn ? ' | already waiting on the client' : ''}`,
     )].join('\n'))
   } else {
     parts.push('REQUESTS: none open for this client.')
@@ -928,6 +945,15 @@ export async function runSuggestionSweep(
 
     summary.inserted += written.inserted
     summary.duplicates += written.duplicates
+
+    // A create the writer dropped because the same client already has one
+    // waiting (CN.1d section 4). Counted beside the model's own drops so a
+    // run log reads as one number for "proposed but not kept", with the
+    // reason beside it.
+    if (written.similarDropped > 0) {
+      summary.dropped += written.similarDropped
+      summary.dropReasons.similar_pending = (summary.dropReasons.similar_pending ?? 0) + written.similarDropped
+    }
 
     await stamp(database, transcript.id, nowIso)
   }

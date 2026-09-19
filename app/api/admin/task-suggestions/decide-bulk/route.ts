@@ -57,6 +57,11 @@ export async function POST(req: NextRequest) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
+  // NEVER FORCES (CN.1d section 3). "Approve all" is one click over six rows
+  // nobody read individually, which is exactly the click that must not be
+  // able to create a duplicate. A row the guard refuses comes back with
+  // `possible_duplicate` beside the ones that applied, and the human deals
+  // with that one on its own, where they can see what it would repeat.
   const decision: DecisionInput = body.action === 'approve' ? { action: 'approve' } : { action: 'reject' }
   const results: BulkResult[] = []
 
