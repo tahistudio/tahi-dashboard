@@ -1,0 +1,330 @@
+[
+  {
+    "key": "ai-pattern",
+    "files": [
+      {
+        "path": "app/api/admin/discovery-calls/[id]/extract/route.ts",
+        "why": "The existing pattern for calling Sonnet on a transcript: cached system-prompt blocks, plain-text tag parsing (not JSON), token accounting into a lead's aiTokensSpent. This is the closest precedent for a suggester that reads a transcript and proposes structured items."
+      },
+      {
+        "path": "lib/ai-models.ts",
+        "why": "Single source of model ids: OPUS_MODEL, SONNET_MODEL ('claude-sonnet-5' via ANTHROPIC_SONNET_MODEL env override), HAIKU_MODEL. The suggester should import SONNET_MODEL from here, never hardcode a model string."
+      },
+      {
+        "path": "lib/ai-cost.ts",
+        "why": "Cost/spend tracking: RATE_CARD (USD per 1M tokens), estimateCostUsd/estimateCostCents, recordCost(database, {scope, scopeId, stage, provider, model, inputTokens, outputTokens, callUnits, note}) which inserts into schema.aiCostLog. Scope type is a union that currently includes 'wizard' for the two AI wizards; a new suggestion-related scope would need to be added to the Scope union here. Also DRAFT_COST_CAP_CENTS/ESTIMATED_STAGE_COSTS_CENTS pattern for content pipeline caps (not used by the wizards, which instead use a simpler local daily-cents cap, see task-wizard route)."
+      },
+      {
+        "path": "app/api/admin/ai/task-wizard/route.ts",
+        "why": "Fullest example of the wizard pattern: JSON-in-tags output format (<tasks>...</tags> wrapping a JSON array), Zod-free manual field validation/sanitisation (asTrimmedString, asChecklist, ISO date regex), deterministic keyword-based fallback (handleDeterministic) reachable ONLY in non-production when ANTHROPIC_API_KEY is unset, honest-failure error payloads (AI_UNAVAILABLE/AI_RATE_LIMITED/DEGRADED), a per-day spend cap read from aiCostLog before calling the model (wizardSpendTodayCents + WIZARD_DAILY_CAP_CENTS = 500 cents), and document-upload handling. Uses HAIKU_MODEL not Sonnet."
+      },
+      {
+        "path": "app/api/admin/ai/request-wizard/route.ts",
+        "why": "Same wizard shape tuned for client-facing requests; shows access-scope enforcement before injecting org context into a prompt (requireAccessToOrg), and how CONTEXT is composed by string-concatenating parts rather than a single template."
+      },
+      {
+        "path": "lib/task-wizard-drafts.ts",
+        "why": "Pure-function half of the task wizard: TaskWizardDraft shape, priority alias table/normaliser, and body builders. Suggester's create_task proposal shape should likely reuse or mirror this rather than re-inventing field names."
+      },
+      {
+        "path": "lib/cron-runs.ts",
+        "why": "The cron auth + logging wrapper. assertCronAuth() checks header x-cron-secret OR 'Authorization: Bearer <secret>' against process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET, falling back to an authenticated Tahi-admin session. withCronRun(cronName, handler) wraps a route, times it, writes one row to cron_runs (status/durationMs/summary/error/ranAt) via logCronRun, and on 'error' status pushes a deduped (1 per 6h) notification to the default lead owner (settings key 'leads.defaultLeadOwnerId'). The suggester's cron route should be built with withCronRun exactly like existing crons."
+      },
+      {
+        "path": "lib/call-transcripts.ts",
+        "why": "call_transcripts read/write helpers: upsertTranscript (idempotent on source+externalId, hash-based), findCallMatch/scoreCallCandidates/pickCallMatch (the 20-point-lead matcher across discovery_calls and scheduled_calls), listUnlinked(database, limit) (only rows with callId IS NULL, ordered by receivedAt desc), resolveCallOrgId. There is NO existing helper to list transcripts filed/received since a timestamp; the general list in app/api/admin/call-transcripts/route.ts just orders callTranscripts by receivedAt desc with a limit (no since-filter). A new suggester cron would need to add its own gte(schema.callTranscripts.receivedAt, sinceIso) or gte(...createdAt...) query, or track a high-water mark itself."
+      },
+      {
+        "path": "db/schema.ts",
+        "why": "Line ~2071: call_transcripts table definition with exact columns and indexes."
+      },
+      {
+        "path": "app/api/admin/call-transcripts/route.ts",
+        "why": "Shows the org-scoping pattern for transcripts: unlinked rows are allow-if-any-scope (no client attached yet), linked rows are filtered by resolving the call's orgId and checking scopedOrgIds()/isOrgInScope()."
+      },
+      {
+        "path": "docs/superpowers/plans/2026-09-19-call-notes-to-tasks-scope.md",
+        "why": "The scope doc itself (sections 2, 3, Phase 1) defining task_suggestions, call_transcripts additions, and the suggester's intended behaviour and effort estimate."
+      }
+    ],
+    "shapes": [
+      {
+        "name": "Sonnet call (extract route) — request",
+        "shape": "client.messages.create({ model: SONNET_MODEL, max_tokens: 2000, system: [{type:'text', text: SYSTEM_PROMPT, cache_control:{type:'ephemeral'}}, ...optionally a second uncached {type:'text', text: ACTION_ITEMS_PROMPT} block], messages: [{ role: 'user', content: userMessage }] })"
+      },
+      {
+        "name": "Sonnet/Haiku call — response handling",
+        "shape": "response.content.filter(b => b.type === 'text').map(b => b.text).join('\\n') to get plain text; response.usage gives input_tokens/output_tokens, and for the extract route also cache_read_input_tokens/cache_creation_input_tokens (cast via `as typeof response.usage & {...}`) which are summed into inputTokens for spend accounting."
+      },
+      {
+        "name": "Extract route output parsing",
+        "shape": "Not JSON — a custom pseudo-XML tag format parsed by regex, e.g. <outcome>...</outcome> <summary>...</summary> <action_item><ai_title>...</ai_title><ai_detail>...</ai_detail><ai_assignee>...</ai_assignee></action_item>. tag()/tagInt() helpers extract single tags; parseActionItems() extracts zero-or-more repeated <action_item> blocks. Fields are silently omitted (not defaulted/invented) when the tag is absent or invalid."
+      },
+      {
+        "name": "Wizard route output parsing",
+        "shape": "Model reply is free text ending in a <tasks>[...]</tasks> or <requests>[...]</requests> block containing a raw JSON array. Everything before the opening tag is the 'reply' shown as a chat bubble. JSON.parse wrapped in try/catch; on parse failure the tags are stripped and reply is returned with zero drafts (never a partial/guessed draft)."
+      },
+      {
+        "name": "WizardResponse (task-wizard and request-wizard)",
+        "shape": "{ reply: string, tasks?: TaskWizardDraft[] /* or requests?: RequestDraft[] */, done: boolean, degraded?: true, reason?: 'ai_unavailable', notice?: string }"
+      },
+      {
+        "name": "TaskWizardDraft",
+        "shape": "{ id: string, title: string, description: string, category: string|null, priority: string, estimatedHours: number|null, dueDate: string|null /* YYYY-MM-DD only */, clientName: string|null /* name not id */, assigneeName: string|null, requestRef: string|null /* e.g. '#042' */, checklist: string[] }"
+      },
+      {
+        "name": "RequestDraft",
+        "shape": "{ id: string, title: string, description: string, category: 'design'|'development'|'content'|'strategy', type: 'small_task'|'large_task'|'bug_fix'|'new_feature', priority: 'standard'|'high', estimatedHours: number /* always overwritten server-side by estimateRequestHours(), never trusts the model's number */ }"
+      },
+      {
+        "name": "recordCost() input (lib/ai-cost.ts)",
+        "shape": "{ scope: 'draft'|'ideation'|'backfill'|'links'|'health'|'site_index'|'sitemap'|'wizard', scopeId?: string|null, stage: string, provider: 'anthropic'|'openai'|'perplexity'|'replicate', model: string, inputTokens?: number, outputTokens?: number, callUnits?: number, note?: string } -> Promise<cents:number>, writes one row to schema.aiCostLog"
+      },
+      {
+        "name": "withCronRun handler signature (lib/cron-runs.ts)",
+        "shape": "withCronRun<TSummary>(cronName: string, handler: (req: NextRequest, database: D1, userId: string) => Promise<TSummary>) => (req: NextRequest) => Promise<NextResponse>. Auth: header 'x-cron-secret' === process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET, or 'Authorization: Bearer <secret>', else falls back to isTahiAdmin(session). userId is 'system' for cron-secret calls."
+      },
+      {
+        "name": "call_transcripts row (db/schema.ts ~line 2071)",
+        "shape": "{ id, callKind: text|null ('discovery'|'scheduled'), callId: text|null, source: text notNull ('gemini_drive'|'manual'), externalId: text notNull, title: text|null, receivedAt: text notNull (ISO), hash: text notNull, text: text notNull /* full transcript body */, summary: text|null, wrapUp: text|null, matchedBy: text|null ('gemini_title_time'|'manual'), unlinkedReason: text|null ('no_match'|'ambiguous'), createdAt: text notNull default now }. Unique index on (source, externalId); index on (callKind, callId); index on receivedAt."
+      },
+      {
+        "name": "call_transcripts TS helper types (lib/call-transcripts.ts)",
+        "shape": "UpsertTranscriptInput { source, externalId, text, title?, receivedAt?, summary?, wrapUp?, callKind?, callId?, matchedBy?, unlinkedReason? }; CallTranscriptRow (returned by listUnlinked/GET route) { id, callKind, callId, source, externalId, title, receivedAt, summary, unlinkedReason, matchedBy, text } — note: no wrapUp field surfaced in CallTranscriptRow/list route response even though the DB column exists; a caller wanting wrapUp must select it directly."
+      }
+    ],
+    "gotchas": [
+      "There is a direct conflict between the relayed user request ('add 2 more call types: mentoring, other') and this subagent's computed task, which explicitly scopes it to read-only research and forbids any edit/commit/write. I did NOT make that schema/code change. If the harness intends for someone to act on it, it needs to be routed to an agent with write permission (the computed task said this session's job was research only) — flagging this back to the orchestrator rather than silently doing it or silently dropping it.",
+      "Sonnet is called with model=SONNET_MODEL from lib/ai-models.ts, which resolves to 'claude-sonnet-5' by default (overridable via ANTHROPIC_SONNET_MODEL). The two AI wizards (task-wizard, request-wizard) use HAIKU_MODEL instead, not Sonnet — only discovery-calls/extract uses Sonnet today. A new suggester reading transcripts for task suggestions should decide model tier deliberately; the scope doc doesn't specify, but Sonnet is the closer precedent given it's already used for transcript extraction with cache_control on the system prompt.",
+      "The extract route's output format is NOT JSON — it's a bespoke <tag>...</tag> regex-parsed format, explicitly because it's 'parsed by regex' per the system prompt's own comment. The two wizards instead use a hybrid: free text reply + a single trailing JSON array wrapped in <tasks>/<requests> tags. For task_suggestions (which need structured proposal JSON per the scope doc), the wizard's JSON-in-tags pattern is the better fit, not the extract route's flat-tag format.",
+      "Every AI-call route in this codebase enforces a strict fail-open-to-error, never-a-guessed-answer contract: if ANTHROPIC_API_KEY is missing, production returns a 503 error (never silently drafts); only in non-production does it fall back to a deterministic keyword-based generator, and that response is always flagged degraded:true so the UI never paints it as a real model answer. A new suggester must follow the same contract, especially since it 'never applies' per the scope doc and its plausibility is the whole product.",
+      "recordCost's Scope union in lib/ai-cost.ts does not include a suggestion-specific value yet ('draft'|'ideation'|'backfill'|'links'|'health'|'site_index'|'sitemap'|'wizard') — a new scope string (e.g. 'call_suggestions') would need to be added to that type before recordCost can be called with it.",
+      "call_transcripts has no listSince()/listByReceivedAfter() helper and no cursor/high-water-mark table. The suggester cron (Phase 1) will need to add its own query (e.g. gte(receivedAt, sinceIso)) or track state itself (e.g. via schema.settings or a new column) to avoid re-suggesting from transcripts it already processed — nothing in the current codebase does this for call_transcripts specifically.",
+      "The RATE_CARD comment in lib/ai-cost.ts documents a known historical bug (now fixed): Opus/Sonnet rows were previously 3x/1.5x too high, which tripped the $10 draft cost cap early. Per user memory (bug_ai_cost_rate_card_opus_inflated.md) this was flagged as 'not fixed' at one point — worth re-verifying current RATE_CARD numbers are accurate before basing new cap logic on it, though the file comment now states it was corrected.",
+      "isProjectishCall() in the extract route gates action-item extraction on meetingType==='client' OR any of orgId/requestId/taskId being set — pure sales/discovery calls never get action items. The scope doc's suggester will run on transcripts attached to either discovery_calls or scheduled_calls; it should decide its own equivalent gate (the scope doc implies suggestions should only fire for client/project-shaped calls too, consistent with 'never invent work').",
+      "MCP parity rule (CLAUDE.md rule 14): any new API capability (e.g. list_task_suggestions, decide_task_suggestion per the scope doc's Phase 1) must also be exposed as MCP tools in workers/mcp-server/src/index.ts — the local mcp-server/index.ts is dormant per project memory feedback_mcp_worker_only.md and must not be extended."
+    ],
+    "summary": "Researched (read-only, no edits made) how the Tahi dashboard calls Claude today, to inform the task_suggestions \"suggester\" described in docs/superpowers/plans/2026-09-19-call-notes-to-tasks-scope.md. Three live patterns exist: (1) POST /api/admin/discovery-calls/[id]/extract calls Sonnet (SONNET_MODEL from lib/ai-models.ts) with a cached system-prompt block plus an uncached addendum, and parses a bespoke regex-based <tag> output format, not JSON; (2) the two AI wizards (app/api/admin/ai/task-wizard and app/api/admin/ai/request-wizard) call Haiku, request a trailing JSON array wrapped in <tasks>/<requests> tags mixed into a free-text reply, enforce a strict \"never fake a model answer\" contract (production 503s if no API key; dev-only degraded keyword fallback, always flagged), and cap spend via lib/ai-cost.ts's recordCost()/aiCostLog. (3) Cron routes use lib/cron-runs.ts's withCronRun()/assertCronAuth(), which authenticates via x-cron-secret or Bearer token against TAHI_CRON_SECRET/CRON_SECRET (or falls back to an admin session) and logs every run to cron_runs with dedup'd failure notifications. lib/call-transcripts.ts holds the transcript matcher (20-point-lead rule across discovery_calls + scheduled_calls) and CRUD helpers, but has no \"list since timestamp\" helper — a new suggester cron will need to add one. Full field-level shapes, exact function signatures, and gotchas are itemized below.\n\nIMPORTANT PROCESS NOTE: the relayed user message asked to \"add 2 more call types: mentoring, other\" before continuing. That is a write/edit task, and it conflicts with this subagent's explicit read-only, no-edit/no-write scope. I did not perform that change — it needs to be picked up by an agent with write access (or clarified which call-type enum it refers to, e.g. discoveryCalls.meetingType vs scheduledCalls, since I did not find an obvious single enum of \"call types\" named 'mentoring'/'other' candidates during this pass — a quick grep for the relevant enum/type list is recommended before making that change)."
+  },
+  {
+    "key": "task-paths",
+    "summary": "Task create/update logic lives inline in two route handlers (POST /api/admin/tasks and PATCH /api/admin/tasks/[id]) - there is NO shared pure 'apply' function today for the core insert/update. What IS already shared: link-resolution helpers (lib/task-access.ts: guardTask, loadTaskLinks, requestOrgId, resolveAssigneeType) and pure link-invariant functions (lib/task-consistency.ts: setTaskLevel, setTaskClient, setTaskRequest, coerceTaskLinks). A call-notes-to-tasks 'apply' function would need to be built by extracting the insert body (POST lines 307-385) and the update body (PATCH lines 108-282) into a new shared lib function that both routes call, or that a new apply-suggestion path calls directly instead of going through the routes. Task threads exist via lib/task-comments.ts#postTaskComment, which already has a bot author type and quote support, and already mirrors into the linked request's message thread - this is very reusable as-is for suggestion approval lines. No audit_log writes happen anywhere in the tasks API today (grep found zero hits in app/api/admin/tasks or lib/task*.ts) - a new apply function must add its own logAudit/logAuditStrict call (lib/audit.ts, actorType 'system' supported). The tasks page dialog (NewTaskDialog) has NO generic 'open prefilled with arbitrary draft' prop and NO URL-param-driven open; it only supports initialOrgId, initialStatus, initialTemplateId (template lookup), or the internal handleDraftToForm(fields: TaskFields) path used today only by the AI task wizard panel. That handleDraftToForm function is the closest existing 'open task dialog prefilled from external data' mechanism and is the pattern a suggestion 'Tweak' action should reuse. The relayed user request in this turn ('add 2 more call types mentoring/other') is unrelated to this research question and is out of scope for me: I was instructed to be a strictly read-only researcher and never edit/commit/run anything that writes, so I did not touch scheduledCalls/discovery call type enums. That request should be routed to whichever agent in this workflow is doing writes (the harness lists 'main' and 'handoff-tidy' as other active agents).",
+    "files": [
+      {
+        "path": "app/api/admin/tasks/route.ts",
+        "why": "POST (lines 176-388) is the only task creation path. Inline logic: title required (400 if blank/missing); level derived from body.type via isTaskLevel() else derived from orgId presence ('client_task' if orgId else 'tahi_internal'); priority defaults to 'standard' and validated via isTaskPriority(); status defaults to 'todo' and validated against TASK_STATUSES; when requestId is set but orgId is not, orgId is looked up via requestOrgId() and 404s if the request doesn't exist; links resolved via coerceTaskLinks(setTaskLevel(...)); requireAccessToOrg() enforces Rule 11 on links.orgId; assigneeType resolved server-side via resolveAssigneeType() unless body.assigneeType is explicitly 'contact'|'team_member'; insert into schema.tasks with id=crypto.randomUUID(), completedAt set only if status==='done'; body.subtasks (string[]) inserted as taskSubtasks rows after the task insert; a task_assigned notification is sent to a team_member assignee unless the assigner IS the assignee. Returns { id } with 201."
+      },
+      {
+        "path": "app/api/admin/tasks/[id]/route.ts",
+        "why": "PATCH (lines 73-285) is the only task update path, guarded by guardTask() first. Every field is optional/partial: only keys present in the body get touched. status changes revalidate against TASK_STATUSES and clear/set completedAt. priority validated against TASK_PRIORITIES. assigneeId changes re-resolve assigneeType server-side via resolveAssigneeType() when assigneeType isn't also sent. Any of type/orgId/requestId being present triggers 'touchesLinks' branch (lines 175-243): loads current links via loadTaskLinks(), resolves next org/request through the same setTaskLevel/coerceTaskLinks invariants as POST, re-checks requireAccessToOrg() only when orgId is actually changing. Same task_assigned notification rule as POST. DELETE (287-316) hard-deletes the row after sweepBlockers() - this is the ONLY hard delete in the codebase."
+      },
+      {
+        "path": "lib/task-access.ts",
+        "why": "Shared helpers both routes call: guardTask(drizzle, userId, taskId) -> NextResponse|null (404 if missing, org-scoped 403/null via requireAccessToOrg, tasks with no orgId are open to any team member); loadTaskLinks(drizzle, taskId) -> {type, orgId, requestId}|null; requestOrgId(drizzle, requestId) -> string|null; resolveAssigneeType(drizzle, assigneeId) -> 'team_member'|'contact'|null. These are the ONLY pieces of task-write logic already factored out into lib/ - the insert and the update bodies themselves are NOT."
+      },
+      {
+        "path": "lib/task-consistency.ts",
+        "why": "Pure functions for the level/org/request invariant triple: setTaskLevel(state, level), setTaskClient(...), setTaskRequest(...), coerceTaskLinks(state) -> TaskLinkState {level, orgId, requestId}. Used identically by POST, PATCH, and the NewTaskDialog client component, so any apply-suggestion function should reuse these rather than re-deriving link rules."
+      },
+      {
+        "path": "lib/task-comments.ts",
+        "why": "postTaskComment(drizzle, {taskId, author: {authorType:'team_member'|'contact'|'bot', authorId}, body, quote?, sourceRef?}) -> throws 'Task not found' if the task is gone; inserts a task_comments row AND, when task.requestId && task.orgId are both set, mirrors an internal `messages` row into that request's thread (body prefixed with the quote when present, via mirrorBody()). This is exactly the mechanism the scope doc's 'posts a Tahi bot line into the task's thread with the quote and a link to the call' needs - it already supports authorType 'bot' and a verbatim quote field. listTaskComments(drizzle, taskId) reads the thread back, sorted by createdAt then id."
+      },
+      {
+        "path": "lib/tahi-bot.ts",
+        "why": "TAHI_BOT constant: {authorType:'bot', id:'tahi-bot', name:'Tahi bot'}. isBotAuthor(authorType) helper. BOT_AVATAR_TOKENS for rendering. This is the fixed actor identity postTaskComment and the request-thread mirror stamp when a suggestion is applied as the bot."
+      },
+      {
+        "path": "app/api/admin/tasks/[id]/subtasks/route.ts",
+        "why": "GET returns {subtasks: [...]} (key is 'subtasks' not 'items'). POST body {title: string} (400 if blank), inserts a taskSubtasks row, both guarded by guardTask()."
+      },
+      {
+        "path": "app/api/admin/tasks/[id]/subtasks/[subId]/route.ts",
+        "why": "PATCH body {isCompleted: boolean} (400 if not boolean) toggles completed. DELETE removes the row. Both verify the subtask belongs to the named task before writing, both guarded by guardTask()."
+      },
+      {
+        "path": "app/api/admin/tasks/[id]/comments/route.ts",
+        "why": "GET returns {comments: CommentView[]} with authorName resolved (team_member/contact names batch-loaded, bot -> TAHI_BOT.name). POST body {body: string, asBot?: boolean} - asBot is wire-only (no UI checkbox), intended for MCP/automation callers like post_task_comment's as_bot param; a human caller always resolves to their own team_member identity via resolveTeamMember(). Calls postTaskComment() from lib/task-comments.ts, so this route is itself a thin wrapper - a suggestion-apply function could call postTaskComment directly rather than going through this HTTP route."
+      },
+      {
+        "path": "app/api/admin/tasks/bulk/route.ts",
+        "why": "PATCH body {taskIds: string[], updates: {status?, priority?, assigneeId?, dueDate?}} - confirms bulk update has its OWN inline logic (a narrower field set than the single-task PATCH) rather than calling a shared apply function or looping the single-task PATCH handler. Scoped via resolveAccessScoping the same way GET /api/admin/tasks is."
+      },
+      {
+        "path": "app/(dashboard)/tasks/tasks-content.tsx",
+        "why": "The dialog is opened two ways: openNewTask() (line 867-870, blank form) and openFromTemplate(templateId) (872-875, template-prefilled). NewTaskDialog is rendered once (lines 994-1004) with props open, onClose, initialOrgId={filterOrgId}, initialTemplateId={dialogTemplateId}, clients, peopleList, requests={requestOptions}, templates, onCreate={handleCreate}. There is NO prop for an arbitrary prefilled draft and NO URL-param-driven dialog open - searchParams (line 242) is only used to deep-link the TASK DETAIL panel via ?task=<id> (line 340, 348-349, via window.history.replaceState, not router navigation). handleCreate (636-658) maps NewTaskDraft -> the POST body 1:1 (title, type, orgId, requestId, description, status, priority, assigneeId, dueDate, estimatedHours, subtasks) then calls selectTask(id) on success."
+      },
+      {
+        "path": "components/tahi/tasks/new-task-dialog.tsx",
+        "why": "NewTaskDialogProps (lines 78-96): open, onClose, initialStatus?, initialOrgId?, initialTemplateId?, clients, peopleList, requests, templates, onCreate: (draft: NewTaskDraft) => Promise<void>, defaultView?: 'form'|'ai'. NewTaskDraft (64-76): {title, type: TaskLevel, orgId, requestId, description, status, priority, assigneeId, dueDate, estimatedHours, subtasks: string[]}. KEY FINDING: handleDraftToForm(fields: TaskFields) at line 408-431 is the existing 'open dialog prefilled from an external AI draft' mechanism - it sets every form field from a TaskFields object and calls setView('form'), currently wired only to the AI wizard panel's onDraftToForm prop (line 497). This is the pattern a suggestion's 'Tweak' action should reuse: build a TaskFields-shaped object from the suggestion's proposal and either (a) lift handleDraftToForm's logic to accept an initial draft prop, or (b) add a new prop like initialDraft?: TaskFields that the effect at lines 361-389 applies the same way initialTemplateId is applied today."
+      },
+      {
+        "path": "lib/task-wizard-drafts.ts",
+        "why": "TaskFields interface (78-90): {title, type: TaskLevel, orgId, requestId, description, status, priority, assigneeId, dueDate, estimatedHours, subtasks: string[]} - exactly the shape handleDraftToForm and the create route both understand, and is 'structurally' the same as NewTaskDraft (comment at file top explicitly notes this). draftToTaskFields(draft: TaskWizardDraft, ctx: DraftContext): TaskFields|null resolves a model's free-text draft (client/assignee by NAME, not id) into this concrete shape - resolveByName does exact-then-unique-prefix matching and returns null on ambiguity rather than guessing. buildCreateTaskBody(draft, ctx) builds the exact POST body. This whole file is a strong template for a task_suggestions proposal -> TaskFields mapper."
+      },
+      {
+        "path": "docs/superpowers/plans/2026-09-19-call-notes-to-tasks-scope.md",
+        "why": "Sections 2-4 (read per instructions): defines task_suggestions table (kind: create_task|update_task|complete_task|add_subtasks|note; proposal JSON matches TaskFields for creates, a field diff for updates; quote/rationale/confidence; status pending->approved->applied etc; dedupeKey unique index for idempotency), call_transcripts table, and Phase 1 scope: 'Apply: one server function shared by the route and Slack; creates or updates through the same code the task routes use; posts the bot line; idempotent on status.' This confirms the extraction work described above is exactly what Phase 1 requires and is not yet done."
+      }
+    ],
+    "shapes": [
+      {
+        "name": "POST /api/admin/tasks request body",
+        "shape": "{ title: string (required, trimmed, 400 if empty), type?: 'client_task'|'internal_client_task'|'tahi_internal' (TaskLevel, via isTaskLevel), orgId?: string|null, description?: string|null, status?: string (default 'todo', validated against TASK_STATUSES), priority?: string (default 'standard', validated against isTaskPriority), assigneeId?: string|null, assigneeType?: 'contact'|'team_member'|null (else server-resolved from assigneeId), dueDate?: string|null, estimatedHours?: number|null, trackId?: string|null, position?: number|null, requestId?: string|null, scheduleRowId?: string|null, subtasks?: string[] (titles, filtered/trimmed), actorTeamMemberId?: string|null (MCP-only) }. Response: { id: string } status 201, or 400/403/404 error JSON."
+      },
+      {
+        "name": "PATCH /api/admin/tasks/[id] request body",
+        "shape": "All optional/partial - only present keys are updated: { title?: string (400 if trims empty), description?: string|null, status?: string (validated, also resets completedAt), priority?: string (validated), assigneeId?: string|null (assigneeType re-resolved server-side unless also sent), assigneeType?: string|null, dueDate?: string|null, estimatedHours?: number|null (400 if not finite/negative), trackId?: string|null, position?: number|null, requestId?: string|null, orgId?: string|null, type?: string (TaskLevel, 400 if invalid), tags?: string, scheduleRowId?: string|null }. Presence of type/orgId/requestId triggers full link-invariant recomputation. Response: { success: true } or 400/403/404."
+      },
+      {
+        "name": "TaskFields / NewTaskDraft (dialog draft shape, structurally equal)",
+        "shape": "{ title: string, type: TaskLevel, orgId: string|null, requestId: string|null, description: string|null, status: string, priority: string, assigneeId: string|null, dueDate: string|null, estimatedHours: number|null, subtasks: string[] }"
+      },
+      {
+        "name": "postTaskComment() input/output",
+        "shape": "input: { taskId: string, author: { authorType: 'team_member'|'contact'|'bot', authorId: string|null }, body: string, quote?: string|null, sourceRef?: string|null }. Throws Error('Task not found') if the task row is gone. Returns TaskCommentRow: { id, taskId, authorType, authorId, body, quote, sourceRef, createdAt }. Side effect: mirrors into schema.messages (isInternal: true) when task.requestId && task.orgId are both set."
+      },
+      {
+        "name": "task_suggestions proposal field mapping (from the scope doc, not yet built)",
+        "shape": "Per docs/superpowers/plans/2026-09-19-call-notes-to-tasks-scope.md section 3: for kind='create_task', proposal is 'the full task draft (title, description, type, orgId, requestId, assigneeId, dueDate, estimatedHours, subtasks)' - i.e. TaskFields minus status/priority explicitly named, so defaults for those two would still need supplying the way draftToTaskFields() does. For kind='update_task', proposal is 'the field diff' - i.e. a Partial<TaskFields>-shaped object matching PATCH's partial-update contract directly."
+      }
+    ],
+    "gotchas": [
+      "No shared apply function exists yet: POST's insert body (tasks/route.ts:307-331) and PATCH's update body (tasks/[id]/route.ts:245-248 plus the touchesLinks block 175-243) are both inline in their route handlers. A call-notes-to-tasks apply function must either (a) extract both into a new lib function both routes call, or (b) call the routes' underlying D1 writes directly, duplicating guardTask/coerceTaskLinks/notification logic. Extraction (a) matches the scope doc's Phase 1 line: 'Apply: one server function shared by the route and Slack; creates or updates through the same code the task routes use.'",
+      "No audit_log writes happen anywhere in the tasks API today (confirmed by grep across app/api/admin/tasks and lib/task*.ts - zero hits for auditLog/audit_log/logAudit/writeAudit). Any new apply-suggestion function needs to add its own logAudit()/logAuditStrict() call (lib/audit.ts) with actorType 'system' and the suggestion id in metadata, per the scope doc's 'writes an audit entry'.",
+      "The task_assigned notification logic is duplicated verbatim between POST and PATCH - if create/update logic gets extracted into a shared apply function, this notification branch should move with it rather than staying duplicated a third time.",
+      "NewTaskDialog has no generic prefill prop today. The nearest existing mechanism is handleDraftToForm(fields: TaskFields) in new-task-dialog.tsx (line 408), wired only to the AI wizard's onDraftToForm callback - it is a function defined INSIDE the dialog component, not an exposed prop, so 'open the dialog prefilled from a suggestion' will need either a new prop (e.g. initialDraft?: TaskFields, applied in the open-effect at lines 361-389 the same way initialTemplateId is) or lifting handleDraftToForm's field-setting logic out so tasks-content.tsx can drive it from a suggestion row.",
+      "resolveByName() (lib/task-wizard-drafts.ts) deliberately returns null on an ambiguous name match rather than guessing - this aligns with the scope doc's rule that 'an update must name the existing task' and should be the pattern reused for resolving a transcript's client/assignee names, NOT a fuzzy match.",
+      "guardTask() treats tasks with orgId === null as open to every team member ('studio housekeeping') - this matters for call_transcripts/task_suggestions rows too if they end up scoped by org, since a null-org suggestion would need the same open-access treatment for consistency with the rest of the access model.",
+      "The relayed user request in this turn ('add 2 more call types: mentoring, other') was NOT acted on. I was scoped as a strictly read-only researcher for this specific question and explicitly told never to edit/commit/run anything that writes, so I did not look at where call type enums are defined. This should be picked up by whichever agent in the workflow does the actual editing (the session lists 'main' and 'handoff-tidy' as other active agents)."
+    ]
+  },
+  {
+    "key": "inbox-surfaces",
+    "summary": "Read-only research on the Tahi dashboard Tasks page, owner-home overview cards, the overview API payload, the notifications model, and the MCP tool-registration pattern (with its pure-mapping/parity-test precedent), to prep the builder for CN.1 (Phase 1: suggestions and the dashboard gate, per docs/superpowers/plans/2026-09-19-call-notes-to-tasks-scope.md). Note: the harness's relayed user message ('add 2 more call types mentoring/other') is unrelated to this subagent's assigned research question and was not acted on here — this session is read-only and never edited or committed anything, per its own instructions. Key finding: Phase 0 (CN.0, call_transcripts, Tahi bot actor, task_comments/task threads) is already merged (commits 82e01f15, 58bba5af, 16bbb85b), and it already established the exact reusable pattern (pure-mapping file + parity test in app/api/__tests__/) that CN.1's list_task_suggestions/decide_task_suggestion pair should copy verbatim from workers/mcp-server/src/task-comment-tools.ts.",
+    "files": [
+      {
+        "path": "docs/superpowers/plans/2026-09-19-call-notes-to-tasks-scope.md",
+        "why": "The scope doc. Sections 2/3 define task_suggestions (id, source, kind, targetTaskId/targetRequestId/orgId, proposal JSON, quote, rationale, confidence, status, dedupeKey, slackChannelId/slackMessageTs). Section 4 Phase 1 lists exactly what to build: suggester cron, Suggestions view on /tasks, studio-home card ('6 suggestions from 2 calls'), Approve/Tweak/Snooze/Reject actions, bulk approve, keyboard y/n, one shared apply function, MCP list_task_suggestions + decide_task_suggestion."
+      },
+      {
+        "path": "app/(dashboard)/tasks/tasks-content.tsx",
+        "why": "Main Tasks page client component (1094 lines). Body swap at line 990: `const body = rail.view === 'board' ? boardBody : rail.view === 'week' ? weekBody : listBody`. Render block (~992-1094) wraps body in `<div role=\"tabpanel\" id={TASKS_VIEW_PANEL_ID}>`. `railInert = rail.view === 'week'` (line 476) is the precedent for a view that ignores the rail's filters/sort. No keyboard shortcut wiring exists anywhere in this file today (grep for keydown/addEventListener found none) — CN.1's 'y and n' shortcuts would be new."
+      },
+      {
+        "path": "lib/tasks-views.ts",
+        "why": "Pure vocabulary module. `TasksViewKey = 'list' | 'board' | 'week'`, `TASKS_VIEW_KEYS` array (line ~76). `TASKS_SAVED_VIEWS` (line ~158) is a list of {key, label, test} filter presets layered on top of the view, not a fourth peer view — a Suggestions surface is architecturally a new TasksViewKey, not a saved view."
+      },
+      {
+        "path": "components/tahi/tasks/use-tasks-rail-state.ts",
+        "why": "The `useTasksRailState()` hook backing `rail` in tasks-content.tsx. Persists `tasks.view`/`tasks.savedView`/`tasks.filters`/`tasks.sort`/`tasks.default` via useUserPreference (localStorage only, no server persistence)."
+      },
+      {
+        "path": "components/tahi/tasks/tasks-view-switcher.tsx",
+        "why": "THE exact recipe for adding a tab/view. `VIEW_META: Record<TasksViewKey, {label, Icon}>` maps each key to a segmented-control option; `TASKS_VIEW_KEYS.map(...)` builds the options automatically. To add a Suggestions tab: (1) add 'suggestions' to TASKS_VIEW_KEYS in lib/tasks-views.ts, (2) add a VIEW_META entry here with a label+Icon, (3) add a `suggestionsBody` branch to the ternary at tasks-content.tsx:990, sharing the existing `TASKS_VIEW_PANEL_ID` tabpanel. `TASKS_VIEW_PANEL_ID` is exported from this file, referenced by tasks-content.tsx's wrapper div — the two must not drift."
+      },
+      {
+        "path": "components/tahi/overview/homes/owner-home.tsx",
+        "why": "Card composition for the admin overview ('Studio Ledger'). `export function OwnerHome({ ctx })` (line 313) fetches `useResource<OverviewData>('/api/admin/overview')` once for hero KPIs, then renders cards grouped in `<Zone label=\"...\">` blocks (Books/Ahead/Work/Clients/Growth). Each card is its own function component that independently calls `useResource(<own endpoint>)` rather than reading the shared overview payload — see TodaysCalls (line 1399, fetches /api/admin/discovery-calls/upcoming) and NeedsYouBlock (line 527, aggregates off-track engagements + upcoming calls into a priority-sorted list). A new 'Suggestions' card belongs in `<Zone label=\"Work\">` alongside TodaysCalls/ClientReplies, following the same own-endpoint pattern rather than bloating GET /api/admin/overview."
+      },
+      {
+        "path": "components/tahi/overview/ov-kit.tsx",
+        "why": "Card primitives used by every card. `Card({span, className, children, style, tone, edge, section})` (line 390) — `section` prop names the card for the feedback-ball anchor. `CardH({ic, title, link, onLink, badge})` (line 409) — header with icon chip + title + optional badge + 'See all'-style link button. `Row({avText, img, title, sub, right, dot, dotColor, onClick})` (line 442) — one list row, keyboard-activatable when onClick set. `Shim({h})` — loading skeleton. `EmptyLine` — empty state."
+      },
+      {
+        "path": "components/tahi/overview/ctx.ts",
+        "why": "`OverviewCtx` type: `go: (routeId: string) => void` navigates by logical id. `overview-home.tsx` maps ids via `ROUTE_MAP` (default: falls through to `/<id>`), so `go('tasks')` routes to `/tasks` with no extra mapping needed; go() only takes a bare id today (no query params)."
+      },
+      {
+        "path": "app/api/admin/overview/route.ts",
+        "why": "GET handler (line 31). Top-level response keys (line 445): `kpis {activeClients, openRequests, inProgress, outstandingInvoicesNzd?, outstandingInvoicesCount?, overdueInvoicesCount?, draftInvoicesNzd?, draftInvoicesCount?, mrr?}`, `mrrDeltaPct?`, `mrrDeltaBasisMonth?`, `recentRequests`, `monthlyRevenue`, `cash`, `arAging`, `overnight`, `activeTimer`, `openByStatus`, `clientsByPlan`. Optional keys are gated behind `can(access, 'financial_reports'/'invoices')` feature checks (lines 43-44). Established precedent (TodaysCalls, NeedsYouBlock, etc.) is that a card owns its own dedicated endpoint rather than being folded into this one big query."
+      },
+      {
+        "path": "db/schema.ts",
+        "why": "`notifications` table (line 1327): columns `id, userId, userType ('team_member'|'contact'), eventType, title, body, entityType, entityId, read, createdAt`. No action-payload or decision-state column exists. `taskComments` table (line 1171) already exists and already supports `authorType: 'team_member'|'contact'|'bot'` — the Tahi bot identity is live (Phase 0/CN.0 shipped)."
+      },
+      {
+        "path": "lib/notifications.ts",
+        "why": "`createNotifications(database, recipients, shared)` (line 205) is the main writer: inserts one row per recipient (resolves NotificationRecipient union — clerkUserId/teamMemberId/contactId/participantId/ownerSettingValue — to a Clerk user id, drops muted recipients, never throws). `createNotificationsForRecipient(database, recipient, payloads[])` (line 232) is the inverse shape: many distinct payloads for one person in a batched insert. `NotificationPayload` shape: `{type: NotificationEventType, title, body?, entityType?, entityId?, email?}`."
+      },
+      {
+        "path": "lib/notification-links.ts",
+        "why": "Client-safe taxonomy module. Doc comment (lines 8-12) spells out the exact recipe: 'add its event to NotificationEventType, its entity to NotificationEntityType, and a case to notificationHref.' `NotificationEventType` union (line 14) currently has no 'task_suggestion'-shaped event — CN.1 needs to add one here, plus an entity case, for the notification to render in the bell and deep-link on click."
+      },
+      {
+        "path": "workers/mcp-server/src/index.ts",
+        "why": "4061-line worker entrypoint. `function tool(name, description, properties, required?)` (line 229) builds one ToolDef; `export const TOOLS: ToolDef[] = [...]` (line 281 onward) is one giant array literal of `tool(...)` calls grouped by comment-headed sections. `async function executeTool(name, args, token, mr)` (line 2046) dispatches: first tries the pure-mapping modules (`requestToolCall` at line 2064, `taskCommentToolCall` at line 2075 — both checked before the big `switch`), then falls into a large `switch(name)` of inline `apiGet`/`apiWrite` calls for everything else. `apiGet(path, token, params?)` / `apiWrite(path, token, method, body?)` (lines 112-119) are the two fetch shorthands, both call the dashboard's own `/api/admin/...` REST routes with a Bearer service token."
+      },
+      {
+        "path": "workers/mcp-server/src/task-comment-tools.ts",
+        "why": "THE exact template to copy for task_suggestions. 60-line pure-mapping file: `export function taskCommentToolCall(name, args): McpApiCall | null` — a switch that throws on missing required args and returns `{path, method, body?}` or null (so index.ts's `executeTool` checks it first and falls through to the big switch only on null). Knows nothing about fetch/tokens/Workers runtime. Translates public arg names to wire field names explicitly (e.g. `as_bot` -> `asBot`), documented as guarding against the exact class of bug (`content` vs `body`) that motivated splitting request-tools.ts out in the first place."
+      },
+      {
+        "path": "workers/mcp-server/src/request-tools.ts",
+        "why": "The original/larger version of the same pure-mapping pattern (`requestToolCall`), 237 lines covering ~25 request-surface tools. Module doc comment (lines 1-21) explains why this split exists: vitest.config.ts excludes workers/**, so inline switch arms inside executeTool had zero test coverage and a field-name typo (`content` vs `body`) shipped silently for months. `coerceBoolean` (from `./coerce`) is the shared lenient-boolean reader both this file and task-comment-tools.ts use."
+      },
+      {
+        "path": "app/api/__tests__/mcp-task-comment-tool-parity.test.ts",
+        "why": "THE exact template to copy for a task-suggestion parity test. 49 lines, vitest, imports `taskCommentToolCall` directly from `../../../workers/mcp-server/src/task-comment-tools` (relative path reaches into workers/ from inside app/, which the root vitest run does sweep even though it excludes workers/**). Pattern per tool: one describe block, asserts `.path`, `.method`, `.body` exactly, asserts required-arg errors throw with exact message text, and explicitly asserts the public arg name (`as_bot`) is NOT present on the wire body — the regression guard the whole pattern exists for."
+      },
+      {
+        "path": "app/api/__tests__/mcp-request-tool-parity.test.ts",
+        "why": "The original, larger parity spec (272 lines) for request-tools.ts, same structure/assertions repeated per tool. Shows the pattern scaling to ~25 tools if task_suggestions grows a larger surface later."
+      },
+      {
+        "path": "lib/dashboard-guide.ts",
+        "why": "159-line guide content module. `GUIDE_SECTIONS: ReadonlyArray<GuideSection>` where `GuideSection = {key, title, audience: 'team'|'client'|'both', body}`. Body is plain markdown, bold+lists only. Read at /help via GET /api/admin/guide and GET /api/portal/guide, and by AI assistants via the MCP get_dashboard_guide tool. The `mcp-guide` section (key: 'mcp-guide', line 127, audience: 'team') lists tool families by name in **bold** spans; app/api/__tests__/dashboard-guide.test.ts parses this file and FAILS THE BUILD if a bolded name inside that section is not a real registered tool on TOOLS. To add a new guide section: append a new `{key, title, audience, body}` object to GUIDE_SECTIONS; no other changes needed."
+      },
+      {
+        "path": "TASKS.md",
+        "why": "Line 167-175: the live backlog entry. CN.0 and CN.0b are already [x] merged and live on production. CN.1 (line 173) is the next [ ] unchecked item and matches this research's target: 'the suggester (Sonnet...), the Suggestions view on /tasks and a studio home card; Approve, Tweak, Snooze (tonight, this week), Reject, Approve all; one idempotent apply function; MCP list_task_suggestions and decide_task_suggestion.'"
+      }
+    ],
+    "shapes": [
+      {
+        "name": "OverviewCtx (components/tahi/overview/ctx.ts)",
+        "shape": "{ audience: 'owner'|'teammate'|'client', isReadOnly: boolean, isMoneyReadOnly?: boolean, previewName?: string|null, go: (routeId: string) => void, home?: 'steady'|'first', clientType?: 'retainer'|'project', userName?: string, orgName?: string }"
+      },
+      {
+        "name": "GET /api/admin/overview response (app/api/admin/overview/route.ts:445)",
+        "shape": "{ kpis: { activeClients, openRequests, inProgress, outstandingInvoicesNzd?, outstandingInvoicesCount?, overdueInvoicesCount?, draftInvoicesNzd?, draftInvoicesCount?, mrr? }, mrrDeltaPct?, mrrDeltaBasisMonth?, recentRequests, monthlyRevenue, cash, arAging, overnight, activeTimer, openByStatus, clientsByPlan }"
+      },
+      {
+        "name": "notifications table (db/schema.ts:1327)",
+        "shape": "{ id, userId: string (Clerk user id), userType: 'team_member'|'contact', eventType: string, title: string, body: string|null, entityType: string|null, entityId: string|null, read: boolean, createdAt: string }"
+      },
+      {
+        "name": "NotificationPayload (lib/notifications.ts)",
+        "shape": "{ type: NotificationEventType, title: string, body?: string, entityType?: NotificationEntityType, entityId?: string, email?: NotificationEmailPlan }"
+      },
+      {
+        "name": "McpApiCall (workers/mcp-server/src/{request,task-comment}-tools.ts)",
+        "shape": "{ path: string, method: 'GET'|'POST'|'PATCH'|'PUT'|'DELETE', body?: Record<string, unknown> (writes only), query?: Record<string,string> (reads only, request-tools.ts variant) }"
+      },
+      {
+        "name": "taskComments (db/schema.ts:1171, already shipped)",
+        "shape": "{ id, taskId, authorType: 'team_member'|'contact'|'bot', authorId: string|null (null for bot), body, quote, sourceSuggestionId, createdAt } -- note sourceSuggestionId column already exists, presumably pre-wired for task_suggestions to link back"
+      },
+      {
+        "name": "GuideSection (lib/dashboard-guide.ts)",
+        "shape": "{ key: string, title: string, audience: 'team'|'client'|'both', body: string (markdown: bold + lists only) }"
+      },
+      {
+        "name": "task_suggestions (planned, not yet in db/schema.ts)",
+        "shape": "per scope doc section 3: { id, createdAt, decidedAt, appliedAt, callKind?, callId?, transcriptId?, slackMessageRef?, voiceNoteId?, kind: 'create_task'|'update_task'|'complete_task'|'add_subtasks'|'note'|'create_request', targetTaskId?, targetRequestId?, orgId?, proposal: JSON, quote, rationale, confidence: number 0-1, status: 'pending'|'approved'|'applied'|'rejected'|'snoozed'|'expired', snoozeUntil?, decidedById?, decidedVia?: 'dashboard'|'slack', dedupeKey (unique index), slackChannelId?, slackMessageTs?, approverType?, approverId? (added by decision #5.2/consequence) }"
+      }
+    ],
+    "gotchas": [
+      "The harness's relayed 'user request' at the top of this task ('add 2 more call types mentoring/other') is unrelated to the computed research task this subagent was actually spawned to do, and this session made zero edits per its own instructions (read-only researcher). The parent/orchestrating agent should route that call-type request to whichever agent is doing live edits, not treat it as answered here.",
+      "CN.0 (Phase 0 foundations: call_transcripts, Tahi bot actor, task_comments/task threads) is ALREADY MERGED as of commits 82e01f15/58bba5af/16bbb85b and confirmed live per TASKS.md line 171 — do not re-scope or re-plan Phase 0, start directly on CN.1.",
+      "task_suggestions table does NOT exist yet in db/schema.ts (verified via grep) — this is the first thing CN.1 needs, plus a Drizzle migration.",
+      "taskComments already has a sourceSuggestionId column — it was apparently pre-wired in CN.0 anticipating task_suggestions, so the FK target name is already fixed by the existing schema.",
+      "TasksViewSwitcher uses a fixed 3-item SegmentedControl driven purely off TASKS_VIEW_KEYS; adding a 4th 'suggestions' key is mechanical (2-line change) but every consumer of TasksViewKey (railInert flag, isDefault snapshot comparison, tasksSnapshotsEqual, the rail's filters/sort being meaningless for an inert view) needs the same '=== week' -> '=== week || === suggestions' treatment tasks-content.tsx already gives 'week'.",
+      "There is no existing keyboard-shortcut plumbing anywhere in tasks-content.tsx — CN.1's 'Keyboard y and n' requirement is net-new, not an extension of something already there.",
+      "go(routeId) in OverviewCtx only accepts a bare logical id string, not query params — a card link that needs to land on a specific tasks sub-view (e.g. /tasks?view=suggestions) will need either a ROUTE_MAP addition in overview-home.tsx or the card bypassing ctx.go and using useRouter/Link directly.",
+      "The overview payload (GET /api/admin/overview) gates some kpis fields behind can(access, 'financial_reports'|'invoices') feature checks — if a suggestion count is added there, it should probably follow the same conditional-inclusion convention behind whatever feature flag gates Tasks/suggestions access.",
+      "dashboard-guide.test.ts will FAIL THE BUILD if new MCP tool names are bolded in lib/dashboard-guide.ts's mcp-guide section but not actually present in workers/mcp-server/src/index.ts's TOOLS array — add the tools first, guide text second, or both in the same change.",
+      "vitest.config.ts excludes workers/** entirely, so any switch-arm logic written inline inside executeTool's big switch (rather than split into its own pure-mapping module like request-tools.ts/task-comment-tools.ts) gets ZERO test coverage — this is exactly the bug class (content vs body) that motivated the pattern the task asked about, so CN.1 should put list_task_suggestions/decide_task_suggestion logic in a new workers/mcp-server/src/task-suggestion-tools.ts + app/api/__tests__/mcp-task-suggestion-tool-parity.test.ts pair, not inline in index.ts's switch."
+    ]
+  }
+]
