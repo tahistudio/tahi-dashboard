@@ -1,8 +1,8 @@
 'use client'
 
 /**
- * <TasksViewSwitcher>. The three peer views of the Tasks surface: List,
- * Board and My week.
+ * <TasksViewSwitcher>. The four peer views of the Tasks surface: List,
+ * Board, My week and Suggestions.
  *
  * A thin arrangement of the shared <SegmentedControl>: the sliding pill, the
  * brand-tinted active icon, the full WAI-ARIA tab pattern and the 2.75rem
@@ -20,15 +20,16 @@
  */
 
 import { useMemo } from 'react'
-import { CalendarRange, LayoutGrid, Rows } from 'lucide-react'
+import { CalendarRange, LayoutGrid, Rows, Sparkles } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { SegmentedControl, type SegmentedControlOption } from '@/components/tahi/segmented-control'
 import { TASKS_VIEW_KEYS, type TasksViewKey } from '@/lib/tasks-views'
 
 const VIEW_META: Record<TasksViewKey, { label: string; Icon: LucideIcon }> = {
-  list:  { label: 'List',    Icon: Rows },
-  board: { label: 'Board',   Icon: LayoutGrid },
-  week:  { label: 'My week', Icon: CalendarRange },
+  list:        { label: 'List',        Icon: Rows },
+  board:       { label: 'Board',       Icon: LayoutGrid },
+  week:        { label: 'My week',     Icon: CalendarRange },
+  suggestions: { label: 'Suggestions', Icon: Sparkles },
 }
 
 /** The id of the region the switcher swaps. The shell puts it on the

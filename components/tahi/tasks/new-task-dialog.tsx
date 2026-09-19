@@ -85,6 +85,10 @@ export interface NewTaskDialogProps {
   /** Pre-apply a template, so the header menu's "New from template" opens
    *  straight into a filled form. Applied on open, then the user owns it. */
   initialTemplateId?: string | null
+  /** Pre-fill every field from an external draft, e.g. Tweak on a
+   *  create_task suggestion. Applied on open the same way initialTemplateId
+   *  is, and takes priority over a template when both are somehow set. */
+  initialDraft?: TaskFields | null
   clients: readonly { id: string; name: string }[]
   peopleList: readonly { id: string; name: string }[]
   requests: readonly { id: string; orgId: string | null; requestNumber: number | null; title: string }[]
@@ -260,6 +264,7 @@ export function NewTaskDialog({
   initialStatus,
   initialOrgId,
   initialTemplateId,
+  initialDraft,
   clients,
   peopleList,
   requests,
@@ -378,7 +383,23 @@ export function NewTaskDialog({
     setSubtaskDraft('')
     setSubmitting(false)
     predictions.reset()
-    if (initialTemplateId) {
+    if (initialDraft) {
+      setLinks(coerceTaskLinks({
+        level: initialDraft.type,
+        orgId: initialDraft.orgId,
+        requestId: initialDraft.requestId,
+      }))
+      setTitle(initialDraft.title)
+      setDescription(initialDraft.description ?? '')
+      setPriority(initialDraft.priority)
+      setDueDate(initialDraft.dueDate ?? '')
+      setAssigneeId(initialDraft.assigneeId)
+      setEstimate(initialDraft.estimatedHours != null ? String(initialDraft.estimatedHours) : '')
+      setSubtasks(initialDraft.subtasks)
+      // The draft answers every predictable field, the same as the wizard's
+      // own draft-to-form path.
+      markWritten(['priority', 'dueDate', 'assigneeId', 'estimatedHours'])
+    } else if (initialTemplateId) {
       const template = templates.find(t => t.id === initialTemplateId)
       if (template) applyTemplate(template)
     }

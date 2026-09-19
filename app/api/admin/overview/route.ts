@@ -15,6 +15,7 @@ import {
 } from '@/lib/overview-aggregates'
 import { computeCashPosition } from '@/lib/cash-position'
 import { elapsedSeconds } from '@/lib/timer-helpers'
+import { summariseTaskSuggestionsOverview, type TaskSuggestionsCountRow } from '@/lib/task-suggestions-overview'
 
 export const dynamic = 'force-dynamic'
 
@@ -442,6 +443,27 @@ export async function GET(req: NextRequest) {
     // Leave clientsByPlan empty on any error (table/column missing).
   }
 
+  // Pending call-suggestion count for the owner home's "Suggestions" card
+  // (CN.1). Queried by raw table name rather than through schema.
+  // taskSuggestions: slice S1's migration may not have landed in every tree
+  // that builds against this route, and a raw query degrades to zero
+  // instead of failing the whole overview when the table is missing, so
+  // deploy order between the two slices does not matter.
+  let taskSuggestions = summariseTaskSuggestionsOverview(undefined)
+  try {
+    const rows = await drizzle.all(sql`
+      SELECT
+        COUNT(*) AS pending,
+        COUNT(DISTINCT COALESCE(call_id, transcript_id)) AS calls
+      FROM task_suggestions
+      WHERE status = 'pending'
+    `) as unknown as TaskSuggestionsCountRow[]
+    taskSuggestions = summariseTaskSuggestionsOverview(rows[0])
+  } catch {
+    // task_suggestions does not exist yet, or the query otherwise failed.
+    taskSuggestions = summariseTaskSuggestionsOverview(undefined)
+  }
+
   return NextResponse.json({
     kpis: {
       activeClients: activeClientsResult[0]?.count ?? 0,
@@ -459,6 +481,10 @@ export async function GET(req: NextRequest) {
           }
         : {}),
       ...(canSeeMrr ? { mrr: Math.round(mrr) } : {}),
+      // Unconditional, unlike the invoice/mrr keys above: every admin can
+      // see the studio's own call-suggestion queue, there is no feature
+      // gate on it the way there is on financial_reports/invoices.
+      taskSuggestions,
     },
     ...(canSeeMrr ? { mrrDeltaPct, mrrDeltaBasisMonth } : {}),
     recentRequests,
