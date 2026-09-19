@@ -1,18 +1,25 @@
 /**
  * lib/task-suggestions.ts
  *
- * The approval gate between "a call said so" and "a task changed".
+ * The approval gate between "a call said so" and "the work changed".
  *
  * Every source (a transcribed call now; typed notes, voice and Slack later)
  * writes `task_suggestions` rows, every approval surface reads them, and a
  * decision is recorded once wherever it was made. That is what lets the
  * dashboard and Slack agree, what makes "approve tonight" possible, and what
  * keeps the bot honest: nothing a model read out of a transcript reaches a
- * task without a founder saying so.
+ * task or a request without a founder saying so.
  *
- * Applying goes through lib/task-writes.ts, which is the same code the task
- * routes use, so an approved suggestion and a hand-typed edit obey one set of
- * rules rather than two that drift.
+ * TASKS AND REQUESTS, not just tasks (CN.1b). The table keeps its name, but a
+ * suggestion is about one of two things: a REQUEST, which is the client-facing
+ * work a call with a client mostly produces, or a TASK, which is the studio's
+ * own follow-up. Which family a row belongs to is its `kind`, and the two
+ * pointers (targetTaskId, targetRequestId) are never both set.
+ *
+ * Applying goes through lib/task-writes.ts and lib/request-writes.ts, which
+ * are the same code the task and request routes use, so an approved
+ * suggestion and a hand-typed edit obey one set of rules rather than two that
+ * drift.
  *
  * Lives in lib/ rather than in a route file because Next.js App Router routes
  * may only export HTTP methods and config.
@@ -24,8 +31,16 @@ import { schema, type DB } from '@/db/d1'
 import { logAudit } from '@/lib/audit'
 import { normalizeCallInstant, STUDIO_TIME_ZONE } from '@/lib/call-time'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { handoffReasonShortLabel } from '@/lib/request-handoff-copy'
+import {
+  createRequestRecord,
+  handOffRequest,
+  updateRequestRecord,
+  type RequestPatchInput,
+  type RequestWriteActor,
+} from '@/lib/request-writes'
 import { TAHI_BOT } from '@/lib/tahi-bot'
-import { postTaskComment } from '@/lib/task-comments'
+import { postRequestBotMessage, postTaskComment } from '@/lib/task-comments'
 import { createTaskRecord, updateTaskRecord, type TaskPatchInput } from '@/lib/task-writes'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -42,16 +57,50 @@ function chunk<T>(items: readonly T[]): T[][] {
 // ── the vocabulary ───────────────────────────────────────────────────────────
 
 /**
- * What a suggestion proposes. `note` changes nothing: it is a line for the
- * task's thread, which is the honest answer when a call said something worth
- * recording that is not a task change.
+ * What a suggestion proposes.
+ *
+ * TWO FAMILIES, and the split is the Tasks vs Requests model rather than a
+ * naming accident. Requests are the client-facing work; tasks run the studio.
+ * A call with a client therefore mostly yields requests, updates to requests
+ * and hand-offs (the client owes something on a request), while the studio's
+ * own follow-ups stay tasks. One suggestion is never both.
+ *
+ * `note` and `request_note` change nothing: they are a line for a thread,
+ * which is the honest answer when a call said something worth recording that
+ * is not a change to anything.
  */
-export type SuggestionKind = 'create_task' | 'update_task' | 'complete_task' | 'add_subtasks' | 'note'
+export type SuggestionKind =
+  | 'create_task' | 'update_task' | 'complete_task' | 'add_subtasks' | 'note'
+  | 'create_request' | 'update_request' | 'request_note' | 'hand_off_request'
 
 export type SuggestionStatus = 'pending' | 'snoozed' | 'applied' | 'rejected' | 'expired' | 'failed'
 
-/** Every kind but create_task names the task it is about. */
+/** The studio's own follow-ups. */
+export const TASK_KINDS: readonly SuggestionKind[] = ['create_task', 'update_task', 'complete_task', 'add_subtasks', 'note']
+
+/** The client-facing half (CN.1b). */
+export const REQUEST_KINDS: readonly SuggestionKind[] = ['create_request', 'update_request', 'request_note', 'hand_off_request']
+
+/** Every kind the suggester may propose and the gate may apply. */
+export const KINDS: readonly SuggestionKind[] = [...TASK_KINDS, ...REQUEST_KINDS]
+
+/** Every task kind but create_task names the task it is about. */
 export const KINDS_NEEDING_TARGET: readonly SuggestionKind[] = ['update_task', 'complete_task', 'add_subtasks', 'note']
+
+/** Every request kind but create_request names the request it is about. */
+export const KINDS_NEEDING_REQUEST_TARGET: readonly SuggestionKind[] = ['update_request', 'request_note', 'hand_off_request']
+
+/**
+ * The fields an update_request may write.
+ *
+ * A whitelist rather than "whatever the model put in `fields`", because the
+ * PATCH route accepts more than a call should be allowed to move: a title or
+ * a description rewritten from a half-heard sentence changes what the CLIENT
+ * sees on their own request, which is not a thing to do from a transcript.
+ */
+export const UPDATABLE_REQUEST_FIELDS = [
+  'status', 'priority', 'dueDate', 'startDate', 'estimatedHours', 'category', 'scopeFlagged',
+] as const
 
 export type DecisionVia = 'dashboard' | 'slack' | 'mcp'
 
@@ -80,6 +129,7 @@ export interface SuggestionRow {
   callId: string | null
   kind: string
   targetTaskId: string | null
+  targetRequestId: string | null
   proposal: string
   quote: string
   rationale: string | null
@@ -93,6 +143,7 @@ export interface SuggestionRow {
   decidedAt: string | null
   appliedAt: string | null
   appliedTaskId: string | null
+  appliedRequestId: string | null
   applyError: string | null
   dedupeKey: string
   slackChannelId: string | null
@@ -110,6 +161,10 @@ export interface DecoratedSuggestion extends Omit<SuggestionRow, 'proposal'> {
   orgName: string | null
   targetTaskTitle: string | null
   targetTaskStatus: string | null
+  /** The target request, for the request kinds. Null when there is none. */
+  targetRequestNumber: number | null
+  targetRequestTitle: string | null
+  targetRequestStatus: string | null
 }
 
 /** A suggestion on its way in, before it has an id or a dedupe key. */
@@ -121,6 +176,7 @@ export interface SuggestionDraft {
   callId: string | null
   kind: SuggestionKind
   targetTaskId: string | null
+  targetRequestId?: string | null
   proposal: unknown
   quote: string
   rationale?: string | null
@@ -133,13 +189,24 @@ export interface DecisionResult {
   suggestion: SuggestionRow
   changed: boolean
   appliedTaskId?: string | null
+  appliedRequestId?: string | null
+  /**
+   * Why an approve came back unchanged, when the reason is something the
+   * human can fix rather than a fault. The one value today is
+   * 'contact_required': a hand-off the model could not resolve to a person.
+   */
+  error?: string
 }
 
 export interface ApplyOutcome {
   ok: boolean
   appliedTaskId: string | null
+  appliedRequestId: string | null
   error: string | null
 }
+
+/** The refusal an approve gets when a hand-off names nobody the gate can use. */
+export const CONTACT_REQUIRED = 'contact_required'
 
 /** The current timestamp, in the shape every other writer in this repo stamps. */
 function now(): string {
@@ -153,6 +220,7 @@ export interface DedupeInput {
   transcriptId: string | null
   kind: SuggestionKind
   targetTaskId?: string | null
+  targetRequestId?: string | null
   proposal: unknown
 }
 
@@ -183,9 +251,17 @@ function collapse(text: string): string {
  */
 function normalisedTitleOrDiff(kind: SuggestionKind, proposal: unknown): string {
   const record = (proposal && typeof proposal === 'object' ? proposal : {}) as Record<string, unknown>
-  if (kind === 'create_task') return collapse(String(record.title ?? '')).toLowerCase()
-  if (kind === 'note') return collapse(String(record.body ?? '')).toLowerCase().slice(0, 80)
-  if (kind === 'update_task') return stableJson(record.fields ?? {})
+  if (kind === 'create_task' || kind === 'create_request') {
+    return collapse(String(record.title ?? '')).toLowerCase()
+  }
+  if (kind === 'note' || kind === 'request_note') {
+    return collapse(String(record.body ?? '')).toLowerCase().slice(0, 80)
+  }
+  if (kind === 'update_task' || kind === 'update_request') return stableJson(record.fields ?? {})
+  // A hand-off is one ask per person per request: the same person asked for
+  // twice off one call is one row however the reason and the note are worded
+  // the second time, so only the name enters the key.
+  if (kind === 'hand_off_request') return collapse(String(record.contactName ?? '')).toLowerCase()
   return stableJson(record)
 }
 
@@ -195,13 +271,19 @@ function normalisedTitleOrDiff(kind: SuggestionKind, proposal: unknown): string 
  * not. The UNIQUE index on the column is what actually enforces it; this is
  * what makes a second run over the same transcript produce the same answer to
  * compare against.
+ *
+ * ONE TARGET SLOT for both families, filled by whichever of the two pointers
+ * a row carries. A request kind never carries a targetTaskId, so every key
+ * written before CN.1b hashes to exactly what it did: adding a separate slot
+ * would have changed the material for every existing task row and orphaned
+ * every dedupe key already on production.
  */
 export async function buildDedupeKey(input: DedupeInput): Promise<string> {
   const material = [
     input.sourceKind,
     input.transcriptId ?? '',
     input.kind,
-    input.targetTaskId ?? '',
+    input.targetRequestId ?? input.targetTaskId ?? '',
     normalisedTitleOrDiff(input.kind, input.proposal),
   ].join(':')
 
@@ -232,6 +314,7 @@ export async function insertSuggestions(
       transcriptId: draft.transcriptId,
       kind: draft.kind,
       targetTaskId: draft.targetTaskId,
+      targetRequestId: draft.targetRequestId ?? null,
       proposal: draft.proposal,
     }),
   })))
@@ -267,6 +350,7 @@ export async function insertSuggestions(
       callId: entry.draft.callId,
       kind: entry.draft.kind,
       targetTaskId: entry.draft.targetTaskId,
+      targetRequestId: entry.draft.targetRequestId ?? null,
       proposal: JSON.stringify(entry.draft.proposal ?? null),
       quote: entry.draft.quote,
       rationale: entry.draft.rationale ?? null,
@@ -295,6 +379,7 @@ const SUGGESTION_COLUMNS = {
   callId: schema.taskSuggestions.callId,
   kind: schema.taskSuggestions.kind,
   targetTaskId: schema.taskSuggestions.targetTaskId,
+  targetRequestId: schema.taskSuggestions.targetRequestId,
   proposal: schema.taskSuggestions.proposal,
   quote: schema.taskSuggestions.quote,
   rationale: schema.taskSuggestions.rationale,
@@ -308,6 +393,7 @@ const SUGGESTION_COLUMNS = {
   decidedAt: schema.taskSuggestions.decidedAt,
   appliedAt: schema.taskSuggestions.appliedAt,
   appliedTaskId: schema.taskSuggestions.appliedTaskId,
+  appliedRequestId: schema.taskSuggestions.appliedRequestId,
   applyError: schema.taskSuggestions.applyError,
   dedupeKey: schema.taskSuggestions.dedupeKey,
   slackChannelId: schema.taskSuggestions.slackChannelId,
@@ -421,6 +507,7 @@ async function decorate(drizzle: Drizzle, rows: SuggestionRow[]): Promise<Decora
 
   const orgIds = unique(rows.map(row => row.orgId))
   const taskIds = unique(rows.map(row => row.targetTaskId))
+  const requestIds = unique(rows.map(row => row.targetRequestId))
   const discoveryIds = unique(rows.filter(row => row.callKind === 'discovery').map(row => row.callId))
   const scheduledIds = unique(rows.filter(row => row.callKind === 'scheduled').map(row => row.callId))
 
@@ -442,6 +529,25 @@ async function decorate(drizzle: Drizzle, rows: SuggestionRow[]): Promise<Decora
     for (const row of found) tasks.set(row.id, { title: row.title, status: row.status })
   }
 
+  // The target request, for the request kinds. The NUMBER comes with it
+  // because that is how a request is named to a human: "#12 Homepage
+  // refresh", never its uuid.
+  const requests = new Map<string, { number: number | null; title: string; status: string }>()
+  for (const batch of chunk(requestIds)) {
+    const found = await drizzle
+      .select({
+        id: schema.requests.id,
+        requestNumber: schema.requests.requestNumber,
+        title: schema.requests.title,
+        status: schema.requests.status,
+      })
+      .from(schema.requests)
+      .where(inArray(schema.requests.id, batch))
+    for (const row of found) {
+      requests.set(row.id, { number: row.requestNumber ?? null, title: row.title, status: row.status })
+    }
+  }
+
   const calls = new Map<string, { title: string; scheduledAt: string }>()
   for (const batch of chunk(discoveryIds)) {
     const found = await drizzle
@@ -461,6 +567,7 @@ async function decorate(drizzle: Drizzle, rows: SuggestionRow[]): Promise<Decora
   return rows.map(row => {
     const call = row.callKind && row.callId ? calls.get(`${row.callKind}:${row.callId}`) ?? null : null
     const task = row.targetTaskId ? tasks.get(row.targetTaskId) ?? null : null
+    const request = row.targetRequestId ? requests.get(row.targetRequestId) ?? null : null
     return {
       ...row,
       proposal: parseProposalLoose(row.proposal),
@@ -469,6 +576,9 @@ async function decorate(drizzle: Drizzle, rows: SuggestionRow[]): Promise<Decora
       orgName: row.orgId ? orgNames.get(row.orgId) ?? null : null,
       targetTaskTitle: task?.title ?? null,
       targetTaskStatus: task?.status ?? null,
+      targetRequestNumber: request?.number ?? null,
+      targetRequestTitle: request?.title ?? null,
+      targetRequestStatus: request?.status ?? null,
     }
   })
 }
@@ -658,8 +768,11 @@ function describeFields(fields: Record<string, unknown>): string {
     status: 'status',
     priority: 'priority',
     dueDate: 'due date',
+    startDate: 'start date',
     assigneeId: 'assignee',
     estimatedHours: 'estimate',
+    category: 'category',
+    scopeFlagged: 'scope flag',
   }
   const parts = Object.entries(fields)
     .filter(([key]) => key in labels)
@@ -667,10 +780,163 @@ function describeFields(fields: Record<string, unknown>): string {
   return parts.length ? parts.join(', ') : 'nothing that could be read'
 }
 
+/** A trimmed string, or null. The shape most of a proposal is read in. */
+function text(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+/**
+ * The subset of a proposed field diff a call suggestion may actually write.
+ *
+ * Anything outside UPDATABLE_REQUEST_FIELDS is dropped rather than refused:
+ * a model that also proposed a title rewrite has still said something useful
+ * about the status, and the human approving it should get the useful half
+ * rather than an error. What it must never do is let the title through.
+ */
+function requestPatchFrom(fields: unknown): RequestPatchInput {
+  const record = (fields && typeof fields === 'object' ? fields : {}) as Record<string, unknown>
+  const patch: Record<string, unknown> = {}
+  for (const key of UPDATABLE_REQUEST_FIELDS) {
+    if (record[key] !== undefined) patch[key] = record[key]
+  }
+  return patch as RequestPatchInput
+}
+
 function stringList(value: unknown): string[] {
   return Array.isArray(value)
     ? value.map(item => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
     : []
+}
+
+/**
+ * The contact a hand-off proposal names, if the suggester could resolve one.
+ *
+ * Exported because `decideSuggestion` has to ask this BEFORE it applies:
+ * a hand-off with nobody resolved is a suggestion the human has to finish,
+ * not a write that failed.
+ */
+export function handOffContactId(proposal: unknown): string | null {
+  const record = (proposal && typeof proposal === 'object' ? proposal : {}) as Record<string, unknown>
+  return text(record.contactId)
+}
+
+/**
+ * Apply one REQUEST suggestion: the request change, the bot line on that
+ * request's thread, the audit entry.
+ *
+ * Split out of `applySuggestion` rather than folded into its chain of
+ * branches because the two families share almost nothing: a different writer
+ * module, a different thread, a different pointer column. The caller's
+ * try/catch still wraps this, so it may throw for the same reasons.
+ */
+async function applyRequestSuggestion(
+  drizzle: Drizzle,
+  row: SuggestionRow,
+  ctx: DecisionContext,
+  proposal: Record<string, unknown>,
+  actor: RequestWriteActor,
+): Promise<ApplyOutcome> {
+  const needsTarget = (KINDS_NEEDING_REQUEST_TARGET as readonly string[]).includes(row.kind)
+  if (needsTarget && !row.targetRequestId) {
+    return { ok: false, appliedTaskId: null, appliedRequestId: null, error: 'This suggestion names no request to change' }
+  }
+
+  let requestId: string | null = row.targetRequestId
+  let description = ''
+
+  if (row.kind === 'create_request') {
+    // The client is the suggestion's own org, never something read out of the
+    // proposal: the sweep resolved it from the call, and a model naming a
+    // different client would be filing one client's work under another.
+    if (!row.orgId) {
+      return { ok: false, appliedTaskId: null, appliedRequestId: null, error: 'This suggestion names no client to file the request under' }
+    }
+
+    const created = await createRequestRecord(drizzle, {
+      clientOrgId: row.orgId,
+      title: text(proposal.title) ?? '',
+      description: text(proposal.description),
+      category: text(proposal.category) ?? undefined,
+      type: text(proposal.type) ?? undefined,
+      priority: text(proposal.priority) ?? undefined,
+      dueDate: text(proposal.dueDate),
+    }, actor)
+    if (!created.ok) {
+      return { ok: false, appliedTaskId: null, appliedRequestId: null, error: created.failure.error }
+    }
+
+    requestId = created.request.id
+    // The requester rides in the line rather than in a column: `submitted_by`
+    // is a studio identity on this path, and naming the person who asked is
+    // what a reader of the thread actually wants.
+    const requester = text(proposal.requesterName)
+    description = requester
+      ? `New request created for ${requester}: ${created.request.title}`
+      : `New request created: ${created.request.title}`
+  } else if (row.kind === 'update_request') {
+    const fields = requestPatchFrom(proposal.fields)
+    const updated = await updateRequestRecord(drizzle, row.targetRequestId!, fields, actor)
+    if (!updated.ok) {
+      return { ok: false, appliedTaskId: null, appliedRequestId: null, error: updated.failure.error }
+    }
+    const note = text(proposal.note)
+    description = `Updated ${describeFields(fields as Record<string, unknown>)}.${note ? ` ${note}` : ''}`
+  } else if (row.kind === 'request_note') {
+    description = text(proposal.body) ?? ''
+    if (!description) {
+      return { ok: false, appliedTaskId: null, appliedRequestId: null, error: 'This note has no body' }
+    }
+  } else if (row.kind === 'hand_off_request') {
+    const contactId = handOffContactId(proposal)
+    if (!contactId) {
+      // decideSuggestion refuses this before it gets here; this is the same
+      // answer for anything that calls applySuggestion directly.
+      return { ok: false, appliedTaskId: null, appliedRequestId: null, error: CONTACT_REQUIRED }
+    }
+
+    const handedOff = await handOffRequest(drizzle, row.targetRequestId!, {
+      contactId,
+      reason: text(proposal.reason) ?? 'other',
+      dueAt: text(proposal.dueAt),
+      note: text(proposal.note),
+    }, actor)
+    if (!handedOff.ok) {
+      return { ok: false, appliedTaskId: null, appliedRequestId: null, error: handedOff.failure.error }
+    }
+
+    // The studio's own words, not the client's: HANDOFF_REASON_SENTENCE is
+    // written in second person ("Needs your approval") for the email the
+    // contact reads, which would be nonsense on an internal thread.
+    const who = handedOff.handOff.waitingOn.contactName ?? text(proposal.contactName) ?? 'the client'
+    description = `Handed to ${who}, waiting on ${handoffReasonShortLabel(handedOff.handOff.waitingOn.reason)}`
+  } else {
+    return { ok: false, appliedTaskId: null, appliedRequestId: null, error: `Unknown suggestion kind "${row.kind}"` }
+  }
+
+  if (!requestId) {
+    return { ok: false, appliedTaskId: null, appliedRequestId: null, error: 'This suggestion names no request to change' }
+  }
+
+  const header = await loadCallHeader(drizzle, row)
+
+  // One internal line on the request's own thread, as the Tahi bot, with the
+  // quote above it. Never client-visible: this is the studio's record of what
+  // a call changed, not a message to the client.
+  await postRequestBotMessage(drizzle, requestId, {
+    body: botLine(header, row.createdAt, description),
+    quote: row.quote,
+  })
+
+  await logAudit(drizzle as unknown as DB, {
+    action: 'task_suggestion.applied',
+    userId: null,
+    userType: 'system',
+    entityType: 'task_suggestion',
+    entityId: row.id,
+    metadata: { suggestionId: row.id, via: ctx.via, decidedById: ctx.actorId, requestId },
+  })
+
+  return { ok: true, appliedTaskId: null, appliedRequestId: requestId, error: null }
 }
 
 /**
@@ -690,9 +956,13 @@ export async function applySuggestion(
     const proposal = parseProposal(row.proposal)
     const actor = { actorType: 'system' as const, actorId: ctx.actorId }
 
+    if ((REQUEST_KINDS as readonly string[]).includes(row.kind)) {
+      return applyRequestSuggestion(drizzle, row, ctx, proposal, actor)
+    }
+
     const needsTarget = (KINDS_NEEDING_TARGET as readonly string[]).includes(row.kind)
     if (needsTarget && !row.targetTaskId) {
-      return { ok: false, appliedTaskId: null, error: 'This suggestion names no task to change' }
+      return { ok: false, appliedTaskId: null, appliedRequestId: null, error: 'This suggestion names no task to change' }
     }
 
     let taskId: string | null = row.targetTaskId
@@ -711,13 +981,13 @@ export async function applySuggestion(
         estimatedHours: (proposal.estimatedHours as number | null | undefined) ?? null,
         subtasks: stringList(proposal.subtasks),
       }, actor)
-      if (!created.ok) return { ok: false, appliedTaskId: null, error: created.failure.error }
+      if (!created.ok) return { ok: false, appliedTaskId: null, appliedRequestId: null, error: created.failure.error }
       taskId = created.task.id
       description = `New task created: ${created.task.title}`
     } else if (row.kind === 'update_task') {
       const fields = (proposal.fields && typeof proposal.fields === 'object' ? proposal.fields : {}) as TaskPatchInput
       const updated = await updateTaskRecord(drizzle, row.targetTaskId!, fields, actor)
-      if (!updated.ok) return { ok: false, appliedTaskId: null, error: updated.failure.error }
+      if (!updated.ok) return { ok: false, appliedTaskId: null, appliedRequestId: null, error: updated.failure.error }
       const note = typeof proposal.note === 'string' && proposal.note.trim() ? ` ${proposal.note.trim()}` : ''
       description = `Updated ${describeFields(fields as Record<string, unknown>)}.${note}`
     } else if (row.kind === 'complete_task') {
@@ -725,7 +995,7 @@ export async function applySuggestion(
       // suggestion means exactly one thing, and trusting the payload would
       // let a mislabelled row write any status it liked.
       const updated = await updateTaskRecord(drizzle, row.targetTaskId!, { status: 'done' }, actor)
-      if (!updated.ok) return { ok: false, appliedTaskId: null, error: updated.failure.error }
+      if (!updated.ok) return { ok: false, appliedTaskId: null, appliedRequestId: null, error: updated.failure.error }
       const note = typeof proposal.note === 'string' && proposal.note.trim() ? ` ${proposal.note.trim()}` : ''
       description = `Marked done.${note}`
     } else if (row.kind === 'add_subtasks') {
@@ -756,12 +1026,12 @@ export async function applySuggestion(
         : 'Every checklist item named was already on the task'
     } else if (row.kind === 'note') {
       description = typeof proposal.body === 'string' ? proposal.body : ''
-      if (!description.trim()) return { ok: false, appliedTaskId: null, error: 'This note has no body' }
+      if (!description.trim()) return { ok: false, appliedTaskId: null, appliedRequestId: null, error: 'This note has no body' }
     } else {
-      return { ok: false, appliedTaskId: null, error: `Unknown suggestion kind "${row.kind}"` }
+      return { ok: false, appliedTaskId: null, appliedRequestId: null, error: `Unknown suggestion kind "${row.kind}"` }
     }
 
-    if (!taskId) return { ok: false, appliedTaskId: null, error: 'This suggestion names no task to change' }
+    if (!taskId) return { ok: false, appliedTaskId: null, appliedRequestId: null, error: 'This suggestion names no task to change' }
 
     const header = await loadCallHeader(drizzle, row)
 
@@ -787,9 +1057,9 @@ export async function applySuggestion(
       metadata: { suggestionId: row.id, via: ctx.via, decidedById: ctx.actorId },
     })
 
-    return { ok: true, appliedTaskId: taskId, error: null }
+    return { ok: true, appliedTaskId: taskId, appliedRequestId: null, error: null }
   } catch (err) {
-    return { ok: false, appliedTaskId: null, error: err instanceof Error ? err.message : 'Apply failed' }
+    return { ok: false, appliedTaskId: null, appliedRequestId: null, error: err instanceof Error ? err.message : 'Apply failed' }
   }
 }
 
@@ -818,7 +1088,26 @@ export async function decideSuggestion(
   if (!row) return null
 
   if (!OPEN_STATUSES.includes(row.status)) {
-    return { suggestion: row, changed: false, appliedTaskId: row.appliedTaskId }
+    return {
+      suggestion: row,
+      changed: false,
+      appliedTaskId: row.appliedTaskId,
+      appliedRequestId: row.appliedRequestId,
+    }
+  }
+
+  // A hand-off the suggester could not resolve to a person is refused BEFORE
+  // anything is written: the model is allowed to propose "waiting on somebody
+  // at the client" off a call that never said who, and the honest answer is
+  // "pick them on Tweak", not a failed row that reads as the gate's fault.
+  // The override is what Tweak sends, so it is what gets checked.
+  if (decision.action === 'approve' && row.kind === 'hand_off_request') {
+    const effective = decision.proposalOverride !== undefined
+      ? decision.proposalOverride
+      : parseProposal(row.proposal)
+    if (!handOffContactId(effective)) {
+      return { suggestion: row, changed: false, error: CONTACT_REQUIRED, appliedTaskId: null, appliedRequestId: null }
+    }
   }
 
   const stamp = now()
@@ -828,6 +1117,7 @@ export async function decideSuggestion(
     updatedAt: stamp,
   }
   let appliedTaskId: string | null = null
+  let appliedRequestId: string | null = null
 
   if (decision.action === 'snooze') {
     // No decidedAt: a snooze is a deferral, not the decision, and the row
@@ -849,8 +1139,10 @@ export async function decideSuggestion(
       updates.status = 'applied'
       updates.appliedAt = stamp
       updates.appliedTaskId = outcome.appliedTaskId
+      updates.appliedRequestId = outcome.appliedRequestId
       updates.applyError = null
       appliedTaskId = outcome.appliedTaskId
+      appliedRequestId = outcome.appliedRequestId
     } else {
       // Failed, not pending: the founder decided, the write did not land, and
       // the reason belongs on the row where it can be read.
@@ -868,5 +1160,6 @@ export async function decideSuggestion(
     suggestion: { ...row, ...updates } as SuggestionRow,
     changed: true,
     appliedTaskId,
+    appliedRequestId,
   }
 }

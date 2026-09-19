@@ -40,47 +40,29 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import type { DB } from '@/db/d1'
-import { and, eq, isNull, ne } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { logAudit } from '@/lib/audit'
-import { createNotification } from '@/lib/notifications'
 import { notifyRequestTeam } from '@/lib/notify-request-team'
-import { notificationEmailUrl, waitingOnYouEmailPlan } from '@/lib/notification-email'
-import { ensureClientInvite } from '@/lib/onboarding-invites'
 import {
   AUDIT_HANDED_BACK,
-  AUDIT_HANDED_OFF,
-  HANDOFF_ACTION_VERB,
   HANDOFF_CLEARED_COLUMNS,
-  HANDOFF_REASONS,
-  HANDOFF_REASON_SENTENCE,
-  buildWaitingOn,
   daysWaiting,
-  handoffParticipantRole,
-  isHandoffReason,
 } from '@/lib/request-handoff'
+// The hand-off itself (validation, participant row, pointer, audit, seat,
+// bell and email) lives in the shared writer, so an approved call suggestion
+// hands a request over exactly the way this route does.
+import { handOffRequest, MAX_HANDOFF_NOTE_CHARS, type HandOffInput } from '@/lib/request-writes'
 
 type Params = { params: Promise<{ id: string }> }
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
-
-/** Long enough for a real ask, short enough that nobody pastes a brief in. */
-const MAX_NOTE_CHARS = 2000
-
-/** Normalise a date the studio picked. Accepts YYYY-MM-DD or a full ISO. */
-function parseDueAt(value: unknown): { ok: true; value: string | null } | { ok: false } {
-  if (value === undefined || value === null || value === '') return { ok: true, value: null }
-  if (typeof value !== 'string') return { ok: false }
-  const ms = Date.parse(value.length === 10 ? `${value}T00:00:00.000Z` : value)
-  if (Number.isNaN(ms)) return { ok: false }
-  return { ok: true, value: new Date(ms).toISOString() }
-}
 
 function readNote(value: unknown): { ok: true; value: string | null } | { ok: false } {
   if (value === undefined || value === null) return { ok: true, value: null }
   if (typeof value !== 'string') return { ok: false }
   const trimmed = value.trim()
   if (!trimmed) return { ok: true, value: null }
-  if (trimmed.length > MAX_NOTE_CHARS) return { ok: false }
+  if (trimmed.length > MAX_HANDOFF_NOTE_CHARS) return { ok: false }
   return { ok: true, value: trimmed }
 }
 
@@ -103,21 +85,6 @@ async function loadRequest(drizzle: Drizzle, id: string) {
   return row ?? null
 }
 
-/** The acting studio member's display name, for "Liam has passed this to you". */
-async function actorName(drizzle: Drizzle, userId: string | null): Promise<string> {
-  if (!userId) return 'Tahi Studio'
-  try {
-    const [member] = await drizzle
-      .select({ name: schema.teamMembers.name })
-      .from(schema.teamMembers)
-      .where(eq(schema.teamMembers.clerkUserId, userId))
-      .limit(1)
-    return member?.name?.trim() || 'Tahi Studio'
-  } catch {
-    return 'Tahi Studio'
-  }
-}
-
 // ── POST : hand off ──────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest, { params }: Params) {
@@ -126,205 +93,26 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const { id } = await params
 
-  let body: { contactId?: unknown; reason?: unknown; note?: unknown; dueAt?: unknown }
+  let body: HandOffInput
   try {
-    body = await req.json() as typeof body
+    body = await req.json() as HandOffInput
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
-  }
-
-  const contactId = typeof body.contactId === 'string' ? body.contactId.trim() : ''
-  if (!contactId) {
-    return NextResponse.json({ error: 'contactId is required' }, { status: 400 })
-  }
-  if (!isHandoffReason(body.reason)) {
-    return NextResponse.json(
-      { error: `reason must be one of: ${HANDOFF_REASONS.join(', ')}` },
-      { status: 400 },
-    )
-  }
-  const reason = body.reason
-  const note = readNote(body.note)
-  if (!note.ok) {
-    return NextResponse.json(
-      { error: `note must be a string of at most ${MAX_NOTE_CHARS} characters` },
-      { status: 400 },
-    )
-  }
-  const dueAt = parseDueAt(body.dueAt)
-  if (!dueAt.ok) {
-    return NextResponse.json({ error: 'dueAt must be an ISO date' }, { status: 400 })
   }
 
   const database = await db()
   const drizzle = database as Drizzle
 
-  const request = await loadRequest(drizzle, id)
-  if (!request) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-
-  const denied = await requireAccessToOrg(drizzle, userId, request.orgId)
-  if (denied) return denied
-
-  // The contact has to be one of THIS client's people. Without this check a
-  // hand-off could point at a contact at another org, which would put another
-  // client's request in their portal and mail them its title.
-  const [contact] = await drizzle
-    .select({
-      id: schema.contacts.id,
-      name: schema.contacts.name,
-      email: schema.contacts.email,
-      clerkUserId: schema.contacts.clerkUserId,
-    })
-    .from(schema.contacts)
-    .where(and(eq(schema.contacts.id, contactId), eq(schema.contacts.orgId, request.orgId)))
-    .limit(1)
-  if (!contact) {
-    return NextResponse.json({ error: 'Contact not found for this client' }, { status: 404 })
-  }
-
-  const now = new Date()
-  const nowIso = now.toISOString()
-  const role = handoffParticipantRole(reason)
-
-  // The participant row, upserted. A person already on the request under the
-  // OTHER hand-off role is moved rather than duplicated: the role is supposed
-  // to say what they are there for now, and leaving the old one active would
-  // show one person twice in the cast with two different answers.
-  await drizzle
-    .update(schema.requestParticipants)
-    .set({ removedAt: nowIso })
-    .where(and(
-      eq(schema.requestParticipants.requestId, id),
-      eq(schema.requestParticipants.participantId, contact.id),
-      eq(schema.requestParticipants.participantType, 'contact'),
-      ne(schema.requestParticipants.role, role),
-      isNull(schema.requestParticipants.removedAt),
-    ))
-
-  const [existingRow] = await drizzle
-    .select({ id: schema.requestParticipants.id })
-    .from(schema.requestParticipants)
-    .where(and(
-      eq(schema.requestParticipants.requestId, id),
-      eq(schema.requestParticipants.participantId, contact.id),
-      eq(schema.requestParticipants.participantType, 'contact'),
-      eq(schema.requestParticipants.role, role),
-      isNull(schema.requestParticipants.removedAt),
-    ))
-    .limit(1)
-
-  if (!existingRow) {
-    await drizzle.insert(schema.requestParticipants).values({
-      id: crypto.randomUUID(),
-      requestId: id,
-      participantId: contact.id,
-      participantType: 'contact',
-      role,
-      addedById: userId,
-      addedByType: 'team_member',
-      addedAt: nowIso,
-      removedAt: null,
-    })
-  }
-
-  // The pointer. waitingNudgedAt resets to null so a re-hand-off starts its
-  // own nudge clock rather than inheriting the last one's.
-  await drizzle
-    .update(schema.requests)
-    .set({
-      waitingOnContactId: contact.id,
-      waitingReason: reason,
-      waitingSince: nowIso,
-      waitingDueAt: dueAt.value,
-      waitingNote: note.value,
-      waitingNudgedAt: null,
-      updatedAt: nowIso,
-    })
-    .where(eq(schema.requests.id, id))
-
-  await logAudit(drizzle as unknown as DB, {
-    action: AUDIT_HANDED_OFF,
-    userId,
-    userType: 'team_member',
-    entityType: 'request',
-    entityId: id,
-    metadata: {
-      orgId: request.orgId,
-      contactId: contact.id,
-      contactEmail: contact.email ?? null,
-      reason,
-      role,
-      dueAt: dueAt.value,
-      note: note.value,
-      // What it was doing before, so a re-hand-off is legible in the trail.
-      previousContactId: request.waitingOnContactId ?? null,
-    },
+  const result = await handOffRequest(drizzle, id, body, {
+    actorType: 'team_member',
+    actorId: userId,
   })
-
-  // A contact with no Clerk login cannot follow a link into the portal, so the
-  // seat is minted BEFORE the email and the button points at the invite. Best
-  // effort: a failure here costs the deep link, never the hand-off.
-  let actionUrl = notificationEmailUrl(id, 'client')
-  if (!contact.clerkUserId && contact.email) {
-    try {
-      const invite = await ensureClientInvite(drizzle, {
-        flow: 'client',
-        orgId: request.orgId,
-        contactEmail: contact.email,
-        contactName: contact.name ?? contact.email,
-        createdById: userId,
-      })
-      actionUrl = invite.link
-    } catch (err) {
-      console.warn('[handoff] could not mint an invite for a seatless contact:', err)
-    }
-  }
-
-  const from = await actorName(drizzle, userId)
-  const reasonLabel = HANDOFF_REASON_SENTENCE[reason]
-
-  // Bell and inbox off one call, the way every other wired event does it.
-  // Never allowed to fail the hand-off: the pointer is already set and the
-  // studio's chip is already right, so a Resend outage must not 500 this.
-  try {
-    await createNotification(drizzle, {
-      recipient: { contactId: contact.id },
-      type: 'request_waiting_on_you',
-      title: `${reasonLabel}: "${request.title}"`,
-      body: note.value ?? (request.requestNumber ? `REQ-${request.requestNumber}` : null),
-      entityType: 'request',
-      entityId: id,
-      email: waitingOnYouEmailPlan({
-        requestId: id,
-        requestTitle: request.title,
-        requestNumber: request.requestNumber,
-        orgId: request.orgId,
-        reasonLabel,
-        actionVerb: HANDOFF_ACTION_VERB[reason],
-        fromName: from,
-        note: note.value,
-        dueAt: dueAt.value,
-        actionUrl,
-      }),
-    })
-  } catch (err) {
-    console.warn('[handoff] could not notify the contact:', err)
+  if (!result.ok) {
+    return NextResponse.json({ error: result.failure.error }, { status: result.failure.status })
   }
 
   return NextResponse.json({
-    request: {
-      id,
-      waitingOn: {
-        ...buildWaitingOn({
-          waitingOnContactId: contact.id,
-          waitingReason: reason,
-          waitingSince: nowIso,
-          waitingDueAt: dueAt.value,
-          waitingNote: note.value,
-        }, contact.name, now),
-        contactEmail: contact.email ?? null,
-      },
-    },
+    request: { id, waitingOn: result.handOff.waitingOn },
   })
 }
 
@@ -342,7 +130,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const note = readNote(body.note)
   if (!note.ok) {
     return NextResponse.json(
-      { error: `note must be a string of at most ${MAX_NOTE_CHARS} characters` },
+      { error: `note must be a string of at most ${MAX_HANDOFF_NOTE_CHARS} characters` },
       { status: 400 },
     )
   }

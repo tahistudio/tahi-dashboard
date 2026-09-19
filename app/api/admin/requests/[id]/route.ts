@@ -4,13 +4,11 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, asc, count, gt, isNull, inArray } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
-// The two vocabularies a PATCH may write live in lib/request-vocabulary so the
-// bulk PATCH is held to the same list. Anything else is a client bug or a
-// probe, and used to land in the row verbatim.
-import { isPatchableStatus, isRequestPriority } from '@/lib/request-vocabulary'
-import { emitRequestStatusChanged } from '@/lib/request-status-effects'
-import { notifyTeamMember, requestParticipantTitle } from '@/lib/notifications'
 import { loadWaitingOnOne } from '@/lib/request-handoff'
+// The validation (held to the vocabularies in lib/request-vocabulary, so the
+// bulk PATCH cannot drift from this one), the access rule, the assignment
+// ping and the status fan-out all live in the shared writer.
+import { updateRequestRecord, type RequestPatchInput } from '@/lib/request-writes'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -204,6 +202,12 @@ export async function GET(req: NextRequest, { params }: Params) {
 }
 
 // ── PATCH /api/admin/requests/[id] ───────────────────────────────────────────
+//
+// Thin over lib/request-writes.ts#updateRequestRecord, which is the one code
+// path that edits a request. Applying an approved call suggestion
+// (lib/task-suggestions.ts) calls the same function with a system actor, so
+// the validation, the assignment ping and the client fan-out happen once
+// wherever the change came from.
 export async function PATCH(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
@@ -211,135 +215,17 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   const { id } = await params
-  const body = await req.json() as {
-    status?: string
-    priority?: string
-    category?: string
-    assigneeId?: string | null
-    estimatedHours?: number | null
-    startDate?: string | null
-    dueDate?: string | null
-    scopeFlagged?: boolean
-    isInternal?: boolean
-    trackId?: string | null
-    checklists?: string
-    scheduleRowId?: string | null
-  }
-
-  const now = new Date().toISOString()
-  const patch: Record<string, unknown> = { updatedAt: now }
-
-  if (body.status !== undefined) {
-    if (!isPatchableStatus(body.status)) {
-      return NextResponse.json({ error: `Unknown status: ${body.status}` }, { status: 400 })
-    }
-    patch.status = body.status
-    if (body.status === 'delivered') patch.deliveredAt = now
-  }
-  if (body.priority !== undefined) {
-    if (!isRequestPriority(body.priority)) {
-      return NextResponse.json({ error: `Unknown priority: ${body.priority}` }, { status: 400 })
-    }
-    patch.priority = body.priority
-  }
-  // Category is edited in place from the detail rail's Details card.
-  if (body.category !== undefined) patch.category = body.category
-  if ('assigneeId' in body) patch.assigneeId = body.assigneeId ?? null
-  if ('estimatedHours' in body) patch.estimatedHours = body.estimatedHours ?? null
-  if ('startDate' in body) patch.startDate = body.startDate ?? null
-  if ('dueDate' in body) patch.dueDate = body.dueDate ?? null
-  if (body.scopeFlagged !== undefined) patch.scopeFlagged = body.scopeFlagged
-  // Client visibility. Both portal request routes filter on requests.isInternal,
-  // so flipping this on removes the request from the client's portal entirely.
-  // Studio-only by construction: this route is already admin-gated above.
-  if (body.isInternal !== undefined) patch.isInternal = body.isInternal
-  if ('trackId' in body) patch.trackId = body.trackId ?? null
-  if (body.checklists !== undefined) patch.checklists = body.checklists
-  // '' and null both mean unlink (the MCP tool cannot send null).
-  if ('scheduleRowId' in body) patch.scheduleRowId = body.scheduleRowId || null
+  const body = await req.json() as RequestPatchInput
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // Access scoping. The same read carries the before-state the assignment
-  // notification needs, so handing a request over costs no extra query.
-  const [ownerRow] = await drizzle
-    .select({
-      orgId: schema.requests.orgId,
-      title: schema.requests.title,
-      assigneeId: schema.requests.assigneeId,
-      requestNumber: schema.requests.requestNumber,
-    })
-    .from(schema.requests)
-    .where(eq(schema.requests.id, id))
-    .limit(1)
-  const denied = await requireAccessToOrg(drizzle, userId, ownerRow?.orgId)
-  if (denied) return denied
-
-  await drizzle
-    .update(schema.requests)
-    .set(patch)
-    .where(eq(schema.requests.id, id))
-
-  // Handing a request to someone wrote the column and told nobody, so the
-  // person who now owns it found out by opening the board. Only a real change
-  // pings, and never for assigning yourself.
-  if (
-    'assigneeId' in body &&
-    body.assigneeId &&
-    ownerRow &&
-    body.assigneeId !== ownerRow.assigneeId
-  ) {
-    const [actor] = await drizzle
-      .select({ id: schema.teamMembers.id })
-      .from(schema.teamMembers)
-      .where(eq(schema.teamMembers.clerkUserId, userId ?? ''))
-      .limit(1)
-
-    if (body.assigneeId !== actor?.id) {
-      await notifyTeamMember(drizzle, body.assigneeId, {
-        type: 'request_assigned',
-        // The shared helper, so this line and the bulk assign bar cannot drift.
-        // This PATCH is the sole owner of the assignment ping: both UI paths
-        // (the detail header and the People panel) end up making it, and the
-        // participants POST deliberately stays quiet for role 'assignee'.
-        title: requestParticipantTitle('assignee', ownerRow.title),
-        body: ownerRow.requestNumber ? `REQ-${ownerRow.requestNumber}` : null,
-        entityType: 'request',
-        entityId: id,
-      })
-    }
-  }
-
-  // Notifications + domain event on status change. Shared with the bulk PATCH
-  // through lib/request-status-effects so the two paths cannot drift.
-  if (body.status !== undefined) {
-    // Fetch the request to get orgId and assigneeId
-    const [updatedReq] = await drizzle
-      .select({
-        title: schema.requests.title,
-        orgId: schema.requests.orgId,
-        assigneeId: schema.requests.assigneeId,
-        isInternal: schema.requests.isInternal,
-        // Read so the client fan-out can be narrowed to the contacts the
-        // brand-scoped portal list would show this row to. Unread, the bell
-        // and the email both go org wide, which is wider than the portal.
-        brandId: schema.requests.brandId,
-      })
-      .from(schema.requests)
-      .where(eq(schema.requests.id, id))
-      .limit(1)
-
-    if (updatedReq) {
-      await emitRequestStatusChanged(drizzle, {
-        id,
-        title: updatedReq.title,
-        orgId: updatedReq.orgId,
-        assigneeId: updatedReq.assigneeId ?? null,
-        isInternal: updatedReq.isInternal === true,
-        brandId: updatedReq.brandId ?? null,
-      }, body.status)
-    }
+  const result = await updateRequestRecord(drizzle, id, body, {
+    actorType: 'team_member',
+    actorId: userId ?? null,
+  })
+  if (!result.ok) {
+    return NextResponse.json({ error: result.failure.error }, { status: result.failure.status })
   }
 
   return NextResponse.json({ success: true })

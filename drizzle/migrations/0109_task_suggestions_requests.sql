@@ -1,0 +1,31 @@
+-- Migration 0109: task_suggestions learns about requests, not just tasks.
+--
+-- CN.1b. Liam: "these are tasks and requests, especially requests if they come
+-- from a client." The Tasks vs Requests model is the reason: requests are the
+-- client-facing work, tasks run the studio. A call with a client therefore
+-- mostly produces requests, updates to requests and hand-offs (the client owes
+-- something on a request); the studio's own follow-ups stay tasks.
+--
+-- Two nullable pointers, mirroring the two the table already carries for tasks:
+--
+--   target_request_id   the request an update_request, request_note or
+--                       hand_off_request is about. Null on create_request and
+--                       on every task kind.
+--   applied_request_id  the request an approved suggestion created, or the
+--                       target it changed. The task-side twin of this column
+--                       (applied_task_id) is what the inbox links to after an
+--                       approval; a request suggestion needs its own because a
+--                       row is never both.
+--
+-- No REFERENCES, for the same reason target_task_id carries none: a suggestion
+-- outlives the request it named rather than vanishing with it, and the history
+-- of what was proposed is worth more than a cascade.
+--
+-- Additive and idempotent: the duplicate-column error is swallowed by the
+-- runner (app/api/admin/db/migrate/route.ts), so re-running is safe. Apply
+-- BEFORE deploying: lib/task-suggestions.ts selects these columns by name and
+-- Drizzle expands a select into an explicit column list, so every read of
+-- task_suggestions fails without them.
+ALTER TABLE task_suggestions ADD COLUMN target_request_id text;
+ALTER TABLE task_suggestions ADD COLUMN applied_request_id text;
+CREATE INDEX IF NOT EXISTS idx_task_suggestions_target_request ON task_suggestions(target_request_id);

@@ -2121,11 +2121,17 @@ export const taskSuggestions = sqliteTable('task_suggestions', {
   // REFERENCES on callId, the same rule call_transcripts already follows.
   callKind: text('call_kind'),
   callId: text('call_id'),
-  // create_task | update_task | complete_task | add_subtasks | note
+  // The task kinds: create_task | update_task | complete_task |
+  // add_subtasks | note. The request kinds (migration 0109): create_request |
+  // update_request | request_note | hand_off_request.
   kind: text('kind').notNull(),
-  // Required for every kind but create_task. No REFERENCES: a suggestion
+  // Required for every task kind but create_task. No REFERENCES: a suggestion
   // outlives the task it named rather than vanishing with it.
   targetTaskId: text('target_task_id'),
+  // The request an update_request, request_note or hand_off_request is about
+  // (migration 0109). Null on create_request and on every task kind: a row is
+  // never about both a task and a request. Same no-REFERENCES rule as above.
+  targetRequestId: text('target_request_id'),
   // JSON, shaped per kind. See lib/task-suggestions.ts.
   proposal: text('proposal').notNull(),
   // The verbatim transcript or wrap-up lines this rests on. A suggestion
@@ -2149,6 +2155,11 @@ export const taskSuggestions = sqliteTable('task_suggestions', {
   appliedAt: text('applied_at'),
   // The task created, or the target task.
   appliedTaskId: text('applied_task_id'),
+  // The request created, or the target request (migration 0109). Its own
+  // column rather than a shared one, because the inbox links an applied row
+  // to the thing it changed and a task href and a request href are not
+  // interchangeable.
+  appliedRequestId: text('applied_request_id'),
   // Why a failed apply failed, so it can be read rather than guessed at.
   applyError: text('apply_error'),
   // sha-256 of the source, the kind, the target and the normalised title or
@@ -2165,6 +2176,7 @@ export const taskSuggestions = sqliteTable('task_suggestions', {
   index('idx_task_suggestions_status').on(table.status, table.createdAt),
   index('idx_task_suggestions_transcript').on(table.transcriptId),
   index('idx_task_suggestions_target').on(table.targetTaskId),
+  index('idx_task_suggestions_target_request').on(table.targetRequestId),
 ])
 
 // ============================================================
