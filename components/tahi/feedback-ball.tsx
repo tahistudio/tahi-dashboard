@@ -687,8 +687,13 @@ export function FeedbackBall() {
             ...edgeAwareFixedStyle(edge, position, BALL_SIZE_PX, 12, viewportSize()),
             zIndex: 1401,
             maxWidth: '16rem',
+            // Bg/text pair inverted together (same technique as .ov-tip in
+            // overview.css) so the chip stays a contrasting ink-on-surface
+            // pair in both themes. A hardcoded white here used to go
+            // invisible in dark mode, where --color-text flips to a light
+            // ink and the background became a light surface under white text.
             background: 'var(--color-text)',
-            color: '#ffffff',
+            color: 'var(--color-bg)',
             fontSize: '0.75rem',
             fontWeight: 500,
             lineHeight: 1.4,

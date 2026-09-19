@@ -41,7 +41,7 @@
 .ov-brief-h{ display:flex; align-items:baseline; gap:10px; margin-bottom:12px; }
 .ov-brief-ic{ width:28px; height:28px; border-radius:8px; background:linear-gradient(135deg,var(--brand-100),transparent); color:var(--brand-strong); display:flex; align-items:center; justify-content:center; box-shadow:inset 0 0 0 1px var(--brand-100); flex-shrink:0; }
 .ov-brief-h h3{ margin:0; font:700 13.5px 'Manrope',sans-serif; color:var(--text); }
-.ov-brief-time{ margin-left:auto; font:500 11.5px 'Manrope',sans-serif; color:var(--text-faint); }
+.ov-brief-time{ margin-left:auto; display:inline-flex; align-items:baseline; gap:5px; font:500 11.5px 'Manrope',sans-serif; color:var(--text-faint); }
 .ov-brief-lede{ margin:0; font:500 14px/1.6 'Manrope',sans-serif; color:var(--text); text-wrap:pretty; }
 /* accordion sections */
 .ov-brief-accs{ margin-top:16px; display:flex; flex-direction:column; gap:8px; }
@@ -260,6 +260,7 @@
 .ov-wire-item{ position:absolute; inset:0; display:flex; align-items:center; gap:9px; font:500 13px 'Manrope',sans-serif; color:var(--text-muted); }
 .ov-wire-item b{ color:var(--text); font-weight:600; }
 .ov-wire-item .ov-wire-dot{ width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.ov-wire-when{ margin-left:auto; flex-shrink:0; color:var(--text-faint); font-size:12px; white-space:nowrap; }
 .ov-wire-item.enter{ animation:ov-wire-in .24s var(--ease); }
 @keyframes ov-wire-in{ from{ opacity:0; transform:translateY(8px); } to{ opacity:1; transform:none; } }
 .ov-wire-static{ display:flex; flex-direction:column; gap:5px; }
@@ -448,6 +449,14 @@
   .ov-row.click{ margin:0 -6px; padding-left:6px; padding-right:6px; }
   .ov-statrow{ gap:14px; flex-wrap:wrap; }
   .ov-brief{ padding:15px 16px; }
+  /* Daily brief meta row was one crowded baseline-aligned line (title, date,
+     time, "Updated Xh ago", Refresh). Stack the title above the date/time on
+     phone and drop the inline dot between date and time; desktop keeps the
+     single row above. */
+  .ov-brief-h{ flex-wrap:wrap; row-gap:6px; }
+  .ov-brief-h h3{ flex:1 1 100%; }
+  .ov-brief-time{ margin-left:0; flex-direction:column; align-items:flex-start; gap:1px; }
+  .ov-brief-time .ov-brief-dot{ display:none; }
   .ov-needrow{ padding:12px 14px; }
   .ov-needs-head{ padding:12px 14px 4px; }
   .ov-trackboard{ padding:15px 16px; }
@@ -463,6 +472,17 @@
   .ov-eyebrow{ flex-wrap:wrap; }
   .ov-mast-r{ margin-left:0; width:100%; }
   .ov-clock{ display:none; }
+  /* Wire ticker item ("Automation ran: ...") was pinned to a fixed 1.6rem
+     row with overflow hidden, so a two-line item on a narrow viewport had
+     its second line clipped. Let it grow: the dot stays on line 1, the
+     text wraps inside its own flex box (a free hanging indent, since it
+     never shares the dot's column), and the timestamp drops to its own
+     line at the same indent instead of breaking mid word. */
+  .ov-wire{ height:auto; min-height:1.6rem; align-items:flex-start; overflow:visible; }
+  .ov-wire-track{ position:static; height:auto; }
+  .ov-wire-item{ position:static; align-items:flex-start; flex-wrap:wrap; row-gap:2px; padding:2px 0; }
+  .ov-wire-item .ov-wire-dot{ margin-top:6px; }
+  .ov-wire-when{ margin-left:0; flex-basis:100%; padding-left:16px; }
 }
 
 /* ---------- reduced motion ---------- */
