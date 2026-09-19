@@ -45,7 +45,12 @@ export function ClientsCardsView({
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(17.5rem, 1fr))',
+        // 19rem (not 17.5rem): the old width packed enough columns on a wide
+        // desktop screen that the MRR / Open / Tracks stat row and the footer
+        // chips had no room and fought each other for space. The extra width
+        // gives the vertical layout below room to breathe without changing
+        // how it reads at 375px, where it was already a single column.
+        gridTemplateColumns: 'repeat(auto-fill, minmax(19rem, 1fr))',
         gap: '0.875rem',
       }}
     >
@@ -90,6 +95,10 @@ function ClientCard({
         flexDirection: 'column',
         gap: '0.75rem',
         padding: '0.9375rem 1rem 1rem',
+        // A floor height so a client with no tags and a one-line health
+        // reason does not read as a visibly shorter card than its neighbours
+        // in the same grid row.
+        minHeight: '13rem',
         border: `1px solid ${hover ? 'var(--color-brand)' : 'var(--color-border)'}`,
         borderRadius: 'var(--radius-lg)',
         background: hover ? 'var(--color-bg-secondary)' : 'var(--color-bg)',
@@ -145,7 +154,12 @@ function ClientCard({
         </span>
       </div>
 
-      <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.5rem', pointerEvents: 'none' }}>
+      {/* auto-fit rather than a fixed 3 columns: three stats forced into one
+          horizontal row on a narrower card is exactly the cramped layout the
+          card was moved away from. Every card in the grid shares the same
+          column width, so the wrap point lands identically across the whole
+          grid and heights stay consistent. */}
+      <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(5.75rem, 1fr))', gap: '0.5rem', pointerEvents: 'none' }}>
         <Stat label={canSeeMoney ? 'MRR' : 'Engagement'}>
           {canSeeMoney
             ? <ClientMoneyCell row={row} unknownLabel={mrrUnknown ? 'Unknown' : undefined} />
