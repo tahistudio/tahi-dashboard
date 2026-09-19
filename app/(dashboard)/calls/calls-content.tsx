@@ -183,6 +183,7 @@ function CallMobileCard({ call, onOpen }: { call: CallRow; onOpen: () => void })
             gap: '0.3125rem',
             maxWidth: '100%',
             minWidth: 0,
+            minHeight: '2.75rem',
             overflow: 'hidden',
             padding: '0.25rem 0.5rem',
             borderRadius: 'var(--radius-full)',
