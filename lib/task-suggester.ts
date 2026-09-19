@@ -706,7 +706,7 @@ export async function runSuggestionSweep(
     await stamp(database, transcript.id, nowIso)
   }
 
-  summary.resurfaced = await resurfaceSnoozed(database, nowIso)
+  summary.resurfaced = await resurfaceSnoozed(database, new Date(nowIso))
 
   return summary
 }

@@ -492,7 +492,8 @@ describe('runSuggestionSweep', () => {
   it('returns snoozed suggestions to pending on its way out', async () => {
     const { handle, updates } = makeDb([
       [],                                   // no transcripts waiting
-      [{ id: 'sug-1' }, { id: 'sug-2' }],   // two snoozes due
+      // two snoozes due (snoozeUntil in the past), read then flipped in one batch
+      [{ id: 'sug-1', snoozeUntil: '2026-09-18T19:00:00Z' }, { id: 'sug-2', snoozeUntil: '2026-09-18T19:00:00Z' }],
     ])
 
     const summary = await runSuggestionSweep(handle, { suggest: okSuggest, now: new Date('2026-09-19T00:00:00Z') })
