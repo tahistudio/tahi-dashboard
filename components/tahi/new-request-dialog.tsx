@@ -65,6 +65,24 @@ interface OrgOption {
   planType?: string | null
 }
 
+/**
+ * The shape Tweak on a create_request call suggestion prefills the dialog
+ * from (docs/superpowers/plans/2026-09-19-cn1b-requests-contract.md section
+ * 5), and what its save hands back through onSubmitOverride instead of
+ * posting to the ordinary create endpoints. Mirrors the create_request
+ * proposal shape from the same contract's section 2, minus the requester
+ * fields a Tweak never edits.
+ */
+export interface RequestInitialDraft {
+  orgId: string | null
+  title: string
+  description: string | null
+  category: string
+  type: 'small_task' | 'large_task'
+  priority: string
+  dueDate: string | null
+}
+
 interface NewRequestDialogProps {
   open: boolean
   onClose: () => void
@@ -88,6 +106,16 @@ interface NewRequestDialogProps {
   /** Pre-fills the form from an AI-authored draft. Marks the size suggestion
    *  as AI-attributed ("Suggested by AI assist: ..."). */
   aiDraft?: { title?: string; description?: string; category?: string } | null
+  /** Pre-fills every field a create_request call suggestion carries. Used
+   *  together with onSubmitOverride: set alone it just prefills, the way
+   *  aiDraft does. */
+  initialDraft?: RequestInitialDraft | null
+  /** Replaces the dialog's own POST when set: save calls this with the
+   *  current form values instead and closes on success. An error it throws
+   *  lands in the same inline banner a failed POST would. The Suggestions
+   *  inbox uses this to turn Tweak-and-save into an approve-with-a-proposal-
+   *  override decide call rather than a second, independent request. */
+  onSubmitOverride?: (draft: RequestInitialDraft) => Promise<void>
 }
 
 /** The two sizes a request can be filed at, in the vocabulary the API takes. */
@@ -361,7 +389,7 @@ type DialogView = 'form' | 'ai' | 'done'
 
 function AlignedRequestDialog({
   open, onClose, isAdmin, canUseLargeTrack = true, defaultOrgId,
-  parentRequestId, forceOrgId, onCreated, aiDraft,
+  parentRequestId, forceOrgId, onCreated, aiDraft, initialDraft, onSubmitOverride,
 }: NewRequestDialogProps) {
   const isSubRequest = !!parentRequestId
   const isClient = !isAdmin
@@ -609,6 +637,23 @@ function AlignedRequestDialog({
     setAiDrafted(true)
   }, [open, aiDraft, markWritten])
 
+  // Tweak on a create_request suggestion. Fills every field the proposal
+  // carries, the same way aiDraft does above, and marks them written so the
+  // predictor never overwrites a value the human already tweaked once on
+  // its way through the inbox.
+  useEffect(() => {
+    if (!open || !initialDraft) return
+    setClientOrgId(initialDraft.orgId ?? '')
+    setTitle(initialDraft.title)
+    setDescription(toBriefHtml(initialDraft.description))
+    setCategory(initialDraft.category)
+    setType(initialDraft.type)
+    setPriority(initialDraft.priority)
+    setDueDate(initialDraft.dueDate ?? '')
+    setAiDrafted(false)
+    markWritten(['category', 'size', 'priority', 'dueDate'])
+  }, [open, initialDraft, markWritten])
+
   const gateInput: SubmitGateInput = {
     title,
     brief: description,
@@ -645,6 +690,32 @@ function AlignedRequestDialog({
     setSuccessMessage(null)
     setSubmitting(true)
     setSavingAnother(saveAndCreateAnother)
+
+    // A Tweak on a create_request suggestion never posts here at all: the
+    // caller turns the current form values into a decide-with-an-override
+    // call, and this dialog closes on success the same way the sub-request
+    // panels close on their own onCreated rather than showing the
+    // confirmation view.
+    if (onSubmitOverride) {
+      try {
+        await onSubmitOverride({
+          orgId: clientOrgId || null,
+          title: title.trim(),
+          description,
+          category,
+          type,
+          priority,
+          dueDate: dueDate || null,
+        })
+        onClose()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'That did not save. Please try again.')
+      } finally {
+        setSubmitting(false)
+        setSavingAnother(false)
+      }
+      return
+    }
 
     try {
       const url = isSubRequest
@@ -1258,7 +1329,7 @@ function AlignedRequestDialog({
               marginLeft: 'auto',
             }}>
               <SecondaryButton onClick={onClose}>Cancel</SecondaryButton>
-              {isAdmin && (
+              {isAdmin && !onSubmitOverride && (
                 <SecondaryButton
                   onClick={e => handleSubmit(e, true)}
                   disabled={!canSubmit || submitting}
@@ -1300,7 +1371,7 @@ function AlignedRequestDialog({
                 }}
               >
                 {submitting && !savingAnother && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
-                {isClient ? 'Submit request' : 'Create request'}
+                {onSubmitOverride ? 'Save and approve' : (isClient ? 'Submit request' : 'Create request')}
               </button>
             </div>
           </div>

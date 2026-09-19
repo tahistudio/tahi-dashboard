@@ -7,9 +7,13 @@
  */
 
 import type { TaskFields } from '@/lib/task-wizard-drafts'
+import type { RequestInitialDraft } from '@/components/tahi/new-request-dialog'
+import { handoffReasonShortLabel, isHandoffReason } from '@/lib/request-handoff-copy'
 import type {
+  CreateRequestProposal,
   CreateTaskProposal,
   DecoratedSuggestion,
+  HandOffRequestProposal,
   SnoozePreset,
   TaskSuggestionKind,
 } from './suggestions-types'
@@ -68,6 +72,10 @@ export const SUGGESTION_KIND_LABELS: Record<TaskSuggestionKind, string> = {
   complete_task: 'Complete',
   add_subtasks: 'Subtasks',
   note: 'Note',
+  create_request: 'New request',
+  update_request: 'Update request',
+  request_note: 'Request note',
+  hand_off_request: 'Hand off',
 }
 
 export function suggestionKindLabel(kind: TaskSuggestionKind): string {
@@ -93,6 +101,16 @@ const UPDATE_FIELD_LABELS: Record<string, string> = {
   dueDate: 'due date',
   assigneeId: 'assignee',
   estimatedHours: 'estimate',
+}
+
+const UPDATE_REQUEST_FIELD_LABELS: Record<string, string> = {
+  status: 'status',
+  priority: 'priority',
+  dueDate: 'due date',
+  startDate: 'start date',
+  estimatedHours: 'estimate',
+  category: 'category',
+  scopeFlagged: 'scope flag',
 }
 
 /** One plain-text line describing a proposal, whatever kind it is. Never
@@ -127,9 +145,45 @@ export function summariseProposal(kind: TaskSuggestionKind, proposal: unknown): 
       const body = typeof p.body === 'string' ? p.body.trim() : ''
       return body || 'No note text'
     }
+    case 'create_request': {
+      const title = typeof p.title === 'string' && p.title.trim() ? p.title.trim() : 'Untitled request'
+      const category = typeof p.category === 'string' ? p.category.trim() : ''
+      return category ? `${title} - ${category}` : title
+    }
+    case 'update_request': {
+      const fields = asRecord(p.fields)
+      const keys = Object.keys(fields)
+      if (keys.length === 0) return 'No fields changed'
+      const labels = keys.map(k => UPDATE_REQUEST_FIELD_LABELS[k] ?? k)
+      return `Changes ${labels.join(', ')}`
+    }
+    case 'request_note': {
+      const body = typeof p.body === 'string' ? p.body.trim() : ''
+      return body || 'No note text'
+    }
+    case 'hand_off_request': {
+      const name = typeof p.contactName === 'string' && p.contactName.trim() ? p.contactName.trim() : 'someone'
+      const reason = isHandoffReason(p.reason) ? handoffReasonShortLabel(p.reason) : 'something'
+      return `Waiting on ${name}: ${reason}`
+    }
     default:
       return 'Unrecognised suggestion'
   }
+}
+
+/** "#<number> <title>" for a row with a target request, or null when there is
+ *  none: a create_request has no target yet, and every kind reads this the
+ *  same way once one exists (contract section 5). */
+export function targetRequestLine(suggestion: Pick<DecoratedSuggestion, 'targetRequestNumber' | 'targetRequestTitle'>): string | null {
+  if (suggestion.targetRequestNumber == null || !suggestion.targetRequestTitle) return null
+  return `#${suggestion.targetRequestNumber} ${suggestion.targetRequestTitle}`
+}
+
+/** A hand-off suggestion cannot be approved until a contact is picked, on
+ *  the row or on Tweak: the sweep suggests it anyway when it could not
+ *  resolve the name, and the human fills in who. */
+export function handOffNeedsContact(proposal: Pick<HandOffRequestProposal, 'contactId'>): boolean {
+  return !proposal.contactId
 }
 
 /** Shown only under 0.7 per the contract; a confident suggestion carries no
@@ -218,5 +272,45 @@ export function taskFieldsToCreateProposal(fields: TaskFields): CreateTaskPropos
     estimatedHours: fields.estimatedHours,
     priority: fields.priority,
     subtasks: fields.subtasks,
+  }
+}
+
+// ── create_request proposal <-> RequestInitialDraft (NewRequestDialog) ──────
+
+/** A create_request suggestion, read as the shape NewRequestDialog's
+ *  initialDraft prop takes. The org comes from the suggestion row, not the
+ *  proposal: create_request never carries one of its own (contract section
+ *  2), it is always the org the call suggestion belongs to. */
+export function createRequestProposalToInitialDraft(
+  proposal: CreateRequestProposal,
+  orgId: string | null,
+): RequestInitialDraft {
+  return {
+    orgId,
+    title: proposal.title,
+    description: proposal.description ?? null,
+    category: proposal.category,
+    type: proposal.type === 'large_task' ? 'large_task' : 'small_task',
+    priority: proposal.priority,
+    dueDate: proposal.dueDate ?? null,
+  }
+}
+
+/** The reverse: what Tweak's save sends back as the proposal override.
+ *  requesterName and requesterContactId carry over unedited from the
+ *  original proposal, a Tweak never touches who asked for it, only what the
+ *  request will say. */
+export function initialDraftToCreateRequestProposal(
+  draft: RequestInitialDraft,
+  original: CreateRequestProposal,
+): CreateRequestProposal {
+  return {
+    ...original,
+    title: draft.title,
+    description: draft.description,
+    category: draft.category,
+    type: draft.type,
+    priority: draft.priority === 'high' ? 'high' : 'standard',
+    dueDate: draft.dueDate,
   }
 }

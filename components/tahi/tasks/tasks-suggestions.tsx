@@ -29,8 +29,12 @@ import { useToast } from '@/components/tahi/toast'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Menu } from '@/components/tahi/menu'
 import { NewTaskDialog } from '@/components/tahi/tasks/new-task-dialog'
-import { TASK_STATUSES } from '@/lib/status-config'
+import { NewRequestDialog, type RequestInitialDraft } from '@/components/tahi/new-request-dialog'
+import type { ContactOption } from '@/components/tahi/requests/waiting-on-card'
+import { TASK_STATUSES, REQUEST_STATUSES } from '@/lib/status-config'
 import { TASK_PRIORITIES, taskPriorityLabel } from '@/lib/task-priorities'
+import { REQUEST_CATEGORIES, REQUEST_PRIORITIES } from '@/lib/request-vocabulary'
+import { HANDOFF_REASON_OPTIONS, isHandoffReason, type HandoffReason } from '@/lib/request-handoff-copy'
 import type {
   TaskClientOption,
   TaskPerson,
@@ -44,23 +48,31 @@ import {
   buildSnoozeRequest,
   confidenceLabel,
   createProposalToTaskFields,
+  createRequestProposalToInitialDraft,
   groupSuggestionsByCall,
+  handOffNeedsContact,
+  initialDraftToCreateRequestProposal,
   suggestionKeyAction,
   suggestionKindLabel,
   summariseProposal,
+  targetRequestLine,
   taskFieldsToCreateProposal,
   type SuggestionCallGroup,
 } from '@/app/(dashboard)/tasks/suggestions-logic'
 import type {
   AddSubtasksProposal,
   CompleteTaskProposal,
+  CreateRequestProposal,
   CreateTaskProposal,
   DecideBulkResponse,
   DecideSuggestionResponse,
   DecoratedSuggestion,
+  HandOffRequestProposal,
   NoteProposal,
+  RequestNoteProposal,
   SnoozePreset,
   TaskSuggestionsResponse,
+  UpdateRequestProposal,
   UpdateTaskProposal,
 } from '@/app/(dashboard)/tasks/suggestions-types'
 
@@ -264,11 +276,156 @@ function NoteEditor({ suggestion, onSave, onCancel, busy }: InlineEditorProps) {
   )
 }
 
-function EditorActions({ onSave, onCancel, busy }: { onSave: () => void; onCancel: () => void; busy: boolean }) {
+function UpdateRequestEditor({ suggestion, onSave, onCancel, busy }: InlineEditorProps) {
+  const original = suggestion.proposal as UpdateRequestProposal
+  const [status, setStatus] = React.useState(original.fields.status ?? '')
+  const [priority, setPriority] = React.useState(original.fields.priority ?? '')
+  const [dueDate, setDueDate] = React.useState(original.fields.dueDate ?? '')
+  const [category, setCategory] = React.useState(original.fields.category ?? '')
+  const [note, setNote] = React.useState(original.note ?? '')
+
+  function save() {
+    const fields: UpdateRequestProposal['fields'] = {}
+    if (status) fields.status = status
+    if (priority) fields.priority = priority
+    if (dueDate) fields.dueDate = dueDate
+    if (category) fields.category = category
+    const proposal: UpdateRequestProposal = note.trim() ? { fields, note: note.trim() } : { fields }
+    void onSave(proposal)
+  }
+
+  return (
+    <div style={editorGrid}>
+      <label style={editorLabel}>
+        Status
+        <select value={status} onChange={e => setStatus(e.target.value)} style={editorInput}>
+          <option value="">Unchanged</option>
+          {REQUEST_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+        </select>
+      </label>
+      <label style={editorLabel}>
+        Priority
+        <select value={priority} onChange={e => setPriority(e.target.value)} style={editorInput}>
+          <option value="">Unchanged</option>
+          {REQUEST_PRIORITIES.map(p => <option key={p} value={p}>{p === 'high' ? 'High' : 'Standard'}</option>)}
+        </select>
+      </label>
+      <label style={editorLabel}>
+        Due date
+        <input type="date" value={dueDate ?? ''} onChange={e => setDueDate(e.target.value)} style={editorInput} />
+      </label>
+      <label style={editorLabel}>
+        Category
+        <select value={category} onChange={e => setCategory(e.target.value)} style={editorInput}>
+          <option value="">Unchanged</option>
+          {REQUEST_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </label>
+      <label style={{ ...editorLabel, gridColumn: '1 / -1' }}>
+        Note
+        <textarea value={note} onChange={e => setNote(e.target.value)} style={{ ...editorInput, minHeight: '3.5rem' }} />
+      </label>
+      <EditorActions onSave={save} onCancel={onCancel} busy={busy} />
+    </div>
+  )
+}
+
+function RequestNoteEditor({ suggestion, onSave, onCancel, busy }: InlineEditorProps) {
+  const original = suggestion.proposal as RequestNoteProposal
+  const [body, setBody] = React.useState(original.body ?? '')
+  return (
+    <div style={editorGrid}>
+      <label style={{ ...editorLabel, gridColumn: '1 / -1' }}>
+        Comment body
+        <textarea value={body} onChange={e => setBody(e.target.value)} style={{ ...editorInput, minHeight: '4.5rem' }} />
+      </label>
+      <EditorActions onSave={() => void onSave({ body } as RequestNoteProposal)} onCancel={onCancel} busy={busy} />
+    </div>
+  )
+}
+
+/** The hand_off_request editor, always shown (not just on Tweak) for a row
+ *  with no resolved contactId: the contract gates Approve on this picker
+ *  rather than offering a second, separate widget. Same GET
+ *  /api/admin/clients/[id]/contacts the request people panel's Waiting-on
+ *  card uses (components/tahi/requests/waiting-on-card.tsx). */
+function HandOffRequestEditor({ suggestion, onSave, onCancel, busy }: InlineEditorProps) {
+  const original = suggestion.proposal as HandOffRequestProposal
+  const [contacts, setContacts] = React.useState<ContactOption[]>([])
+  const [contactId, setContactId] = React.useState(original.contactId ?? '')
+  const [reason, setReason] = React.useState<HandoffReason>(isHandoffReason(original.reason) ? original.reason : 'other')
+  const [dueAt, setDueAt] = React.useState(original.dueAt ?? '')
+  const [note, setNote] = React.useState(original.note ?? '')
+
+  React.useEffect(() => {
+    const orgId = suggestion.orgId
+    if (!orgId) return
+    let cancelled = false
+    fetch(apiPath(`/api/admin/clients/${orgId}/contacts`))
+      .then(r => (r.ok ? (r.json() as Promise<{ contacts?: ContactOption[] }>) : { contacts: [] }))
+      .then(d => { if (!cancelled) setContacts(d.contacts ?? []) })
+      .catch(() => { if (!cancelled) setContacts([]) })
+    return () => { cancelled = true }
+  }, [suggestion.orgId])
+
+  function save() {
+    const picked = contacts.find(c => c.id === contactId)
+    const proposal: HandOffRequestProposal = {
+      contactName: picked?.name ?? original.contactName,
+      contactId: contactId || null,
+      reason,
+      dueAt: dueAt || null,
+      note: note.trim() || undefined,
+    }
+    void onSave(proposal)
+  }
+
+  return (
+    <div style={editorGrid}>
+      <label style={editorLabel}>
+        Contact
+        <select value={contactId} onChange={e => setContactId(e.target.value)} style={editorInput}>
+          <option value="">Pick a contact</option>
+          {contacts.map(c => (
+            <option key={c.id} value={c.id}>{c.email ? `${c.name} (${c.email})` : c.name}</option>
+          ))}
+        </select>
+      </label>
+      <label style={editorLabel}>
+        Reason
+        <select value={reason} onChange={e => setReason(e.target.value as HandoffReason)} style={editorInput}>
+          {HANDOFF_REASON_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </label>
+      <label style={editorLabel}>
+        Due date
+        <input type="date" value={dueAt ?? ''} onChange={e => setDueAt(e.target.value)} style={editorInput} />
+      </label>
+      <label style={{ ...editorLabel, gridColumn: '1 / -1' }}>
+        Note
+        <textarea value={note} onChange={e => setNote(e.target.value)} style={{ ...editorInput, minHeight: '3.5rem' }} />
+      </label>
+      <EditorActions onSave={save} onCancel={onCancel} busy={busy} disabledReason={contactId ? undefined : 'Pick a contact first'} />
+    </div>
+  )
+}
+
+function EditorActions({
+  onSave, onCancel, busy, disabledReason,
+}: { onSave: () => void; onCancel: () => void; busy: boolean; disabledReason?: string }) {
   return (
     <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
       <TahiButton variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Cancel</TahiButton>
-      <TahiButton variant="primary" size="sm" onClick={onSave} loading={busy}>Save and approve</TahiButton>
+      <TahiButton
+        variant="primary"
+        size="sm"
+        onClick={onSave}
+        loading={busy}
+        disabled={busy || !!disabledReason}
+        title={disabledReason}
+      >
+        Save and approve
+      </TahiButton>
     </div>
   )
 }
@@ -328,20 +485,33 @@ interface SuggestionRowProps {
   onReject: () => void
   onSnooze: (preset: SnoozePreset) => void
   onTweakCreate: () => void
+  onTweakCreateRequest: () => void
   onTweakOther: (proposal: unknown) => Promise<void>
   busy: boolean
 }
 
 function SuggestionRow({
-  suggestion, peopleList, focused, onFocus, onApprove, onReject, onSnooze, onTweakCreate, onTweakOther, busy,
+  suggestion, peopleList, focused, onFocus, onApprove, onReject, onSnooze,
+  onTweakCreate, onTweakCreateRequest, onTweakOther, busy,
 }: SuggestionRowProps) {
   const [editing, setEditing] = React.useState(false)
   const confidence = confidenceLabel(suggestion.confidence)
   const summary = summariseProposal(suggestion.kind, suggestion.proposal)
+  const requestLine = targetRequestLine(suggestion)
+  // A hand-off with no resolved contact cannot be approved as is (contract
+  // section 5): the editor that picks one is forced open rather than left
+  // behind a Tweak click nobody is told to make.
+  const needsContactPick = suggestion.kind === 'hand_off_request'
+    && handOffNeedsContact(suggestion.proposal as HandOffRequestProposal)
+  const showEditor = editing || needsContactPick
 
   function handleTweak() {
     if (suggestion.kind === 'create_task') {
       onTweakCreate()
+      return
+    }
+    if (suggestion.kind === 'create_request') {
+      onTweakCreateRequest()
       return
     }
     setEditing(e => !e)
@@ -397,6 +567,11 @@ function SuggestionRow({
             on &quot;{suggestion.targetTaskTitle}&quot;
           </span>
         )}
+        {requestLine && (
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+            on {requestLine}
+          </span>
+        )}
       </div>
 
       <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--color-text)', fontWeight: 500 }}>{summary}</p>
@@ -416,7 +591,15 @@ function SuggestionRow({
       </blockquote>
 
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-        <TahiButton variant="primary" size="sm" iconLeft={<Check size={14} />} onClick={onApprove} loading={busy}>
+        <TahiButton
+          variant="primary"
+          size="sm"
+          iconLeft={<Check size={14} />}
+          onClick={onApprove}
+          loading={busy}
+          disabled={busy || needsContactPick}
+          title={needsContactPick ? 'Pick a contact first' : undefined}
+        >
           Approve
         </TahiButton>
         <TahiButton variant="secondary" size="sm" iconLeft={<Pencil size={14} />} onClick={handleTweak} disabled={busy}>
@@ -444,17 +627,26 @@ function SuggestionRow({
         </TahiButton>
       </div>
 
-      {editing && suggestion.kind === 'update_task' && (
+      {showEditor && suggestion.kind === 'update_task' && (
         <UpdateTaskEditor suggestion={suggestion} peopleList={peopleList} onSave={handleEditorSave} onCancel={() => setEditing(false)} busy={busy} />
       )}
-      {editing && suggestion.kind === 'complete_task' && (
+      {showEditor && suggestion.kind === 'complete_task' && (
         <CompleteTaskEditor suggestion={suggestion} peopleList={peopleList} onSave={handleEditorSave} onCancel={() => setEditing(false)} busy={busy} />
       )}
-      {editing && suggestion.kind === 'add_subtasks' && (
+      {showEditor && suggestion.kind === 'add_subtasks' && (
         <AddSubtasksEditor suggestion={suggestion} peopleList={peopleList} onSave={handleEditorSave} onCancel={() => setEditing(false)} busy={busy} />
       )}
-      {editing && suggestion.kind === 'note' && (
+      {showEditor && suggestion.kind === 'note' && (
         <NoteEditor suggestion={suggestion} peopleList={peopleList} onSave={handleEditorSave} onCancel={() => setEditing(false)} busy={busy} />
+      )}
+      {showEditor && suggestion.kind === 'update_request' && (
+        <UpdateRequestEditor suggestion={suggestion} peopleList={peopleList} onSave={handleEditorSave} onCancel={() => setEditing(false)} busy={busy} />
+      )}
+      {showEditor && suggestion.kind === 'request_note' && (
+        <RequestNoteEditor suggestion={suggestion} peopleList={peopleList} onSave={handleEditorSave} onCancel={() => setEditing(false)} busy={busy} />
+      )}
+      {showEditor && suggestion.kind === 'hand_off_request' && (
+        <HandOffRequestEditor suggestion={suggestion} peopleList={peopleList} onSave={handleEditorSave} onCancel={() => setEditing(false)} busy={busy} />
       )}
     </div>
   )
@@ -471,13 +663,15 @@ interface CallGroupProps {
   onReject: (id: string) => void
   onSnooze: (id: string, preset: SnoozePreset) => void
   onTweakCreate: (suggestion: DecoratedSuggestion) => void
+  onTweakCreateRequest: (suggestion: DecoratedSuggestion) => void
   onTweakOther: (id: string, proposal: unknown) => Promise<void>
   onApproveAll: (ids: string[]) => void
   busyIds: ReadonlySet<string>
 }
 
 function CallGroupBlock({
-  group, peopleList, focusedId, onFocusRow, onApprove, onReject, onSnooze, onTweakCreate, onTweakOther, onApproveAll, busyIds,
+  group, peopleList, focusedId, onFocusRow, onApprove, onReject, onSnooze,
+  onTweakCreate, onTweakCreateRequest, onTweakOther, onApproveAll, busyIds,
 }: CallGroupProps) {
   const when = group.callScheduledAt ? new Date(group.callScheduledAt) : null
   const whenLabel = when && Number.isFinite(when.getTime())
@@ -516,6 +710,7 @@ function CallGroupBlock({
           onReject={() => onReject(item.id)}
           onSnooze={preset => onSnooze(item.id, preset)}
           onTweakCreate={() => onTweakCreate(item)}
+          onTweakCreateRequest={() => onTweakCreateRequest(item)}
           onTweakOther={proposal => onTweakOther(item.id, proposal)}
           busy={busyIds.has(item.id)}
         />
@@ -533,12 +728,16 @@ export interface TasksSuggestionsProps {
   /** Called after a create_task suggestion is applied, so the shell can
    *  refetch the task list and offer to open the new row. */
   onTaskCreated: (taskId: string) => void
+  /** Called after a create_request suggestion is applied. Optional: a caller
+   *  that has not wired anything up yet still gets the toast, it just has
+   *  no Open link to attach it to. */
+  onRequestCreated?: (requestId: string) => void
   /** The pending count, lifted so the rail's toolbar can show it the same
    *  way My week reports its own count while that view is on screen. */
   onCountChange?: (count: number) => void
 }
 
-export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated, onCountChange }: TasksSuggestionsProps) {
+export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated, onRequestCreated, onCountChange }: TasksSuggestionsProps) {
   const { showToast } = useToast()
   const { data, mutate, isLoading } = useSWR<TaskSuggestionsResponse>(SUGGESTIONS_KEY)
   const items = data?.items ?? NO_SUGGESTIONS
@@ -551,6 +750,7 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
   const [focusedId, setFocusedId] = React.useState<string | null>(null)
   const [busyIds, setBusyIds] = React.useState<ReadonlySet<string>>(new Set())
   const [tweakTarget, setTweakTarget] = React.useState<DecoratedSuggestion | null>(null)
+  const [tweakRequestTarget, setTweakRequestTarget] = React.useState<DecoratedSuggestion | null>(null)
 
   const orderedIds = React.useMemo(() => groups.flatMap(g => g.items.map(i => i.id)), [groups])
 
@@ -607,6 +807,12 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
           const taskId = result.appliedTaskId
           showToast(`Task created: ${proposal.title}`, 'success', {
             action: { label: 'Open', onClick: () => onTaskCreated(taskId) },
+          })
+        } else if (suggestion.kind === 'create_request' && result.appliedRequestId) {
+          const proposal = (proposalOverride as CreateRequestProposal | undefined) ?? (suggestion.proposal as CreateRequestProposal)
+          const requestId = result.appliedRequestId
+          showToast(`Request created: ${proposal.title}`, 'success', {
+            action: { label: 'Open', onClick: () => onRequestCreated?.(requestId) },
           })
         } else {
           showToast('Suggestion approved')
@@ -705,6 +911,10 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
     ? createProposalToTaskFields(tweakTarget.proposal as CreateTaskProposal)
     : null
 
+  const requestInitialDraft: RequestInitialDraft | null = tweakRequestTarget && tweakRequestTarget.kind === 'create_request'
+    ? createRequestProposalToInitialDraft(tweakRequestTarget.proposal as CreateRequestProposal, tweakRequestTarget.orgId)
+    : null
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       {tweakTarget && (
@@ -737,6 +947,21 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
         />
       )}
 
+      {tweakRequestTarget && (
+        <NewRequestDialog
+          open={!!tweakRequestTarget}
+          onClose={() => setTweakRequestTarget(null)}
+          isAdmin
+          initialDraft={requestInitialDraft}
+          onSubmitOverride={async draft => {
+            const target = tweakRequestTarget
+            setTweakRequestTarget(null)
+            if (!target) return
+            await handleApprove(target, initialDraftToCreateRequestProposal(draft, target.proposal as CreateRequestProposal))
+          }}
+        />
+      )}
+
       {isLoading ? (
         <Skeleton />
       ) : groups.length === 0 ? (
@@ -756,6 +981,7 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
             onReject={id => void handleReject(id)}
             onSnooze={(id, preset) => void handleSnooze(id, preset)}
             onTweakCreate={suggestion => setTweakTarget(suggestion)}
+            onTweakCreateRequest={suggestion => setTweakRequestTarget(suggestion)}
             onTweakOther={(id, proposal) => handleTweakOther(id, proposal)}
             onApproveAll={ids => void handleApproveAll(ids)}
             busyIds={busyIds}
