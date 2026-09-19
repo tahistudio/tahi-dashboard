@@ -60,6 +60,7 @@ import {
   nextSortState,
   nextInternalSortState,
   applyRangeSelection,
+  runRowAction,
 } from '@/components/tahi/data-table-expand'
 
 export {
@@ -70,6 +71,7 @@ export {
   nextSortState,
   nextInternalSortState,
   applyRangeSelection,
+  runRowAction,
 } from '@/components/tahi/data-table-expand'
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -1494,7 +1496,7 @@ function ActionMenuList({
           type="button"
           role="menuitem"
           disabled={action.disabled}
-          onClick={() => { action.onClick(); onClose() }}
+          onClick={(e) => runRowAction(e, action, onClose)}
           className="w-full inline-flex items-center"
           style={{
             gap: '0.5rem',

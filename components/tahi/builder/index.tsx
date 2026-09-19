@@ -18,8 +18,10 @@
  */
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Check, MoreHorizontal } from 'lucide-react'
+import { Popover } from '@/components/tahi/popover'
+import { Menu } from '@/components/tahi/menu'
 
 // ─── Layout shells & global builder styles ───────────────────────────────
 
@@ -169,9 +171,17 @@ export const builderHeader: React.CSSProperties = {
   top: 0,
   zIndex: 20,
   padding: '0.625rem 1rem',
-  background: 'rgba(255,255,255,0.85)',
+  // Mode-aware translucent backdrop (see --color-header-glass in
+  // globals.css) - the old hardcoded white sat white-on-white in dark
+  // mode since dark text/surfaces were rendered on top of a permanently
+  // light glass strip.
+  background: 'var(--color-header-glass)',
   backdropFilter: 'blur(12px)',
   WebkitBackdropFilter: 'blur(12px)',
+  // Hairline so the bar still reads as a distinct surface once the blur
+  // settles over a busy background, in both themes (matches builderNav /
+  // builderRail's own structural single-side borders below).
+  borderBottom: '1px solid var(--color-border-subtle)',
 }
 
 /** Rounded inner surface — the actual visible toolbar bar. Sits inside
@@ -443,6 +453,16 @@ export interface BuilderMoreMenuItem {
  * <BuilderMoreMenu> - three-dot overflow trigger + popover menu for
  * actions that don't earn a place in the toolbar (Save as template,
  * Delete, etc).
+ *
+ * Built on the shared <Popover> (the same primitive the request detail
+ * "..." menu uses) instead of a hand-rolled `position: absolute; right: 0`
+ * panel. The old panel was positioned relative to its own trigger wrapper,
+ * so on a narrow phone screen - where the header's title + pills + toolbar
+ * buttons overflow the 375px frame - the wrapper itself could sit past the
+ * right edge and the panel opened further off-screen still. Popover
+ * portals to document.body and clamps its left edge to an 8px viewport
+ * margin, so the panel always stays on-screen regardless of where its
+ * trigger ends up.
  */
 export function BuilderMoreMenu({
   open,
@@ -455,71 +475,37 @@ export function BuilderMoreMenu({
   onClose: () => void
   items: BuilderMoreMenuItem[]
 }) {
-  useEffect(() => {
-    if (!open) return
-    function onDocClick(e: MouseEvent) {
-      const target = e.target as HTMLElement | null
-      if (!target?.closest?.('[data-more-menu]')) onClose()
-    }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [open, onClose])
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
   return (
-    <div data-more-menu style={{ position: 'relative' }}>
+    <>
       <button
+        ref={triggerRef}
+        type="button"
         onClick={onToggle}
+        aria-haspopup="menu"
         aria-label="More actions"
         aria-expanded={open}
-        style={{ ...toolbarBtn, padding: '0.4375rem 0.5rem' }}
+        className="inline-flex items-center justify-center flex-shrink-0 w-11 h-11 md:w-8 md:h-8"
+        style={{ ...toolbarBtn, padding: 0, justifyContent: 'center' }}
       >
         <MoreHorizontal size={14} />
       </button>
-      {open && (
-        <div
-          role="menu"
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 0.375rem)',
-            right: 0,
-            minWidth: '14rem',
-            padding: '0.25rem',
-            background: 'var(--color-bg)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-md)',
-            boxShadow: '0 16px 40px -12px rgba(31, 44, 26, 0.18)',
-            zIndex: 30,
-          }}
-        >
+      <Popover anchorRef={triggerRef} open={open} onClose={onClose} align="end" width="14rem">
+        <div role="menu" aria-label="More actions" style={{ padding: '0.25rem' }}>
           {items.map((it, i) => (
-            <button
+            <Menu.Item
               key={i}
-              onClick={() => { onClose(); if (!it.disabled) it.onClick() }}
+              icon={it.icon}
               disabled={it.disabled}
-              role="menuitem"
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.5rem 0.625rem',
-                fontSize: '0.8125rem',
-                color: it.danger ? 'var(--color-danger)' : 'var(--color-text)',
-                background: 'transparent',
-                border: 'none',
-                borderRadius: 'var(--radius-sm)',
-                cursor: it.disabled ? 'not-allowed' : 'pointer',
-                opacity: it.disabled ? 0.4 : 1,
-                textAlign: 'left',
-              }}
-              className="nav-item-hover"
+              tone={it.danger ? 'danger' : 'default'}
+              onClick={() => { onClose(); if (!it.disabled) it.onClick() }}
             >
-              {it.icon}
               {it.label}
-            </button>
+            </Menu.Item>
           ))}
         </div>
-      )}
-    </div>
+      </Popover>
+    </>
   )
 }
 
