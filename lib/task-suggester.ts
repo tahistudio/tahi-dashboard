@@ -720,6 +720,9 @@ export async function suggestFromTranscript(input: SuggestFromTranscriptInput): 
   const response = await client.messages.create({
     model: SONNET_MODEL,
     max_tokens: MAX_OUTPUT_TOKENS,
+    // Deterministic as the API allows: a re-read of the same call should propose
+    // the same items, and a rebuild must not lose work to sampling noise.
+    temperature: 0,
     system: [{ type: 'text', text: SUGGESTER_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: buildUserMessage(input) }],
   }) as unknown as AnthropicResponse
