@@ -155,3 +155,26 @@ export function applyRangeSelection(
   }
   return next
 }
+
+/**
+ * Row-actions menu item click. <DataRow>'s own row-click guard
+ * (`event.target.closest('[data-row-control]')` in data-table.tsx) only
+ * works for clicks inside the row's actual DOM subtree. The row-actions
+ * popover renders through <Popover>'s `createPortal(..., document.body)`,
+ * so its buttons sit outside the row in the DOM even though they're
+ * logically nested inside it in the React tree - and React bubbles portal
+ * events along that React tree, not the DOM tree. Without an explicit
+ * stopPropagation() here, picking an item (Delete, on the contracts list)
+ * also fires the row's onRowClick and navigates to the record instead of,
+ * or as well as, running the action.
+ */
+export function runRowAction(
+  event: { stopPropagation: () => void },
+  action: { onClick: () => void; disabled?: boolean },
+  onClose: () => void,
+): void {
+  event.stopPropagation()
+  if (action.disabled) return
+  action.onClick()
+  onClose()
+}

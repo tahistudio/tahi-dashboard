@@ -67,6 +67,10 @@
   --color-bg-secondary: #F4F3EF;    /* secondary / hover surface */
   --color-bg-tertiary: #EDEBE6;     /* inset / kbd hint surface */
   --color-bg-mist: #E8E6E1;         /* very subtle divider strip / panel bg */
+  /* Translucent sticky-header backdrop (builder shells). Matches
+     --color-bg-cream per theme so a blurred header never freezes at a
+     light-mode white that goes invisible-on-invisible in dark mode. */
+  --color-header-glass: rgba(247, 246, 243, 0.85);
   --color-text: #121A0F;
   --color-text-muted: #5D5B55;      /* warm neutral ink (was green-tinted) */
   --color-text-subtle: #63615B;     /* WCAG AA on sand (5.8:1) + white (6.2:1) */
@@ -1298,6 +1302,7 @@ html.tahi-private [data-private] button {
   --color-bg-secondary: #242320;       /* hover, sub-card (level 3) */
   --color-bg-tertiary: #2C2B27;        /* inset / overlay (level 4) */
   --color-bg-mist: #201F1C;            /* divider strip */
+  --color-header-glass: rgba(19, 18, 17, 0.85);
 
   /* Semantic surfaces (dark resolution). */
   --surface-canvas: #131211;

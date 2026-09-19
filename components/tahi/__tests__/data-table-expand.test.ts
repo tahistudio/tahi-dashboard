@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   toggleExpandedId,
   pruneExpandedIds,
@@ -7,6 +7,7 @@ import {
   nextSortState,
   nextInternalSortState,
   applyRangeSelection,
+  runRowAction,
 } from '@/components/tahi/data-table-expand'
 
 // The repo's Vitest runs in the `node` environment and has no
@@ -191,5 +192,41 @@ describe('applyRangeSelection', () => {
 
   it('does nothing on an empty row set', () => {
     expect(applyRangeSelection(new Set(), [], 0, 0, true).size).toBe(0)
+  })
+})
+
+describe('runRowAction', () => {
+  // Regression for the contracts list bug report: choosing "Delete" from a
+  // row's actions popover navigated to the contract instead of deleting it,
+  // because the popover portals to document.body and the row's own
+  // data-row-control guard only sees the real DOM tree, not the React tree
+  // the portal event bubbles through.
+  it('stops the click from reaching the row before running the action', () => {
+    const stopPropagation = vi.fn()
+    const onClick = vi.fn()
+    const onClose = vi.fn()
+    runRowAction({ stopPropagation }, { onClick }, onClose)
+    expect(stopPropagation).toHaveBeenCalledOnce()
+    expect(onClick).toHaveBeenCalledOnce()
+    expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it('still stops propagation for a disabled action, but never runs it', () => {
+    const stopPropagation = vi.fn()
+    const onClick = vi.fn()
+    const onClose = vi.fn()
+    runRowAction({ stopPropagation }, { onClick, disabled: true }, onClose)
+    expect(stopPropagation).toHaveBeenCalledOnce()
+    expect(onClick).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('stops propagation before the action runs, not after', () => {
+    const order: string[] = []
+    const stopPropagation = () => order.push('stopPropagation')
+    const onClick = () => order.push('onClick')
+    const onClose = () => order.push('onClose')
+    runRowAction({ stopPropagation }, { onClick }, onClose)
+    expect(order).toEqual(['stopPropagation', 'onClick', 'onClose'])
   })
 })
