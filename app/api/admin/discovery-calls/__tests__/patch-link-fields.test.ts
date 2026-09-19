@@ -128,6 +128,28 @@ describe('PATCH /api/admin/discovery-calls/[id], link fields', () => {
     expect(queries).toHaveLength(1)
   })
 
+  it('400s "coffee" with the full derived vocabulary in the message', async () => {
+    const { handle } = makeDb([[baseCall]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await PATCH(req({ meetingType: 'coffee' }), params('call-1'))
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string }
+    // Derived from MEETING_TYPES so this can never drift from the
+    // vocabulary again - assert every current value is named.
+    expect(body.error).toBe('meetingType must be one of: discovery, client, partnership, mentoring, other, unclassified')
+  })
+
+  it.each(['mentoring', 'other'] as const)('accepts the new meetingType %s', async (meetingType) => {
+    const { handle, queries } = makeDb([[baseCall], []])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await PATCH(req({ meetingType }), params('call-1'))
+    expect(res.status).toBe(200)
+    const updateCall = queries[1].find(c => c.method === 'set')
+    expect(updateCall?.args[0]).toMatchObject({ meetingType })
+  })
+
   it('400s an orgId that does not reference an existing organisation', async () => {
     const { handle, queries } = makeDb([[baseCall], []])
     vi.mocked(db).mockResolvedValue(handle as never)

@@ -27,6 +27,7 @@ import { eq, inArray, sql } from 'drizzle-orm'
 import { getGoogleAccessToken, listCalendarEvents, GoogleNotConnectedError } from '@/lib/google'
 import { logCronRun } from '@/lib/cron-runs'
 import { normalizeCallInstant } from '@/lib/call-time'
+import type { MeetingType } from '@/lib/calls'
 
 export const dynamic = 'force-dynamic'
 
@@ -261,17 +262,21 @@ export async function POST(req: NextRequest) {
     // - lead   → discovery (Liam still has to qualify)
     // - org    → client check-in
     // - deal   → discovery (active deal mid-pipeline)
-    // - none   → partnership if the title hints at it, else unclassified
-    function classifyTitle(t: string): 'partnership' | null {
+    // - none   → mentoring/partnership if the title hints at it, else
+    //            unclassified. 'other' is never assigned by the title
+    //            heuristic, it is a human-only choice from the /calls
+    //            slide-over or a card's own "what it is for" select.
+    function classifyTitle(t: string): 'partnership' | 'mentoring' | null {
       const lower = t.toLowerCase()
+      if (/mentor|mentoring|coaching/i.test(lower)) return 'mentoring'
       if (/(partner|intro|sync|collab|webflow|catch[- ]?up|chat)/i.test(lower)) return 'partnership'
       return null
     }
-    let meetingType: 'discovery' | 'client' | 'partnership' | 'unclassified' = 'unclassified'
-    if (parentType === 'lead') meetingType = 'discovery'
-    else if (parentType === 'org') meetingType = 'client'
-    else if (parentType === 'deal') meetingType = 'discovery'
-    else meetingType = classifyTitle(summary) ?? 'unclassified'
+    let computedMeetingType: MeetingType = 'unclassified'
+    if (parentType === 'lead') computedMeetingType = 'discovery'
+    else if (parentType === 'org') computedMeetingType = 'client'
+    else if (parentType === 'deal') computedMeetingType = 'discovery'
+    else computedMeetingType = classifyTitle(summary) ?? 'unclassified'
 
     // Unmatched events are still recorded — they go into the triage
     // queue on /calls so Liam can categorise rather than silently skip.
@@ -291,6 +296,19 @@ export async function POST(req: NextRequest) {
 
     const existing = callByEventId.get(ev.id)
     const nowIso = new Date().toISOString()
+
+    // Preserve a human classification: a parent link (lead / org / deal)
+    // always wins, same as before, since that is a fresh, reliable signal
+    // every poll. But when there is NO parent link, the computed value
+    // comes only from the title heuristic - a much weaker signal than a
+    // human's own hand-set choice. In that case, if the existing row
+    // already carries a meetingType someone set on purpose (anything but
+    // 'unclassified'), keep it rather than silently reverting it.
+    const parentDerived = parentType === 'lead' || parentType === 'org' || parentType === 'deal'
+    const meetingType: MeetingType =
+      existing && !parentDerived && existing.meetingType && existing.meetingType !== 'unclassified'
+        ? existing.meetingType as MeetingType
+        : computedMeetingType
 
     if (existing) {
       // A Teams or Zoom link pasted straight onto the row (there is no

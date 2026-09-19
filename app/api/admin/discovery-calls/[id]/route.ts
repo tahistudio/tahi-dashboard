@@ -37,7 +37,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { normalizeCallInstant } from '@/lib/call-time'
-import { isMeetingType, resolveCallOrgId, validateCallLinkFields } from '@/lib/calls'
+import { isMeetingType, MEETING_TYPES, resolveCallOrgId, validateCallLinkFields } from '@/lib/calls'
 import { requireAccessToOrgOrPreClient } from '@/lib/require-access'
 import { logAudit } from '@/lib/audit'
 
@@ -109,7 +109,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       updates.meetingType = v
     } else {
       return NextResponse.json({
-        error: `meetingType must be one of: discovery, client, partnership, unclassified`,
+        error: `meetingType must be one of: ${MEETING_TYPES.join(', ')}`,
       }, { status: 400 })
     }
   }

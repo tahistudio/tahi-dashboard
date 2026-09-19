@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Calendar, Check, FileText, ExternalLink, RefreshCw, UserPlus, TrendingUp, Building2, AlertTriangle, Phone } from 'lucide-react'
+import { Calendar, Check, FileText, ExternalLink, RefreshCw, UserPlus, TrendingUp, Building2, AlertTriangle, Phone, GraduationCap, CircleDashed } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
@@ -25,7 +25,7 @@ import { SlideOver } from '@/components/tahi/slide-over'
 import { LinkedToPanel } from '@/components/tahi/linked-to-panel'
 import { useToast } from '@/components/tahi/toast'
 import { apiPath } from '@/lib/api'
-import { MEETING_TYPES } from '@/lib/calls'
+import { MEETING_TYPES, MEETING_TYPE_META, type MeetingType } from '@/lib/calls'
 import { parseCallFocusParams } from '@/lib/call-deep-link'
 import { UnlinkedCallNotes } from './unlinked-call-notes'
 
@@ -35,7 +35,7 @@ interface CallRow {
   scheduledAt: string
   durationMinutes: number
   status: string
-  meetingType: 'discovery' | 'client' | 'partnership' | 'unclassified' | null
+  meetingType: MeetingType | null
   outcome: string | null
   prepNote: string | null
   hasTranscript: boolean
@@ -52,11 +52,16 @@ interface CallRow {
   source: 'discovery_calls'
 }
 
-const TYPE_META: Record<string, { label: string; tone: BadgeTone; icon: React.ReactNode }> = {
-  discovery: { label: 'Discovery', tone: 'brand', icon: <UserPlus size={11} /> },
-  client: { label: 'Client check-in', tone: 'info', icon: <Building2 size={11} /> },
-  partnership: { label: 'Partnership', tone: 'purple', icon: <TrendingUp size={11} /> },
-  unclassified: { label: 'Triage', tone: 'warning', icon: <AlertTriangle size={11} /> },
+// Labels + tones come from MEETING_TYPE_META (lib/calls.ts), the single
+// source of truth shared with discovery-calls.tsx and the PATCH route's
+// validation message. Only the icon is picked per-surface.
+const TYPE_META: Record<MeetingType, { label: string; tone: BadgeTone; icon: React.ReactNode }> = {
+  discovery: { ...MEETING_TYPE_META.discovery, icon: <UserPlus size={11} /> },
+  client: { ...MEETING_TYPE_META.client, icon: <Building2 size={11} /> },
+  partnership: { ...MEETING_TYPE_META.partnership, icon: <TrendingUp size={11} /> },
+  mentoring: { ...MEETING_TYPE_META.mentoring, icon: <GraduationCap size={11} /> },
+  other: { ...MEETING_TYPE_META.other, icon: <CircleDashed size={11} /> },
+  unclassified: { ...MEETING_TYPE_META.unclassified, icon: <AlertTriangle size={11} /> },
 }
 
 const STATUS_META: Record<string, { label: string; tone: BadgeTone }> = {
@@ -194,10 +199,12 @@ export function CallsContent() {
       label: 'Type',
       kind: 'multiselect',
       options: [
-        { value: 'discovery', label: 'Discovery', tone: 'brand' },
-        { value: 'client', label: 'Client check-in', tone: 'info' },
-        { value: 'partnership', label: 'Partnership', tone: 'purple' },
-        { value: 'unclassified', label: 'Triage', tone: 'warning' },
+        { value: 'discovery', label: MEETING_TYPE_META.discovery.label, tone: MEETING_TYPE_META.discovery.tone },
+        { value: 'client', label: MEETING_TYPE_META.client.label, tone: MEETING_TYPE_META.client.tone },
+        { value: 'partnership', label: MEETING_TYPE_META.partnership.label, tone: MEETING_TYPE_META.partnership.tone },
+        { value: 'mentoring', label: MEETING_TYPE_META.mentoring.label, tone: MEETING_TYPE_META.mentoring.tone },
+        { value: 'other', label: MEETING_TYPE_META.other.label, tone: MEETING_TYPE_META.other.tone },
+        { value: 'unclassified', label: MEETING_TYPE_META.unclassified.label, tone: MEETING_TYPE_META.unclassified.tone },
       ],
     },
   ]), [])
