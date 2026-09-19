@@ -10,6 +10,7 @@
 import { requestToolCall } from './request-tools'
 import { taskCommentToolCall } from './task-comment-tools'
 import { taskSuggestionToolCall } from './task-suggestion-tools'
+import { feedbackToolCall } from './feedback-tools'
 import {
   APPROVAL_ATTEMPT_LIMIT,
   APPROVAL_ATTEMPT_WINDOW_MS,
@@ -1587,12 +1588,15 @@ export const TOOLS: ToolDef[] = [
   }),
 
   // ── Feedback ──────────────────────────────────────────────────────────
-  tool('list_feedback_comments', 'The beta feedback floating comment ball\'s rows, newest first. This is the ONLY way to read feedback: there is no inbox UI in the dashboard yet. Each row carries who wrote it (userId, userType: admin | team_member | contact, userEmail), where (route, pageTitle), their screen (viewportWidth, viewportHeight, breakpoint: phone | tablet | desktop, theme: light | dark, userAgent), the free-text body, and a context JSON blob (the last 20 console errors/warnings, the last 20 failed fetches with method/url/status, the visible headings on the page, and the impersonation state when the sender was a Tahi admin previewing a client). orgId is null on every Tahi team/admin row (there is no single client the comment is about) and the client\'s organisation id on a contact row. A comment left by clicking a specific element (pick mode, like Claude Design/Webflow/Figma commenting) also carries anchorSelector (a CSS-ish path, preferring an id, then data-testid/aria-label, then a short tag+nth-of-type path), anchorTag (element tag name), anchorText (its visible text, trimmed to 120 chars), anchorRect (JSON: {x, y, width, height, scrollHeight}, the element\'s bounding rect relative to the page plus the page\'s total scroll height) and anchorContext (the nearest ancestor\'s data-section or aria-label). All five anchor fields are null on a general comment. screenshotKey is the R2 key of a best-effort screenshot taken at send time: the whole scroll container at one image pixel per CSS pixel, so anchorRect indexes straight into it. Fetch it at GET /api/admin/feedback/<id>/screenshot (admin only). Null whenever the capture failed, timed out, or the page was too large to rasterise.', {
+  tool('list_feedback_comments', 'The beta feedback floating comment ball\'s rows, newest first. This is the ONLY way to read feedback: there is no inbox UI in the dashboard yet. Each row carries who wrote it (userId, userType: admin | team_member | contact, userEmail), where (route, pageTitle), their screen (viewportWidth, viewportHeight, breakpoint: phone | tablet | desktop, theme: light | dark, userAgent), the free-text body, and a context JSON blob (the last 20 console errors/warnings, the last 20 failed fetches with method/url/status, the visible headings on the page, and the impersonation state when the sender was a Tahi admin previewing a client). orgId is null on every Tahi team/admin row (there is no single client the comment is about) and the client\'s organisation id on a contact row. A comment left by clicking a specific element (pick mode, like Claude Design/Webflow/Figma commenting) also carries anchorSelector (a CSS-ish path, preferring an id, then data-testid/aria-label, then a short tag+nth-of-type path), anchorTag (element tag name), anchorText (its visible text, trimmed to 120 chars), anchorRect (JSON: {x, y, width, height, scrollHeight}, the element\'s bounding rect relative to the page plus the page\'s total scroll height) and anchorContext (the nearest ancestor\'s data-section or aria-label). All five anchor fields are null on a general comment. screenshotKey is the R2 key of a best-effort screenshot taken at send time: the whole scroll container at one image pixel per CSS pixel, so anchorRect indexes straight into it. Fetch it at GET /api/admin/feedback/<id>/screenshot (admin only). Null whenever the capture failed, timed out, or the page was too large to rasterise. Delete a row with delete_feedback_comment once it has been actioned.', {
     org_id: prop('string', 'Narrow to one client (organisations.id). Tahi team/admin rows have no org and never match this filter.'),
     route: prop('string', 'Exact route match, e.g. /requests/abc123'),
     since: prop('string', 'ISO instant: only rows at or after it'),
     limit: prop('number', 'Page size, 1 to 200 (default 100)'),
   }),
+  tool('delete_feedback_comment', 'Delete one beta feedback comment row. Removes its R2 screenshot object first (when it has one), then the row. DESTRUCTIVE and irreversible: confirm with the user before calling.', {
+    id: prop('string', 'Feedback comment ID'),
+  }, ['id']),
 
   // ── Messaging ─────────────────────────────────────────────────────────
   // The inbox is ONE surface over TWO stores: an org channel (the standing
@@ -2109,6 +2113,13 @@ async function executeTool(
         ? await apiGet(taskSuggestionCall.path, token, taskSuggestionCall.query)
         : await apiWrite(taskSuggestionCall.path, token, taskSuggestionCall.method, taskSuggestionCall.body),
     )
+  }
+
+  // The feedback-comment write tools, same pattern again. list_feedback_comments
+  // stays a plain GET handled below in the switch.
+  const feedbackCall = feedbackToolCall(name, args)
+  if (feedbackCall) {
+    return json(await apiWrite(feedbackCall.path, token, feedbackCall.method, feedbackCall.body))
   }
 
   switch (name) {
