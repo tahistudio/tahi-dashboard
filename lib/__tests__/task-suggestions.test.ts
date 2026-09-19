@@ -19,6 +19,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { schema } from '@/db/d1'
+import { SIMILAR_BLOCK, SIMILAR_WARN } from '@/lib/text-similarity'
 
 const created: Array<Record<string, unknown>> = []
 const updatedTasks: Array<{ taskId: string; patch: Record<string, unknown> }> = []
@@ -242,7 +243,7 @@ describe('insertSuggestions', () => {
       quote: 'We still need the hero video.',
     }])
 
-    expect(result).toEqual({ inserted: 1, duplicates: 0 })
+    expect(result).toEqual({ inserted: 1, duplicates: 0, similarDropped: 0 })
     expect(inserted).toHaveLength(1)
     expect(inserted[0].values.status).toBe('pending')
     expect(inserted[0].values.approverType).toBe('founders')
@@ -260,7 +261,7 @@ describe('insertSuggestions', () => {
     const { database, inserted } = fakeDb({ task_suggestions: [{ dedupeKey: key }] })
 
     const result = await insertSuggestions(database, [draft])
-    expect(result).toEqual({ inserted: 0, duplicates: 1 })
+    expect(result).toEqual({ inserted: 0, duplicates: 1, similarDropped: 0 })
     expect(inserted).toHaveLength(0)
   })
 
@@ -273,7 +274,7 @@ describe('insertSuggestions', () => {
     const { database, inserted } = fakeDb({ task_suggestions: [] })
 
     const result = await insertSuggestions(database, [draft, { ...draft }])
-    expect(result).toEqual({ inserted: 1, duplicates: 1 })
+    expect(result).toEqual({ inserted: 1, duplicates: 1, similarDropped: 0 })
     expect(inserted).toHaveLength(1)
   })
 })
@@ -910,5 +911,329 @@ describe('listSuggestions over the request kinds', () => {
     expect(items[0].targetRequestNumber).toBeNull()
     expect(items[0].targetRequestTitle).toBeNull()
     expect(items[0].targetRequestStatus).toBeNull()
+  })
+})
+
+// ─── CN.1d: the duplicate guard ──────────────────────────────────────────────
+//
+// The suggester is asked to prefer an update over a create, and mostly does.
+// "Mostly" is not a guard: two calls a month apart about the same footer tag
+// produce two create_request rows sharing no transcript, no dedupe key and no
+// exact title, and nothing in CN.1 or CN.1b could see it.
+//
+// What is pinned below is the three places that changes.
+//
+//   READ TIME, where every open create row carries the live requests, tasks
+//   and other pending suggestions it looks like, computed on read so the
+//   warning is never stale.
+//
+//   APPROVE TIME, where a match at or above SIMILAR_BLOCK writes nothing
+//   unless the human says force.
+//
+//   INSERT TIME, where a second call proposing what is already sitting
+//   pending is dropped and counted.
+
+describe('listSuggestions decorates a create row with what already exists', () => {
+  const HERO = 'Cut the hero video to 30 seconds'
+
+  it('finds the client\'s own open request behind a reworded proposal', async () => {
+    const { database } = fakeDb({
+      task_suggestions: [requestRow()],
+      requests: [{ id: 'r1', orgId: 'o1', requestNumber: 226, title: HERO, status: 'in_progress', deliveredAt: null, updatedAt: '2026-09-18T00:00:00Z' }],
+    })
+
+    const items = await listSuggestions(database, { status: 'pending', orgIds: 'all', limit: 100 })
+
+    expect(items[0].similar).toHaveLength(1)
+    expect(items[0].similar[0]).toMatchObject({ kind: 'request', id: 'r1', number: 226, title: HERO, status: 'in_progress' })
+    expect(items[0].similar[0].score).toBeGreaterThanOrEqual(SIMILAR_WARN)
+  })
+
+  it('finds a task and another pending create suggestion, never the row itself', async () => {
+    const { database } = fakeDb({
+      task_suggestions: [
+        requestRow(),
+        requestRow({ id: 's2', dedupeKey: 'key2', proposal: JSON.stringify({ title: HERO }) }),
+      ],
+      tasks: [{ id: 't1', orgId: 'o1', title: HERO, status: 'todo', completedAt: null, updatedAt: '2026-09-18T00:00:00Z' }],
+    })
+
+    const items = await listSuggestions(database, { status: 'pending', orgIds: 'all', limit: 100 })
+
+    const first = items.find(item => item.id === 's1')!
+    expect(first.similar.map(match => match.id)).not.toContain('s1')
+    expect(first.similar.map(match => match.kind).sort()).toEqual(['suggestion', 'task'])
+    // The other suggestion sees this one back, which is how two calls swept
+    // together proposing the same thing become visible to the reader.
+    expect(items.find(item => item.id === 's2')!.similar.map(match => match.id)).toContain('s1')
+  })
+
+  it('never offers another client\'s work as a match', async () => {
+    const { database } = fakeDb({
+      task_suggestions: [requestRow()],
+      requests: [{ id: 'r9', orgId: 'o9', requestNumber: 9, title: HERO, status: 'in_progress', deliveredAt: null, updatedAt: '2026-09-18T00:00:00Z' }],
+    })
+
+    const items = await listSuggestions(database, { status: 'pending', orgIds: 'all', limit: 100 })
+    expect(items[0].similar).toEqual([])
+  })
+
+  it('leaves the list empty on a kind that creates nothing', async () => {
+    const { database } = fakeDb({
+      task_suggestions: [requestRow({ kind: 'update_request', targetRequestId: 'r1' })],
+      requests: [{ id: 'r1', orgId: 'o1', requestNumber: 226, title: HERO, status: 'in_progress', deliveredAt: null, updatedAt: '2026-09-18T00:00:00Z' }],
+    })
+
+    const items = await listSuggestions(database, { status: 'pending', orgIds: 'all', limit: 100 })
+    expect(items[0].similar).toEqual([])
+  })
+
+  it('shows at most three, best first', async () => {
+    const requests = Array.from({ length: 6 }, (_, index) => ({
+      id: `r${index}`, orgId: 'o1', requestNumber: index, title: index === 0 ? 'Cut a 30s hero video' : HERO,
+      status: 'in_progress', deliveredAt: null, updatedAt: '2026-09-18T00:00:00Z',
+    }))
+    const { database } = fakeDb({ task_suggestions: [requestRow()], requests })
+
+    const items = await listSuggestions(database, { status: 'pending', orgIds: 'all', limit: 100 })
+    expect(items[0].similar).toHaveLength(3)
+    expect(items[0].similar[0].id).toBe('r0')
+    expect(items[0].similar[0].score).toBe(1)
+  })
+})
+
+describe('decideSuggestion refuses to create a duplicate', () => {
+  function withTwin(overrides: Record<string, unknown> = {}) {
+    return fakeDb({
+      task_suggestions: [requestRow(overrides)],
+      requests: [{ id: 'r1', orgId: 'o1', requestNumber: 226, title: 'Cut a 30s hero video', status: 'in_progress', deliveredAt: null, updatedAt: '2026-09-18T00:00:00Z' }],
+    })
+  }
+
+  it('writes nothing and names the twin when the match is at the blocking line', async () => {
+    const { database, updated } = withTwin()
+
+    const result = await decideSuggestion(database, 's1', { action: 'approve' }, CTX)
+
+    expect(result?.changed).toBe(false)
+    expect(result?.error).toBe('possible_duplicate')
+    expect(result?.similar?.[0]).toMatchObject({ kind: 'request', id: 'r1', number: 226 })
+    expect(result?.similar?.[0].score).toBeGreaterThanOrEqual(SIMILAR_BLOCK)
+    expect(createdRequests).toHaveLength(0)
+    expect(updated).toHaveLength(0)
+    // Still pending, so the human can attach it, force it or reject it.
+    expect(result?.suggestion.status).toBe('pending')
+  })
+
+  it('creates it anyway when the human says force', async () => {
+    const { database } = withTwin()
+
+    const result = await decideSuggestion(database, 's1', { action: 'approve', force: true }, CTX)
+
+    expect(result?.changed).toBe(true)
+    expect(result?.error).toBeUndefined()
+    expect(createdRequests).toHaveLength(1)
+  })
+
+  it('judges the tweaked title, not the one the model wrote', async () => {
+    const { database } = withTwin()
+
+    const result = await decideSuggestion(
+      database,
+      's1',
+      { action: 'approve', proposalOverride: { title: 'Write the launch email', description: null } },
+      CTX,
+    )
+
+    expect(result?.changed).toBe(true)
+    expect(createdRequests).toHaveLength(1)
+  })
+
+  it('leaves a warning-level match alone: it warns, it does not block', async () => {
+    const { database } = fakeDb({
+      task_suggestions: [requestRow()],
+      requests: [{ id: 'r1', orgId: 'o1', requestNumber: 226, title: 'Cut a 30s hero video for the homepage and the pitch deck', status: 'in_progress', deliveredAt: null, updatedAt: '2026-09-18T00:00:00Z' }],
+    })
+
+    const result = await decideSuggestion(database, 's1', { action: 'approve' }, CTX)
+    expect(result?.changed).toBe(true)
+    expect(createdRequests).toHaveLength(1)
+  })
+
+  it('never blocks a kind that changes something that already exists', async () => {
+    const { database } = fakeDb({
+      task_suggestions: [requestRow({ kind: 'request_note', targetRequestId: 'r1', proposal: JSON.stringify({ body: 'Cut a 30s hero video' }) })],
+      requests: [{ id: 'r1', orgId: 'o1', requestNumber: 226, title: 'Cut a 30s hero video', status: 'in_progress', deliveredAt: null, updatedAt: '2026-09-18T00:00:00Z' }],
+    })
+
+    const result = await decideSuggestion(database, 's1', { action: 'approve' }, CTX)
+    expect(result?.changed).toBe(true)
+    expect(requestMessages).toHaveLength(1)
+  })
+})
+
+describe('decideSuggestion attach', () => {
+  it('turns a create_request into a note on the request the human picked', async () => {
+    const { database, updated } = fakeDb({
+      task_suggestions: [requestRow()],
+      requests: [{ id: 'r1', orgId: 'o1', requestNumber: 226, title: 'Cut a 30s hero video', status: 'in_progress' }],
+    })
+
+    const result = await decideSuggestion(database, 's1', { action: 'attach', target: { kind: 'request', id: 'r1' } }, CTX)
+
+    expect(result?.changed).toBe(true)
+    expect(result?.suggestion.kind).toBe('request_note')
+    expect(result?.suggestion.targetRequestId).toBe('r1')
+    // Still pending: attaching is not approving, the human still presses the button.
+    expect(result?.suggestion.status).toBe('pending')
+    expect(result?.suggestion.quote).toBe(requestRow().quote)
+    expect(result?.suggestion.confidence).toBe(0.82)
+
+    const body = (JSON.parse(String(result?.suggestion.proposal)) as { body: string }).body
+    expect(body).toContain('Cut a 30s hero video')
+    expect(body).toContain('Trim the launch film for the homepage.')
+
+    expect(createdRequests).toHaveLength(0)
+    expect(requestMessages).toHaveLength(0)
+    expect(updated[0].values.kind).toBe('request_note')
+  })
+
+  it('turns a create_task into a note on the task the human picked', async () => {
+    const { database } = fakeDb({
+      task_suggestions: [suggestionRow()],
+      tasks: [{ id: 't1', orgId: 'o1', title: 'Cut the hero video', status: 'todo' }],
+    })
+
+    const result = await decideSuggestion(database, 's1', { action: 'attach', target: { kind: 'task', id: 't1' } }, CTX)
+
+    expect(result?.changed).toBe(true)
+    expect(result?.suggestion.kind).toBe('note')
+    expect(result?.suggestion.targetTaskId).toBe('t1')
+    expect(result?.suggestion.targetRequestId).toBeNull()
+  })
+
+  it('refuses a target belonging to another client', async () => {
+    const { database, updated } = fakeDb({
+      task_suggestions: [requestRow()],
+      requests: [{ id: 'r9', orgId: 'o9', requestNumber: 9, title: 'Cut a 30s hero video', status: 'in_progress' }],
+    })
+
+    const result = await decideSuggestion(database, 's1', { action: 'attach', target: { kind: 'request', id: 'r9' } }, CTX)
+
+    expect(result?.changed).toBe(false)
+    expect(result?.error).toBe('attach_target_invalid')
+    expect(updated).toHaveLength(0)
+  })
+
+  it('refuses a target that names nothing', async () => {
+    const { database } = fakeDb({ task_suggestions: [requestRow()], requests: [] })
+
+    const result = await decideSuggestion(database, 's1', { action: 'attach', target: { kind: 'request', id: 'ghost' } }, CTX)
+    expect(result?.error).toBe('attach_target_invalid')
+  })
+
+  it('refuses a kind that already names what it changes', async () => {
+    const { database, updated } = fakeDb({
+      task_suggestions: [requestRow({ kind: 'update_request', targetRequestId: 'r1' })],
+      requests: [{ id: 'r1', orgId: 'o1', requestNumber: 226, title: 'Homepage refresh', status: 'in_progress' }],
+    })
+
+    const result = await decideSuggestion(database, 's1', { action: 'attach', target: { kind: 'request', id: 'r1' } }, CTX)
+
+    expect(result?.changed).toBe(false)
+    expect(result?.error).toBe('attach_not_allowed')
+    expect(updated).toHaveLength(0)
+  })
+
+  it('leaves a decided row alone, exactly as every other decision does', async () => {
+    const { database, updated } = fakeDb({
+      task_suggestions: [requestRow({ status: 'applied' })],
+      requests: [{ id: 'r1', orgId: 'o1', requestNumber: 226, title: 'Cut a 30s hero video', status: 'in_progress' }],
+    })
+
+    const result = await decideSuggestion(database, 's1', { action: 'attach', target: { kind: 'request', id: 'r1' } }, CTX)
+    expect(result?.changed).toBe(false)
+    expect(updated).toHaveLength(0)
+  })
+})
+
+describe('insertSuggestions drops what is already waiting', () => {
+  const draft = {
+    orgId: 'o1', sourceKind: 'call', transcriptId: 'tr2', callKind: 'scheduled', callId: 'c2',
+    kind: 'create_request' as const, targetTaskId: null, targetRequestId: null,
+    proposal: { title: 'Cut the hero video down to 30 seconds' },
+    quote: 'Can we get the hero video down to thirty seconds.',
+  }
+
+  it('drops a draft that repeats a pending suggestion from another call', async () => {
+    const { database, inserted } = fakeDb({
+      task_suggestions: [{
+        id: 'existing', orgId: 'o1', kind: 'create_request', status: 'pending',
+        proposal: JSON.stringify({ title: 'Cut the hero video to 30 seconds' }), dedupeKey: 'other',
+      }],
+    })
+
+    const result = await insertSuggestions(database, [draft])
+
+    expect(result).toEqual({ inserted: 0, duplicates: 0, similarDropped: 1 })
+    expect(inserted).toHaveLength(0)
+  })
+
+  it('keeps a draft that repeats another client\'s pending suggestion', async () => {
+    const { database, inserted } = fakeDb({
+      task_suggestions: [{
+        id: 'existing', orgId: 'o2', kind: 'create_request', status: 'pending',
+        proposal: JSON.stringify({ title: 'Cut the hero video to 30 seconds' }), dedupeKey: 'other',
+      }],
+    })
+
+    const result = await insertSuggestions(database, [draft])
+    expect(result).toEqual({ inserted: 1, duplicates: 0, similarDropped: 0 })
+    expect(inserted).toHaveLength(1)
+  })
+
+  it('drops the second of two near identical drafts in one batch', async () => {
+    const { database, inserted } = fakeDb({ task_suggestions: [] })
+
+    const result = await insertSuggestions(database, [
+      draft,
+      { ...draft, proposal: { title: 'Cut the hero video to 30 seconds' }, quote: 'Thirty seconds on the hero video.' },
+    ])
+
+    expect(result).toEqual({ inserted: 1, duplicates: 0, similarDropped: 1 })
+    expect(inserted).toHaveLength(1)
+  })
+
+  it('keeps a draft that only warns, because the human may still want it', async () => {
+    const { database, inserted } = fakeDb({
+      task_suggestions: [{
+        id: 'existing', orgId: 'o1', kind: 'create_request', status: 'pending',
+        proposal: JSON.stringify({ title: 'Cut the hero video for the homepage and the pitch deck' }), dedupeKey: 'other',
+      }],
+    })
+
+    const result = await insertSuggestions(database, [draft])
+    expect(result.inserted).toBe(1)
+    expect(result.similarDropped).toBe(0)
+    expect(inserted).toHaveLength(1)
+  })
+
+  it('never drops a kind that changes something that already exists', async () => {
+    const { database, inserted } = fakeDb({
+      task_suggestions: [{
+        id: 'existing', orgId: 'o1', kind: 'create_request', status: 'pending',
+        proposal: JSON.stringify({ title: 'Cut the hero video to 30 seconds' }), dedupeKey: 'other',
+      }],
+    })
+
+    const result = await insertSuggestions(database, [{
+      ...draft,
+      kind: 'request_note' as const,
+      targetRequestId: 'r1',
+      proposal: { body: 'Cut the hero video down to 30 seconds' },
+    }])
+
+    expect(result.inserted).toBe(1)
+    expect(inserted).toHaveLength(1)
   })
 })

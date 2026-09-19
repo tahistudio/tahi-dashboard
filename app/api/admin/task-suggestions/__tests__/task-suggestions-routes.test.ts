@@ -21,6 +21,8 @@ const listCalls: Array<Record<string, unknown>> = []
 let rows: Record<string, { id: string; orgId: string | null; status: string; appliedTaskId: string | null }> = {}
 let deniedOrgIds: string[] = []
 let decideThrowsFor: string | null = null
+/** A canned answer from the gate, for the refusals the route has to relay. */
+let decideResultFor: Record<string, unknown> | null = null
 
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: async (req: Request) => (
@@ -58,6 +60,7 @@ vi.mock('@/lib/task-suggestions', async () => {
     decideSuggestion: async (_drizzle: unknown, id: string, decision: Record<string, unknown>, ctx: Record<string, unknown>) => {
       if (decideThrowsFor === id) throw new Error('D1 fell over')
       decisions.push({ id, decision, ctx })
+      if (decideResultFor) return decideResultFor
       const row = rows[id]
       if (!row) return null
       const status = decision.action === 'approve' ? 'applied' : decision.action === 'reject' ? 'rejected' : 'snoozed'
@@ -91,6 +94,7 @@ beforeEach(() => {
   listCalls.length = 0
   deniedOrgIds = []
   decideThrowsFor = null
+  decideResultFor = null
   rows = {
     s1: { id: 's1', orgId: 'o1', status: 'pending', appliedTaskId: null },
     s2: { id: 's2', orgId: 'o2', status: 'pending', appliedTaskId: null },
@@ -212,6 +216,53 @@ describe('POST /api/admin/task-suggestions/[id]/decide', () => {
     expect(res.status).toBe(400)
   })
 
+  it('carries force through only when the human actually said it', async () => {
+    await DECIDE(req('http://localhost/x', { method: 'POST', body: { action: 'approve', force: true } }) as never, params('s1'))
+    expect(decisions[0].decision).toEqual({ action: 'approve', force: true })
+
+    // An approve that says force false and one that says nothing are the same
+    // decision, and the row must record the same thing for both.
+    await DECIDE(req('http://localhost/x', { method: 'POST', body: { action: 'approve', force: false } }) as never, params('s1'))
+    expect(decisions[1].decision).toEqual({ action: 'approve' })
+  })
+
+  it('reports the duplicate an approve was refused for', async () => {
+    decideResultFor = {
+      suggestion: { id: 's1', orgId: 'o1', status: 'pending', appliedTaskId: null },
+      changed: false,
+      error: 'possible_duplicate',
+      similar: [{ kind: 'request', id: 'r1', number: 226, title: 'Design directions', status: 'in_progress', score: 0.91 }],
+    }
+
+    const res = await DECIDE(req('http://localhost/x', { method: 'POST', body: { action: 'approve' } }) as never, params('s1'))
+    const body = await res.json() as { changed: boolean; error: string; similar: Array<{ id: string }> }
+
+    expect(res.status).toBe(200)
+    expect(body.changed).toBe(false)
+    expect(body.error).toBe('possible_duplicate')
+    expect(body.similar[0].id).toBe('r1')
+  })
+
+  it('carries an attach target through', async () => {
+    await DECIDE(
+      req('http://localhost/x', { method: 'POST', body: { action: 'attach', target: { kind: 'request', id: ' r1 ' } } }) as never,
+      params('s1'),
+    )
+    expect(decisions[0].decision).toEqual({ action: 'attach', target: { kind: 'request', id: 'r1' } })
+  })
+
+  it('400s an attach that names no target, or a target kind it cannot use', async () => {
+    const noTarget = await DECIDE(req('http://localhost/x', { method: 'POST', body: { action: 'attach' } }) as never, params('s1'))
+    expect(noTarget.status).toBe(400)
+
+    const badKind = await DECIDE(
+      req('http://localhost/x', { method: 'POST', body: { action: 'attach', target: { kind: 'invoice', id: 'i1' } } }) as never,
+      params('s1'),
+    )
+    expect(badKind.status).toBe(400)
+    expect(decisions).toHaveLength(0)
+  })
+
   it('records the surface the decision was made on', async () => {
     await DECIDE(req('http://localhost/x', { method: 'POST', body: { action: 'reject' } }) as never, params('s1'))
     expect(decisions[0].ctx).toEqual({ actorId: 'user_1', via: 'dashboard' })
@@ -244,6 +295,13 @@ describe('POST /api/admin/task-suggestions/decide-bulk', () => {
     expect(body.results[3].error).toContain('D1 fell over')
     // The one that worked still worked, which is the whole point.
     expect(decisions.map(d => d.id)).toEqual(['s1'])
+  })
+
+  it('never forces, whatever the caller puts in the body', async () => {
+    await BULK(req('http://localhost/x', { method: 'POST', body: { ids: ['s1'], action: 'approve', force: true } }) as never)
+    // "Approve all" is one click over rows nobody read one by one, which is
+    // exactly the click that must not be able to create a duplicate.
+    expect(decisions[0].decision).toEqual({ action: 'approve' })
   })
 
   it('400s an action outside approve and reject', async () => {
