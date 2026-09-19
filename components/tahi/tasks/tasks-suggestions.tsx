@@ -43,7 +43,10 @@ import type {
 } from '@/components/tahi/tasks/task-types'
 import type { TaskFields } from '@/lib/task-wizard-drafts'
 import {
+  attachButtonLabel,
+  bestMatchTarget,
   buildApproveRequest,
+  buildAttachRequest,
   buildRejectRequest,
   buildSnoozeRequest,
   confidenceLabel,
@@ -52,6 +55,9 @@ import {
   groupSuggestionsByCall,
   handOffNeedsContact,
   initialDraftToCreateRequestProposal,
+  needsApproveConfirm,
+  similarMatchLine,
+  similarOverflowLabel,
   suggestionKeyAction,
   suggestionKindLabel,
   summariseProposal,
@@ -70,6 +76,7 @@ import type {
   HandOffRequestProposal,
   NoteProposal,
   RequestNoteProposal,
+  SimilarMatch,
   SnoozePreset,
   TaskSuggestionsResponse,
   UpdateRequestProposal,
@@ -81,6 +88,7 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
 const NO_TEMPLATES: readonly TaskTemplateOption[] = []
 const NO_SUGGESTIONS: readonly DecoratedSuggestion[] = []
+const NO_SIMILAR: readonly SimilarMatch[] = []
 
 // ── Wire helpers ──────────────────────────────────────────────────────────
 
@@ -474,14 +482,70 @@ const editorInput: React.CSSProperties = {
   padding: '0.375rem 0.5rem',
 }
 
+// ── The duplicate-guard note (CN.1d contract section 5) ───────────────────
+
+const similarNoteStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.5rem',
+  flexWrap: 'wrap',
+  padding: '0.5rem 0.75rem',
+  borderRadius: 'var(--radius-leaf-sm)',
+  background: 'var(--color-warning-bg, #fff7ed)',
+  color: 'var(--color-text-muted)',
+  fontSize: '0.8125rem',
+}
+
+interface SimilarMatchNoteProps {
+  similar: readonly SimilarMatch[]
+  onUseInstead: () => void
+  busy: boolean
+}
+
+/** The "Looks like #226 Design directions (open, 71%) and 2 more" line under
+ *  a create row, with the "Use #226 instead" button when the best match is
+ *  something that can be attached to. Renders nothing with no matches. */
+function SimilarMatchNote({ similar, onUseInstead, busy }: SimilarMatchNoteProps) {
+  const line = similarMatchLine(similar)
+  if (!line) return null
+  const overflow = similarOverflowLabel(similar)
+  const attachLabel = attachButtonLabel(similar)
+
+  return (
+    <div style={similarNoteStyle}>
+      <span>{line}{overflow ? ` ${overflow}` : ''}</span>
+      {attachLabel && (
+        <TahiButton variant="secondary" size="sm" onClick={onUseInstead} disabled={busy}>
+          {attachLabel}
+        </TahiButton>
+      )}
+    </div>
+  )
+}
+
+const approveConfirmStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.5rem',
+  flexWrap: 'wrap',
+  padding: '0.5rem 0.75rem',
+  borderRadius: 'var(--radius-leaf-sm)',
+  background: 'var(--color-danger-bg, #fef2f2)',
+  color: 'var(--color-text)',
+  fontSize: '0.8125rem',
+}
+
 // ── The row ─────────────────────────────────────────────────────────────
 
 interface SuggestionRowProps {
   suggestion: DecoratedSuggestion
+  similar: readonly SimilarMatch[]
   peopleList: readonly TaskPerson[]
   focused: boolean
   onFocus: () => void
   onApprove: () => void
+  onApproveForce: () => void
+  onAttach: (target: { kind: 'request' | 'task'; id: string }) => void
   onReject: () => void
   onSnooze: (preset: SnoozePreset) => void
   onTweakCreate: () => void
@@ -491,10 +555,11 @@ interface SuggestionRowProps {
 }
 
 function SuggestionRow({
-  suggestion, peopleList, focused, onFocus, onApprove, onReject, onSnooze,
+  suggestion, similar, peopleList, focused, onFocus, onApprove, onApproveForce, onAttach, onReject, onSnooze,
   onTweakCreate, onTweakCreateRequest, onTweakOther, busy,
 }: SuggestionRowProps) {
   const [editing, setEditing] = React.useState(false)
+  const [confirmingForce, setConfirmingForce] = React.useState(false)
   const confidence = confidenceLabel(suggestion.confidence)
   const summary = summariseProposal(suggestion.kind, suggestion.proposal)
   const requestLine = targetRequestLine(suggestion)
@@ -504,6 +569,24 @@ function SuggestionRow({
   const needsContactPick = suggestion.kind === 'hand_off_request'
     && handOffNeedsContact(suggestion.proposal as HandOffRequestProposal)
   const showEditor = editing || needsContactPick
+  // Only create rows carry a duplicate note (contract section 5); a match
+  // this close needs a confirm before Approve is allowed to fire at all.
+  const isCreateKind = suggestion.kind === 'create_task' || suggestion.kind === 'create_request'
+  const rowSimilar = isCreateKind ? similar : NO_SIMILAR
+  const needsConfirm = needsApproveConfirm(rowSimilar)
+
+  function handleApproveClick() {
+    if (needsConfirm) {
+      setConfirmingForce(true)
+      return
+    }
+    onApprove()
+  }
+
+  function handleConfirmForce() {
+    setConfirmingForce(false)
+    onApproveForce()
+  }
 
   function handleTweak() {
     if (suggestion.kind === 'create_task') {
@@ -533,8 +616,10 @@ function SuggestionRow({
         if (action === 'approve') {
           e.preventDefault()
           // The keyboard obeys the same gate as the button: a hand-off with no
-          // contact cannot be approved until someone is picked.
-          if (!busy && !needsContactPick) onApprove()
+          // contact cannot be approved until someone is picked, and a match at
+          // or above SIMILAR_BLOCK needs the same inline confirm the button
+          // itself requires rather than firing straight through.
+          if (!busy && !needsContactPick) handleApproveClick()
         }
         else if (action === 'reject') { e.preventDefault(); onReject() }
       }}
@@ -595,17 +680,40 @@ function SuggestionRow({
         &quot;{suggestion.quote}&quot;
       </blockquote>
 
+      {rowSimilar.length > 0 && (
+        <SimilarMatchNote
+          similar={rowSimilar}
+          busy={busy}
+          onUseInstead={() => {
+            const target = bestMatchTarget(rowSimilar)
+            if (target) onAttach(target)
+          }}
+        />
+      )}
+
+      {confirmingForce && (
+        <div style={approveConfirmStyle}>
+          <span>This looks a lot like an existing item. Approve anyway?</span>
+          <TahiButton variant="danger" size="sm" onClick={handleConfirmForce} loading={busy} disabled={busy}>
+            Yes, approve
+          </TahiButton>
+          <TahiButton variant="ghost" size="sm" onClick={() => setConfirmingForce(false)} disabled={busy}>
+            Cancel
+          </TahiButton>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
         <TahiButton
           variant="primary"
           size="sm"
           iconLeft={<Check size={14} />}
-          onClick={onApprove}
+          onClick={handleApproveClick}
           loading={busy}
           disabled={busy || needsContactPick}
           title={needsContactPick ? 'Pick a contact first' : undefined}
         >
-          Approve
+          {needsConfirm ? 'Approve anyway' : 'Approve'}
         </TahiButton>
         <TahiButton variant="secondary" size="sm" iconLeft={<Pencil size={14} />} onClick={handleTweak} disabled={busy}>
           Tweak
@@ -665,6 +773,8 @@ interface CallGroupProps {
   focusedId: string | null
   onFocusRow: (id: string) => void
   onApprove: (id: string) => void
+  onApproveForce: (id: string) => void
+  onAttach: (id: string, target: { kind: 'request' | 'task'; id: string }) => void
   onReject: (id: string) => void
   onSnooze: (id: string, preset: SnoozePreset) => void
   onTweakCreate: (suggestion: DecoratedSuggestion) => void
@@ -672,11 +782,12 @@ interface CallGroupProps {
   onTweakOther: (id: string, proposal: unknown) => Promise<void>
   onApproveAll: (ids: string[]) => void
   busyIds: ReadonlySet<string>
+  similarFor: (suggestion: DecoratedSuggestion) => readonly SimilarMatch[]
 }
 
 function CallGroupBlock({
-  group, peopleList, focusedId, onFocusRow, onApprove, onReject, onSnooze,
-  onTweakCreate, onTweakCreateRequest, onTweakOther, onApproveAll, busyIds,
+  group, peopleList, focusedId, onFocusRow, onApprove, onApproveForce, onAttach, onReject, onSnooze,
+  onTweakCreate, onTweakCreateRequest, onTweakOther, onApproveAll, busyIds, similarFor,
 }: CallGroupProps) {
   const when = group.callScheduledAt ? new Date(group.callScheduledAt) : null
   const whenLabel = when && Number.isFinite(when.getTime())
@@ -708,10 +819,13 @@ function CallGroupBlock({
         <SuggestionRow
           key={item.id}
           suggestion={item}
+          similar={similarFor(item)}
           peopleList={peopleList}
           focused={focusedId === item.id}
           onFocus={() => onFocusRow(item.id)}
           onApprove={() => onApprove(item.id)}
+          onApproveForce={() => onApproveForce(item.id)}
+          onAttach={target => onAttach(item.id, target)}
           onReject={() => onReject(item.id)}
           onSnooze={preset => onSnooze(item.id, preset)}
           onTweakCreate={() => onTweakCreate(item)}
@@ -756,6 +870,15 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
   const [busyIds, setBusyIds] = React.useState<ReadonlySet<string>>(new Set())
   const [tweakTarget, setTweakTarget] = React.useState<DecoratedSuggestion | null>(null)
   const [tweakRequestTarget, setTweakRequestTarget] = React.useState<DecoratedSuggestion | null>(null)
+  // Set only from a possible_duplicate error on approve (contract section
+  // 5): the row's own decorated `similar` may not have shown a warning yet,
+  // and this is what makes the same choices appear once one comes back.
+  const [duplicateWarnings, setDuplicateWarnings] = React.useState<Record<string, readonly SimilarMatch[]>>({})
+
+  const similarFor = React.useCallback(
+    (suggestion: DecoratedSuggestion): readonly SimilarMatch[] => duplicateWarnings[suggestion.id] ?? suggestion.similar,
+    [duplicateWarnings],
+  )
 
   const orderedIds = React.useMemo(() => groups.flatMap(g => g.items.map(i => i.id)), [groups])
 
@@ -802,31 +925,96 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
     )
   }
 
-  async function handleApprove(suggestion: DecoratedSuggestion, proposalOverride?: unknown) {
+  /** Clears a row's duplicate warning once the decision that carried it has
+   *  been superseded (approved through or attached). No-op when the row
+   *  never had one, so callers can call it unconditionally. */
+  function clearDuplicateWarning(id: string) {
+    setDuplicateWarnings(current => {
+      if (!(id in current)) return current
+      const next = { ...current }
+      delete next[id]
+      return next
+    })
+  }
+
+  /** Approve, or Tweak's approve-with-override, or (force: true) the second
+   *  click of "Approve anyway". A possible_duplicate result is not a
+   *  failure: the row stays exactly where it is and the same choices it was
+   *  already showing (or a fresh set, if this is the first time the server
+   *  has seen a match this close) render again, rather than the row vanishing
+   *  and reappearing on the next revalidate (contract section 5). */
+  async function handleApprove(suggestion: DecoratedSuggestion, proposalOverride?: unknown, force?: boolean) {
     setBusy(suggestion.id, true)
     try {
-      await removeOptimistically([suggestion.id], async () => {
-        const result = await decide(suggestion.id, buildApproveRequest(proposalOverride))
-        if (suggestion.kind === 'create_task' && result.appliedTaskId) {
-          const proposal = (proposalOverride as CreateTaskProposal | undefined) ?? (suggestion.proposal as CreateTaskProposal)
-          const taskId = result.appliedTaskId
-          showToast(`Task created: ${proposal.title}`, 'success', {
-            action: { label: 'Open', onClick: () => onTaskCreated(taskId) },
-          })
-        } else if (suggestion.kind === 'create_request' && result.appliedRequestId) {
-          const proposal = (proposalOverride as CreateRequestProposal | undefined) ?? (suggestion.proposal as CreateRequestProposal)
-          const requestId = result.appliedRequestId
-          showToast(`Request created: ${proposal.title}`, 'success', {
-            action: { label: 'Open', onClick: () => onRequestCreated?.(requestId) },
-          })
-        } else {
-          showToast('Suggestion approved')
-        }
-      })
-    } catch {
-      // removeOptimistically already toasted the failure.
+      const result = await decide(suggestion.id, buildApproveRequest(proposalOverride, force))
+      if (result.error === 'possible_duplicate') {
+        setDuplicateWarnings(current => ({ ...current, [suggestion.id]: result.similar ?? [] }))
+        showToast('This looks like something that already exists', 'warning')
+        return
+      }
+      clearDuplicateWarning(suggestion.id)
+      await mutate(
+        current => current
+          ? {
+              items: current.items.filter(i => i.id !== suggestion.id),
+              counts: {
+                pending: Math.max(0, current.counts.pending - 1),
+                snoozed: current.counts.snoozed,
+                calls: current.counts.calls,
+              },
+            }
+          : current,
+        { revalidate: true },
+      )
+      if (suggestion.kind === 'create_task' && result.appliedTaskId) {
+        const proposal = (proposalOverride as CreateTaskProposal | undefined) ?? (suggestion.proposal as CreateTaskProposal)
+        const taskId = result.appliedTaskId
+        showToast(`Task created: ${proposal.title}`, 'success', {
+          action: { label: 'Open', onClick: () => onTaskCreated(taskId) },
+        })
+      } else if (suggestion.kind === 'create_request' && result.appliedRequestId) {
+        const proposal = (proposalOverride as CreateRequestProposal | undefined) ?? (suggestion.proposal as CreateRequestProposal)
+        const requestId = result.appliedRequestId
+        showToast(`Request created: ${proposal.title}`, 'success', {
+          action: { label: 'Open', onClick: () => onRequestCreated?.(requestId) },
+        })
+      } else {
+        showToast('Suggestion approved')
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'That did not save', 'error')
     } finally {
       setBusy(suggestion.id, false)
+    }
+  }
+
+  /** The second click of "Approve anyway", sent only after the row's own
+   *  inline confirm (contract section 5). Never used by bulk Approve all,
+   *  which the contract keeps from ever forcing. */
+  async function handleApproveForce(id: string) {
+    const suggestion = items.find(i => i.id === id)
+    if (!suggestion) return
+    await handleApprove(suggestion, undefined, true)
+  }
+
+  /** "Use #226 instead": converts the pending create row into a note on the
+   *  existing request or task, in place, rather than removing the row. */
+  async function handleAttach(id: string, target: { kind: 'request' | 'task'; id: string }) {
+    setBusy(id, true)
+    try {
+      const result = await decide(id, buildAttachRequest(target))
+      clearDuplicateWarning(id)
+      await mutate(
+        current => current
+          ? { items: current.items.map(i => (i.id === id ? result.suggestion : i)), counts: current.counts }
+          : current,
+        { revalidate: true },
+      )
+      showToast('Linked to the existing item')
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'That did not save', 'error')
+    } finally {
+      setBusy(id, false)
     }
   }
 
@@ -983,8 +1171,11 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
               const suggestion = items.find(i => i.id === id)
               if (suggestion) void handleApprove(suggestion)
             }}
+            onApproveForce={id => void handleApproveForce(id)}
+            onAttach={(id, target) => void handleAttach(id, target)}
             onReject={id => void handleReject(id)}
             onSnooze={(id, preset) => void handleSnooze(id, preset)}
+            similarFor={similarFor}
             onTweakCreate={suggestion => setTweakTarget(suggestion)}
             onTweakCreateRequest={suggestion => setTweakRequestTarget(suggestion)}
             onTweakOther={(id, proposal) => handleTweakOther(id, proposal)}

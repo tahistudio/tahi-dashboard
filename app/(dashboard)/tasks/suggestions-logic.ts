@@ -14,6 +14,7 @@ import type {
   CreateTaskProposal,
   DecoratedSuggestion,
   HandOffRequestProposal,
+  SimilarMatch,
   SnoozePreset,
   TaskSuggestionKind,
 } from './suggestions-types'
@@ -194,6 +195,66 @@ export function confidenceLabel(confidence: number | null): string | null {
   return `${pct}% confidence`
 }
 
+// ── Duplicate guard (CN.1d contract sections 2 and 5) ───────────────────────
+
+/** Mirrors lib/text-similarity.ts SIMILAR_BLOCK. Slice D1 owns the real
+ *  export; this literal is swapped for it at merge if the two drift. */
+export const SIMILAR_BLOCK = 0.8
+
+function similarMatchRef(match: Pick<SimilarMatch, 'number' | 'title'>): string {
+  return match.number != null ? `#${match.number} ${match.title}` : match.title
+}
+
+/** "Looks like #226 Design directions (open, 71%)" for the best match under
+ *  a create row, or null when there is nothing to show. */
+export function similarMatchLine(similar: readonly SimilarMatch[]): string | null {
+  const best = similar[0]
+  if (!best) return null
+  const pct = Math.round(Math.max(0, Math.min(1, best.score)) * 100)
+  return `Looks like ${similarMatchRef(best)} (${best.status}, ${pct}%)`
+}
+
+/** "and 2 more" for whatever is behind the best match, or null when there is
+ *  nothing left over. */
+export function similarOverflowLabel(similar: readonly SimilarMatch[]): string | null {
+  const extra = similar.length - 1
+  return extra > 0 ? `and ${extra} more` : null
+}
+
+/** The best match can be attached to only when it is an existing request or
+ *  task: a match against another pending suggestion has nothing to attach
+ *  to yet. */
+export function canAttachBestMatch(similar: readonly SimilarMatch[]): boolean {
+  const best = similar[0]
+  return !!best && (best.kind === 'request' || best.kind === 'task')
+}
+
+/** "Use #226 instead", or a quoted-title fallback when the best match has no
+ *  number to show. Null when the best match cannot be attached to. */
+export function attachButtonLabel(similar: readonly SimilarMatch[]): string | null {
+  if (!canAttachBestMatch(similar)) return null
+  const best = similar[0]
+  if (!best) return null
+  return best.number != null ? `Use #${best.number} instead` : `Use "${best.title}" instead`
+}
+
+/** Approve reads "Approve anyway" and needs an inline confirm once the best
+ *  match is at or above SIMILAR_BLOCK (contract section 5); below that the
+ *  line is informational only and Approve behaves as it does with no
+ *  matches at all. */
+export function needsApproveConfirm(similar: readonly SimilarMatch[]): boolean {
+  const best = similar[0]
+  return !!best && best.score >= SIMILAR_BLOCK
+}
+
+/** The target an "attach" decision carries: the best match's kind and id.
+ *  Callers should only call this once canAttachBestMatch is true. */
+export function bestMatchTarget(similar: readonly SimilarMatch[]): { kind: 'request' | 'task'; id: string } | null {
+  const best = similar[0]
+  if (!best || (best.kind !== 'request' && best.kind !== 'task')) return null
+  return { kind: best.kind, id: best.id }
+}
+
 // ── Keyboard ──────────────────────────────────────────────────────────────
 
 export type SuggestionKeyAction = 'approve' | 'reject' | 'focus_next' | 'focus_prev' | null
@@ -213,18 +274,26 @@ export function suggestionKeyAction(key: string): SuggestionKeyAction {
 // ── Decide request bodies ────────────────────────────────────────────────
 
 export interface DecideRequestBody {
-  action: 'approve' | 'reject' | 'snooze'
+  action: 'approve' | 'reject' | 'snooze' | 'attach'
   proposal?: unknown
   snooze?: SnoozePreset | { until: string }
+  /** Sent only on approve, only once the confirm line under an
+   *  "Approve anyway" button has itself been confirmed (contract section
+   *  5). Omitted entirely otherwise, never sent as false. */
+  force?: boolean
+  target?: { kind: 'request' | 'task'; id: string }
 }
 
 /** Plain approve, or Tweak's approve-with-a-proposal-override: the contract
  *  reads a Tweak-and-save as "approve is a proposal override", not a
- *  separate action. */
-export function buildApproveRequest(proposalOverride?: unknown): DecideRequestBody {
-  return proposalOverride === undefined
+ *  separate action. `force` is only ever true, sent after the row's own
+ *  confirm line; never sent as false. */
+export function buildApproveRequest(proposalOverride?: unknown, force?: boolean): DecideRequestBody {
+  const body: DecideRequestBody = proposalOverride === undefined
     ? { action: 'approve' }
     : { action: 'approve', proposal: proposalOverride }
+  if (force) body.force = true
+  return body
 }
 
 export function buildRejectRequest(): DecideRequestBody {
@@ -233,6 +302,12 @@ export function buildRejectRequest(): DecideRequestBody {
 
 export function buildSnoozeRequest(preset: SnoozePreset): DecideRequestBody {
   return { action: 'snooze', snooze: preset }
+}
+
+/** "Use #226 instead": converts the pending create row into a note on the
+ *  existing request or task the human picked (contract section 3). */
+export function buildAttachRequest(target: { kind: 'request' | 'task'; id: string }): DecideRequestBody {
+  return { action: 'attach', target }
 }
 
 // ── create_task proposal <-> TaskFields (NewTaskDialog's initialDraft) ──────
