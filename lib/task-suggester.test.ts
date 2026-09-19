@@ -18,18 +18,32 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { schema } from '@/db/d1'
 import {
+  CONTEXT_CONTACT_LIMIT,
   CONTEXT_REQUEST_LIMIT,
   CONTEXT_TASK_LIMIT,
   MAX_SUGGESTIONS,
+  MAX_SWEEP_BATCH,
+  SUGGESTER_SYSTEM_PROMPT,
+  SWEEP_BATCH,
   SuggesterUnavailableError,
   buildSuggestionContext,
   parseSuggestionsBlock,
+  parseSweepLimit,
   runSuggestionSweep,
   suggestFromTranscript,
   suggestionContextWindows,
   validateSuggestionItems,
   type SuggestionContext,
 } from '@/lib/task-suggester'
+import { HANDOFF_REASONS } from '@/lib/request-handoff-copy'
+import { REQUEST_CATEGORIES, REQUEST_PRIORITIES, REQUEST_TYPES } from '@/lib/request-vocabulary'
+
+// The real module, with one spy over the writer, so a test can read the drafts
+// the sweep hands it. Everything else behaves exactly as it does in production.
+vi.mock('@/lib/task-suggestions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/task-suggestions')>()
+  return { ...actual, insertSuggestions: vi.fn(actual.insertSuggestions) }
+})
 
 // ── A fake Drizzle handle ────────────────────────────────────────────────────
 // Selects come off a queue in call order; inserts and updates are recorded so
@@ -95,8 +109,12 @@ const CONTEXT: SuggestionContext = {
     { id: 'task-1', title: 'Rebuild the pricing page', status: 'in_progress', assigneeName: 'Liam', dueDate: null, updatedAt: '2026-09-10T00:00:00Z' },
     { id: 'task-2', title: 'Write the launch email', status: 'todo', assigneeName: null, dueDate: '2026-09-25', updatedAt: '2026-09-12T00:00:00Z' },
   ],
-  requests: [{ id: 'req-1', number: 42, title: 'Spring landing page', status: 'in_progress' }],
+  requests: [{ id: 'req-1', number: 42, title: 'Spring landing page', status: 'in_progress', waitingOn: false }],
   members: [{ id: 'tm-1', name: 'Liam' }, { id: 'tm-2', name: 'Staci' }],
+  contacts: [
+    { id: 'con-1', name: 'Ella Brown', email: 'ella@elevate.uk' },
+    { id: 'con-2', name: 'Sam Reed', email: 'sam@elevate.uk' },
+  ],
 }
 
 const TRANSCRIPT = [
@@ -120,7 +138,8 @@ describe('buildSuggestionContext', () => {
     const { handle, selects } = makeDb([
       [{ id: 'tm-1', name: 'Liam' }],
       [{ id: 'task-1', title: 'Rebuild the pricing page', status: 'in_progress', assigneeId: 'tm-1', dueDate: null, updatedAt: '2026-09-10T00:00:00Z' }],
-      [{ id: 'req-1', requestNumber: 42, title: 'Spring landing page', status: 'in_progress' }],
+      [{ id: 'req-1', requestNumber: 42, title: 'Spring landing page', status: 'in_progress', waitingOnContactId: 'con-1' }],
+      [{ id: 'con-1', name: 'Ella Brown', email: 'ella@elevate.uk' }],
     ])
 
     const ctx = await buildSuggestionContext(handle, 'org-a')
@@ -134,6 +153,26 @@ describe('buildSuggestionContext', () => {
     expect(limits).toContain(CONTEXT_REQUEST_LIMIT)
   })
 
+  it('carries the org contacts and says which requests are already with somebody', async () => {
+    const { handle, selects } = makeDb([
+      [{ id: 'tm-1', name: 'Liam' }],
+      [{ id: 'task-1', title: 'Rebuild the pricing page', status: 'in_progress', assigneeId: 'tm-1', dueDate: null, updatedAt: '2026-09-10T00:00:00Z' }],
+      [
+        { id: 'req-1', requestNumber: 42, title: 'Spring landing page', status: 'in_progress', waitingOnContactId: 'con-1' },
+        { id: 'req-2', requestNumber: 43, title: 'Careers page', status: 'in_review', waitingOnContactId: null },
+      ],
+      [{ id: 'con-1', name: 'Ella Brown', email: 'ella@elevate.uk' }],
+    ])
+
+    const ctx = await buildSuggestionContext(handle, 'org-a')
+
+    expect(ctx.contacts).toEqual([{ id: 'con-1', name: 'Ella Brown', email: 'ella@elevate.uk' }])
+    expect(ctx.requests.map(r => r.waitingOn)).toEqual([true, false])
+
+    const limits = selects.flatMap(s => s.args[s.methods.indexOf('limit') - 1] ?? [])
+    expect(limits).toContain(CONTEXT_CONTACT_LIMIT)
+  })
+
   it('asks for no requests at all when the transcript is studio housekeeping', async () => {
     const { handle, selects } = makeDb([
       [{ id: 'tm-1', name: 'Liam' }],
@@ -143,7 +182,8 @@ describe('buildSuggestionContext', () => {
     const ctx = await buildSuggestionContext(handle, null)
 
     expect(ctx.requests).toEqual([])
-    // Roster and tasks only: a null org has no client requests to read.
+    expect(ctx.contacts).toEqual([])
+    // Roster and tasks only: a null org has no client requests or contacts to read.
     expect(selects).toHaveLength(2)
   })
 })
@@ -313,6 +353,216 @@ describe('validateSuggestionItems', () => {
   })
 })
 
+// ── The request kinds ────────────────────────────────────────────────────────
+// CN.1b. A call with a client mostly produces client-facing work, and
+// client-facing work is a request. The suggester has to tell the two apart
+// before a human ever sees the row, because an inbox that files a client
+// deliverable as an internal task quietly hides it from the client.
+
+const REQUEST_TRANSCRIPT = [
+  'Liam: right, the pricing page rebuild is finished and live as of this morning.',
+  'Client: we also need a new FAQ section on the pricing page before the launch.',
+  'Liam: the spring landing page has to go live on the twenty fifth instead.',
+  'Liam: Ella, we need the brand photography from you before we can finish the spring landing page.',
+  'Liam: I will check our own hosting invoice internally before the next billing run.',
+].join('\n')
+
+const validateRequestItems = (items: unknown[]) =>
+  validateSuggestionItems(items, { source: REQUEST_TRANSCRIPT, context: CONTEXT })
+
+describe('the system prompt', () => {
+  it('prints the request vocabulary rather than repeating it by hand', () => {
+    for (const category of REQUEST_CATEGORIES) expect(SUGGESTER_SYSTEM_PROMPT).toContain(`"${category}"`)
+    for (const type of REQUEST_TYPES) expect(SUGGESTER_SYSTEM_PROMPT).toContain(`"${type}"`)
+    for (const priority of REQUEST_PRIORITIES) expect(SUGGESTER_SYSTEM_PROMPT).toContain(`"${priority}"`)
+    for (const reason of HANDOFF_REASONS) expect(SUGGESTER_SYSTEM_PROMPT).toContain(`"${reason}"`)
+  })
+
+  it('states the rule that decides between a task and a request', () => {
+    expect(SUGGESTER_SYSTEM_PROMPT).toContain('create_request')
+    expect(SUGGESTER_SYSTEM_PROMPT).toContain('hand_off_request')
+    expect(SUGGESTER_SYSTEM_PROMPT.toLowerCase()).toContain('never both')
+  })
+})
+
+describe('validateSuggestionItems for the request kinds', () => {
+  it('keeps a client deliverable as a create_request with no target', () => {
+    const { suggestions, dropped } = validateRequestItems([{
+      kind: 'create_request',
+      proposal: {
+        title: 'Add an FAQ section to the pricing page',
+        description: 'The client asked for it on the call.',
+        category: 'content',
+        type: 'small_task',
+        priority: 'standard',
+        requesterName: 'Ella Brown',
+      },
+      quote: 'we also need a new FAQ section on the pricing page before the launch.',
+      confidence: 0.9,
+    }])
+
+    expect(dropped).toEqual([])
+    expect(suggestions).toHaveLength(1)
+    expect(suggestions[0].targetTaskId).toBeNull()
+    expect(suggestions[0].targetRequestId).toBeNull()
+    // Exactly one contact of this org matches the name, so the id is safe.
+    expect((suggestions[0].proposal as { requesterContactId: string | null }).requesterContactId).toBe('con-1')
+  })
+
+  it('leaves the requester id null when the name matches nobody at the client', () => {
+    const { suggestions } = validateRequestItems([{
+      kind: 'create_request',
+      proposal: {
+        title: 'Add an FAQ section to the pricing page',
+        category: 'content',
+        type: 'small_task',
+        priority: 'standard',
+        requesterName: 'Someone Else',
+      },
+      quote: 'we also need a new FAQ section on the pricing page before the launch.',
+    }])
+
+    const proposal = suggestions[0].proposal as { requesterContactId: string | null; requesterName: string | null }
+    expect(proposal.requesterContactId).toBeNull()
+    expect(proposal.requesterName).toBe('Someone Else')
+  })
+
+  it('drops a create_request whose category is not one the dialog offers', () => {
+    const { suggestions, dropped } = validateRequestItems([{
+      kind: 'create_request',
+      proposal: { title: 'Add an FAQ section to the pricing page', category: 'marketing', type: 'small_task', priority: 'standard' },
+      quote: 'we also need a new FAQ section on the pricing page before the launch.',
+    }])
+
+    expect(suggestions).toEqual([])
+    expect(dropped[0].reason).toBe('invalid_request_category')
+  })
+
+  it('drops a create_request whose priority is outside the two-value vocabulary', () => {
+    const { dropped } = validateRequestItems([{
+      kind: 'create_request',
+      proposal: { title: 'Add an FAQ section to the pricing page', category: 'content', type: 'small_task', priority: 'urgent' },
+      quote: 'we also need a new FAQ section on the pricing page before the launch.',
+    }])
+    expect(dropped[0].reason).toBe('invalid_request_priority')
+  })
+
+  it('keeps an update_request that names an open request from the context', () => {
+    const { suggestions, dropped } = validateRequestItems([{
+      kind: 'update_request',
+      targetRequestId: 'req-1',
+      proposal: { fields: { dueDate: '2026-09-25' }, note: 'Moved on the call.' },
+      quote: 'the spring landing page has to go live on the twenty fifth instead.',
+    }])
+
+    expect(dropped).toEqual([])
+    expect(suggestions[0].targetRequestId).toBe('req-1')
+    expect(suggestions[0].targetTaskId).toBeNull()
+  })
+
+  it('drops an update_request whose target is not an open request it was shown', () => {
+    const { suggestions, dropped } = validateRequestItems([{
+      kind: 'update_request',
+      targetRequestId: 'req-999',
+      proposal: { fields: { dueDate: '2026-09-25' } },
+      quote: 'the spring landing page has to go live on the twenty fifth instead.',
+    }])
+
+    expect(suggestions).toEqual([])
+    expect(dropped[0].reason).toBe('unknown_target_request')
+  })
+
+  it('drops an update_request that changes nothing', () => {
+    const { dropped } = validateRequestItems([{
+      kind: 'update_request',
+      targetRequestId: 'req-1',
+      proposal: { note: 'Just a note really.' },
+      quote: 'the spring landing page has to go live on the twenty fifth instead.',
+    }])
+    expect(dropped[0].reason).toBe('no_request_fields')
+  })
+
+  it('keeps a request_note on an open request', () => {
+    const { suggestions, dropped } = validateRequestItems([{
+      kind: 'request_note',
+      targetRequestId: 'req-1',
+      proposal: { body: 'The launch date moved to the twenty fifth.' },
+      quote: 'the spring landing page has to go live on the twenty fifth instead.',
+    }])
+
+    expect(dropped).toEqual([])
+    expect(suggestions[0].targetRequestId).toBe('req-1')
+  })
+
+  it('drops a request_note with no body', () => {
+    const { dropped } = validateRequestItems([{
+      kind: 'request_note',
+      targetRequestId: 'req-1',
+      proposal: { body: '  ' },
+      quote: 'the spring landing page has to go live on the twenty fifth instead.',
+    }])
+    expect(dropped[0].reason).toBe('empty_note')
+  })
+
+  it('resolves the contact on a hand off from the context, by name', () => {
+    const { suggestions, dropped } = validateRequestItems([{
+      kind: 'hand_off_request',
+      targetRequestId: 'req-1',
+      proposal: { contactName: 'Ella Brown', reason: 'content', dueAt: '2026-09-22' },
+      quote: 'Ella, we need the brand photography from you before we can finish the spring landing page.',
+    }])
+
+    expect(dropped).toEqual([])
+    expect((suggestions[0].proposal as { contactId: string | null }).contactId).toBe('con-1')
+  })
+
+  it('resolves the contact on a hand off by email as well, case folded', () => {
+    const { suggestions } = validateRequestItems([{
+      kind: 'hand_off_request',
+      targetRequestId: 'req-1',
+      proposal: { contactName: 'ELLA@elevate.uk', reason: 'file' },
+      quote: 'Ella, we need the brand photography from you before we can finish the spring landing page.',
+    }])
+    expect((suggestions[0].proposal as { contactId: string | null }).contactId).toBe('con-1')
+  })
+
+  it('still suggests a hand off whose person cannot be resolved, with the id left null', () => {
+    const { suggestions, dropped } = validateRequestItems([{
+      kind: 'hand_off_request',
+      targetRequestId: 'req-1',
+      proposal: { contactName: 'the marketing team', reason: 'content' },
+      quote: 'Ella, we need the brand photography from you before we can finish the spring landing page.',
+    }])
+
+    expect(dropped).toEqual([])
+    expect((suggestions[0].proposal as { contactId: string | null }).contactId).toBeNull()
+  })
+
+  it('drops a hand off whose reason is not one of the six', () => {
+    const { suggestions, dropped } = validateRequestItems([{
+      kind: 'hand_off_request',
+      targetRequestId: 'req-1',
+      proposal: { contactName: 'Ella Brown', reason: 'vibes' },
+      quote: 'Ella, we need the brand photography from you before we can finish the spring landing page.',
+    }])
+
+    expect(suggestions).toEqual([])
+    expect(dropped[0].reason).toBe('invalid_handoff_reason')
+  })
+
+  it('leaves the studio its own follow-up as a task, not a request', () => {
+    const { suggestions, dropped } = validateRequestItems([{
+      kind: 'create_task',
+      proposal: { title: 'Check the hosting invoice before the next billing run', type: 'tahi_internal' },
+      quote: 'I will check our own hosting invoice internally before the next billing run.',
+    }])
+
+    expect(dropped).toEqual([])
+    expect(suggestions[0].kind).toBe('create_task')
+    expect(suggestions[0].targetRequestId).toBeNull()
+  })
+})
+
 // ── The model call itself ────────────────────────────────────────────────────
 
 describe('suggestFromTranscript without a key', () => {
@@ -368,7 +618,8 @@ function contextSelects() {
   return [
     [{ id: 'tm-1', name: 'Liam' }],
     [{ id: 'task-1', title: 'Rebuild the pricing page', status: 'in_progress', assigneeId: 'tm-1', dueDate: null, updatedAt: '2026-09-10T00:00:00Z' }],
-    [{ id: 'req-1', requestNumber: 42, title: 'Spring landing page', status: 'in_progress' }],
+    [{ id: 'req-1', requestNumber: 42, title: 'Spring landing page', status: 'in_progress', waitingOnContactId: null }],
+    [{ id: 'con-1', name: 'Ella Brown', email: 'ella@elevate.uk' }],
   ]
 }
 
@@ -376,6 +627,7 @@ const okSuggest = vi.fn(async () => ({
   suggestions: [{
     kind: 'create_task' as const,
     targetTaskId: null,
+    targetRequestId: null,
     proposal: { title: 'Add an FAQ section to the pricing page' },
     quote: 'We also need a new FAQ section on the pricing page before the launch.',
     rationale: null,
@@ -574,5 +826,66 @@ describe('runSuggestionSweep', () => {
     expect(summary.resurfaced).toBe(2)
     const back = updates.find(u => u.table === schema.taskSuggestions)
     expect((back!.set as { status: string }).status).toBe('pending')
+  })
+
+  it('carries the target request through to the row it writes, on the call org', async () => {
+    const handOff = vi.fn(async () => ({
+      suggestions: [{
+        kind: 'hand_off_request' as const,
+        targetTaskId: null,
+        targetRequestId: 'req-1',
+        proposal: { contactName: 'Ella Brown', contactId: 'con-1', reason: 'content' },
+        quote: 'We also need a new FAQ section on the pricing page before the launch.',
+        rationale: null,
+        confidence: 0.8,
+      }],
+      usage: { model: 'claude-sonnet-5', inputTokens: 0, outputTokens: 0 },
+      dropped: [],
+    }))
+
+    const { handle } = makeDb([
+      [TRANSCRIPT_ROW],
+      [{ orgId: 'org-a', meetingType: null }],
+      ...contextSelects(),
+      [],                                   // insertSuggestions: no existing keys
+      [],                                   // resurfaceSnoozed
+      [],                                   // repair: nothing orgless
+    ])
+
+    await runSuggestionSweep(handle, { suggest: handOff, now: new Date('2026-09-19T00:00:00Z') })
+
+    const { insertSuggestions } = await import('@/lib/task-suggestions')
+    const drafts = vi.mocked(insertSuggestions).mock.calls.at(-1)?.[1]
+    expect(drafts?.[0]).toMatchObject({
+      kind: 'hand_off_request',
+      orgId: 'org-a',
+      targetRequestId: 'req-1',
+      targetTaskId: null,
+    })
+  })
+})
+
+// ── The manual cutover pass ──────────────────────────────────────────────────
+// The GitHub job keeps the default of five. A human draining a backlog of
+// eight calls in one go passes ?limit=20, and nothing beyond twenty, because
+// one run is one model bill and an unbounded one is an unbounded bill.
+
+describe('parseSweepLimit', () => {
+  it('falls back to the cron default when nothing was asked for', () => {
+    expect(parseSweepLimit(null)).toBe(SWEEP_BATCH)
+    expect(parseSweepLimit('')).toBe(SWEEP_BATCH)
+    expect(parseSweepLimit('not a number')).toBe(SWEEP_BATCH)
+  })
+
+  it('takes a number a human typed', () => {
+    expect(parseSweepLimit('8')).toBe(8)
+    expect(parseSweepLimit('20')).toBe(MAX_SWEEP_BATCH)
+  })
+
+  it('clamps both ends rather than refusing', () => {
+    expect(parseSweepLimit('0')).toBe(1)
+    expect(parseSweepLimit('-4')).toBe(1)
+    expect(parseSweepLimit('500')).toBe(MAX_SWEEP_BATCH)
+    expect(parseSweepLimit('7.9')).toBe(7)
   })
 })

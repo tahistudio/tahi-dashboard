@@ -35,6 +35,8 @@ import { SONNET_MODEL } from '@/lib/ai-models'
 import { recordCost } from '@/lib/ai-cost'
 import { resolveByName } from '@/lib/task-wizard-drafts'
 import { insertSuggestions, resurfaceSnoozed, type SuggestionKind } from '@/lib/task-suggestions'
+import { HANDOFF_REASONS } from '@/lib/request-handoff-copy'
+import { REQUEST_CATEGORIES, REQUEST_PRIORITIES, REQUEST_TYPES } from '@/lib/request-vocabulary'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -45,6 +47,10 @@ type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 export const CONTEXT_TASK_LIMIT = 80
 export const CONTEXT_REQUEST_LIMIT = 40
 export const CONTEXT_MEMBER_LIMIT = 40
+
+/** The client's people, so a hand-off can name one of them instead of a
+ *  string the reviewer then has to look up. */
+export const CONTEXT_CONTACT_LIMIT = 40
 
 /** More than this and the reviewer stops reading, which is the one failure
  *  this whole feature exists to avoid. */
@@ -58,6 +64,22 @@ export const SWEEP_WINDOW_DAYS = 30
  *  drains in hours, and one bad batch costs five calls rather than fifty. */
 export const SWEEP_BATCH = 5
 
+/** The ceiling on `?limit=`. A cutover pass over every call in the backlog is
+ *  a reasonable thing to ask for; an unbounded sweep is an unbounded bill. */
+export const MAX_SWEEP_BATCH = 20
+
+/**
+ * `?limit=` as the cron route reads it: the cron's own default when the query
+ * says nothing or says nonsense, clamped to one transcript at the bottom and
+ * twenty at the top. Lives here rather than in the route because a route.ts
+ * may only export HTTP handlers.
+ */
+export function parseSweepLimit(raw: string | null): number {
+  const parsed = Number.parseInt((raw ?? '').trim(), 10)
+  if (!Number.isFinite(parsed)) return SWEEP_BATCH
+  return Math.min(MAX_SWEEP_BATCH, Math.max(1, parsed))
+}
+
 const TASK_ACTIVITY_DAYS = 60
 const TASK_DONE_DAYS = 14
 const MAX_OUTPUT_TOKENS = 3000
@@ -68,7 +90,28 @@ const MAX_TRANSCRIPT_CHARS = 60_000
  *  until someone says otherwise. */
 export const COMPLETION_WORDS = ['done', 'finished', 'completed', 'complete', 'shipped', 'live', 'sent', 'delivered'] as const
 
-const KINDS: readonly SuggestionKind[] = ['create_task', 'update_task', 'complete_task', 'add_subtasks', 'note']
+const KINDS: readonly SuggestionKind[] = [
+  'create_task',
+  'update_task',
+  'complete_task',
+  'add_subtasks',
+  'note',
+  'create_request',
+  'update_request',
+  'request_note',
+  'hand_off_request',
+]
+
+/** The kinds that name a task from the TASKS list. */
+const KINDS_NEEDING_TASK: readonly SuggestionKind[] = ['update_task', 'complete_task', 'add_subtasks', 'note']
+
+/** The kinds that name a request from the REQUESTS list. */
+const KINDS_NEEDING_REQUEST: readonly SuggestionKind[] = ['update_request', 'request_note', 'hand_off_request']
+
+/** The fields an update_request may carry, the same set PATCH
+ *  /api/admin/requests/[id] accepts from this contract's section 2. The
+ *  values themselves are validated on apply, against the route's own rules. */
+const REQUEST_UPDATE_FIELDS = ['status', 'priority', 'dueDate', 'startDate', 'estimatedHours', 'category', 'scopeFlagged'] as const
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -86,6 +129,10 @@ export interface SuggestionContextRequest {
   number: number | null
   title: string
   status: string
+  /** True when the request is already parked with a client contact. A second
+   *  hand-off on the same request is nearly always the model repeating one
+   *  that is already live. */
+  waitingOn: boolean
 }
 
 export interface SuggestionContextMember {
@@ -93,15 +140,26 @@ export interface SuggestionContextMember {
   name: string
 }
 
+/** A person at the client. Emails are here because a transcript names people
+ *  both ways and an exact match on either is still an exact match. */
+export interface SuggestionContextContact {
+  id: string
+  name: string
+  email: string
+}
+
 export interface SuggestionContext {
   tasks: SuggestionContextTask[]
   requests: SuggestionContextRequest[]
   members: SuggestionContextMember[]
+  contacts: SuggestionContextContact[]
 }
 
 export interface SuggestionDraft {
   kind: SuggestionKind
   targetTaskId: string | null
+  /** Set for the three kinds that change an existing request. */
+  targetRequestId: string | null
   proposal: Record<string, unknown>
   quote: string
   rationale: string | null
@@ -234,7 +292,7 @@ export async function buildSuggestionContext(
     updatedAt: t.updatedAt,
   }))
 
-  if (!orgId) return { tasks, requests: [], members }
+  if (!orgId) return { tasks, requests: [], members, contacts: [] }
 
   const requestRows = await database
     .select({
@@ -242,6 +300,7 @@ export async function buildSuggestionContext(
       requestNumber: schema.requests.requestNumber,
       title: schema.requests.title,
       status: schema.requests.status,
+      waitingOnContactId: schema.requests.waitingOnContactId,
     })
     .from(schema.requests)
     .where(and(
@@ -258,9 +317,47 @@ export async function buildSuggestionContext(
     number: r.requestNumber ?? null,
     title: r.title,
     status: r.status,
+    waitingOn: Boolean(r.waitingOnContactId),
   }))
 
-  return { tasks, requests, members }
+  const contactRows = await database
+    .select({
+      id: schema.contacts.id,
+      name: schema.contacts.name,
+      email: schema.contacts.email,
+    })
+    .from(schema.contacts)
+    .where(eq(schema.contacts.orgId, orgId))
+    .orderBy(asc(schema.contacts.name))
+    .limit(CONTEXT_CONTACT_LIMIT)
+
+  const contacts: SuggestionContextContact[] = contactRows.map(c => ({
+    id: c.id,
+    name: c.name,
+    email: c.email,
+  }))
+
+  return { tasks, requests, members, contacts }
+}
+
+/**
+ * A name or an email to one of this client's people, or nothing.
+ *
+ * Exact match only, case folded, on either column. No prefix pass, unlike
+ * `resolveByName` for the studio roster: a transcript says "Ella" for a
+ * contact list that may hold two Ellas, and a hand-off filed against the wrong
+ * person emails the wrong client. An unresolved name still reaches the inbox
+ * with the words the call used; the reviewer picks the person.
+ */
+export function resolveContact(
+  name: string | null,
+  contacts: readonly SuggestionContextContact[],
+): string | null {
+  const needle = (name ?? '').trim().toLowerCase()
+  if (!needle) return null
+  const matches = contacts.filter(c =>
+    c.name.trim().toLowerCase() === needle || c.email.trim().toLowerCase() === needle)
+  return matches.length === 1 ? matches[0].id : null
 }
 
 // ── The parser ───────────────────────────────────────────────────────────────
@@ -302,6 +399,7 @@ export function validateSuggestionItems(
 ): { suggestions: SuggestionDraft[]; dropped: DroppedSuggestion[] } {
   const haystack = fold(opts.source)
   const knownTasks = new Set(opts.context.tasks.map(t => t.id))
+  const knownRequests = new Set(opts.context.requests.map(r => r.id))
   const suggestions: SuggestionDraft[] = []
   const dropped: DroppedSuggestion[] = []
 
@@ -341,13 +439,25 @@ export function validateSuggestionItems(
     const proposal = { ...(proposalRaw as Record<string, unknown>) }
 
     const targetTaskId = asString(item.targetTaskId)
-    if (kind !== 'create_task') {
+    if (KINDS_NEEDING_TASK.includes(kind)) {
       if (!targetTaskId) {
         dropped.push({ reason: 'missing_target_task', raw })
         continue
       }
       if (!knownTasks.has(targetTaskId)) {
         dropped.push({ reason: 'unknown_target_task', raw })
+        continue
+      }
+    }
+
+    const targetRequestId = asString(item.targetRequestId)
+    if (KINDS_NEEDING_REQUEST.includes(kind)) {
+      if (!targetRequestId) {
+        dropped.push({ reason: 'missing_target_request', raw })
+        continue
+      }
+      if (!knownRequests.has(targetRequestId)) {
+        dropped.push({ reason: 'unknown_target_request', raw })
         continue
       }
     }
@@ -382,14 +492,85 @@ export function validateSuggestionItems(
       proposal.subtasks = subtasks
     }
 
-    if (kind === 'note' && !asString(proposal.body)) {
+    if ((kind === 'note' || kind === 'request_note') && !asString(proposal.body)) {
       dropped.push({ reason: 'empty_note', raw })
       continue
     }
 
+    if (kind === 'create_request') {
+      const title = asString(proposal.title)
+      if (!title || title.length < 4) {
+        dropped.push({ reason: 'title_too_short', raw })
+        continue
+      }
+      proposal.title = title
+
+      // The three vocabularies, checked rather than trusted. A value the
+      // dialog would not offer is a value the route would reject on apply,
+      // and a suggestion that cannot be approved is noise in the inbox.
+      const category = asString(proposal.category)
+      if (!category || !REQUEST_CATEGORIES.includes(category)) {
+        dropped.push({ reason: 'invalid_request_category', raw })
+        continue
+      }
+      const type = asString(proposal.type)
+      if (!type || !REQUEST_TYPES.includes(type)) {
+        dropped.push({ reason: 'invalid_request_type', raw })
+        continue
+      }
+      const priority = asString(proposal.priority)
+      if (!priority || !REQUEST_PRIORITIES.includes(priority)) {
+        dropped.push({ reason: 'invalid_request_priority', raw })
+        continue
+      }
+      proposal.category = category
+      proposal.type = type
+      proposal.priority = priority
+
+      // Who asked for it. A name that matches exactly one person at this
+      // client becomes an id; anything else stays a name for the reviewer.
+      const requesterName = asString(proposal.requesterName)
+      proposal.requesterName = requesterName
+      proposal.requesterContactId = resolveContact(requesterName, opts.context.contacts)
+    }
+
+    if (kind === 'update_request') {
+      const fieldsRaw = proposal.fields
+      const fields = fieldsRaw && typeof fieldsRaw === 'object' && !Array.isArray(fieldsRaw)
+        ? Object.fromEntries(Object.entries(fieldsRaw as Record<string, unknown>)
+          .filter(([key, value]) => (REQUEST_UPDATE_FIELDS as readonly string[]).includes(key) && value !== null && value !== undefined))
+        : {}
+      if (Object.keys(fields).length === 0) {
+        // An update that changes nothing is a note wearing a different hat,
+        // and it would dedupe against every other empty update on the request.
+        dropped.push({ reason: 'no_request_fields', raw })
+        continue
+      }
+      proposal.fields = fields
+    }
+
+    if (kind === 'hand_off_request') {
+      const contactName = asString(proposal.contactName)
+      if (!contactName) {
+        dropped.push({ reason: 'missing_contact_name', raw })
+        continue
+      }
+      const reason = asString(proposal.reason)
+      if (!reason || !(HANDOFF_REASONS as readonly string[]).includes(reason)) {
+        dropped.push({ reason: 'invalid_handoff_reason', raw })
+        continue
+      }
+      proposal.contactName = contactName
+      proposal.reason = reason
+      // An unresolved person is still a real hand-off. It reaches the inbox
+      // and the reviewer picks the contact before Approve lights up.
+      proposal.contactId = resolveContact(contactName, opts.context.contacts)
+    }
+
     suggestions.push({
       kind,
-      targetTaskId: kind === 'create_task' ? null : targetTaskId,
+      targetTaskId: KINDS_NEEDING_TASK.includes(kind) ? targetTaskId : null,
+      targetRequestId: KINDS_NEEDING_REQUEST.includes(kind) ? targetRequestId : null,
       proposal,
       quote,
       rationale: asString(item.rationale),
@@ -409,30 +590,59 @@ function saysComplete(quote: string): boolean {
 
 // ── The prompt ───────────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You read the notes from one call and propose changes to the studio's task list. You never make a change yourself. A person reads every item you write and presses a button, so your job is to be checkable, not to be comprehensive.
+/** A vocabulary as the prompt prints it: quoted, pipe separated, read from
+ *  the module that the routes and the dialog read. Printed rather than typed
+ *  out so a value added there cannot go missing here. */
+function vocabulary(values: readonly string[]): string {
+  return values.map(value => `"${value}"`).join(' | ')
+}
+
+/**
+ * The system prompt, built once from the live vocabularies.
+ *
+ * The rule that matters most in this phase is the second one: client-facing
+ * work is a REQUEST, the studio's own work is a TASK, and one thing said on a
+ * call is never both. A client deliverable filed as an internal task is
+ * invisible to the client who asked for it, which is exactly the failure the
+ * portal exists to prevent.
+ */
+export const SUGGESTER_SYSTEM_PROMPT = `You read the notes from one call and propose changes to the studio's work. You never make a change yourself. A person reads every item you write and presses a button, so your job is to be checkable, not to be comprehensive.
 
 Rules, in order of importance:
 1. Only what was said on this call. If it was not said, it does not exist.
-2. Every item carries a quote: the exact words from the transcript or the wrap up, copied character for character. An item without a usable quote is thrown away before anyone sees it.
-3. An update, a completion, a subtask list or a note must name a task from the TASKS list you were given, by its id. Never compose an id.
-4. Propose a completion only when the call says the thing is done. "I will finish it tonight" is a promise, not a completion.
-5. Never invent an owner, a date or an estimate. If a person was named, put the NAME in assigneeName and leave assigneeId out. If no date was said, leave dueDate out.
-6. At most 12 items. Fewer good ones beat more.
+2. Requests are client-facing work. Tasks run the studio.
+   - Work the client asked for or agreed to on the call is a request: create_request, or update_request when a request from the REQUESTS list already covers it.
+   - Something the client owes on an existing request (an approval, content, access, a decision, a file) is hand_off_request, naming the person.
+   - The studio's own follow-ups, research, admin and internal operations, anything the client will never see, are tasks.
+   - One thing said on the call produces one item. Never both a task and a request for the same thing.
+3. Every item carries a quote: the exact words from the transcript or the wrap up, copied character for character. An item without a usable quote is thrown away before anyone sees it.
+4. An update, a completion, a subtask list or a task note must name a task from the TASKS list you were given, by its id. An update_request, a request_note or a hand_off_request must name a request from the REQUESTS list, by its id. Never compose an id.
+5. Propose a completion only when the call says the thing is done. "I will finish it tonight" is a promise, not a completion.
+6. Never invent an owner, a date or an estimate. If a person was named, put the NAME in assigneeName, requesterName or contactName and leave the id out. If no date was said, leave the date out.
+7. At most 12 items. Fewer good ones beat more.
 
 Write in the studio's voice: plain sentences, no dashes of any kind, no exclamation marks, no filler.
 
-Kinds and their proposal shapes:
+Task kinds and their proposal shapes:
 - create_task: { "title": string, "description": string, "type": "client_task" | "internal_client_task" | "tahi_internal", "orgId": string | null, "requestId": string | null, "assigneeName": string | null, "dueDate": "YYYY-MM-DD" | null, "estimatedHours": number | null, "priority": "standard" | "high" | "urgent", "subtasks": string[] }
 - update_task: { "fields": { "title"?, "description"?, "status"?, "priority"?, "dueDate"?, "estimatedHours"? }, "note"?: string }
 - complete_task: { "note"?: string }
 - add_subtasks: { "subtasks": string[] }
 - note: { "body": string }
 
+Request kinds and their proposal shapes:
+- create_request: { "title": string, "description": string, "category": ${vocabulary(REQUEST_CATEGORIES)}, "type": ${vocabulary(REQUEST_TYPES)}, "priority": ${vocabulary(REQUEST_PRIORITIES)}, "dueDate": "YYYY-MM-DD" | null, "requesterName": string | null }
+- update_request: { "fields": { ${REQUEST_UPDATE_FIELDS.map(field => `"${field}"?`).join(', ')} }, "note"?: string }
+- request_note: { "body": string }
+- hand_off_request: { "contactName": string, "reason": ${vocabulary(HANDOFF_REASONS)}, "dueAt": "YYYY-MM-DD" | null, "note"?: string }
+
+The client is already known, so never put an org on a request. "category", "type" and "priority" on a create_request must be one of the values listed above and nothing else. Pick the contactName for a hand off from the CONTACTS list when the call names somebody on it.
+
 Answer with a short sentence saying what the call was about, then one block exactly like this at the end:
 
-<suggestions>[{"kind":"create_task","proposal":{...},"quote":"...","rationale":"one sentence","confidence":0.8}]</suggestions>
+<suggestions>[{"kind":"create_request","proposal":{...},"quote":"...","rationale":"one sentence","confidence":0.8}]</suggestions>
 
-Use "targetTaskId" alongside "kind" for every kind except create_task. If nothing actionable was said, write the sentence and an empty array.`
+Use "targetTaskId" alongside "kind" for update_task, complete_task, add_subtasks and note. Use "targetRequestId" for update_request, request_note and hand_off_request. If nothing actionable was said, write the sentence and an empty array.`
 
 function buildUserMessage(input: SuggestFromTranscriptInput): string {
   const parts: string[] = []
@@ -447,13 +657,21 @@ function buildUserMessage(input: SuggestFromTranscriptInput): string {
   }
 
   if (input.context.requests.length > 0) {
-    parts.push(['REQUESTS:', ...input.context.requests.map(r =>
-      `- ${r.id} | #${r.number ?? '?'} ${r.title} | status ${r.status}`,
+    parts.push(['REQUESTS (the only request ids you may name):', ...input.context.requests.map(r =>
+      `- ${r.id} | #${r.number ?? '?'} ${r.title} | status ${r.status}${r.waitingOn ? ' | already waiting on the client' : ''}`,
     )].join('\n'))
+  } else {
+    parts.push('REQUESTS: none open for this client.')
   }
 
   if (input.context.members.length > 0) {
     parts.push(`PEOPLE (names only): ${input.context.members.map(m => m.name).join(', ')}`)
+  }
+
+  if (input.context.contacts.length > 0) {
+    parts.push(['CONTACTS (the client\'s people, for a hand off):', ...input.context.contacts.map(c =>
+      `- ${c.name} | ${c.email}`,
+    )].join('\n'))
   }
 
   if (input.wrapUp) {
@@ -502,7 +720,7 @@ export async function suggestFromTranscript(input: SuggestFromTranscriptInput): 
   const response = await client.messages.create({
     model: SONNET_MODEL,
     max_tokens: MAX_OUTPUT_TOKENS,
-    system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+    system: [{ type: 'text', text: SUGGESTER_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: buildUserMessage(input) }],
   }) as unknown as AnthropicResponse
 
@@ -696,6 +914,7 @@ export async function runSuggestionSweep(
       callId: transcript.callId,
       kind: s.kind,
       targetTaskId: s.targetTaskId,
+      targetRequestId: s.targetRequestId,
       proposal: s.proposal,
       quote: s.quote,
       rationale: s.rationale,

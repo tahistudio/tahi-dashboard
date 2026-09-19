@@ -15,7 +15,12 @@ vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn(),
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org_tahi'),
 }))
-vi.mock('@/lib/task-suggester', () => ({ runSuggestionSweep: vi.fn() }))
+// The sweep is stubbed; the limit parser is the real one, because what this
+// route does with ?limit is the only logic it has.
+vi.mock('@/lib/task-suggester', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/task-suggester')>()
+  return { runSuggestionSweep: vi.fn(), parseSweepLimit: actual.parseSweepLimit }
+})
 
 import { db } from '@/lib/db'
 import { getRequestAuth } from '@/lib/server-auth'
@@ -35,8 +40,8 @@ const SUMMARY = {
   repaired: 0,
 }
 
-function post(headers: Record<string, string> = {}) {
-  return new NextRequest('http://localhost/api/admin/crons/suggest-from-transcripts', {
+function post(headers: Record<string, string> = {}, query = '') {
+  return new NextRequest(`http://localhost/api/admin/crons/suggest-from-transcripts${query}`, {
     method: 'POST',
     headers,
   })
@@ -73,5 +78,20 @@ describe('POST /api/admin/crons/suggest-from-transcripts', () => {
     const res = await POST(post())
     expect(res.status).toBe(200)
     expect(runSuggestionSweep).toHaveBeenCalledTimes(1)
+  })
+
+  it('sweeps five transcripts when nobody asked for more', async () => {
+    await POST(post({ 'x-cron-secret': 'shhh' }))
+    expect(runSuggestionSweep).toHaveBeenCalledWith(expect.anything(), { batch: 5 })
+  })
+
+  it('takes a bigger batch from ?limit for a manual cutover pass', async () => {
+    await POST(post({ 'x-cron-secret': 'shhh' }, '?limit=8'))
+    expect(runSuggestionSweep).toHaveBeenCalledWith(expect.anything(), { batch: 8 })
+  })
+
+  it('never sweeps more than twenty in one run, whatever the query says', async () => {
+    await POST(post({ 'x-cron-secret': 'shhh' }, '?limit=500'))
+    expect(runSuggestionSweep).toHaveBeenCalledWith(expect.anything(), { batch: 20 })
   })
 })

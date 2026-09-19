@@ -46,7 +46,18 @@ function chunk<T>(items: readonly T[]): T[][] {
  * task's thread, which is the honest answer when a call said something worth
  * recording that is not a task change.
  */
-export type SuggestionKind = 'create_task' | 'update_task' | 'complete_task' | 'add_subtasks' | 'note'
+export type SuggestionKind =
+  | 'create_task'
+  | 'update_task'
+  | 'complete_task'
+  | 'add_subtasks'
+  | 'note'
+  // CN.1b: a call with a client mostly produces client-facing work, which is a
+  // request, not a task. Same table, same approval, different write path.
+  | 'create_request'
+  | 'update_request'
+  | 'request_note'
+  | 'hand_off_request'
 
 export type SuggestionStatus = 'pending' | 'snoozed' | 'applied' | 'rejected' | 'expired' | 'failed'
 
@@ -121,6 +132,9 @@ export interface SuggestionDraft {
   callId: string | null
   kind: SuggestionKind
   targetTaskId: string | null
+  /** The request a request-shaped suggestion is about. CN.1b; the column and
+   *  the persistence of it belong to slice R1. */
+  targetRequestId?: string | null
   proposal: unknown
   quote: string
   rationale?: string | null
