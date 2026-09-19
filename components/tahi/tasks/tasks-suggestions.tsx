@@ -530,7 +530,12 @@ function SuggestionRow({
       onFocus={onFocus}
       onKeyDown={e => {
         const action = suggestionKeyAction(e.key)
-        if (action === 'approve') { e.preventDefault(); onApprove() }
+        if (action === 'approve') {
+          e.preventDefault()
+          // The keyboard obeys the same gate as the button: a hand-off with no
+          // contact cannot be approved until someone is picked.
+          if (!busy && !needsContactPick) onApprove()
+        }
         else if (action === 'reject') { e.preventDefault(); onReject() }
       }}
       className="tahi-focus-ring"

@@ -986,6 +986,7 @@ export function TasksContent() {
       peopleList={peopleList}
       requests={requestOptions}
       onTaskCreated={id => { void mutateTasks(); selectTask(id) }}
+      onRequestCreated={id => router.push(`/requests/${id}`)}
       onCountChange={setSuggestionsCount}
     />
   )
