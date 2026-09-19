@@ -26,6 +26,7 @@ interface BulkResult {
   changed: boolean
   status: string | null
   appliedTaskId?: string | null
+  appliedRequestId?: string | null
   error?: string
 }
 
@@ -84,7 +85,10 @@ export async function POST(req: NextRequest) {
         changed: result.changed,
         status: result.suggestion.status,
         appliedTaskId: result.appliedTaskId ?? null,
-        error: result.suggestion.applyError ?? undefined,
+        appliedRequestId: result.appliedRequestId ?? null,
+        // A refusal the human can fix (a hand-off with nobody named) reads as
+        // the error on its own result, beside the applies that worked.
+        error: result.error ?? result.suggestion.applyError ?? undefined,
       })
     } catch (err) {
       // One id falling over is one result, not a 500 for the other five.

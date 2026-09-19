@@ -2394,6 +2394,15 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE call_transcripts ADD COLUMN suggested_at text`,
     ],
   },
+  {
+    name: '0109',
+    description: `task_suggestions.target_request_id and applied_request_id: the suggestions inbox learns about requests, not just tasks (CN.1b). The Tasks vs Requests model is the reason a second pair of pointers is right rather than reusing the task ones: requests are the client-facing work and tasks run the studio, so a call with a client mostly produces requests, updates to requests and hand-offs, while the studio's own follow-ups stay tasks, and a row is never both. target_request_id is the request an update_request, request_note or hand_off_request is about (null on create_request and on every task kind); applied_request_id is the request an approved suggestion created, or the target it changed, which is what the inbox links to after an approval. No REFERENCES, for the same reason target_task_id carries none: a suggestion outlives the request it named rather than vanishing with it. Additive and idempotent, the duplicate-column error is swallowed above so re-running is safe. Apply BEFORE deploying: lib/task-suggestions.ts selects these columns by name and Drizzle expands a select into an explicit column list, so every read of task_suggestions fails without them.`,
+    statements: [
+      `ALTER TABLE task_suggestions ADD COLUMN target_request_id text`,
+      `ALTER TABLE task_suggestions ADD COLUMN applied_request_id text`,
+      `CREATE INDEX IF NOT EXISTS idx_task_suggestions_target_request ON task_suggestions(target_request_id)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

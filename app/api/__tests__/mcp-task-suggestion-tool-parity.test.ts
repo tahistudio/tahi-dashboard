@@ -80,6 +80,32 @@ describe('decide_task_suggestion', () => {
   })
 })
 
+describe('rebuild_task_suggestions', () => {
+  it('rebuilds the named transcripts', () => {
+    const mapped = call('rebuild_task_suggestions', { transcript_ids: ['tr1', 'tr2'] })
+    expect(mapped.path).toBe('/api/admin/task-suggestions/rebuild')
+    expect(mapped.method).toBe('POST')
+    expect(mapped.body).toEqual({ transcriptIds: ['tr1', 'tr2'] })
+  })
+
+  it('rebuilds everything when asked to', () => {
+    const mapped = call('rebuild_task_suggestions', { all: true })
+    expect(mapped.body).toEqual({ all: true })
+  })
+
+  it('refuses a call that names nothing rather than rebuilding the workspace', () => {
+    // The dangerous default: an empty call must never quietly become "all".
+    expect(() => call('rebuild_task_suggestions', {})).toThrow('Name transcript_ids')
+    expect(() => call('rebuild_task_suggestions', { transcript_ids: [] })).toThrow('Name transcript_ids')
+    expect(() => call('rebuild_task_suggestions', { all: false })).toThrow('Name transcript_ids')
+  })
+
+  it('drops blank ids out of the list', () => {
+    const mapped = call('rebuild_task_suggestions', { transcript_ids: ['tr1', '  ', 7] })
+    expect(mapped.body).toEqual({ transcriptIds: ['tr1'] })
+  })
+})
+
 describe('names outside this module', () => {
   it('returns null for an unrelated tool name', () => {
     expect(taskSuggestionToolCall('list_tasks', {})).toBeNull()

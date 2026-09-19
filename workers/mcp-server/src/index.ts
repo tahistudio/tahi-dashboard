@@ -614,6 +614,10 @@ export const TOOLS: ToolDef[] = [
     proposal: { type: 'object', description: 'An edited proposal to apply instead of the suggested one. Only read when action is approve.' },
     snooze: prop('string', "'tonight' or 'this_week'. Required when action is snooze."),
   }, ['id', 'action']),
+  tool('rebuild_task_suggestions', "Re-read call transcripts the suggester has already looked at. Expires their still-undecided suggestions (applied and rejected ones are left alone: those are decisions) and clears the transcripts' read mark, so the next sweep proposes against them again. This is the cutover tool for a change to what the suggester knows how to propose, not a routine one: it costs another model pass over every transcript it names.", {
+    transcript_ids: { type: 'array', items: { type: 'string' }, description: 'The transcripts to re-read' },
+    all: prop('boolean', 'Re-read every transcript that has been swept. Required when transcript_ids is empty.'),
+  }),
   tool('toggle_task_subtask', 'Toggle the completion status of a subtask', {
     taskId: prop('string', 'Parent task ID'),
     subId: prop('string', 'Subtask ID'),

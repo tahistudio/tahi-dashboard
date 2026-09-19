@@ -58,6 +58,81 @@ function mirrorBody(body: string, quote: string | null | undefined): string {
 }
 
 /**
+ * One internal `messages` row on a request's thread.
+ *
+ * The single insert both thread writers in this file share: the task comment
+ * mirror below, and `postRequestBotMessage`, which applying a REQUEST
+ * suggestion uses (lib/task-suggestions.ts). Shared rather than typed twice
+ * because the two have to agree on four things that are easy to get subtly
+ * different: the bot's stand-in author id, the quote-above-body layout, the
+ * isInternal flag, and the fact that this is never client-visible.
+ */
+async function insertRequestThreadMessage(
+  drizzle: Drizzle,
+  input: {
+    requestId: string
+    orgId: string
+    author: TaskCommentAuthor
+    body: string
+    quote: string | null
+  },
+): Promise<string> {
+  const id = crypto.randomUUID()
+  await drizzle.insert(schema.messages).values({
+    id,
+    requestId: input.requestId,
+    orgId: input.orgId,
+    // The bot has no roster row; TAHI_BOT.id stands in for authorId so the
+    // row still carries a stable, non-empty value.
+    authorId: input.author.authorType === 'bot' ? TAHI_BOT.id : (input.author.authorId ?? 'unknown'),
+    authorType: input.author.authorType,
+    body: mirrorBody(input.body, input.quote),
+    // Always internal: this is the studio's own record of what changed, not a
+    // line the client asked for or should see.
+    isInternal: true,
+  })
+  return id
+}
+
+/**
+ * Post one line on a request's thread as the Tahi bot.
+ *
+ * What applying a request suggestion leaves behind, and the exact twin of the
+ * line a task suggestion leaves on its task (which is mirrored here too when
+ * the task carries a requestId). One helper so the two cannot drift: a reader
+ * scrolling a request thread sees the same voice, the same quote treatment
+ * and the same internal-only rule whichever door the automation came in by.
+ *
+ * NO sourceRef. `messages` has no source_ref column, only task_comments does,
+ * and adding one to the request thread is not in this slice; the suggestion
+ * id lives on the audit row instead.
+ *
+ * Throws when the request does not exist, so a caller cannot write a line
+ * onto a row that was deleted underneath it and have it silently vanish.
+ */
+export async function postRequestBotMessage(
+  drizzle: Drizzle,
+  requestId: string,
+  input: { body: string; quote?: string | null },
+): Promise<string> {
+  const [request] = await drizzle
+    .select({ id: schema.requests.id, orgId: schema.requests.orgId })
+    .from(schema.requests)
+    .where(eq(schema.requests.id, requestId))
+    .limit(1)
+
+  if (!request) throw new Error('Request not found')
+
+  return insertRequestThreadMessage(drizzle, {
+    requestId,
+    orgId: request.orgId,
+    author: { authorType: TAHI_BOT.authorType, authorId: null },
+    body: input.body,
+    quote: input.quote?.trim() ? input.quote.trim() : null,
+  })
+}
+
+/**
  * Insert one task_comments row and, when the task has a requestId, mirror it
  * into that request's thread.
  *
@@ -102,18 +177,12 @@ export async function postTaskComment(
   // without an org (tahi_internal) is studio housekeeping with no client
   // thread to mirror into either.
   if (task.requestId && task.orgId) {
-    await drizzle.insert(schema.messages).values({
-      id: crypto.randomUUID(),
+    await insertRequestThreadMessage(drizzle, {
       requestId: task.requestId,
       orgId: task.orgId,
-      // The bot has no roster row; TAHI_BOT.id stands in for authorId so the
-      // mirrored row still carries a stable, non-empty value.
-      authorId: input.author.authorType === 'bot' ? TAHI_BOT.id : (input.author.authorId ?? 'unknown'),
-      authorType: input.author.authorType,
-      body: mirrorBody(input.body, quote),
-      // Always internal: this is the studio's own record of what changed on
-      // the task, not a line the client asked for or should see.
-      isInternal: true,
+      author: input.author,
+      body: input.body,
+      quote,
     })
   }
 

@@ -83,6 +83,12 @@ export async function POST(
     suggestion: result.suggestion,
     changed: result.changed,
     appliedTaskId: result.appliedTaskId ?? null,
+    // The request an approved suggestion created or changed (CN.1b). A row is
+    // never both, so exactly one of the two is ever non-null.
+    appliedRequestId: result.appliedRequestId ?? null,
+    // Why an approve came back unchanged when the human can fix it:
+    // 'contact_required' on a hand-off with nobody named yet.
+    error: result.error ?? null,
   })
 }
 

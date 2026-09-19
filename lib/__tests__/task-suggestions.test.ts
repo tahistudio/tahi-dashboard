@@ -25,8 +25,16 @@ const updatedTasks: Array<{ taskId: string; patch: Record<string, unknown> }> = 
 const comments: Array<Record<string, unknown>> = []
 const audits: Array<Record<string, unknown>> = []
 
+const requestMessages: Array<Record<string, unknown>> = []
+const createdRequests: Array<Record<string, unknown>> = []
+const updatedRequests: Array<{ requestId: string; patch: Record<string, unknown> }> = []
+const handOffs: Array<{ requestId: string; input: Record<string, unknown> }> = []
+
 let createResult: { ok: boolean; id?: string; title?: string; error?: string } = { ok: true, id: 'task_new', title: 'Cut the hero video' }
 let updateResult: { ok: boolean; title?: string; status?: string; error?: string } = { ok: true, title: 'Ship the retainer deck', status: 'done' }
+let createRequestResult: { ok: boolean; id?: string; title?: string; error?: string } = { ok: true, id: 'req_new', title: 'Cut a 30s hero video' }
+let updateRequestResult: { ok: boolean; error?: string } = { ok: true }
+let handOffResult: { ok: boolean; error?: string } = { ok: true }
 let commentThrows = false
 
 vi.mock('@/lib/task-writes', () => ({
@@ -49,6 +57,32 @@ vi.mock('@/lib/task-comments', () => ({
     if (commentThrows) throw new Error('Task not found')
     comments.push(input)
     return { id: 'c1', ...input }
+  },
+  postRequestBotMessage: async (_drizzle: unknown, requestId: string, input: Record<string, unknown>) => {
+    if (commentThrows) throw new Error('Request not found')
+    requestMessages.push({ requestId, ...input })
+    return 'm1'
+  },
+}))
+
+vi.mock('@/lib/request-writes', () => ({
+  createRequestRecord: async (_drizzle: unknown, input: Record<string, unknown>) => {
+    createdRequests.push(input)
+    return createRequestResult.ok
+      ? { ok: true, request: { id: createRequestResult.id, orgId: input.clientOrgId, title: createRequestResult.title ?? input.title, status: 'submitted', requestNumber: null } }
+      : { ok: false, failure: { status: 400, error: createRequestResult.error ?? 'Nope' } }
+  },
+  updateRequestRecord: async (_drizzle: unknown, requestId: string, patch: Record<string, unknown>) => {
+    updatedRequests.push({ requestId, patch })
+    return updateRequestResult.ok
+      ? { ok: true, request: { id: requestId, orgId: 'o1', title: 'Homepage refresh', status: 'in_progress', requestNumber: 12 } }
+      : { ok: false, failure: { status: 400, error: updateRequestResult.error ?? 'Nope' } }
+  },
+  handOffRequest: async (_drizzle: unknown, requestId: string, input: Record<string, unknown>) => {
+    handOffs.push({ requestId, input })
+    return handOffResult.ok
+      ? { ok: true, handOff: { requestId, waitingOn: { contactId: input.contactId, contactName: 'Ngaire Reid', reason: input.reason, reasonLabel: 'They need to approve it', since: '2026-09-19T01:00:00Z', dueAt: null, note: null, daysWaiting: 0, contactEmail: null } } }
+      : { ok: false, failure: { status: 404, error: handOffResult.error ?? 'Nope' } }
   },
 }))
 
@@ -76,6 +110,7 @@ const TABLE_KEYS = new Map<unknown, string>([
   [schema.organisations, 'organisations'],
   [schema.discoveryCalls, 'discovery_calls'],
   [schema.scheduledCalls, 'scheduled_calls'],
+  [schema.requests, 'requests'],
 ])
 
 function fakeDb(rows: Rows) {
@@ -149,8 +184,15 @@ beforeEach(() => {
   updatedTasks.length = 0
   comments.length = 0
   audits.length = 0
+  requestMessages.length = 0
+  createdRequests.length = 0
+  updatedRequests.length = 0
+  handOffs.length = 0
   createResult = { ok: true, id: 'task_new', title: 'Cut the hero video' }
   updateResult = { ok: true, title: 'Ship the retainer deck', status: 'done' }
+  createRequestResult = { ok: true, id: 'req_new', title: 'Cut a 30s hero video' }
+  updateRequestResult = { ok: true }
+  handOffResult = { ok: true }
   commentThrows = false
 })
 
@@ -533,5 +575,340 @@ describe('listSuggestions', () => {
     // An empty scope still admits studio housekeeping, so the read runs; what
     // it must never do is throw or widen itself back to every client.
     expect(Array.isArray(items)).toBe(true)
+  })
+})
+
+// ─── CN.1b: the request kinds ────────────────────────────────────────────────
+//
+// A call with a client mostly produces REQUESTS, not tasks: requests are the
+// client-facing work and tasks run the studio. What is pinned below is the
+// half of that which can go quietly wrong.
+//
+//   THE DEDUPE KEYS, because a request suggestion re-read off the same
+//   transcript must collapse the way a task one does, and a request kind must
+//   never collide with the task kind it rhymes with.
+//
+//   THE APPLY, per kind, through lib/request-writes.ts (the same code the
+//   request routes use), with the Tahi bot line landing on the REQUEST thread
+//   rather than on a task thread.
+//
+//   THE HAND-OFF WITH NOBODY NAMED, which is the one proposal the model is
+//   allowed to make and the gate is not allowed to apply.
+
+function requestRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return suggestionRow({
+    kind: 'create_request',
+    targetTaskId: null,
+    targetRequestId: null,
+    appliedRequestId: null,
+    proposal: JSON.stringify({
+      title: 'Cut a 30s hero video',
+      description: 'Trim the launch film for the homepage.',
+      category: 'design',
+      type: 'small_task',
+      priority: 'standard',
+    }),
+    ...overrides,
+  })
+}
+
+describe('buildDedupeKey over the request kinds', () => {
+  const base = {
+    sourceKind: 'call',
+    transcriptId: 'tr1',
+    kind: 'create_request' as const,
+    targetTaskId: null,
+    targetRequestId: null,
+    proposal: { title: 'Cut a 30s hero video' },
+  }
+
+  it('reads a create_request off its normalised title, like a create_task', async () => {
+    const noisy = { ...base, proposal: { title: '  CUT a   30s Hero Video ' } }
+    expect(await buildDedupeKey(noisy)).toBe(await buildDedupeKey(base))
+  })
+
+  it('never collides with the task kind it rhymes with', async () => {
+    const asTask = await buildDedupeKey({ ...base, kind: 'create_task' })
+    expect(await buildDedupeKey(base)).not.toBe(asTask)
+  })
+
+  it('separates two updates to different requests', async () => {
+    const one = await buildDedupeKey({
+      ...base, kind: 'update_request', targetRequestId: 'r1', proposal: { fields: { status: 'in_progress' } },
+    })
+    const two = await buildDedupeKey({
+      ...base, kind: 'update_request', targetRequestId: 'r2', proposal: { fields: { status: 'in_progress' } },
+    })
+    expect(one).not.toBe(two)
+  })
+
+  it('reads an update_request off its field diff, whatever order the keys arrive in', async () => {
+    const a = await buildDedupeKey({
+      ...base, kind: 'update_request', targetRequestId: 'r1', proposal: { fields: { status: 'on_hold', dueDate: '2026-10-01' } },
+    })
+    const b = await buildDedupeKey({
+      ...base, kind: 'update_request', targetRequestId: 'r1', proposal: { fields: { dueDate: '2026-10-01', status: 'on_hold' } },
+    })
+    expect(a).toBe(b)
+  })
+
+  it('reads a request_note off the first 80 characters of its body', async () => {
+    const long = 'x'.repeat(200)
+    const a = await buildDedupeKey({ ...base, kind: 'request_note', targetRequestId: 'r1', proposal: { body: long } })
+    const b = await buildDedupeKey({ ...base, kind: 'request_note', targetRequestId: 'r1', proposal: { body: `${long}, and one more thing` } })
+    expect(a).toBe(b)
+  })
+
+  it('reads a hand_off_request off the person, case folded', async () => {
+    const a = await buildDedupeKey({ ...base, kind: 'hand_off_request', targetRequestId: 'r1', proposal: { contactName: 'Ngaire Reid', reason: 'approval' } })
+    const b = await buildDedupeKey({ ...base, kind: 'hand_off_request', targetRequestId: 'r1', proposal: { contactName: '  ngaire reid ', reason: 'content' } })
+    const c = await buildDedupeKey({ ...base, kind: 'hand_off_request', targetRequestId: 'r1', proposal: { contactName: 'Tama Wiremu', reason: 'approval' } })
+    // The same person on the same request is one ask however the reason is
+    // worded; a different person is a different ask.
+    expect(a).toBe(b)
+    expect(a).not.toBe(c)
+  })
+})
+
+describe('applySuggestion over the request kinds', () => {
+  it('creates a request on the suggestion org and posts the bot line on its thread', async () => {
+    const { database } = fakeDb({
+      scheduled_calls: [{ title: 'Glasswall kickoff', scheduledAt: '2026-09-18T21:00:00Z' }],
+    })
+
+    const outcome = await applySuggestion(database, requestRow() as never, CTX)
+
+    expect(outcome.ok).toBe(true)
+    expect(outcome.appliedRequestId).toBe('req_new')
+    // A request suggestion never touches a task.
+    expect(outcome.appliedTaskId).toBeNull()
+    expect(created).toHaveLength(0)
+
+    expect(createdRequests).toHaveLength(1)
+    expect(createdRequests[0].clientOrgId).toBe('o1')
+    expect(createdRequests[0].title).toBe('Cut a 30s hero video')
+    expect(createdRequests[0].category).toBe('design')
+
+    expect(comments).toHaveLength(0)
+    expect(requestMessages).toHaveLength(1)
+    expect(requestMessages[0].requestId).toBe('req_new')
+    expect(requestMessages[0].quote).toBe('We still need the hero video cut down to thirty seconds.')
+    expect(String(requestMessages[0].body)).toContain('Glasswall kickoff')
+    expect(String(requestMessages[0].body)).toContain('Cut a 30s hero video')
+  })
+
+  it('names the person who asked for it, when the call named one', async () => {
+    const row = requestRow({
+      proposal: JSON.stringify({ title: 'Cut a 30s hero video', category: 'design', requesterName: 'Ngaire Reid' }),
+    })
+    const { database } = fakeDb({})
+
+    await applySuggestion(database, row as never, CTX)
+    expect(String(requestMessages[0].body)).toContain('Ngaire Reid')
+  })
+
+  it('refuses a create_request with no client rather than filing orphan work', async () => {
+    const row = requestRow({ orgId: null })
+    const { database } = fakeDb({})
+
+    const outcome = await applySuggestion(database, row as never, CTX)
+
+    expect(outcome.ok).toBe(false)
+    expect(outcome.error).toContain('client')
+    expect(createdRequests).toHaveLength(0)
+  })
+
+  it('updates a request through the request patch path, fields only', async () => {
+    const row = requestRow({
+      kind: 'update_request',
+      targetRequestId: 'r1',
+      proposal: JSON.stringify({
+        fields: { status: 'on_hold', dueDate: '2026-10-02', title: 'Renamed behind our backs' },
+        note: 'They want it parked until the brand lands.',
+      }),
+    })
+    const { database } = fakeDb({})
+
+    const outcome = await applySuggestion(database, row as never, CTX)
+
+    expect(outcome.ok).toBe(true)
+    expect(outcome.appliedRequestId).toBe('r1')
+    expect(updatedRequests).toHaveLength(1)
+    expect(updatedRequests[0].requestId).toBe('r1')
+    // Only the fields the contract lists reach the patch: a title the model
+    // slipped in is not one a call suggestion may rewrite.
+    expect(updatedRequests[0].patch).toEqual({ status: 'on_hold', dueDate: '2026-10-02' })
+    expect(String(requestMessages[0].body)).toContain('status')
+    expect(String(requestMessages[0].body)).toContain('parked until the brand lands')
+  })
+
+  it('posts a request note as one bot line and changes nothing else', async () => {
+    const row = requestRow({
+      kind: 'request_note',
+      targetRequestId: 'r1',
+      proposal: JSON.stringify({ body: 'They want the invoice split in two' }),
+    })
+    const { database } = fakeDb({})
+
+    const outcome = await applySuggestion(database, row as never, CTX)
+
+    expect(outcome.ok).toBe(true)
+    expect(outcome.appliedRequestId).toBe('r1')
+    expect(createdRequests).toHaveLength(0)
+    expect(updatedRequests).toHaveLength(0)
+    expect(requestMessages).toHaveLength(1)
+    expect(String(requestMessages[0].body)).toContain('They want the invoice split in two')
+  })
+
+  it('hands a request to the named contact and says so on the thread', async () => {
+    const row = requestRow({
+      kind: 'hand_off_request',
+      targetRequestId: 'r1',
+      proposal: JSON.stringify({
+        contactName: 'Ngaire Reid',
+        contactId: 'c1',
+        reason: 'approval',
+        dueAt: '2026-10-02',
+        note: 'Sign off the homepage copy.',
+      }),
+    })
+    const { database } = fakeDb({})
+
+    const outcome = await applySuggestion(database, row as never, CTX)
+
+    expect(outcome.ok).toBe(true)
+    expect(outcome.appliedRequestId).toBe('r1')
+    expect(handOffs).toHaveLength(1)
+    expect(handOffs[0].requestId).toBe('r1')
+    expect(handOffs[0].input).toEqual({
+      contactId: 'c1',
+      reason: 'approval',
+      dueAt: '2026-10-02',
+      note: 'Sign off the homepage copy.',
+    })
+    expect(String(requestMessages[0].body)).toContain('Ngaire Reid')
+  })
+
+  it('refuses a request kind that names no request rather than guessing one', async () => {
+    const row = requestRow({ kind: 'update_request', targetRequestId: null, proposal: JSON.stringify({ fields: { status: 'on_hold' } }) })
+    const { database } = fakeDb({})
+
+    const outcome = await applySuggestion(database, row as never, CTX)
+
+    expect(outcome.ok).toBe(false)
+    expect(outcome.error).toContain('no request')
+    expect(updatedRequests).toHaveLength(0)
+  })
+
+  it('records a refused request write on the row rather than throwing', async () => {
+    createRequestResult = { ok: false, error: 'Unknown client org' }
+    const { database } = fakeDb({})
+
+    const outcome = await applySuggestion(database, requestRow() as never, CTX)
+
+    expect(outcome.ok).toBe(false)
+    expect(outcome.error).toBe('Unknown client org')
+    expect(requestMessages).toHaveLength(0)
+  })
+})
+
+describe('decideSuggestion over the request kinds', () => {
+  it('stamps the request an approved suggestion created, not a task id', async () => {
+    const { database, updated } = fakeDb({ task_suggestions: [requestRow()] })
+
+    const result = await decideSuggestion(database, 's1', { action: 'approve' }, CTX)
+
+    expect(result?.changed).toBe(true)
+    expect(result?.appliedRequestId).toBe('req_new')
+    expect(result?.appliedTaskId).toBeNull()
+    const write = updated.find(u => u.table === 'task_suggestions')
+    expect(write?.values.status).toBe('applied')
+    expect(write?.values.appliedRequestId).toBe('req_new')
+  })
+
+  it('refuses a hand-off nobody is named on, and writes nothing', async () => {
+    const row = requestRow({
+      kind: 'hand_off_request',
+      targetRequestId: 'r1',
+      proposal: JSON.stringify({ contactName: 'Somebody at the client', contactId: null, reason: 'approval' }),
+    })
+    const { database, updated } = fakeDb({ task_suggestions: [row] })
+
+    const result = await decideSuggestion(database, 's1', { action: 'approve' }, CTX)
+
+    // Not 'failed': the suggestion is fine, the human just has to pick the
+    // person on Tweak first. A failed row would read as the gate's fault.
+    expect(result?.changed).toBe(false)
+    expect(result?.error).toBe('contact_required')
+    expect(result?.suggestion.status).toBe('pending')
+    expect(handOffs).toHaveLength(0)
+    expect(updated).toHaveLength(0)
+  })
+
+  it('accepts the same hand-off once Tweak has picked the person', async () => {
+    const row = requestRow({
+      kind: 'hand_off_request',
+      targetRequestId: 'r1',
+      proposal: JSON.stringify({ contactName: 'Somebody at the client', contactId: null, reason: 'approval' }),
+    })
+    const { database } = fakeDb({ task_suggestions: [row] })
+
+    const result = await decideSuggestion(
+      database,
+      's1',
+      { action: 'approve', proposalOverride: { contactName: 'Ngaire Reid', contactId: 'c1', reason: 'approval' } },
+      CTX,
+    )
+
+    expect(result?.changed).toBe(true)
+    expect(result?.error).toBeUndefined()
+    expect(handOffs[0].input.contactId).toBe('c1')
+  })
+
+  it('still rejects a contact-less hand-off without touching anything', async () => {
+    const row = requestRow({
+      kind: 'hand_off_request',
+      targetRequestId: 'r1',
+      proposal: JSON.stringify({ contactName: 'Somebody at the client', reason: 'approval' }),
+    })
+    const { database, updated } = fakeDb({ task_suggestions: [row] })
+
+    const result = await decideSuggestion(database, 's1', { action: 'reject' }, CTX)
+
+    expect(result?.changed).toBe(true)
+    expect(result?.suggestion.status).toBe('rejected')
+    expect(handOffs).toHaveLength(0)
+    expect(updated).toHaveLength(1)
+  })
+})
+
+describe('listSuggestions over the request kinds', () => {
+  it('decorates a row with the request it names', async () => {
+    const { database } = fakeDb({
+      task_suggestions: [requestRow({ kind: 'update_request', targetRequestId: 'r1' })],
+      organisations: [{ id: 'o1', name: 'Glasswall' }],
+      requests: [{ id: 'r1', requestNumber: 12, title: 'Homepage refresh', status: 'in_progress' }],
+    })
+
+    const items = await listSuggestions(database, { status: 'pending', orgIds: 'all', limit: 100 })
+
+    expect(items).toHaveLength(1)
+    expect(items[0].targetRequestNumber).toBe(12)
+    expect(items[0].targetRequestTitle).toBe('Homepage refresh')
+    expect(items[0].targetRequestStatus).toBe('in_progress')
+    // A request row names no task, and says so rather than borrowing one.
+    expect(items[0].targetTaskTitle).toBeNull()
+  })
+
+  it('leaves the request fields null on a task suggestion', async () => {
+    const { database } = fakeDb({
+      task_suggestions: [suggestionRow()],
+      requests: [{ id: 'r1', requestNumber: 12, title: 'Homepage refresh', status: 'in_progress' }],
+    })
+
+    const items = await listSuggestions(database, { status: 'pending', orgIds: 'all', limit: 100 })
+    expect(items[0].targetRequestNumber).toBeNull()
+    expect(items[0].targetRequestTitle).toBeNull()
+    expect(items[0].targetRequestStatus).toBeNull()
   })
 })

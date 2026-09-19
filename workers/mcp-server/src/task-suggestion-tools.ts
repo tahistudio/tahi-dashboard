@@ -6,9 +6,9 @@
  * already sweeps it). This module deliberately knows nothing about fetch,
  * tokens or the Workers runtime.
  *
- * Backs GET /api/admin/task-suggestions and POST
- * /api/admin/task-suggestions/[id]/decide (CN.1 build contract, section 3;
- * slice S1 owns both routes).
+ * Backs GET /api/admin/task-suggestions, POST
+ * /api/admin/task-suggestions/[id]/decide (CN.1 build contract, section 3)
+ * and POST /api/admin/task-suggestions/rebuild (CN.1b, section 3).
  */
 
 export type McpMethod = 'GET' | 'POST'
@@ -70,6 +70,22 @@ export function taskSuggestionToolCall(
         body.snooze = snooze
       }
       return { path: `/api/admin/task-suggestions/${id}/decide`, method: 'POST', body }
+    }
+    case 'rebuild_task_suggestions': {
+      // Either a named list or the whole workspace, never neither: the route
+      // 400s an empty call rather than guessing, and the tool should not
+      // invent an `all: true` the asker did not say.
+      const body: Record<string, unknown> = {}
+      const ids = args.transcript_ids
+      if (Array.isArray(ids)) {
+        const named = ids.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+        if (named.length > 0) body.transcriptIds = named
+      }
+      if (args.all === true) body.all = true
+      if (body.transcriptIds === undefined && body.all === undefined) {
+        throw new Error('Name transcript_ids, or pass all true')
+      }
+      return { path: '/api/admin/task-suggestions/rebuild', method: 'POST', body }
     }
     default:
       return null

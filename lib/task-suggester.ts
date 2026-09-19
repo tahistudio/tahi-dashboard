@@ -68,7 +68,12 @@ const MAX_TRANSCRIPT_CHARS = 60_000
  *  until someone says otherwise. */
 export const COMPLETION_WORDS = ['done', 'finished', 'completed', 'complete', 'shipped', 'live', 'sent', 'delivered'] as const
 
-const KINDS: readonly SuggestionKind[] = ['create_task', 'update_task', 'complete_task', 'add_subtasks', 'note']
+const KINDS: readonly SuggestionKind[] = [
+  'create_task', 'update_task', 'complete_task', 'add_subtasks', 'note',
+  // The request kinds (CN.1b): a call with a client mostly produces
+  // client-facing work, not studio follow-ups.
+  'create_request', 'update_request', 'request_note', 'hand_off_request',
+]
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
