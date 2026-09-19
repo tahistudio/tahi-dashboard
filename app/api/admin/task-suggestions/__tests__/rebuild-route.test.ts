@@ -52,7 +52,7 @@ vi.mock('@/db/d1', () => ({
 
 vi.mock('drizzle-orm', () => {
   const stub = (...args: unknown[]) => ({ args })
-  return { and: stub, inArray: stub, isNotNull: stub }
+  return { and: stub, eq: stub, inArray: stub, isNotNull: stub, notLike: stub, sql: stub }
 })
 
 vi.mock('@/lib/db', () => ({
@@ -125,7 +125,8 @@ describe('POST /api/admin/task-suggestions/rebuild', () => {
 
   it('clears the mark only after the rows are expired', async () => {
     await POST(req({ transcriptIds: ['tr1'] }) as never)
-    expect(order).toEqual(['task_suggestions', 'call_transcripts'])
+    // Expire, retire the keys of earlier expired rows, then clear the mark.
+    expect(order).toEqual(['task_suggestions', 'task_suggestions', 'call_transcripts'])
   })
 
   it('takes every transcript that has been read when all is true', async () => {
@@ -137,7 +138,8 @@ describe('POST /api/admin/task-suggestions/rebuild', () => {
     openRows = []
     const res = await POST(req({ transcriptIds: ['tr1'] }) as never)
     expect(await res.json()).toEqual({ expired: 0, transcripts: 1 })
-    expect(writes.map(w => w.table)).toEqual(['call_transcripts'])
+    // The key-retiring pass over already-expired rows always runs for the batch.
+    expect(writes.map(w => w.table)).toEqual(['task_suggestions', 'call_transcripts'])
   })
 
   it('answers zero rather than writing when no transcript has been read yet', async () => {

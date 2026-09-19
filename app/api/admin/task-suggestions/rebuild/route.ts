@@ -36,7 +36,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { and, inArray, isNotNull } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, notLike, sql } from 'drizzle-orm'
 
 /** Ids per IN clause. D1 caps bound parameters at 100 per statement. */
 const ID_CHUNK = 90
@@ -114,6 +114,10 @@ export async function POST(req: NextRequest) {
         .update(schema.taskSuggestions)
         .set({
           status: 'expired',
+          // The key retires with the row: a re-read that proposes the same item
+          // again must be able to insert it, and the unique index would
+          // otherwise count it as a duplicate of a row nobody can see.
+          dedupeKey: sql`'expired:' || ${schema.taskSuggestions.id}`,
           snoozeUntil: null,
           decidedById: userId ?? null,
           decidedVia: 'dashboard',
@@ -122,6 +126,17 @@ export async function POST(req: NextRequest) {
         })
         .where(inArray(schema.taskSuggestions.id, open.map(row => row.id)))
     }
+
+    // Rows expired by an earlier pass, before keys retired with the row, get
+    // the same treatment so they stop blocking re-reads.
+    await drizzle
+      .update(schema.taskSuggestions)
+      .set({ dedupeKey: sql`'expired:' || ${schema.taskSuggestions.id}` })
+      .where(and(
+        inArray(schema.taskSuggestions.transcriptId, batch),
+        eq(schema.taskSuggestions.status, 'expired'),
+        notLike(schema.taskSuggestions.dedupeKey, 'expired:%'),
+      ))
 
     // Last, and deliberately: a failure above must not leave the transcripts
     // clear with the old rows still pending, which would put the same
