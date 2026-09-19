@@ -271,6 +271,27 @@ describe('sync-drive-transcripts, idempotence', () => {
     expect(queries.some(q => q[0].method === 'insert')).toBe(false)
   })
 
+  it('rewrites the discovery mirror of a call it stamped itself when force=1', async () => {
+    const { handle, queries } = makeDb([
+      [{ id: 'disc-1', title: 'Discovery (Tim Lyons)', scheduledAt: CALL_TIME, attendees: '[]', orgId: null, transcript: 'old machine text', transcriptSource: 'gemini_drive' }],
+      [],
+      // filed lookup: the row from the earlier pass, unchanged doc
+      [{ id: 'ct-1', callKind: 'discovery', callId: 'disc-1', receivedAt: DOC.modifiedTime }],
+      // upsert lookup finds the same row
+      [{ id: 'ct-1', callId: 'disc-1' }],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await POST(request('?force=1'))
+    const body = await res.json() as { written: number; filed: number; results: Array<{ status: string }> }
+    expect(body).toMatchObject({ written: 1, filed: 1 })
+    expect(body.results[0].status).toBe('matched')
+    const updates = queries.filter(q => q[0].method === 'update')
+    expect(updates).toHaveLength(3)  // transcripts row + discovery_calls + integrations
+    const discoverySet = updates.map(u => u.find(c => c.method === 'set')?.args[0] as Record<string, unknown> | undefined).find(s => s && 'transcriptSource' in s)
+    expect(discoverySet?.transcript).toBe(PARSED.transcript)
+  })
+
   it('re-exports and updates the row when Drive says the doc changed', async () => {
     const { handle, queries } = makeDb([
       [],

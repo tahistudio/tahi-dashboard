@@ -87,7 +87,8 @@ export async function POST(req: NextRequest) {
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 50) : 20
   const dryRun = url.searchParams.get('dryRun') === '1' || url.searchParams.get('dryRun') === 'true'
   // force=1 re-exports docs already filed and unchanged, for the pass after a
-  // parser change so the stored text catches up. Links are never touched.
+  // parser change so the stored text catches up, and rewrites the discovery
+  // mirror of a call this sync stamped itself. Links are never touched.
   const force = url.searchParams.get('force') === '1' || url.searchParams.get('force') === 'true'
 
   const database = await db()
@@ -263,7 +264,7 @@ export async function POST(req: NextRequest) {
       continue
     }
 
-    if (alreadySynced) {
+    if (alreadySynced && !force) {
       results.push({
         fileId: file.id,
         title: file.name,
@@ -299,7 +300,10 @@ export async function POST(req: NextRequest) {
       transcriptSource: 'gemini_drive',
       updatedAt: new Date().toISOString(),
     }
-    if (parsed.transcript && !matchedCall.transcript) {
+    // The transcript is only ever written into an empty column, except on a
+    // forced pass over a call this sync stamped itself: that text was the
+    // machine's, so the machine may replace it.
+    if (parsed.transcript && (!matchedCall.transcript || (force && alreadySynced))) {
       updates.transcript = parsed.transcript.slice(0, 250_000)  // matches the discovery-calls PATCH cap
     }
     if (parsed.summary) {
