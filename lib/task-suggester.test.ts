@@ -407,6 +407,78 @@ describe('runSuggestionSweep', () => {
     expect((stamp!.set as { suggestedAt: string }).suggestedAt).toBe('2026-09-19T00:00:00Z')
   })
 
+  it('resolves the org through the deal when the call has none', async () => {
+    const { handle, inserts } = makeDb([
+      [TRANSCRIPT_ROW],
+      [{ orgId: null, meetingType: 'client', dealId: 'deal-1', attendees: '[]' }],
+      [{ orgId: 'org-9' }],                 // deals lookup
+      ...contextSelects(),
+      [],                                   // insertSuggestions: no existing keys
+      [],                                   // resurfaceSnoozed
+      [],                                   // repair: nothing orgless
+    ])
+
+    const summary = await runSuggestionSweep(handle, { suggest: okSuggest, now: new Date('2026-09-19T00:00:00Z') })
+
+    expect(summary.eligible).toBe(1)
+    expect(summary.inserted).toBe(1)
+    const written = inserts.find(i => i.table === schema.taskSuggestions)
+    expect(JSON.stringify(written?.values)).toContain('org-9')
+  })
+
+  it('resolves the org through the guests when they are contacts at exactly one client', async () => {
+    const { handle, inserts } = makeDb([
+      [TRANSCRIPT_ROW],
+      [{ orgId: null, meetingType: 'client', dealId: null, attendees: JSON.stringify([{ email: 'Ella@elevate.uk' }, { email: 'staci@tahi.studio' }]) }],
+      [{ orgId: 'org-e', email: 'ella@elevate.uk' }],   // contacts lookup
+      ...contextSelects(),
+      [],
+      [],
+      [],
+    ])
+
+    const summary = await runSuggestionSweep(handle, { suggest: okSuggest, now: new Date('2026-09-19T00:00:00Z') })
+
+    expect(summary.eligible).toBe(1)
+    expect(JSON.stringify(inserts.find(i => i.table === schema.taskSuggestions)?.values)).toContain('org-e')
+  })
+
+  it('leaves the org empty when the guests span two clients', async () => {
+    const { handle, inserts } = makeDb([
+      [TRANSCRIPT_ROW],
+      [{ orgId: null, meetingType: 'client', dealId: null, attendees: JSON.stringify([{ email: 'a@one.com' }, { email: 'b@two.com' }]) }],
+      [{ orgId: 'org-a', email: 'a@one.com' }, { orgId: 'org-b', email: 'b@two.com' }],
+      ...contextSelects().slice(0, 2),
+      [],
+      [],
+      [],
+    ])
+
+    const summary = await runSuggestionSweep(handle, { suggest: okSuggest, now: new Date('2026-09-19T00:00:00Z') })
+
+    expect(summary.eligible).toBe(1)
+    expect(JSON.stringify(inserts.find(i => i.table === schema.taskSuggestions)?.values)).not.toContain('org-a')
+  })
+
+  it('repairs pending suggestions that were written without an org', async () => {
+    const { handle, updates } = makeDb([
+      [],                                   // no transcripts waiting
+      [],                                   // resurfaceSnoozed: nothing due
+      [{ id: 'sug-1', callKind: 'discovery', callId: 'call-1', kind: 'create_task', proposal: JSON.stringify({ title: 'Send headers', orgId: null }) }],
+      [{ orgId: null, meetingType: 'client', dealId: 'deal-1', attendees: '[]' }],
+      [{ orgId: 'org-9' }],
+    ])
+
+    const summary = await runSuggestionSweep(handle, { suggest: okSuggest, now: new Date('2026-09-19T00:00:00Z') })
+
+    expect(summary.repaired).toBe(1)
+    const fix = updates.find(u => u.table === schema.taskSuggestions)
+    expect(fix).toBeTruthy()
+    const set = fix!.set as { orgId: string; proposal: string }
+    expect(set.orgId).toBe('org-9')
+    expect(JSON.parse(set.proposal)).toMatchObject({ title: 'Send headers', orgId: 'org-9' })
+  })
+
   it('lets a discovery call through on meeting_type client even with no org', async () => {
     const { handle } = makeDb([
       [TRANSCRIPT_ROW],

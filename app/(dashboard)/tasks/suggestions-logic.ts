@@ -75,6 +75,13 @@ export function suggestionKindLabel(kind: TaskSuggestionKind): string {
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
+  if (typeof value === 'string') {
+    try {
+      return asRecord(JSON.parse(value))
+    } catch {
+      return {}
+    }
+  }
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
 

@@ -1,16 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  groupSuggestionsByCall,
-  suggestionKindLabel,
-  summariseProposal,
-  confidenceLabel,
-  suggestionKeyAction,
-  buildApproveRequest,
-  buildRejectRequest,
-  buildSnoozeRequest,
-  createProposalToTaskFields,
-  taskFieldsToCreateProposal,
-} from '../suggestions-logic'
+import { groupSuggestionsByCall, suggestionKindLabel, summariseProposal, confidenceLabel, suggestionKeyAction, buildApproveRequest, buildRejectRequest, buildSnoozeRequest, createProposalToTaskFields, taskFieldsToCreateProposal } from '../suggestions-logic'
 import type { DecoratedSuggestion, CreateTaskProposal } from '../suggestions-types'
 import type { TaskFields } from '@/lib/task-wizard-drafts'
 
@@ -206,5 +195,11 @@ describe('create_task proposal <-> TaskFields', () => {
     const edited: TaskFields = { ...fields, dueDate: '2026-09-25' }
     const rebuilt = taskFieldsToCreateProposal(edited)
     expect(buildApproveRequest(rebuilt)).toEqual({ action: 'approve', proposal: rebuilt })
+  })
+})
+
+describe('summariseProposal with a stored JSON string', () => {
+  it('reads the title out of the string the route hands over', () => {
+    expect(summariseProposal('create_task', JSON.stringify({ title: 'Send header examples to Staci' }))).toContain('Send header examples to Staci')
   })
 })

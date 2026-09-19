@@ -102,7 +102,9 @@ export interface SuggestionRow {
 }
 
 /** A row with the names a reader needs, resolved once on the server. */
-export interface DecoratedSuggestion extends SuggestionRow {
+export interface DecoratedSuggestion extends Omit<SuggestionRow, 'proposal'> {
+  /** The stored JSON, parsed once at the boundary so readers see the shapes in the contract. */
+  proposal: unknown
   callTitle: string | null
   callScheduledAt: string | null
   orgName: string | null
@@ -405,6 +407,15 @@ export async function countSuggestions(
   }
 }
 
+/** The stored JSON as an object; unreadable text stays a string so nothing crashes on it. */
+function parseProposalLoose(proposal: string): unknown {
+  try {
+    return JSON.parse(proposal)
+  } catch {
+    return proposal
+  }
+}
+
 async function decorate(drizzle: Drizzle, rows: SuggestionRow[]): Promise<DecoratedSuggestion[]> {
   if (rows.length === 0) return []
 
@@ -452,6 +463,7 @@ async function decorate(drizzle: Drizzle, rows: SuggestionRow[]): Promise<Decora
     const task = row.targetTaskId ? tasks.get(row.targetTaskId) ?? null : null
     return {
       ...row,
+      proposal: parseProposalLoose(row.proposal),
       callTitle: call?.title ?? null,
       callScheduledAt: call?.scheduledAt ?? null,
       orgName: row.orgId ? orgNames.get(row.orgId) ?? null : null,

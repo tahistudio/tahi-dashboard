@@ -29,7 +29,7 @@
  * be unit tested is a scheduled job that quietly bills for nothing.
  */
 
-import { and, asc, desc, eq, gte, isNotNull, isNull, ne, or } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm'
 import { schema } from '@/db/d1'
 import { SONNET_MODEL } from '@/lib/ai-models'
 import { recordCost } from '@/lib/ai-cost'
@@ -576,6 +576,8 @@ export interface SweepSummary {
   dropped: number
   resurfaced: number
   costCents: number
+  /** Pending rows that had no org and gained one through the deal or attendee lookup. */
+  repaired: number
 }
 
 export interface SweepOptions {
@@ -613,6 +615,7 @@ export async function runSuggestionSweep(
     dropped: 0,
     resurfaced: 0,
     costCents: 0,
+    repaired: 0,
   }
 
   const transcripts = await database
@@ -707,13 +710,69 @@ export async function runSuggestionSweep(
   }
 
   summary.resurfaced = await resurfaceSnoozed(database, new Date(nowIso))
+  summary.repaired = await repairOrglessSuggestions(database, nowIso)
 
   return summary
 }
 
 type Gate =
-  | { eligible: true; orgId: string | null }
+  | { eligible: true; orgId: string | null; orgVia: 'call' | 'deal' | 'attendees' | null }
   | { eligible: false; reason: string }
+
+/** The attendee emails on a discovery call, lower-cased, studio addresses dropped. */
+function attendeeEmails(attendees: string | null): string[] {
+  if (!attendees) return []
+  try {
+    const parsed: unknown = JSON.parse(attendees)
+    if (!Array.isArray(parsed)) return []
+    const out = new Set<string>()
+    for (const a of parsed) {
+      const email = a && typeof a === 'object' && typeof (a as { email?: unknown }).email === 'string'
+        ? (a as { email: string }).email.trim().toLowerCase()
+        : ''
+      if (email && !email.endsWith('@tahi.studio')) out.add(email)
+    }
+    return [...out]
+  } catch {
+    return []
+  }
+}
+
+/**
+ * A discovery call the calendar sync labelled 'client' by its title usually
+ * carries no org_id: the sync links a parent only when it can match a lead,
+ * org or deal, and a client check-in matches none of those. The org is still
+ * knowable: through the deal the call belongs to, or through the guests, who
+ * are contacts at exactly one organisation. Either gives the suggester the
+ * client's open tasks and gives every proposal a client to land on.
+ */
+async function resolveDiscoveryOrg(
+  database: Drizzle,
+  call: { orgId: string | null; dealId: string | null; attendees: string | null },
+): Promise<{ orgId: string | null; via: 'call' | 'deal' | 'attendees' | null }> {
+  if (call.orgId) return { orgId: call.orgId, via: 'call' }
+
+  if (call.dealId) {
+    const [deal] = await database
+      .select({ orgId: schema.deals.orgId })
+      .from(schema.deals)
+      .where(eq(schema.deals.id, call.dealId))
+      .limit(1)
+    if (deal?.orgId) return { orgId: deal.orgId, via: 'deal' }
+  }
+
+  const emails = attendeeEmails(call.attendees)
+  if (emails.length > 0) {
+    const rows = await database
+      .select({ orgId: schema.contacts.orgId, email: schema.contacts.email })
+      .from(schema.contacts)
+      .where(inArray(sql`lower(${schema.contacts.email})`, emails))
+    const orgs = new Set(rows.map(r => r.orgId).filter((v): v is string => typeof v === 'string' && v.length > 0))
+    if (orgs.size === 1) return { orgId: [...orgs][0], via: 'attendees' }
+  }
+
+  return { orgId: null, via: null }
+}
 
 /**
  * The gate: a call has to belong to a client before its notes can propose
@@ -739,19 +798,83 @@ async function resolveCallGate(
       .where(eq(schema.scheduledCalls.id, callId))
       .limit(1)
     if (!call) return { eligible: false, reason: 'call_not_found' }
-    return { eligible: true, orgId: call.orgId }
+    return { eligible: true, orgId: call.orgId, orgVia: call.orgId ? 'call' : null }
   }
 
   const [call] = await database
-    .select({ orgId: schema.discoveryCalls.orgId, meetingType: schema.discoveryCalls.meetingType })
+    .select({
+      orgId: schema.discoveryCalls.orgId,
+      meetingType: schema.discoveryCalls.meetingType,
+      dealId: schema.discoveryCalls.dealId,
+      attendees: schema.discoveryCalls.attendees,
+    })
     .from(schema.discoveryCalls)
     .where(eq(schema.discoveryCalls.id, callId))
     .limit(1)
 
   if (!call) return { eligible: false, reason: 'call_not_found' }
-  if (call.orgId) return { eligible: true, orgId: call.orgId }
-  if (call.meetingType === 'client') return { eligible: true, orgId: null }
+  const resolved = await resolveDiscoveryOrg(database, {
+    orgId: call.orgId,
+    dealId: call.dealId ?? null,
+    attendees: call.attendees ?? null,
+  })
+  if (resolved.orgId) return { eligible: true, orgId: resolved.orgId, orgVia: resolved.via }
+  if (call.meetingType === 'client') return { eligible: true, orgId: null, orgVia: null }
   return { eligible: false, reason: 'no_client_org' }
+}
+
+const REPAIR_BATCH = 50
+
+/**
+ * Pending suggestions written before their call's org could be resolved (or
+ * before the resolver existed) gain the org on the next pass, so the inbox
+ * shows the client and an approved task lands on it. Bounded, idempotent, and
+ * silent on rows the resolver still cannot place.
+ */
+async function repairOrglessSuggestions(database: Drizzle, nowIso: string): Promise<number> {
+  const rows = await database
+    .select({
+      id: schema.taskSuggestions.id,
+      callKind: schema.taskSuggestions.callKind,
+      callId: schema.taskSuggestions.callId,
+      kind: schema.taskSuggestions.kind,
+      proposal: schema.taskSuggestions.proposal,
+    })
+    .from(schema.taskSuggestions)
+    .where(and(
+      eq(schema.taskSuggestions.status, 'pending'),
+      isNull(schema.taskSuggestions.orgId),
+      isNotNull(schema.taskSuggestions.callId),
+    ))
+    .limit(REPAIR_BATCH)
+
+  let repaired = 0
+  const byCall = new Map<string, string | null>()
+  for (const row of rows) {
+    const key = `${row.callKind ?? ''}:${row.callId ?? ''}`
+    let orgId = byCall.get(key)
+    if (orgId === undefined) {
+      const gate = await resolveCallGate(database, row.callKind, row.callId)
+      orgId = gate.eligible ? gate.orgId : null
+      byCall.set(key, orgId)
+    }
+    if (!orgId) continue
+
+    const updates: Record<string, unknown> = { orgId, updatedAt: nowIso }
+    if (row.kind === 'create_task') {
+      try {
+        const proposal: unknown = JSON.parse(row.proposal)
+        if (proposal && typeof proposal === 'object' && !Array.isArray(proposal)) {
+          updates.proposal = JSON.stringify({ ...(proposal as Record<string, unknown>), orgId })
+        }
+      } catch {
+        // An unreadable proposal keeps its text; the org still lands on the row.
+      }
+    }
+    await database.update(schema.taskSuggestions).set(updates).where(eq(schema.taskSuggestions.id, row.id))
+    repaired++
+  }
+  return repaired
 }
 
 async function stamp(database: Drizzle, transcriptId: string, at: string): Promise<void> {
