@@ -8,14 +8,22 @@ import {
   buildApproveRequest,
   buildRejectRequest,
   buildSnoozeRequest,
+  buildAttachRequest,
   createProposalToTaskFields,
   taskFieldsToCreateProposal,
   targetRequestLine,
   handOffNeedsContact,
   createRequestProposalToInitialDraft,
   initialDraftToCreateRequestProposal,
+  similarMatchLine,
+  similarOverflowLabel,
+  canAttachBestMatch,
+  attachButtonLabel,
+  needsApproveConfirm,
+  bestMatchTarget,
+  SIMILAR_BLOCK,
 } from '../suggestions-logic'
-import type { DecoratedSuggestion, CreateTaskProposal, CreateRequestProposal } from '../suggestions-types'
+import type { DecoratedSuggestion, CreateTaskProposal, CreateRequestProposal, SimilarMatch } from '../suggestions-types'
 import type { TaskFields } from '@/lib/task-wizard-drafts'
 
 function row(overrides: Partial<DecoratedSuggestion> = {}): DecoratedSuggestion {
@@ -45,6 +53,7 @@ function row(overrides: Partial<DecoratedSuggestion> = {}): DecoratedSuggestion 
     targetRequestNumber: null,
     targetRequestTitle: null,
     targetRequestStatus: null,
+    similar: [],
     ...overrides,
   }
 }
@@ -319,5 +328,103 @@ describe('create_request proposal <-> RequestInitialDraft', () => {
 describe('summariseProposal with a stored JSON string', () => {
   it('reads the title out of the string the route hands over', () => {
     expect(summariseProposal('create_task', JSON.stringify({ title: 'Send header examples to Staci' }))).toContain('Send header examples to Staci')
+  })
+})
+
+describe('the duplicate guard (CN.1d contract sections 2 and 5)', () => {
+  const requestMatch: SimilarMatch = { kind: 'request', id: 'r1', number: 226, title: 'Design directions', status: 'open', score: 0.71 }
+  const taskMatch: SimilarMatch = { kind: 'task', id: 't1', number: null, title: 'Rework the homepage hero', status: 'todo', score: 0.9 }
+  const suggestionMatch: SimilarMatch = { kind: 'suggestion', id: 's2', number: null, title: 'Add LinkedIn insight tag', status: 'pending', score: 0.85 }
+
+  describe('similarMatchLine', () => {
+    it('reads "Looks like #<number> <title> (<status>, <pct>%)" for a request match', () => {
+      expect(similarMatchLine([requestMatch])).toBe('Looks like #226 Design directions (open, 71%)')
+    })
+
+    it('drops the number when the best match has none', () => {
+      expect(similarMatchLine([taskMatch])).toBe('Looks like Rework the homepage hero (todo, 90%)')
+    })
+
+    it('is null with no matches', () => {
+      expect(similarMatchLine([])).toBeNull()
+    })
+  })
+
+  describe('similarOverflowLabel', () => {
+    it('is null with one match or none', () => {
+      expect(similarOverflowLabel([])).toBeNull()
+      expect(similarOverflowLabel([requestMatch])).toBeNull()
+    })
+
+    it('counts everything behind the best match', () => {
+      expect(similarOverflowLabel([requestMatch, taskMatch])).toBe('and 1 more')
+      expect(similarOverflowLabel([requestMatch, taskMatch, suggestionMatch])).toBe('and 2 more')
+    })
+  })
+
+  describe('canAttachBestMatch and attachButtonLabel', () => {
+    it('can attach to a request or task match', () => {
+      expect(canAttachBestMatch([requestMatch])).toBe(true)
+      expect(canAttachBestMatch([taskMatch])).toBe(true)
+      expect(attachButtonLabel([requestMatch])).toBe('Use #226 instead')
+      expect(attachButtonLabel([taskMatch])).toBe('Use "Rework the homepage hero" instead')
+    })
+
+    it('cannot attach to another pending suggestion', () => {
+      expect(canAttachBestMatch([suggestionMatch])).toBe(false)
+      expect(attachButtonLabel([suggestionMatch])).toBeNull()
+    })
+
+    it('is null and false with no matches', () => {
+      expect(canAttachBestMatch([])).toBe(false)
+      expect(attachButtonLabel([])).toBeNull()
+    })
+  })
+
+  describe('bestMatchTarget', () => {
+    it('reads the kind and id off the best match', () => {
+      expect(bestMatchTarget([requestMatch])).toEqual({ kind: 'request', id: 'r1' })
+      expect(bestMatchTarget([taskMatch])).toEqual({ kind: 'task', id: 't1' })
+    })
+
+    it('is null for a suggestion match or no matches', () => {
+      expect(bestMatchTarget([suggestionMatch])).toBeNull()
+      expect(bestMatchTarget([])).toBeNull()
+    })
+  })
+
+  describe('needsApproveConfirm', () => {
+    it('is false under SIMILAR_BLOCK', () => {
+      expect(needsApproveConfirm([requestMatch])).toBe(false)
+    })
+
+    it('is true at or above SIMILAR_BLOCK', () => {
+      expect(needsApproveConfirm([taskMatch])).toBe(true)
+      expect(needsApproveConfirm([{ ...requestMatch, score: SIMILAR_BLOCK }])).toBe(true)
+    })
+
+    it('is false with no matches', () => {
+      expect(needsApproveConfirm([])).toBe(false)
+    })
+  })
+
+  describe('buildApproveRequest with force', () => {
+    it('omits force when not asked for', () => {
+      expect(buildApproveRequest()).toEqual({ action: 'approve' })
+      expect(buildApproveRequest(undefined, false)).toEqual({ action: 'approve' })
+    })
+
+    it('sends force: true only once confirmed, alongside a proposal override or not', () => {
+      expect(buildApproveRequest(undefined, true)).toEqual({ action: 'approve', force: true })
+      const proposal = { title: 'Edited title' }
+      expect(buildApproveRequest(proposal, true)).toEqual({ action: 'approve', proposal, force: true })
+    })
+  })
+
+  describe('buildAttachRequest', () => {
+    it('sends action attach with the picked target', () => {
+      expect(buildAttachRequest({ kind: 'request', id: 'r1' })).toEqual({ action: 'attach', target: { kind: 'request', id: 'r1' } })
+      expect(buildAttachRequest({ kind: 'task', id: 't1' })).toEqual({ action: 'attach', target: { kind: 'task', id: 't1' } })
+    })
   })
 })

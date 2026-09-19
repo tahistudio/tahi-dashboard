@@ -3,10 +3,14 @@
  * (docs/superpowers/plans/2026-09-19-cn1-build-contract.md, sections 1, 2
  * and 3) plus the four request kinds CN.1b adds
  * (docs/superpowers/plans/2026-09-19-cn1b-requests-contract.md, sections 1
- * and 2). Slice R1 owns the real table, routes and DecoratedSuggestion type;
- * this file exists so the Suggestions view can be built and tested against
- * the contract before R1's code lands in the same tree. The lead swaps this
- * file's import sites for R1's own export at merge, if the two drift.
+ * and 2) plus the duplicate-guard fields CN.1d adds
+ * (docs/superpowers/plans/2026-09-19-cn1d-duplicate-guard-contract.md,
+ * sections 2 and 3). Slice R1 owns the real table, routes and
+ * DecoratedSuggestion type, and slice D1 owns the similar decoration and the
+ * possible_duplicate error; this file exists so the Suggestions view can be
+ * built and tested against the contract before that code lands in the same
+ * tree. The lead swaps this file's import sites for the real export at
+ * merge, if the two drift.
  */
 
 export type TaskSuggestionKind =
@@ -128,9 +132,22 @@ export type TaskSuggestionProposal =
   | RequestNoteProposal
   | HandOffRequestProposal
 
+/** A close match against something that already exists, or against another
+ *  pending suggestion proposing the same thing (CN.1d contract section 2).
+ *  'suggestion' matches carry no number, they are not created yet. */
+export interface SimilarMatch {
+  kind: 'request' | 'task' | 'suggestion'
+  id: string
+  number: number | null
+  title: string
+  status: string
+  score: number
+}
+
 /** The row shape GET /api/admin/task-suggestions returns: the table row plus
  *  the decorations listSuggestions() adds (CN.1 contract section 3, request
- *  target decorations added by CN.1b contract section 1). */
+ *  target decorations added by CN.1b contract section 1, similar added by
+ *  CN.1d contract section 2). */
 export interface DecoratedSuggestion {
   id: string
   orgId: string | null
@@ -161,6 +178,10 @@ export interface DecoratedSuggestion {
   targetRequestNumber: number | null
   targetRequestTitle: string | null
   targetRequestStatus: string | null
+  /** Only populated for create_request and create_task rows; empty for
+   *  every other kind (CN.1d contract section 2). Best match first, at
+   *  most 3. */
+  similar: SimilarMatch[]
 }
 
 export interface TaskSuggestionsResponse {
@@ -176,8 +197,16 @@ export interface DecideSuggestionResponse {
   appliedTaskId?: string
   appliedRequestId?: string
   /** 'contact_required': a hand_off_request approved with no contactId,
-   *  resolved or picked. changed is false alongside this. */
+   *  resolved or picked. 'possible_duplicate': approve on a create_request
+   *  or create_task scored at or above SIMILAR_BLOCK against a live row and
+   *  the decision did not carry force: true. changed is false alongside
+   *  either. */
   error?: string
+  /** Set alongside a 'possible_duplicate' error: the same shape
+   *  DecoratedSuggestion.similar carries, so the row can render the same
+   *  choices even if it had not already shown a warning (CN.1d contract
+   *  section 5). */
+  similar?: SimilarMatch[]
 }
 
 export interface DecideBulkResultItem {

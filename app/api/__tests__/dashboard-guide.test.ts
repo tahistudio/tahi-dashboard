@@ -58,6 +58,15 @@ describe('GUIDE_SECTIONS', () => {
   })
 })
 
+describe('suggestions-from-calls names the duplicate guard (CN.1d contract section 5)', () => {
+  it('says a new task or request is checked against what already exists, and names the fallback verbs', () => {
+    const section = getGuideSection('suggestions-from-calls')
+    if (!section) throw new Error('suggestions-from-calls section is missing from GUIDE_SECTIONS')
+    expect(section.body).toContain('checked against what already exists')
+    expect(section.body).toContain('Approve anyway')
+  })
+})
+
 describe('guideSectionsFor', () => {
   it('gives the client audience only sections marked client or both', () => {
     const clientSections = guideSectionsFor('client')

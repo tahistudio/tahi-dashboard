@@ -153,6 +153,7 @@ export const GUIDE_SECTIONS: ReadonlyArray<GuideSection> = [
       '- **Tweak** opens it for editing first; saving approves the edited version.\n' +
       '- **Snooze** (tonight or this week) brings it back later.\n' +
       '- **Reject** dismisses it.\n\n' +
+      'A new task or request is checked against what already exists before anything is created. A close match shows on the row with a "Use it instead" button, which attaches the suggestion to that existing item as a note rather than creating a copy. A very close match asks for a second confirm, and Approve reads "Approve anyway" until that confirm is given.\n\n' +
       'An applied suggestion posts as "Tahi bot" in the task\'s own thread, with the quote it came from, so it never reads as something Liam or Staci typed themselves.',
   },
 ]
