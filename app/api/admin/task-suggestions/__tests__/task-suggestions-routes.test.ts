@@ -211,7 +211,7 @@ describe('POST /api/admin/task-suggestions/[id]/decide', () => {
     expect(decisions).toHaveLength(0)
   })
 
-  it('400s an action outside the three', async () => {
+  it('400s an action outside the four', async () => {
     const res = await DECIDE(req('http://localhost/x', { method: 'POST', body: { action: 'delete' } }) as never, params('s1'))
     expect(res.status).toBe(400)
   })
