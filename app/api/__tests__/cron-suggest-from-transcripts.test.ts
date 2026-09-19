@@ -38,6 +38,7 @@ const SUMMARY = {
   resurfaced: 0,
   costCents: 4,
   repaired: 0,
+    dropReasons: {},
 }
 
 function post(headers: Record<string, string> = {}, query = '') {

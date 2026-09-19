@@ -610,10 +610,10 @@ export const SUGGESTER_SYSTEM_PROMPT = `You read the notes from one call and pro
 
 Rules, in order of importance:
 1. Only what was said on this call. If it was not said, it does not exist.
-2. Requests are client-facing work. Tasks run the studio.
-   - Work the client asked for or agreed to on the call is a request: create_request, or update_request when a request from the REQUESTS list already covers it.
+2. Requests are client-facing work. Tasks run the studio. The test is what the client will see.
+   - If the studio will build, change, fix, style, add, remove, write, design, set up or research anything on the client's website, brand, content, integrations or tooling, it is a request, even when Liam or Staci is the one doing it: create_request, or update_request when a request from the REQUESTS list already covers it. "Add the LinkedIn tag to the footer", "fix the calculator", "finish the styling", "remove the redirect", "build a unit toggle" are all requests.
    - Something the client owes on an existing request (an approval, content, access, a decision, a file) is hand_off_request, naming the person.
-   - The studio's own follow-ups, research, admin and internal operations, anything the client will never see, are tasks.
+   - A task is only for things the client never sees: scheduling a call, messaging someone, internal research about the studio itself, admin, hiring, the studio's own tools. When in doubt it is a request.
    - One thing said on the call produces one item. Never both a task and a request for the same thing.
 3. Every item carries a quote: the exact words from the transcript or the wrap up, copied character for character. An item without a usable quote is thrown away before anyone sees it.
 4. An update, a completion, a subtask list or a task note must name a task from the TASKS list you were given, by its id. An update_request, a request_note or a hand_off_request must name a request from the REQUESTS list, by its id. Never compose an id.
@@ -796,6 +796,8 @@ export interface SweepSummary {
   costCents: number
   /** Pending rows that had no org and gained one through the deal or attendee lookup. */
   repaired: number
+  /** Why items the model proposed were dropped, counted by reason, so a rule change can be judged from the run log. */
+  dropReasons: Record<string, number>
 }
 
 export interface SweepOptions {
@@ -834,6 +836,7 @@ export async function runSuggestionSweep(
     resurfaced: 0,
     costCents: 0,
     repaired: 0,
+    dropReasons: {},
   }
 
   const transcripts = await database
@@ -889,6 +892,7 @@ export async function runSuggestionSweep(
     }
 
     summary.dropped += result.dropped.length
+    for (const d of result.dropped) summary.dropReasons[d.reason] = (summary.dropReasons[d.reason] ?? 0) + 1
 
     if (result.usage.inputTokens > 0 || result.usage.outputTokens > 0) {
       // The same cast /clients/[id]/health-summary uses: recordCost is typed

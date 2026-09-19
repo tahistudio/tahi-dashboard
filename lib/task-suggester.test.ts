@@ -371,6 +371,12 @@ const validateRequestItems = (items: unknown[]) =>
   validateSuggestionItems(items, { source: REQUEST_TRANSCRIPT, context: CONTEXT })
 
 describe('the system prompt', () => {
+  it('sends work on the client site to requests and keeps tasks for what the client never sees', () => {
+    expect(SUGGESTER_SYSTEM_PROMPT).toContain('The test is what the client will see')
+    expect(SUGGESTER_SYSTEM_PROMPT).toContain('even when Liam or Staci is the one doing it')
+    expect(SUGGESTER_SYSTEM_PROMPT).toContain('When in doubt it is a request')
+  })
+
   it('prints the request vocabulary rather than repeating it by hand', () => {
     for (const category of REQUEST_CATEGORIES) expect(SUGGESTER_SYSTEM_PROMPT).toContain(`"${category}"`)
     for (const type of REQUEST_TYPES) expect(SUGGESTER_SYSTEM_PROMPT).toContain(`"${type}"`)
