@@ -73,6 +73,13 @@ const CRONS: CronDef[] = [
     schedule: 'Every 30 min',
   },
   {
+    cron: 'suggest-from-transcripts',
+    label: 'Task suggestions from call notes',
+    description: 'Reads the call transcripts nobody has read yet, asks Sonnet what the call changed, and writes task_suggestions for approval. Never applies anything. Gate: the call must belong to a client. Every transcript it looks at is stamped so nothing is read twice.',
+    endpoint: '/api/admin/crons/suggest-from-transcripts',
+    schedule: 'Every 30 min',
+  },
+  {
     cron: 'sync-airwallex',
     label: 'Airwallex bank sync',
     description: 'Pulls current account balances + the last 30 days of transactions from Airwallex. Powers the disposable-cash strip + reconciliation on /financial-reports.',

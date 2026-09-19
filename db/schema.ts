@@ -2084,6 +2084,11 @@ export const callTranscripts = sqliteTable('call_transcripts', {
   wrapUp: text('wrap_up'),
   matchedBy: text('matched_by'),
   unlinkedReason: text('unlinked_reason'),
+  // The suggester's high-water mark (migration 0108). Stamped on EVERY
+  // transcript the sweep has looked at, including the ones it skipped and the
+  // ones the model failed on, so nothing is read, and paid for, twice. Null
+  // means "never looked at"; that is the only thing the sweep selects on.
+  suggestedAt: text('suggested_at'),
   createdAt: text('created_at')
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
@@ -2095,66 +2100,7 @@ export const callTranscripts = sqliteTable('call_transcripts', {
 
 // ============================================================
 // TASK SUGGESTIONS (the approval gate, call notes to tasks Phase 1)
-// ============================================================
-//
-// One row per thing a call said should happen to a task, held until a founder
-// approves it. Nothing a model reads out of a transcript ever reaches a task
-// on its own: the suggester writes here, the /tasks Suggestions view and
-// (Phase 2) Slack read the same rows, and one decision is recorded once
-// wherever it was made.
-//
-// Every writer goes through lib/task-suggestions.ts, and applying one goes
-// through lib/task-writes.ts, which is the same code the task routes use.
-
-export const taskSuggestions = sqliteTable('task_suggestions', {
-  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  // Null means studio housekeeping, open to every admin, exactly as a task
-  // with no client is (lib/task-access.ts#guardTask).
-  orgId: text('org_id'),
-  // 'call' in this phase; later 'note' | 'voice' | 'slack'.
-  sourceKind: text('source_kind').notNull(),
-  transcriptId: text('transcript_id'),
-  // 'discovery' | 'scheduled'. Polymorphic across two tables, so no
-  // REFERENCES on callId, the same rule call_transcripts already follows.
-  callKind: text('call_kind'),
-  callId: text('call_id'),
-  // create_task | update_task | complete_task | add_subtasks | note
-  kind: text('kind').notNull(),
-  // Required for every kind but create_task. No REFERENCES: a suggestion
-  // outlives the task it named rather than vanishing with it.
-  targetTaskId: text('target_task_id'),
-  // JSON, shaped per kind. See lib/task-suggestions.ts.
-  proposal: text('proposal').notNull(),
-  // The verbatim transcript or wrap-up lines this rests on. A suggestion
-  // without one is dropped before it ever reaches this table.
-  quote: text('quote').notNull(),
-  rationale: text('rationale'),
-  // 0 to 1.
-  confidence: real('confidence'),
-  // pending | snoozed | applied | rejected | expired | failed
-  status: text('status').notNull().default('pending'),
-  snoozeUntil: text('snooze_until'),
-  // Who may decide: 'founders' for a call, 'member' for somebody's own note,
-  // 'contact' for a client's own draft (Phase 2). approverId is null for the
-  // founder pair, which is a fixed audience rather than one row.
-  approverType: text('approver_type').notNull().default('founders'),
-  approverId: text('approver_id'),
-  decidedById: text('decided_by_id'),
-  // dashboard | slack | mcp
-  decidedVia: text('decided_via'),
-  decidedAt: text('decided_at'),
-  appliedAt: text('applied_at'),
-  // The task created, or the target task.
-  appliedTaskId: text('applied_task_id'),
-  // Why a failed apply failed, so it can be read rather than guessed at.
-  applyError: text('apply_error'),
-  // sha-256 of the source, the kind, the target and the normalised title or
-  // diff. Its UNIQUE index is what makes a second run over the same
-  // transcript insert nothing.
-  dedupeKey: text('dedupe_key').notNull(),
-  // Written in Phase 2, so a dashboard decision can rewrite the Slack
-  // message in place.
-  slackChannelId: text('slack_channel_id'),
+// =====================================================  slackChannelId: text('slack_channel_id'),
   slackMessageTs: text('slack_message_ts'),
   ...timestamps,
 }, (table) => [

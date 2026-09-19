@@ -1,0 +1,30 @@
+-- Migration 0108: call_transcripts.suggested_at, the suggester's high-water mark.
+--
+-- Phase 1 of "call notes to tasks". The suggester sweep reads transcripts that
+-- have landed, asks Sonnet for task suggestions and writes task_suggestions
+-- rows (migration 0107). Without a mark on the transcript itself there is no
+-- honest answer to "have I already read this one": task_suggestions only
+-- records the transcripts that PRODUCED something, so a call that legitimately
+-- yielded nothing, or one the gate skipped, or one the model failed on, would
+-- be re-read and re-paid-for on every run, forever.
+--
+-- So the column is stamped on EVERY transcript the sweep has looked at, not
+-- only the ones it wrote suggestions from:
+--
+--   * eligible and suggested   stamped after the insert
+--   * skipped by the gate      stamped with nothing written (no client org
+--                              and not a 'client' meeting: a pure sales call
+--                              has no delivery tasks to propose)
+--   * the model call failed    stamped too, deliberately. Re-reading a
+--                              transcript that broke the model once, every
+--                              thirty minutes, is the more expensive mistake;
+--                              a human clears the column to retry one.
+--
+-- NULL therefore means exactly one thing, "never looked at", which is the only
+-- predicate the sweep selects on (plus call_id NOT NULL and a 30 day window).
+--
+-- Nullable and additive; the duplicate-column error is swallowed by the runner
+-- so re-running is safe. Apply BEFORE deploying: the sweep selects and sets
+-- this column directly, and Drizzle expands a bare select() into an explicit
+-- column list, so reads over call_transcripts fail without it.
+ALTER TABLE call_transcripts ADD COLUMN suggested_at text;
