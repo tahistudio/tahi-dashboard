@@ -52,8 +52,14 @@ export const RATE_CARD = {
 export type Provider = keyof typeof RATE_CARD
 /** `wizard` is the AI task and request wizards. It is scoped separately from
  *  the content pipeline so wizard spend can be read next to content spend
- *  rather than hiding inside it. */
-export type Scope = 'draft' | 'ideation' | 'backfill' | 'links' | 'health' | 'site_index' | 'sitemap' | 'wizard'
+ *  rather than hiding inside it.
+ *
+ *  `call_suggestions` is the transcript suggester (call notes to tasks,
+ *  Phase 1). Same reasoning, one step further: it is the only scope that
+ *  spends money on a schedule with nobody watching, so it has to be readable
+ *  on its own line. Its `scopeId` is the call_transcripts row, which is what
+ *  makes "what did reading this call cost" answerable. */
+export type Scope = 'draft' | 'ideation' | 'backfill' | 'links' | 'health' | 'site_index' | 'sitemap' | 'wizard' | 'call_suggestions'
 
 export interface CostInput {
   scope: Scope

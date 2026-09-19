@@ -2082,6 +2082,11 @@ export const callTranscripts = sqliteTable('call_transcripts', {
   wrapUp: text('wrap_up'),
   matchedBy: text('matched_by'),
   unlinkedReason: text('unlinked_reason'),
+  // The suggester's high-water mark (migration 0108). Stamped on EVERY
+  // transcript the sweep has looked at, including the ones it skipped and the
+  // ones the model failed on, so nothing is read, and paid for, twice. Null
+  // means "never looked at"; that is the only thing the sweep selects on.
+  suggestedAt: text('suggested_at'),
   createdAt: text('created_at')
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
@@ -2089,6 +2094,70 @@ export const callTranscripts = sqliteTable('call_transcripts', {
   uniqueIndex('idx_call_transcripts_source_external').on(table.source, table.externalId),
   index('idx_call_transcripts_call').on(table.callKind, table.callId),
   index('idx_call_transcripts_received').on(table.receivedAt),
+])
+
+// ============================================================
+// TASK SUGGESTIONS (the gate between "something was said" and a task change)
+// ============================================================
+//
+// Phase 1 of "call notes to tasks". One table sits between every source (a
+// call transcript now, a note or a Slack message later) and every approval
+// surface (the /tasks inbox, an MCP connector, a Slack message later), so the
+// surfaces cannot disagree about what is waiting and nothing is ever applied
+// twice.
+//
+// Nothing here is ever auto applied. A row is a proposal with the words it
+// rests on: `quote` is verbatim transcript or wrap up text, and the suggester
+// drops any item whose quote it cannot find in the source. That is the only
+// thing that makes a suggestion checkable at a glance.
+//
+//   orgId          Null means studio housekeeping, open to every admin, the
+//                  same way a tahi_internal task with no org is.
+//   kind           'create_task' | 'update_task' | 'complete_task' |
+//                  'add_subtasks' | 'note'. Everything but create_task needs
+//                  a targetTaskId.
+//   proposal       JSON, shaped by kind (see the CN.1 build contract).
+//   status         'pending' | 'snoozed' | 'applied' | 'rejected' |
+//                  'expired' | 'failed'. A failed apply keeps applyError and
+//                  never throws back at the surface that asked.
+//   dedupeKey      sha-256 of source plus kind plus target plus the
+//                  normalised title or diff, UNIQUE, so a second sweep over
+//                  the same transcript inserts nothing new and a double
+//                  click cannot apply twice.
+//   slackChannelId / slackMessageTs  Written in Phase 2 so a Slack message
+//                  can be rewritten in place when the dashboard decides.
+export const taskSuggestions = sqliteTable('task_suggestions', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  orgId: text('org_id'),
+  sourceKind: text('source_kind').notNull(),
+  transcriptId: text('transcript_id'),
+  callKind: text('call_kind'),
+  callId: text('call_id'),
+  kind: text('kind').notNull(),
+  targetTaskId: text('target_task_id'),
+  proposal: text('proposal').notNull(),
+  quote: text('quote').notNull(),
+  rationale: text('rationale'),
+  confidence: real('confidence'),
+  status: text('status').notNull().default('pending'),
+  snoozeUntil: text('snooze_until'),
+  approverType: text('approver_type').notNull().default('founders'),
+  approverId: text('approver_id'),
+  decidedById: text('decided_by_id'),
+  decidedVia: text('decided_via'),
+  decidedAt: text('decided_at'),
+  appliedAt: text('applied_at'),
+  appliedTaskId: text('applied_task_id'),
+  applyError: text('apply_error'),
+  dedupeKey: text('dedupe_key').notNull(),
+  slackChannelId: text('slack_channel_id'),
+  slackMessageTs: text('slack_message_ts'),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('idx_task_suggestions_dedupe').on(table.dedupeKey),
+  index('idx_task_suggestions_status').on(table.status, table.createdAt),
+  index('idx_task_suggestions_transcript').on(table.transcriptId),
+  index('idx_task_suggestions_target_task').on(table.targetTaskId),
 ])
 
 // ============================================================
@@ -2542,6 +2611,8 @@ export type Contract = typeof contracts.$inferSelect
 export type NewContract = typeof contracts.$inferInsert
 export type CallTranscript = typeof callTranscripts.$inferSelect
 export type NewCallTranscript = typeof callTranscripts.$inferInsert
+export type TaskSuggestion = typeof taskSuggestions.$inferSelect
+export type NewTaskSuggestion = typeof taskSuggestions.$inferInsert
 export type ScheduledCall = typeof scheduledCalls.$inferSelect
 export type NewScheduledCall = typeof scheduledCalls.$inferInsert
 export type CaseStudySubmission = typeof caseStudySubmissions.$inferSelect

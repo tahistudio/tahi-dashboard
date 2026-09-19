@@ -186,6 +186,13 @@ export const ORG_SCOPED_TABLES: readonly OrgScopedTable[] = [
   // never counts against any organisation and is never in scope here either
   // way.
   { schemaKey: 'feedbackComments', table: 'feedback_comments', policy: 'delete' },
+  // AI proposals read off this client's call notes (migration 0107). 'delete',
+  // for the same reason as feedback_comments: a suggestion about work for a
+  // client who no longer exists has no independent value, and it is a proposal
+  // nobody approved rather than a record of anything that happened. Studio
+  // housekeeping suggestions carry org_id NULL, so they never count against an
+  // organisation and never block a cleanup.
+  { schemaKey: 'taskSuggestions', table: 'task_suggestions', policy: 'delete' },
 ]
 
 interface OrgTableHandle {

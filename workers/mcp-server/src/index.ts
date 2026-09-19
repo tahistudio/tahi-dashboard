@@ -1160,6 +1160,7 @@ export const TOOLS: ToolDef[] = [
   tool('cron_affiliate_reactivation', 'Finds affiliateCode values that haven\'t sent a lead in the last 60 days (default), pushes a reactivation notification for each. Capped at 5 notifications per run; 30-day dedup per code.'),
   tool('cron_pre_call_digest', 'Scans discovery_calls scheduled in the next 25-35 min window. For each: composes a pre-call brief (lead context + AI score + briefing + questions + sources) and emails to leads.preCallDigestEmail (default business@tahi.studio). Idempotent.'),
   tool('cron_delivery_watch', 'Delivery spine: scans active engagements and pushes a notification to the default owner for each client whose delivery rollup is off track (blocked / delayed / at_risk). One ping per off-track client per 23h.'),
+  tool('cron_suggest_from_transcripts', 'Call notes to tasks: reads the call transcripts nobody has read yet (at most 5, oldest first, last 30 days), asks Sonnet what the call changed, and writes task_suggestions rows for approval. Never applies anything. The gate: the call must belong to a client (an org on the call, or meeting_type client). Every transcript it looks at is stamped suggested_at, including skipped and failed ones, so nothing is read or paid for twice. Also returns snoozed suggestions whose time has come to pending.'),
 
   // ── Google Drive: Gemini transcript autopull ─────────────────────────
   tool('drive_sync_gemini_transcripts', 'Scan Google Drive for "Notes by Gemini" docs modified in the last N hours, parse the summary + transcript + next steps, and file each one as a call_transcripts row. Matches by parsed meeting time (within 2h) + attendee name in the call title or attendees JSON, scored across BOTH discovery_calls and scheduled_calls; a winner needs a 20 point lead or the notes are parked as unlinked for a human to attach. A discovery match also writes transcript + summary + outcome notes onto the call as before; a scheduled match writes the transcripts row only. Idempotent: already-synced calls are skipped and a re-read of the same doc updates its row. Returns { scanned, written, filed, parked, results }.', {
@@ -2644,6 +2645,8 @@ async function executeTool(
       return json(await apiWrite('/api/admin/cron/daily-summary', token, 'POST', {}))
     case 'cron_delivery_watch':
       return json(await apiWrite('/api/admin/cron/delivery-watch', token, 'POST', {}))
+    case 'cron_suggest_from_transcripts':
+      return json(await apiWrite('/api/admin/crons/suggest-from-transcripts', token, 'POST', {}))
     case 'cron_affiliate_reactivation':
       return json(await apiWrite('/api/admin/cron/affiliate-reactivation', token, 'POST', {}))
     case 'cron_pre_call_digest':

@@ -2348,6 +2348,13 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments(task_id)`,
     ],
   },
+  {
+    name: '0108',
+    description: `call_transcripts.suggested_at: the suggester sweep's high-water mark (call notes to tasks, Phase 1). task_suggestions (0107) only records the transcripts that PRODUCED something, so without a mark on the transcript itself a call that legitimately yielded nothing, one the gate skipped, or one the model failed on would be re-read and re-paid-for every thirty minutes forever. The column is therefore stamped on EVERY transcript the sweep has looked at: suggested ones after the insert, gate-skipped ones (no client org and meeting_type is not 'client', because a pure sales call has no delivery tasks to propose) with nothing written, and failed ones too, deliberately, since re-reading a transcript that broke the model once on every tick is the more expensive mistake and a human can clear the column to retry one. NULL means exactly one thing, "never looked at", which is the only predicate the sweep selects on alongside call_id NOT NULL and a 30 day window. Nullable and additive; the duplicate-column error is swallowed above so re-running is safe. Apply BEFORE deploying: POST /api/admin/crons/suggest-from-transcripts selects and sets this column directly and Drizzle expands a bare select() into an explicit column list.`,
+    statements: [
+      `ALTER TABLE call_transcripts ADD COLUMN suggested_at text`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

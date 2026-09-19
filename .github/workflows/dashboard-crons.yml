@@ -32,6 +32,12 @@ on:
     # for new "Notes by Gemini" docs and writes transcripts back to
     # matching discovery_calls rows.
     - cron: '7,37 * * * *'
+    # Task suggestions from call notes, every 30 min (offset 12, five
+    # minutes behind the Drive pull so a transcript that just landed is
+    # read on this tick rather than the next). At most 5 transcripts per
+    # run; every one it looks at is stamped suggested_at, so nothing is
+    # read, or paid for, twice.
+    - cron: '12,42 * * * *'
     # Pre-call digest — every 10 min. Fires the email 25-35 min before
     # each scheduled discovery call. Idempotent (dedup by call id).
     - cron: '*/10 * * * *'
@@ -102,6 +108,7 @@ on:
           - affiliate-reactivation
           - sync-calendar
           - sync-drive-transcripts
+          - suggest-from-transcripts
           - sync-airwallex
           - sync-xero
           - sync-stripe
@@ -138,6 +145,7 @@ jobs:
               "0 15 * * *")                      targets="sync-xero sync-stripe" ;;
               "2,17,32,47 * * * *")              targets="sync-calendar" ;;
               "7,37 * * * *")                    targets="sync-drive-transcripts" ;;
+              "12,42 * * * *")                   targets="suggest-from-transcripts" ;;
               "0 19 * * *"|"0 20 * * *")         targets="daily-summary ai-briefing overview-brief" ;;
               "0 19 * * MON")                    targets="affiliate-reactivation" ;;
               "0 18 * * *")                      targets="sync-airwallex snapshot-metrics" ;;
@@ -181,6 +189,10 @@ jobs:
             # /integrations/google/.
             case "$target" in
               sync-calendar|sync-drive-transcripts) url="$root/integrations/google/$target" ;;
+              # The suggester sits under /crons/ (plural), not /cron/, per
+              # the CN.1 build contract. Named explicitly so the default
+              # branch below cannot quietly 404 it.
+              suggest-from-transcripts)             url="$root/crons/$target" ;;
               sync-airwallex)                       url="$root/integrations/airwallex/sync" ;;
               ai-briefing)                          url="$root/ai/briefing/cron" ;;
               overview-brief)                       url="$root/overview/brief/refresh" ;;
