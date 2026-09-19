@@ -30,7 +30,11 @@ vi.mock('@/lib/server-auth', () => ({
 }))
 
 vi.mock('@/db/d1', () => ({
-  schema: { tasks: { __name: 'tasks' }, taskSubtasks: { __name: 'task_subtasks' } },
+  schema: {
+    tasks: { __name: 'tasks' },
+    taskSubtasks: { __name: 'task_subtasks' },
+    auditLog: { __name: 'audit_log' },
+  },
 }))
 
 vi.mock('@/lib/task-access', () => ({
@@ -156,13 +160,16 @@ describe('POST /api/admin/tasks', () => {
     deniedOrgIds = ['o2']
     const res = await POST(post({ title: 'x', orgId: 'o2' }) as never)
     expect(res.status).toBe(403)
-    expect(inserted).toHaveLength(1)
+    // The allowed call wrote one task; the denied one wrote none. Counted on
+    // the tasks table rather than on every insert, because the extraction into
+    // lib/task-writes.ts added an audit row beside each task.
+    expect(inserted.filter(i => i.table === 'tasks')).toHaveLength(1)
   })
 
   it('does not gate a task with no client', async () => {
     await POST(post({ title: 'Tidy the drive' }) as never)
     expect(accessChecked).toHaveLength(0)
-    expect(inserted).toHaveLength(1)
+    expect(inserted.filter(i => i.table === 'tasks')).toHaveLength(1)
   })
 
   it('accepts a valid status instead of always writing todo', async () => {
@@ -258,6 +265,20 @@ describe('POST /api/admin/tasks', () => {
     await POST(post({ title: 'Unassigned for now' }) as never)
     expect(notified).toHaveLength(0)
     expect(inserted[0].values.assigneeType).toBeNull()
+  })
+
+  it('leaves an audit trail, which this door never used to', async () => {
+    // Nothing in the tasks API wrote an audit_log row before the extraction
+    // into lib/task-writes.ts. Applying an approved call suggestion has to be
+    // traceable, and a trail that records only the automation would read as
+    // though the studio never touches its own tasks.
+    await POST(post({ title: 'Chase GA4', orgId: 'o1' }) as never)
+    const audit = inserted.find(i => i.table === 'audit_log')
+    expect(audit).toBeDefined()
+    expect(audit?.values.action).toBe('task.created')
+    expect(audit?.values.actorType).toBe('team_member')
+    expect(audit?.values.entityType).toBe('task')
+    expect(audit?.values.entityId).toBe(inserted[0].values.id)
   })
 
   it('still creates the task when the assignee id matches no row', async () => {

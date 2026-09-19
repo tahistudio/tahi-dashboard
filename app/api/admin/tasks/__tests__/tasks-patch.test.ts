@@ -31,10 +31,13 @@ vi.mock('@/lib/server-auth', () => ({
 
 vi.mock('@/db/d1', () => ({
   schema: {
-    tasks: { id: 'id', title: 'title' },
-    organisations: { id: 'id', name: 'name' },
+    tasks: { __name: 'tasks', id: 'id', title: 'title' },
+    organisations: { __name: 'organisations', id: 'id', name: 'name' },
+    auditLog: { __name: 'audit_log' },
   },
 }))
+
+const inserted: Array<{ table: string; values: Record<string, unknown> }> = []
 
 const notified: Record<string, unknown>[] = []
 let assigneeKinds: Record<string, 'team_member' | 'contact'> = {}
@@ -72,9 +75,12 @@ vi.mock('@/lib/db', () => ({
         where: async () => { updates.push(values) },
       }),
     }),
+    insert: (table: { __name: string }) => ({
+      values: async (values: Record<string, unknown>) => { inserted.push({ table: table.__name, values }) },
+    }),
     select: () => ({
       from: () => ({
-        where: () => ({ limit: async () => [{ title: 'A task' }] }),
+        where: () => ({ limit: async () => [{ id: 't1', title: 'A task' }] }),
       }),
     }),
   }),
@@ -187,6 +193,19 @@ describe('PATCH /api/admin/tasks/[id] link invariants', () => {
     expect(updates[0]).not.toHaveProperty('orgId')
     expect(updates[0]).not.toHaveProperty('requestId')
     expect(updates[0].status).toBe('done')
+  })
+
+  it('leaves an audit trail, which this door never used to', async () => {
+    // Nothing in the tasks API wrote an audit_log row before the write moved
+    // into lib/task-writes.ts. Applying an approved call suggestion goes
+    // through the same function, so both are traceable or neither is.
+    inserted.length = 0
+    await PATCH(patch({ status: 'done' }) as never, params)
+    const audit = inserted.find(row => row.table === 'audit_log')
+    expect(audit).toBeDefined()
+    expect(audit?.values.action).toBe('task.updated')
+    expect(audit?.values.actorType).toBe('team_member')
+    expect(audit?.values.entityId).toBe('t1')
   })
 })
 

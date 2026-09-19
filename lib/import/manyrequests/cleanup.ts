@@ -186,6 +186,17 @@ export const ORG_SCOPED_TABLES: readonly OrgScopedTable[] = [
   // never counts against any organisation and is never in scope here either
   // way.
   { schemaKey: 'feedbackComments', table: 'feedback_comments', policy: 'delete' },
+  // Proposed task changes read out of a call (migration 0107). 'delete', not
+  // 'refuse': a suggestion is a question waiting for an answer, not a record
+  // of anything that happened, and once the client is gone there is nobody
+  // left to answer it. The tasks it would have changed are 'delete' above for
+  // the same reason. A studio-housekeeping suggestion carries org_id NULL and
+  // is therefore never in scope here at all.
+  //
+  // This is also why target_task_id and applied_task_id are NOT in
+  // PARENT_KEYED_TABLES: the lifecycle policy test requires that list to hold
+  // nothing org-scoped, and org_id already reaches every row a client owns.
+  { schemaKey: 'taskSuggestions', table: 'task_suggestions', policy: 'delete' },
 ]
 
 interface OrgTableHandle {

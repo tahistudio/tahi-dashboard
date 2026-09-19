@@ -179,6 +179,13 @@ export const CONTACT_REFERENCE_COLUMNS: readonly ContactRefColumn[] = [
   { schemaKey: 'conversationParticipants', table: 'conversation_participants', column: 'participantId', sqlColumn: 'participant_id', typeColumn: 'participantType', typeValue: 'contact' },
   { schemaKey: 'messages', table: 'messages', column: 'authorId', sqlColumn: 'author_id', typeColumn: 'authorType', typeValue: 'contact' },
   { schemaKey: 'taskComments', table: 'task_comments', column: 'authorId', sqlColumn: 'author_id', typeColumn: 'authorType', typeValue: 'contact' },
+  // Who may decide a pending suggestion (migration 0107). 'contact' is a
+  // client approving their own request draft (Phase 2), so folding two
+  // duplicate contacts together has to move the approval with the person or
+  // the row is left addressed to somebody who no longer exists. 'founders'
+  // and 'member' rows are untouched by a contact merge, as the type sibling
+  // says.
+  { schemaKey: 'taskSuggestions', table: 'task_suggestions', column: 'approverId', sqlColumn: 'approver_id', typeColumn: 'approverType', typeValue: 'contact' },
   { schemaKey: 'files', table: 'files', column: 'uploadedById', sqlColumn: 'uploaded_by_id', typeColumn: 'uploadedByType', typeValue: 'contact' },
   { schemaKey: 'tasks', table: 'tasks', column: 'assigneeId', sqlColumn: 'assignee_id', typeColumn: 'assigneeType', typeValue: 'contact' },
   { schemaKey: 'mentions', table: 'mentions', column: 'mentionedId', sqlColumn: 'mentioned_id', typeColumn: 'mentionedType', typeValue: 'contact' },
