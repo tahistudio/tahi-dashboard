@@ -7,7 +7,7 @@
  * name / org name / deal title) so the /calls index page can render
  * one DataTable with classified rows.
  *
- * Query: ?since=ISO&until=ISO&type=discovery|client|partnership|unclassified
+ * Query: ?since=ISO&until=ISO&type=discovery|client|partnership|mentoring|other|unclassified
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'

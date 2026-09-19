@@ -26,13 +26,16 @@ export const dynamic = 'force-dynamic'
 const MODEL = SONNET_MODEL
 const MAX_TRANSCRIPT_CHARS = 40_000
 
-// Meeting-type classifier values (see migration 0050 / sync-calendar
-// classifier): 'discovery' and 'deal' calls are sales, 'client' are
-// existing-org check-ins, 'partnership' are intro/sync, 'unclassified'
-// needs triage. Action items only make sense for client/project work,
-// so we gate on 'client' meeting type OR a concrete project linkage
-// (org / request / task). Pure sales calls (lead/deal only) never get
-// action-item extraction, keeping their output byte-compatible.
+// Meeting-type classifier values (see MEETING_TYPES in lib/calls.ts):
+// 'discovery' and 'deal' calls are sales, 'client' are existing-org
+// check-ins, 'partnership' are intro/sync, 'mentoring' are coaching
+// calls, 'other' is a human-only catch-all, 'unclassified' needs triage.
+// Action items only make sense for client/project work, so we gate on
+// 'client' meeting type OR a concrete project linkage (org / request /
+// task). Pure sales calls (lead/deal only) never get action-item
+// extraction, keeping their output byte-compatible. 'mentoring' and
+// 'other' calls are never extracted either, unless they happen to also
+// carry a concrete project linkage - same rule as every other type.
 function isProjectishCall(call: {
   meetingType: string | null
   orgId: string | null

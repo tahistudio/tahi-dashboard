@@ -11,6 +11,9 @@ import { schema } from '@/db/d1'
 import type { db } from '@/lib/db'
 import { desc, eq, getTableColumns } from 'drizzle-orm'
 import { normalizeCallInstant } from '@/lib/call-time'
+// Type-only import, the same one-way dependency badge.tsx documents for
+// lib/status-config.ts, so this file stays server-safe.
+import type { BadgeTone } from '@/components/tahi/badge'
 
 type Database = Awaited<ReturnType<typeof db>>
 
@@ -143,8 +146,23 @@ export async function listCallsForParent(
 // or a call's own detail. Kept here as the single source of truth so the
 // PATCH routes, the MCP tool description and the UI dropdown never drift.
 
-export const MEETING_TYPES = ['discovery', 'client', 'partnership', 'unclassified'] as const
+export const MEETING_TYPES = ['discovery', 'client', 'partnership', 'mentoring', 'other', 'unclassified'] as const
 export type MeetingType = typeof MEETING_TYPES[number]
+
+/** Label + Badge tone per meeting type, kept alongside the vocabulary
+ *  itself so a new value only ever needs one entry here rather than a
+ *  label map duplicated across calls-content.tsx and discovery-calls.tsx.
+ *  Icons are picked per-surface (lucide-react components aren't safe to
+ *  import from a .ts file consumed by both client and server code), so
+ *  this only carries label + tone. */
+export const MEETING_TYPE_META: Record<MeetingType, { label: string; tone: BadgeTone }> = {
+  discovery: { label: 'Discovery', tone: 'brand' },
+  client: { label: 'Client check-in', tone: 'info' },
+  partnership: { label: 'Partnership', tone: 'purple' },
+  mentoring: { label: 'Mentoring', tone: 'positive' },
+  other: { label: 'Other', tone: 'neutral' },
+  unclassified: { label: 'Triage', tone: 'warning' },
+}
 
 export function isMeetingType(value: unknown): value is MeetingType {
   return typeof value === 'string' && (MEETING_TYPES as readonly string[]).includes(value)

@@ -1989,12 +1989,14 @@ export const discoveryCalls = sqliteTable('discovery_calls', {
   budgetCurrency: text('budget_currency'),
   // urgent | this_quarter | this_year | no_rush
   timeline: text('timeline'),
-  // Meeting classification set by the calendar sync. 'discovery' is the
-  // default for lead-linked calls; 'client' for existing-org check-ins;
-  // 'partnership' for intro/sync meetings with unknown contacts whose
-  // titles hint at partnership; 'unclassified' for unmatched events that
-  // need triage. Lets the calls index segment without re-running the
-  // classifier on read.
+  // Meeting classification. 'discovery' is the default for lead-linked
+  // calls; 'client' for existing-org check-ins; 'partnership' or
+  // 'mentoring' for intro/sync or coaching meetings with unknown contacts
+  // whose titles hint at one of those; 'other' is a human-only choice
+  // (never set by the calendar sync classifier); 'unclassified' for
+  // unmatched events that need triage. See MEETING_TYPES in lib/calls.ts
+  // for the single source of truth this vocabulary is kept in sync with.
+  // Lets the calls index segment without re-running the classifier on read.
   meetingType: text('meeting_type'),
   createdById: text('created_by_id').notNull(),
   ...timestamps,

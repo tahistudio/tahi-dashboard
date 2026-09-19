@@ -32,7 +32,7 @@ import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { Input } from '@/components/tahi/input'
 import { LinkedToPanel } from '@/components/tahi/linked-to-panel'
 import { apiPath } from '@/lib/api'
-import { MEETING_TYPES } from '@/lib/calls'
+import { MEETING_TYPES, MEETING_TYPE_META, type MeetingType } from '@/lib/calls'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -69,7 +69,7 @@ export interface DiscoveryCall {
   /** Set by the calendar-sync classifier; also hand-editable from a call's
    *  own "what it is for" control. Null on rows created manually before
    *  classification (e.g. straight from a client's Calls tab). */
-  meetingType: 'discovery' | 'client' | 'partnership' | 'unclassified' | null
+  meetingType: MeetingType | null
   createdById: string
   createdAt: string
   updatedAt: string
@@ -83,10 +83,16 @@ export interface DiscoveryCall {
   requestTitle?: string | null
 }
 
+// Derived from MEETING_TYPE_META (lib/calls.ts) so this can never drift
+// from the badge labels used on /calls. 'unclassified' keeps its own
+// "Unclassified" wording here (vs. "Triage" on /calls) to match this
+// card's "- unclassified -" empty option below.
 const MEETING_TYPE_LABELS: Record<string, string> = {
-  discovery: 'Discovery',
-  client: 'Client check-in',
-  partnership: 'Partnership',
+  discovery: MEETING_TYPE_META.discovery.label,
+  client: MEETING_TYPE_META.client.label,
+  partnership: MEETING_TYPE_META.partnership.label,
+  mentoring: MEETING_TYPE_META.mentoring.label,
+  other: MEETING_TYPE_META.other.label,
   unclassified: 'Unclassified',
 }
 

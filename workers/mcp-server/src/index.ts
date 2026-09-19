@@ -1005,7 +1005,7 @@ export const TOOLS: ToolDef[] = [
     scheduledAt: prop('string', 'Full ISO 8601 instant with an explicit offset or Z when you mean that UTC moment; a bare value with no offset is read as Pacific/Auckland wall-clock time.'),
     durationMinutes: prop('number', 'Length in minutes'),
     status: prop('string', 'scheduled | completed | cancelled | no_show | rescheduled'),
-    meetingType: prop('string', 'Classifier: discovery | client | partnership | unclassified. Calendar sync sets this automatically; pass it here to reclassify. Must be one of these four values (null/empty clears it) or the call 400s.'),
+    meetingType: prop('string', 'Classifier: discovery | client | partnership | mentoring | other | unclassified. Calendar sync sets this automatically; pass it here to reclassify. Must be one of these six values (null/empty clears it) or the call 400s.'),
     prepNote: prop('string', 'Pre-call prep, written before the call happens (what to bring, what to check beforehand) - distinct from the post-call summary/scopeNotes fields below. Capped at 4000 characters; empty string clears it. Editable from the /calls slide-over and included in the pre-call digest email when present.'),
     orgId: prop('string', 'Linked client organisation ID (null detaches). A non-null id must reference an existing organisation or the call 400s.'),
     leadId: prop('string', 'Linked lead ID (null detaches). A non-null id must reference an existing lead or the call 400s.'),
@@ -1208,8 +1208,8 @@ export const TOOLS: ToolDef[] = [
 
   // ── Calls ─────────────────────────────────────────────────────────────
   tool('list_calls', 'List all scheduled calls (legacy scheduled_calls table — client check-ins added manually). Use list_all_calls for the unified post-classifier list that also covers Google Calendar pull.'),
-  tool('list_all_calls', 'Unified list of every call from discovery_calls (the post-classifier polymorphic table). Returns lead-attached + client check-ins + partnership + unclassified rows with parent context (lead/deal/org name), classification, and prepNote (the pre-call prep field). Filters: type (discovery|client|partnership|unclassified), since/until ISO dates.', {
-    type: prop('string', 'Filter by meetingType: discovery | client | partnership | unclassified'),
+  tool('list_all_calls', 'Unified list of every call from discovery_calls (the post-classifier polymorphic table). Returns lead-attached + client check-ins + partnership + mentoring + other + unclassified rows with parent context (lead/deal/org name), classification, and prepNote (the pre-call prep field). Filters: type (discovery|client|partnership|mentoring|other|unclassified), since/until ISO dates.', {
+    type: prop('string', 'Filter by meetingType: discovery | client | partnership | mentoring | other | unclassified'),
     since: prop('string', 'ISO datetime — earliest scheduledAt to include. Defaults to 60 days ago.'),
     until: prop('string', 'ISO datetime — latest scheduledAt to include. Defaults to 60 days ahead.'),
   }),
