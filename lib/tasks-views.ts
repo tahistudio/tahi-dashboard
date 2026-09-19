@@ -77,9 +77,9 @@ export function levelOf(row: Pick<TaskRow, 'type' | 'orgId'>): TaskLevel {
 
 // -- Views -------------------------------------------------------------------
 
-export type TasksViewKey = 'list' | 'board' | 'week'
+export type TasksViewKey = 'list' | 'board' | 'week' | 'suggestions'
 
-export const TASKS_VIEW_KEYS: readonly TasksViewKey[] = ['list', 'board', 'week']
+export const TASKS_VIEW_KEYS: readonly TasksViewKey[] = ['list', 'board', 'week', 'suggestions']
 
 /** Read a stored view key back safely. The pre-rail `tasks.viewMode` held
  *  'my_work' for what is now My week, so that value migrates rather than

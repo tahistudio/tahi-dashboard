@@ -20,6 +20,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useRouter } from 'next/navigation'
 import { useResource } from '@/lib/use-resource'
 import { apiPath } from '@/lib/api'
 import { stageColour } from '@/lib/chart-colors'
@@ -73,6 +74,9 @@ interface OverviewData {
     draftInvoicesNzd?: number
     draftInvoicesCount?: number
     mrr?: number
+    /** Pending call-transcript suggestions the studio has not decided yet
+     *  (CN.1). Always present, no feature gate. */
+    taskSuggestions?: { pending: number; calls: number }
   }
   mrrDeltaPct?: number | null
   /** monthKey (YYYY-MM) of the prior snapshot mrrDeltaPct is computed against. */
@@ -388,6 +392,7 @@ export function OwnerHome({ ctx }: { ctx: OverviewCtx }) {
         <InTheStudio requests={ov?.recentRequests} loading={!ov} go={go} />
         <TodaysCalls go={go} />
         <ClientReplies go={go} />
+        <SuggestionsCard suggestions={ov?.kpis.taskSuggestions} loading={!ov} />
         <Worklog go={go} />
       </Zone>
 
@@ -1534,6 +1539,42 @@ function ClientReplies({ go }: { go: (id: string) => void }) {
           })}
         </div>
       )}
+    </Card>
+  )
+}
+
+/** The owner home's link into the Suggestions view (CN.1). `go()` on
+ *  OverviewCtx only ever takes a bare route id, no query string, so this
+ *  card routes with next/navigation directly rather than asking go() to
+ *  understand /tasks?view=suggestions. Hidden entirely at zero pending: an
+ *  empty inbox is not something the home page needs to announce. */
+function SuggestionsCard({
+  suggestions,
+  loading,
+}: {
+  suggestions?: { pending: number; calls: number }
+  loading: boolean
+}) {
+  const router = useRouter()
+  if (loading) return <Card section="Suggestions from calls" span={5}><Shim h={70} /></Card>
+  if (!suggestions || suggestions.pending === 0) return null
+  const { pending, calls } = suggestions
+  return (
+    <Card section="Suggestions from calls" span={5}>
+      <CardH
+        ic="spark"
+        title="Suggestions from calls"
+        link="Review"
+        onLink={() => router.push('/tasks?view=suggestions')}
+      />
+      <div className="ov-rows">
+        <Row
+          avText={<Icon n="spark" s={16} />}
+          title={`${pending} suggestion${pending === 1 ? '' : 's'}`}
+          sub={`From ${calls} call${calls === 1 ? '' : 's'}, waiting on a decision`}
+          onClick={() => router.push('/tasks?view=suggestions')}
+        />
+      </div>
     </Card>
   )
 }

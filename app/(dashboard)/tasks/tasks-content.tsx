@@ -71,6 +71,7 @@ import { useTasksRailState } from '@/components/tahi/tasks/use-tasks-rail-state'
 import { TasksList } from '@/components/tahi/tasks/tasks-list'
 import { TasksBoard } from '@/components/tahi/tasks/tasks-board'
 import { TasksWeek } from '@/components/tahi/tasks/tasks-week'
+import { TasksSuggestions } from '@/components/tahi/tasks/tasks-suggestions'
 import { TaskDetailPanel } from '@/components/tahi/tasks/task-detail-panel'
 import { NewTaskDialog, type NewTaskDraft } from '@/components/tahi/tasks/new-task-dialog'
 import type {
@@ -178,6 +179,7 @@ const CSV_BOM = String.fromCharCode(0xFEFF)
 /** One frozen identity, so suppressing the chip strip does not hand RailLayout
  *  a fresh array on every render. */
 const NO_CHIPS: readonly RailFilterChip[] = []
+const NO_EXPORT_ROWS: readonly TaskRow[] = []
 
 // -- Boot skeleton ------------------------------------------------------------
 
@@ -242,6 +244,15 @@ export function TasksContent() {
   const searchParams = useSearchParams()
   const { mutate: mutateKey } = useSWRConfig()
   const rail = useTasksRailState()
+
+  // The Tasks surface otherwise has no URL-override layer (see
+  // use-tasks-rail-state.ts), but the overview's suggestions card links to
+  // /tasks?view=suggestions and has to land on that view. Runs once: after
+  // the first paint the switcher, not the address bar, owns rail.view.
+  useEffect(() => {
+    if (searchParams.get('view') === 'suggestions') rail.setView('suggestions')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const {
     isImpersonatingTeamMember,
@@ -472,8 +483,15 @@ export function TasksContent() {
   // the view on screen the search box, the saved views, the filter selects
   // and the chip strip all answer nothing. The rail says so in a note; the
   // chips are suppressed rather than left printing a filter that changes
-  // nothing next to a count that ignores it.
-  const railInert = rail.view === 'week'
+  // nothing next to a count that ignores it. Suggestions is the same shape:
+  // a suggestion has no status, priority, client or assignee until it
+  // becomes a task, so the rail has nothing to filter it by either.
+  const railInert = rail.view === 'week' || rail.view === 'suggestions'
+
+  // Lifted from <TasksSuggestions> so the toolbar's total reads the pending
+  // count while that view is on screen, the same way weekCount answers for
+  // My week.
+  const [suggestionsCount, setSuggestionsCount] = useState(0)
 
   // Both option lists are built from the loaded rows, so a filter can only
   // ever pick a value that exists in the data in front of the user.
@@ -878,7 +896,10 @@ export function TasksContent() {
   // filtered list, and exporting something else is the wrong answer. In My
   // week that is the planner's own plate, not the rail-filtered set, because
   // the planner ignores the rail and the toolbar count already says so.
-  const exportRows = railInert ? weekRows : visible
+  // Suggestions are not tasks yet, so there is nothing a task CSV can
+  // honestly say about them; the export stays empty on that view rather than
+  // silently reprinting My week's rows.
+  const exportRows = rail.view === 'week' ? weekRows : rail.view === 'suggestions' ? NO_EXPORT_ROWS : visible
 
   // The BOM is what makes Excel open a UTF-8 CSV without mangling a client
   // name.
@@ -959,6 +980,16 @@ export function TasksContent() {
     />
   )
 
+  const suggestionsBody = (
+    <TasksSuggestions
+      clients={clients}
+      peopleList={peopleList}
+      requests={requestOptions}
+      onTaskCreated={id => { void mutateTasks(); selectTask(id) }}
+      onCountChange={setSuggestionsCount}
+    />
+  )
+
   const listBody = (
     <TasksList
       rows={visible}
@@ -987,7 +1018,13 @@ export function TasksContent() {
     />
   )
 
-  const body = rail.view === 'board' ? boardBody : rail.view === 'week' ? weekBody : listBody
+  const body = rail.view === 'board'
+    ? boardBody
+    : rail.view === 'week'
+      ? weekBody
+      : rail.view === 'suggestions'
+        ? suggestionsBody
+        : listBody
 
   return (
     <>
@@ -1072,8 +1109,8 @@ export function TasksContent() {
           query={rail.query}
           onQueryChange={rail.setQuery}
           searchPlaceholder="Search tasks or clients"
-          total={railInert ? weekCount : visible.length}
-          itemNoun="task"
+          total={rail.view === 'week' ? weekCount : rail.view === 'suggestions' ? suggestionsCount : visible.length}
+          itemNoun={rail.view === 'suggestions' ? 'suggestion' : 'task'}
           loading={booting}
           extraActiveCount={railInert || !rail.savedView ? 0 : 1}
           saveDefaultTouch={

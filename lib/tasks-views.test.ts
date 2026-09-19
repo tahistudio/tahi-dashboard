@@ -49,8 +49,8 @@ function row(over: Partial<TaskRow> = {}): TaskRow {
 }
 
 describe('view keys', () => {
-  it('has exactly list, board and week in that order', () => {
-    expect(TASKS_VIEW_KEYS).toEqual(['list', 'board', 'week'])
+  it('has exactly list, board, week and suggestions in that order', () => {
+    expect(TASKS_VIEW_KEYS).toEqual(['list', 'board', 'week', 'suggestions'])
   })
 
   it('migrates the legacy my_work view onto week', () => {
