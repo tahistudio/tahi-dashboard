@@ -149,7 +149,7 @@ export function CallsContent() {
     }
   }
 
-  async function reclassify(callId: string, meetingType: 'discovery' | 'client' | 'partnership') {
+  async function reclassify(callId: string, meetingType: Exclude<MeetingType, 'unclassified'>) {
     // Optimistic update — flip the local row immediately, then PATCH.
     void mutateItems(
       prev => prev ? { items: prev.items.map(c => c.id === callId ? { ...c, meetingType } : c) } : prev,
@@ -396,10 +396,12 @@ export function CallsContent() {
             // Inline reclassify actions — let Liam move a call between
             // buckets without leaving the index. Skips the type the row
             // is currently in.
-            const types: Array<['discovery' | 'client' | 'partnership', string, React.ReactNode]> = [
+            const types: Array<[Exclude<MeetingType, 'unclassified'>, string, React.ReactNode]> = [
               ['discovery', 'Mark as Discovery', <UserPlus key="d" size={14} />],
               ['client', 'Mark as Client', <Building2 key="c" size={14} />],
               ['partnership', 'Mark as Partnership', <TrendingUp key="p" size={14} />],
+              ['mentoring', 'Mark as Mentoring', <GraduationCap key="m" size={14} />],
+              ['other', 'Mark as Other', <CircleDashed key="o" size={14} />],
             ]
             for (const [val, label, icon] of types) {
               if (r.meetingType === val) continue

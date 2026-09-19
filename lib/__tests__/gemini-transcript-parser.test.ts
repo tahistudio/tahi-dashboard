@@ -308,9 +308,9 @@ describe('parseGeminiTranscript, markdown export with bold headings (2026-09)', 
 
 describe('transcriptPreview', () => {
   it('reads as prose and caps the length', () => {
-    const p = transcriptPreview('## **Weekly catchup \\- Transcript** ### **00:00:25** {#00:00:25} &nbsp; **Liam:** Hello. [00:01](https://x.y/z) **Nathan:** Hi.', 60)
-    expect(p).toBe('Weekly catchup - Transcript 00:00:25 Liam: Hello. 00:01 Nathan')
-    expect(p.length).toBeLessThanOrEqual(60)
+    const noisy = '## **Weekly catchup \\- Transcript** ### **00:00:25** {#00:00:25} &nbsp; **Liam:** Hello. [00:01](https://x.y/z) **Nathan:** Hi.'
+    expect(transcriptPreview(noisy, 80)).toBe('Weekly catchup - Transcript 00:00:25 Liam: Hello. 00:01 Nathan: Hi.')
+    expect(transcriptPreview(noisy, 40)).toBe('Weekly catchup - Transcript 00:00:25 Lia')
   })
 })
 
