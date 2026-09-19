@@ -820,7 +820,7 @@ export function TheWire({ events }: { events: WireEvent[] }) {
           {events.slice(0, 4).map((e, k) => (
             <div className="ov-wire-item" key={k} style={{ position: 'static' }}>
               <span className="ov-wire-dot" style={{ background: e.color }} />
-              <span>
+              <span className="ov-wire-txt">
                 <b>{e.who}</b> {e.what}
               </span>
             </div>
@@ -837,10 +837,10 @@ export function TheWire({ events }: { events: WireEvent[] }) {
       <div className="ov-wire-track">
         <div className="ov-wire-item enter" key={i}>
           <span className="ov-wire-dot" style={{ background: e.color }} />
-          <span>
+          <span className="ov-wire-txt">
             <b>{e.who}</b> {e.what}
           </span>
-          {e.when != null && <span style={{ marginLeft: 'auto', color: 'var(--text-faint)', fontSize: '12px' }}>{e.when}</span>}
+          {e.when != null && <span className="ov-wire-when">{e.when}</span>}
         </div>
       </div>
     </div>

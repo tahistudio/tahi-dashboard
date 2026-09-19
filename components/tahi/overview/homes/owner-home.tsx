@@ -646,10 +646,14 @@ function DailyBrief({ go, ro }: { go: (id: string) => void; ro: boolean }) {
     { key: 'slept', lbl: 'While you slept', tone: '', rows: slept },
   ]
 
-  const timeStr = mounted
-    ? new Date().toLocaleDateString('en-NZ', { weekday: 'long', day: 'numeric', month: 'long' }) +
-      ' · ' +
-      new Date().toLocaleTimeString('en-NZ', { hour: 'numeric', minute: '2-digit', hour12: true })
+  // Date and time are kept as separate strings (not one joined-with-a-dot
+  // string) so the phone layout can stack them without an orphaned dot; see
+  // .ov-brief-time in overview.css.
+  const dateStr = mounted
+    ? new Date().toLocaleDateString('en-NZ', { weekday: 'long', day: 'numeric', month: 'long' })
+    : ''
+  const clockStr = mounted
+    ? new Date().toLocaleTimeString('en-NZ', { hour: 'numeric', minute: '2-digit', hour12: true })
     : ''
 
   const lede =
@@ -661,7 +665,15 @@ function DailyBrief({ go, ro }: { go: (id: string) => void; ro: boolean }) {
     <div className="ov-brief" data-section="Daily brief">
       <div className="ov-brief-h">
         <h3>Daily brief</h3>
-        {timeStr && <span className="ov-brief-time">{timeStr}</span>}
+        {dateStr && (
+          <span className="ov-brief-time">
+            <span className="ov-brief-date">{dateStr}</span>
+            <span className="ov-brief-dot" aria-hidden="true">
+              ·
+            </span>
+            <span className="ov-brief-clock">{clockStr}</span>
+          </span>
+        )}
         {updatedStr && (
           <span style={{ font: "500 11.5px 'Manrope',sans-serif", color: 'var(--text-faint)' }}>{updatedStr}</span>
         )}
