@@ -1,5 +1,5 @@
 import { withCronRun } from '@/lib/cron-runs'
-import { runSuggestionSweep } from '@/lib/task-suggester'
+import { parseSweepLimit, runSuggestionSweep } from '@/lib/task-suggester'
 
 // POST /api/admin/crons/suggest-from-transcripts
 //
@@ -17,6 +17,11 @@ import { runSuggestionSweep } from '@/lib/task-suggester'
 // Everything the route itself does is in withCronRun: the cron secret (or an
 // admin session), the timing, and one cron_runs row per run so
 // /settings/automations can answer "is this thing alive" without firing it.
-export const POST = withCronRun('suggest-from-transcripts', async (_req, database) => {
-  return runSuggestionSweep(database)
+// `?limit=` is the one knob: the scheduled job never passes it and keeps the
+// default of five, and a human draining a backlog by hand can ask for up to
+// twenty in one pass. Clamped in lib/task-suggester.ts#parseSweepLimit,
+// because an unbounded sweep is an unbounded model bill.
+export const POST = withCronRun('suggest-from-transcripts', async (req, database) => {
+  const batch = parseSweepLimit(new URL(req.url).searchParams.get('limit'))
+  return runSuggestionSweep(database, { batch })
 })
