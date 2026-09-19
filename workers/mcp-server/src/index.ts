@@ -564,7 +564,7 @@ export const TOOLS: ToolDef[] = [
   tool('list_task_comments', "List a task's thread: every comment, oldest first, with the author's name, the quote it rests on (if any) and where it came from.", {
     task_id: prop('string', 'Task ID'),
   }, ['task_id']),
-  tool('list_task_suggestions', 'List the call-suggestions inbox: task suggestions a transcribed call produced (new tasks, updates, completions, subtask additions, thread notes), each with a verbatim quote. Nothing here has been applied yet.', {
+  tool('list_task_suggestions', 'List the call-suggestions inbox: suggestions a transcribed call produced, each with a verbatim quote. Task kinds: create_task, update_task, complete_task, add_subtasks, note. Request kinds, mostly from client calls: create_request, update_request, request_note, hand_off_request. Nothing here has been applied yet.', {
     status: prop('string', 'Filter by status: pending, snoozed, applied, rejected, expired or failed. Default pending.'),
     call_id: prop('string', 'Only the suggestions from one call'),
     limit: prop('number', 'Max rows to return. Default 100.'),
@@ -608,7 +608,7 @@ export const TOOLS: ToolDef[] = [
     body: prop('string', 'The comment text'),
     as_bot: prop('boolean', 'Post as "Tahi bot" rather than as a person. Default false.'),
   }, ['task_id', 'body']),
-  tool('decide_task_suggestion', 'Record a decision on one call suggestion: approve (creates or updates the task, posts the "Tahi bot" thread line), reject, or snooze. Approving with a proposal is a Tweak: the edited proposal replaces the suggested one before it is applied. Guarded: deciding an already-decided suggestion again is a no-op.', {
+  tool('decide_task_suggestion', 'Record a decision on one call suggestion: approve (creates or updates the task or request, hands a request to a client contact, or posts a thread note, then posts the "Tahi bot" thread line), reject, or snooze. Approving with a proposal is a Tweak: the edited proposal replaces the suggested one before it is applied. A hand_off_request approved with no contact resolved returns changed false and error contact_required. Guarded: deciding an already-decided suggestion again is a no-op.', {
     id: prop('string', 'Suggestion ID'),
     action: prop('string', "'approve', 'reject' or 'snooze'"),
     proposal: { type: 'object', description: 'An edited proposal to apply instead of the suggested one. Only read when action is approve.' },

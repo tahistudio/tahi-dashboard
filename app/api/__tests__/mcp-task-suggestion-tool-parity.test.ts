@@ -9,6 +9,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { taskSuggestionToolCall } from '../../../workers/mcp-server/src/task-suggestion-tools'
+import { TOOLS } from '../../../workers/mcp-server/src/index'
 
 function call(name: string, args: Record<string, unknown> = {}) {
   const mapped = taskSuggestionToolCall(name, args)
@@ -83,5 +84,26 @@ describe('decide_task_suggestion', () => {
 describe('names outside this module', () => {
   it('returns null for an unrelated tool name', () => {
     expect(taskSuggestionToolCall('list_tasks', {})).toBeNull()
+  })
+})
+
+describe('the registered tool descriptions list the CN.1b request kinds', () => {
+  const REQUEST_KINDS = ['create_request', 'update_request', 'request_note', 'hand_off_request']
+
+  function description(name: string): string {
+    const tool = TOOLS.find(t => t.name === name)
+    if (!tool) throw new Error(`${name} is not registered`)
+    return tool.description
+  }
+
+  it('list_task_suggestions names every request kind', () => {
+    const desc = description('list_task_suggestions')
+    for (const kind of REQUEST_KINDS) expect(desc).toContain(kind)
+  })
+
+  it('decide_task_suggestion documents the hand-off contact gate', () => {
+    const desc = description('decide_task_suggestion')
+    expect(desc).toContain('hand_off_request')
+    expect(desc).toContain('contact_required')
   })
 })

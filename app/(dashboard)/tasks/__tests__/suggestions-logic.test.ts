@@ -1,6 +1,21 @@
 import { describe, it, expect } from 'vitest'
-import { groupSuggestionsByCall, suggestionKindLabel, summariseProposal, confidenceLabel, suggestionKeyAction, buildApproveRequest, buildRejectRequest, buildSnoozeRequest, createProposalToTaskFields, taskFieldsToCreateProposal } from '../suggestions-logic'
-import type { DecoratedSuggestion, CreateTaskProposal } from '../suggestions-types'
+import {
+  groupSuggestionsByCall,
+  suggestionKindLabel,
+  summariseProposal,
+  confidenceLabel,
+  suggestionKeyAction,
+  buildApproveRequest,
+  buildRejectRequest,
+  buildSnoozeRequest,
+  createProposalToTaskFields,
+  taskFieldsToCreateProposal,
+  targetRequestLine,
+  handOffNeedsContact,
+  createRequestProposalToInitialDraft,
+  initialDraftToCreateRequestProposal,
+} from '../suggestions-logic'
+import type { DecoratedSuggestion, CreateTaskProposal, CreateRequestProposal } from '../suggestions-types'
 import type { TaskFields } from '@/lib/task-wizard-drafts'
 
 function row(overrides: Partial<DecoratedSuggestion> = {}): DecoratedSuggestion {
@@ -13,6 +28,8 @@ function row(overrides: Partial<DecoratedSuggestion> = {}): DecoratedSuggestion 
     callId: 'c1',
     kind: 'create_task',
     targetTaskId: null,
+    targetRequestId: null,
+    appliedRequestId: null,
     proposal: { title: 'Follow up', description: null, type: 'internal_client_task', orgId: 'org1' },
     quote: 'we should follow up on the invoice',
     rationale: null,
@@ -25,6 +42,9 @@ function row(overrides: Partial<DecoratedSuggestion> = {}): DecoratedSuggestion 
     orgName: 'Acme',
     targetTaskTitle: null,
     targetTaskStatus: null,
+    targetRequestNumber: null,
+    targetRequestTitle: null,
+    targetRequestStatus: null,
     ...overrides,
   }
 }
@@ -80,6 +100,10 @@ describe('suggestionKindLabel', () => {
     expect(suggestionKindLabel('complete_task')).toBe('Complete')
     expect(suggestionKindLabel('add_subtasks')).toBe('Subtasks')
     expect(suggestionKindLabel('note')).toBe('Note')
+    expect(suggestionKindLabel('create_request')).toBe('New request')
+    expect(suggestionKindLabel('update_request')).toBe('Update request')
+    expect(suggestionKindLabel('request_note')).toBe('Request note')
+    expect(suggestionKindLabel('hand_off_request')).toBe('Hand off')
   })
 })
 
@@ -194,6 +218,100 @@ describe('create_task proposal <-> TaskFields', () => {
     const fields = createProposalToTaskFields(proposal)
     const edited: TaskFields = { ...fields, dueDate: '2026-09-25' }
     const rebuilt = taskFieldsToCreateProposal(edited)
+    expect(buildApproveRequest(rebuilt)).toEqual({ action: 'approve', proposal: rebuilt })
+  })
+})
+
+describe('summariseProposal for the CN.1b request kinds', () => {
+  it('renders each kind', () => {
+    expect(summariseProposal('create_request', { title: 'Refresh the hero', category: 'design' }))
+      .toBe('Refresh the hero - design')
+    expect(summariseProposal('create_request', { title: 'Refresh the hero' })).toBe('Refresh the hero')
+    expect(summariseProposal('create_request', {})).toBe('Untitled request')
+
+    expect(summariseProposal('update_request', { fields: { status: 'in_progress', dueDate: '2026-09-25' } }))
+      .toBe('Changes status, due date')
+    expect(summariseProposal('update_request', { fields: {} })).toBe('No fields changed')
+
+    expect(summariseProposal('request_note', { body: 'Client confirmed the copy is final' }))
+      .toBe('Client confirmed the copy is final')
+    expect(summariseProposal('request_note', {})).toBe('No note text')
+
+    expect(summariseProposal('hand_off_request', { contactName: 'Priya', reason: 'approval' }))
+      .toBe('Waiting on Priya: approval')
+    expect(summariseProposal('hand_off_request', { contactName: 'Priya', reason: 'decision' }))
+      .toBe('Waiting on Priya: a decision')
+    expect(summariseProposal('hand_off_request', { reason: 'approval' }))
+      .toBe('Waiting on someone: approval')
+    expect(summariseProposal('hand_off_request', { contactName: 'Priya', reason: 'not_a_reason' }))
+      .toBe('Waiting on Priya: something')
+  })
+
+  it('never throws on a malformed proposal', () => {
+    expect(summariseProposal('create_request', null)).toBe('Untitled request')
+    expect(summariseProposal('update_request', 'not an object')).toBe('No fields changed')
+    expect(summariseProposal('hand_off_request', null)).toBe('Waiting on someone: something')
+  })
+})
+
+describe('targetRequestLine', () => {
+  it('reads "#<number> <title>" when a target request is present', () => {
+    expect(targetRequestLine({ targetRequestNumber: 42, targetRequestTitle: 'Homepage refresh' }))
+      .toBe('#42 Homepage refresh')
+  })
+
+  it('is null with no target request', () => {
+    expect(targetRequestLine({ targetRequestNumber: null, targetRequestTitle: null })).toBeNull()
+    expect(targetRequestLine({ targetRequestNumber: 42, targetRequestTitle: null })).toBeNull()
+  })
+})
+
+describe('handOffNeedsContact', () => {
+  it('needs a contact when none is resolved or picked', () => {
+    expect(handOffNeedsContact({ contactId: null })).toBe(true)
+    expect(handOffNeedsContact({ contactId: undefined })).toBe(true)
+  })
+
+  it('is satisfied once a contact id is set', () => {
+    expect(handOffNeedsContact({ contactId: 'contact1' })).toBe(false)
+  })
+})
+
+describe('create_request proposal <-> RequestInitialDraft', () => {
+  const proposal: CreateRequestProposal = {
+    title: 'Refresh the hero',
+    description: 'Client wants a new hero image',
+    category: 'design',
+    type: 'small_task',
+    priority: 'high',
+    dueDate: '2026-09-25',
+    requesterName: 'Priya',
+    requesterContactId: 'contact1',
+  }
+
+  it('reads the org from the suggestion row, not the proposal', () => {
+    const draft = createRequestProposalToInitialDraft(proposal, 'org1')
+    expect(draft.orgId).toBe('org1')
+    expect(draft.title).toBe('Refresh the hero')
+    expect(draft.type).toBe('small_task')
+    expect(draft.priority).toBe('high')
+    expect(draft.dueDate).toBe('2026-09-25')
+  })
+
+  it("Tweak's save round-trips the edited fields back into a proposal, leaving the requester alone", () => {
+    const draft = createRequestProposalToInitialDraft(proposal, 'org1')
+    const edited = { ...draft, title: 'Refresh the homepage hero', priority: 'standard' }
+    const rebuilt = initialDraftToCreateRequestProposal(edited, proposal)
+    expect(rebuilt.title).toBe('Refresh the homepage hero')
+    expect(rebuilt.priority).toBe('standard')
+    expect(rebuilt.requesterName).toBe('Priya')
+    expect(rebuilt.requesterContactId).toBe('contact1')
+  })
+
+  it('a decide call built from the edited proposal carries it as the override', () => {
+    const draft = createRequestProposalToInitialDraft(proposal, 'org1')
+    const edited = { ...draft, dueDate: '2026-09-30' }
+    const rebuilt = initialDraftToCreateRequestProposal(edited, proposal)
     expect(buildApproveRequest(rebuilt)).toEqual({ action: 'approve', proposal: rebuilt })
   })
 })

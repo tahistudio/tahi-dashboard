@@ -134,7 +134,7 @@ export const GUIDE_SECTIONS: ReadonlyArray<GuideSection> = [
       '- **hand_off_request, hand_back_request, list_requests_waiting_on_clients** - point a request at a client contact, hand it back, and see everything currently waiting on someone.\n' +
       '- **list_clients, get_client, create_client, update_client, list_client_contacts** - client organisations and the people at them.\n' +
       '- **list_tasks, get_task, create_task, update_task** - the studio\'s internal to-do list.\n' +
-      '- **list_task_suggestions, decide_task_suggestion** - the call-suggestions inbox: read what a transcribed call proposed for tasks, and approve, tweak, snooze or reject it.\n' +
+      '- **list_task_suggestions, decide_task_suggestion** - the call-suggestions inbox: read what a transcribed call proposed for tasks and requests, and approve, tweak, snooze or reject it.\n' +
       '- **add_blocker, remove_blocker, list_blockers** - link and unlink blocking work.\n' +
       '- **list_invoices, get_invoice, create_invoice, update_invoice** - billing records.\n' +
       '- **list_time_entries, log_time, start_timer, stop_timer** - time tracking.\n' +
@@ -147,7 +147,7 @@ export const GUIDE_SECTIONS: ReadonlyArray<GuideSection> = [
     title: 'Suggestions from calls',
     audience: 'team',
     body:
-      'When a call gets transcribed, the studio reads it and proposes task suggestions: a new task, an update to an existing one, marking something done, or a plain note. Nothing is created or changed until someone decides.\n\n' +
+      'When a call gets transcribed, the studio reads it and proposes suggestions: a new task, an update to an existing one, marking something done, or a plain note, and for client calls, a new request, an update to an existing request, a hand-off to a client contact, or a note on a request\'s thread. Nothing is created or changed until someone decides.\n\n' +
       'Each suggestion carries the exact words it rests on, so nothing is invented. Find them on the **Suggestions** view on /tasks, or from the studio home\'s "Suggestions from calls" card once any are waiting.\n\n' +
       '- **Approve** applies it as written.\n' +
       '- **Tweak** opens it for editing first; saving approves the edited version.\n' +
