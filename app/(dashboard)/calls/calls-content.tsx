@@ -94,6 +94,154 @@ function formatRelative(iso: string): string {
   return diff > 0 ? 'just now' : 'now'
 }
 
+/** Same precedence as the "Linked to" column's render(): lead, then deal,
+ *  then org, then request. Named apart from the column so the mobile card
+ *  can label the chip with what kind of thing it links to ("Deal", "Lead"),
+ *  which the desktop cell leaves to the column header alone. */
+function callLinkedTo(call: CallRow): { kind: string; label: string; href: string; icon: React.ReactNode } | null {
+  if (call.leadId && call.leadName) return { kind: 'Lead', label: call.leadName, href: `/leads/${call.leadId}`, icon: <UserPlus size={11} /> }
+  if (call.dealId && call.dealTitle) return { kind: 'Deal', label: call.dealTitle, href: `/deals/${call.dealId}`, icon: <TrendingUp size={11} /> }
+  if (call.orgId && call.orgName) return { kind: 'Client', label: call.orgName, href: `/clients/${call.orgId}`, icon: <Building2 size={11} /> }
+  if (call.requestId && call.requestTitle) return { kind: 'Request', label: call.requestTitle, href: `/requests/${call.requestId}`, icon: <FileText size={11} /> }
+  return null
+}
+
+/**
+ * The /calls row, reshaped for a phone. The table below md packs title, type
+ * badge, transcript badge, the linked-to link, status and the when/duration
+ * into one h-scrolling row, which is unreadable at 375px. This stacks them
+ * instead: title on its own line (wraps rather than clipping mid-word), the
+ * type and status badges wrap onto their own flex line, the linked-to chip
+ * (labelled with what it links to, so "Deal" reads as a chip rather than a
+ * bare title) sits below that, and the schedule lines up against the Meet
+ * link with nothing forced onto one un-wrappable row.
+ */
+function CallMobileCard({ call, onOpen }: { call: CallRow; onOpen: () => void }) {
+  const meta = TYPE_META[call.meetingType ?? 'unclassified']
+  const statusMeta = STATUS_META[call.status] ?? { label: call.status, tone: 'neutral' as BadgeTone }
+  const linked = callLinkedTo(call)
+
+  return (
+    <div
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() }
+      }}
+      className="tahi-focus-ring"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.5rem',
+        padding: '0.875rem',
+        minHeight: '2.75rem',
+        borderBottom: '1px solid var(--color-border-subtle)',
+        cursor: 'pointer',
+      }}
+    >
+      <span
+        data-private
+        style={{
+          fontWeight: 600,
+          fontSize: '0.9375rem',
+          color: 'var(--color-text)',
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+          wordBreak: 'break-word',
+        }}
+      >
+        {call.title}
+      </span>
+
+      <div className="flex items-center" style={{ gap: '0.375rem', flexWrap: 'wrap' }}>
+        <Badge tone={meta.tone} variant="soft" size="sm">
+          <span style={{ marginRight: 4, display: 'inline-flex' }}>{meta.icon}</span>
+          {meta.label}
+        </Badge>
+        <Badge tone={statusMeta.tone} variant="soft" size="sm">{statusMeta.label}</Badge>
+        {call.hasTranscript && (
+          <Badge tone="positive" variant="soft" size="sm">
+            <FileText size={11} style={{ marginRight: 4, display: 'inline-block' }} />
+            Transcript
+          </Badge>
+        )}
+      </div>
+
+      {linked && (
+        <Link
+          data-private
+          href={linked.href}
+          onClick={e => e.stopPropagation()}
+          className="tahi-focus-ring"
+          style={{
+            alignSelf: 'flex-start',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.3125rem',
+            maxWidth: '100%',
+            minWidth: 0,
+            overflow: 'hidden',
+            padding: '0.25rem 0.5rem',
+            borderRadius: 'var(--radius-full)',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg-secondary)',
+            textDecoration: 'none',
+          }}
+        >
+          <span style={{ flexShrink: 0, display: 'inline-flex', color: 'var(--color-text-muted)' }}>{linked.icon}</span>
+          <span style={{ flexShrink: 0, fontSize: '0.6875rem', fontWeight: 700, color: 'var(--color-text-muted)' }}>{linked.kind}</span>
+          <span
+            style={{
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              color: 'var(--color-text)',
+            }}
+          >
+            {linked.label}
+          </span>
+        </Link>
+      )}
+
+      <div className="flex items-center" style={{ gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 500 }}>
+          {formatDateTime(call.scheduledAt)} · {call.durationMinutes}m
+        </span>
+        {call.googleMeetUrl && (
+          <a
+            href={call.googleMeetUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            className="tahi-focus-ring"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+              minHeight: '2.75rem',
+              padding: '0 0.625rem',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--color-border)',
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              color: 'var(--color-text)',
+              textDecoration: 'none',
+            }}
+          >
+            <ExternalLink size={12} aria-hidden="true" /> Meet
+          </a>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function CallsContent() {
   const { showToast } = useToast()
   const router = useRouter()
@@ -372,6 +520,9 @@ export function CallsContent() {
           getRowId={r => r.id}
           defaultSort={{ key: 'scheduledAt', dir: tab === 'past' ? 'desc' : 'asc' }}
           loading={loading}
+          mobileCard={r => (
+            <CallMobileCard call={r} onOpen={() => { setPreviewCall(r); setFocusPrepNote(false) }} />
+          )}
           onRowPreview={r => { setPreviewCall(r); setFocusPrepNote(false) }}
           rowActions={(r) => {
             const actions: Array<{ label: string; icon: React.ReactNode; onClick: () => void }> = []
