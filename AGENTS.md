@@ -4,7 +4,7 @@
 
 ## Read in this order
 
-1. `CLAUDE.md`: the bible (stack, auth model, database, design system, code rules, the Definition of Done). Its "What Is Built" and "What Is NOT Built" lists are a March 2026 snapshot and most of the "not built" list has since shipped; STATUS.md is the live record.
+1. `CLAUDE.md`: the bible (stack, auth model, database, design system, code rules, the Definition of Done). Its "What Is Built" and "What Is NOT Built" lists are a March 2026 snapshot and most of the "not built" list has since shipped; STATUS.md is the live record. Codex does not load CLAUDE.md automatically: read it in full at the start of every session. The Auth Model, Database, Planned Schema Additions, Design System and Component Patterns sections that the .codex/agents definitions call "AGENTS.md sections" live there.
 2. `STATUS.md`: what is live and trusted on production, what changed in the last week, known live bugs, operator steps waiting on Liam.
 3. `TASKS.md`: the backlog. The sections near the top are the active asks in reverse date order (PM, CN, HA, HO, LW ids); the catalogue batches (A to J) and the tiers follow. `[ ]` open, `[~]` merged but not yet seen live, `[x]` seen live. One id has exactly one home; never re-list an id.
 4. `docs/superpowers/plans/2026-09-13-overnight-run-log.md`: the running log since 2026-09-12, one dated entry per merge, deploy, live check and production data step. Append to it in every session; do not start a new log unless Liam asks.
@@ -22,6 +22,13 @@
 - **ManyRequests** is the old portal; its data was imported and the read-only connector still exists. **Xero and Stripe** are the two invoice rails, chosen per client (organisations.invoiceChannel); Xero invoices are pushed as drafts and Tahi owns the invoice number sequence.
 - **Slack**: the founders' channel is #founders (Liam and Staci only). The Slack app for the suggestion gate (CN.2) is not built; the Tahi bot actor exists in the dashboard already.
 - **Google**: Gemini call transcripts arrive through Google Drive (the sync exports as markdown every 30 minutes over a 72 hour window); the production Google grant needed calendar.events for kickoff bookings, and Liam reconnects it once (LW.8b).
+
+## Codex specifics (2026-09-21)
+
+- `.codex/agents/*.toml` are conversions of `.claude/agents/*.md` (the Claude ones are gitignored; whether `.codex/` is tracked is Liam's call, and its config.toml has a token slot that must never be committed filled). Where a definition says "read AGENTS.md fully", read this file and then CLAUDE.md.
+- `.codex/config.toml` as first created points the tahi-dashboard MCP at the dormant local `mcp-server/index.ts` and at the retired Webflow Cloud host; do not use that pair. The live MCP is the Cloudflare worker under `workers/mcp-server` (tahi-mcp-server, an OAuth front door, the same connector claude.ai uses) or, with a bearer token, the dashboard's own `POST https://portal.tahi.studio/api/mcp` with `Authorization: Bearer TAHI_API_TOKEN`. Liam sets tokens and secrets; never paste one into a tracked file.
+- Codex has no Chrome extension, no Claude Design and no Workflow tool. Live QA happens in a browser Liam drives or through Playwright against the QA worktree (docs/local-dev-and-qa.md); designs are ported from the requirement docs under docs/superpowers/design and the screenshots Liam shares; parallel work uses git worktrees by hand.
+- Commit trailer for Codex: `Made-With: Codex`. Everything else in this file applies unchanged.
 
 ## Working agreements (Liam's standing feedback, in force)
 
