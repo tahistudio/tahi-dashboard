@@ -34,7 +34,7 @@ A task only flips to `[x]` after all of:
 
 1. `npm run type-check` zero errors
 2. `npm run lint` zero errors
-3. Pushed to main + Webflow Cloud deploy green
+3. Pushed to main + Cloudflare deploy green (GitHub Actions "Deploy dashboard"; no approval click since 2026-09-10)
 4. **Live browser smoke**: golden-path flow exercised on the deployed URL
 5. **Mobile 375px**: layout verified, no horizontal scroll, touch targets >= 44px
 6. **Dark mode**: page rendered with `.dark` class, no contrast regressions
@@ -82,18 +82,41 @@ live look by a human.
 
 ## Operator steps waiting on Liam
 
-- [ ] MC.4 - [Liam decision] Giant Group first access: allow their org in the
-  email allowlist and invite when Liam says. 2026-09-12: NOT YET. No emails to
-  Giant Group; the allowlist stays closed until Liam says otherwise.
-  Note: LW.1 widened the allowlist to liammiller.dev for the dummy test, which
-  also lets every tahi.studio mailbox through. Re-narrow when the test is over.
+Refreshed 2026-09-21. Each line is a step only Liam (or Staci) can take; the
+agent side is done unless the line says otherwise.
+
+- [x] MC.4 - Giant Group first access: DONE 2026-09-14 (LW.33). email.allowedOrgIds
+  carries their org (aa80a2d6); Michael Day invited through the real flow (link
+  valid to 27 September). Still open on this line: Mark Ramsey's invite waits on
+  the spelling of his address (row says ramsey, Liam typed ramsay). The allowlist
+  also passes liammiller.dev (LW.1, the dummy test) and every tahi.studio mailbox;
+  re-narrow when the dummy test is over.
 - [~] LW.8 "The call went through, just wasn't booked" (no calendar event, no
   meet link). Cause: the production Google grant holds only
   calendar.events.readonly, so the event insert was refused and swallowed
   without a log. 03406711 requests calendar.events and calendar.freebusy and
-  logs the failure. **LW.8b LIAM**: after the deploy, Settings > Integrations >
-  Google > reconnect, then book a kickoff again and confirm the event and Join
-  link.
+  logs the failure. **LW.8b LIAM**: Settings > Integrations > Google >
+  reconnect, then book a kickoff again and confirm the event and Join link.
+- [ ] LW.36b LIAM - Void the "test manual" Stripe invoice
+  (in_1TGQaE2MOtshRPkATn4r8ByV) and delete the "test manual" org on /clients
+  (the importer no longer demotes the local write-off, but the org is a dummy).
+- [ ] A5 - The real-session lap (see "The one proof nobody else can give").
+- [ ] LIAM - Pay-rise decision: 74k each (Liam's figure, with Meditrain at
+  2,200 a month per Bharat's 17 September call) or 78k each (the model's
+  recommendation from the live numbers) from the 1 October payroll; top the tax
+  pot from NZ$15k to the full IRD balance before the January instalment. The
+  analysis is in docs/superpowers/plans/2026-09-13-overnight-run-log.md under
+  2026-09-19. Agent side after the decision: update the salary lines on the
+  finance page and confirm Meditrain's CRM value (1,250 vs 2,200, and whether
+  the 2,200 includes the SE Ranking subscription).
+- [ ] LIAM - Work the Suggestions inbox on /tasks as calls come in (CN.1); the
+  first similarity warnings show on the next call's suggestions.
+- [ ] LIAM - Mark docs/superpowers/plans/2026-09-14-design-review-for-liam.md
+  (19 modules, 13 SHIP, 6 FIX); nothing is ported until he has.
+- [ ] LIAM - Say go on PM.0 (product manager AI scope) and on CN.2 (the Slack
+  app: create the app, signing secret and bot token, invite it to #founders).
+- [ ] LIAM or the next session with a browser - the eight LW.40 fixes at 375px
+  and in dark (the Chrome extension was disconnected for that round).
 
 ## Liam's dummy-client walk-through, merged, live check owed
 

@@ -1,7 +1,82 @@
-# AGENTS.md — Tahi Dashboard Multi-Agent Workflow
+# AGENTS.md, Tahi Dashboard
 
-This file defines the five-agent team structure for building the Tahi Dashboard.
-Every agent must read `CLAUDE.md` first, then their own section below.
+> **Start here, whichever agent you are** (Claude Code, Codex, or anything else). Liam switches tools as usage limits reset, so the repo is the only memory that carries over: nothing a later session needs may live only in one tool's private notes or in a chat transcript. When you learn a rule, a fact or a decision, write it into one of the files below in the same session. This preamble was written 2026-09-21; the five-agent role vocabulary from March 2026 follows further down.
+
+## Read in this order
+
+1. `CLAUDE.md`: the bible (stack, auth model, database, design system, code rules, the Definition of Done). Its "What Is Built" and "What Is NOT Built" lists are a March 2026 snapshot and most of the "not built" list has since shipped; STATUS.md is the live record.
+2. `STATUS.md`: what is live and trusted on production, what changed in the last week, known live bugs, operator steps waiting on Liam.
+3. `TASKS.md`: the backlog. The sections near the top are the active asks in reverse date order (PM, CN, HA, HO, LW ids); the catalogue batches (A to J) and the tiers follow. `[ ]` open, `[~]` merged but not yet seen live, `[x]` seen live. One id has exactly one home; never re-list an id.
+4. `docs/superpowers/plans/2026-09-13-overnight-run-log.md`: the running log since 2026-09-12, one dated entry per merge, deploy, live check and production data step. Append to it in every session; do not start a new log unless Liam asks.
+5. `DECISIONS.md`: numbered decisions with rationale, newest at the bottom (#061 onward covers the week of 2026-09-14). Add a decision when a product or architecture question is settled; do not relitigate one that is recorded.
+6. The scope and contract docs for work in flight: `docs/superpowers/plans/2026-09-19-call-notes-to-tasks-scope.md` and the `2026-09-19-cn1*` contracts (call notes to tasks), `docs/superpowers/design/` (the design brief and 27 requirement documents), `docs/superpowers/audits/` (dated audits and readiness results).
+7. `docs/local-dev-and-qa.md`: running the app, the QA worktree on port 3179, the local D1 snapshot, applying migrations, the deploy watch and the post-deploy health probe.
+8. `WORKFLOWS.md`, `DASHBOARD_MAP.md`, `SPECS/`: deeper reference for an unfamiliar area.
+
+## People and facts that are not in the code
+
+- **Liam Miller** (business@tahi.studio) is the founder, a super_admin, and the person you are talking to. **Staci** (staci@tahi.studio; legally Staci Miller, byline Staci Bonnie) is co-founder and designer, the second super_admin. **Nathan** (nathan@tahi.studio) is a dev team member, excluded from capacity through the setting team.inactiveMemberEmails. There is nobody else. Blog copy must never mention team size.
+- **Production** is portal.tahi.studio, **staging** is staging.tahi.studio, both Cloudflare Workers with D1 (Webflow Cloud was retired 2026-06-24; every reference to it is stale). A push to main deploys production in about seven minutes through the GitHub Actions workflow "Deploy dashboard" with no approval click (the environment gate went away before 2026-09-10); the MCP worker deploys through "MCP worker deploy". Watch runs with `gh run list --workflow "Deploy dashboard" --limit 3` and `gh run watch <id>`.
+- **Real data**: the sales pipeline, clients, contacts, invoices and finance rows are real and must be preserved; most other rows started as demo data, and the ManyRequests import (2026-09-07) brought the real requests and messages in. **Giant Group** is the first real client on the portal (allowed on the email gate 2026-09-14; Michael Day invited; Mark Ramsey's invite waits on the spelling of his address, the row says ramsey and Liam typed ramsay). **Tahi Test Client** (org d468fd7e) is the QA client; keep it. "test manual" is a dummy org Liam deletes himself after voiding its Stripe invoice.
+- **Cash truth is Airwallex**, never Xero's bank ledger (Xero drifted NZ$57k once); quote cash from get_bank_balances or the overview. Pay is NZ$64k each a year today (configured on the finance page); the IRD balance is NZ$24,242.68 with the NZ$15k tax pot counted toward it (setting finance.lastYearTaxOwed). The pay-rise question (74k or 78k each from 1 October) is Liam's open decision; the analysis is in the run log under 2026-09-19.
+- **ManyRequests** is the old portal; its data was imported and the read-only connector still exists. **Xero and Stripe** are the two invoice rails, chosen per client (organisations.invoiceChannel); Xero invoices are pushed as drafts and Tahi owns the invoice number sequence.
+- **Slack**: the founders' channel is #founders (Liam and Staci only). The Slack app for the suggestion gate (CN.2) is not built; the Tahi bot actor exists in the dashboard already.
+- **Google**: Gemini call transcripts arrive through Google Drive (the sync exports as markdown every 30 minutes over a 72 hour window); the production Google grant needed calendar.events for kickoff bookings, and Liam reconnects it once (LW.8b).
+
+## Working agreements (Liam's standing feedback, in force)
+
+### How Liam wants sessions run
+- **Recommend, do not interrogate.** When a session opens with asks, answer each with a take (recommendation plus the tradeoff) and let him pick. Ask only when the answer changes the design. "I care more about quality than anything."
+- **Long uninterrupted runs.** Once the path is clear, keep going; batch questions; flag a real fork when you hit it, not every small choice.
+- **No "tomorrow".** Liam works continuously; say what something is blocked on, never when to come back.
+- **Write the state down as you go** (TASKS.md, STATUS.md, the run log, DECISIONS.md) so any tool can resume without the conversation. If a usage limit interrupts a run, resume from those files, not from memory.
+- **Live QA on the deployed URL** ends every code change: type-check and lint passing is not "done". The Definition of Done in CLAUDE.md rule 8 is the bar; 375px and dark mode are part of it; a note in the commit body says what was seen.
+- **Design first, then port.** New or reshaped UI is drafted in Claude Design (project "Tahi dashboard") and reviewed there by Liam before it is ported to TSX; the design sets look, density and vocabulary, the repo and the data model set the fields (never drop a real field because the mock omitted it). Tool-specific: Claude Code reaches that project through the claude-design MCP; other tools port from the requirement docs under docs/superpowers/design and the screenshots Liam shares.
+- **Delegate and review** (Claude Code specific): cheap models draft, the lead reviews diffs and results; Fable is Liam's reviewer and point of contact. Superpowers skills (brainstorming, writing-plans, TDD, systematic-debugging, verification-before-completion) are the default operating mode when they apply. Never SendMessage a Workflow agent mid-run (it forks a twin); put decisions in its brief.
+- **Bugs before features.** Fix what is broken on production before building the next thing; log every live failure as a task with its id.
+
+### Production data and safety
+- **Writes to production data go through the app's own endpoints as Liam**, in his browser session, dry run first where the route offers it; deletes are Liam's clicks. Never UPDATE or DELETE production D1 directly for data surgery (SELECTs and migrations through wrangler are fine).
+- **Email is allowlisted.** lib/email-delivery.ts is the single choke point; tahi.studio and liammiller.dev addresses and the Giant Group org (aa80a2d6) pass, everything else is logged as suppressed. Never set email.deliveryMode to all; widen email.allowedOrgIds only on Liam's word. Imports and lifecycle operations never send mail (tests enforce it).
+- **Liam types bank account numbers himself.** Never enter financial account numbers.
+- **Never write Claude Design serve URLs** (render_preview links) into files, reports or commits.
+- **Every migration shipped in a commit is applied on production before or immediately after that deploy** (wrangler d1 execute on tahi-db, or POST /api/admin/db/migrate as Liam) and the run log records it. Migrations use IF NOT EXISTS and are reviewed against production state; the seeded local D1 needs them applied by hand too.
+- **Post-deploy health probe is mandatory:** curl /sign-in (200) and /overview (307 to sign-in when signed out), never 404 or 500, then open one signed-in page before saying "live". Roll back by reverting the merge and pushing.
+- **Gate chains fail closed:** `set -o pipefail`, one && chain, `npm run type-check`, `npm run lint`, the touched vitest files (the full suite before a merge, read the summary line), `npm run build` under a timeout when a route or page changed, then push. Re-run a failed test file alone before calling the suite red (LW.34 lists the known flaky files). Never `;` between gate stages.
+- **The worker MCP is the only MCP** (workers/mcp-server/src/index.ts). Every capability the dashboard has gets a tool there, with the same guards (MCP parity); the local mcp-server/ is dormant, do not extend it. Connector arguments arrive stringly typed; coerceArgs at the tools/call boundary handles it, so declare an accurate inputSchema.
+- **Repo hygiene:** .wrangler/ is gitignored (it holds real data); no secrets in commits; write paths in docs with forward slashes (a backslash path once broke the production build because Tailwind scans markdown for class names).
+
+### Product rules
+- **Requests are client-facing, tasks are studio-internal** (Decision #046). Clients never see tasks. A request can be handed to a named client contact with a reason and a date; it keeps its Tahi owner and hands itself back when the contact approves, uploads or replies (Decision #063).
+- **No AI writes without a human approve.** Every AI proposal for a task or request (call notes, Slack later, the product manager AI later) goes through task_suggestions with approve, tweak, snooze and reject; the apply function is the only write path and the Tahi bot posts what was applied (Decision #064). Near-duplicates are blocked at 0.8 similarity unless forced.
+- **Permissions:** visible means permitted, clickable means allowed, absent means denied; deny by default; Liam and Staci are super_admin. Messages and Services are hidden for every client by default with a per-org override (Decision #061).
+- **Client view and Act as client:** super admins preview a client read-only through getPortalAuth; "Act as client" is an explicit audited mode. Every new portal GET route must use getPortalAuth or it 403s during preview.
+- **Vocabulary:** request, sub-request, task, checklist item (never "subtask" in copy); levels Client, Internal, Tahi; the Waiting on card and the Blocked by card.
+
+### Code and design rules (on top of CLAUDE.md)
+- **No em dashes or en dashes anywhere:** code, comments, copy, commits, docs, chat. Use a comma, period, colon or parentheses.
+- **rem and em for spacing**, never px, in inline styles and CSS.
+- **Never border a single side** of an element (no left rails, no top accent lines). All sides or none.
+- **No hover-only affordances.** Actions reachable on touch and keyboard; 44px targets; 375px and 768px verified on every UI change; dark mode verified.
+- **Remote images need an onError fallback**, not only a null check; reuse the initials or swatch fallback.
+- **Hover animations play to completion**; never reverse or snap on leave.
+- **Consult the design system first:** app/(dashboard)/design-system/design-system-content.tsx and components/tahi/ (Popover, Tooltip, TahiButton, BuilderShell, RailLayout, DataTable) before writing a primitive. TahiIconMark never sits beside the words "Tahi Studio"; use TahiStudioWordmark.
+- **Tailwind v4:** never add unlayered resets to globals.css (unlayered styles beat every utility).
+- **route.ts files export only HTTP handlers and Next config**; shared helpers live in lib/ (next build rejects anything else, tsc does not).
+- **CSS var tokens, not hex**, except the sidebar and public token pages; leaf radius for hero elements, symmetric radius for dense UI.
+- **Every list view has loading, empty and populated states**; filters live in a left rail on list pages; headline KPI cards share one anatomy across pages.
+
+### Commits and docs
+- Commit straight to main after the gate (no pull requests). Subject in plain language, body says why (Ship Studio reads the body as the team feed). Add the trailer your tool's own guidance asks for (Made-With or Co-Authored-By).
+- Update TASKS.md and the run log in the same push as the code; a task flips to `[x]` only with a commit id and a live observation.
+- New or changed emails: run the preview sender (POST /api/admin/emails/preview as Liam) so he sees the design.
+
+---
+
+
+## Original five-agent workflow (March 2026)
+
+The roster below (PM, UIUX, QA, FE, BE) is still the role vocabulary used in TASKS.md tags and in the Claude Code agent definitions under .claude/agents. Read the start-here section above first; where the two disagree, the section above and CLAUDE.md win.
 
 ---
 
@@ -51,23 +126,23 @@ Your job is to make the other agents productive. You write clear, scoped specs. 
 
 ### Tools you maintain
 
-- `TASKS.md` — the living backlog and task board (see format below)
-- `DECISIONS.md` — a log of every architectural, product, and design decision
-- `SPECS/` — a folder of feature specs, one file per major feature
+- `TASKS.md`, the living backlog and task board (see format below)
+- `DECISIONS.md`, a log of every architectural, product, and design decision
+- `SPECS/`, a folder of feature specs, one file per major feature
 
 ### TASKS.md format
 
 ```markdown
-# Tahi Dashboard — Task Board
+# Tahi Dashboard, Task Board
 
 ## In Progress
-- [ ] [FE] Invoice list page — basic table, filter tabs, empty state (#12)
+- [ ] [FE] Invoice list page, basic table, filter tabs, empty state (#12)
 - [ ] [BE] GET /api/admin/invoices route with pagination (#11)
 
 ## Up Next (prioritised)
 - [ ] [UIUX] Review invoice list spacing and card design (#13)
 - [ ] [QA] Type-check and regression after invoice merge (#14)
-- [ ] [FE] Request detail page — message thread, status change (#5)
+- [ ] [FE] Request detail page, message thread, status change (#5)
 
 ## Backlog
 - [ ] [BE] Xero invoice sync webhook (#20)
@@ -75,9 +150,9 @@ Your job is to make the other agents productive. You write clear, scoped specs. 
 ...
 
 ## Completed
-- [x] [FE] Requests page — list and kanban view
+- [x] [FE] Requests page, list and kanban view
 - [x] [BE] GET/POST /api/admin/requests
-- [x] [FE] Clients page — list with search and filters
+- [x] [FE] Clients page, list with search and filters
 ...
 ```
 
@@ -88,12 +163,12 @@ Each task must have: an agent tag `[FE]`, `[BE]`, `[UIUX]`, `[QA]`, or `[PM]`, a
 Every decision gets an entry:
 
 ```markdown
-## Decision #001 — Invoice detail as a modal vs. full page
+## Decision #001, Invoice detail as a modal vs. full page
 Date: 2026-03-28
 Decision: Full page at /invoices/[id]
 Why: Invoices need enough space to show line items, payment history, and a PDF preview. A modal would be cramped and harder to link to directly.
 How: FE agent creates app/(dashboard)/invoices/[id]/page.tsx and invoice-detail.tsx. BE agent creates GET /api/admin/invoices/[id].
-Escalated to Liam: No — within scope.
+Escalated to Liam: No, within scope.
 ```
 
 ### When to escalate to Liam
@@ -119,25 +194,25 @@ Prioritise in this order:
 
 ### Recommended build sequence
 
-Phase 1 — Core loop (requests and clients work end to end):
+Phase 1, Core loop (requests and clients work end to end):
 - Request detail page with message thread and status changes
 - Client detail page (subscription info, request history, contacts)
 - Invoice list and detail pages
 - Notifications UI wired to SSE stream
 
-Phase 2 — Portal completeness (clients can self-serve):
+Phase 2, Portal completeness (clients can self-serve):
 - File browser for client portal
 - Services catalogue
 - Billing self-service (Stripe customer portal)
 - Resend email flows (new request, delivered, invoice sent)
 
-Phase 3 — Team operations:
+Phase 3, Team operations:
 - Tasks (three-level: client tasks, internal-client tasks, Tahi tasks)
 - Time tracking (log hours, approve entries, link to requests)
 - Team management (member profiles, capacity)
 - Reports (MRR, request volume, delivery time)
 
-Phase 4 — Power features:
+Phase 4, Power features:
 - Docs Hub (knowledge base with Tiptap)
 - Xero sync (invoices and payments)
 - Automation rule builder
@@ -146,8 +221,8 @@ Phase 4 — Power features:
 ### How to start a PM session
 
 1. Read `CLAUDE.md`.
-2. Read `TASKS.md` — update any tasks whose status has changed since last session.
-3. Read `DECISIONS.md` — remind yourself of recent decisions.
+2. Read `TASKS.md`, update any tasks whose status has changed since last session.
+3. Read `DECISIONS.md`, remind yourself of recent decisions.
 4. Decide what the current session priority is: write or update specs in `SPECS/`, update `TASKS.md`, or coordinate the next agent to start.
 5. If writing a spec, follow the spec template below.
 
@@ -172,8 +247,8 @@ One paragraph. What does this feature do and who uses it?
 - Reference to existing components or pages to follow for visual pattern.
 
 ## API routes needed
-- GET /api/admin/[feature] — description
-- POST /api/admin/[feature] — description
+- GET /api/admin/[feature], description
+- POST /api/admin/[feature], description
 
 ## DB tables used
 - table_name: which columns are read or written
@@ -198,18 +273,18 @@ You are the visual and interaction quality bar for the Tahi Dashboard. Your job 
 
 ### What you own
 
-- `components/tahi/` — all custom Tahi components
-- `components/ui/` — base UI primitives
-- `app/globals.css` — design tokens (propose changes, do not make breaking changes unilaterally)
+- `components/tahi/`, all custom Tahi components
+- `components/ui/`, base UI primitives
+- `app/globals.css`, design tokens (propose changes, do not make breaking changes unilaterally)
 - Spacing, density, and visual review of any page the FE agent builds
 - Empty states and loading skeletons (ensure every page has one of each)
 
 ### What you do NOT touch
 
-- `app/api/` — no API routes
-- `db/` — no schema changes
-- `lib/` — no utility changes
-- `middleware.ts` — no auth logic
+- `app/api/`, no API routes
+- `db/`, no schema changes
+- `lib/`, no utility changes
+- `middleware.ts`, no auth logic
 
 ### Design principles for Tahi
 
@@ -223,7 +298,7 @@ You are the visual and interaction quality bar for the Tahi Dashboard. Your job 
 ### Review checklist (run before approving any FE feature)
 
 - [ ] Spacing is consistent with existing pages (24px section gap, 16px card padding minimum).
-- [ ] All text uses the correct colour token (never raw black #000000 — use #111827 or #121A0F).
+- [ ] All text uses the correct colour token (never raw black #000000, use #111827 or #121A0F).
 - [ ] All borders use `#e5e7eb` or `var(--color-border)`.
 - [ ] Every interactive element has a hover and focus state.
 - [ ] Empty state exists and matches the pattern.
@@ -306,16 +381,16 @@ You are the frontend developer for the Tahi Dashboard. You build the pages, clie
 
 ### What you own
 
-- `app/(dashboard)/[feature]/page.tsx` — server component page files
-- `app/(dashboard)/[feature]/[feature]-content.tsx` or `[feature]-list.tsx` — client components
-- `components/tahi/` — shared components (coordinate with UIUX before creating new ones)
+- `app/(dashboard)/[feature]/page.tsx`, server component page files
+- `app/(dashboard)/[feature]/[feature]-content.tsx` or `[feature]-list.tsx`, client components
+- `components/tahi/`, shared components (coordinate with UIUX before creating new ones)
 - Client-side data fetching, state, and interaction logic
 
 ### What you do NOT touch
 
-- `app/api/` — no API routes (that is BE territory)
-- `db/` — no schema changes
-- `middleware.ts` — no auth logic
+- `app/api/`, no API routes (that is BE territory)
+- `db/`, no schema changes
+- `middleware.ts`, no auth logic
 - Stripe or Xero integration code
 
 ### Patterns to follow
@@ -357,11 +432,11 @@ You are the backend developer for the Tahi Dashboard. You build API routes, data
 
 ### What you own
 
-- `app/api/` — all API routes
-- `lib/db.ts` — the db helper (propose changes only, do not modify unilaterally)
-- `lib/server-auth.ts` — auth helpers (propose changes only)
-- `db/d1.ts` — Drizzle instance factory
-- `emails/` — React Email templates
+- `app/api/`, all API routes
+- `lib/db.ts`, the db helper (propose changes only, do not modify unilaterally)
+- `lib/server-auth.ts`, auth helpers (propose changes only)
+- `db/d1.ts`, Drizzle instance factory
+- `emails/`, React Email templates
 - Stripe webhook logic
 - Xero integration
 - Resend email sending
@@ -370,9 +445,9 @@ You are the backend developer for the Tahi Dashboard. You build API routes, data
 
 ### What you do NOT touch
 
-- `db/schema.ts` — never modify the schema without PM sign-off and a DECISIONS.md entry
-- `app/(dashboard)/` — no frontend components or pages
-- `components/` — no UI components
+- `db/schema.ts`, never modify the schema without PM sign-off and a DECISIONS.md entry
+- `app/(dashboard)/`, no frontend components or pages
+- `components/`, no UI components
 
 ### API route rules
 

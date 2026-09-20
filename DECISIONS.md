@@ -1246,3 +1246,87 @@ So the lock MOVES rather than loosens. The cleanup asks "does it hold finance da
 - Existing clients are not bulk-reclassified by this decision. Recategorising specific rows (Blank Space Inc, Fluvial, and similar) is a data change, done deliberately per client, not a side effect of shipping the enum value.
 
 ---
+
+## #061 - Messages and Services Are Hidden for Every Client by Default
+
+**Date:** 2026-09-13 (Messages), 2026-09-14 (Services)
+
+**Decision:** The standalone Messages page and the Services page are denied for every client organisation at the platform default (feature_visibility client default deny: nav item absent, page guard redirects, the portal API answers 403), with a per-organisation override that can switch either on for one client.
+
+**Rationale:** Liam, 2026-09-13 morning: Messages stays hidden for every client; the request thread is the conversation surface that works. Liam, 2026-09-14: "lets hide services for now for clients". This reverses the 2026-09-12 direction where a Scale client compared their custom plan against the public ladder on /services; the catalogue rows and the plan ladder stay in place for when it comes back, and "Ask about this plan" still files a request.
+
+**Implications:** The permission resolver (lib/permissions.ts, feature_visibility) is the only switch; do not add page-level flags. Giant Group carries the Messages denial as an organisation override from before the platform default. When Services returns for clients it must showcase and compare, never sell (no order path, per Liam's 2026-09-12 direction).
+
+---
+
+## #062 - A Migration Shipped in a Commit Is Applied on Production Before or Right After the Deploy
+
+**Date:** 2026-09-15
+
+**Decision:** Whoever merges a commit that adds a file under drizzle/migrations/ applies it on production (wrangler d1 execute against tahi-db, or POST /api/admin/db/migrate as Liam) before the push or immediately after the deploy lands, checks the migrate list afterwards, and records the apply in the run log entry for that merge. The seeded local QA D1 gets the same migration by hand.
+
+**Rationale:** Migration 0103 (feedback_comments.screenshot_key) shipped on 2026-09-14 in the repo and the runner list, nobody applied it, and the deployed insert wrote a column that did not exist: the comment ball answered "Something went wrong sending that" for a day until the runner was called on 2026-09-15. Earlier, migration 0088 had to be applied statement by statement. The deploy pipeline has no migration step by design (D1 writes are an operator act), so the rule has to live with the merge.
+
+**Implications:** A deploy that lands ahead of its migration must degrade honestly (tolerant side queries, empty states), never 500 the page. Migrations keep IF NOT EXISTS and are reviewed against production state. The runner endpoint is admin-gated and is the audited path when wrangler is not to hand.
+
+---
+
+## #063 - A Request Can Be Handed to a Named Client Contact and Hands Itself Back
+
+**Date:** 2026-09-18
+
+**Decision:** Requests stay Tahi's work, but a request can be handed to exactly one client contact with a reason (approval, content, access, decision, file, other), a note and an optional date (requests.waiting_on_* columns, migration 0104). The request keeps its Tahi owner and assignees; the contact becomes a contributor participant; the portal shows a personal Waiting on you list with one action verb and the org admin sees the org-wide list; the studio sees a chip on rows and cards, a Waiting on clients rail view and a Waiting on card on the detail, and the Blocked by card shows the hand-off as a synthetic line. The request hands itself back when the contact approves, uploads or replies. A nudge email goes out after requests.handoffNudgeDays (default 3), never more than once per three days, and a contact without a seat is invited in the same email.
+
+**Rationale:** Liam, 2026-09-18: "requests are mainly for us (good). but occasionally, i'll need a client to help with a request (a person on the org). or i'll be blocked by them for something." Assigning the request to the client would have inverted ownership and hidden it from the studio queue; a hand-off keeps the studio accountable and makes the client's part explicit, visible and nudged.
+
+**Implications:** Participant roles approver, contributor and watcher are real for contacts (HO.4 widened the participants route). The new notification type request_waiting_on_you has no preference toggle for launch (HO.5). MCP hand_off_request, hand_back_request and list_requests_waiting_on_clients mirror the routes; get_dashboard_guide explains hand-offs, blockers and roles to any connector. A request created isInternal must be flipped client-visible before a hand-off, or the contact lands on nothing.
+
+---
+
+## #064 - One Suggestion Gate for Every AI-Proposed Change to Tasks and Requests
+
+**Date:** 2026-09-19
+
+**Decision:** No AI path writes a task or a request directly. Every proposal (call transcripts today; Slack messages, voice notes and the product manager AI later) lands in task_suggestions with a verbatim quote from its source, and a human decides it in the Suggestions inbox on /tasks, from the home card, through the MCP or, later, in Slack: Approve, Tweak, Snooze, Reject, Approve all. Applying is one server function per kind (lib/task-writes.ts and lib/request-writes.ts, the same code the routes use, with audit entries), and every applied change posts in the item's thread as the Tahi bot, never as a person. Suggestions may be tasks or requests; when the work is something the client will see, it is a request (create, update, thread note or hand-off), and the prompt states that test with examples. Approval belongs to the sender: Staci approves suggestions from her notes, a client approves their own request draft, and call suggestions go to the #founders Slack channel where the first founder to click decides. Gemini transcripts arrive through Google Drive (the full transcript plus the wrap-up); the Gmail inbox branch was dropped. Snooze exists but is minimal. A proposal whose title scores 0.8 or above against the client's open or recently delivered requests, its tasks or another pending suggestion is blocked at approval unless forced (never in bulk), the inbox offers to attach it as a note to the existing item instead, and the sweep drops cross-call duplicates.
+
+**Rationale:** Liam's ask (2026-09-18) was to keep every task and request in sync with what was said on calls without anything changing quietly; the approval gate is the whole point ("it's really easy for me to just go yes yes"). Liam, 2026-09-19: "these are tasks and requests. Especially requests if they come from a client", and "make sure we don't duplicate what we already have". The first live pass filed site work as tasks and proposed items that already existed, which is why the client-visibility test and the similarity guard are part of the decision rather than tuning.
+
+**Implications:** New sources (CN.2 Slack, PM.3 plain-word updates) feed task_suggestions and reuse the apply function; nothing else may call the write helpers on behalf of an AI. The cron keeps a high-water mark per transcript and a cost scope call_suggestions. A rebuild currently replaces a pass (CN.1c is the open fix: union the passes, leave decided rows alone). The Tahi bot is an actor type (authorType bot) on task_comments and request messages, not a team member row.
+
+---
+
+## #065 - Studio Home Money Cards Share One Cash Position
+
+**Date:** 2026-09-19
+
+**Decision:** lib/cash-position.ts computes the cash position once (total cash across currencies, tax owed, reserve pots, recurring burn, project run-rate, surplus, gross and net runway) and the overview, the owner home cards and /financial-reports read it. The setting finance.lastYearTaxOwed now means the total IRD balance (NZ$24,242.68 on 2026-09-19); the NZ$15k tax pot counts toward that bill and is never deducted on top of it. The cash-flow ribbon shows the full picture (retainers plus the trailing project run-rate plus weighted pipeline, minus commitments) with its basis printed under the card. Receivables aging buckets are not due, 1 to 30, 31 to 60 and 61+ days late, with a count for invoices lacking a due date. Studio capacity counts assigned open work as booked and only active members, with the roster governed by team.inactiveMemberEmails (not the email block list). Retainer health follows the API's own status; pipeline ahead uses the forecast's weighting and separates past-due closes; proposals live lists shared, published or accepted documents only.
+
+**Rationale:** Liam, 2026-09-18: "check my home page for accuracy". Every card was traced to its route; nine were wrong for nine different reasons (0 to 30 days late called current, gross burn with revenue ignored, tax deducted twice, annualised deal values, logged hours as booked, an inactive member counted, drafts as live). Three burn figures on one screen came from three computations. One source and stated bases are what make the numbers defensible.
+
+**Implications:** Any new money card reads computeCashPosition or the cash-flow forecast route, never a private sum. When Liam moves money into or out of the tax pot or pays IRD, the settings change, not the code. Nathan is inactive for capacity through the setting; a new hire is active by default.
+
+---
+
+## #066 - The MCP Worker Coerces Arguments Against Each Tool's Schema at the Dispatch Boundary
+
+**Date:** 2026-09-19
+
+**Decision:** workers/mcp-server/src/coerce.ts normalises every tools/call payload against the tool's own inputSchema before dispatch: booleans from "true", "yes", 1, "false", "no", 0 and so on; numeric strings to numbers; string arrays from JSON, newline or comma separated strings; subtasks from strings, objects or one block of text. Tool code reads typed values and declares an accurate inputSchema.
+
+**Rationale:** Connectors (claude.ai and others) send arguments as strings. create_task silently dropped subtasks, toggle_task_subtask always refused, update_request_fields { isInternal: false } read as "no field to update", and an audit found sixty-odd boolean arguments read with === true, !== false or truthiness, so a stringy "false" could even rotate a share token. Fixing each call site would have left the next tool broken.
+
+**Implications:** New tools get coercion for free but must declare types honestly in inputSchema; tests live in app/api/__tests__/mcp-coerce.test.ts and the request tool parity file. New tools appear in a connector session only after a fresh session.
+
+---
+
+## #067 - The Product Manager AI Is a Layer on the Suggestion Gate, Scoped Before Built
+
+**Date:** 2026-09-20
+
+**Decision:** Liam's product manager AI (checks tasks, clients and requests, nudges the person handling each item, helps them or the owner make updates, plans far-off work) is planned as PM.0 to PM.5 on top of what exists: the Tahi bot actor and item threads, task_suggestions for every proposed change, the delivery-watch and hand-off nudge crons, the daily brief, and the CN.2 Slack app for DMs and buttons. It never edits fields itself; it proposes through the gate. The scope (PM.0) is written and approved by Liam before any build.
+
+**Rationale:** Liam, 2026-09-20: "this helps us be accountable from slipping behind". The gate already gives a human the last word, and a second write path would reintroduce quiet changes. Decisions for Liam at scope time: cadence, tone, and whether the PM may ever change a field directly.
+
+**Implications:** No new bot identity and no second Slack app; pm_findings is the only new table sketched. Client-facing nudges stay behind a human unless the allowlist and Liam say otherwise.
+
+---

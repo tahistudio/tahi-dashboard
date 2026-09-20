@@ -1,7 +1,7 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-09-12** by Claude (deploy gate gone, `completed` client status, client book reclassified, MC.4 and MC.10 decided, DL.0 unblocked). Triage snapshot below is still the 2026-08-18 audit.
+> Last updated: **2026-09-21** by Claude (handoff sync: the 2026-09-13 to 2026-09-20 week written up, known bugs and operator steps refreshed). Triage snapshot below is still the 2026-08-18 audit. Reading order for any agent: AGENTS.md.
 
 ## The plan (2026-08-18)
 
@@ -10,6 +10,34 @@ Liam's call: ship every surface a client touches first (proposals, contracts, sc
 ## DEPLOY GATE - RESOLVED 2026-09-10
 
 **Pushes to main DO auto-deploy to production now.** The `production` GitHub environment carries no protection rules any more (checked through the API on 2026-09-12: `protection_rules: []`), so the "Deploy dashboard" workflow's production job runs straight through: 4e43bd9d was pushed at 01:07 NZST on 2026-09-10 and was live at 01:14 with nobody clicking anything. The Aug 10 story (dc41442a sat behind a required reviewer for 8 days) is history. If the gate ever comes back it shows up as a run stuck on "waiting" at GitHub -> Actions -> the run -> Review deployments.
+
+## Since the last update (2026-09-13 to 2026-09-20)
+
+Full detail with commit ids is in docs/superpowers/plans/2026-09-13-overnight-run-log.md (dated entries) and the TASKS.md sections named in brackets.
+
+- **Giant Group is live on the portal** (2026-09-14, LW.33): their org is on the email allowlist, Michael Day was invited through the real flow (link valid to 27 September), Mark Ramsey's invite waits on the spelling of his address. The first real hand-off went through the MCP on 2026-09-18: request #244 to Mickey Day, due 30 September. Their two shared proposals are the only ones on the home's Proposals live card.
+- **Liam's second walk-through round** (2026-09-14, LW.21 to LW.36): one scrollbar on the requests board; delete a file from every files surface with MCP delete_file; Services hidden for clients the way Messages is; one focus ring on the AI composer; the seat invite flow fixed end to end (signed out plus a token goes to sign-up with the email prefilled, acceptance runs on arrival, seat versus first contact decided from the org's contacts); the client home empty state keeps the dark header; "Sign out and return to sign in" on every onboarding step; People delete resilient to a missing Clerk membership; member seats never see plan or billing; prep notes on every call (migration 0102); the "test manual" phantom invoice written off and the Stripe importer taught never to demote written_off or paid; the comment ball picks its element and snaps to an edge (0101) and stores screenshots (0103, applied 2026-09-15 after the insert had failed for a day). Google Calendar: the production grant was read-only, so kickoff bookings never reached the calendar; scopes widened, Liam reconnects once (LW.8b).
+- **Client hand-offs on requests** (2026-09-18, HO.1 to HO.4, Decision #063): a request can be handed to a named client contact with a reason, note and date (migration 0104); the contact sees Waiting on you in the portal, the studio sees a chip, a rail view and a Waiting on card, the request hands itself back on approve, upload or reply, a nudge email goes out after three days, and a contact without a seat is invited in the same email. MCP hand_off_request, hand_back_request, list_requests_waiting_on_clients and get_dashboard_guide; /help renders the ten-section guide for both audiences.
+- **MCP worker hardened** (LW.37, LW.38, Decision #066): connector arguments arrive as strings, so create_task lost subtasks and every boolean flag misread; coerceArgs now normalises every call against the tool's inputSchema at the tools/call boundary. New tools show up in a connector only in a fresh session.
+- **Studio home accuracy** (2026-09-19, HA.1 to HA.10, Decision #065): every card was traced to its route on production; nine were wrong and are fixed and verified live (receivables aging buckets, the brief's currency prefix, the MRR delta basis month, pipeline ahead on the forecast's basis, capacity by assigned work and active members, retainer health by the API's own status, proposals live without drafts, one cash position for the money cards, the cash-flow ribbon on the full picture). Settings applied as Liam: finance.lastYearTaxOwed 24242.68 (the IRD balance), team.inactiveMemberEmails nathan@tahi.studio. Greyhive INV-2025000024 written off (a debt collector is engaged). Live after c554076d: outstanding NZ$21,394 across 6 invoices with NZ$16,106 overdue; cash NZ$76.1k, +NZ$13.2k a month net, 3.6 months if revenue stopped; take-home NZ$51.8k free; September net +NZ$14.5k, twelve months +NZ$136.5k.
+- **Pay-rise question** (2026-09-19, decision open): Liam asked whether the pipeline retainer justifies a rise for Staci and him. The model from the live numbers recommends NZ$78k each from the 1 October payroll on today's revenue (nearly tax neutral inside the 30 percent band), with NZ$74k each also comfortable, with or without Meditrain; Bharat's 17 September transcript confirms the Meditrain package at 2,200 a month, which the CRM still carries as 1,250 and which may include the SE Ranking subscription. Conditions and revert rules are in the run log under 2026-09-19. Liam decides; nothing was changed in settings or code.
+- **Call notes to tasks with an approval gate** (2026-09-19, scope docs/superpowers/plans/2026-09-19-call-notes-to-tasks-scope.md, Decision #064). Live: CN.0 (call_transcripts for every call kind, the Tahi bot actor, task threads mirrored into the request thread; migrations 0105, 0106); CN.0b (the Gemini Drive export had never parsed since it shipped because it asked for text/plain while the parser read markdown; fixed, 15 docs parsed, 12 discovery calls carry their first real transcripts, 2 parked for manual attach on /calls); CN.1 (the Sonnet suggester over transcripts, the Suggestions inbox on /tasks with Approve, Tweak, Snooze, Reject, Approve all and the y n j k keys, the owner home card, MCP list_task_suggestions and decide_task_suggestion, the half-hourly cron; migrations 0107, 0108); CN.1b (suggestions become requests, hand-offs and request notes as well as tasks, with the Tasks vs Requests rule stated as "what the client will see"; migration 0109); CN.1d (similarity guard: Looks like #226, Use #226 instead, approve blocked at 0.8 unless forced, cross-call dedupe, delivered requests shown to the model). Liam's first pass: 8 approved (Verandela requests #228 to #235) and 19 rejected. Model spend over five passes about 3 dollars. Open: CN.1c (a rebuild should union passes, not replace them; Sonnet 5 rejects a temperature parameter), CN.2 (the Slack app), CN.3 (keeping in sync).
+- **Calls:** two more meeting types, mentoring and other (LW.39); lib/calls.ts owns the vocabulary; the calendar sync keeps a hand-set type.
+- **Feedback comments round** (LW.40, LW.41): the nine comments Liam left through the comment ball are fixed and deployed (brief meta stacking on phone, the Wire ticker, the comment hint in dark, contract header glass in dark, the More actions popover on phone, row Delete no longer navigating in the shared DataTable, vertical client cards, the deal-linked call row on phone). The live phone and dark pass is still owed (the Chrome extension was disconnected). DELETE /api/admin/feedback/[id] and MCP delete_feedback_comment exist now; the fixed rows were removed.
+- **Product manager AI** logged as PM.0 to PM.5 (2026-09-20, Decision #067): scope first, on Liam's go; it rides on the suggestion gate, the Tahi bot, the nudge crons and the coming Slack app.
+- **Design pass held for review:** 19 Claude Design modules (13 SHIP, 6 FIX) and the 27 requirement documents under docs/superpowers/design; nothing ported. Liam marks docs/superpowers/plans/2026-09-14-design-review-for-liam.md first.
+- **Migrations 0100 to 0109 are all applied on production** (0100 comment ball, 0101 anchors, 0102 prep notes, 0103 screenshots, 0104 hand-offs, 0105 transcripts, 0106 task comments, 0107 suggestions, 0108 suggested_at, 0109 request suggestion kinds). Rule since 0103 (Decision #062): a migration is applied before or right after the deploy that ships it, and the run log says so.
+
+### Operator steps waiting on Liam (2026-09-21)
+
+- Reconnect Google under Settings > Integrations, then book a kickoff and confirm the calendar event and Join link (LW.8b).
+- Confirm the spelling of Mark Ramsey's address so his Giant Group invite can go.
+- Void the "test manual" Stripe invoice (in_1TGQaE2MOtshRPkATn4r8ByV) and delete the "test manual" org from /clients.
+- Work the Suggestions inbox on /tasks as calls come in; the first similarity warnings show on the next call's suggestions.
+- The real-session lap (A5): Liam or Staci in incognito for 20 minutes; the only proof for the greeting, the bell, the invite path and the second seat.
+- The pay-rise decision (74k or 78k each from 1 October) and topping the tax pot from NZ$15k to the full IRD balance before the January instalment.
+- Mark the 2026-09-14 design review; say go on PM.0 (product manager AI scope) and on CN.2 (the Slack app needs an app with a signing secret and a bot token in #founders).
+- Look at the eight LW.40 fixes at 375px and in dark, or let the next session with a browser do it.
 
 ## Since the last update (2026-09-10 to 2026-09-12)
 
@@ -101,12 +129,16 @@ Liam's call: ship every surface a client touches first (proposals, contracts, sc
 
 ## Known live bugs (priority order)
 
-1. **P0 - production deploy gate: RESOLVED 2026-09-10.** The required-reviewer rule is gone and pushes to main are live in about seven minutes (see DEPLOY GATE above). T0.2 (sync-airwallex + get_bank_balances check) stays open on its own merits.
-2. **P0 - `finance.yieldHoldings` stale**: yield positions grew (Xero shows Yield USD 33,956.89 / AUD 638.80 vs setting's 20,014.13 / 531.51). Confirm in Airwallex UI, update via update_settings after the deploy lands.
-3. **P1 - the five portal blockers** (sprint C2 above).
-4. **P1 - proposal/schedule share leaks live rows; proposal accept + contract sign are silent** (sprint C1).
-5. **P2 - migrations 0081/0082 apply state unverified on prod D1** (C0.4).
-6. **P3 - board drop targets**: on the Tasks board a card in the SAME column as the dragged card still lights as a drop target. Cosmetic, inside `KanbanBoard`, so it shows on the Requests board too.
+Refreshed 2026-09-21. The older items are kept at the bottom with their state.
+
+1. **P1 - never seen live at 375px or in dark:** the eight LW.40 comment-ball fixes (overview brief meta, the Wire ticker, contracts header and More menu, client cards, the deal-linked call row) rest on reviewers' reading and the DataTable tests. The real-session lap (A5: greeting, bell, invite path, second seat) is Liam's or Staci's and has not happened.
+2. **P1 - `finance.yieldHoldings` may be stale** (last noted 2026-08-18: Xero showed Yield USD 33,956.89 / AUD 638.80 vs the setting's 20,014.13 / 531.51; not re-checked since). Confirm in the Airwallex UI and update through update_settings; the home cash figure (NZ$76.1k on 17 Sep) depends on it, and Liam quoted NZ$85k on 2026-09-19.
+3. **P2 - CN.1c:** a rebuild of call suggestions replaces the previous pass instead of merging it, so sampling variance can drop items a human never saw (Sonnet 5 rejects a temperature parameter).
+4. **P2 - flaky under a full parallel vitest run** (LW.34): middleware.test.ts, utils formatDate, server-client-boundary; all green alone. The gate retries a failed file in isolation before calling the suite red.
+5. **P2 - the August financial snapshot is missing** (the monthly cron did not fire); the MRR delta reads against July until September's snapshot lands. The writer is idempotent; what is owed is a manual write of the August row or a cron re-run.
+6. **P3 - HO.5:** request_waiting_on_you has no notification preference toggle (bell and email on, cannot be muted); add when a client asks.
+7. **P3 - board drop targets**: on the Tasks board a card in the SAME column as the dragged card still lights as a drop target. Cosmetic, inside `KanbanBoard`, so it shows on the Requests board too.
+8. **Older items, for the record:** the production deploy gate is RESOLVED (2026-09-10); T0.2 (sync-airwallex plus a get_bank_balances check) stays open on its own merits; migrations 0081/0082 apply state on prod D1 (C0.4) was never re-verified; the five portal blockers (C2) shipped 2026-09-05; the proposal and schedule share leaks and the silent accept and sign (C1) were closed by Catalogue Batch C on 2026-09-13.
 
 ### Corrections to previous STATUS claims
 

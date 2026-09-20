@@ -451,6 +451,8 @@ Every list view must handle all three states: loading (animate-pulse skeletons),
 
 ## What Is Built
 
+> March 2026 snapshot, kept for history. STATUS.md is the live record of what is built and trusted on production; AGENTS.md gives the reading order. (Note added 2026-09-21.)
+
 - Auth and role routing (complete)
 - Database schema core tables (complete)
 - Cloudflare Workers / D1 infrastructure (complete)
@@ -467,6 +469,8 @@ Every list view must handle all three states: loading (animate-pulse skeletons),
 ---
 
 ## What Is NOT Built
+
+> March 2026 snapshot. Most of this list has shipped since; STATUS.md and TASKS.md say what is actually open. (Note added 2026-09-21.)
 
 See `TASKS.md` for the full prioritised list. The high-level categories:
 
@@ -527,7 +531,7 @@ See `TASKS.md` for the full prioritised list. The high-level categories:
 8. **Definition of Done.** A task only flips to `[x]` after all of:
    1. `npm run type-check` zero errors
    2. `npm run lint` zero errors
-   3. Pushed to main + Webflow Cloud deploy green
+   3. Pushed to main + Cloudflare deploy green (GitHub Actions "Deploy dashboard"; no approval click since 2026-09-10)
    4. **Live browser smoke**: golden-path flow exercised on the deployed URL
    5. **Mobile 375px**: layout verified — no horizontal scroll, touch targets ≥ 44px
    6. **Dark mode**: page rendered with `.dark` class — no contrast regressions
