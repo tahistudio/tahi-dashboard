@@ -61,6 +61,10 @@ lib/slack/identity.ts: `resolveSlackIdentity(database, { teamId, userId, fetchPr
 
 docs/superpowers/plans/2026-09-22-slack-app-manifest.md: the app manifest JSON (name Tahi, bot user, App Home with the messages tab on, scopes chat:write, im:history, im:read, im:write, users:read, users:read.email, files:read, app_mentions:read, channels:history for later; events message.im, app_mention, file_shared; interactivity URL and events URL on portal.tahi.studio) and the two secrets to set.
 
+## 6b. Agent mode (the existing app has assistant:write)
+
+The app runs in Agents and Apps mode, so the 1:1 is the assistant pane, not a plain DM. S1's events route also accepts assistant_thread_started (reply with a welcome line for the identity level and set suggested prompts through assistant.threads.setSuggestedPrompts) and assistant_thread_context_changed (ignore, ack). While a note or voice file is being read, set assistant.threads.setStatus "Reading your note" and clear it when the draft posts. lib/slack/api.ts gains setStatus and setSuggestedPrompts. The lead adds this at merge if the slices did not see it.
+
 ## 7. Out of this phase
 
 Channels (team wide and founders only), the PM nudges (PM.2), distributing the app to client workspaces (Slack Connect guests in the Tahi workspace for now), and anything the bot could do without a human pressing a button.
