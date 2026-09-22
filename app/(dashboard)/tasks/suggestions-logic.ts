@@ -1,14 +1,19 @@
 /**
- * The pure half of the Suggestions view: grouping, labels, the keyboard
- * map and the two directions a create_task proposal travels through
- * NewTaskDialog's initialDraft prop. Nothing here talks to fetch, React or
- * the DOM, so it runs in the repo's node-only Vitest environment the same
- * way lib/tasks-views.ts does.
+ * The pure half of the Suggestions view: grouping, the keyboard map, the
+ * decide request bodies and the two directions a create_task proposal travels
+ * through NewTaskDialog's initialDraft prop. Nothing here talks to fetch,
+ * React or the DOM, so it runs in the repo's node-only Vitest environment the
+ * same way lib/tasks-views.ts does.
+ *
+ * The words a suggestion is described in (the kind chip, the proposal
+ * summary, the target request line, the confidence label, the suggested
+ * assignee line and the duplicate warning) moved to lib/suggestion-summary.ts
+ * when the Slack DM started showing the same row (CN.2 contract section 3),
+ * and are re-exported from here so no call site in the view had to move.
  */
 
 import type { TaskFields } from '@/lib/task-wizard-drafts'
 import type { RequestInitialDraft } from '@/components/tahi/new-request-dialog'
-import { handoffReasonShortLabel, isHandoffReason } from '@/lib/request-handoff-copy'
 import type {
   CreateRequestProposal,
   CreateTaskProposal,
@@ -16,8 +21,22 @@ import type {
   HandOffRequestProposal,
   SimilarMatch,
   SnoozePreset,
-  TaskSuggestionKind,
 } from './suggestions-types'
+
+// The shared summariser (lib/suggestion-summary.ts). Re-exported rather than
+// re-implemented: Slack and the inbox describe a row in one set of words.
+export {
+  SUGGESTION_KIND_LABELS,
+  attachButtonLabel,
+  bestMatchTarget,
+  canAttachBestMatch,
+  confidenceLabel,
+  similarMatchLine,
+  suggestedAssigneeLine,
+  suggestionKindLabel,
+  summariseProposal,
+  targetRequestLine,
+} from '@/lib/suggestion-summary'
 
 // ── Grouping ────────────────────────────────────────────────────────────────
 
@@ -65,134 +84,11 @@ export function groupSuggestionsByCall(items: readonly DecoratedSuggestion[]): S
   return groups
 }
 
-// ── Kind chip and proposal summary ───────────────────────────────────────────
-
-export const SUGGESTION_KIND_LABELS: Record<TaskSuggestionKind, string> = {
-  create_task: 'New task',
-  update_task: 'Update',
-  complete_task: 'Complete',
-  add_subtasks: 'Subtasks',
-  note: 'Note',
-  create_request: 'New request',
-  update_request: 'Update request',
-  request_note: 'Request note',
-  hand_off_request: 'Hand off',
-}
-
-export function suggestionKindLabel(kind: TaskSuggestionKind): string {
-  return SUGGESTION_KIND_LABELS[kind] ?? kind
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  if (typeof value === 'string') {
-    try {
-      return asRecord(JSON.parse(value))
-    } catch {
-      return {}
-    }
-  }
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
-}
-
-const UPDATE_FIELD_LABELS: Record<string, string> = {
-  title: 'title',
-  description: 'description',
-  status: 'status',
-  priority: 'priority',
-  dueDate: 'due date',
-  assigneeId: 'assignee',
-  estimatedHours: 'estimate',
-}
-
-const UPDATE_REQUEST_FIELD_LABELS: Record<string, string> = {
-  status: 'status',
-  priority: 'priority',
-  dueDate: 'due date',
-  startDate: 'start date',
-  estimatedHours: 'estimate',
-  category: 'category',
-  scopeFlagged: 'scope flag',
-}
-
-/** One plain-text line describing a proposal, whatever kind it is. Never
- *  throws on a malformed shape: an unreadable proposal reads as a generic
- *  line rather than crashing the row it is inside. */
-export function summariseProposal(kind: TaskSuggestionKind, proposal: unknown): string {
-  const p = asRecord(proposal)
-  switch (kind) {
-    case 'create_task': {
-      const title = typeof p.title === 'string' && p.title.trim() ? p.title.trim() : 'Untitled task'
-      const description = typeof p.description === 'string' ? p.description.trim() : ''
-      return description ? `${title} - ${description}` : title
-    }
-    case 'update_task': {
-      const fields = asRecord(p.fields)
-      const keys = Object.keys(fields)
-      if (keys.length === 0) return 'No fields changed'
-      const labels = keys.map(k => UPDATE_FIELD_LABELS[k] ?? k)
-      return `Changes ${labels.join(', ')}`
-    }
-    case 'complete_task': {
-      const note = typeof p.note === 'string' ? p.note.trim() : ''
-      return note ? `Marks the task done. ${note}` : 'Marks the task done'
-    }
-    case 'add_subtasks': {
-      const subtasks = Array.isArray(p.subtasks)
-        ? p.subtasks.filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
-        : []
-      return subtasks.length > 0 ? subtasks.join(', ') : 'No subtasks listed'
-    }
-    case 'note': {
-      const body = typeof p.body === 'string' ? p.body.trim() : ''
-      return body || 'No note text'
-    }
-    case 'create_request': {
-      const title = typeof p.title === 'string' && p.title.trim() ? p.title.trim() : 'Untitled request'
-      const category = typeof p.category === 'string' ? p.category.trim() : ''
-      return category ? `${title} - ${category}` : title
-    }
-    case 'update_request': {
-      const fields = asRecord(p.fields)
-      const keys = Object.keys(fields)
-      if (keys.length === 0) return 'No fields changed'
-      const labels = keys.map(k => UPDATE_REQUEST_FIELD_LABELS[k] ?? k)
-      return `Changes ${labels.join(', ')}`
-    }
-    case 'request_note': {
-      const body = typeof p.body === 'string' ? p.body.trim() : ''
-      return body || 'No note text'
-    }
-    case 'hand_off_request': {
-      const name = typeof p.contactName === 'string' && p.contactName.trim() ? p.contactName.trim() : 'someone'
-      const reason = isHandoffReason(p.reason) ? handoffReasonShortLabel(p.reason) : 'something'
-      return `Waiting on ${name}: ${reason}`
-    }
-    default:
-      return 'Unrecognised suggestion'
-  }
-}
-
-/** "#<number> <title>" for a row with a target request, or null when there is
- *  none: a create_request has no target yet, and every kind reads this the
- *  same way once one exists (contract section 5). */
-export function targetRequestLine(suggestion: Pick<DecoratedSuggestion, 'targetRequestNumber' | 'targetRequestTitle'>): string | null {
-  if (suggestion.targetRequestNumber == null || !suggestion.targetRequestTitle) return null
-  return `#${suggestion.targetRequestNumber} ${suggestion.targetRequestTitle}`
-}
-
 /** A hand-off suggestion cannot be approved until a contact is picked, on
  *  the row or on Tweak: the sweep suggests it anyway when it could not
  *  resolve the name, and the human fills in who. */
 export function handOffNeedsContact(proposal: Pick<HandOffRequestProposal, 'contactId'>): boolean {
   return !proposal.contactId
-}
-
-/** Shown only under 0.7 per the contract; a confident suggestion carries no
- *  percentage at all rather than a reassuring one nobody asked for. */
-export function confidenceLabel(confidence: number | null): string | null {
-  if (confidence == null || confidence >= 0.7) return null
-  const pct = Math.round(Math.max(0, Math.min(1, confidence)) * 100)
-  return `${pct}% confidence`
 }
 
 // ── Duplicate guard (CN.1d contract sections 2 and 5) ───────────────────────
@@ -201,41 +97,11 @@ export function confidenceLabel(confidence: number | null): string | null {
  *  export; this literal is swapped for it at merge if the two drift. */
 export const SIMILAR_BLOCK = 0.8
 
-function similarMatchRef(match: Pick<SimilarMatch, 'number' | 'title'>): string {
-  return match.number != null ? `#${match.number} ${match.title}` : match.title
-}
-
-/** "Looks like #226 Design directions (open, 71%)" for the best match under
- *  a create row, or null when there is nothing to show. */
-export function similarMatchLine(similar: readonly SimilarMatch[]): string | null {
-  const best = similar[0]
-  if (!best) return null
-  const pct = Math.round(Math.max(0, Math.min(1, best.score)) * 100)
-  return `Looks like ${similarMatchRef(best)} (${best.status}, ${pct}%)`
-}
-
 /** "and 2 more" for whatever is behind the best match, or null when there is
  *  nothing left over. */
 export function similarOverflowLabel(similar: readonly SimilarMatch[]): string | null {
   const extra = similar.length - 1
   return extra > 0 ? `and ${extra} more` : null
-}
-
-/** The best match can be attached to only when it is an existing request or
- *  task: a match against another pending suggestion has nothing to attach
- *  to yet. */
-export function canAttachBestMatch(similar: readonly SimilarMatch[]): boolean {
-  const best = similar[0]
-  return !!best && (best.kind === 'request' || best.kind === 'task')
-}
-
-/** "Use #226 instead", or a quoted-title fallback when the best match has no
- *  number to show. Null when the best match cannot be attached to. */
-export function attachButtonLabel(similar: readonly SimilarMatch[]): string | null {
-  if (!canAttachBestMatch(similar)) return null
-  const best = similar[0]
-  if (!best) return null
-  return best.number != null ? `Use #${best.number} instead` : `Use "${best.title}" instead`
 }
 
 /** Approve reads "Approve anyway" and needs an inline confirm once the best
@@ -245,14 +111,6 @@ export function attachButtonLabel(similar: readonly SimilarMatch[]): string | nu
 export function needsApproveConfirm(similar: readonly SimilarMatch[]): boolean {
   const best = similar[0]
   return !!best && best.score >= SIMILAR_BLOCK
-}
-
-/** The target an "attach" decision carries: the best match's kind and id.
- *  Callers should only call this once canAttachBestMatch is true. */
-export function bestMatchTarget(similar: readonly SimilarMatch[]): { kind: 'request' | 'task'; id: string } | null {
-  const best = similar[0]
-  if (!best || (best.kind !== 'request' && best.kind !== 'task')) return null
-  return { kind: best.kind, id: best.id }
 }
 
 // ── Keyboard ──────────────────────────────────────────────────────────────

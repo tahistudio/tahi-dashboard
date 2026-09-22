@@ -34,7 +34,9 @@ import { schema } from '@/db/d1'
 import { SONNET_MODEL } from '@/lib/ai-models'
 import { recordCost } from '@/lib/ai-cost'
 import { resolveByName } from '@/lib/task-wizard-drafts'
-import { insertSuggestions, resurfaceSnoozed, type SuggestionKind } from '@/lib/task-suggestions'
+import { slackBotToken } from '@/lib/slack/api'
+import { postSuggestionsForCall } from '@/lib/slack/mirror'
+import { insertSuggestions, listSuggestions, resurfaceSnoozed, type SuggestionKind } from '@/lib/task-suggestions'
 import { HANDOFF_REASONS } from '@/lib/request-handoff-copy'
 import { REQUEST_CATEGORIES, REQUEST_PRIORITIES, REQUEST_TYPES } from '@/lib/request-vocabulary'
 
@@ -837,6 +839,14 @@ export interface SweepSummary {
   dropped: number
   resurfaced: number
   costCents: number
+  /**
+   * Suggestion messages posted to founder DMs this run, counted across both
+   * founders (CN.2 contract section 3). Optional because Slack is a side
+   * channel: a run with the app uninstalled reports nothing rather than a
+   * zero that reads like a failure, and a summary written before this
+   * existed is still a summary.
+   */
+  slackDelivered?: number
   /** Pending rows that had no org and gained one through the deal or attendee lookup. */
   repaired: number
   /** Why items the model proposed were dropped, counted by reason, so a rule change can be judged from the run log. */
@@ -878,6 +888,7 @@ export async function runSuggestionSweep(
     dropped: 0,
     resurfaced: 0,
     costCents: 0,
+    slackDelivered: 0,
     repaired: 0,
     dropReasons: {},
   }
@@ -972,6 +983,15 @@ export async function runSuggestionSweep(
     summary.inserted += written.inserted
     summary.duplicates += written.duplicates
 
+    // The founders' DMs (CN.2 contract section 3). A pending suggestion
+    // nobody sees is a suggestion nobody decides, so the same pass that wrote
+    // them posts them. Only when something new landed, only the rows still
+    // pending for THIS call, and never in a way that can fail the sweep: the
+    // suggestions exist in the dashboard by now whatever Slack does.
+    if (written.inserted > 0) {
+      summary.slackDelivered = (summary.slackDelivered ?? 0) + await deliverToSlack(database, transcript.callId)
+    }
+
     // A create the writer dropped because the same client already has one
     // waiting (CN.1d section 4). Counted beside the model's own drops so a
     // run log reads as one number for "proposed but not kept", with the
@@ -988,6 +1008,30 @@ export async function runSuggestionSweep(
   summary.repaired = await repairOrglessSuggestions(database, nowIso)
 
   return summary
+}
+
+/**
+ * Post one call's waiting suggestions to the founders' DMs.
+ *
+ * The token check comes FIRST and reads nothing when it fails, which is what
+ * lets a studio with no Slack app run the sweep exactly as it ran before.
+ * postSuggestionsForCall skips any row it has already posted, so handing it
+ * every pending row for the call is safe on the second, third and fiftieth
+ * run over the same call.
+ */
+async function deliverToSlack(database: Drizzle, callId: string | null): Promise<number> {
+  if (!callId || !slackBotToken()) return 0
+  try {
+    const rows = await listSuggestions(database, { status: 'pending', callId, orgIds: 'all', limit: 50 })
+    if (rows.length === 0) return 0
+    const result = await postSuggestionsForCall(database, { rows })
+    return result.posted
+  } catch {
+    // Slack is never the reason a sweep reports a failure. The rows are
+    // written; the inbox has them; a founder can still decide in the
+    // dashboard.
+    return 0
+  }
 }
 
 type Gate =
