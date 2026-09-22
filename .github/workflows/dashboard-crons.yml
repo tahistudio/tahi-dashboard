@@ -1,13 +1,19 @@
 name: Dashboard cron triggers
 
-# Schedules every recurring dashboard cron endpoint via GitHub Actions.
-# Each cron endpoint is idempotent and short-circuits when there's
-# nothing to do, so over-firing is safe + cheap.
+# Manual-only now. The recurring schedule that used to live here as a
+# `schedule:` block moved to workers/cron-trigger/wrangler.jsonc, deployed
+# by .github/workflows/cron-trigger-deploy.yml, on 2026-09-22.
 #
-# Why GitHub Actions and not Cloudflare cron triggers: Webflow Cloud's
-# builder overwrites wrangler.json on every deploy (see Decision #039
-# in DECISIONS.md), so cron triggers added there would be clobbered.
-# GH Actions is external and reliable.
+# Why: GitHub Actions scheduled workflows were measured dropping 2 to 5
+# runs an hour against the 12+ schedules configured here. Several
+# dashboard crons (pre-call digest, transcript sync, briefing regen) were
+# going stale. Cloudflare Cron Triggers on a dedicated worker fire
+# reliably, so the schedule lives there now. See
+# workers/cron-trigger/README.md and workers/cron-trigger/src/schedule.ts
+# for the current schedule -> target -> path mapping.
+#
+# This workflow keeps only its manual path, for ad hoc re-runs from the
+# Actions UI.
 #
 # Required GitHub repo settings:
 #   - Variable: TAHI_DASHBOARD_URL = https://portal.tahi.studio
@@ -15,82 +21,9 @@ name: Dashboard cron triggers
 #                                      legacy /dashboard suffix is stripped)
 #   - Secret:   TAHI_CRON_SECRET   = the same string set as TAHI_CRON_SECRET
 #                                     env var on the Worker
-#
-# Note: GitHub Actions cron has up to 5-10 min delay during peak load.
-# All our crons are designed with windows that tolerate that drift —
-# pre-call-digest uses a 10-min slot (25-35 min before call), the
-# others are once-per-day or once-per-week so a few minutes' delay is
-# invisible.
 
 on:
-  schedule:
-    # Google Calendar sync — every 15 min (offset 2). Pulls new/changed
-    # events into discovery_calls so the Upcoming Calls widget reflects
-    # what's actually on Liam's calendar without him doing anything.
-    - cron: '2,17,32,47 * * * *'
-    # Drive Gemini transcript autopull — every 30 min (offset 7). Looks
-    # for new "Notes by Gemini" docs and writes transcripts back to
-    # matching discovery_calls rows.
-    - cron: '7,37 * * * *'
-    # Task suggestions from call notes, every 30 min (offset 12, five
-    # minutes behind the Drive pull so a transcript that just landed is
-    # read on this tick rather than the next). At most 5 transcripts per
-    # run; every one it looks at is stamped suggested_at, so nothing is
-    # read, or paid for, twice.
-    - cron: '12,42 * * * *'
-    # Pre-call digest — every 10 min. Fires the email 25-35 min before
-    # each scheduled discovery call. Idempotent (dedup by call id).
-    - cron: '*/10 * * * *'
-    # Auto-promote completed calls — every 15 min. Scans calls with
-    # outcome='promote' and auto-creates a deal if not already promoted.
-    - cron: '5,20,35,50 * * * *'
-    # Lead AI scoring + transitions — daily at 17:00 UTC (~5am NZ, ahead of
-    # the morning briefing). Picks up new leads + re-scores stale ones.
-    - cron: '0 17 * * *'
-    # Xero + Stripe sync — daily 15:00 UTC (~3am NZ, before the briefing) so
-    # invoices, payments and balances are fresh for MRR / receivables / take-home.
-    - cron: '0 15 * * *'
-    # Morning briefing — fires at 19:00 UTC + 20:00 UTC (7-9am NZ across DST).
-    # Regenerates the AI briefing + the overview daily-brief cache and posts the
-    # daily summary. Each endpoint self-gates to NZ 7-8am + dedups, so the user
-    # gets exactly one briefing per morning.
-    - cron: '0 19 * * *'
-    - cron: '0 20 * * *'
-    # Weekly affiliate reactivation — Monday 19:00 UTC = Mon 7am NZST
-    # / 8am NZDT. Same dedup pattern.
-    - cron: '0 19 * * MON'
-    # Airwallex bank sync — daily 18:00 UTC = 06:00 NZT (next-day NZST/
-    # NZDT). Pulls current balances + last 30 days of transactions.
-    # Powers the disposable-cash strip on /financial-reports. The financial
-    # snapshot (snapshot-metrics) fires in the same slot, right after, so it
-    # freezes this month's cash / MRR / owed against the freshest balances.
-    - cron: '0 18 * * *'
-    # Finance anomaly scan (AI) — Monday 21:00 UTC + 1st of month
-    # 21:00 UTC (offset from affiliate-reactivation @ 19:00 so the
-    # schedule→target mapping below stays unambiguous). Sonnet surfaces
-    # subscriptions creep, missing tax reserves, dry pipeline, etc.
-    - cron: '0 21 * * MON'
-    - cron: '0 21 1 * *'
-    # Content auto-backfill — Sunday 22:00 UTC. Re-runs schema +
-    # date-modified patches on any glossary/blog item whose schema
-    # is missing or invalid. Gated by content.autoBackfillEnabled.
-    - cron: '0 22 * * SUN'
-    # Content gap hunter (agent) — Sunday 19:00 UTC. Perplexity +
-    # Sonnet propose 8-15 new topic ideas, write to content_ideas
-    # for round-table pickup. ~$0.05/run.
-    - cron: '30 19 * * SUN'
-    # Schema watchdog (agent) — Sunday 23:00 UTC. Validates schema
-    # on every live URL + auto-fixes broken ones via backfill.
-    - cron: '0 23 * * SUN'
-    # Indexing reverser — Sunday 20:00 UTC. GSC URL Inspection for
-    # every live URL, IndexNow ping for unindexed ones.
-    - cron: '0 20 * * SUN'
-    # Publish-scheduled — every 15 min. Promotes staged Webflow drafts
-    # to live when their content_drafts.scheduledFor has arrived.
-    # Gated by content.publishCronEnabled setting — fires this endpoint
-    # regardless, the route short-circuits when the setting is off.
-    - cron: '3,18,33,48 * * * *'
-  # Manual trigger via the Actions UI — pick which cron to fire.
+  # Manual trigger via the Actions UI, pick which cron to fire.
   workflow_dispatch:
     inputs:
       target:
@@ -132,7 +65,7 @@ jobs:
         run: |
           # Map the firing cron schedule (or manual selection) to the
           # endpoint paths that should run. Multiple endpoints may fire
-          # on the same minute (e.g. midnight UTC) — we run them all.
+          # on the same minute (e.g. midnight UTC); we run them all.
           targets=""
           if [ -n "$MANUAL_TARGET" ]; then
             targets="$MANUAL_TARGET"
@@ -169,7 +102,7 @@ jobs:
         run: |
           # Intentionally NO `set -e` here. A single failing curl
           # (e.g. exit 56 when the Worker hits its CPU limit mid-
-          # response) must not crash the whole workflow — every cron
+          # response) must not crash the whole workflow; every cron
           # is idempotent and the next tick recovers. We log each
           # failure as a ::warning:: and continue to the next target.
           if [ -z "$DASHBOARD_URL" ] || [ -z "$CRON_SECRET" ]; then

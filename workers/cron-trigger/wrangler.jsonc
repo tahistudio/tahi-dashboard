@@ -1,0 +1,44 @@
+{
+  // Secrets this worker needs. Values never live in this file or in git:
+  // set each one with `wrangler secret put <NAME>` from workers/cron-trigger.
+  // See README.md for the full procedure.
+  //
+  //   DASHBOARD_URL       https://portal.tahi.studio (the dashboard's own
+  //                       origin; the worker POSTs /api/admin/... paths onto it)
+  //   TAHI_CRON_SECRET    the same string set as TAHI_CRON_SECRET on the
+  //                       dashboard, sent as the x-cron-secret header
+  //
+  // Declared as comments on purpose: a `vars` entry with an empty value would
+  // shadow the real secret at deploy time.
+  "name": "tahi-cron-trigger",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-12",
+  "observability": {
+    "enabled": true
+  },
+  "triggers": {
+    // Every schedule that used to live in .github/workflows/dashboard-crons.yml.
+    // See src/schedule.ts for the schedule -> target -> path mapping and
+    // app/api/__tests__/cron-trigger-schedule.test.ts for the coverage check.
+    "crons": [
+      "2,17,32,47 * * * *",
+      "7,37 * * * *",
+      "12,42 * * * *",
+      "*/10 * * * *",
+      "5,20,35,50 * * * *",
+      "0 17 * * *",
+      "0 15 * * *",
+      "0 19 * * *",
+      "0 20 * * *",
+      "0 19 * * MON",
+      "0 18 * * *",
+      "0 21 * * MON",
+      "0 21 1 * *",
+      "0 22 * * SUN",
+      "30 19 * * SUN",
+      "0 23 * * SUN",
+      "0 20 * * SUN",
+      "3,18,33,48 * * * *"
+    ]
+  }
+}

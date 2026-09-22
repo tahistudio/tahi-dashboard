@@ -1,0 +1,79 @@
+name: Cron trigger worker deploy
+
+# Auto-deploys workers/cron-trigger to Cloudflare whenever its source
+# changes. This worker owns the schedule that used to live in
+# dashboard-crons.yml's `schedule:` block (moved out because GitHub Actions
+# scheduled workflows dropped 2 to 5 runs an hour against 12 or more
+# configured schedules in this repo). Keeping this in CI means schedule
+# changes go live the same way as dashboard changes: push to main, live
+# in a couple of minutes.
+#
+# Required GitHub repo secrets:
+#   - CLOUDFLARE_API_TOKEN, a token with Worker Scripts: Edit on the
+#     same Cloudflare account that hosts the worker. Generate via
+#     https://dash.cloudflare.com/profile/api-tokens (template: "Edit
+#     Cloudflare Workers").
+#   - CLOUDFLARE_ACCOUNT_ID, find at the bottom of any Cloudflare
+#     dashboard page (the "Account ID" field).
+#
+# How to trigger manually:
+#   Actions → "Cron trigger worker deploy" → Run workflow
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'workers/cron-trigger/**'
+      - '.github/workflows/cron-trigger-deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: workers/cron-trigger/package-lock.json
+
+      - name: Install
+        working-directory: workers/cron-trigger
+        run: npm ci
+
+      - name: Type check
+        # The worker doesn't ship a dedicated type-check script; run tsc
+        # directly so a broken type lands as a red CI build, not a broken
+        # live deploy.
+        working-directory: workers/cron-trigger
+        run: npx tsc --noEmit
+
+      - name: Deploy to Cloudflare
+        working-directory: workers/cron-trigger
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        # --config pins wrangler to the worker's own config. Without
+        # this, wrangler 4.x walked up to the repo root's wrangler.json
+        # (the dashboard's OpenNext config) and tried to deploy that.
+        run: npx wrangler deploy --config wrangler.jsonc
+
+      # The worker's own secrets come from the same GitHub secrets the old
+      # schedule used, so nothing has to be typed on a laptop. Idempotent:
+      # wrangler overwrites the value on every deploy.
+      - name: Set the worker secrets
+        working-directory: workers/cron-trigger
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DASHBOARD_URL: ${{ vars.TAHI_DASHBOARD_URL }}
+          TAHI_CRON_SECRET: ${{ secrets.TAHI_CRON_SECRET }}
+        run: |
+          printf '%s' "$DASHBOARD_URL" | npx wrangler secret put DASHBOARD_URL --config wrangler.jsonc
+          printf '%s' "$TAHI_CRON_SECRET" | npx wrangler secret put TAHI_CRON_SECRET --config wrangler.jsonc

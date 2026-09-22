@@ -154,7 +154,9 @@ Identify 8-15 specific content gaps Tahi should fill. Return JSON per the system
     model: SONNET_MODEL,
     systemPrompt: STRATEGIST_SYSTEM,
     userPrompt,
-    maxTokens: 4096,
+    // 8 to 15 gaps with rationale and outline overran 4096 tokens and the
+    // truncated JSON failed to parse (cron_runs 2026-09-20). Sonnet allows more.
+    maxTokens: 8192,
     parse: (raw: string) => {
       const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim()
       try { return JSON.parse(cleaned) }
