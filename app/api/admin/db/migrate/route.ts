@@ -2403,6 +2403,42 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_task_suggestions_target_request ON task_suggestions(target_request_id)`,
     ],
   },
+  {
+    name: '0110',
+    description: `The Slack app's three tables (CN.2). slack_identities is who a Slack user is and therefore what the bot will do for them: Slack hands a webhook only a workspace id and a user id, so email is the join, because it is the one field a Slack profile, a team_members row and a contacts row all carry. A super_admin on the roster is a founder, any other team member is a member, a contact is a client on their own org, and everybody else is 'unknown', which is the column default and may do nothing at all. That default is the security model: a stranger who finds the app is denied by the ABSENCE of a mapping rather than by a rule somebody had to remember to write. The mapping costs a users.info call, so it is cached here and re-read after seven days. No REFERENCES on team_member_id / contact_id / org_id, because this is a cache of another system's users and a removed contact should resolve to 'unknown' on its next refresh rather than vanish mid-conversation. slack_events_seen is the retry guard: Slack re-delivers anything it does not see a 200 for within three seconds, up to three times, so without it the second delivery of a tapped Approve decides the suggestion twice and the second delivery of a DM drafts the same note twice. The event id is the PRIMARY KEY rather than a column checked before writing, so two concurrent retries are settled by the database's uniqueness instead of by our read. slack_suggestion_messages is the list of Slack copies of one suggestion: task_suggestions.slack_channel_id / slack_message_ts hold ONE copy and both founders get their own DM, so a decision made on any surface needs every copy's channel and ts to rewrite in place, or the other founder is left tapping live buttons on a settled row. All three are CREATE TABLE IF NOT EXISTS, additive, and touch nothing that exists. Apply BEFORE deploying: the Slack webhook routes write slack_events_seen on the very first delivery, including the url_verification handshake's follow-up traffic.`,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS slack_identities (
+        id text PRIMARY KEY NOT NULL,
+        slack_team_id text NOT NULL,
+        slack_user_id text NOT NULL,
+        email text,
+        level text NOT NULL DEFAULT 'unknown',
+        team_member_id text,
+        contact_id text,
+        org_id text,
+        dm_channel_id text,
+        last_seen_at text,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_identities_user ON slack_identities(slack_team_id, slack_user_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_slack_identities_email ON slack_identities(email)`,
+      `CREATE TABLE IF NOT EXISTS slack_events_seen (
+        id text PRIMARY KEY NOT NULL,
+        seen_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_slack_events_seen_at ON slack_events_seen(seen_at)`,
+      `CREATE TABLE IF NOT EXISTS slack_suggestion_messages (
+        id text PRIMARY KEY NOT NULL,
+        suggestion_id text NOT NULL,
+        channel_id text NOT NULL,
+        ts text NOT NULL,
+        created_at text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_suggestion_messages_copy ON slack_suggestion_messages(suggestion_id, channel_id, ts)`,
+      `CREATE INDEX IF NOT EXISTS idx_slack_suggestion_messages_suggestion ON slack_suggestion_messages(suggestion_id)`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

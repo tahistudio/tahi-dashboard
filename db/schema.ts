@@ -4044,3 +4044,88 @@ export const feedbackComments = sqliteTable('feedback_comments', {
   index('idx_feedback_comments_created').on(table.createdAt),
 ])
 
+// ============================================================
+// SLACK APP (CN.2, the studio assistant, DM first)
+// ============================================================
+
+/**
+ * Who a Slack user is, and therefore what the bot will do for them.
+ *
+ * The bot talks to three audiences inside one workspace: the founders, the
+ * rest of the team, and client contacts invited as Slack Connect guests.
+ * Slack hands us only a workspace id and a user id, so EMAIL is the join: it
+ * is the one field a Slack profile, a team_members row and a contacts row all
+ * carry. Resolving it costs a users.info call, which is why the answer is
+ * cached here rather than looked up on every message.
+ *
+ * `level` is the permission level lib/slack/identity.ts#can() reads, and its
+ * default is 'unknown', which may do nothing at all. That is deliberate: a
+ * stranger who finds the app is denied by the ABSENCE of a mapping rather
+ * than by a rule somebody had to remember to write.
+ *
+ * No REFERENCES on teamMemberId / contactId / orgId. This is a cache of
+ * another system's users, and a contact who is removed should leave a row
+ * that resolves to 'unknown' on its next refresh rather than one that
+ * disappears mid-conversation.
+ */
+export const slackIdentities = sqliteTable('slack_identities', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  slackTeamId: text('slack_team_id').notNull(),
+  slackUserId: text('slack_user_id').notNull(),
+  // Lower-cased. Null when the profile carries no email (a bot, or a guest
+  // whose workspace hides it), which is itself a reason to stay unknown.
+  email: text('email'),
+  // 'founder' | 'member' | 'client' | 'unknown'
+  level: text('level').notNull().default('unknown'),
+  teamMemberId: text('team_member_id'),
+  contactId: text('contact_id'),
+  // The client's org, for level 'client'. Null for everyone else.
+  orgId: text('org_id'),
+  // The app's 1:1 channel with this user, cached so a reply does not spend a
+  // conversations.open call every time.
+  dmChannelId: text('dm_channel_id'),
+  lastSeenAt: text('last_seen_at'),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('idx_slack_identities_user').on(table.slackTeamId, table.slackUserId),
+  index('idx_slack_identities_email').on(table.email),
+])
+
+/**
+ * Every Slack delivery we have already answered.
+ *
+ * Slack retries a delivery it does not see a 200 for within three seconds, up
+ * to three times. Without this table the second delivery of a tapped Approve
+ * would decide the suggestion again, and the second delivery of a DM would
+ * draft the same note twice. The event id is the PRIMARY KEY rather than a
+ * column we check before writing, so the race between two concurrent retries
+ * is settled by the database's uniqueness rather than by our read.
+ */
+export const slackEventsSeen = sqliteTable('slack_events_seen', {
+  // Slack's event_id for an event, or trigger_id for an interaction.
+  id: text('id').primaryKey(),
+  seenAt: text('seen_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  index('idx_slack_events_seen_at').on(table.seenAt),
+])
+
+/**
+ * Every Slack copy of one suggestion message.
+ *
+ * task_suggestions carries slackChannelId / slackMessageTs, but that is ONE
+ * copy and both founders get their own DM. When a decision lands anywhere
+ * (the dashboard, Slack, MCP) every copy has to be rewritten in place, or the
+ * other founder is left looking at live buttons on a settled row. This table
+ * is the list of copies to rewrite.
+ */
+export const slackSuggestionMessages = sqliteTable('slack_suggestion_messages', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  suggestionId: text('suggestion_id').notNull(),
+  channelId: text('channel_id').notNull(),
+  ts: text('ts').notNull(),
+  createdAt: text('created_at').notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+}, (table) => [
+  uniqueIndex('idx_slack_suggestion_messages_copy').on(table.suggestionId, table.channelId, table.ts),
+  index('idx_slack_suggestion_messages_suggestion').on(table.suggestionId),
+])
+
