@@ -141,6 +141,11 @@ export interface SuggestionContextRequest {
    *  model is shown these so a client re-mentioning finished work produces a
    *  note on it, not a second request for it. */
   delivered: boolean
+  /** The request's current owner, if it has one (CN.2 contract section 5).
+   *  Shown to the model so "owns this client's work" is a fact read off the
+   *  roster, never a guess. */
+  currentAssigneeId: string | null
+  currentAssigneeName: string | null
 }
 
 export interface SuggestionContextMember {
@@ -314,6 +319,7 @@ export async function buildSuggestionContext(
       title: schema.requests.title,
       status: schema.requests.status,
       waitingOnContactId: schema.requests.waitingOnContactId,
+      assigneeId: schema.requests.assigneeId,
     })
     .from(schema.requests)
     .where(and(
@@ -335,6 +341,8 @@ export async function buildSuggestionContext(
     status: r.status,
     waitingOn: Boolean(r.waitingOnContactId),
     delivered: r.status === 'delivered',
+    currentAssigneeId: r.assigneeId ?? null,
+    currentAssigneeName: r.assigneeId ? memberName.get(r.assigneeId) ?? null : null,
   }))
 
   const contactRows = await database
@@ -375,6 +383,25 @@ export function resolveContact(
   const matches = contacts.filter(c =>
     c.name.trim().toLowerCase() === needle || c.email.trim().toLowerCase() === needle)
   return matches.length === 1 ? matches[0].id : null
+}
+
+/**
+ * The owner suggestion a create_task, create_request or update_request
+ * proposal may carry (CN.2 contract section 5): a NAME the model read off
+ * the call, resolved to an id only when it matches exactly one person on
+ * the studio roster, plus the one sentence explaining it. Mutates the
+ * proposal in place, the same way the rest of `validateSuggestionItems`
+ * does, so every kind that calls it reads the same three keys back:
+ * `suggestedAssigneeName`, `suggestedAssigneeId`, `assigneeReason`.
+ */
+function resolveAssigneeSuggestion(
+  proposal: Record<string, unknown>,
+  members: readonly SuggestionContextMember[],
+): void {
+  const suggestedAssigneeName = asString(proposal.suggestedAssigneeName)
+  proposal.suggestedAssigneeName = suggestedAssigneeName
+  proposal.suggestedAssigneeId = resolveByName(suggestedAssigneeName, members)
+  proposal.assigneeReason = asString(proposal.assigneeReason)
 }
 
 // ── The parser ───────────────────────────────────────────────────────────────
@@ -491,11 +518,7 @@ export function validateSuggestionItems(
         continue
       }
       proposal.title = title
-      // A NAME resolves to an id only when exactly one person matches. An
-      // ambiguous or unknown name stays a name, and the reviewer picks.
-      const assigneeName = asString(proposal.assigneeName)
-      proposal.assigneeName = assigneeName
-      proposal.assigneeId = resolveByName(assigneeName, opts.context.members)
+      resolveAssigneeSuggestion(proposal, opts.context.members)
     }
 
     if (kind === 'add_subtasks') {
@@ -549,6 +572,7 @@ export function validateSuggestionItems(
       const requesterName = asString(proposal.requesterName)
       proposal.requesterName = requesterName
       proposal.requesterContactId = resolveContact(requesterName, opts.context.contacts)
+      resolveAssigneeSuggestion(proposal, opts.context.members)
     }
 
     if (kind === 'update_request') {
@@ -564,6 +588,7 @@ export function validateSuggestionItems(
         continue
       }
       proposal.fields = fields
+      resolveAssigneeSuggestion(proposal, opts.context.members)
     }
 
     if (kind === 'hand_off_request') {
@@ -635,21 +660,22 @@ Rules, in order of importance:
 3. Every item carries a quote: the exact words from the transcript or the wrap up, copied character for character. An item without a usable quote is thrown away before anyone sees it.
 4. An update, a completion, a subtask list or a task note must name a task from the TASKS list you were given, by its id. An update_request, a request_note or a hand_off_request must name a request from the REQUESTS list, by its id. Never compose an id.
 5. Propose a completion only when the call says the thing is done. "I will finish it tonight" is a promise, not a completion.
-6. Never invent an owner, a date or an estimate. If a person was named, put the NAME in assigneeName, requesterName or contactName and leave the id out. If no date was said, leave the date out.
+6. Never invent an owner, a date or an estimate. If a person was named, put the NAME in suggestedAssigneeName, requesterName or contactName and leave the id out. If no date was said, leave the date out.
+   - suggestedAssigneeName is who will do the work, on a create_task, a create_request or an update_request: the person who said on the call they would do it, with assigneeReason quoting what they said in one sentence ("said she would send the headers"). When nobody named an owner but the REQUESTS list already shows one for the request being updated, repeat that name with assigneeReason "owns this client's work". Leave both null when neither is true.
 7. At most 12 items. Fewer good ones beat more.
 
 Write in the studio's voice: plain sentences, no dashes of any kind, no exclamation marks, no filler.
 
 Task kinds and their proposal shapes:
-- create_task: { "title": string, "description": string, "type": "client_task" | "internal_client_task" | "tahi_internal", "orgId": string | null, "requestId": string | null, "assigneeName": string | null, "dueDate": "YYYY-MM-DD" | null, "estimatedHours": number | null, "priority": "standard" | "high" | "urgent", "subtasks": string[] }
+- create_task: { "title": string, "description": string, "type": "client_task" | "internal_client_task" | "tahi_internal", "orgId": string | null, "requestId": string | null, "suggestedAssigneeName": string | null, "assigneeReason": string | null, "dueDate": "YYYY-MM-DD" | null, "estimatedHours": number | null, "priority": "standard" | "high" | "urgent", "subtasks": string[] }
 - update_task: { "fields": { "title"?, "description"?, "status"?, "priority"?, "dueDate"?, "estimatedHours"? }, "note"?: string }
 - complete_task: { "note"?: string }
 - add_subtasks: { "subtasks": string[] }
 - note: { "body": string }
 
 Request kinds and their proposal shapes:
-- create_request: { "title": string, "description": string, "category": ${vocabulary(REQUEST_CATEGORIES)}, "type": ${vocabulary(REQUEST_TYPES)}, "priority": ${vocabulary(REQUEST_PRIORITIES)}, "dueDate": "YYYY-MM-DD" | null, "requesterName": string | null }
-- update_request: { "fields": { ${REQUEST_UPDATE_FIELDS.map(field => `"${field}"?`).join(', ')} }, "note"?: string }
+- create_request: { "title": string, "description": string, "category": ${vocabulary(REQUEST_CATEGORIES)}, "type": ${vocabulary(REQUEST_TYPES)}, "priority": ${vocabulary(REQUEST_PRIORITIES)}, "dueDate": "YYYY-MM-DD" | null, "requesterName": string | null, "suggestedAssigneeName": string | null, "assigneeReason": string | null }
+- update_request: { "fields": { ${REQUEST_UPDATE_FIELDS.map(field => `"${field}"?`).join(', ')} }, "note"?: string, "suggestedAssigneeName": string | null, "assigneeReason": string | null }
 - request_note: { "body": string }
 - hand_off_request: { "contactName": string, "reason": ${vocabulary(HANDOFF_REASONS)}, "dueAt": "YYYY-MM-DD" | null, "note"?: string }
 
@@ -675,7 +701,7 @@ function buildUserMessage(input: SuggestFromTranscriptInput): string {
 
   if (input.context.requests.length > 0) {
     parts.push(['REQUESTS (the only request ids you may name):', ...input.context.requests.map(r =>
-      `- ${r.id} | #${r.number ?? '?'} ${r.title} | status ${r.status}${r.delivered ? ' | DELIVERED, this work is finished' : ''}${r.waitingOn ? ' | already waiting on the client' : ''}`,
+      `- ${r.id} | #${r.number ?? '?'} ${r.title} | status ${r.status}${r.delivered ? ' | DELIVERED, this work is finished' : ''}${r.waitingOn ? ' | already waiting on the client' : ''}${r.currentAssigneeName ? ` | owned by ${r.currentAssigneeName}` : ''}`,
     )].join('\n'))
   } else {
     parts.push('REQUESTS: none open for this client.')

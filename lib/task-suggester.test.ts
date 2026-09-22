@@ -109,7 +109,7 @@ const CONTEXT: SuggestionContext = {
     { id: 'task-1', title: 'Rebuild the pricing page', status: 'in_progress', assigneeName: 'Liam', dueDate: null, updatedAt: '2026-09-10T00:00:00Z' },
     { id: 'task-2', title: 'Write the launch email', status: 'todo', assigneeName: null, dueDate: '2026-09-25', updatedAt: '2026-09-12T00:00:00Z' },
   ],
-  requests: [{ id: 'req-1', number: 42, title: 'Spring landing page', status: 'in_progress', waitingOn: false, delivered: false }],
+  requests: [{ id: 'req-1', number: 42, title: 'Spring landing page', status: 'in_progress', waitingOn: false, delivered: false, currentAssigneeId: null, currentAssigneeName: null }],
   members: [{ id: 'tm-1', name: 'Liam' }, { id: 'tm-2', name: 'Staci' }],
   contacts: [
     { id: 'con-1', name: 'Ella Brown', email: 'ella@elevate.uk' },
@@ -175,6 +175,23 @@ describe('buildSuggestionContext', () => {
 
     const limits = selects.flatMap(s => s.args[s.methods.indexOf('limit') - 1] ?? [])
     expect(limits).toContain(CONTEXT_CONTACT_LIMIT)
+  })
+
+  it('names the current owner of an open request off the roster, for "owns this client\'s work" (CN.2 section 5)', async () => {
+    const { handle } = makeDb([
+      [{ id: 'tm-1', name: 'Liam' }],
+      [],
+      [
+        { id: 'req-1', requestNumber: 42, title: 'Spring landing page', status: 'in_progress', waitingOnContactId: null, assigneeId: 'tm-1' },
+        { id: 'req-2', requestNumber: 43, title: 'Careers page', status: 'in_review', waitingOnContactId: null, assigneeId: null },
+      ],
+      [],
+    ])
+
+    const ctx = await buildSuggestionContext(handle, 'org-a')
+
+    expect(ctx.requests[0]).toMatchObject({ currentAssigneeId: 'tm-1', currentAssigneeName: 'Liam' })
+    expect(ctx.requests[1]).toMatchObject({ currentAssigneeId: null, currentAssigneeName: null })
   })
 
   it('shows work delivered lately, marked delivered, so it is not proposed again', async () => {
@@ -251,7 +268,7 @@ describe('validateSuggestionItems', () => {
   it('keeps a create whose quote is in the transcript', () => {
     const { suggestions, dropped } = validate([{
       kind: 'create_task',
-      proposal: { title: 'Add an FAQ section to the pricing page', description: 'From the call.', type: 'internal_client_task', assigneeName: 'Liam' },
+      proposal: { title: 'Add an FAQ section to the pricing page', description: 'From the call.', type: 'internal_client_task', suggestedAssigneeName: 'Liam', assigneeReason: 'said he would write it' },
       quote: 'We also need a new FAQ section on the pricing page before the launch.',
       rationale: 'The client asked for it.',
       confidence: 0.9,
@@ -260,16 +277,32 @@ describe('validateSuggestionItems', () => {
     expect(dropped).toEqual([])
     expect(suggestions).toHaveLength(1)
     // Resolved because exactly one roster name matches. Never guessed.
-    expect((suggestions[0].proposal as { assigneeId?: string }).assigneeId).toBe('tm-1')
+    const proposal = suggestions[0].proposal as { suggestedAssigneeId?: string; suggestedAssigneeName?: string; assigneeReason?: string }
+    expect(proposal.suggestedAssigneeId).toBe('tm-1')
+    expect(proposal.suggestedAssigneeName).toBe('Liam')
+    expect(proposal.assigneeReason).toBe('said he would write it')
   })
 
-  it('leaves assigneeId null when the name matches nobody on the roster', () => {
+  it('leaves suggestedAssigneeId null when the name matches nobody on the roster', () => {
     const { suggestions } = validate([{
       kind: 'create_task',
-      proposal: { title: 'Add an FAQ section to the pricing page', type: 'internal_client_task', assigneeName: 'Someone Else' },
+      proposal: { title: 'Add an FAQ section to the pricing page', type: 'internal_client_task', suggestedAssigneeName: 'Someone Else' },
       quote: 'We also need a new FAQ section on the pricing page before the launch.',
     }])
-    expect((suggestions[0].proposal as { assigneeId: string | null }).assigneeId).toBeNull()
+    const proposal = suggestions[0].proposal as { suggestedAssigneeId: string | null; suggestedAssigneeName: string | null }
+    expect(proposal.suggestedAssigneeId).toBeNull()
+    expect(proposal.suggestedAssigneeName).toBe('Someone Else')
+  })
+
+  it('leaves both null when the suggester named nobody', () => {
+    const { suggestions } = validate([{
+      kind: 'create_task',
+      proposal: { title: 'Add an FAQ section to the pricing page', type: 'internal_client_task' },
+      quote: 'We also need a new FAQ section on the pricing page before the launch.',
+    }])
+    const proposal = suggestions[0].proposal as { suggestedAssigneeId: string | null; suggestedAssigneeName: string | null }
+    expect(proposal.suggestedAssigneeId).toBeNull()
+    expect(proposal.suggestedAssigneeName).toBeNull()
   })
 
   it('drops an item whose quote is nowhere in the transcript', () => {
@@ -400,6 +433,14 @@ describe('the system prompt', () => {
     expect(SUGGESTER_SYSTEM_PROMPT).toContain('When in doubt it is a request')
   })
 
+  it('asks for an owner suggestion on the three kinds CN.2 section 5 names', () => {
+    expect(SUGGESTER_SYSTEM_PROMPT).toContain('suggestedAssigneeName')
+    expect(SUGGESTER_SYSTEM_PROMPT).toContain('assigneeReason')
+    expect(SUGGESTER_SYSTEM_PROMPT).toContain('owns this client\'s work')
+    // Printed on create_task, create_request and update_request's own shapes.
+    expect(SUGGESTER_SYSTEM_PROMPT.match(/suggestedAssigneeName/g)?.length).toBeGreaterThanOrEqual(4)
+  })
+
   it('prints the request vocabulary rather than repeating it by hand', () => {
     for (const category of REQUEST_CATEGORIES) expect(SUGGESTER_SYSTEM_PROMPT).toContain(`"${category}"`)
     for (const type of REQUEST_TYPES) expect(SUGGESTER_SYSTEM_PROMPT).toContain(`"${type}"`)
@@ -476,6 +517,31 @@ describe('validateSuggestionItems for the request kinds', () => {
     expect(dropped[0].reason).toBe('invalid_request_priority')
   })
 
+  it('resolves a create_request owner exactly, and leaves it null when nobody named matches (CN.2 section 5)', () => {
+    const named = validateRequestItems([{
+      kind: 'create_request',
+      proposal: {
+        title: 'Add an FAQ section to the pricing page', category: 'content', type: 'small_task', priority: 'standard',
+        suggestedAssigneeName: 'Staci', assigneeReason: 'said she would send the headers',
+      },
+      quote: 'we also need a new FAQ section on the pricing page before the launch.',
+    }])
+    const namedProposal = named.suggestions[0].proposal as { suggestedAssigneeId: string | null; suggestedAssigneeName: string | null; assigneeReason: string | null }
+    expect(namedProposal.suggestedAssigneeId).toBe('tm-2')
+    expect(namedProposal.assigneeReason).toBe('said she would send the headers')
+
+    const unmatched = validateRequestItems([{
+      kind: 'create_request',
+      proposal: {
+        title: 'Add an FAQ section to the pricing page', category: 'content', type: 'small_task', priority: 'standard',
+        suggestedAssigneeName: 'Nobody On The Roster',
+      },
+      quote: 'we also need a new FAQ section on the pricing page before the launch.',
+    }])
+    const unmatchedProposal = unmatched.suggestions[0].proposal as { suggestedAssigneeId: string | null }
+    expect(unmatchedProposal.suggestedAssigneeId).toBeNull()
+  })
+
   it('keeps an update_request that names an open request from the context', () => {
     const { suggestions, dropped } = validateRequestItems([{
       kind: 'update_request',
@@ -487,6 +553,21 @@ describe('validateSuggestionItems for the request kinds', () => {
     expect(dropped).toEqual([])
     expect(suggestions[0].targetRequestId).toBe('req-1')
     expect(suggestions[0].targetTaskId).toBeNull()
+  })
+
+  it('resolves an update_request owner the same way, repeating the request\'s current owner when the model echoed it (CN.2 section 5)', () => {
+    const { suggestions } = validateRequestItems([{
+      kind: 'update_request',
+      targetRequestId: 'req-1',
+      proposal: {
+        fields: { dueDate: '2026-09-25' },
+        suggestedAssigneeName: 'Liam', assigneeReason: 'owns this client\'s work',
+      },
+      quote: 'the spring landing page has to go live on the twenty fifth instead.',
+    }])
+    const proposal = suggestions[0].proposal as { suggestedAssigneeId: string | null; assigneeReason: string | null }
+    expect(proposal.suggestedAssigneeId).toBe('tm-1')
+    expect(proposal.assigneeReason).toBe('owns this client\'s work')
   })
 
   it('drops an update_request whose target is not an open request it was shown', () => {
