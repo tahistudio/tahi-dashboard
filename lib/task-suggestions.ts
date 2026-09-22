@@ -1166,6 +1166,7 @@ async function applyRequestSuggestion(
       type: text(proposal.type) ?? undefined,
       priority: text(proposal.priority) ?? undefined,
       dueDate: text(proposal.dueDate),
+      assigneeId: (proposal.suggestedAssigneeId as string | null | undefined) ?? null,
     }, actor)
     if (!created.ok) {
       return { ok: false, appliedTaskId: null, appliedRequestId: null, error: created.failure.error }
@@ -1282,7 +1283,7 @@ export async function applySuggestion(
         requestId: (proposal.requestId as string | null | undefined) ?? null,
         description: (proposal.description as string | null | undefined) ?? null,
         priority: typeof proposal.priority === 'string' ? proposal.priority : undefined,
-        assigneeId: (proposal.assigneeId as string | null | undefined) ?? null,
+        assigneeId: (proposal.suggestedAssigneeId as string | null | undefined) ?? null,
         dueDate: (proposal.dueDate as string | null | undefined) ?? null,
         estimatedHours: (proposal.estimatedHours as number | null | undefined) ?? null,
         subtasks: stringList(proposal.subtasks),

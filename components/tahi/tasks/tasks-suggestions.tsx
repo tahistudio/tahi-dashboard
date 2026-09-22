@@ -43,6 +43,7 @@ import type {
 } from '@/components/tahi/tasks/task-types'
 import type { TaskFields } from '@/lib/task-wizard-drafts'
 import {
+  assigneeSuggestionLine,
   attachButtonLabel,
   bestMatchTarget,
   buildApproveRequest,
@@ -56,6 +57,7 @@ import {
   handOffNeedsContact,
   initialDraftToCreateRequestProposal,
   needsApproveConfirm,
+  proposalAssigneeSuggestion,
   similarMatchLine,
   similarOverflowLabel,
   suggestionKeyAction,
@@ -63,6 +65,8 @@ import {
   summariseProposal,
   targetRequestLine,
   taskFieldsToCreateProposal,
+  withAssigneeOverride,
+  type AssigneeSuggestion,
   type SuggestionCallGroup,
 } from '@/app/(dashboard)/tasks/suggestions-logic'
 import type {
@@ -175,6 +179,10 @@ interface InlineEditorProps {
   onSave: (proposal: unknown) => Promise<void>
   onCancel: () => void
   busy: boolean
+  /** The row's own assignee picker, carried into the editor so Tweak keeps
+   *  a pick made before it was opened (CN.2 contract section 5). Only
+   *  UpdateRequestEditor reads it; every other editor ignores it. */
+  initialAssigneeId?: string | null
 }
 
 function UpdateTaskEditor({ suggestion, peopleList, onSave, onCancel, busy }: InlineEditorProps) {
@@ -284,13 +292,14 @@ function NoteEditor({ suggestion, onSave, onCancel, busy }: InlineEditorProps) {
   )
 }
 
-function UpdateRequestEditor({ suggestion, onSave, onCancel, busy }: InlineEditorProps) {
+function UpdateRequestEditor({ suggestion, peopleList, onSave, onCancel, busy, initialAssigneeId }: InlineEditorProps) {
   const original = suggestion.proposal as UpdateRequestProposal
   const [status, setStatus] = React.useState(original.fields.status ?? '')
   const [priority, setPriority] = React.useState(original.fields.priority ?? '')
   const [dueDate, setDueDate] = React.useState(original.fields.dueDate ?? '')
   const [category, setCategory] = React.useState(original.fields.category ?? '')
   const [note, setNote] = React.useState(original.note ?? '')
+  const [assigneeId, setAssigneeId] = React.useState(initialAssigneeId ?? original.suggestedAssigneeId ?? '')
 
   function save() {
     const fields: UpdateRequestProposal['fields'] = {}
@@ -298,7 +307,14 @@ function UpdateRequestEditor({ suggestion, onSave, onCancel, busy }: InlineEdito
     if (priority) fields.priority = priority
     if (dueDate) fields.dueDate = dueDate
     if (category) fields.category = category
-    const proposal: UpdateRequestProposal = note.trim() ? { fields, note: note.trim() } : { fields }
+    const picked = peopleList.find(p => p.id === assigneeId)
+    const proposal: UpdateRequestProposal = {
+      fields,
+      ...(note.trim() ? { note: note.trim() } : {}),
+      suggestedAssigneeId: assigneeId || null,
+      suggestedAssigneeName: picked?.name ?? null,
+      assigneeReason: null,
+    }
     void onSave(proposal)
   }
 
@@ -327,6 +343,13 @@ function UpdateRequestEditor({ suggestion, onSave, onCancel, busy }: InlineEdito
         <select value={category} onChange={e => setCategory(e.target.value)} style={editorInput}>
           <option value="">Unchanged</option>
           {REQUEST_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </label>
+      <label style={editorLabel}>
+        Assignee
+        <select value={assigneeId ?? ''} onChange={e => setAssigneeId(e.target.value)} style={editorInput}>
+          <option value="">Unassigned</option>
+          {peopleList.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
       </label>
       <label style={{ ...editorLabel, gridColumn: '1 / -1' }}>
@@ -482,6 +505,19 @@ const editorInput: React.CSSProperties = {
   padding: '0.375rem 0.5rem',
 }
 
+/** The row-level owner picker (contract section 5), smaller than the
+ *  editor grid's inputs since it sits inline with the "Suggested:" line
+ *  rather than inside a form. */
+const assigneePickerStyle: React.CSSProperties = {
+  fontSize: '0.75rem',
+  fontFamily: 'inherit',
+  color: 'var(--color-text)',
+  background: 'var(--color-bg)',
+  border: '1px solid var(--color-border)',
+  borderRadius: '0.375rem',
+  padding: '0.1875rem 0.375rem',
+}
+
 // ── The duplicate-guard note (CN.1d contract section 5) ───────────────────
 
 const similarNoteStyle: React.CSSProperties = {
@@ -543,26 +579,53 @@ interface SuggestionRowProps {
   peopleList: readonly TaskPerson[]
   focused: boolean
   onFocus: () => void
-  onApprove: () => void
-  onApproveForce: () => void
+  onApprove: (proposalOverride?: unknown) => void
+  onApproveForce: (proposalOverride?: unknown) => void
   onAttach: (target: { kind: 'request' | 'task'; id: string }) => void
   onReject: () => void
   onSnooze: (preset: SnoozePreset) => void
-  onTweakCreate: () => void
-  onTweakCreateRequest: () => void
+  onTweakCreate: (proposalOverride?: unknown) => void
+  onTweakCreateRequest: (proposalOverride?: unknown) => void
   onTweakOther: (proposal: unknown) => Promise<void>
+  /** The row's own assignee pick, lifted to the view so it survives into
+   *  Tweak (CN.2 contract section 5): '' reads as "not yet touched", which
+   *  falls back to the suggester's own suggestedAssigneeId. */
+  assigneeOverride: string | undefined
+  onAssigneeOverrideChange: (value: string) => void
   busy: boolean
 }
 
 function SuggestionRow({
   suggestion, similar, peopleList, focused, onFocus, onApprove, onApproveForce, onAttach, onReject, onSnooze,
-  onTweakCreate, onTweakCreateRequest, onTweakOther, busy,
+  onTweakCreate, onTweakCreateRequest, onTweakOther, assigneeOverride, onAssigneeOverrideChange, busy,
 }: SuggestionRowProps) {
   const [editing, setEditing] = React.useState(false)
   const [confirmingForce, setConfirmingForce] = React.useState(false)
   const confidence = confidenceLabel(suggestion.confidence)
   const summary = summariseProposal(suggestion.kind, suggestion.proposal)
   const requestLine = targetRequestLine(suggestion)
+  // create_task, create_request and update_request may carry an owner
+  // suggestion (contract section 5); every other kind renders neither the
+  // line nor the picker.
+  const assigneeSuggestion: AssigneeSuggestion | null = proposalAssigneeSuggestion(suggestion.kind, suggestion.proposal)
+  const isAssigneeKind = suggestion.kind === 'create_task' || suggestion.kind === 'create_request' || suggestion.kind === 'update_request'
+  const assigneeLine = assigneeSuggestionLine(assigneeSuggestion)
+  const currentAssigneeId = assigneeOverride ?? assigneeSuggestion?.id ?? ''
+
+  /** The proposal Approve or Tweak carries: undefined (use the suggester's
+   *  own proposal as is) unless the picker has moved the owner away from
+   *  what the suggester wrote. */
+  function assigneeOverrideProposal(): unknown | undefined {
+    if (!isAssigneeKind) return undefined
+    const pickedId = currentAssigneeId || null
+    const originalId = assigneeSuggestion?.id ?? null
+    if (pickedId === originalId) return undefined
+    const picked = peopleList.find(p => p.id === pickedId)
+    return withAssigneeOverride(
+      suggestion.proposal as { suggestedAssigneeId?: string | null; suggestedAssigneeName?: string | null; assigneeReason?: string | null },
+      { id: pickedId, name: picked?.name ?? null },
+    )
+  }
   // A hand-off with no resolved contact cannot be approved as is (contract
   // section 5): the editor that picks one is forced open rather than left
   // behind a Tweak click nobody is told to make.
@@ -580,21 +643,21 @@ function SuggestionRow({
       setConfirmingForce(true)
       return
     }
-    onApprove()
+    onApprove(assigneeOverrideProposal())
   }
 
   function handleConfirmForce() {
     setConfirmingForce(false)
-    onApproveForce()
+    onApproveForce(assigneeOverrideProposal())
   }
 
   function handleTweak() {
     if (suggestion.kind === 'create_task') {
-      onTweakCreate()
+      onTweakCreate(assigneeOverrideProposal())
       return
     }
     if (suggestion.kind === 'create_request') {
-      onTweakCreateRequest()
+      onTweakCreateRequest(assigneeOverrideProposal())
       return
     }
     setEditing(e => !e)
@@ -665,6 +728,23 @@ function SuggestionRow({
       </div>
 
       <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--color-text)', fontWeight: 500 }}>{summary}</p>
+
+      {isAssigneeKind && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          {assigneeLine && (
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{assigneeLine}</span>
+          )}
+          <select
+            aria-label="Assignee"
+            value={currentAssigneeId}
+            onChange={e => onAssigneeOverrideChange(e.target.value)}
+            style={assigneePickerStyle}
+          >
+            <option value="">{assigneeLine ? 'Change assignee' : 'Assign to'}</option>
+            {peopleList.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+      )}
 
       <blockquote
         style={{
@@ -753,7 +833,14 @@ function SuggestionRow({
         <NoteEditor suggestion={suggestion} peopleList={peopleList} onSave={handleEditorSave} onCancel={() => setEditing(false)} busy={busy} />
       )}
       {showEditor && suggestion.kind === 'update_request' && (
-        <UpdateRequestEditor suggestion={suggestion} peopleList={peopleList} onSave={handleEditorSave} onCancel={() => setEditing(false)} busy={busy} />
+        <UpdateRequestEditor
+          suggestion={suggestion}
+          peopleList={peopleList}
+          onSave={handleEditorSave}
+          onCancel={() => setEditing(false)}
+          busy={busy}
+          initialAssigneeId={currentAssigneeId}
+        />
       )}
       {showEditor && suggestion.kind === 'request_note' && (
         <RequestNoteEditor suggestion={suggestion} peopleList={peopleList} onSave={handleEditorSave} onCancel={() => setEditing(false)} busy={busy} />
@@ -772,22 +859,25 @@ interface CallGroupProps {
   peopleList: readonly TaskPerson[]
   focusedId: string | null
   onFocusRow: (id: string) => void
-  onApprove: (id: string) => void
-  onApproveForce: (id: string) => void
+  onApprove: (id: string, proposalOverride?: unknown) => void
+  onApproveForce: (id: string, proposalOverride?: unknown) => void
   onAttach: (id: string, target: { kind: 'request' | 'task'; id: string }) => void
   onReject: (id: string) => void
   onSnooze: (id: string, preset: SnoozePreset) => void
-  onTweakCreate: (suggestion: DecoratedSuggestion) => void
-  onTweakCreateRequest: (suggestion: DecoratedSuggestion) => void
+  onTweakCreate: (suggestion: DecoratedSuggestion, proposalOverride?: unknown) => void
+  onTweakCreateRequest: (suggestion: DecoratedSuggestion, proposalOverride?: unknown) => void
   onTweakOther: (id: string, proposal: unknown) => Promise<void>
   onApproveAll: (ids: string[]) => void
   busyIds: ReadonlySet<string>
   similarFor: (suggestion: DecoratedSuggestion) => readonly SimilarMatch[]
+  assigneeOverrides: Readonly<Record<string, string>>
+  onAssigneeOverrideChange: (id: string, value: string) => void
 }
 
 function CallGroupBlock({
   group, peopleList, focusedId, onFocusRow, onApprove, onApproveForce, onAttach, onReject, onSnooze,
   onTweakCreate, onTweakCreateRequest, onTweakOther, onApproveAll, busyIds, similarFor,
+  assigneeOverrides, onAssigneeOverrideChange,
 }: CallGroupProps) {
   const when = group.callScheduledAt ? new Date(group.callScheduledAt) : null
   const whenLabel = when && Number.isFinite(when.getTime())
@@ -823,14 +913,16 @@ function CallGroupBlock({
           peopleList={peopleList}
           focused={focusedId === item.id}
           onFocus={() => onFocusRow(item.id)}
-          onApprove={() => onApprove(item.id)}
-          onApproveForce={() => onApproveForce(item.id)}
+          onApprove={proposalOverride => onApprove(item.id, proposalOverride)}
+          onApproveForce={proposalOverride => onApproveForce(item.id, proposalOverride)}
           onAttach={target => onAttach(item.id, target)}
           onReject={() => onReject(item.id)}
           onSnooze={preset => onSnooze(item.id, preset)}
-          onTweakCreate={() => onTweakCreate(item)}
-          onTweakCreateRequest={() => onTweakCreateRequest(item)}
+          onTweakCreate={proposalOverride => onTweakCreate(item, proposalOverride)}
+          onTweakCreateRequest={proposalOverride => onTweakCreateRequest(item, proposalOverride)}
           onTweakOther={proposal => onTweakOther(item.id, proposal)}
+          assigneeOverride={assigneeOverrides[item.id]}
+          onAssigneeOverrideChange={value => onAssigneeOverrideChange(item.id, value)}
           busy={busyIds.has(item.id)}
         />
       ))}
@@ -870,6 +962,10 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
   const [busyIds, setBusyIds] = React.useState<ReadonlySet<string>>(new Set())
   const [tweakTarget, setTweakTarget] = React.useState<DecoratedSuggestion | null>(null)
   const [tweakRequestTarget, setTweakRequestTarget] = React.useState<DecoratedSuggestion | null>(null)
+  // The row's own owner pick, keyed by suggestion id, so it survives into
+  // Tweak rather than resetting to the suggester's original guess every
+  // time the dialog reopens (contract section 5).
+  const [assigneeOverrides, setAssigneeOverrides] = React.useState<Record<string, string>>({})
   // Set only from a possible_duplicate error on approve (contract section
   // 5): the row's own decorated `similar` may not have shown a warning yet,
   // and this is what makes the same choices appear once one comes back.
@@ -991,10 +1087,10 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
   /** The second click of "Approve anyway", sent only after the row's own
    *  inline confirm (contract section 5). Never used by bulk Approve all,
    *  which the contract keeps from ever forcing. */
-  async function handleApproveForce(id: string) {
+  async function handleApproveForce(id: string, proposalOverride?: unknown) {
     const suggestion = items.find(i => i.id === id)
     if (!suggestion) return
-    await handleApprove(suggestion, undefined, true)
+    await handleApprove(suggestion, proposalOverride, true)
   }
 
   /** "Use #226 instead": converts the pending create row into a note on the
@@ -1077,6 +1173,21 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
 
   function handleFocusRow(id: string) {
     setFocusedId(id)
+  }
+
+  /** The row's own owner pick (contract section 5), kept keyed by
+   *  suggestion id so it is still there if the row's picker is touched,
+   *  then Tweak is opened, then closed without saving. */
+  function handleAssigneeOverrideChange(id: string, value: string) {
+    setAssigneeOverrides(current => ({ ...current, [id]: value }))
+  }
+
+  /** A row's picker was moved before Tweak was clicked: the dialog opens
+   *  on that pick rather than the suggester's original guess (contract
+   *  section 5, "Tweak carries it"). */
+  function withProposalOverride(suggestion: DecoratedSuggestion, proposalOverride: unknown): DecoratedSuggestion {
+    if (proposalOverride === undefined) return suggestion
+    return { ...suggestion, proposal: proposalOverride as DecoratedSuggestion['proposal'] }
   }
 
   React.useEffect(() => {
@@ -1167,20 +1278,22 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
             peopleList={peopleList}
             focusedId={focusedId}
             onFocusRow={handleFocusRow}
-            onApprove={id => {
+            onApprove={(id, proposalOverride) => {
               const suggestion = items.find(i => i.id === id)
-              if (suggestion) void handleApprove(suggestion)
+              if (suggestion) void handleApprove(suggestion, proposalOverride)
             }}
-            onApproveForce={id => void handleApproveForce(id)}
+            onApproveForce={(id, proposalOverride) => void handleApproveForce(id, proposalOverride)}
             onAttach={(id, target) => void handleAttach(id, target)}
             onReject={id => void handleReject(id)}
             onSnooze={(id, preset) => void handleSnooze(id, preset)}
             similarFor={similarFor}
-            onTweakCreate={suggestion => setTweakTarget(suggestion)}
-            onTweakCreateRequest={suggestion => setTweakRequestTarget(suggestion)}
+            onTweakCreate={(suggestion, proposalOverride) => setTweakTarget(withProposalOverride(suggestion, proposalOverride))}
+            onTweakCreateRequest={(suggestion, proposalOverride) => setTweakRequestTarget(withProposalOverride(suggestion, proposalOverride))}
             onTweakOther={(id, proposal) => handleTweakOther(id, proposal)}
             onApproveAll={ids => void handleApproveAll(ids)}
             busyIds={busyIds}
+            assigneeOverrides={assigneeOverrides}
+            onAssigneeOverrideChange={handleAssigneeOverrideChange}
           />
         ))
       )}

@@ -325,7 +325,7 @@ export function createProposalToTaskFields(proposal: CreateTaskProposal): TaskFi
     description: proposal.description ?? null,
     status: 'todo',
     priority: proposal.priority ?? 'standard',
-    assigneeId: proposal.assigneeId ?? null,
+    assigneeId: proposal.suggestedAssigneeId ?? null,
     dueDate: proposal.dueDate ?? null,
     estimatedHours: proposal.estimatedHours ?? null,
     subtasks: proposal.subtasks ?? [],
@@ -333,8 +333,9 @@ export function createProposalToTaskFields(proposal: CreateTaskProposal): TaskFi
 }
 
 /** The reverse: what Tweak's save sends back as the proposal override.
- *  assigneeName is dropped deliberately, it was the suggester's guess at a
- *  name and the human has now either confirmed an id or cleared it. */
+ *  suggestedAssigneeName and assigneeReason are dropped deliberately, they
+ *  were the suggester's guess at a name and the human has now either
+ *  confirmed an id or cleared it. */
 export function taskFieldsToCreateProposal(fields: TaskFields): CreateTaskProposal {
   return {
     title: fields.title,
@@ -342,11 +343,61 @@ export function taskFieldsToCreateProposal(fields: TaskFields): CreateTaskPropos
     type: fields.type,
     orgId: fields.orgId,
     requestId: fields.requestId,
-    assigneeId: fields.assigneeId,
+    suggestedAssigneeId: fields.assigneeId,
     dueDate: fields.dueDate,
     estimatedHours: fields.estimatedHours,
     priority: fields.priority,
     subtasks: fields.subtasks,
+  }
+}
+
+// ── Assignee suggestions (CN.2 contract section 5) ─────────────────────────
+
+/** The three kinds whose proposal may carry an owner suggestion. */
+const ASSIGNEE_SUGGESTION_KINDS: readonly TaskSuggestionKind[] = ['create_task', 'create_request', 'update_request']
+
+export interface AssigneeSuggestion {
+  name: string | null
+  id: string | null
+  reason: string | null
+}
+
+/** The owner the suggester proposed, read off whichever of the three kinds
+ *  the proposal is, or null when the kind carries no such suggestion at
+ *  all. Null is also what a kind that carries the fields but named nobody
+ *  returns, so a row never renders an empty "Suggested:" line. */
+export function proposalAssigneeSuggestion(kind: TaskSuggestionKind, proposal: unknown): AssigneeSuggestion | null {
+  if (!ASSIGNEE_SUGGESTION_KINDS.includes(kind)) return null
+  const p = asRecord(proposal)
+  const name = typeof p.suggestedAssigneeName === 'string' && p.suggestedAssigneeName.trim() ? p.suggestedAssigneeName.trim() : null
+  if (!name) return null
+  const id = typeof p.suggestedAssigneeId === 'string' && p.suggestedAssigneeId ? p.suggestedAssigneeId : null
+  const reason = typeof p.assigneeReason === 'string' && p.assigneeReason.trim() ? p.assigneeReason.trim() : null
+  return { name, id, reason }
+}
+
+/** "Suggested: Staci, said she would send the headers" for the row, or
+ *  "Suggested: Staci" when there is a name but no reason. Null when the
+ *  suggester named nobody. */
+export function assigneeSuggestionLine(suggestion: AssigneeSuggestion | null): string | null {
+  if (!suggestion || !suggestion.name) return null
+  return suggestion.reason ? `Suggested: ${suggestion.name}, ${suggestion.reason}` : `Suggested: ${suggestion.name}`
+}
+
+/** The proposal Approve sends once the row's picker has moved the owner
+ *  away from what the suggester wrote: the original proposal, spread, with
+ *  the three assignee keys replaced. `assigneeReason` is dropped alongside
+ *  a human pick the same way Tweak drops it for create_task, it was the
+ *  suggester's reasoning for a name that is no longer the one on the row. */
+export function withAssigneeOverride<P extends { suggestedAssigneeId?: string | null; suggestedAssigneeName?: string | null; assigneeReason?: string | null }>(
+  proposal: P,
+  picked: { id: string | null; name: string | null },
+): P {
+  return {
+    ...proposal,
+    suggestedAssigneeId: picked.id,
+    suggestedAssigneeName: picked.name,
+    assigneeReason: null,
   }
 }
 

@@ -93,6 +93,11 @@ export interface RequestCreateInput {
   startDate?: string | null
   dueDate?: string | null
   estimatedHours?: number | null
+  /** Mirrors PATCH's assigneeId (CN.2 contract section 5): a call
+   *  suggestion resolved to exactly one team member can hand the request
+   *  its owner at the moment it is created, the same column the PATCH
+   *  route writes later. Absent or null leaves the request unassigned. */
+  assigneeId?: string | null
 }
 
 /**
@@ -291,7 +296,7 @@ export async function createRequestRecord(
   await drizzle.run(sql`
     INSERT INTO requests (
       id, org_id, brand_id, title, type, category, description, status, priority,
-      start_date, due_date, estimated_hours, submitted_by_id, is_internal,
+      start_date, due_date, estimated_hours, assignee_id, submitted_by_id, is_internal,
       revision_count, max_revisions, request_number, created_at, updated_at
     ) VALUES (
       ${id},
@@ -306,6 +311,7 @@ export async function createRequestRecord(
       ${startDate ?? null},
       ${dueDate ?? null},
       ${estimatedHours ?? null},
+      ${input.assigneeId ?? null},
       ${actor.actorId ?? null},
       ${input.isInternal ? 1 : 0},
       0,

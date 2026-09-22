@@ -42,8 +42,15 @@ export interface CreateTaskProposal {
   type: TaskLevelValue
   orgId: string | null
   requestId?: string | null
-  assigneeId?: string | null
-  assigneeName?: string | null
+  /** The suggester's owner guess, resolved exactly or null (CN.2 contract
+   *  section 5). suggestedAssigneeId is what Approve carries into
+   *  createTaskRecord; a picker on the row may override it before Approve
+   *  fires. */
+  suggestedAssigneeId?: string | null
+  suggestedAssigneeName?: string | null
+  /** One sentence: who said they would do it, or "owns this client's
+   *  work" when there was no new owner named on the call. */
+  assigneeReason?: string | null
   dueDate?: string | null
   estimatedHours?: number | null
   priority?: string | null
@@ -89,6 +96,12 @@ export interface CreateRequestProposal {
   dueDate?: string | null
   requesterName?: string | null
   requesterContactId?: string | null
+  /** The suggester's owner guess, resolved exactly or null (CN.2 contract
+   *  section 5). suggestedAssigneeId is what Approve carries into
+   *  createRequestRecord. */
+  suggestedAssigneeId?: string | null
+  suggestedAssigneeName?: string | null
+  assigneeReason?: string | null
 }
 
 export interface UpdateRequestProposalFields {
@@ -104,6 +117,14 @@ export interface UpdateRequestProposalFields {
 export interface UpdateRequestProposal {
   fields: UpdateRequestProposalFields
   note?: string
+  /** The suggester's owner guess (CN.2 contract section 5), shown on the
+   *  row with the same picker create_task and create_request carry. Not
+   *  wired into the write this slice makes: an update_request's own field
+   *  list stays the PATCH-safe set above, so this is informational until a
+   *  later slice adds it there. */
+  suggestedAssigneeId?: string | null
+  suggestedAssigneeName?: string | null
+  assigneeReason?: string | null
 }
 
 export interface RequestNoteProposal {

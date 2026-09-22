@@ -22,8 +22,11 @@ import {
   needsApproveConfirm,
   bestMatchTarget,
   SIMILAR_BLOCK,
+  proposalAssigneeSuggestion,
+  assigneeSuggestionLine,
+  withAssigneeOverride,
 } from '../suggestions-logic'
-import type { DecoratedSuggestion, CreateTaskProposal, CreateRequestProposal, SimilarMatch } from '../suggestions-types'
+import type { DecoratedSuggestion, CreateTaskProposal, CreateRequestProposal, UpdateRequestProposal, SimilarMatch } from '../suggestions-types'
 import type { TaskFields } from '@/lib/task-wizard-drafts'
 
 function row(overrides: Partial<DecoratedSuggestion> = {}): DecoratedSuggestion {
@@ -198,7 +201,7 @@ describe('create_task proposal <-> TaskFields', () => {
     type: 'internal_client_task',
     orgId: 'org1',
     requestId: null,
-    assigneeId: 'member1',
+    suggestedAssigneeId: 'member1',
     dueDate: '2026-09-22',
     estimatedHours: 1.5,
     priority: 'high',
@@ -426,5 +429,94 @@ describe('the duplicate guard (CN.1d contract sections 2 and 5)', () => {
       expect(buildAttachRequest({ kind: 'request', id: 'r1' })).toEqual({ action: 'attach', target: { kind: 'request', id: 'r1' } })
       expect(buildAttachRequest({ kind: 'task', id: 't1' })).toEqual({ action: 'attach', target: { kind: 'task', id: 't1' } })
     })
+  })
+})
+
+// ── Assignee suggestions (CN.2 contract section 5) ──────────────────────────
+
+describe('proposalAssigneeSuggestion', () => {
+  it('reads the name, id and reason off a create_task proposal', () => {
+    const suggestion = proposalAssigneeSuggestion('create_task', {
+      title: 'Send the contract',
+      suggestedAssigneeName: 'Staci',
+      suggestedAssigneeId: 'member1',
+      assigneeReason: 'said she would send the headers',
+    })
+    expect(suggestion).toEqual({ name: 'Staci', id: 'member1', reason: 'said she would send the headers' })
+  })
+
+  it('reads it off create_request and update_request too', () => {
+    expect(proposalAssigneeSuggestion('create_request', {
+      title: 'New landing page', suggestedAssigneeName: 'Liam', suggestedAssigneeId: 'member2', assigneeReason: null,
+    })).toEqual({ name: 'Liam', id: 'member2', reason: null })
+
+    expect(proposalAssigneeSuggestion('update_request', {
+      fields: {}, suggestedAssigneeName: 'Liam', suggestedAssigneeId: null, assigneeReason: 'owns this client\'s work',
+    })).toEqual({ name: 'Liam', id: null, reason: 'owns this client\'s work' })
+  })
+
+  it('is null when the kind does not carry an assignee suggestion at all', () => {
+    expect(proposalAssigneeSuggestion('note', { body: 'A note' })).toBeNull()
+    expect(proposalAssigneeSuggestion('hand_off_request', { contactName: 'Ella', reason: 'needs_content' })).toBeNull()
+  })
+
+  it('is null when the kind carries the fields but nobody was named', () => {
+    expect(proposalAssigneeSuggestion('create_task', { title: 'Send the contract' })).toBeNull()
+    expect(proposalAssigneeSuggestion('create_task', { title: 'Send the contract', suggestedAssigneeName: null })).toBeNull()
+  })
+})
+
+describe('assigneeSuggestionLine', () => {
+  it('reads "Suggested: name, reason" when both are present', () => {
+    expect(assigneeSuggestionLine({ name: 'Staci', id: 'member1', reason: 'said she would send the headers' }))
+      .toBe('Suggested: Staci, said she would send the headers')
+  })
+
+  it('drops the reason clause when there is none', () => {
+    expect(assigneeSuggestionLine({ name: 'Staci', id: null, reason: null })).toBe('Suggested: Staci')
+  })
+
+  it('is null with no suggestion at all', () => {
+    expect(assigneeSuggestionLine(null)).toBeNull()
+    expect(assigneeSuggestionLine({ name: null, id: null, reason: null })).toBeNull()
+  })
+})
+
+describe('withAssigneeOverride', () => {
+  it('replaces the three assignee keys and drops the reason on a human pick', () => {
+    const proposal: CreateTaskProposal = {
+      title: 'Send the contract',
+      description: null,
+      type: 'internal_client_task',
+      orgId: 'org1',
+      requestId: null,
+      suggestedAssigneeName: 'Staci',
+      suggestedAssigneeId: 'member1',
+      assigneeReason: 'said she would send the headers',
+      dueDate: null,
+      estimatedHours: null,
+      priority: 'standard',
+      subtasks: [],
+    }
+    const overridden = withAssigneeOverride(proposal, { id: 'member2', name: 'Liam' })
+    expect(overridden.suggestedAssigneeId).toBe('member2')
+    expect(overridden.suggestedAssigneeName).toBe('Liam')
+    expect(overridden.assigneeReason).toBeNull()
+    // Everything else on the proposal survives untouched.
+    expect(overridden.title).toBe('Send the contract')
+  })
+
+  it('clears the assignee back to unassigned', () => {
+    const proposal: UpdateRequestProposal = {
+      fields: { priority: 'high' },
+      suggestedAssigneeName: 'Liam',
+      suggestedAssigneeId: 'member2',
+      assigneeReason: 'owns this client\'s work',
+    }
+    const overridden = withAssigneeOverride(proposal, { id: null, name: null })
+    expect(overridden.suggestedAssigneeId).toBeNull()
+    expect(overridden.suggestedAssigneeName).toBeNull()
+    expect(overridden.assigneeReason).toBeNull()
+    expect(overridden.fields).toEqual({ priority: 'high' })
   })
 })
