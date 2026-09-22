@@ -197,6 +197,14 @@ export const ORG_SCOPED_TABLES: readonly OrgScopedTable[] = [
   // PARENT_KEYED_TABLES: the lifecycle policy test requires that list to hold
   // nothing org-scoped, and org_id already reaches every row a client owns.
   { schemaKey: 'taskSuggestions', table: 'task_suggestions', policy: 'delete' },
+  // Cached Slack identities (migration 0110). 'delete', and it is closer to a
+  // security requirement than to tidiness: the row is what tells the bot this
+  // Slack user is a client of THIS org, and it is only re-resolved after seven
+  // days, so a row left behind would keep claiming a client level on an
+  // organisation that no longer exists. It holds nothing but a cache of a
+  // Slack profile, so there is nothing to keep. A founder's or a team
+  // member's row carries org_id NULL and is therefore never in scope here.
+  { schemaKey: 'slackIdentities', table: 'slack_identities', policy: 'delete' },
 ]
 
 interface OrgTableHandle {

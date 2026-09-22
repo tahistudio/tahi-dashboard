@@ -54,6 +54,7 @@ export const schemaDouble = {
   contractDocuments: fakeTable('contract_documents', ORG),
   projectCalculations: fakeTable('project_calculations', ORG),
   taskSuggestions: fakeTable('task_suggestions', ['orgId', 'approverId', 'approverType']),
+  slackIdentities: fakeTable('slack_identities', ['orgId', 'contactId', 'teamMemberId']),
 
   requestParticipants: fakeTable('request_participants', ['requestId', 'participantId', 'participantType', 'addedById', 'addedByType']),
   requestReads: fakeTable('request_reads', ['requestId', 'userId', 'userType']),
