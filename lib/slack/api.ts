@@ -22,8 +22,22 @@
 
 const SLACK_API = 'https://slack.com/api'
 
-function botToken(): string {
+/**
+ * The bot token, or null.
+ *
+ * The soft read, for a caller whose whole job is optional: the suggestion
+ * sweep and the decision mirror both ask this before they try, because a
+ * studio with no Slack app installed must still write its suggestions and
+ * still decide them. Everything that is actually being asked for by a person
+ * goes through botToken() below and gets an error instead.
+ */
+export function slackBotToken(): string | null {
   const token = process.env.SLACK_BOT_TOKEN
+  return token && token.trim() ? token : null
+}
+
+function botToken(): string {
+  const token = slackBotToken()
   if (!token) throw new Error('SLACK_BOT_TOKEN not configured')
   return token
 }
@@ -196,4 +210,66 @@ export async function viewsOpen(triggerId: string, view: unknown): Promise<strin
     view,
   })
   return data.view?.id ?? ''
+}
+
+// ── Agent mode (contract section 6b) ────────────────────────────────────────
+// The app runs in Slack's Agents and Apps mode, so the 1:1 is an assistant
+// pane rather than a plain DM. Two of its methods matter: the status line
+// above the composer while the bot is thinking, and the prompts a fresh
+// thread opens with.
+
+export interface AssistantThreadRef {
+  channelId: string
+  threadTs: string
+}
+
+/**
+ * The little grey line in the assistant pane: "Reading your note".
+ *
+ * An EMPTY status is how Slack clears it, which is why the parameter is a
+ * plain string with no special case: the caller that finishes work passes ''
+ * and the line disappears.
+ *
+ * Never throws. A status line is the one thing in this file that is purely
+ * cosmetic, and a workspace on an older app (no assistant:write) would
+ * otherwise turn every note into an error.
+ */
+export async function setStatus(input: AssistantThreadRef & { status: string }): Promise<void> {
+  try {
+    await callSlack<SlackEnvelope>('assistant.threads.setStatus', {
+      channel_id: input.channelId,
+      thread_ts: input.threadTs,
+      status: input.status,
+    })
+  } catch {
+    // Cosmetic. See above.
+  }
+}
+
+/** One tappable opener in a fresh assistant thread. */
+export interface SlackSuggestedPrompt {
+  title: string
+  message: string
+}
+
+/**
+ * The prompts a new assistant thread opens with (contract section 6b).
+ *
+ * Same rule as the status line: a workspace that cannot take them still gets
+ * a working bot, it just gets an empty composer.
+ */
+export async function setSuggestedPrompts(
+  input: AssistantThreadRef & { prompts: readonly SlackSuggestedPrompt[]; title?: string },
+): Promise<void> {
+  if (input.prompts.length === 0) return
+  try {
+    await callSlack<SlackEnvelope>('assistant.threads.setSuggestedPrompts', {
+      channel_id: input.channelId,
+      thread_ts: input.threadTs,
+      prompts: input.prompts.map(prompt => ({ title: prompt.title, message: prompt.message })),
+      ...(input.title ? { title: input.title } : {}),
+    })
+  } catch {
+    // Cosmetic. See above.
+  }
 }

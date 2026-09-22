@@ -12,18 +12,30 @@
  *   WHAT WE REFUSE TO LOOK AT: the bot's own messages (an infinite loop, one
  *   reply at a time), edits and deletions, and anything that is not a DM.
  *
- *   THE UNKNOWN REPLY. Until S2 and S3 land, the hooks answer "not wired yet",
- *   but an unknown identity already gets the refusal line and nothing else,
- *   because that branch is a security answer rather than a placeholder.
+ *   THE UNKNOWN REPLY, which runs BEFORE either hook is delegated to: a
+ *   stranger must not be able to spend a model call, a download or a database
+ *   read, and must not learn from the wording whether anything was looked up.
+ *
+ *   THE DELEGATION. handleDm hands the flattened event to S3's DM handler and
+ *   handleAction hands the button to whatever claimed its prefix. A button
+ *   nothing has claimed says so rather than going quiet.
+ *
+ *   THE ASSISTANT PANE (contract section 6b): a new thread gets one welcome
+ *   line for the level and the three suggested prompts.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { schema } from '@/db/d1'
 
 const posted: Array<Record<string, unknown>> = []
+const statuses: Array<Record<string, unknown>> = []
+const prompts: Array<Record<string, unknown>> = []
 
 vi.mock('../api', () => ({
   postMessage: async (input: Record<string, unknown>) => { posted.push(input); return { ts: '1.1', channel: String(input.channel) } },
   openDm: async (userId: string) => `D_${userId}`,
+  filesInfo: async (fileId: string) => ({ id: fileId, mimetype: 'audio/mp4', urlPrivate: 'https://files.slack.com/f', name: 'note.m4a', size: 2048 }),
+  setStatus: async (input: Record<string, unknown>) => { statuses.push(input) },
+  setSuggestedPrompts: async (input: Record<string, unknown>) => { prompts.push(input) },
 }))
 
 const {
@@ -33,8 +45,13 @@ const {
   readAction,
   handleDm,
   handleAction,
+  handleAssistantThreadStarted,
+  ASSISTANT_PROMPTS,
   NOT_WIRED_LINE,
 } = await import('../dispatch')
+
+const { registerSlackDmHandler, resetSlackDmHandler } = await import('../dm-hook')
+const { registerBlockActionHandler, clearBlockActionHandlers } = await import('../action-registry')
 
 const { DENIAL_LINE } = await import('../identity')
 
@@ -62,7 +79,13 @@ function identity(level: 'founder' | 'member' | 'client' | 'unknown') {
   }
 }
 
-beforeEach(() => { posted.length = 0 })
+beforeEach(() => {
+  posted.length = 0
+  statuses.length = 0
+  prompts.length = 0
+  resetSlackDmHandler()
+  clearBlockActionHandlers()
+})
 
 describe('isHandledEvent', () => {
   it('handles a plain DM', () => {
@@ -170,35 +193,166 @@ describe('parseInteractivePayload and readAction', () => {
   })
 })
 
-describe('the default hooks', () => {
-  it('answers a DM with the placeholder until S3 fills the hook', async () => {
-    await handleDm(identity('founder'), { type: 'message', channel_type: 'im', user: 'U', channel: 'D1', text: 'note this' })
-    expect(posted).toHaveLength(1)
-    expect(posted[0]).toMatchObject({ channel: 'D1', text: NOT_WIRED_LINE })
+const fakeDrizzle = {} as Parameters<typeof handleDm>[2]
+
+function click(overrides: Record<string, unknown> = {}) {
+  return {
+    type: 'block_actions' as const,
+    actionId: 'sugg:approve:s1',
+    value: 's1',
+    channelId: 'D_LIAM',
+    messageTs: '1758.1',
+    triggerId: 't',
+    responseUrl: null,
+    userId: 'U',
+    teamId: 'T',
+    ...overrides,
+  }
+}
+
+describe('handleDm', () => {
+  it('hands the flattened event to the DM handler, with the identity and the database', async () => {
+    const seen: Array<Record<string, unknown>> = []
+    registerSlackDmHandler(async (event, deps) => {
+      seen.push({ event, identity: deps.identity })
+      return { handled: true, reason: 'ok', voice: false, posted: 0 }
+    })
+
+    await handleDm(
+      identity('founder'),
+      { type: 'message', channel_type: 'im', user: 'U', channel: 'D1', text: 'note this', ts: '1758.1' },
+      fakeDrizzle,
+    )
+
+    expect(seen).toHaveLength(1)
+    expect(seen[0].event).toMatchObject({ channelId: 'D1', userId: 'U', text: 'note this', ts: '1758.1' })
+    // The hook posts its own replies through the injected poster, so dispatch
+    // itself says nothing.
+    expect(posted).toHaveLength(0)
   })
 
-  it('answers a button click with the placeholder until S2 fills the hook', async () => {
-    await handleAction(identity('founder'), {
-      type: 'block_actions', actionId: 'sugg:approve:s1', value: 's1',
-      channelId: 'D_LIAM', messageTs: '1758.1', triggerId: 't', responseUrl: null, userId: 'U', teamId: 'T',
+  it('reads a file_shared through files.info, because the event names no size', async () => {
+    const seen: Array<Record<string, unknown>> = []
+    registerSlackDmHandler(async (event) => {
+      seen.push({ files: event.files })
+      return { handled: true, reason: 'ok', voice: true, posted: 0 }
     })
+
+    await handleDm(identity('founder'), { type: 'file_shared', user_id: 'U', channel_id: 'D1', file_id: 'F1' }, fakeDrizzle)
+    expect(seen[0].files).toEqual([
+      { id: 'F1', mimetype: 'audio/mp4', urlPrivate: 'https://files.slack.com/f', name: 'note.m4a', size: 2048 },
+    ])
+  })
+
+  it('threads every reply, because an unthreaded message lands behind the assistant pane', async () => {
+    registerSlackDmHandler(async (_event, deps) => {
+      await deps.postMessage({ channel: 'D1', text: 'Here is what I understood.' })
+      return { handled: true, reason: 'ok', voice: false, posted: 1 }
+    })
+
+    await handleDm(
+      identity('founder'),
+      { type: 'message', channel_type: 'im', user: 'U', channel: 'D1', text: 'note this', ts: '1758.9' },
+      fakeDrizzle,
+    )
+    expect(posted[0]).toMatchObject({ channel: 'D1', threadTs: '1758.9' })
+  })
+
+  it('refuses an unknown identity before the handler is ever reached', async () => {
+    let called = false
+    registerSlackDmHandler(async () => {
+      called = true
+      return { handled: true, reason: 'ok', voice: false, posted: 0 }
+    })
+
+    await handleDm(identity('unknown'), { type: 'message', channel_type: 'im', user: 'U', channel: 'D1', text: 'hello?' }, fakeDrizzle)
+    expect(called).toBe(false)
+    expect(posted.map((p) => p.text)).toEqual([DENIAL_LINE])
+  })
+})
+
+describe('handleAction', () => {
+  it('hands the button to whatever claimed its prefix, and says back what it answers', async () => {
+    const seen: Array<Record<string, unknown>> = []
+    registerBlockActionHandler('sugg', async (ctx) => {
+      seen.push({ payload: ctx.payload, level: ctx.identity?.level })
+      return { handled: true, reply: 'That one was already decided.' }
+    })
+
+    await handleAction(identity('founder'), click(), fakeDrizzle)
+    expect(seen[0].payload).toMatchObject({ actionId: 'sugg:approve:s1', value: 's1', slackUserId: 'U', slackTeamId: 'T', channelId: 'D_LIAM', messageTs: '1758.1' })
+    expect(seen[0].level).toBe('founder')
+    expect(posted).toEqual([{ channel: 'D_LIAM', text: 'That one was already decided.' }])
+  })
+
+  it('says nothing when the handler answered with nothing to say', async () => {
+    registerBlockActionHandler('sugg', async () => ({ handled: true, reply: null }))
+    await handleAction(identity('founder'), click(), fakeDrizzle)
+    expect(posted).toHaveLength(0)
+  })
+
+  it('answers a button nothing has claimed rather than going quiet', async () => {
+    await handleAction(identity('founder'), click({ actionId: 'nudge:send:n1' }), fakeDrizzle)
     expect(posted[0]).toMatchObject({ channel: 'D_LIAM', text: NOT_WIRED_LINE })
   })
 
-  it('answers an unknown identity with the refusal line and nothing else, in both directions', async () => {
-    await handleDm(identity('unknown'), { type: 'message', channel_type: 'im', user: 'U', channel: 'D1', text: 'hello?' })
-    await handleAction(identity('unknown'), {
-      type: 'block_actions', actionId: 'sugg:approve:s1', value: 's1',
-      channelId: 'D1', messageTs: '1', triggerId: 't', responseUrl: null, userId: 'U', teamId: 'T',
+  it('refuses an unknown identity before the handler is ever reached', async () => {
+    let called = false
+    registerBlockActionHandler('sugg', async () => {
+      called = true
+      return { handled: true, reply: null }
     })
-    expect(posted.map((p) => p.text)).toEqual([DENIAL_LINE, DENIAL_LINE])
+    await handleAction(identity('unknown'), click({ channelId: 'D1' }), fakeDrizzle)
+    expect(called).toBe(false)
+    expect(posted.map((p) => p.text)).toEqual([DENIAL_LINE])
   })
 
   it('never posts when there is nowhere to post to', async () => {
     await handleAction(identity('founder'), {
       type: 'view_submission', actionId: 'x', value: null,
       channelId: null, messageTs: null, triggerId: 't', responseUrl: null, userId: 'U', teamId: 'T',
-    })
+    }, fakeDrizzle)
     expect(posted).toHaveLength(0)
+  })
+})
+
+describe('the assistant pane (contract section 6b)', () => {
+  const started = {
+    type: 'assistant_thread_started',
+    assistant_thread: { user_id: 'U_LIAM', channel_id: 'D_LIAM', thread_ts: '1758.1' },
+  }
+
+  it('is an event this route acts on', () => {
+    expect(isHandledEvent(started)).toBe(true)
+  })
+
+  it('acks a context change and does nothing else with it', () => {
+    expect(isHandledEvent({ type: 'assistant_thread_context_changed', assistant_thread: { channel_id: 'D_LIAM', thread_ts: '1758.1' } })).toBe(false)
+  })
+
+  it('opens a founder thread with one line and the three prompts', async () => {
+    await handleAssistantThreadStarted(identity('founder'), started)
+    expect(posted).toHaveLength(1)
+    expect(posted[0]).toMatchObject({ channel: 'D_LIAM', threadTs: '1758.1' })
+    expect(String(posted[0].text)).toContain('press a button')
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toMatchObject({ channelId: 'D_LIAM', threadTs: '1758.1' })
+    expect(ASSISTANT_PROMPTS.map((prompt) => prompt.message)).toEqual([
+      'Task for me: ',
+      'Request for ',
+      'What is waiting on me?',
+    ])
+  })
+
+  it('opens a client thread with the client line', async () => {
+    await handleAssistantThreadStarted(identity('client'), started)
+    expect(String(posted[0].text)).toContain('draft the request')
+    expect(prompts).toHaveLength(1)
+  })
+
+  it('gives a stranger the refusal line and no prompts to press', async () => {
+    await handleAssistantThreadStarted(identity('unknown'), started)
+    expect(posted[0]).toMatchObject({ text: DENIAL_LINE })
+    expect(prompts).toHaveLength(0)
   })
 })

@@ -48,9 +48,18 @@ vi.mock('../notes', async () => {
   }
 })
 
-const { handleSlackDm } = await import('../dispatch-dm')
+const { handleSlackDm, READING_STATUS } = await import('../dispatch-dm')
 const { registerSlackDmHandler, resetSlackDmHandler, dispatchSlackDm } = await import('../dm-hook')
-const { transcribeAudio, loadAiBinding, VOICE_NOT_ENABLED, WHISPER_MODEL, isAudioFile } = await import('../voice')
+const {
+  transcribeAudio,
+  preflightAudio,
+  loadAiBinding,
+  VOICE_NOT_ENABLED,
+  VOICE_TOO_LARGE,
+  MAX_AUDIO_BYTES,
+  WHISPER_MODEL,
+  isAudioFile,
+} = await import('../voice')
 const { SLACK_DENIED_REPLY } = await import('../identity')
 
 function identity(overrides: Partial<SlackIdentity> = {}): SlackIdentity {
@@ -289,5 +298,106 @@ describe('the DM hook', () => {
     })
     await dispatchSlackDm(event(), deps())
     expect(called).toBe(true)
+  })
+})
+
+describe('the voice preflight', () => {
+  it('answers not enabled before it looks at the size, so a worker with no binding never says "too long"', async () => {
+    const result = await preflightAudio({ size: MAX_AUDIO_BYTES + 1 }, { ai: null })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toBe('not_enabled')
+  })
+
+  it('refuses an oversized recording once the binding is there', async () => {
+    const result = await preflightAudio({ size: MAX_AUDIO_BYTES + 1 }, { ai: { run: async () => ({ text: 'x' }) } })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toBe('too_large')
+  })
+
+  it('passes a size nobody could tell us, and leaves the byte length as the backstop', async () => {
+    const result = await preflightAudio({ size: null }, { ai: { run: async () => ({ text: 'x' }) } })
+    expect(result.ok).toBe(true)
+  })
+})
+
+describe('the size check happens before the download', () => {
+  it('refuses a recording Slack already said was too big, without spending the download', async () => {
+    cfEnv.AI = { run: async () => ({ text: 'never reached' }) }
+    let downloaded = false
+    const outcome = await handleSlackDm(
+      event({ text: '', files: [{ ...AUDIO_FILE, size: MAX_AUDIO_BYTES + 1 }] }),
+      deps({
+        downloadFile: async () => {
+          downloaded = true
+          return new Uint8Array([1]).buffer
+        },
+      }),
+    )
+    expect(outcome.reason).toBe('voice_too_large')
+    expect(downloaded).toBe(false)
+    expect(posted).toEqual([{ channel: 'D1', text: VOICE_TOO_LARGE }])
+    expect(noteCalls).toHaveLength(0)
+  })
+
+  it('asks files.info for a size the event did not carry, and refuses on that', async () => {
+    cfEnv.AI = { run: async () => ({ text: 'never reached' }) }
+    let downloaded = false
+    const outcome = await handleSlackDm(
+      event({ text: '', files: [AUDIO_FILE] }),
+      deps({
+        filesInfo: async (fileId: string) => ({
+          id: fileId, mimetype: 'audio/mp4', urlPrivate: null, name: 'note.m4a', size: MAX_AUDIO_BYTES + 1,
+        }),
+        downloadFile: async () => {
+          downloaded = true
+          return new Uint8Array([1]).buffer
+        },
+      }),
+    )
+    expect(outcome.reason).toBe('voice_too_large')
+    expect(downloaded).toBe(false)
+  })
+
+  it('says voice notes are not enabled yet for an oversized recording on a worker with no binding', async () => {
+    const outcome = await handleSlackDm(
+      event({ text: '', files: [{ ...AUDIO_FILE, size: MAX_AUDIO_BYTES + 1 }] }),
+      deps({ downloadFile: async () => new Uint8Array([1]).buffer }),
+    )
+    expect(outcome.reason).toBe('voice_not_enabled')
+  })
+})
+
+describe('the assistant status line (contract section 6b)', () => {
+  it('goes up before the note is read and comes back down once the reply is out', async () => {
+    const statuses: string[] = []
+    await handleSlackDm(event(), deps({ setStatus: async (status: string) => { statuses.push(status) } }))
+    expect(statuses).toEqual([READING_STATUS, ''])
+  })
+
+  it('comes down even when the note could not be read', async () => {
+    const statuses: string[] = []
+    noteResult = {
+      ok: false,
+      reason: 'suggester_failed',
+      reply: 'I could not read that one just now. Try again in a minute.',
+      orgId: null,
+      orgName: null,
+      approverType: 'member',
+      approverId: 'tm_liam',
+      inserted: 0,
+      duplicates: 0,
+      rows: [],
+    }
+    await handleSlackDm(event(), deps({ setStatus: async (status: string) => { statuses.push(status) } }))
+    expect(statuses).toEqual([READING_STATUS, ''])
+  })
+
+  it('is never set for a stranger, who is refused before any work starts', async () => {
+    const statuses: string[] = []
+    await handleSlackDm(event(), deps({
+      identity: identity({ level: 'unknown', teamMemberId: null }),
+      setStatus: async (status: string) => { statuses.push(status) },
+    }))
+    expect(statuses).toEqual([])
   })
 })

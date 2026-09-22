@@ -14,6 +14,7 @@
 
 import type { TaskFields } from '@/lib/task-wizard-drafts'
 import type { RequestInitialDraft } from '@/components/tahi/new-request-dialog'
+import { asRecord } from '@/lib/suggestion-summary'
 import type {
   CreateRequestProposal,
   CreateTaskProposal,
@@ -21,6 +22,7 @@ import type {
   HandOffRequestProposal,
   SimilarMatch,
   SnoozePreset,
+  TaskSuggestionKind,
 } from './suggestions-types'
 
 // The shared summariser (lib/suggestion-summary.ts). Re-exported rather than

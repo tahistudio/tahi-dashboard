@@ -164,6 +164,15 @@ export interface SuggestionMessageInput {
   targetRequestNumber?: number | null
   targetRequestTitle?: string | null
   similar?: readonly SummarySimilarMatch[]
+  /**
+   * Slice A1's owner suggestion, when the caller has already read it off the
+   * proposal (lib/slack/dispatch-dm.ts does). Optional because most callers
+   * hand over the whole proposal and let the line be read out of it; an
+   * explicit name here WINS, because a caller that went to the trouble of
+   * resolving one has better information than the raw JSON does.
+   */
+  suggestedAssigneeName?: string | null
+  assigneeReason?: string | null
 }
 
 export interface SuggestionMessageOptions {
@@ -174,6 +183,28 @@ export interface SuggestionMessageOptions {
    * already scores at or above the block threshold (CN.1d section 5).
    */
   duplicate?: boolean
+  /**
+   * Where Tweak goes. Left out for the dashboard's own link, which is what a
+   * studio card wants. Set to NULL to drop the button entirely, which is what
+   * a client's card wants: /tasks is not a page they can open, and a button
+   * that lands somebody on a permission error is worse than no button.
+   */
+  tweakUrl?: string | null
+}
+
+/**
+ * "Suggested: Staci, said she would send the headers" (contract section 5).
+ *
+ * The explicit fields first, the proposal second, so a card reads the same
+ * line whether the caller resolved the owner itself or handed over the stored
+ * JSON. No name at all renders no line: "Suggested: nobody" is worse than
+ * silence.
+ */
+function assigneeLine(input: SuggestionMessageInput): string | null {
+  const name = input.suggestedAssigneeName?.trim()
+  if (!name) return suggestedAssigneeLine(input.proposal)
+  const reason = input.assigneeReason?.trim()
+  return reason ? `Suggested: ${name}, ${reason}` : `Suggested: ${name}`
 }
 
 /** The one-line fallback a notification shows: the kind and the summary. */
@@ -217,7 +248,7 @@ export function suggestionMessage(
     blocks.push({ type: 'section', text: mrkdwn(quoteBlock(input.quote)) })
   }
 
-  const assignee = suggestedAssigneeLine(input.proposal)
+  const assignee = assigneeLine(input)
   if (assignee) {
     blocks.push({ type: 'context', elements: [mrkdwn(escapeSlackText(assignee))] })
   }
@@ -245,12 +276,15 @@ export function suggestionMessage(
     action_id: suggestionActionId(duplicate ? 'approve_anyway' : 'approve', input.id),
     style: 'primary',
   })
-  buttons.push({
-    type: 'button',
-    text: plain('Tweak'),
-    action_id: suggestionActionId('tweak', input.id),
-    url: suggestionTweakUrl(input.id),
-  })
+  const tweakUrl = options.tweakUrl === undefined ? suggestionTweakUrl(input.id) : options.tweakUrl
+  if (tweakUrl) {
+    buttons.push({
+      type: 'button',
+      text: plain('Tweak'),
+      action_id: suggestionActionId('tweak', input.id),
+      url: tweakUrl,
+    })
+  }
   buttons.push({ type: 'button', text: plain('Tonight'), action_id: suggestionActionId('snooze_tonight', input.id) })
   buttons.push({ type: 'button', text: plain('This week'), action_id: suggestionActionId('snooze_week', input.id) })
   buttons.push({ type: 'button', text: plain('Reject'), action_id: suggestionActionId('reject', input.id), style: 'danger' })

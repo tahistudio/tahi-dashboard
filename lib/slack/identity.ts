@@ -41,6 +41,15 @@ export const SLACK_IDENTITY_TTL_MS = 7 * 24 * 60 * 60 * 1000
  */
 export const DENIAL_LINE = 'Sorry, I cannot help with that here.'
 
+/**
+ * The same sentence, under the two names the sibling modules were written
+ * against. One constant, two aliases: a second string would be a second
+ * refusal to keep in step, and the whole point of the line is that every
+ * refusal reads identically whatever door it came through.
+ */
+export const SLACK_DENIED_LINE = DENIAL_LINE
+export const SLACK_DENIED_REPLY = DENIAL_LINE
+
 export interface SlackIdentity {
   id: string
   slackTeamId: string
@@ -79,9 +88,29 @@ const CAPABILITIES: Record<SlackCapability, readonly SlackLevel[]> = {
   read_studio_numbers: ['founder'],
 }
 
-/** True only when this level is named. Unknown is named nowhere. */
-export function can(identity: Pick<SlackIdentity, 'level'>, action: SlackCapability): boolean {
+/**
+ * True only when this level is named. Unknown is named nowhere, and neither is
+ * a Slack user the app has never resolved, so a null identity is refused here
+ * rather than by a null check every caller has to remember.
+ */
+export function can(
+  identity: Pick<SlackIdentity, 'level'> | null | undefined,
+  action: SlackCapability,
+): boolean {
+  if (!identity) return false
   return CAPABILITIES[action]?.includes(identity.level) ?? false
+}
+
+/**
+ * Somebody on the Tahi roster, founder or not.
+ *
+ * The studio half of the app (a note becoming a task, the whole of /tasks)
+ * opens for these two levels and nobody else. Written as its own predicate
+ * because "not a client and not a stranger" is a sentence three modules need
+ * and none of them should spell out.
+ */
+export function isStudioLevel(level: SlackLevel): boolean {
+  return level === 'founder' || level === 'member'
 }
 
 export interface SlackProfileLookup {
@@ -138,6 +167,21 @@ function toIdentity(row: IdentityRow, dmChannelId: string | null): SlackIdentity
     dmChannelId: dmChannelId ?? row.dmChannelId ?? null,
   }
 }
+
+/** Every column an identity is read from, in one place, so the three readers
+ *  below cannot drift into selecting different halves of the same row. */
+const IDENTITY_COLUMNS = {
+  id: schema.slackIdentities.id,
+  slackTeamId: schema.slackIdentities.slackTeamId,
+  slackUserId: schema.slackIdentities.slackUserId,
+  email: schema.slackIdentities.email,
+  level: schema.slackIdentities.level,
+  teamMemberId: schema.slackIdentities.teamMemberId,
+  contactId: schema.slackIdentities.contactId,
+  orgId: schema.slackIdentities.orgId,
+  dmChannelId: schema.slackIdentities.dmChannelId,
+  updatedAt: schema.slackIdentities.updatedAt,
+} as const
 
 function isFresh(updatedAt: string | null, nowMs: number): boolean {
   if (!updatedAt) return false
@@ -208,18 +252,7 @@ export async function resolveSlackIdentity(
   const dmChannelId = input.dmChannelId ?? null
 
   const [existing] = await database
-    .select({
-      id: schema.slackIdentities.id,
-      slackTeamId: schema.slackIdentities.slackTeamId,
-      slackUserId: schema.slackIdentities.slackUserId,
-      email: schema.slackIdentities.email,
-      level: schema.slackIdentities.level,
-      teamMemberId: schema.slackIdentities.teamMemberId,
-      contactId: schema.slackIdentities.contactId,
-      orgId: schema.slackIdentities.orgId,
-      dmChannelId: schema.slackIdentities.dmChannelId,
-      updatedAt: schema.slackIdentities.updatedAt,
-    })
+    .select(IDENTITY_COLUMNS)
     .from(schema.slackIdentities)
     .where(and(
       eq(schema.slackIdentities.slackTeamId, input.teamId),
@@ -304,5 +337,59 @@ export async function resolveSlackIdentity(
     contactId: mapping.contactId,
     orgId: mapping.orgId,
     dmChannelId,
+  }
+}
+
+/**
+ * The cached identity for a Slack user, or null.
+ *
+ * The CACHE ONLY. resolveSlackIdentity above is the one that may spend a
+ * users.info call and write a row; this is what a handler in the middle of an
+ * interaction wants, because a button press already carries the person's
+ * whole authorisation and a Slack API call on the way to honouring it is
+ * three seconds it does not have.
+ *
+ * Any read failure answers null, which the capability check then refuses. A
+ * database that cannot tell us who pressed the button is not a reason to act
+ * as if anybody did.
+ */
+export async function findSlackIdentity(
+  database: Drizzle,
+  input: { teamId: string; userId: string },
+): Promise<SlackIdentity | null> {
+  if (!input.teamId || !input.userId) return null
+  try {
+    const [row] = await database
+      .select(IDENTITY_COLUMNS)
+      .from(schema.slackIdentities)
+      .where(and(
+        eq(schema.slackIdentities.slackTeamId, input.teamId),
+        eq(schema.slackIdentities.slackUserId, input.userId),
+      ))
+      .limit(1) as IdentityRow[]
+    return row ? toIdentity(row, null) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Every founder the app has ever spoken to, which is where a call's
+ * suggestions go (contract section 3).
+ *
+ * Read off the cache rather than off team_members, because a founder with no
+ * slack_identities row has never opened the app and has no DM channel to post
+ * into. An empty list is a legitimate answer on a fresh install and the
+ * caller treats it as "nobody to tell" rather than as a failure.
+ */
+export async function listFounderIdentities(database: Drizzle): Promise<SlackIdentity[]> {
+  try {
+    const rows = await database
+      .select(IDENTITY_COLUMNS)
+      .from(schema.slackIdentities)
+      .where(eq(schema.slackIdentities.level, 'founder')) as IdentityRow[]
+    return (rows ?? []).map(row => toIdentity(row, null))
+  } catch {
+    return []
   }
 }

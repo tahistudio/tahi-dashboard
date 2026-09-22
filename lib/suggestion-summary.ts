@@ -51,7 +51,13 @@ export function suggestionKindLabel(kind: string): string {
   return SUGGESTION_KIND_LABELS[kind as SuggestionSummaryKind] ?? kind
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
+/**
+ * A proposal as a bag of fields, whether it arrived parsed or as the JSON
+ * string the column holds. Exported because every surface that reads one
+ * field off a proposal (the inbox row, the Slack card) needs exactly this and
+ * a second copy would be a second set of edge cases.
+ */
+export function asRecord(value: unknown): Record<string, unknown> {
   if (typeof value === 'string') {
     try {
       return asRecord(JSON.parse(value))

@@ -102,22 +102,62 @@ export async function loadAiBinding(): Promise<WhisperBinding | null> {
   }
 }
 
+export type AudioPreflight =
+  | { ok: true; ai: WhisperBinding }
+  | { ok: false; reason: 'not_enabled' | 'too_large'; message: string }
+
+/**
+ * Everything that can be decided about a recording BEFORE a byte of it is
+ * downloaded, in the order it has to be decided in.
+ *
+ * THE BINDING FIRST. A worker with no AI binding can do nothing with audio of
+ * any length, so it must answer "voice notes are not enabled yet" even for a
+ * two hour recording. Checking the size first would answer "too long" on a
+ * deployment where no length would have worked, which sends the sender off to
+ * trim a file for nothing.
+ *
+ * THE SIZE SECOND, and from files.info rather than from the downloaded bytes.
+ * A forty minute recording is a worker's memory and a Workers AI bill, and
+ * Slack tells us how big it is for free before we spend either.
+ *
+ * A size we do not know is not a refusal: it passes, and transcribeAudio
+ * checks the real byte length as the backstop.
+ */
+export async function preflightAudio(
+  file: { size?: number | null },
+  options: { ai?: WhisperBinding | null } = {},
+): Promise<AudioPreflight> {
+  const ai = options.ai !== undefined ? options.ai : await loadAiBinding()
+  if (!ai) return { ok: false, reason: 'not_enabled', message: VOICE_NOT_ENABLED }
+
+  const size = file.size
+  if (typeof size === 'number' && size > MAX_AUDIO_BYTES) {
+    return { ok: false, reason: 'too_large', message: VOICE_TOO_LARGE }
+  }
+
+  return { ok: true, ai }
+}
+
 /**
  * Bytes in, words out.
  *
  * The binding is a parameter so a test never has to stand up a Cloudflare
  * context; production passes nothing and gets the real one.
+ *
+ * Same order as preflightAudio, for the same reason: a missing binding is the
+ * answer whatever the length. This is the backstop for a recording whose size
+ * Slack did not tell us before the download.
  */
 export async function transcribeAudio(
   audio: ArrayBuffer,
   options: { ai?: WhisperBinding | null } = {},
 ): Promise<TranscribeResult> {
+  const ai = options.ai !== undefined ? options.ai : await loadAiBinding()
+  if (!ai) return { ok: false, reason: 'not_enabled', message: VOICE_NOT_ENABLED }
+
   if (audio.byteLength > MAX_AUDIO_BYTES) {
     return { ok: false, reason: 'too_large', message: VOICE_TOO_LARGE }
   }
-
-  const ai = options.ai !== undefined ? options.ai : await loadAiBinding()
-  if (!ai) return { ok: false, reason: 'not_enabled', message: VOICE_NOT_ENABLED }
 
   try {
     const output = await ai.run(WHISPER_MODEL, { audio: Array.from(new Uint8Array(audio)) })

@@ -32,9 +32,17 @@ import {
   parseInteractivePayload,
   rememberSlackEvent,
 } from '@/lib/slack/dispatch'
+import { registerSuggestionActions } from '@/lib/slack/dispatch-actions'
 
 // Prevent build-time static analysis: the signing secret is read at runtime.
 export const dynamic = 'force-dynamic'
+
+// The `sugg:*` buttons, claimed at module load rather than per request. The
+// dispatcher resolves a handler by action id prefix and has no list of its
+// own, so an unregistered prefix is a button that answers "not switched on
+// yet". Importing the module registers it too; the explicit call is so that
+// nothing here looks like an unused import and gets tidied away.
+registerSuggestionActions()
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 

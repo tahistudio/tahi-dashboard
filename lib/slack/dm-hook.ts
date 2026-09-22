@@ -4,19 +4,21 @@
  * The seam between S1's events route and S3's DM handler (CN.2 sections 2
  * and 4).
  *
- * STUB NOTE (slice S3). The registry belongs to slice S1, which owns
- * app/api/webhooks/slack/events/route.ts and calls `dispatchSlackDm` from the
- * work it hands to waitUntil. It is here so S3's handler has something to
- * register through while S1 is still in flight, and so the route never has to
- * import the handler directly: a route that imports the world is a route that
- * cannot be tested.
+ * lib/slack/dispatch.ts#handleDm calls `dispatchSlackDm` once it knows who is
+ * talking, and this is what stands between it and the handler. The seam is
+ * here rather than as a direct import so a test of the inbound path can
+ * replace the whole of the note and voice machinery with two lines.
  *
- * The default is a lazy import rather than a throw, so a route that forgets to
- * register anything still reaches the handler that exists. Registration is for
- * tests and for whatever S1 decides to put in front of it.
+ * The default is a lazy import rather than a throw, so a caller that registers
+ * nothing still reaches the handler that exists. Registration is for tests and
+ * for anything that wants to sit in front of the default.
  */
 
 import type { SlackDmDeps, SlackDmEvent, SlackDmOutcome } from './dispatch-dm'
+
+// Re-exported so a caller wiring the hook up (lib/slack/dispatch.ts) imports
+// the event shape from the same module it imports the dispatcher from.
+export type { SlackDmDeps, SlackDmEvent, SlackDmOutcome }
 
 export type SlackDmHandler = (event: SlackDmEvent, deps: SlackDmDeps) => Promise<SlackDmOutcome>
 

@@ -143,6 +143,43 @@ describe('POST /api/webhooks/slack/events', () => {
   it('answers 400 to a body that is not JSON', async () => {
     expect((await eventsRoute(post('not json'))).status).toBe(400)
   })
+
+  // Agent mode, contract section 6b. Which of the two assistant events is
+  // acted on is lib/slack/dispatch.ts#isHandledEvent's call and is pinned
+  // there; what the route owes each one is the 200, and that is pinned here.
+  it('carries a new assistant thread through to the handler', async () => {
+    const envelope = {
+      type: 'event_callback',
+      event_id: 'Ev_assist',
+      team_id: 'T_TAHI',
+      event: {
+        type: 'assistant_thread_started',
+        assistant_thread: { user_id: 'U_LIAM', channel_id: 'D_LIAM', thread_ts: '1758.1' },
+      },
+    }
+    const res = await eventsRoute(post(JSON.stringify(envelope)))
+    expect(res.status).toBe(200)
+    await settle()
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ event_id: 'Ev_assist' })
+  })
+
+  it('acks a context change and spends nothing on it', async () => {
+    handled = false
+    const res = await eventsRoute(post(JSON.stringify({
+      type: 'event_callback',
+      event_id: 'Ev_ctx',
+      team_id: 'T_TAHI',
+      event: {
+        type: 'assistant_thread_context_changed',
+        assistant_thread: { user_id: 'U_LIAM', channel_id: 'D_LIAM', thread_ts: '1758.1' },
+      },
+    })))
+    expect(res.status).toBe(200)
+    await settle()
+    expect(remembered).toHaveLength(0)
+    expect(events).toHaveLength(0)
+  })
 })
 
 describe('POST /api/webhooks/slack/interactive', () => {

@@ -13,7 +13,18 @@
  *   a DM carrying the only copy of a suggestion is not.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { postMessage, updateMessage, openDm, usersInfo, filesInfo, downloadFile, viewsOpen } from '../api'
+import {
+  postMessage,
+  updateMessage,
+  openDm,
+  usersInfo,
+  filesInfo,
+  downloadFile,
+  viewsOpen,
+  slackBotToken,
+  setStatus,
+  setSuggestedPrompts,
+} from '../api'
 
 interface Call { url: string; init: RequestInit }
 
@@ -104,5 +115,69 @@ describe('the rest of the surface', () => {
     expect(await viewsOpen('trig1', { type: 'modal' })).toBe('V1')
     expect(calls[0].url).toBe('https://slack.com/api/views.open')
     expect(JSON.parse(String(calls[0].init.body))).toMatchObject({ trigger_id: 'trig1' })
+  })
+})
+
+describe('slackBotToken', () => {
+  it('reads the token off the environment', () => {
+    expect(slackBotToken()).toBe('xoxb-test')
+  })
+
+  it('is null rather than a throw when the worker has none, which is what the optional callers ask', () => {
+    delete process.env.SLACK_BOT_TOKEN
+    expect(slackBotToken()).toBeNull()
+  })
+
+  it('treats a blank token as no token', () => {
+    process.env.SLACK_BOT_TOKEN = '   '
+    expect(slackBotToken()).toBeNull()
+  })
+})
+
+describe('agent mode (contract section 6b)', () => {
+  it('sets the status line on the assistant thread', async () => {
+    await setStatus({ channelId: 'D1', threadTs: '1758.1', status: 'Reading your note' })
+    expect(calls[0].url).toBe('https://slack.com/api/assistant.threads.setStatus')
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      channel_id: 'D1',
+      thread_ts: '1758.1',
+      status: 'Reading your note',
+    })
+  })
+
+  it('clears the status line with an empty string rather than a second method', async () => {
+    await setStatus({ channelId: 'D1', threadTs: '1758.1', status: '' })
+    expect(JSON.parse(String(calls[0].init.body))).toMatchObject({ status: '' })
+  })
+
+  it('sets the three suggested prompts', async () => {
+    await setSuggestedPrompts({
+      channelId: 'D1',
+      threadTs: '1758.1',
+      prompts: [
+        { title: 'Log a task', message: 'Task for me: ' },
+        { title: 'New request for a client', message: 'Request for ' },
+        { title: 'What is waiting on me', message: 'What is waiting on me?' },
+      ],
+    })
+    expect(calls[0].url).toBe('https://slack.com/api/assistant.threads.setSuggestedPrompts')
+    const body = JSON.parse(String(calls[0].init.body)) as { prompts: Array<{ message: string }> }
+    expect(body.prompts).toHaveLength(3)
+    expect(body.prompts.map(prompt => prompt.message)).toEqual(['Task for me: ', 'Request for ', 'What is waiting on me?'])
+  })
+
+  it('says nothing at all when there are no prompts to set', async () => {
+    await setSuggestedPrompts({ channelId: 'D1', threadTs: '1758.1', prompts: [] })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('swallows a refusal, because a status line is never worth failing a note over', async () => {
+    responder = () => json({ ok: false, error: 'missing_scope' })
+    await expect(setStatus({ channelId: 'D1', threadTs: '1758.1', status: 'Reading your note' })).resolves.toBeUndefined()
+    await expect(setSuggestedPrompts({
+      channelId: 'D1',
+      threadTs: '1758.1',
+      prompts: [{ title: 'Log a task', message: 'Task for me: ' }],
+    })).resolves.toBeUndefined()
   })
 })

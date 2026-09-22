@@ -24,26 +24,63 @@
  *   handler sees it, so a handler can never act for somebody it has not
  *   identified, and an unmapped stranger is refused here rather than deeper in.
  *
- *   THE TWO HOOKS. handleDm and handleAction are what slices S2 (approvals in
- *   a DM) and S3 (notes and voice) fill in. Today they answer NOT_WIRED_LINE,
- *   which makes the whole inbound path testable and installable before either
- *   slice lands. The 'unknown' branch is NOT a placeholder: that one is a
- *   security answer and is already final.
+ *   THE TWO HOOKS. handleDm delegates to lib/slack/dispatch-dm.ts (S3: a
+ *   note, a voice note, a client's request) and handleAction delegates to
+ *   whatever has claimed the action id on lib/slack/action-registry.ts (S2:
+ *   Approve, Tweak, Tonight, This week, Reject). Both check the identity
+ *   FIRST: the 'unknown' branch is a security answer, not a placeholder, and
+ *   nothing is delegated to before it has run.
+ *
+ *   THE ASSISTANT PANE. The app runs in Slack's Agents and Apps mode, so a
+ *   new 1:1 opens as an assistant thread rather than an empty DM. That
+ *   arrives as assistant_thread_started and is answered here with a welcome
+ *   line and three suggested prompts (contract section 6b).
  */
 
 import { schema } from '@/db/d1'
-import { postMessage, usersInfo } from './api'
-import { DENIAL_LINE, resolveSlackIdentity, type SlackIdentity } from './identity'
+import {
+  filesInfo,
+  postMessage,
+  setStatus,
+  setSuggestedPrompts,
+  usersInfo,
+  type SlackFile,
+  type SlackSuggestedPrompt,
+} from './api'
+import { DENIAL_LINE, resolveSlackIdentity, type SlackIdentity, type SlackLevel } from './identity'
+import { dispatchSlackDm, type SlackDmEvent } from './dm-hook'
+import { resolveBlockActionHandler } from './action-registry'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 /**
- * What the bot says while S2 and S3 are unbuilt. It states that nothing was
- * created, because the worst possible reply here is one that leaves somebody
- * believing a task exists.
+ * What the bot says when a delivery reached a handler that does not exist: a
+ * button from a feature that has been removed, or a message the registry has
+ * nothing registered for. It states that nothing was created, because the
+ * worst possible reply here is one that leaves somebody believing a task
+ * exists.
  */
 export const NOT_WIRED_LINE =
   'Got your message. I can hear you, but this part of me is not switched on yet, so nothing has been created.'
+
+/** The one line a fresh assistant thread opens with, per level. */
+const WELCOME_LINES: Record<SlackLevel, string> = {
+  founder: 'Tell me what happened, typed or recorded, and I will draft the tasks and requests it should become. Nothing is created until you press a button.',
+  member: 'Tell me what happened, typed or recorded, and I will draft the work it should become for you to approve.',
+  client: 'Tell me what you need and I will draft the request. You confirm it before it reaches the studio.',
+  unknown: DENIAL_LINE,
+}
+
+/**
+ * The three openers from the contract, which are the same three in the app
+ * manifest. A trailing space on the first two is deliberate: the prompt drops
+ * the sender straight into typing the rest of the sentence.
+ */
+export const ASSISTANT_PROMPTS: readonly SlackSuggestedPrompt[] = [
+  { title: 'Log a task', message: 'Task for me: ' },
+  { title: 'New request for a client', message: 'Request for ' },
+  { title: 'What is waiting on me', message: 'What is waiting on me?' },
+]
 
 /**
  * The fields of a Slack event this phase reads. Slack sends plenty more, and
@@ -68,6 +105,13 @@ export interface SlackEventLike {
   bot_profile?: unknown
   file_id?: string
   files?: unknown
+  /** Present on the two assistant_thread_* events, and nowhere else. */
+  assistant_thread?: {
+    user_id?: string
+    channel_id?: string
+    thread_ts?: string
+    context?: unknown
+  }
 }
 
 export interface SlackEventEnvelope {
@@ -82,11 +126,23 @@ export interface SlackEventEnvelope {
 const FILE_SHARE_SUBTYPE = 'file_share'
 
 export function eventUserId(event: SlackEventLike): string | null {
-  return event.user ?? event.user_id ?? null
+  return event.user ?? event.user_id ?? event.assistant_thread?.user_id ?? null
 }
 
 export function eventChannelId(event: SlackEventLike): string | null {
-  return event.channel ?? event.channel_id ?? null
+  return event.channel ?? event.channel_id ?? event.assistant_thread?.channel_id ?? null
+}
+
+/**
+ * The assistant thread a delivery belongs to, when it is in one.
+ *
+ * In Agents and Apps mode every message in the 1:1 is threaded, so the reply
+ * has to carry thread_ts or it lands in the channel behind the pane where
+ * nobody is looking. `ts` is the fallback because the FIRST message of a
+ * thread is its own parent.
+ */
+export function eventThreadTs(event: SlackEventLike): string | null {
+  return event.assistant_thread?.thread_ts ?? event.thread_ts ?? event.ts ?? null
 }
 
 /**
@@ -114,6 +170,15 @@ export function isHandledEvent(event: SlackEventLike | null | undefined): boolea
   // A voice note. Slack sends this alongside the message.im delivery, and the
   // file id is the only place the audio is named.
   if (event.type === 'file_shared') return true
+
+  // A fresh assistant thread: the welcome line and the suggested prompts.
+  if (event.type === 'assistant_thread_started') return true
+
+  // assistant_thread_context_changed is deliberately NOT handled. Slack sends
+  // it whenever the sender moves between channels with the pane open, it says
+  // nothing the bot acts on, and the route's 200 is the whole of the ack the
+  // contract asks for. Answering false here also spends no dedupe row on it.
+  if (event.type === 'assistant_thread_context_changed') return false
 
   if (event.type === 'app_mention') return true
 
@@ -273,9 +338,57 @@ export function readAction(payload: SlackInteractivePayload): SlackActionInput |
 }
 
 // ── The two hooks ────────────────────────────────────────────────────────────
-// S2 fills handleAction (Approve, Tweak, Tonight, This week, Reject).
-// S3 fills handleDm (a note, a voice note, a client's request).
-// Both must keep the 'unknown' branch exactly as it is.
+// handleDm delegates to S3 (a note, a voice note, a client's request) and
+// handleAction to S2 (Approve, Tweak, Tonight, This week, Reject). The
+// 'unknown' branch runs in both BEFORE any delegation: a stranger must not be
+// able to spend a model call, a download, or a database read.
+
+/** Slack's own file shape on a message event, which is not api.ts's. */
+interface RawSlackFile {
+  id?: string
+  mimetype?: string
+  filetype?: string
+  name?: string
+  size?: number
+  url_private_download?: string
+  url_private?: string
+}
+
+function toSlackFile(raw: RawSlackFile): SlackFile | null {
+  if (!raw.id) return null
+  return {
+    id: raw.id,
+    mimetype: raw.mimetype ?? raw.filetype ?? null,
+    urlPrivate: raw.url_private_download ?? raw.url_private ?? null,
+    name: raw.name ?? null,
+    size: typeof raw.size === 'number' ? raw.size : null,
+  }
+}
+
+/**
+ * The files on a delivery, in api.ts's shape.
+ *
+ * A message.im carrying a recording lists it inline, WITH its size, which is
+ * what lets the voice preflight refuse an oversized one for free. A
+ * file_shared carries a file id and nothing else, so that one costs a
+ * files.info call. A lookup that fails yields no files rather than throwing:
+ * the typed half of the same message is still worth filing.
+ */
+async function eventFiles(event: SlackEventLike): Promise<SlackFile[]> {
+  const inline = Array.isArray(event.files)
+    ? (event.files as RawSlackFile[]).map(toSlackFile).filter((file): file is SlackFile => file !== null)
+    : []
+  if (inline.length > 0) return inline
+
+  if (event.file_id) {
+    try {
+      return [await filesInfo(event.file_id)]
+    } catch {
+      return []
+    }
+  }
+  return []
+}
 
 /**
  * Somebody said something to the bot.
@@ -283,14 +396,47 @@ export function readAction(payload: SlackInteractivePayload): SlackActionInput |
  * `event.channel` is where the reply belongs, falling back to the identity's
  * cached DM channel. When there is neither, there is nowhere to answer, and
  * saying nothing beats opening a conversation nobody started.
+ *
+ * Every reply carries the thread: in the assistant pane an unthreaded message
+ * lands behind the pane rather than in it.
  */
-export async function handleDm(identity: SlackIdentity, event: SlackEventLike): Promise<void> {
+export async function handleDm(
+  identity: SlackIdentity,
+  event: SlackEventLike,
+  database: Drizzle,
+): Promise<void> {
   const channel = eventChannelId(event) ?? identity.dmChannelId
   if (!channel) return
 
-  await postMessage({
-    channel,
-    text: identity.level === 'unknown' ? DENIAL_LINE : NOT_WIRED_LINE,
+  if (identity.level === 'unknown') {
+    await postMessage({ channel, text: DENIAL_LINE })
+    return
+  }
+
+  const threadTs = eventThreadTs(event)
+  const dmEvent: SlackDmEvent = {
+    teamId: identity.slackTeamId,
+    channelId: channel,
+    userId: identity.slackUserId,
+    text: typeof event.text === 'string' ? event.text : '',
+    ts: event.ts ?? event.event_ts ?? '',
+    files: await eventFiles(event),
+    subtype: event.subtype,
+  }
+
+  await dispatchSlackDm(dmEvent, {
+    database,
+    identity,
+    postMessage: async (input) => postMessage({
+      channel: input.channel,
+      text: input.text,
+      blocks: input.blocks,
+      ...(threadTs ? { threadTs } : {}),
+    }),
+    filesInfo,
+    setStatus: threadTs
+      ? async (status: string) => setStatus({ channelId: channel, threadTs, status })
+      : undefined,
   })
 }
 
@@ -300,18 +446,69 @@ export async function handleDm(identity: SlackIdentity, event: SlackEventLike): 
  * Only the channel the interaction happened in is answered. The identity's
  * cached DM is deliberately NOT a fallback here: a modal submit has no
  * channel, and replying to it in a DM the person is not looking at would be a
- * message arriving out of nowhere.
+ * message arriving out of nowhere. That also means a view_submission reaches
+ * no handler this phase, which is correct: the only modal the app opens is
+ * Tweak, and Tweak is a link to the dashboard.
  */
 export async function handleAction(
   identity: SlackIdentity,
   action: SlackActionInput,
+  database: Drizzle,
 ): Promise<void> {
   if (!action.channelId) return
 
-  await postMessage({
-    channel: action.channelId,
-    text: identity.level === 'unknown' ? DENIAL_LINE : NOT_WIRED_LINE,
-  })
+  if (identity.level === 'unknown') {
+    await postMessage({ channel: action.channelId, text: DENIAL_LINE })
+    return
+  }
+
+  const handler = resolveBlockActionHandler(action.actionId)
+  const result = handler
+    ? await handler({
+      drizzle: database,
+      identity,
+      payload: {
+        actionId: action.actionId,
+        value: action.value,
+        slackUserId: action.userId,
+        slackTeamId: action.teamId,
+        channelId: action.channelId,
+        messageTs: action.messageTs,
+      },
+    })
+    : { handled: false, reply: null }
+
+  // Nothing claimed this button. Say so plainly rather than silently: a
+  // founder who pressed Approve and heard nothing back has to go and check.
+  if (!result.handled) {
+    await postMessage({ channel: action.channelId, text: NOT_WIRED_LINE })
+    return
+  }
+
+  if (result.reply) {
+    await postMessage({ channel: action.channelId, text: result.reply })
+  }
+}
+
+/**
+ * A fresh assistant thread (contract section 6b).
+ *
+ * One welcome line for the level, then the three prompts. A stranger gets the
+ * refusal line and no prompts: the openers name the studio's verbs, and
+ * offering them to somebody who cannot use them is both a tease and a leak.
+ */
+export async function handleAssistantThreadStarted(
+  identity: SlackIdentity,
+  event: SlackEventLike,
+): Promise<void> {
+  const channel = eventChannelId(event) ?? identity.dmChannelId
+  const threadTs = eventThreadTs(event)
+  if (!channel || !threadTs) return
+
+  await postMessage({ channel, text: WELCOME_LINES[identity.level], threadTs })
+
+  if (identity.level === 'unknown') return
+  await setSuggestedPrompts({ channelId: channel, threadTs, prompts: ASSISTANT_PROMPTS })
 }
 
 // ── What the routes call ─────────────────────────────────────────────────────
@@ -350,9 +547,14 @@ export async function handleSlackEvent(
     fetchProfile: profileReader(userId),
   })
 
+  if (event.type === 'assistant_thread_started') {
+    await handleAssistantThreadStarted(identity, event)
+    return
+  }
+
   // An app_mention is still somebody addressing the bot, so it goes through the
   // same hook; S3 decides whether a mention in a channel is answered at all.
-  await handleDm(identity, event)
+  await handleDm(identity, event, database)
 }
 
 /** Handle one verified, deduped interaction. Same deferred position as above. */
@@ -371,5 +573,5 @@ export async function handleSlackInteraction(
     fetchProfile: profileReader(action.userId),
   })
 
-  await handleAction(identity, action)
+  await handleAction(identity, action, database)
 }

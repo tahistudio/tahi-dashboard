@@ -1,12 +1,13 @@
 /**
- * S2 stub, S1 replaces.
+ * lib/slack/action-registry.ts
  *
- * The hook app/api/webhooks/slack/interactive/route.ts hands a block_actions
- * payload to (CN.2 contract section 2). Slice S1 owns the route, the
- * signature verification and the ack-within-three-seconds shape; this is the
- * seam between that route and the handlers, so S2's suggestion buttons have
- * something to register with while the two slices build in parallel. The lead
- * keeps S1's version at merge.
+ * Which handler answers which button (CN.2 contract section 2).
+ *
+ * app/api/webhooks/slack/interactive/route.ts verifies the delivery and acks
+ * it; lib/slack/dispatch.ts#handleAction resolves who the presser is and then
+ * asks this registry for the handler. The route therefore never learns a
+ * single verb, and a feature that adds buttons adds them by registering a
+ * prefix rather than by editing a route.
  *
  * Handlers are keyed by the first segment of the action id, which is why
  * every button this codebase writes is namespaced (`sugg:approve:<id>`).

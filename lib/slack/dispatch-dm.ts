@@ -27,11 +27,10 @@
  * through lib/slack/notes.ts, and a human presses the button.
  */
 
-import { publicUrl } from '@/lib/app-url'
 import { suggestionMessage } from './blocks'
 import { SLACK_DENIED_REPLY, type SlackIdentity } from './identity'
 import { draftFromNote, type NoteSuggestionRow } from './notes'
-import { isAudioFile, transcribeAudio, type WhisperBinding } from './voice'
+import { isAudioFile, preflightAudio, transcribeAudio, type AudioFileLike, type WhisperBinding } from './voice'
 import { downloadFile as downloadSlackFile, type SlackFile } from './api'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -67,6 +66,18 @@ export interface SlackDmDeps {
   postMessage: (input: SlackDmPostInput) => Promise<unknown>
   downloadFile?: (file: SlackFile) => Promise<ArrayBuffer>
   /**
+   * files.info, for a recording whose size the event did not carry. Optional:
+   * when it is absent an unknown size simply passes the preflight and the
+   * byte length is checked after the download instead.
+   */
+  filesInfo?: (fileId: string) => Promise<SlackFile>
+  /**
+   * The assistant pane's status line (contract section 6b). Called with
+   * "Reading your note" before any model work and with '' once the reply is
+   * out. Optional, because a plain DM has no status line to set.
+   */
+  setStatus?: (status: string) => Promise<void>
+  /**
    * The Workers AI binding. Undefined means "look it up", which is what
    * production wants; null means "there is none", which is what a test that
    * pins the not-enabled reply wants.
@@ -74,6 +85,9 @@ export interface SlackDmDeps {
   ai?: WhisperBinding | null
   now?: Date
 }
+
+/** The assistant pane's status line while the bot is working on a note. */
+export const READING_STATUS = 'Reading your note'
 
 export type SlackDmReason =
   | 'ok'
@@ -107,13 +121,54 @@ function outcome(
   return { handled, reason, voice, posted }
 }
 
+/**
+ * A Slack file as the audio sniffer reads one.
+ *
+ * lib/slack/api.ts models an absent field as null (it is reading a JSON
+ * envelope where the field may not be there) and lib/slack/voice.ts models it
+ * as undefined (it is an optional property on a structural type). Both are
+ * right in their own file, so the seam is adapted here, once, rather than
+ * either side loosening its own shape.
+ */
+function toAudioFile(file: SlackFile): AudioFileLike {
+  return {
+    id: file.id,
+    name: file.name ?? undefined,
+    mimetype: file.mimetype ?? undefined,
+  }
+}
+
 /** The audio in a DM, if any. One recording per message is the real case. */
 function firstAudio(files: readonly SlackFile[] | undefined): SlackFile | null {
   if (!files) return null
   for (const file of files) {
-    if (isAudioFile(file)) return file
+    if (isAudioFile(toAudioFile(file))) return file
   }
   return null
+}
+
+/** The bytes behind a Slack file, through the authenticated download URL. */
+async function downloadDefault(file: SlackFile): Promise<ArrayBuffer> {
+  if (!file.urlPrivate) throw new Error('Slack file has no download URL')
+  return downloadSlackFile(file.urlPrivate)
+}
+
+/**
+ * How big the recording is, from files.info when the event did not say.
+ *
+ * Null means "we do not know", never "it is fine": the preflight treats an
+ * unknown size as a pass and the byte length after the download is the
+ * backstop. A files.info that fails is not worth a refusal on its own.
+ */
+async function audioSize(deps: SlackDmDeps, file: SlackFile): Promise<number | null> {
+  if (typeof file.size === 'number') return file.size
+  if (!deps.filesInfo) return null
+  try {
+    const info = await deps.filesInfo(file.id)
+    return typeof info.size === 'number' ? info.size : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -123,19 +178,25 @@ function firstAudio(files: readonly SlackFile[] | undefined): SlackFile | null {
  * that renders the line when it is there and omits it when it is not needs no
  * change when A1 lands.
  */
-function suggestedAssigneeName(proposal: unknown): string | null {
-  if (!proposal || typeof proposal !== 'object') return null
-  const value = (proposal as Record<string, unknown>).suggestedAssigneeName
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+function suggestedAssignee(proposal: unknown): { name: string | null; reason: string | null } {
+  if (!proposal || typeof proposal !== 'object') return { name: null, reason: null }
+  const record = proposal as Record<string, unknown>
+  const name = typeof record.suggestedAssigneeName === 'string' && record.suggestedAssigneeName.trim()
+    ? record.suggestedAssigneeName.trim()
+    : null
+  const reason = typeof record.assigneeReason === 'string' && record.assigneeReason.trim()
+    ? record.assigneeReason.trim()
+    : null
+  return { name, reason: name ? reason : null }
 }
 
 /**
  * The bot's own copy of the sender's words, as a card per filed row.
  *
- * Studio people get the Tweak deep link because /tasks is theirs; a client
- * does not, because the link would land them on a page they cannot open. The
- * button itself stays on the card either way, so S2's interactive route is
- * the one place that decides what a client's Tweak does.
+ * Studio people get the Tweak deep link because /tasks is theirs; a client's
+ * card carries no Tweak button at all, because the link would land them on a
+ * page they cannot open. Every other button is the same on both, and the
+ * interactive route gates what each one is allowed to do.
  */
 async function postCards(
   deps: SlackDmDeps,
@@ -145,6 +206,7 @@ async function postCards(
 ): Promise<number> {
   let posted = 0
   for (const row of rows) {
+    const assignee = suggestedAssignee(row.proposal)
     const message = suggestionMessage(
       {
         id: row.id,
@@ -152,11 +214,12 @@ async function postCards(
         proposal: row.proposal,
         quote: row.quote,
         orgName: options.orgName,
-        suggestedAssigneeName: suggestedAssigneeName(row.proposal),
+        suggestedAssigneeName: assignee.name,
+        assigneeReason: assignee.reason,
       },
-      options.deepLink
-        ? { tweakUrl: publicUrl(`/tasks?view=suggestions&focus=${encodeURIComponent(row.id)}`) }
-        : {},
+      // A studio card gets the dashboard link (the default). A client's card
+      // gets no Tweak button at all, because /tasks is not theirs to open.
+      options.deepLink ? {} : { tweakUrl: null },
     )
     await deps.postMessage({ channel, text: message.text, blocks: message.blocks })
     posted += 1
@@ -191,54 +254,78 @@ export async function handleSlackDm(event: SlackDmEvent, deps: SlackDmDeps): Pro
     return outcome(true, 'denied', voice, 1)
   }
 
-  let text = typed
+  // The status line goes up before the first expensive thing and comes down
+  // in the finally below, whichever way this ends (contract section 6b).
+  const status = deps.setStatus ?? (async () => {})
+  await status(READING_STATUS)
 
-  if (audio) {
-    const download = deps.downloadFile ?? downloadSlackFile
-    let bytes: ArrayBuffer
-    try {
-      bytes = await download(audio)
-    } catch {
-      await deps.postMessage({
-        channel: event.channelId,
-        text: 'I could not open that recording. Send it again, or type it.',
-      })
-      return outcome(true, 'voice_download_failed', true, 1)
+  try {
+    let text = typed
+
+    if (audio) {
+      // Both of these are decided before a byte is downloaded: a worker with
+      // no AI binding answers "not enabled" whatever the length, and a
+      // recording Slack has already told us is too big is refused for free.
+      const preflight = await preflightAudio(
+        { size: await audioSize(deps, audio) },
+        deps.ai !== undefined ? { ai: deps.ai } : {},
+      )
+      if (!preflight.ok) {
+        await deps.postMessage({ channel: event.channelId, text: preflight.message })
+        return outcome(true, `voice_${preflight.reason}` as SlackDmReason, true, 1)
+      }
+
+      const download = deps.downloadFile ?? downloadDefault
+      let bytes: ArrayBuffer
+      try {
+        bytes = await download(audio)
+      } catch {
+        await deps.postMessage({
+          channel: event.channelId,
+          text: 'I could not open that recording. Send it again, or type it.',
+        })
+        return outcome(true, 'voice_download_failed', true, 1)
+      }
+
+      const transcript = await transcribeAudio(bytes, { ai: preflight.ai })
+      if (!transcript.ok) {
+        await deps.postMessage({ channel: event.channelId, text: transcript.message })
+        return outcome(true, `voice_${transcript.reason}` as SlackDmReason, true, 1)
+      }
+
+      // The transcript wins over any caption typed alongside the recording: the
+      // words in the audio are the ones the sender said, and the suggester's
+      // quote has to be checkable against them.
+      text = transcript.text
     }
 
-    const transcript = await transcribeAudio(bytes, deps.ai !== undefined ? { ai: deps.ai } : {})
-    if (!transcript.ok) {
-      await deps.postMessage({ channel: event.channelId, text: transcript.message })
-      return outcome(true, `voice_${transcript.reason}` as SlackDmReason, true, 1)
+    const draft = await draftFromNote({
+      database: deps.database,
+      text,
+      identity,
+      now: deps.now,
+    })
+
+    let posted = 0
+    if (draft.reply) {
+      await deps.postMessage({ channel: event.channelId, text: draft.reply })
+      posted += 1
     }
 
-    // The transcript wins over any caption typed alongside the recording: the
-    // words in the audio are the ones the sender said, and the suggester's
-    // quote has to be checkable against them.
-    text = transcript.text
+    if (!draft.ok) {
+      return outcome(posted > 0, draft.reason as SlackDmReason, voice, posted)
+    }
+
+    posted += await postCards(deps, event.channelId, draft.rows, {
+      orgName: draft.orgName,
+      deepLink: identity.level !== 'client',
+    })
+
+    return outcome(true, 'ok', voice, posted)
+  } finally {
+    // An empty status is how Slack clears the line. In a finally because a
+    // sender left looking at "Reading your note" forever is worse than any of
+    // the failures above.
+    await status('')
   }
-
-  const draft = await draftFromNote({
-    database: deps.database,
-    text,
-    identity,
-    now: deps.now,
-  })
-
-  let posted = 0
-  if (draft.reply) {
-    await deps.postMessage({ channel: event.channelId, text: draft.reply })
-    posted += 1
-  }
-
-  if (!draft.ok) {
-    return outcome(posted > 0, draft.reason as SlackDmReason, voice, posted)
-  }
-
-  posted += await postCards(deps, event.channelId, draft.rows, {
-    orgName: draft.orgName,
-    deepLink: identity.level !== 'client',
-  })
-
-  return outcome(true, 'ok', voice, posted)
 }
