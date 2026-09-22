@@ -97,4 +97,8 @@ export default nextConfig
 // development can actually reach the database. This is a no-op in production
 // builds. Without it, getCloudflareContext() has no bindings and every db()
 // call throws, which is why local dev shows empty data.
-initOpenNextCloudflareForDev()
+// Skipped on CI: the Workers AI binding makes the dev proxy open a remote
+// session, which needs a wrangler login the lint and build runners do not have.
+if (!process.env.CI) {
+  initOpenNextCloudflareForDev()
+}
