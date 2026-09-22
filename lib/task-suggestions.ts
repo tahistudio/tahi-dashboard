@@ -39,6 +39,8 @@ import {
   type RequestPatchInput,
   type RequestWriteActor,
 } from '@/lib/request-writes'
+import { slackBotToken } from '@/lib/slack/api'
+import { mirrorSuggestionDecision, repostSuggestion } from '@/lib/slack/mirror'
 import { TAHI_BOT } from '@/lib/tahi-bot'
 import { postRequestBotMessage, postTaskComment } from '@/lib/task-comments'
 import { SIMILAR_BLOCK, SIMILAR_WARN, findSimilar } from '@/lib/text-similarity'
@@ -747,6 +749,25 @@ export async function listSuggestions(
   return decorate(drizzle, rows)
 }
 
+/**
+ * One suggestion with the names and the duplicate warning a reader needs, or
+ * null when the id names nothing.
+ *
+ * The Slack DM reads a row this way so its message says what the inbox row
+ * says, in the same words, off the same decoration (CN.2 contract section 3).
+ * A message built from the bare row would say "Studio" where the client's
+ * name belongs.
+ */
+export async function loadDecoratedSuggestion(
+  drizzle: Drizzle,
+  id: string,
+): Promise<DecoratedSuggestion | null> {
+  const row = await loadSuggestion(drizzle, id)
+  if (!row) return null
+  const [decorated] = await decorate(drizzle, [row])
+  return decorated ?? null
+}
+
 export interface SuggestionCounts {
   pending: number
   snoozed: number
@@ -1007,6 +1028,22 @@ export async function resurfaceSnoozed(drizzle: Drizzle, at: Date = new Date()):
       .update(schema.taskSuggestions)
       .set({ status: 'pending', snoozeUntil: null, updatedAt: stamp })
       .where(inArray(schema.taskSuggestions.id, batch))
+  }
+
+  // Back into the DMs that held it (CN.2 contract section 3). A fresh message
+  // rather than a rewrite, because the whole point of a snooze ending is the
+  // notification. Reads nothing without a bot token, so a studio with no
+  // Slack app resurfaces exactly as it did before.
+  if (slackBotToken()) {
+    for (const id of due) {
+      try {
+        const row = await loadDecoratedSuggestion(drizzle, id)
+        if (row) await repostSuggestion(drizzle, row)
+      } catch {
+        // A row that could not be re-posted is still pending in the inbox,
+        // which is where it is decided anyway.
+      }
+    }
   }
 
   return due.length
@@ -1567,8 +1604,29 @@ export async function decideSuggestion(
     .set(updates)
     .where(eq(schema.taskSuggestions.id, id))
 
+  const decided = { ...row, ...updates } as SuggestionRow
+
+  // THE SLACK REWRITE. The other founder is holding this same suggestion in a
+  // DM with an Approve button on it; unless that message is rewritten, the
+  // studio keeps a button that creates a second task for work that now
+  // exists (CN.2 contract section 3). Fired here rather than in each surface
+  // so the dashboard, Slack and MCP all get it for free.
+  //
+  // Deliberately awaited and deliberately swallowed. Awaited because a
+  // Worker may be torn down the moment the response is written, and a
+  // floating promise would lose the rewrite; swallowed because the decision
+  // is a fact about the database and whether Slack heard about it is a
+  // separate, lesser question.
+  try {
+    await mirrorSuggestionDecision(drizzle, decided)
+  } catch {
+    // mirrorSuggestionDecision already swallows its own failures. This is the
+    // belt for the braces: an import-time or binding failure must not undo a
+    // decision that landed.
+  }
+
   return {
-    suggestion: { ...row, ...updates } as SuggestionRow,
+    suggestion: decided,
     changed: true,
     appliedTaskId,
     appliedRequestId,
