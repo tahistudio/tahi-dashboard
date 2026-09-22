@@ -22,6 +22,9 @@
       "bucket_name": "tahi-storage"
     }
   ],
+  "ai": {
+    "binding": "AI"
+  },
   "env": {
     "staging": {
       "name": "tahi-dashboard-staging",
@@ -45,7 +48,10 @@
           "binding": "STORAGE",
           "bucket_name": "tahi-storage-staging"
         }
-      ]
+      ],
+      "ai": {
+        "binding": "AI"
+      }
     }
   }
 }
