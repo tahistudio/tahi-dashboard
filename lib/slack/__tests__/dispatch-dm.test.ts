@@ -22,7 +22,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { SlackIdentity } from '../identity'
-import type { NoteDraftResult } from '../notes'
+import type { NoteDraftResult, NoteSuggestionRow } from '../notes'
 
 const cfEnv: { AI?: unknown } = {}
 let cfThrows = false
@@ -48,7 +48,7 @@ vi.mock('../notes', async () => {
   }
 })
 
-const { handleSlackDm, READING_STATUS } = await import('../dispatch-dm')
+const { handleSlackDm, READING_STATUS, CARD_WITHHELD_LINE } = await import('../dispatch-dm')
 const { registerSlackDmHandler, resetSlackDmHandler, dispatchSlackDm } = await import('../dm-hook')
 const {
   transcribeAudio,
@@ -125,9 +125,29 @@ beforeEach(() => {
     approverId: 'tm_liam',
     inserted: 1,
     duplicates: 0,
-    rows: [{ id: 's1', kind: 'create_task', proposal: { title: 'Send the font headers' }, quote: 'I will send the font headers' }],
+    rows: [liamsRow({ id: 's1', proposal: { title: 'Send the font headers' }, quote: 'I will send the font headers' })],
   }
 })
+
+/** A studio note row belonging to Liam (the default identity), still pending. */
+function liamsRow(overrides: Partial<NoteSuggestionRow> = {}): NoteSuggestionRow {
+  return {
+    id: 's1', kind: 'create_task', proposal: {}, quote: '',
+    approverType: 'member', approverId: 'tm_liam', orgId: 'o_giant', status: 'pending',
+    ...overrides,
+  }
+}
+
+/** Tim's own draft at Giant Group, still pending: what a client card shows. */
+function timsRow(overrides: Partial<NoteSuggestionRow> = {}): NoteSuggestionRow {
+  return {
+    id: 's9', kind: 'create_request', proposal: {}, quote: '',
+    approverType: 'contact', approverId: 'c_tim', orgId: 'o_giant', status: 'pending',
+    ...overrides,
+  }
+}
+
+const TIM = { level: 'client' as const, email: 'tim@giantgroup.com', teamMemberId: null, contactId: 'c_tim', orgId: 'o_giant' }
 
 describe('isAudioFile', () => {
   it('recognises a Slack voice note', () => {
@@ -441,8 +461,8 @@ describe('a studio card is filed as a copy the moment it lands, a client card ne
     noteResult = {
       ...noteResult,
       rows: [
-        { id: 's1', kind: 'create_task', proposal: { title: 'Send the font headers' }, quote: 'I will send the font headers' },
-        { id: 's2', kind: 'create_task', proposal: { title: 'Book the shoot' }, quote: 'and book the shoot' },
+        liamsRow({ id: 's1', proposal: { title: 'Send the font headers' }, quote: 'I will send the font headers' }),
+        liamsRow({ id: 's2', proposal: { title: 'Book the shoot' }, quote: 'and book the shoot' }),
       ],
     }
   })
@@ -461,6 +481,10 @@ describe('a studio card is filed as a copy the moment it lands, a client card ne
   })
 
   it("records a member's cards the same way as a founder's", async () => {
+    noteResult = {
+      ...noteResult,
+      rows: noteResult.rows.map(row => ({ ...row, approverId: 'tm_staci' })),
+    }
     const { runs, database } = recordingDatabase()
     await handleSlackDm(event(), deps({
       database,
@@ -474,16 +498,17 @@ describe('a studio card is filed as a copy the moment it lands, a client card ne
   })
 
   it("posts a client's cards but files no copy of them, so nothing studio-only can reach that DM later", async () => {
+    noteResult = {
+      ...noteResult,
+      rows: [
+        timsRow({ id: 's8', proposal: { title: 'New footer icons' }, quote: 'New footer icons please.' }),
+        timsRow({ id: 's9', proposal: { title: 'A blog page' }, quote: 'And a blog page.' }),
+      ],
+    }
     const { runs, database } = recordingDatabase()
     const outcome = await handleSlackDm(event(), deps({
       database,
-      identity: identity({
-        level: 'client',
-        email: 'tim@giantgroup.com',
-        teamMemberId: null,
-        contactId: 'c_tim',
-        orgId: 'o_giant',
-      }),
+      identity: identity(TIM),
       postMessage: answeringPost(),
     }))
     expect(outcome.reason).toBe('ok')
@@ -496,18 +521,17 @@ describe('a studio card is filed as a copy the moment it lands, a client card ne
   it("renders a client's card as Approve and Reject only, with nothing studio side on it", async () => {
     noteResult = {
       ...noteResult,
-      rows: [{
+      rows: [timsRow({
         id: 's9',
-        kind: 'create_request',
         proposal: { title: 'New footer icons', suggestedAssigneeName: 'Staci', assigneeReason: 'owns the brand work' },
         quote: 'Can we get new footer icons?',
-      }],
+      })],
     }
     const sent: Array<{ text: string; blocks?: unknown[] }> = []
     const { runs, database } = recordingDatabase()
     await handleSlackDm(event(), deps({
       database,
-      identity: identity({ level: 'client', email: 'tim@giantgroup.com', teamMemberId: null, contactId: 'c_tim', orgId: 'o_giant' }),
+      identity: identity(TIM),
       postMessage: async (message: { channel: string; text: string; blocks?: unknown[] }) => {
         sent.push({ text: message.text, blocks: message.blocks })
         return { channel: 'D_TIM', ts: '1758500000.000300' }
@@ -542,6 +566,52 @@ describe('a studio card is filed as a copy the moment it lands, a client card ne
     const { runs, database } = recordingDatabase()
     const outcome = await handleSlackDm(event(), deps({ database }))
     expect(outcome.reason).toBe('ok')
+    expect(runs).toEqual([])
+  })
+})
+
+describe("a card is only ever the sender's own row (the post-time fence)", () => {
+  /** Rows that must never become a card in Tim's DM, whatever hands them over. */
+  const NOT_TIMS: Array<[string, NoteSuggestionRow]> = [
+    ["another contact's draft at his client", timsRow({ approverId: 'c_ngaire', quote: 'NGAIRE private words' })],
+    ["another client's draft", timsRow({ orgId: 'o_kiwi', approverId: 'c_tim', quote: 'KIWI private words' })],
+    ["a member's note", liamsRow({ quote: 'STUDIO private words' })],
+    ['his own draft, re-pointed by the studio', timsRow({ kind: 'request_note', quote: 'REPOINTED words' })],
+    ['his own draft, already decided', timsRow({ status: 'applied', quote: 'DECIDED words' })],
+  ]
+
+  for (const [label, row] of NOT_TIMS) {
+    it(`withholds ${label}: a neutral line, nothing rendered, nothing recorded`, async () => {
+      noteResult = { ...noteResult, reply: 'Is this the request?', rows: [row] }
+      const sent: Array<{ text: string; blocks?: unknown[] }> = []
+      const runs: unknown[] = []
+      await handleSlackDm(event(), deps({
+        database: { run: async (query: unknown) => { runs.push(query); return {} } } as never,
+        identity: identity(TIM),
+        postMessage: async (message: { channel: string; text: string; blocks?: unknown[] }) => {
+          sent.push({ text: message.text, blocks: message.blocks })
+          return { channel: 'D_TIM', ts: '1758500000.000400' }
+        },
+      }))
+      expect(sent.map(message => message.text)).toEqual(['Is this the request?', CARD_WITHHELD_LINE])
+      expect(sent.every(message => message.blocks === undefined)).toBe(true)
+      expect(JSON.stringify(sent)).not.toMatch(/private words|REPOINTED|DECIDED/)
+      expect(runs).toEqual([])
+    })
+  }
+
+  it("withholds another person's note from a studio sender, and records no copy of it", async () => {
+    noteResult = { ...noteResult, rows: [liamsRow({ approverId: 'tm_staci', quote: 'STACI private words' })] }
+    const sent: string[] = []
+    const runs: unknown[] = []
+    await handleSlackDm(event(), deps({
+      database: { run: async (query: unknown) => { runs.push(query); return {} } } as never,
+      postMessage: async (message: { channel: string; text: string }) => {
+        sent.push(message.text)
+        return { channel: 'D1', ts: '1758500000.000500' }
+      },
+    }))
+    expect(sent).toEqual(['Here is what I understood.', CARD_WITHHELD_LINE])
     expect(runs).toEqual([])
   })
 })

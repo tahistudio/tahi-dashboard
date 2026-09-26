@@ -35,7 +35,9 @@
  * nothing else. Their press is never filed as a copy, never re-renders the
  * studio's card, and never reaches mirrorSuggestionDecision: the one message
  * it changes is the card they pressed, rewritten by rewriteClientCard from
- * fixed client wording.
+ * fixed client wording. Their Approve files a real request, so it passes the
+ * portal's Requests feature gate first (lib/slack/entitlement.ts): a client
+ * the portal would refuse cannot file through Slack instead.
  *
  * Registered with the interactive route through the S1 hook in
  * lib/slack/action-registry.ts, by prefix, so the route never learns the
@@ -43,9 +45,6 @@
  * digest's `digest:*` url button with it.
  */
 
-import { eq } from 'drizzle-orm'
-import { schema } from '@/db/d1'
-import { resolveAccessScoping } from '@/lib/access-scoping'
 import {
   registerBlockActionHandler,
   type SlackBlockActionContext,
@@ -57,6 +56,7 @@ import {
   parseSuggestionActionId,
   type SuggestionActionName,
 } from '@/lib/slack/blocks'
+import { clientMayFileRequests, studioReachesOrg } from '@/lib/slack/entitlement'
 import { findSlackIdentity, isStudioLevel, SLACK_DENIED_LINE, type SlackIdentity } from '@/lib/slack/identity'
 import {
   mirrorSuggestionDecision,
@@ -117,34 +117,6 @@ export function canDecideSuggestion(
         && identity.orgId === row.orgId
     default:
       return false
-  }
-}
-
-type Drizzle = SlackBlockActionContext['drizzle']
-
-/**
- * Whether a studio person can reach the row's client under the access
- * scoping the dashboard enforces (guardSuggestion, which is
- * requireAccessToOrg on the row's client).
- *
- * Scoping keys on the Clerk user id, so the team member's own is read first.
- * A row with no client is studio housekeeping and is open, as it is in the
- * dashboard. A founder holding super_admin resolves to unrestricted, so this
- * changes nothing for them. Anything that cannot be read, including a member
- * with no Clerk login and a lookup that throws, is false: deny by default.
- */
-async function studioReachesRow(drizzle: Drizzle, teamMemberId: string, orgId: string | null): Promise<boolean> {
-  if (!orgId) return true
-  try {
-    const [member] = await drizzle
-      .select({ clerkUserId: schema.teamMembers.clerkUserId })
-      .from(schema.teamMembers)
-      .where(eq(schema.teamMembers.id, teamMemberId))
-      .limit(1)
-    const scope = await resolveAccessScoping(drizzle, member?.clerkUserId ?? null)
-    return scope === null || scope.includes(orgId)
-  } catch {
-    return false
   }
 }
 
@@ -258,9 +230,9 @@ export async function handleSuggestionAction(ctx: SlackBlockActionContext): Prom
   // is already held to their own client by canDecideSuggestion; a studio
   // person is held to the clients they can reach in the dashboard, and a row
   // outside them reads as the same refusal as a row that is not theirs.
-  if (studio && !await studioReachesRow(ctx.drizzle, actorId, row.orgId)) return answer(SLACK_DENIED_LINE)
+  if (studio && !await studioReachesOrg(ctx.drizzle, actorId, row.orgId)) return answer(SLACK_DENIED_LINE)
 
-  if (client) return clientPress(ctx, parsed.action, parsed.suggestionId, row.kind, actorId)
+  if (client) return clientPress(ctx, parsed.action, parsed.suggestionId, row, actorId)
 
   const decision = decisionFor(parsed.action, ctx.payload.value)
   if (!decision) return answer(DISPATCH_LINES.attachUnreadable)
@@ -314,6 +286,11 @@ export async function handleSuggestionAction(ctx: SlackBlockActionContext): Prom
  * A client's press on their own card, after canDecideSuggestion has held
  * them to their own draft at their own client.
  *
+ * An Approve files a real request, so it also passes the portal's own gate
+ * first (clientMayFileRequests, the 'requests' feature for this contact at
+ * this client): a client the portal would refuse is refused here, and
+ * nothing is decided. Reject files nothing and needs no feature.
+ *
  * Nothing is recorded, nothing studio side is re-rendered, and the only
  * Slack write is the card they pressed, through rewriteClientCard. Every
  * answer is null, the plain refusal, or "already decided", none of which
@@ -323,12 +300,15 @@ async function clientPress(
   ctx: SlackBlockActionContext,
   action: SuggestionActionName,
   suggestionId: string,
-  kind: string,
+  row: { kind: string; orgId: string | null },
   contactId: string,
 ): Promise<SlackBlockActionResult> {
   const decision = clientDecisionFor(action)
   if (!decision) return answer(SLACK_DENIED_LINE)
-  if (decision.action === 'approve' && kind !== CLIENT_CARD_KIND) return answer(SLACK_DENIED_LINE)
+  if (decision.action === 'approve') {
+    if (row.kind !== CLIENT_CARD_KIND) return answer(SLACK_DENIED_LINE)
+    if (!await clientMayFileRequests(ctx.drizzle, contactId, row.orgId)) return answer(SLACK_DENIED_LINE)
+  }
 
   const result = await decideSuggestion(ctx.drizzle, suggestionId, decision, { actorId: contactId, via: 'slack' })
   if (!result || result.error) return answer(SLACK_DENIED_LINE)

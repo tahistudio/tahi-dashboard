@@ -126,6 +126,7 @@ const TABLE_KEYS = new Map<unknown, string>([
   [schema.discoveryCalls, 'discovery_calls'],
   [schema.scheduledCalls, 'scheduled_calls'],
   [schema.requests, 'requests'],
+  [schema.brandContacts, 'brand_contacts'],
 ])
 
 function fakeDb(rows: Rows) {
@@ -247,6 +248,51 @@ describe('buildDedupeKey', () => {
     const a = await buildDedupeKey({ ...base, kind: 'update_task', targetTaskId: 't1', proposal: { fields: { status: 'done', dueDate: '2026-10-01' } } })
     const b = await buildDedupeKey({ ...base, kind: 'update_task', targetTaskId: 't1', proposal: { fields: { dueDate: '2026-10-01', status: 'done' } } })
     expect(a).toBe(b)
+  })
+
+  it('hashes a call exactly as before whatever owner it is handed, so no production key is orphaned', async () => {
+    const owned = await buildDedupeKey({ ...base, orgId: 'o1', approverType: 'founders', approverId: null, quote: 'anything' })
+    expect(owned).toBe(await buildDedupeKey(base))
+  })
+})
+
+describe('buildDedupeKey for a note (a Slack DM), keyed to its sender', () => {
+  const clientNote = {
+    sourceKind: 'note',
+    transcriptId: null,
+    kind: 'create_request' as const,
+    targetTaskId: null,
+    proposal: { title: 'Hi Liam!' },
+    orgId: 'o_ver',
+    approverType: 'contact',
+    approverId: 'c_tim',
+    quote: 'Hi Liam! Please add our new office address to the footer.',
+  }
+
+  it("gives two clients' identical openings two keys, and two contacts at one client two keys", async () => {
+    const tim = await buildDedupeKey(clientNote)
+    const ana = await buildDedupeKey({ ...clientNote, orgId: 'o_ele', approverId: 'c_ana' })
+    const ngaire = await buildDedupeKey({ ...clientNote, approverId: 'c_ngaire' })
+    expect(new Set([tim, ana, ngaire]).size).toBe(3)
+  })
+
+  it("keys a client's draft on their whole message, so a second ask with the same greeting is its own row", async () => {
+    const footer = await buildDedupeKey(clientNote)
+    const blog = await buildDedupeKey({ ...clientNote, quote: 'Hi Liam! Add a blog page.' })
+    expect(blog).not.toBe(footer)
+  })
+
+  it('still answers the same message sent twice with one key, casing and spacing aside', async () => {
+    const again = await buildDedupeKey({ ...clientNote, quote: '  hi liam!   Please add our new office address to the footer. ' })
+    expect(again).toBe(await buildDedupeKey(clientNote))
+  })
+
+  it("keys a studio note on its sender and client, not on the model's quote", async () => {
+    const studio = { ...clientNote, kind: 'create_task' as const, approverType: 'member', approverId: 'tm_staci', proposal: { title: 'Send the font headers' } }
+    const reworded = await buildDedupeKey({ ...studio, quote: 'a different quote the second time' })
+    expect(reworded).toBe(await buildDedupeKey(studio))
+    expect(await buildDedupeKey({ ...studio, approverId: 'tm_nathan' })).not.toBe(await buildDedupeKey(studio))
+    expect(await buildDedupeKey({ ...studio, orgId: null })).not.toBe(await buildDedupeKey(studio))
   })
 })
 
@@ -861,6 +907,30 @@ describe('applySuggestion over the request kinds', () => {
     expect(String(requestMessages[0].body)).toContain('Ngaire Reid')
   })
 
+  it("files a client's own draft under their brand, as the portal would, so they can see what they asked for", async () => {
+    const row = requestRow({ approverType: 'contact', approverId: 'c_tim' })
+    const { database } = fakeDb({ brand_contacts: [{ brandId: 'b_ver_retail' }, { brandId: 'b_ver_trade' }] })
+
+    await applySuggestion(database, row as never, CTX)
+    expect(createdRequests).toHaveLength(1)
+    expect(createdRequests[0].brandId).toBe('b_ver_retail')
+  })
+
+  it('files a client draft with no brand when the contact holds no brand link', async () => {
+    const row = requestRow({ approverType: 'contact', approverId: 'c_tim' })
+    const { database } = fakeDb({ brand_contacts: [] })
+
+    await applySuggestion(database, row as never, CTX)
+    expect(createdRequests[0]).not.toHaveProperty('brandId')
+  })
+
+  it("never reads a brand for a call's suggestion, whose approver is the founders", async () => {
+    const { database } = fakeDb({ brand_contacts: [{ brandId: 'b_should_not_be_used' }] })
+
+    await applySuggestion(database, requestRow() as never, CTX)
+    expect(createdRequests[0]).not.toHaveProperty('brandId')
+  })
+
   it('refuses a create_request with no client rather than filing orphan work', async () => {
     const row = requestRow({ orgId: null })
     const { database } = fakeDb({})
@@ -1330,6 +1400,24 @@ describe('insertSuggestions drops what is already waiting', () => {
 
     expect(result).toEqual({ inserted: 0, duplicates: 0, similarDropped: 1 })
     expect(inserted).toHaveLength(0)
+  })
+
+  it("never drops a client's own Slack draft as similar: its title is only the first sentence of their DM", async () => {
+    const { database, inserted } = fakeDb({
+      task_suggestions: [{
+        id: 'existing', orgId: 'o1', kind: 'create_request', status: 'pending',
+        proposal: JSON.stringify({ title: 'Hi Liam!' }), dedupeKey: 'other',
+      }],
+    })
+    const result = await insertSuggestions(database, [{
+      orgId: 'o1', sourceKind: 'note', transcriptId: null, callKind: null, callId: null,
+      kind: 'create_request', targetTaskId: null, targetRequestId: null,
+      proposal: { title: 'Hi Liam!', description: 'Hi Liam! Add a blog page.' },
+      quote: 'Hi Liam! Add a blog page.',
+      approverType: 'contact', approverId: 'c_tim',
+    }])
+    expect(result).toEqual({ inserted: 1, duplicates: 0, similarDropped: 0 })
+    expect(inserted).toHaveLength(1)
   })
 
   it('keeps a draft that repeats another client\'s pending suggestion', async () => {

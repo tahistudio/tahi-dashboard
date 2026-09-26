@@ -41,6 +41,7 @@ import {
 } from '@/lib/request-writes'
 import { slackBotToken } from '@/lib/slack/api'
 import { mirrorSuggestionDecision, repostSuggestion } from '@/lib/slack/mirror'
+import { resolveSubmitterBrandId } from '@/lib/submitter-brand'
 import { TAHI_BOT } from '@/lib/tahi-bot'
 import { postRequestBotMessage, postTaskComment } from '@/lib/task-comments'
 import { SIMILAR_BLOCK, SIMILAR_WARN, findSimilar, similarityScore } from '@/lib/text-similarity'
@@ -477,6 +478,16 @@ export interface DedupeInput {
   targetTaskId?: string | null
   targetRequestId?: string | null
   proposal: unknown
+  /**
+   * Who the row belongs to, read only for a note (sourceKind 'note'): see
+   * noteOwnerMaterial. Ignored for a call, so every call key hashes exactly
+   * what it always did.
+   */
+  orgId?: string | null
+  approverType?: string | null
+  approverId?: string | null
+  /** A client's note keys on their whole message, not on its first sentence. */
+  quote?: string | null
 }
 
 /** JSON with its keys in a fixed order, so two equal objects hash the same. */
@@ -521,6 +532,29 @@ function normalisedTitleOrDiff(kind: SuggestionKind, proposal: unknown): string 
 }
 
 /**
+ * The extra key material for a note (sourceKind 'note', a Slack DM): whose it
+ * is, and for a client, everything they said.
+ *
+ * The approver and the client, because a note is one person's ask and two
+ * people's notes are two rows however alike they read. A founders row never
+ * comes from a note, so the approver type is always member or contact here.
+ *
+ * A client's whole message, lower-cased and whitespace-collapsed, because the
+ * title of their draft is only the first sentence of the DM. "Hi Liam! Fix
+ * the footer." and "Hi Liam! Add a blog page." are two asks with one title;
+ * keyed on the title the second was swallowed as a repeat of the first. The
+ * same message sent twice is still one row, which is the point of the key.
+ *
+ * A studio note keys on the owner only: its titles are the suggester's own
+ * words, and the same note read twice should land on the card already open.
+ */
+function noteOwnerMaterial(input: DedupeInput): string[] {
+  const owner = [input.approverType ?? '', input.approverId ?? '', input.orgId ?? '']
+  if (input.approverType === 'contact') owner.push(collapse(input.quote ?? '').toLowerCase())
+  return owner
+}
+
+/**
  * sha-256 hex over the source, the kind, the target and the normalised
  * change. Web Crypto, because this runs on Workers where node:crypto does
  * not. The UNIQUE index on the column is what actually enforces it; this is
@@ -532,15 +566,23 @@ function normalisedTitleOrDiff(kind: SuggestionKind, proposal: unknown): string 
  * written before CN.1b hashes to exactly what it did: adding a separate slot
  * would have changed the material for every existing task row and orphaned
  * every dedupe key already on production.
+ *
+ * A NOTE IS KEYED TO ITS SENDER (noteOwnerMaterial). The UNIQUE index is
+ * global and a note has no transcript, so without the owner two people whose
+ * notes shared a title shared a key: the second note was counted a duplicate
+ * and never filed, and the Slack DM that read the row back by key showed the
+ * second sender the first sender's row, words and all.
  */
 export async function buildDedupeKey(input: DedupeInput): Promise<string> {
-  const material = [
+  const parts = [
     input.sourceKind,
     input.transcriptId ?? '',
     input.kind,
     input.targetRequestId ?? input.targetTaskId ?? '',
     normalisedTitleOrDiff(input.kind, input.proposal),
-  ].join(':')
+  ]
+  if (input.sourceKind === 'note') parts.push(...noteOwnerMaterial(input))
+  const material = parts.join(':')
 
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(material))
   return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('')
@@ -705,6 +747,26 @@ function pendingCreateScope(orgIds: ReadonlyArray<string | null>): SQL | null {
   )!
 }
 
+/**
+ * The dedupe key a draft is filed under. One function for the writer below
+ * and for a caller that reads its own rows back by key (lib/slack/notes.ts),
+ * so the two can never hash a draft differently.
+ */
+export function dedupeKeyForDraft(draft: SuggestionDraft): Promise<string> {
+  return buildDedupeKey({
+    sourceKind: draft.sourceKind,
+    transcriptId: draft.transcriptId,
+    kind: draft.kind,
+    targetTaskId: draft.targetTaskId,
+    targetRequestId: draft.targetRequestId ?? null,
+    proposal: draft.proposal,
+    orgId: draft.orgId,
+    approverType: draft.approverType ?? 'founders',
+    approverId: draft.approverId ?? null,
+    quote: draft.quote,
+  })
+}
+
 export async function insertSuggestions(
   drizzle: Drizzle,
   drafts: readonly SuggestionDraft[],
@@ -713,14 +775,7 @@ export async function insertSuggestions(
 
   const keyed = await Promise.all(drafts.map(async draft => ({
     draft,
-    dedupeKey: await buildDedupeKey({
-      sourceKind: draft.sourceKind,
-      transcriptId: draft.transcriptId,
-      kind: draft.kind,
-      targetTaskId: draft.targetTaskId,
-      targetRequestId: draft.targetRequestId ?? null,
-      proposal: draft.proposal,
-    }),
+    dedupeKey: await dedupeKeyForDraft(draft),
   })))
 
   // ONE READ FOR EVERY GUARD. The dedupe keys already on the table, the
@@ -813,8 +868,15 @@ export async function insertSuggestions(
     // inbox longer and the decision no easier. A match against an existing
     // REQUEST or TASK is deliberately NOT dropped: the human may still want
     // it, and the read-time warning will say so.
+    //
+    // A client's own draft (approver_type 'contact') is never dropped here.
+    // Its title is only the first sentence of their DM, so "Hi Liam!" would
+    // match every other ask that opens the same way, and the ask it dropped
+    // would be gone with the client told it was received. Their DM is the
+    // request; the studio triages likeness on its own side, which is also
+    // why their Approve carries force.
     const createTitle = isCreateKind(entry.draft.kind) ? proposalTitleOf(entry.draft.proposal).trim() : ''
-    if (createTitle) {
+    if (createTitle && entry.draft.approverType !== 'contact') {
       const key = orgKeyOf(entry.draft.orgId)
       const mine = pending.filter(candidate => pendingOrg.get(candidate.id) === key)
       if (findSimilar(createTitle, mine, SIMILAR_BLOCK)[0]) {
@@ -1408,6 +1470,17 @@ async function applyRequestSuggestion(
       return { ok: false, appliedTaskId: null, appliedRequestId: null, error: 'This suggestion names no client to file the request under' }
     }
 
+    // A client's own draft (a Slack DM, approver_type 'contact') is filed
+    // under that client's brand, by the same rule the portal's POST uses: a
+    // brand-linked contact only sees requests carrying one of their brands,
+    // so a request filed without one is invisible to the person who asked
+    // for it, and so is the "Open #N" link on their card. Read from the
+    // contact's own links, never from the proposal, whoever approves it;
+    // createRequestRecord drops a brand that is not at this client.
+    const brandId = row.approverType === 'contact' && row.approverId
+      ? await resolveSubmitterBrandId(drizzle, row.approverId)
+      : null
+
     const created = await createRequestRecord(drizzle, {
       clientOrgId: row.orgId,
       title: text(proposal.title) ?? '',
@@ -1417,6 +1490,7 @@ async function applyRequestSuggestion(
       priority: text(proposal.priority) ?? undefined,
       dueDate: text(proposal.dueDate),
       assigneeId: (proposal.suggestedAssigneeId as string | null | undefined) ?? null,
+      ...(brandId ? { brandId } : {}),
     }, actor)
     if (!created.ok) {
       return { ok: false, appliedTaskId: null, appliedRequestId: null, error: created.failure.error }

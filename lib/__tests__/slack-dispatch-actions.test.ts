@@ -169,18 +169,64 @@ function boundValue(condition: unknown): unknown {
   return param ? (param as Param).value : undefined
 }
 
-/** The one read the handler makes itself: a team member's Clerk user id. */
+/** Every value bound anywhere in a drizzle condition, in order: for
+ *  `and(eq(a, x), eq(b, y))` that is [x, y]. */
+function boundValues(condition: unknown): unknown[] {
+  const out: unknown[] = []
+  const walk = (node: unknown): void => {
+    if (is(node, Param)) {
+      out.push((node as Param).value)
+      return
+    }
+    const chunks = (node as { queryChunks?: unknown[] } | null)?.queryChunks
+    if (Array.isArray(chunks)) chunks.forEach(walk)
+  }
+  walk(condition)
+  return out
+}
+
+/** The contacts rows the portal gate may find (by id, at their own client). */
+const contactRows = new Map<string, { id: string; orgId: string; portalRole: string; isPrimary: boolean }>()
+/** feature_visibility, as the permissions builder writes it. */
+let featureRows: Array<{ subjectType: string; subjectId: string; featureKey: string; effect: string }> = []
+let featureThrows = false
+
+/**
+ * The reads the handler makes itself: a team member's Clerk user id (the
+ * studio scoping), and for a client's Approve their contacts row and the
+ * feature_visibility rows (the portal's Requests gate).
+ */
 function scopingDb() {
+  const rowsFor = (table: unknown, condition: unknown): Array<Record<string, unknown>> => {
+    if (table === schema.teamMembers) {
+      const id = boundValue(condition)
+      return typeof id === 'string' && clerkIds.has(id) ? [{ clerkUserId: clerkIds.get(id) ?? null }] : []
+    }
+    if (table === schema.contacts) {
+      const [id, orgId] = boundValues(condition)
+      const contact = typeof id === 'string' ? contactRows.get(id) : undefined
+      return contact && contact.orgId === orgId ? [contact] : []
+    }
+    if (table === schema.featureVisibility) {
+      if (featureThrows) throw new Error('D1_ERROR: feature_visibility read failed')
+      const [subjectType, subjectId] = boundValues(condition)
+      return featureRows
+        .filter(rule => rule.subjectType === subjectType && rule.subjectId === subjectId)
+        .map(rule => ({ featureKey: rule.featureKey, effect: rule.effect }))
+    }
+    return []
+  }
   return {
     select: () => ({
       from: (table: unknown) => ({
-        where: (condition: unknown) => ({
-          limit: async () => {
-            if (table !== schema.teamMembers) return []
-            const id = boundValue(condition)
-            return typeof id === 'string' && clerkIds.has(id) ? [{ clerkUserId: clerkIds.get(id) ?? null }] : []
-          },
-        }),
+        where: (condition: unknown) => {
+          const read = async () => rowsFor(table, condition)
+          return {
+            limit: read,
+            then: <T>(resolve: (rows: Array<Record<string, unknown>>) => T, reject?: (error: unknown) => T) =>
+              read().then(resolve, reject),
+          }
+        },
       }),
     }),
   }
@@ -222,6 +268,12 @@ beforeEach(() => {
   scopes.set('clerk_nathan', ['o_ver'])
   scopeLookups.length = 0
   scopeThrows = false
+  // Tim is a contact at Verandela with the Requests feature on (the client
+  // default: no feature_visibility row at all).
+  contactRows.clear()
+  contactRows.set('c_tim', { id: 'c_tim', orgId: 'o_ver', portalRole: 'member', isPrimary: false })
+  featureRows = []
+  featureThrows = false
 })
 
 describe('canDecideSuggestion', () => {
@@ -562,6 +614,82 @@ describe('a client confirms their own request', () => {
     decideResult = null
     const result = await handleSuggestionAction({ ...click('approve'), identity: CLIENT as Identity })
     expect(result.reply).toBe(SLACK_DENIED_LINE)
+  })
+})
+
+describe("a client's Approve passes the portal's Requests gate (requirePortalFeature's rule)", () => {
+  function timClick(action: string) {
+    const base = click(action, { slackUserId: 'U_TIM', channelId: 'D_TIM', messageTs: '1758500000.0042' })
+    return { ...base, identity: CLIENT as Identity }
+  }
+
+  function expectNothingFiled(reply: string | null): void {
+    expect(reply).toBe(SLACK_DENIED_LINE)
+    expect(decideCalls).toHaveLength(0)
+    expect(clientCards).toHaveLength(0)
+    expect(recorded).toHaveLength(0)
+  }
+
+  beforeEach(() => {
+    loadedRow = stored({ kind: 'create_request', approverType: 'contact', approverId: 'c_tim', orgId: 'o_ver' })
+    decideResult = {
+      suggestion: row({ decidedById: 'c_tim', approverType: 'contact', approverId: 'c_tim', orgId: 'o_ver' }),
+      changed: true,
+      appliedTaskId: null,
+      appliedRequestId: 'r_new',
+    }
+  })
+
+  it('refuses when Requests is denied for their whole client, and decides nothing', async () => {
+    featureRows = [{ subjectType: 'organisation', subjectId: 'o_ver', featureKey: 'requests', effect: 'deny' }]
+    const result = await handleSuggestionAction(timClick('approve'))
+    expectNothingFiled(result.reply)
+  })
+
+  it('refuses when Requests is denied for them alone', async () => {
+    featureRows = [{ subjectType: 'contact', subjectId: 'c_tim', featureKey: 'requests', effect: 'deny' }]
+    const result = await handleSuggestionAction(timClick('approve'))
+    expectNothingFiled(result.reply)
+  })
+
+  it('lets their own allow beat a deny for their client, most specific first, as the portal does', async () => {
+    featureRows = [
+      { subjectType: 'organisation', subjectId: 'o_ver', featureKey: 'requests', effect: 'deny' },
+      { subjectType: 'contact', subjectId: 'c_tim', featureKey: 'requests', effect: 'allow' },
+    ]
+    const result = await handleSuggestionAction(timClick('approve'))
+    expect(result.reply).toBeNull()
+    expect(decideCalls).toHaveLength(1)
+  })
+
+  it("is not fooled by another contact's deny or another client's", async () => {
+    featureRows = [
+      { subjectType: 'contact', subjectId: 'c_ngaire', featureKey: 'requests', effect: 'deny' },
+      { subjectType: 'organisation', subjectId: 'o_other', featureKey: 'requests', effect: 'deny' },
+    ]
+    const result = await handleSuggestionAction(timClick('approve'))
+    expect(result.reply).toBeNull()
+    expect(decideCalls).toHaveLength(1)
+  })
+
+  it('refuses a contact who is no longer on that client', async () => {
+    contactRows.clear()
+    const result = await handleSuggestionAction(timClick('approve'))
+    expectNothingFiled(result.reply)
+  })
+
+  it('refuses when the permissions read fails', async () => {
+    featureThrows = true
+    const result = await handleSuggestionAction(timClick('approve'))
+    expectNothingFiled(result.reply)
+  })
+
+  it('still takes their Reject, which files nothing', async () => {
+    featureRows = [{ subjectType: 'organisation', subjectId: 'o_ver', featureKey: 'requests', effect: 'deny' }]
+    decideResult = { suggestion: row({ status: 'rejected', decidedById: 'c_tim', approverType: 'contact' }), changed: true }
+    const result = await handleSuggestionAction(timClick('reject'))
+    expect(result.reply).toBeNull()
+    expect(decideCalls.map(call => call.decision)).toEqual([{ action: 'reject' }])
   })
 })
 

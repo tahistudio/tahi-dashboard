@@ -30,7 +30,7 @@
 import { clientDraftMessage, suggestionMessage } from './blocks'
 import { SLACK_DENIED_REPLY, type SlackIdentity } from './identity'
 import { recordSuggestionMessage } from './mirror'
-import { draftFromNote, type NoteSuggestionRow } from './notes'
+import { draftFromNote, noteRowBelongsTo, type NoteSuggestionRow } from './notes'
 import { isAudioFile, preflightAudio, transcribeAudio, type AudioFileLike, type WhisperBinding } from './voice'
 import { downloadFile as downloadSlackFile, type SlackFile } from './api'
 
@@ -97,6 +97,7 @@ export type SlackDmReason =
   | 'denied'
   | 'nothing_understood'
   | 'suggester_failed'
+  | 'already_on_file'
   | 'voice_not_enabled'
   | 'voice_too_large'
   | 'voice_empty'
@@ -219,16 +220,28 @@ function isMessageRef(value: unknown): value is { channel: string; ts: string } 
  * snooze coming back, the work-sync thread lines) was written for studio
  * eyes, so a client's DM is kept off the table entirely, and the only thing
  * that ever changes this card is the client's own press.
+ *
+ * ONLY THE SENDER'S OWN ROW becomes a card, checked here again whatever
+ * notes.ts handed over (noteRowBelongsTo: their approver id, still pending,
+ * and for a client their own client and a create_request). A row that fails
+ * is never rendered and never recorded; the sender gets CARD_WITHHELD_LINE in
+ * its place, which names nothing.
  */
 async function postCards(
   deps: SlackDmDeps,
   channel: string,
   rows: readonly NoteSuggestionRow[],
-  options: { orgName: string | null; studio: boolean },
+  options: { orgName: string | null; identity: SlackIdentity },
 ): Promise<number> {
+  const studio = options.identity.level !== 'client'
   let posted = 0
   for (const row of rows) {
-    const message = options.studio
+    if (!noteRowBelongsTo(options.identity, row)) {
+      await deps.postMessage({ channel, text: CARD_WITHHELD_LINE })
+      posted += 1
+      continue
+    }
+    const message = studio
       ? studioCard(row, options.orgName)
       : clientDraftMessage({
         id: row.id,
@@ -238,13 +251,16 @@ async function postCards(
         orgName: options.orgName,
       })
     const ref = await deps.postMessage({ channel, text: message.text, blocks: message.blocks })
-    if (options.studio && isMessageRef(ref)) {
+    if (studio && isMessageRef(ref)) {
       await recordSuggestionMessage(deps.database, { suggestionId: row.id, channelId: ref.channel, ts: ref.ts })
     }
     posted += 1
   }
   return posted
 }
+
+/** In place of a card that is not the sender's to see. Names nothing. */
+export const CARD_WITHHELD_LINE = 'I could not show that one here.'
 
 /** A founder's or member's note card: the studio suggestion message with the
  *  dashboard's Tweak link (the default) and the suggested owner. */
@@ -352,7 +368,7 @@ export async function handleSlackDm(event: SlackDmEvent, deps: SlackDmDeps): Pro
 
     posted += await postCards(deps, event.channelId, draft.rows, {
       orgName: draft.orgName,
-      studio: identity.level !== 'client',
+      identity,
     })
 
     return outcome(true, 'ok', voice, posted)
