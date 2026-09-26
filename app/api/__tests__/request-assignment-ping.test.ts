@@ -12,9 +12,20 @@
  * participants POST keeps its ping for 'pm' and 'follower', which the PATCH
  * knows nothing about.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 type Row = Record<string, unknown>
+
+// The Slack thread line (CN.3): armed only when the token is set, with the
+// queue recorded rather than deferred.
+vi.mock('@/lib/slack/work-sync', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/slack/work-sync')>('@/lib/slack/work-sync')
+  return {
+    ...actual,
+    workSyncArmed: () => !!process.env.SLACK_BOT_TOKEN,
+    queueWorkSync: vi.fn(async () => undefined),
+  }
+})
 
 type SelectChain = Promise<Row[]> & {
   innerJoin: () => SelectChain
@@ -122,10 +133,11 @@ vi.mock('@/lib/db', () => {
 })
 
 import { POST as addParticipant } from '@/app/api/admin/requests/[id]/participants/route'
-import { PATCH as patchRequest } from '@/app/api/admin/requests/[id]/route'
+import { DELETE as deleteRequest, PATCH as patchRequest } from '@/app/api/admin/requests/[id]/route'
 import { NextRequest } from 'next/server'
 import * as dbModule from '@/lib/db'
 import { notifyTeamMember } from '@/lib/notifications'
+import { queueWorkSync } from '@/lib/slack/work-sync'
 
 const dbMock = (dbModule as unknown as { __mock: DbMockHandles }).__mock
 const params = { params: Promise.resolve({ id: 'req_1' }) }
@@ -260,5 +272,89 @@ describe('PATCH /api/admin/requests/[id]', () => {
     }
     await patchRequest(patch({ assigneeId: 'tm_owner' }), params)
     expect(notifyTeamMember).not.toHaveBeenCalled()
+  })
+})
+
+describe('the Slack thread line from the request writer (CN.3)', () => {
+  const OWNER_ROW = {
+    orgId: 'org_client',
+    title: 'Rebuild the checkout',
+    status: 'in_progress',
+    assigneeId: 'tm_previous',
+    requestNumber: 4,
+    dueDate: null,
+    priority: 'standard',
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('queues the status, assignee and due date that moved, and not the priority that did not', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    dbMock.state.queues = { requests: [[OWNER_ROW]], team_members: [[{ id: 'tm_actor' }]] }
+
+    const res = await patchRequest(patch({
+      status: 'client_review',
+      assigneeId: 'tm_owner',
+      dueDate: '2026-10-02',
+      priority: 'standard',
+    }), params)
+    expect(res.status).toBe(200)
+    expect(vi.mocked(queueWorkSync)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([{
+      entityType: 'request',
+      entityId: 'req_1',
+      actor: { type: 'studio', clerkUserId: 'user_admin' },
+      changes: [
+        { field: 'status', from: 'in_progress', to: 'client_review' },
+        { field: 'assignee', from: 'tm_previous', to: 'tm_owner' },
+        { field: 'dueDate', from: null, to: '2026-10-02' },
+      ],
+    }])
+  })
+
+  it('queues nothing when every value was already what the patch says', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    dbMock.state.queues = { requests: [[OWNER_ROW]] }
+    await patchRequest(patch({ status: 'in_progress', assigneeId: 'tm_previous', priority: 'standard' }), params)
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+  })
+
+  it('queues nothing while Slack is not configured', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', '')
+    dbMock.state.queues = { requests: [[OWNER_ROW]], team_members: [[{ id: 'tm_actor' }]] }
+    await patchRequest(patch({ status: 'client_review' }), params)
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+  })
+
+  it('tells the thread an archive from DELETE is a move to archived', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    dbMock.state.queues = { requests: [[{ orgId: 'org_client', status: 'delivered' }]] }
+    const res = await deleteRequest(
+      new NextRequest('http://localhost:3000/api/admin/requests/req_1', { method: 'DELETE' }),
+      params,
+    )
+    expect(res.status).toBe(200)
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([{
+      entityType: 'request',
+      entityId: 'req_1',
+      actor: { type: 'studio', clerkUserId: 'user_admin' },
+      changes: [{ field: 'status', from: 'delivered', to: 'archived' }],
+    }])
+  })
+
+  it('says nothing about archiving a request that was already archived', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    dbMock.state.queues = { requests: [[{ orgId: 'org_client', status: 'archived' }]] }
+    await deleteRequest(new NextRequest('http://localhost:3000/api/admin/requests/req_1', { method: 'DELETE' }), params)
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+  })
+
+  it('queues nothing on DELETE while Slack is not configured', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', '')
+    dbMock.state.queues = { requests: [[{ orgId: 'org_client', status: 'delivered' }]] }
+    await deleteRequest(new NextRequest('http://localhost:3000/api/admin/requests/req_1', { method: 'DELETE' }), params)
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
   })
 })

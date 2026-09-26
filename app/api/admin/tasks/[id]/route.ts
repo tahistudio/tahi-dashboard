@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm'
 import { guardTask } from '@/lib/task-access'
 import { sweepBlockers } from '@/lib/blockers-server'
 import { updateTaskRecord, type TaskPatchInput } from '@/lib/task-writes'
+import { queueWorkSync, workSyncArmed } from '@/lib/slack/work-sync'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -125,6 +126,18 @@ export async function DELETE(
   // Checklist items still cascade via their FK onDelete rule. Blocker links no
   // longer do, which is what the sweep above is for.
   await drizzle.delete(schema.tasks).where(eq(schema.tasks.id, id))
+
+  // A task that came from a Slack card says so in the card's thread (CN.3).
+  // The suggestion rows still name it after the delete, which is how the
+  // thread is found with the task gone.
+  if (workSyncArmed()) {
+    await queueWorkSync(drizzle, [{
+      entityType: 'task',
+      entityId: id,
+      actor: { type: 'studio', clerkUserId: userId ?? null },
+      changes: [{ field: 'deleted', to: null }],
+    }])
+  }
 
   return NextResponse.json({ success: true })
 }

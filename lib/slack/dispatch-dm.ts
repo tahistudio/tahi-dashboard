@@ -29,6 +29,7 @@
 
 import { suggestionMessage } from './blocks'
 import { SLACK_DENIED_REPLY, type SlackIdentity } from './identity'
+import { recordSuggestionMessage } from './mirror'
 import { draftFromNote, type NoteSuggestionRow } from './notes'
 import { isAudioFile, preflightAudio, transcribeAudio, type AudioFileLike, type WhisperBinding } from './voice'
 import { downloadFile as downloadSlackFile, type SlackFile } from './api'
@@ -191,18 +192,44 @@ function suggestedAssignee(proposal: unknown): { name: string | null; reason: st
 }
 
 /**
+ * Whether a post answered with where the message landed. deps.postMessage is
+ * typed loosely (a test double may resolve to nothing), so the channel and ts
+ * are checked rather than assumed.
+ */
+function isMessageRef(value: unknown): value is { channel: string; ts: string } {
+  if (!value || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  return typeof record.channel === 'string' && record.channel !== ''
+    && typeof record.ts === 'string' && record.ts !== ''
+}
+
+/**
  * The bot's own copy of the sender's words, as a card per filed row.
  *
  * Studio people get the Tweak deep link because /tasks is theirs; a client's
  * card carries no Tweak button at all, because the link would land them on a
  * page they cannot open. Every other button is the same on both, and the
  * interactive route gates what each one is allowed to do.
+ *
+ * A studio person's card is filed as a copy the moment it lands (CN.3),
+ * exactly as a call card is: a decision in the dashboard can then rewrite it,
+ * and once the note is applied its thread is where later changes to the item
+ * are told.
+ *
+ * A client's card is NOT filed, on purpose. Everything that reads the copies
+ * today was written for studio eyes: a snoozed draft that wakes up is reposted
+ * into every recorded channel with the studio Tweak link and the "looks like
+ * <task>" line, whose candidates include the studio's internal tasks and
+ * requests for that client, and a decision rewrites the card with who snoozed
+ * it and any raw apply error. Until lib/slack/mirror.ts renders a contact's
+ * row without those, a copy in the client's own DM is a leak waiting for
+ * SLACK_BOT_TOKEN.
  */
 async function postCards(
   deps: SlackDmDeps,
   channel: string,
   rows: readonly NoteSuggestionRow[],
-  options: { orgName: string | null; deepLink: boolean },
+  options: { orgName: string | null; studio: boolean },
 ): Promise<number> {
   let posted = 0
   for (const row of rows) {
@@ -219,9 +246,12 @@ async function postCards(
       },
       // A studio card gets the dashboard link (the default). A client's card
       // gets no Tweak button at all, because /tasks is not theirs to open.
-      options.deepLink ? {} : { tweakUrl: null },
+      options.studio ? {} : { tweakUrl: null },
     )
-    await deps.postMessage({ channel, text: message.text, blocks: message.blocks })
+    const ref = await deps.postMessage({ channel, text: message.text, blocks: message.blocks })
+    if (options.studio && isMessageRef(ref)) {
+      await recordSuggestionMessage(deps.database, { suggestionId: row.id, channelId: ref.channel, ts: ref.ts })
+    }
     posted += 1
   }
   return posted
@@ -318,7 +348,7 @@ export async function handleSlackDm(event: SlackDmEvent, deps: SlackDmDeps): Pro
 
     posted += await postCards(deps, event.channelId, draft.rows, {
       orgName: draft.orgName,
-      deepLink: identity.level !== 'client',
+      studio: identity.level !== 'client',
     })
 
     return outcome(true, 'ok', voice, posted)

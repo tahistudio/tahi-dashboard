@@ -57,6 +57,8 @@ import {
   isRequestPriority,
 } from '@/lib/request-vocabulary'
 import { sanitizeRichText } from '@/lib/sanitize-rich-text'
+import { handoffReasonShortLabel } from '@/lib/request-handoff-copy'
+import { diffWorkFields, queueWorkSync, workSyncArmed, type WorkField } from '@/lib/slack/work-sync'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -388,7 +390,8 @@ export async function updateRequestRecord(
 
   // Access scoping. The same read carries the before-state the assignment
   // notification needs, so handing a request over costs no extra query, and
-  // it is what the returned row is built from.
+  // it is what the returned row is built from. The due date and priority ride
+  // along for the Slack thread line (CN.3), still one query.
   const [ownerRow] = await drizzle
     .select({
       orgId: schema.requests.orgId,
@@ -396,6 +399,8 @@ export async function updateRequestRecord(
       status: schema.requests.status,
       assigneeId: schema.requests.assigneeId,
       requestNumber: schema.requests.requestNumber,
+      dueDate: schema.requests.dueDate,
+      priority: schema.requests.priority,
     })
     .from(schema.requests)
     .where(eq(schema.requests.id, requestId))
@@ -468,6 +473,30 @@ export async function updateRequestRecord(
         isInternal: updatedReq.isInternal === true,
         brandId: updatedReq.brandId ?? null,
       }, body.status)
+    }
+  }
+
+  // The Slack thread line (CN.3), for a person's change only: a system apply
+  // is the suggestion itself, whose card already says it was approved.
+  if (actor.actorType === 'team_member' && ownerRow && workSyncArmed()) {
+    const after: Partial<Record<WorkField, string | null>> = {}
+    if (body.status !== undefined) after.status = body.status
+    if ('assigneeId' in body) after.assignee = body.assigneeId ?? null
+    if ('dueDate' in body) after.dueDate = body.dueDate ?? null
+    if (body.priority !== undefined) after.priority = body.priority
+    const changes = diffWorkFields({
+      status: ownerRow.status,
+      assignee: ownerRow.assigneeId ?? null,
+      dueDate: ownerRow.dueDate ?? null,
+      priority: ownerRow.priority ?? null,
+    }, after)
+    if (changes.length > 0) {
+      await queueWorkSync(drizzle, [{
+        entityType: 'request',
+        entityId: requestId,
+        actor: { type: 'studio', clerkUserId: actor.actorId },
+        changes,
+      }])
     }
   }
 
@@ -739,6 +768,25 @@ export async function handOffRequest(
     })
   } catch (err) {
     console.warn('[handoff] could not notify the contact:', err)
+  }
+
+  // The Slack thread line (CN.3). Only a person's hand-off: an approved
+  // hand_off_request suggestion is the card itself. Handing it again to the
+  // same person for the same reason moves nothing the line would say, so it
+  // stays quiet, the way a double-clicked PATCH does.
+  const rehanded = request.waitingOnContactId === contact.id && request.waitingReason === reason
+  if (actor.actorType === 'team_member' && !rehanded && workSyncArmed()) {
+    const name = contact.name?.trim() || 'the client'
+    await queueWorkSync(drizzle, [{
+      entityType: 'request',
+      entityId: requestId,
+      actor: { type: 'studio', clerkUserId: actor.actorId },
+      changes: [{
+        field: 'waitingOn',
+        to: name,
+        phrase: `handed it to ${name}, waiting on ${handoffReasonShortLabel(reason)}`,
+      }],
+    }])
   }
 
   return {

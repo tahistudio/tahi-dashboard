@@ -401,3 +401,114 @@ describe('the assistant status line (contract section 6b)', () => {
     expect(statuses).toEqual([])
   })
 })
+
+describe('a studio card is filed as a copy the moment it lands, a client card never is (CN.3)', () => {
+  /** The static text and the bound values of a drizzle `sql` template. */
+  function render(query: unknown): { text: string; values: unknown[] } {
+    const chunks = (query as { queryChunks?: unknown[] }).queryChunks ?? []
+    let text = ''
+    const values: unknown[] = []
+    for (const chunk of chunks) {
+      const part = (chunk as { value?: unknown }).value
+      if (Array.isArray(part) && part.every(piece => typeof piece === 'string')) text += part.join('')
+      else values.push(chunk)
+    }
+    return { text, values }
+  }
+
+  function recordingDatabase() {
+    const runs: Array<{ text: string; values: unknown[] }> = []
+    const database = {
+      run: async (query: unknown) => {
+        runs.push(render(query))
+        return {}
+      },
+    }
+    return { runs, database: database as never }
+  }
+
+  /** A postMessage that answers every post with a real channel and a fresh ts. */
+  function answeringPost() {
+    let ts = 0
+    return async (message: { channel: string; text: string }) => {
+      posted.push({ channel: message.channel, text: message.text })
+      ts += 1
+      return { channel: 'D1_REAL', ts: `1758500000.00020${ts}` }
+    }
+  }
+
+  beforeEach(() => {
+    noteResult = {
+      ...noteResult,
+      rows: [
+        { id: 's1', kind: 'create_task', proposal: { title: 'Send the font headers' }, quote: 'I will send the font headers' },
+        { id: 's2', kind: 'create_task', proposal: { title: 'Book the shoot' }, quote: 'and book the shoot' },
+      ],
+    }
+  })
+
+  it('records each card with the channel and ts Slack answered, and nothing for the reply line', async () => {
+    const { runs, database } = recordingDatabase()
+    await handleSlackDm(event(), deps({ database, postMessage: answeringPost() }))
+
+    // The first post is the "Here is what I understood" line; the cards follow.
+    expect(runs).toHaveLength(2)
+    for (const run of runs) expect(run.text).toContain('INSERT OR IGNORE INTO slack_suggestion_messages')
+    expect(runs.map(run => run.values.slice(1, 4))).toEqual([
+      ['s1', 'D1_REAL', '1758500000.000202'],
+      ['s2', 'D1_REAL', '1758500000.000203'],
+    ])
+  })
+
+  it("records a member's cards the same way as a founder's", async () => {
+    const { runs, database } = recordingDatabase()
+    await handleSlackDm(event(), deps({
+      database,
+      identity: identity({ level: 'member', teamMemberId: 'tm_staci', email: 'staci@tahi.studio' }),
+      postMessage: answeringPost(),
+    }))
+    expect(runs.map(run => run.values.slice(1, 4))).toEqual([
+      ['s1', 'D1_REAL', '1758500000.000202'],
+      ['s2', 'D1_REAL', '1758500000.000203'],
+    ])
+  })
+
+  it("posts a client's cards but files no copy of them, so nothing studio-only can reach that DM later", async () => {
+    const { runs, database } = recordingDatabase()
+    const outcome = await handleSlackDm(event(), deps({
+      database,
+      identity: identity({
+        level: 'client',
+        email: 'tim@giantgroup.com',
+        teamMemberId: null,
+        contactId: 'c_tim',
+        orgId: 'o_giant',
+      }),
+      postMessage: answeringPost(),
+    }))
+    expect(outcome.reason).toBe('ok')
+    // The reply line and both cards still go out.
+    expect(outcome.posted).toBe(3)
+    expect(posted).toHaveLength(3)
+    expect(runs).toEqual([])
+  })
+
+  it('records nothing when a post answers without a ts', async () => {
+    const { runs, database } = recordingDatabase()
+    await handleSlackDm(event(), deps({
+      database,
+      postMessage: async (message: { channel: string; text: string }) => {
+        posted.push({ channel: message.channel, text: message.text })
+        return { channel: 'D1_REAL', ts: '' }
+      },
+    }))
+    expect(runs).toEqual([])
+  })
+
+  it('records nothing when a post answers with nothing at all', async () => {
+    const { runs, database } = recordingDatabase()
+    const outcome = await handleSlackDm(event(), deps({ database }))
+    expect(outcome.reason).toBe('ok')
+    expect(runs).toEqual([])
+  })
+})
