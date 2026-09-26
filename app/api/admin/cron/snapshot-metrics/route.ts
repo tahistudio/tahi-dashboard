@@ -11,6 +11,14 @@
  * Airwallex ledger for months that have no snapshot yet, a one-time seed so
  * the cash trend has history rather than starting empty.
  *
+ * It also carries one piece of daily housekeeping that has nothing to do with
+ * money: the sweep of the Slack app's retry guard table (slack_events_seen,
+ * see lib/slack/events-seen.ts). It rides here because this is a daily route
+ * that always reaches its steps (no connection check or quiet-day return in
+ * front of them) and already reports each step on its own. The sweep runs
+ * after the snapshot and never decides the run's status, so a failed sweep
+ * shows as a failed step and the snapshot still logs as a success.
+ *
  * Response: { steps: [{ name, ok, error?, detail? }] }, always HTTP 200.
  *
  * Auth: admin session (financial_reports feature) OR Bearer/x-cron-secret.
@@ -21,6 +29,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logCronRun } from '@/lib/cron-runs'
 import { writeCurrentSnapshot, backfillCashFromLedger } from '@/lib/financial-snapshots'
+import { sweepSlackEventsSeen } from '@/lib/slack/events-seen'
 
 export const dynamic = 'force-dynamic'
 
@@ -69,6 +78,16 @@ export async function POST(req: NextRequest) {
     steps.push({ name: 'write-current', ok: true, detail })
   } catch (err) {
     steps.push({ name: 'write-current', ok: false, error: err instanceof Error ? err.message : 'Write failed' })
+  }
+
+  // Housekeeping, after the snapshot so it can never hold the snapshot up:
+  // drop Slack delivery ids older than a week. Its own try, so a failure is
+  // this step's red mark and nothing more.
+  try {
+    const detail = await sweepSlackEventsSeen(database)
+    steps.push({ name: 'sweep-slack-events', ok: true, detail })
+  } catch (err) {
+    steps.push({ name: 'sweep-slack-events', ok: false, error: err instanceof Error ? err.message : 'Sweep failed' })
   }
 
   // 'write-current' is the load-bearing step; only log 'error' if it failed.

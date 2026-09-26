@@ -4100,6 +4100,10 @@ export const slackIdentities = sqliteTable('slack_identities', {
  * draft the same note twice. The event id is the PRIMARY KEY rather than a
  * column we check before writing, so the race between two concurrent retries
  * is settled by the database's uniqueness rather than by our read.
+ *
+ * Rows older than seven days are swept once a day (lib/slack/events-seen.ts,
+ * a step of the snapshot-metrics cron); the seen_at index is what that delete
+ * walks.
  */
 export const slackEventsSeen = sqliteTable('slack_events_seen', {
   // Slack's event_id for an event, or trigger_id for an interaction.
