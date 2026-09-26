@@ -91,7 +91,17 @@ vi.mock('@/lib/audit', () => ({
   logAudit: async (_drizzle: unknown, entry: Record<string, unknown>) => { audits.push(entry) },
 }))
 
+// The real mirror (it returns before reading anything without a bot token),
+// under a spy, so a test can say whether a decision reached Slack at all.
+vi.mock('@/lib/slack/mirror', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/slack/mirror')>()
+  return { ...actual, mirrorSuggestionDecision: vi.fn(actual.mirrorSuggestionDecision) }
+})
+
+const { mirrorSuggestionDecision } = await import('@/lib/slack/mirror')
+
 const {
+  MAX_REJECT_REASON_CHARS,
   buildDedupeKey,
   countSuggestions,
   insertSuggestions,
@@ -99,9 +109,12 @@ const {
   listSuggestions,
   decideSuggestion,
   applySuggestion,
+  normaliseRejectReason,
   snoozePreset,
   resurfaceSnoozed,
 } = await import('../task-suggestions')
+
+type DecisionInput = import('../task-suggestions').DecisionInput
 
 type Rows = Record<string, Array<Record<string, unknown>>>
 
@@ -170,6 +183,7 @@ function suggestionRow(overrides: Record<string, unknown> = {}): Record<string, 
     appliedAt: null,
     appliedTaskId: null,
     applyError: null,
+    rejectReason: null,
     dedupeKey: 'key1',
     slackChannelId: null,
     slackMessageTs: null,
@@ -196,6 +210,7 @@ beforeEach(() => {
   updateRequestResult = { ok: true }
   handOffResult = { ok: true }
   commentThrows = false
+  vi.mocked(mirrorSuggestionDecision).mockClear()
 })
 
 describe('buildDedupeKey', () => {
@@ -415,6 +430,143 @@ describe('decideSuggestion', () => {
   it('answers null for a suggestion that does not exist', async () => {
     const { database } = fakeDb({ task_suggestions: [] })
     expect(await decideSuggestion(database, 'ghost', { action: 'reject' }, CTX)).toBeNull()
+  })
+})
+
+// ── Reject reasons (CN.3 section 7) ──────────────────────────────────────────
+// Why a person said no is what the suggester reads back beside the rejected
+// item. A reason can arrive with the Reject itself, or after it, from a
+// one-tap reason row; the second case records the reason and nothing else.
+
+describe('normaliseRejectReason', () => {
+  it('is null for anything that is not a string, and for blank text', () => {
+    expect(normaliseRejectReason(undefined)).toBeNull()
+    expect(normaliseRejectReason(null)).toBeNull()
+    expect(normaliseRejectReason(42)).toBeNull()
+    expect(normaliseRejectReason({ reason: 'Already have it' })).toBeNull()
+    expect(normaliseRejectReason('')).toBeNull()
+    expect(normaliseRejectReason('   \n\t ')).toBeNull()
+  })
+
+  it('collapses whitespace and trims', () => {
+    expect(normaliseRejectReason('  Not said\n on   the call  ')).toBe('Not said on the call')
+  })
+
+  it('clips at two hundred characters', () => {
+    expect(MAX_REJECT_REASON_CHARS).toBe(200)
+    const long = 'a'.repeat(250)
+    expect(normaliseRejectReason(long)).toBe('a'.repeat(200))
+    expect(normaliseRejectReason(`${'b'.repeat(199)} c and more`)?.length).toBeLessThanOrEqual(200)
+  })
+})
+
+describe('decideSuggestion with a reject reason', () => {
+  it('stores the reason with the rejection', async () => {
+    const { database, updated } = fakeDb({ task_suggestions: [suggestionRow()] })
+
+    const result = await decideSuggestion(database, 's1', { action: 'reject', reason: '  Already   have it ' }, CTX)
+
+    expect(result?.changed).toBe(true)
+    expect(result?.reasonRecorded).toBe(true)
+    expect(result?.suggestion.status).toBe('rejected')
+    expect(result?.suggestion.rejectReason).toBe('Already have it')
+    const write = updated.find(u => u.table === 'task_suggestions')
+    expect(write?.values).toMatchObject({ status: 'rejected', rejectReason: 'Already have it' })
+    expect(write?.values.decidedAt).toBeTruthy()
+    // The Slack copies are rewritten as for any rejection.
+    expect(mirrorSuggestionDecision).toHaveBeenCalledTimes(1)
+  })
+
+  it('stores null when the reject carries no reason, or a blank one', async () => {
+    const plain = fakeDb({ task_suggestions: [suggestionRow()] })
+    const result = await decideSuggestion(plain.database, 's1', { action: 'reject' }, CTX)
+    expect(plain.updated[0].values).toHaveProperty('rejectReason', null)
+    expect(result?.reasonRecorded).toBeUndefined()
+
+    const blank = fakeDb({ task_suggestions: [suggestionRow()] })
+    await decideSuggestion(blank.database, 's1', { action: 'reject', reason: '   ' }, CTX)
+    expect(blank.updated[0].values).toHaveProperty('rejectReason', null)
+  })
+
+  it('records only the reason on a row that is already rejected, and leaves Slack alone', async () => {
+    const already = suggestionRow({
+      status: 'rejected',
+      decidedById: 'user_staci',
+      decidedVia: 'slack',
+      decidedAt: '2026-09-20T01:00:00Z',
+    })
+    const { database, updated } = fakeDb({ task_suggestions: [already] })
+
+    const result = await decideSuggestion(database, 's1', { action: 'reject', reason: 'Not said on the call' }, CTX)
+
+    expect(result?.changed).toBe(false)
+    expect(result?.reasonRecorded).toBe(true)
+    expect(result?.suggestion.rejectReason).toBe('Not said on the call')
+    expect(result?.suggestion.decidedById).toBe('user_staci')
+    expect(updated).toHaveLength(1)
+    // The reason and the touch, nothing else: who decided, when and where stay as they were.
+    expect(Object.keys(updated[0].values).sort()).toEqual(['rejectReason', 'updatedAt'])
+    expect(updated[0].values.rejectReason).toBe('Not said on the call')
+    expect(mirrorSuggestionDecision).not.toHaveBeenCalled()
+  })
+
+  it('writes nothing for a second reject with no reason, as before', async () => {
+    const { database, updated } = fakeDb({ task_suggestions: [suggestionRow({ status: 'rejected', rejectReason: 'Wrong client' })] })
+
+    const result = await decideSuggestion(database, 's1', { action: 'reject', reason: '  ' }, CTX)
+
+    expect(result?.changed).toBe(false)
+    expect(result?.reasonRecorded).toBeUndefined()
+    expect(result?.suggestion.rejectReason).toBe('Wrong client')
+    expect(updated).toHaveLength(0)
+    expect(mirrorSuggestionDecision).not.toHaveBeenCalled()
+  })
+
+  it('never puts a reason on a row that was applied or expired', async () => {
+    for (const status of ['applied', 'expired', 'failed']) {
+      const { database, updated } = fakeDb({ task_suggestions: [suggestionRow({ status })] })
+      const result = await decideSuggestion(database, 's1', { action: 'reject', reason: 'Too late' }, CTX)
+      expect(result?.changed).toBe(false)
+      expect(result?.reasonRecorded).toBeUndefined()
+      expect(updated).toHaveLength(0)
+    }
+  })
+
+  it('ignores a reason on an approve or a snooze', async () => {
+    const approve = fakeDb({
+      task_suggestions: [suggestionRow()],
+      tasks: [{ id: 'task_new', requestId: null, orgId: 'o1' }],
+    })
+    const approved = await decideSuggestion(
+      approve.database,
+      's1',
+      { action: 'approve', reason: 'Looks right' } as unknown as DecisionInput,
+      CTX,
+    )
+    expect(approved?.suggestion.status).toBe('applied')
+    expect(approved?.reasonRecorded).toBeUndefined()
+    expect(approve.updated.find(u => u.table === 'task_suggestions')?.values).not.toHaveProperty('rejectReason')
+
+    const snooze = fakeDb({ task_suggestions: [suggestionRow()] })
+    const snoozed = await decideSuggestion(
+      snooze.database,
+      's1',
+      { action: 'snooze', until: '2026-09-23T07:00:00Z', reason: 'Later' } as unknown as DecisionInput,
+      CTX,
+    )
+    expect(snoozed?.suggestion.status).toBe('snoozed')
+    expect(snooze.updated[0].values).not.toHaveProperty('rejectReason')
+  })
+
+  it('still takes a reject with no reason at all, which is what Slack sends', async () => {
+    // A compile-time check as much as a run-time one: the widened reject
+    // member must keep accepting the shape every existing caller sends.
+    const plain: DecisionInput = { action: 'reject' }
+    const withNull: DecisionInput = { action: 'reject', reason: null }
+    const { database } = fakeDb({ task_suggestions: [suggestionRow()] })
+    expect((await decideSuggestion(database, 's1', plain, CTX))?.suggestion.status).toBe('rejected')
+    const second = fakeDb({ task_suggestions: [suggestionRow()] })
+    expect((await decideSuggestion(second.database, 's1', withNull, CTX))?.suggestion.rejectReason).toBeNull()
   })
 })
 

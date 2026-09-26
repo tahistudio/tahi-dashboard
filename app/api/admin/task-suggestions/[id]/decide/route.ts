@@ -14,6 +14,11 @@
  * that already exists and leaves it pending, and an approve may carry
  * `force: true`, which is the human saying they have read the duplicate
  * warning and want the row created anyway.
+ *
+ * A reject may carry `reason` (CN.3 section 7), which the suggester reads
+ * back so it stops proposing what a person already turned down. Sent again
+ * on a row that is already rejected, it records the reason and nothing else.
+ * Ignored on every other action.
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -23,6 +28,7 @@ import {
   decideSuggestion,
   guardSuggestion,
   loadSuggestion,
+  normaliseRejectReason,
   snoozePreset,
   type DecisionInput,
   type DecisionVia,
@@ -42,6 +48,8 @@ interface DecideBody {
   force?: boolean
   /** The request or task an attach points this create suggestion at. */
   target?: { kind?: string; id?: string }
+  /** Why a person rejected it. Only read on a reject. */
+  reason?: unknown
 }
 
 const VIAS: readonly string[] = ['dashboard', 'slack', 'mcp']
@@ -86,7 +94,10 @@ export async function POST(
     }
     decision = { action: 'attach', target: { kind: kind as 'request' | 'task', id: targetId } }
   } else if (body.action === 'reject') {
-    decision = { action: 'reject' }
+    // Only added when there is one, the same rule `force` follows: a reject
+    // with a blank reason and one with none are the same decision.
+    const reason = normaliseRejectReason(body.reason)
+    decision = { action: 'reject', ...(reason !== null ? { reason } : {}) }
   } else if (body.action === 'snooze') {
     const until = resolveSnooze(body.snooze)
     if (!until) {

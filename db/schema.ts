@@ -2169,6 +2169,10 @@ export const taskSuggestions = sqliteTable('task_suggestions', {
   appliedRequestId: text('applied_request_id'),
   // Why a failed apply failed, so it can be read rather than guessed at.
   applyError: text('apply_error'),
+  // Why a person rejected it, at most 200 characters, null when nobody said
+  // (migration 0111). Read back to the suggester beside the rejected item, so
+  // the next read of that client's calls does not propose it again.
+  rejectReason: text('reject_reason'),
   // sha-256 of the source, the kind, the target and the normalised title or
   // diff. Its UNIQUE index is what makes a second run over the same
   // transcript insert nothing.
@@ -2184,6 +2188,11 @@ export const taskSuggestions = sqliteTable('task_suggestions', {
   index('idx_task_suggestions_transcript').on(table.transcriptId),
   index('idx_task_suggestions_target').on(table.targetTaskId),
   index('idx_task_suggestions_target_request').on(table.targetRequestId),
+  // Migration 0111 (CN.3): the cards an item hangs off when it changes on the
+  // dashboard, and a client's recent decisions for the suggester and the digest.
+  index('idx_task_suggestions_applied_task').on(table.appliedTaskId),
+  index('idx_task_suggestions_applied_request').on(table.appliedRequestId),
+  index('idx_task_suggestions_org_status').on(table.orgId, table.status, table.decidedAt),
 ])
 
 // ============================================================
@@ -4138,5 +4147,67 @@ export const slackSuggestionMessages = sqliteTable('slack_suggestion_messages', 
 }, (table) => [
   uniqueIndex('idx_slack_suggestion_messages_copy').on(table.suggestionId, table.channelId, table.ts),
   index('idx_slack_suggestion_messages_suggestion').on(table.suggestionId),
+])
+
+/**
+ * Every threaded reply the bot posts under a suggestion card (CN.3, migration
+ * 0111).
+ *
+ * When a task or request that came from an applied suggestion changes on the
+ * dashboard, one line goes into the thread under that suggestion's card in
+ * each DM that holds a copy. A row is CLAIMED before posting, through the
+ * unique dedupeKey, so two requests racing for the same change post once. The
+ * same person changing the same item again within ten minutes rewrites this
+ * row's reply in place rather than adding a line, and the (channelId,
+ * threadTs, postedAt) index is what counts a thread's lines against its daily
+ * cap. `ts` is null while a claim is in flight.
+ *
+ * lib/slack/work-sync.ts reads and writes it with raw SQL (the mirror.ts
+ * precedent), so it compiles on its own; this entry is the typed record.
+ */
+export const slackWorkPosts = sqliteTable('slack_work_posts', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // sha-256 over channel, thread, entity, actor, the canonical change list and the minute.
+  dedupeKey: text('dedupe_key').notNull(),
+  // 'task' | 'request'
+  entityType: text('entity_type').notNull(),
+  entityId: text('entity_id').notNull(),
+  // The suggestion whose card the thread hangs off.
+  suggestionId: text('suggestion_id').notNull(),
+  channelId: text('channel_id').notNull(),
+  threadTs: text('thread_ts').notNull(),
+  // The posted reply. Null while claimed.
+  ts: text('ts'),
+  // 'tm:<teamMemberId>' | 'contact:<contactId>' | 'service' | 'unknown' | 'cap'
+  actorKey: text('actor_key').notNull(),
+  // JSON array of { field, from, to, phrase }.
+  changes: text('changes').notNull(),
+  postedAt: text('posted_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_slack_work_posts_dedupe').on(table.dedupeKey),
+  index('idx_slack_work_posts_thread').on(table.channelId, table.threadTs, table.postedAt),
+])
+
+/**
+ * One Monday digest claim per NZ week per Slack user (CN.3, migration 0111).
+ *
+ * Inserted before the post and unique on (weekKey, slackUserId), so the
+ * second Sunday cron slot never sends a second digest, and a failed post can
+ * delete its claim and be retried by the next slot. lib/slack/digest.ts reads
+ * and writes it with raw SQL.
+ */
+export const slackDigests = sqliteTable('slack_digests', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // '2026-W40', the NZ ISO week.
+  weekKey: text('week_key').notNull(),
+  slackUserId: text('slack_user_id').notNull(),
+  channelId: text('channel_id'),
+  ts: text('ts'),
+  // JSON counts.
+  summary: text('summary'),
+  createdAt: text('created_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_slack_digests_week_user').on(table.weekKey, table.slackUserId),
 ])
 

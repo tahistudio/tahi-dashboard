@@ -120,9 +120,30 @@ export interface AttachTarget {
 
 export type DecisionInput =
   | { action: 'approve'; proposalOverride?: unknown; force?: boolean }
-  | { action: 'reject' }
+  | { action: 'reject'; reason?: string | null }
   | { action: 'snooze'; until: string }
   | { action: 'attach'; target: AttachTarget }
+
+/**
+ * The most a reject reason may hold, after trimming (CN.3 section 7). A
+ * reason is one line the suggester reads back beside the rejected item, not
+ * an essay, and the whole block it sits in has a budget.
+ */
+export const MAX_REJECT_REASON_CHARS = 200
+
+/**
+ * A reject reason as it is stored: whitespace collapsed, trimmed, clipped to
+ * MAX_REJECT_REASON_CHARS, and null for anything that is not a string or is
+ * blank. Every surface that takes a reason (the decide route, MCP through
+ * it, a direct caller) passes through here, so "no reason" is always null
+ * rather than an empty string that reads as a reason.
+ */
+export function normaliseRejectReason(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const flat = raw.replace(/\s+/g, ' ').trim()
+  if (!flat) return null
+  return flat.slice(0, MAX_REJECT_REASON_CHARS).trim()
+}
 
 export interface DecisionContext {
   actorId: string
@@ -155,6 +176,8 @@ export interface SuggestionRow {
   appliedTaskId: string | null
   appliedRequestId: string | null
   applyError: string | null
+  /** Why a person rejected it, when they said (CN.3). Null on every other row. */
+  rejectReason: string | null
   dedupeKey: string
   slackChannelId: string | null
   slackMessageTs: string | null
@@ -232,6 +255,13 @@ export interface DecisionResult {
   error?: string
   /** What the refused create would have duplicated, best first. */
   similar?: SimilarMatch[]
+  /**
+   * True when this call stored a reject reason. A reject carrying a reason on
+   * a row that is already rejected records the reason and nothing else, and
+   * comes back `changed: false` with this set, which is how a reason picked
+   * after the Reject tap is told apart from a second Reject that did nothing.
+   */
+  reasonRecorded?: boolean
 }
 
 export interface ApplyOutcome {
@@ -871,6 +901,7 @@ const SUGGESTION_COLUMNS = {
   appliedTaskId: schema.taskSuggestions.appliedTaskId,
   appliedRequestId: schema.taskSuggestions.appliedRequestId,
   applyError: schema.taskSuggestions.applyError,
+  rejectReason: schema.taskSuggestions.rejectReason,
   dedupeKey: schema.taskSuggestions.dedupeKey,
   slackChannelId: schema.taskSuggestions.slackChannelId,
   slackMessageTs: schema.taskSuggestions.slackMessageTs,
@@ -1681,6 +1712,12 @@ async function attachSuggestion(
  * Approve on the same Slack message is the expected case, and the second
  * click must be a no-op, not a second task and not a red toast.
  *
+ * ONE EXCEPTION, the reject reason (CN.3 section 7). A reject that carries a
+ * reason on a row that is already rejected stores the reason and nothing
+ * else: no decider, no decided time, no Slack rewrite, `changed: false` and
+ * `reasonRecorded: true`. That is the call a reason picked after the Reject
+ * tap makes, and the rejection itself was already recorded by the tap.
+ *
  * Returns null when the id names nothing, which the routes answer as a 404.
  */
 export async function decideSuggestion(
@@ -1691,6 +1728,24 @@ export async function decideSuggestion(
 ): Promise<DecisionResult | null> {
   const row = await loadSuggestion(drizzle, id)
   if (!row) return null
+
+  if (decision.action === 'reject' && row.status === 'rejected') {
+    const reason = normaliseRejectReason(decision.reason)
+    if (reason !== null) {
+      const stamp = now()
+      await drizzle
+        .update(schema.taskSuggestions)
+        .set({ rejectReason: reason, updatedAt: stamp })
+        .where(eq(schema.taskSuggestions.id, id))
+      return {
+        suggestion: { ...row, rejectReason: reason, updatedAt: stamp },
+        changed: false,
+        reasonRecorded: true,
+        appliedTaskId: row.appliedTaskId,
+        appliedRequestId: row.appliedRequestId,
+      }
+    }
+  }
 
   if (!OPEN_STATUSES.includes(row.status)) {
     return {
@@ -1749,6 +1804,7 @@ export async function decideSuggestion(
   }
   let appliedTaskId: string | null = null
   let appliedRequestId: string | null = null
+  let reasonRecorded = false
 
   if (decision.action === 'snooze') {
     // No decidedAt: a snooze is a deferral, not the decision, and the row
@@ -1758,6 +1814,11 @@ export async function decideSuggestion(
   } else if (decision.action === 'reject') {
     updates.status = 'rejected'
     updates.decidedAt = stamp
+    // Written on every reject, null when nobody said why, so the column is
+    // always the answer to "did a person give a reason" and never a leftover.
+    const reason = normaliseRejectReason(decision.reason)
+    updates.rejectReason = reason
+    reasonRecorded = reason !== null
   } else {
     const proposal = decision.proposalOverride !== undefined
       ? JSON.stringify(decision.proposalOverride)
@@ -1813,5 +1874,6 @@ export async function decideSuggestion(
     changed: true,
     appliedTaskId,
     appliedRequestId,
+    ...(reasonRecorded ? { reasonRecorded: true } : {}),
   }
 }
