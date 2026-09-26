@@ -149,6 +149,7 @@ export const GUIDE_SECTIONS: ReadonlyArray<GuideSection> = [
     body:
       'When a call gets transcribed, the studio reads it and proposes suggestions: a new task, an update to an existing one, marking something done, or a plain note, and for client calls, a new request, an update to an existing request, a hand-off to a client contact, or a note on a request\'s thread. Nothing is created or changed until someone decides.\n\n' +
       'Each suggestion carries the exact words it rests on, so nothing is invented. Find them on the **Suggestions** view on /tasks, or from the studio home\'s "Suggestions from calls" card once any are waiting.\n\n' +
+      'Each call is read twice: the second read is shown what the first proposed and asked only for what it missed. Reading a call again later (a rebuild) adds to what is already waiting rather than replacing it, files nothing it already has, and never brings back something already approved or rejected.\n\n' +
       '- **Approve** applies it as written.\n' +
       '- **Tweak** opens it for editing first; saving approves the edited version.\n' +
       '- **Snooze** (tonight or this week) brings it back later.\n' +

@@ -7,8 +7,10 @@
  * tokens or the Workers runtime.
  *
  * Backs GET /api/admin/task-suggestions, POST
- * /api/admin/task-suggestions/[id]/decide (CN.1 build contract, section 3)
- * and POST /api/admin/task-suggestions/rebuild (CN.1b, section 3). The decide
+ * /api/admin/task-suggestions/[id]/decide (CN.1 build contract, section 3),
+ * POST /api/admin/task-suggestions/rebuild (CN.1b, section 3; union by
+ * default since CN.1c) and POST /api/admin/crons/suggest-from-transcripts
+ * (the sweep itself, with its ?limit= and ?second_pass= knobs). The decide
  * mapping also carries CN.1d's duplicate guard: the `attach` action, and
  * `force` on an approve the guard would otherwise refuse.
  */
@@ -103,7 +105,28 @@ export function taskSuggestionToolCall(
       if (body.transcriptIds === undefined && body.all === undefined) {
         throw new Error('Name transcript_ids, or pass all true')
       }
+      // The three switches travel only when they leave their default, the
+      // same rule as force: an assistant passing `replace` along by habit
+      // must not be able to expire an inbox, so only a literal true does it,
+      // and only a literal false turns either read off.
+      if (args.replace === true) body.replace = true
+      if (args.second_pass === false) body.secondPass = false
+      if (args.read_now === false) body.readNow = false
       return { path: '/api/admin/task-suggestions/rebuild', method: 'POST', body }
+    }
+    case 'cron_suggest_from_transcripts': {
+      // A POST with its knobs in the query, because that is where the
+      // scheduled job's route reads them (?limit=, ?second_pass=).
+      const query = new URLSearchParams()
+      const limit = s('limit')
+      if (limit) query.set('limit', limit)
+      if (args.second_pass === false) query.set('second_pass', '0')
+      const qs = query.toString()
+      return {
+        path: `/api/admin/crons/suggest-from-transcripts${qs ? `?${qs}` : ''}`,
+        method: 'POST',
+        body: {},
+      }
     }
     default:
       return null

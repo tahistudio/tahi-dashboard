@@ -95,6 +95,7 @@ const {
   buildDedupeKey,
   countSuggestions,
   insertSuggestions,
+  isRepeatOf,
   listSuggestions,
   decideSuggestion,
   applySuggestion,
@@ -1234,6 +1235,139 @@ describe('insertSuggestions drops what is already waiting', () => {
     }])
 
     expect(result.inserted).toBe(1)
+    expect(inserted).toHaveLength(1)
+  })
+})
+
+// ── re-reads merge (CN.1c) ────────────────────────────────────────────────────
+// A second read of a call is a second sample. It adds what is new and files
+// nothing the transcript already has, in the same words or in new ones, and
+// it never changes a row that is already there.
+
+describe('isRepeatOf', () => {
+  const create = (title: string, kind: 'create_task' | 'create_request' = 'create_request') =>
+    ({ kind, targetTaskId: null, targetRequestId: null, proposal: { title } })
+
+  it('matches a create reworded, across the two create kinds', () => {
+    expect(isRepeatOf(create('Add a FAQ section to the pricing page'), create('Add an FAQ section to the pricing page', 'create_task'))).toBe(true)
+    expect(isRepeatOf(create('Cut the hero video'), create('Write the launch email'))).toBe(false)
+  })
+
+  it('reads a stored proposal as easily as a draft one', () => {
+    const stored = { kind: 'create_request', targetTaskId: null, targetRequestId: null, proposal: JSON.stringify({ title: 'Cut the hero video' }) }
+    expect(isRepeatOf(create('cut the  hero video'), stored)).toBe(true)
+  })
+
+  it('matches a note only on the same target', () => {
+    const note = (target: string, body: string) => ({ kind: 'request_note', targetTaskId: null, targetRequestId: target, proposal: { body } })
+    expect(isRepeatOf(note('r1', 'The launch date moved to the 25th'), note('r1', 'The launch date moved to the 25th.'))).toBe(true)
+    expect(isRepeatOf(note('r2', 'The launch date moved to the 25th'), note('r1', 'The launch date moved to the 25th'))).toBe(false)
+  })
+
+  it('treats an update to the same fields as one sentence sampled twice, whatever the values', () => {
+    const update = (fields: Record<string, unknown>) => ({ kind: 'update_request', targetTaskId: null, targetRequestId: 'r1', proposal: { fields } })
+    expect(isRepeatOf(update({ dueDate: '2026-10-03' }), update({ dueDate: '2026-10-04' }))).toBe(true)
+    expect(isRepeatOf(update({ dueDate: '2026-10-03', status: 'in_progress' }), update({ dueDate: '2026-10-03' }))).toBe(false)
+  })
+
+  it('files a subtask list only when it adds a subtask', () => {
+    const subtasks = (list: string[]) => ({ kind: 'add_subtasks', targetTaskId: 't1', targetRequestId: null, proposal: { subtasks: list } })
+    expect(isRepeatOf(subtasks(['write copy']), subtasks(['Write copy', 'Pick photos']))).toBe(true)
+    expect(isRepeatOf(subtasks(['Write copy', 'Send to client']), subtasks(['Write copy', 'Pick photos']))).toBe(false)
+  })
+
+  it('matches a hand-off on the same person, by id or by name', () => {
+    const handOff = (contactName: string, contactId: string | null) =>
+      ({ kind: 'hand_off_request', targetTaskId: null, targetRequestId: 'r1', proposal: { contactName, contactId, reason: 'content' } })
+    expect(isRepeatOf(handOff('Ella', 'con-1'), handOff('Ella Brown', 'con-1'))).toBe(true)
+    expect(isRepeatOf(handOff('ella brown', null), handOff('Ella  Brown', null))).toBe(true)
+    expect(isRepeatOf(handOff('Sam Reed', null), handOff('Ella Brown', null))).toBe(false)
+  })
+
+  it('never matches two different kinds that change something', () => {
+    const note = { kind: 'note', targetTaskId: 't1', targetRequestId: null, proposal: { body: 'Done' } }
+    const done = { kind: 'complete_task', targetTaskId: 't1', targetRequestId: null, proposal: {} }
+    expect(isRepeatOf(note, done)).toBe(false)
+    expect(isRepeatOf(done, { ...done })).toBe(true)
+  })
+})
+
+describe('insertSuggestions over a transcript read before', () => {
+  const draft = {
+    orgId: 'o1', sourceKind: 'call', transcriptId: 'tr1', callKind: 'scheduled', callId: 'c1',
+    kind: 'request_note' as const, targetTaskId: null, targetRequestId: 'r1',
+    proposal: { body: 'The launch date moved to the twenty fifth' },
+    quote: 'The launch moves to the twenty fifth.',
+  }
+
+  const onFile = (status: string, overrides: Record<string, unknown> = {}) => ({
+    id: `row-${status}`, orgId: 'o1', transcriptId: 'tr1', kind: 'request_note', targetTaskId: null, targetRequestId: 'r1',
+    status, proposal: JSON.stringify({ body: 'The launch date moved to the twenty fifth.' }), dedupeKey: `key-${status}`,
+    ...overrides,
+  })
+
+  it.each(['pending', 'snoozed', 'applied', 'rejected', 'failed'])(
+    'files nothing a %s row of the same transcript already says, and touches that row not at all',
+    async (status) => {
+      const { database, inserted, updated } = fakeDb({ task_suggestions: [onFile(status)] })
+
+      const result = await insertSuggestions(database, [draft])
+
+      expect(result).toEqual({ inserted: 0, duplicates: 1, similarDropped: 0 })
+      expect(inserted).toHaveLength(0)
+      expect(updated).toHaveLength(0)
+    },
+  )
+
+  it('lets an item an expired row held come back', async () => {
+    const { database, inserted } = fakeDb({ task_suggestions: [onFile('expired', { dedupeKey: 'expired:row-expired' })] })
+    const result = await insertSuggestions(database, [draft])
+    expect(result.inserted).toBe(1)
+    expect(inserted).toHaveLength(1)
+  })
+
+  it('compares only against the same transcript', async () => {
+    const { database, inserted } = fakeDb({ task_suggestions: [onFile('pending', { transcriptId: 'tr9' })] })
+    const result = await insertSuggestions(database, [draft])
+    expect(result.inserted).toBe(1)
+    expect(inserted).toHaveLength(1)
+  })
+
+  it('files what is new beside what is already there', async () => {
+    const { database, inserted, updated } = fakeDb({ task_suggestions: [onFile('pending')] })
+
+    const result = await insertSuggestions(database, [
+      draft,
+      { ...draft, proposal: { body: 'They want the careers page after the launch' }, quote: 'Careers after the launch.' },
+    ])
+
+    expect(result).toEqual({ inserted: 1, duplicates: 1, similarDropped: 0 })
+    expect(inserted.map(row => JSON.parse(String(row.values.proposal)).body)).toEqual(['They want the careers page after the launch'])
+    expect(updated).toHaveLength(0)
+  })
+
+  it('files a snoozed create once, however the new read words it', async () => {
+    const snoozedCreate = onFile('snoozed', {
+      kind: 'create_request', targetRequestId: null,
+      proposal: JSON.stringify({ title: 'Cut the hero video down to 30 seconds' }),
+    })
+    const { database, inserted } = fakeDb({ task_suggestions: [snoozedCreate] })
+
+    const result = await insertSuggestions(database, [{
+      ...draft, kind: 'create_request', targetRequestId: null,
+      proposal: { title: 'Cut the hero video to 30 seconds' },
+    }])
+
+    // The CN.1d guard reads pending rows only; the transcript's own record is
+    // what sees the snoozed one.
+    expect(result).toEqual({ inserted: 0, duplicates: 1, similarDropped: 0 })
+    expect(inserted).toHaveLength(0)
+  })
+
+  it('files one of two reworded notes in one batch', async () => {
+    const { database, inserted } = fakeDb({ task_suggestions: [] })
+    const result = await insertSuggestions(database, [draft, { ...draft, proposal: { body: 'Launch date has moved to the twenty fifth' } }])
+    expect(result).toEqual({ inserted: 1, duplicates: 1, similarDropped: 0 })
     expect(inserted).toHaveLength(1)
   })
 })

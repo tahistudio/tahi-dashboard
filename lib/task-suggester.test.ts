@@ -26,17 +26,42 @@ import {
   SUGGESTER_SYSTEM_PROMPT,
   SWEEP_BATCH,
   SuggesterUnavailableError,
+  buildSecondReadMessage,
   buildSuggestionContext,
+  mergeSecondRead,
+  parseSecondPass,
   parseSuggestionsBlock,
   parseSweepLimit,
   runSuggestionSweep,
   suggestFromTranscript,
   suggestionContextWindows,
   validateSuggestionItems,
+  type SuggestFromTranscriptInput,
   type SuggestionContext,
+  type SuggestionDraft,
 } from '@/lib/task-suggester'
 import { HANDOFF_REASONS } from '@/lib/request-handoff-copy'
 import { REQUEST_CATEGORIES, REQUEST_PRIORITIES, REQUEST_TYPES } from '@/lib/request-vocabulary'
+
+// The SDK, for the one block that checks the request a real read sends. Every
+// other test either has no key (so no SDK) or injects its own suggest.
+const sdk = vi.hoisted(() => ({
+  calls: [] as Array<Record<string, unknown>>,
+  reply: '',
+}))
+vi.mock('@anthropic-ai/sdk', () => ({
+  default: class {
+    messages = {
+      create: async (params: Record<string, unknown>) => {
+        sdk.calls.push(params)
+        return {
+          content: [{ type: 'text', text: sdk.reply }],
+          usage: { input_tokens: 300, output_tokens: 200, cache_read_input_tokens: 4000 },
+        }
+      },
+    }
+  },
+}))
 
 // The real module, with one spy over the writer, so a test can read the drafts
 // the sweep hands it. Everything else behaves exactly as it does in production.
@@ -851,7 +876,9 @@ describe('runSuggestionSweep', () => {
       [],                                   // resurfaceSnoozed
     ])
 
-    const summary = await runSuggestionSweep(handle, { suggest: okSuggest, now: new Date('2026-09-19T00:00:00Z') })
+    // One read: this test is about the gate, and a second read's own drops
+    // would muddy the count below. The second read has its own block.
+    const summary = await runSuggestionSweep(handle, { suggest: okSuggest, now: new Date('2026-09-19T00:00:00Z'), secondPass: false })
 
     expect(okSuggest).toHaveBeenCalledTimes(1)
     expect(summary.eligible).toBe(1)
@@ -986,7 +1013,7 @@ describe('runSuggestionSweep', () => {
       [],                                   // repair: nothing orgless
     ])
 
-    const summary = await runSuggestionSweep(handle, { suggest: okSuggest, now: new Date('2026-09-19T00:00:00Z') })
+    const summary = await runSuggestionSweep(handle, { suggest: okSuggest, now: new Date('2026-09-19T00:00:00Z'), secondPass: false })
 
     expect(summary.inserted).toBe(0)
     expect(summary.dropReasons.similar_pending).toBe(1)
@@ -1018,5 +1045,366 @@ describe('parseSweepLimit', () => {
     expect(parseSweepLimit('-4')).toBe(1)
     expect(parseSweepLimit('500')).toBe(MAX_SWEEP_BATCH)
     expect(parseSweepLimit('7.9')).toBe(7)
+  })
+})
+
+// ── The second read and the union (CN.1c) ────────────────────────────────────
+// Sonnet 5 refuses a temperature, so one read of a call is one sample: the
+// same three Elevate calls gave five items and then none. Two things follow.
+// Each call is read twice, the second time with the first read shown and the
+// question "anything missed?". And a read never takes anything away: what
+// earlier reads left on file stays, and the writer files only what is new.
+
+const FAQ: SuggestionDraft = {
+  kind: 'create_task',
+  targetTaskId: null,
+  targetRequestId: null,
+  proposal: { title: 'Add an FAQ section to the pricing page' },
+  quote: 'We also need a new FAQ section on the pricing page before the launch.',
+  rationale: null,
+  confidence: 0.8,
+}
+
+const MOVE_EMAIL: SuggestionDraft = {
+  kind: 'update_task',
+  targetTaskId: 'task-2',
+  targetRequestId: null,
+  proposal: { fields: { dueDate: '2026-09-25' } },
+  quote: 'I will get the launch email moved to the twenty fifth.',
+  rationale: null,
+  confidence: 0.7,
+}
+
+/** The same FAQ item in the second read's own words. */
+const FAQ_REWORDED: SuggestionDraft = {
+  ...FAQ,
+  proposal: { title: 'Add a FAQ section to the pricing page' },
+  quote: 'We also need a new FAQ section on the pricing page',
+}
+
+const USAGE = { model: 'claude-sonnet-5', inputTokens: 4000, outputTokens: 500 }
+
+/** A model stand-in that answers the first read and the second differently. */
+function twoReads(first: SuggestionDraft[], second: SuggestionDraft[] | Error) {
+  return vi.fn(async (input: SuggestFromTranscriptInput) => {
+    if (input.alreadyProposed === undefined) return { suggestions: first, usage: USAGE, dropped: [] }
+    if (second instanceof Error) throw second
+    return { suggestions: second, usage: USAGE, dropped: [] }
+  })
+}
+
+/** Every select a sweep over one client transcript makes, in order. */
+function oneClientTranscript(onFile: unknown[] = []) {
+  return [
+    [TRANSCRIPT_ROW],
+    [{ orgId: 'org-a', meetingType: null }],
+    ...contextSelects(),
+    onFile,                               // insertSuggestions: keys, pending creates, rows on file
+    [],                                   // resurfaceSnoozed
+    [],                                   // repair: nothing orgless
+  ]
+}
+
+const NOW_CN1C = new Date('2026-09-19T00:00:00Z')
+
+async function lastDrafts() {
+  const { insertSuggestions } = await import('@/lib/task-suggestions')
+  return vi.mocked(insertSuggestions).mock.calls.at(-1)?.[1] ?? []
+}
+
+describe('parseSecondPass', () => {
+  it('is on when the query says nothing', () => {
+    expect(parseSecondPass(null)).toBe(true)
+    expect(parseSecondPass('')).toBe(true)
+  })
+
+  it('is off for the four words that mean off, in any case', () => {
+    for (const off of ['0', 'false', 'off', 'no', 'FALSE', ' Off ']) expect(parseSecondPass(off)).toBe(false)
+  })
+
+  it('stays on for anything it does not recognise', () => {
+    expect(parseSecondPass('1')).toBe(true)
+    expect(parseSecondPass('maybe')).toBe(true)
+  })
+})
+
+describe('buildSecondReadMessage', () => {
+  it('lists every item of the first read with its kind, target and quote', () => {
+    const message = buildSecondReadMessage([FAQ, MOVE_EMAIL], 10)
+    expect(message).toContain('ALREADY PROPOSED FROM THIS CALL')
+    expect(message).toContain('1. create_task | "Add an FAQ section to the pricing page"')
+    expect(message).toContain('2. update_task on task-2 | changes dueDate')
+    expect(message).toContain(`quote "${FAQ.quote}"`)
+    expect(message).toContain('At most 10 new items')
+  })
+
+  it('asks again when the first read found nothing, which is when it helps most', () => {
+    const message = buildSecondReadMessage([], 12)
+    expect(message).toContain('An earlier read of these same notes proposed no items.')
+    expect(message).toContain('propose only what the earlier read missed')
+  })
+
+  it('tells the model not to hand the list back in new words', () => {
+    expect(buildSecondReadMessage([FAQ], 1)).toContain('Never repeat, reword, merge or split an item above.')
+    expect(buildSecondReadMessage([FAQ], 1)).toContain('At most 1 new item.')
+  })
+
+  it('carries no dash of any kind into the prompt', () => {
+    // Built from code points, so this file never holds the glyphs it checks for.
+    const message = buildSecondReadMessage([FAQ, MOVE_EMAIL], 3)
+    for (const dash of [0x2013, 0x2014]) expect(message).not.toContain(String.fromCharCode(dash))
+  })
+})
+
+describe('mergeSecondRead', () => {
+  it('adds only what the first read did not have, and counts the repeat', () => {
+    const merged = mergeSecondRead([FAQ], { suggestions: [FAQ_REWORDED, MOVE_EMAIL], dropped: [] }, 11)
+    expect(merged.added).toEqual([MOVE_EMAIL])
+    expect(merged.dropped.map(d => d.reason)).toEqual(['second_read_repeat'])
+  })
+
+  it('drops an item the second read repeats within itself', () => {
+    const merged = mergeSecondRead([], {
+      suggestions: [MOVE_EMAIL, { ...MOVE_EMAIL, proposal: { fields: { dueDate: '2026-09-26' } } }],
+      dropped: [],
+    }, 12)
+    expect(merged.added).toEqual([MOVE_EMAIL])
+    expect(merged.dropped.map(d => d.reason)).toEqual(['second_read_repeat'])
+  })
+
+  it('keeps the two reads inside the ceiling one read has', () => {
+    const merged = mergeSecondRead([FAQ], {
+      suggestions: [MOVE_EMAIL, { ...MOVE_EMAIL, kind: 'note', proposal: { body: 'The launch email moves to the twenty fifth.' } }],
+      dropped: [],
+    }, 1)
+    expect(merged.added).toEqual([MOVE_EMAIL])
+    expect(merged.dropped.map(d => d.reason)).toEqual(['over_limit'])
+  })
+
+  it('carries the second read\'s own validation drops through', () => {
+    const merged = mergeSecondRead([], { suggestions: [], dropped: [{ reason: 'quote_not_in_source', raw: {} }] }, 12)
+    expect(merged.dropped).toEqual([{ reason: 'quote_not_in_source', raw: {} }])
+  })
+})
+
+describe('runSuggestionSweep reads every call twice', () => {
+  it('shows the second read the first, and hands the writer the union of the two', async () => {
+    const suggest = twoReads([FAQ], [FAQ_REWORDED, MOVE_EMAIL])
+    const { handle, inserts } = makeDb(oneClientTranscript())
+
+    const summary = await runSuggestionSweep(handle, { suggest, now: NOW_CN1C })
+
+    expect(suggest).toHaveBeenCalledTimes(2)
+    const [first, second] = suggest.mock.calls.map(call => call[0])
+    // The notes are cached on the first read because a second read follows.
+    expect(first).toMatchObject({ cacheSource: true })
+    expect(first.alreadyProposed).toBeUndefined()
+    expect(second).toMatchObject({ cacheSource: true, alreadyProposed: [FAQ], maxNew: MAX_SUGGESTIONS - 1 })
+    expect(second.transcript).toBe(first.transcript)
+    expect(second.context).toBe(first.context)
+
+    expect(await lastDrafts()).toMatchObject([
+      { kind: 'create_task', proposal: { title: 'Add an FAQ section to the pricing page' } },
+      { kind: 'update_task', targetTaskId: 'task-2' },
+    ])
+    expect(summary.inserted).toBe(2)
+    expect(summary.secondPass).toEqual({ enabled: true, ran: 1, proposed: 1, failed: [] })
+    expect(summary.dropReasons.second_read_repeat).toBe(1)
+
+    // Each read is its own line in the spend log.
+    const stages = inserts
+      .filter(i => i.table === schema.aiCostLog)
+      .map(i => (i.values as { stage: string }).stage)
+    expect(stages).toEqual(['suggest', 'second_pass'])
+  })
+
+  it('gives an empty first read a second, independent chance', async () => {
+    const suggest = twoReads([], [MOVE_EMAIL])
+    const { handle } = makeDb(oneClientTranscript())
+
+    const summary = await runSuggestionSweep(handle, { suggest, now: NOW_CN1C })
+
+    expect(suggest.mock.calls[1][0].alreadyProposed).toEqual([])
+    expect(summary.inserted).toBe(1)
+    expect(summary.secondPass?.proposed).toBe(1)
+  })
+
+  it('writes the first read when the second one throws, and says so', async () => {
+    const suggest = twoReads([FAQ], new Error('529 overloaded'))
+    const { handle, updates } = makeDb(oneClientTranscript())
+
+    const summary = await runSuggestionSweep(handle, { suggest, now: NOW_CN1C })
+
+    expect(summary.inserted).toBe(1)
+    expect(summary.skipped).toEqual([])
+    expect(summary.secondPass?.failed).toEqual([{ transcriptId: 'ct-1', reason: 'suggester_failed: 529 overloaded' }])
+    expect(updates.find(u => u.table === schema.callTranscripts)).toBeTruthy()
+  })
+
+  it('reads once, uncached, when the caller switches the second read off', async () => {
+    const suggest = twoReads([FAQ], [MOVE_EMAIL])
+    const { handle } = makeDb(oneClientTranscript())
+
+    const summary = await runSuggestionSweep(handle, { suggest, now: NOW_CN1C, secondPass: false })
+
+    expect(suggest).toHaveBeenCalledTimes(1)
+    expect(suggest.mock.calls[0][0].cacheSource).toBeUndefined()
+    expect(summary.inserted).toBe(1)
+    expect(summary.secondPass).toEqual({ enabled: false, ran: 0, proposed: 0, failed: [] })
+  })
+
+  it('skips the second read when the first already filled the ceiling', async () => {
+    const full = Array.from({ length: MAX_SUGGESTIONS }, (_, i) => ({
+      ...FAQ,
+      proposal: { title: `Distinct piece of work number ${i} for the launch` },
+    }))
+    const suggest = twoReads(full, [MOVE_EMAIL])
+    const { handle } = makeDb(oneClientTranscript())
+
+    const summary = await runSuggestionSweep(handle, { suggest, now: NOW_CN1C })
+
+    expect(suggest).toHaveBeenCalledTimes(1)
+    expect(summary.secondPass?.ran).toBe(0)
+  })
+})
+
+describe('runSuggestionSweep over a transcript read before', () => {
+  // What an earlier read left for ct-1: a pending create, a snoozed note and
+  // a rejected update, as insertSuggestions reads them back.
+  const EARLIER = [
+    { id: 'sug-pending', orgId: 'org-a', transcriptId: 'ct-1', kind: 'create_task', targetTaskId: null, targetRequestId: null, status: 'pending', proposal: JSON.stringify({ title: 'Add an FAQ section to the pricing page' }), dedupeKey: 'k-pending' },
+    { id: 'sug-snoozed', orgId: 'org-a', transcriptId: 'ct-1', kind: 'note', targetTaskId: 'task-1', targetRequestId: null, status: 'snoozed', proposal: JSON.stringify({ body: 'The pricing page rebuild is live.' }), dedupeKey: 'k-snoozed' },
+    { id: 'sug-rejected', orgId: 'org-a', transcriptId: 'ct-1', kind: 'update_task', targetTaskId: 'task-2', targetRequestId: null, status: 'rejected', proposal: JSON.stringify({ fields: { dueDate: '2026-09-24' } }), dedupeKey: 'k-rejected' },
+  ]
+
+  it('leaves every row an earlier read filed alone when the new read omits them', async () => {
+    const newItem: SuggestionDraft = {
+      kind: 'add_subtasks',
+      targetTaskId: 'task-1',
+      targetRequestId: null,
+      proposal: { subtasks: ['Write the FAQ answers'] },
+      quote: 'We also need a new FAQ section on the pricing page before the launch.',
+      rationale: null,
+      confidence: 0.6,
+    }
+    const { handle, inserts, updates } = makeDb(oneClientTranscript(EARLIER))
+
+    const summary = await runSuggestionSweep(handle, { suggest: twoReads([newItem], []), now: NOW_CN1C })
+
+    // Nothing expired, nothing rewritten: the only write to the table is the new row.
+    expect(updates.filter(u => u.table === schema.taskSuggestions)).toEqual([])
+    const written = inserts.filter(i => i.table === schema.taskSuggestions)
+    expect(written).toHaveLength(1)
+    expect(written[0].values).toMatchObject({ kind: 'add_subtasks', status: 'pending' })
+    expect(summary.inserted).toBe(1)
+  })
+
+  it('files nothing a new read proposes again in other words, pending, snoozed or decided', async () => {
+    const again: SuggestionDraft[] = [
+      FAQ_REWORDED,
+      {
+        ...MOVE_EMAIL,
+        kind: 'note',
+        targetTaskId: 'task-1',
+        proposal: { body: 'The pricing page rebuild is live now.' },
+        quote: 'the pricing page rebuild is finished and live as of this morning.',
+      },
+      MOVE_EMAIL,
+    ]
+    const { handle, inserts, updates } = makeDb(oneClientTranscript(EARLIER))
+
+    const summary = await runSuggestionSweep(handle, { suggest: twoReads(again, []), now: NOW_CN1C })
+
+    expect(summary.inserted).toBe(0)
+    // The reworded create meets the pending one in the CN.1d guard first
+    // (same client, still waiting); the note repeats the snoozed row and the
+    // update the rejected one, which only the transcript's own record sees.
+    expect(summary.dropReasons.similar_pending).toBe(1)
+    expect(summary.duplicates).toBe(2)
+    expect(inserts.filter(i => i.table === schema.taskSuggestions)).toEqual([])
+    expect(updates.filter(u => u.table === schema.taskSuggestions)).toEqual([])
+  })
+
+  it('lets an item an expired row held come back', async () => {
+    const expired = [{ ...EARLIER[0], id: 'sug-expired', status: 'expired', dedupeKey: 'expired:sug-expired' }]
+    const { handle } = makeDb(oneClientTranscript(expired))
+
+    const summary = await runSuggestionSweep(handle, { suggest: twoReads([FAQ], []), now: NOW_CN1C })
+
+    expect(summary.inserted).toBe(1)
+    expect(summary.duplicates).toBe(0)
+  })
+})
+
+describe('runSuggestionSweep over named transcripts', () => {
+  it('reads nothing at all when asked for no transcript by name', async () => {
+    const { handle, selects } = makeDb([[TRANSCRIPT_ROW]])
+    const summary = await runSuggestionSweep(handle, { suggest: okSuggest, transcriptIds: [] })
+    expect(selects).toHaveLength(0)
+    expect(summary.looked).toBe(0)
+    expect(okSuggest).not.toHaveBeenCalled()
+  })
+
+  it('reads the named transcripts, as many as were named', async () => {
+    const { handle, selects } = makeDb(oneClientTranscript())
+    const summary = await runSuggestionSweep(handle, { suggest: okSuggest, transcriptIds: ['ct-1', 'ct-9', 'ct-1'], now: NOW_CN1C })
+
+    expect(summary.looked).toBe(1)
+    const read = selects[0]
+    expect(read.args[read.methods.indexOf('limit') - 1]).toEqual([2])
+  })
+})
+
+describe('suggestFromTranscript, the request each read sends', () => {
+  const INPUT: SuggestFromTranscriptInput = {
+    transcript: TRANSCRIPT,
+    wrapUp: null,
+    callTitle: 'Check-in',
+    callDate: '2026-09-19',
+    context: CONTEXT,
+  }
+
+  beforeEach(() => {
+    sdk.calls.length = 0
+    sdk.reply = [
+      'One more thing came up.',
+      '<suggestions>[',
+      '{"kind":"update_task","targetTaskId":"task-2","proposal":{"fields":{"dueDate":"2026-09-25"}},"quote":"I will get the launch email moved to the twenty fifth.","confidence":0.7},',
+      '{"kind":"note","targetTaskId":"task-1","proposal":{"body":"x"},"quote":"nobody said this"}',
+      ']</suggestions>',
+    ].join('\n')
+    vi.stubEnv('ANTHROPIC_API_KEY', 'test-key')
+  })
+
+  afterEach(() => { vi.unstubAllEnvs() })
+
+  type Block = { type: string; text: string; cache_control?: { type: string } }
+  const userContent = (index: number) => (sdk.calls[index].messages as Array<{ content: string | Block[] }>)[0].content
+
+  it('sends the notes as plain text when no second read follows', async () => {
+    await suggestFromTranscript(INPUT)
+    expect(typeof userContent(0)).toBe('string')
+  })
+
+  it('caches the notes on both reads and asks the question after them', async () => {
+    await suggestFromTranscript({ ...INPUT, cacheSource: true })
+    const result = await suggestFromTranscript({ ...INPUT, alreadyProposed: [FAQ], maxNew: 11 })
+
+    const first = userContent(0) as Block[]
+    const second = userContent(1) as Block[]
+    expect(first).toHaveLength(1)
+    expect(first[0].cache_control).toEqual({ type: 'ephemeral' })
+    // Byte for byte the same notes, which is what lets the second read hit the cache.
+    expect(second[0]).toEqual(first[0])
+    expect(second[1].cache_control).toBeUndefined()
+    expect(second[1].text).toContain('ALREADY PROPOSED FROM THIS CALL')
+    expect(second[1].text).toContain('At most 11 new items')
+    // The system prompt is the same cached block on every read.
+    expect(sdk.calls[1].system).toEqual(sdk.calls[0].system)
+
+    // The second read's answer is validated like any read's.
+    expect(result.suggestions.map(s => s.kind)).toEqual(['update_task'])
+    expect(result.dropped.map(d => d.reason)).toEqual(['quote_not_in_source'])
+    expect(result.usage.inputTokens).toBe(4300)
   })
 })
