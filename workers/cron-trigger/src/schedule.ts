@@ -29,9 +29,14 @@ export const cronToTargets: Record<string, string[]> = {
   '0 21 * * MON': ['finance-anomaly-scan'],
   '0 21 1 * *': ['finance-anomaly-scan'],
   '0 22 * * SUN': ['content-auto-backfill'],
-  '30 19 * * SUN': ['content-gap-hunt'],
+  // The Monday suggestions digest rides both Sunday evening UTC slots, first
+  // in each list so a slow content job cannot push it out of its window.
+  // 19:30 UTC is 08:30 Monday in NZDT (sends) and 07:30 in NZST (outside the
+  // window, does nothing); 20:00 UTC is 09:00 in NZDT (already claimed) and
+  // 08:00 in NZST (sends). lib/slack/digest.ts decides; this only fires it.
+  '30 19 * * SUN': ['suggestion-digest', 'content-gap-hunt'],
   '0 23 * * SUN': ['schema-watchdog'],
-  '0 20 * * SUN': ['indexing-reverser'],
+  '0 20 * * SUN': ['suggestion-digest', 'indexing-reverser'],
   '3,18,33,48 * * * *': ['publish-scheduled'],
 }
 

@@ -76,6 +76,21 @@ describe('GET /api/admin/crons', () => {
     expect(askedFor).toContain('snapshot-metrics')
   })
 
+  it('lists the Monday suggestions digest with the endpoint Run now posts', async () => {
+    const res = await listCrons(new NextRequest('http://localhost:3000/api/admin/crons'))
+    const body = await res.json() as { items: Array<CronItem & { description: string }> }
+
+    const digest = body.items.find((item) => item.cron === 'suggestion-digest')
+    expect(digest).toBeDefined()
+    expect(digest?.label).toBe('Suggestions digest')
+    expect(digest?.endpoint).toBe('/api/admin/cron/suggestion-digest')
+    expect(digest?.schedule).toBe('Weekly (Mon 08:30 NZ)')
+    expect(digest?.description).toContain('Slack is not set up')
+    expect(digest?.description).not.toMatch(/[\u2013\u2014]/)
+    expect(digest?.lastRun).toEqual(RUN)
+    expect(askedFor).toContain('suggestion-digest')
+  })
+
   it('keeps one entry per cron name', async () => {
     const res = await listCrons(new NextRequest('http://localhost:3000/api/admin/crons'))
     const body = await res.json() as { items: CronItem[] }

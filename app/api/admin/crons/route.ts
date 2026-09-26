@@ -80,6 +80,13 @@ const CRONS: CronDef[] = [
     schedule: 'Every 30 min',
   },
   {
+    cron: 'suggestion-digest',
+    label: 'Suggestions digest',
+    description: 'Monday 08:30 NZ: a Slack DM to each founder with the suggestions still waiting, and to anyone whose own notes are waiting. Quiet when nothing is waiting or Slack is not set up.',
+    endpoint: '/api/admin/cron/suggestion-digest',
+    schedule: 'Weekly (Mon 08:30 NZ)',
+  },
+  {
     cron: 'sync-airwallex',
     label: 'Airwallex bank sync',
     description: 'Pulls current account balances + the last 30 days of transactions from Airwallex. Powers the disposable-cash strip + reconciliation on /financial-reports.',

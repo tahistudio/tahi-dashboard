@@ -134,7 +134,7 @@ export const GUIDE_SECTIONS: ReadonlyArray<GuideSection> = [
       '- **hand_off_request, hand_back_request, list_requests_waiting_on_clients** - point a request at a client contact, hand it back, and see everything currently waiting on someone.\n' +
       '- **list_clients, get_client, create_client, update_client, list_client_contacts** - client organisations and the people at them.\n' +
       '- **list_tasks, get_task, create_task, update_task** - the studio\'s internal to-do list.\n' +
-      '- **list_task_suggestions, decide_task_suggestion** - the call-suggestions inbox: read what a transcribed call proposed for tasks and requests, and approve, tweak, snooze or reject it.\n' +
+      '- **list_task_suggestions, decide_task_suggestion, cron_suggestion_digest** - the call-suggestions inbox: read what a transcribed call proposed for tasks and requests, approve, tweak, snooze or reject it (a reject can carry a reason), and preview or send the Monday digest.\n' +
       '- **add_blocker, remove_blocker, list_blockers** - link and unlink blocking work.\n' +
       '- **list_invoices, get_invoice, create_invoice, update_invoice** - billing records.\n' +
       '- **list_time_entries, log_time, start_timer, stop_timer** - time tracking.\n' +
@@ -156,7 +156,13 @@ export const GUIDE_SECTIONS: ReadonlyArray<GuideSection> = [
       '- **Snooze** (tonight or this week) brings it back later.\n' +
       '- **Reject** dismisses it.\n\n' +
       'A new task or request is checked against what already exists before anything is created. A close match shows on the row with a "Use it instead" button, which attaches the suggestion to that existing item as a note rather than creating a copy. A very close match asks for a second confirm, and Approve reads "Approve anyway" until that confirm is given.\n\n' +
-      'An applied suggestion posts as "Tahi bot" in the task\'s own thread, with the quote it came from, so it never reads as something Liam or Staci typed themselves.',
+      'An applied suggestion posts as "Tahi bot" in the task\'s own thread, with the quote it came from, so it never reads as something Liam or Staci typed themselves.\n\n' +
+      'Once Slack is set up, the suggestions keep in step there too:\n\n' +
+      '- A change to a task or request that came from a suggestion (its status, who has it, its due date, its priority, its title) posts one short line under that suggestion\'s card: on the founders\' cards, and on a person\'s own note cards. Nobody gets a line about their own change.\n' +
+      '- An approved card says who approved it and links to what it made: "Approved by Liam, 09:41 · Open #231".\n' +
+      '- Every Monday at 08:30 NZ time a digest arrives by DM: how many suggestions are waiting and for which clients, the five that have waited longest, what is snoozed, client drafts not confirmed yet, approvals that did not apply, and last week\'s decisions. Anyone whose own notes have waited a day or more gets just those. Nothing arrives when nothing is waiting.\n' +
+      '- Each person approves their own notes in Slack: a note you sent the bot is yours to approve (a founder can too), and a client confirms their own request.\n\n' +
+      'The suggester learns from what happens next. A rejection, with its reason when one is given, teaches it not to propose the same thing for that client again. An applied suggestion teaches the request wizard what was already agreed on a call, so it names the existing request rather than drafting it twice.',
   },
 ]
 

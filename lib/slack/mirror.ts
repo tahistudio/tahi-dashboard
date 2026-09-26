@@ -35,6 +35,7 @@
 
 import { eq, sql } from 'drizzle-orm'
 import { schema } from '@/db/d1'
+import { publicUrl } from '@/lib/app-url'
 import { STUDIO_TIME_ZONE } from '@/lib/call-time'
 import { SIMILAR_BLOCK } from '@/lib/text-similarity'
 import { openDm, postMessage, slackBotToken, updateMessage, type SlackMessageRef } from '@/lib/slack/api'
@@ -347,18 +348,37 @@ export function outcomeForStatus(status: string): SuggestionOutcome | null {
   }
 }
 
-/** A team member's first name, which is what "Approved by Liam" wants. */
+function firstName(name: string | null | undefined): string | null {
+  const trimmed = name?.trim()
+  if (!trimmed) return null
+  return trimmed.split(/\s+/)[0] ?? trimmed
+}
+
+/**
+ * The decider's first name, which is what "Approved by Liam" wants.
+ *
+ * A team member first, then a client contact: since CN.3 a client approves
+ * their own "Is this the request?" card in Slack, and the decision is
+ * recorded against their contact id (contract section 6), so their card
+ * reads "Approved by Tim, 09:41" rather than "Approved by someone".
+ */
 async function actorName(drizzle: Drizzle, actorId: string | null): Promise<string | null> {
   if (!actorId) return null
   try {
-    const [row] = await drizzle
+    const [member] = await drizzle
       .select({ name: schema.teamMembers.name })
       .from(schema.teamMembers)
       .where(eq(schema.teamMembers.id, actorId))
       .limit(1)
-    const name = row?.name?.trim()
-    if (!name) return null
-    return name.split(/\s+/)[0] ?? name
+    const memberName = firstName(member?.name)
+    if (memberName) return memberName
+
+    const [contact] = await drizzle
+      .select({ name: schema.contacts.name })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.id, actorId))
+      .limit(1)
+    return firstName(contact?.name)
   } catch {
     return null
   }
@@ -373,6 +393,62 @@ export interface DecidedSuggestionRow {
   decidedAt: string | null
   updatedAt: string | null
   applyError: string | null
+  /** Optional so an older caller still fits; decideSuggestion hands the
+   *  whole row, which carries all three. */
+  kind?: string
+  appliedTaskId?: string | null
+  appliedRequestId?: string | null
+}
+
+/** The request half of the suggestion kinds. Spelled out here rather than
+ *  imported, because lib/task-suggestions.ts imports this module. */
+const REQUEST_KIND_NAMES: ReadonlySet<string> = new Set([
+  'create_request', 'update_request', 'request_note', 'hand_off_request',
+])
+
+/** "Open #231", or "Open request" when the number cannot be read. */
+async function requestLinkLabel(drizzle: Drizzle, requestId: string): Promise<string> {
+  try {
+    const [row] = await drizzle
+      .select({ requestNumber: schema.requests.requestNumber })
+      .from(schema.requests)
+      .where(eq(schema.requests.id, requestId))
+      .limit(1)
+    const number = row?.requestNumber
+    return typeof number === 'number' && Number.isFinite(number) ? `Open #${number}` : 'Open request'
+  } catch {
+    return 'Open request'
+  }
+}
+
+/**
+ * Where an approved card points: the request or the task the suggestion
+ * made or changed (CN.3 contract section 1). Null for every other outcome,
+ * and for an applied row that names nothing, which is a row this function
+ * has no business guessing about.
+ *
+ * applySuggestion stamps exactly one of the two ids, by kind; the kind is
+ * read first anyway so a row carrying both would still link the thing its
+ * kind is about.
+ */
+export async function decidedLinkFor(
+  drizzle: Drizzle,
+  row: Pick<DecidedSuggestionRow, 'status' | 'kind' | 'appliedTaskId' | 'appliedRequestId'>,
+): Promise<{ url: string; label: string } | null> {
+  if (outcomeForStatus(row.status) !== 'approved') return null
+  const requestId = row.appliedRequestId ?? null
+  const taskId = row.appliedTaskId ?? null
+  const preferRequest = row.kind ? REQUEST_KIND_NAMES.has(row.kind) : !!requestId
+  if (preferRequest && requestId) {
+    return { url: publicUrl(`/requests/${encodeURIComponent(requestId)}`), label: await requestLinkLabel(drizzle, requestId) }
+  }
+  if (taskId) {
+    return { url: publicUrl(`/tasks/${encodeURIComponent(taskId)}`), label: 'Open task' }
+  }
+  if (requestId) {
+    return { url: publicUrl(`/requests/${encodeURIComponent(requestId)}`), label: await requestLinkLabel(drizzle, requestId) }
+  }
+  return null
 }
 
 /**
@@ -397,6 +473,7 @@ export async function mirrorSuggestionDecision(
       at: studioClock(row.decidedAt ?? row.updatedAt ?? null),
       until: outcome === 'snoozed' ? studioWhen(row.snoozeUntil) : null,
       error: row.applyError,
+      link: await decidedLinkFor(drizzle, row),
     })
     return await rewriteEverywhere(drizzle, row.id, payload)
   } catch {

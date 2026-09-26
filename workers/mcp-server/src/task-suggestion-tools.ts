@@ -12,7 +12,9 @@
  * default since CN.1c) and POST /api/admin/crons/suggest-from-transcripts
  * (the sweep itself, with its ?limit= and ?second_pass= knobs). The decide
  * mapping also carries CN.1d's duplicate guard: the `attach` action, and
- * `force` on an approve the guard would otherwise refuse.
+ * `force` on an approve the guard would otherwise refuse, and CN.3's reject
+ * reason. CN.3 adds POST /api/admin/cron/suggestion-digest, the Monday
+ * digest, with its ?dry_run= and ?force= knobs.
  */
 
 export type McpMethod = 'GET' | 'POST'
@@ -73,6 +75,13 @@ export function taskSuggestionToolCall(
       if (action === 'approve' && args.force === true) {
         body.force = true
       }
+      // A reason teaches the suggester what not to propose again for this
+      // client (CN.3 section 7). Only on a reject, and only when there are
+      // words in it: an empty reason is no reason, and a reason on an
+      // approve means nothing to the route.
+      if (action === 'reject' && typeof args.reason === 'string' && args.reason.trim()) {
+        body.reason = args.reason.trim()
+      }
       if (action === 'attach') {
         const kind = s('target_kind')
         const targetId = s('target_id')
@@ -124,6 +133,20 @@ export function taskSuggestionToolCall(
       const qs = query.toString()
       return {
         path: `/api/admin/crons/suggest-from-transcripts${qs ? `?${qs}` : ''}`,
+        method: 'POST',
+        body: {},
+      }
+    }
+    case 'cron_suggestion_digest': {
+      // Same shape: the knobs ride the query. Each is sent only on a literal
+      // true, the rule force follows above: a habit of passing force along
+      // must not send a digest outside its Monday window.
+      const query = new URLSearchParams()
+      if (args.dry_run === true) query.set('dry_run', '1')
+      if (args.force === true) query.set('force', '1')
+      const qs = query.toString()
+      return {
+        path: `/api/admin/cron/suggestion-digest${qs ? `?${qs}` : ''}`,
         method: 'POST',
         body: {},
       }

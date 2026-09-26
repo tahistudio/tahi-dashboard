@@ -114,6 +114,55 @@ describe('decide_task_suggestion', () => {
     const mapped = call('decide_task_suggestion', { id: 's1', action: 'reject', proposal: { title: 'x' } })
     expect(mapped.body).toEqual({ action: 'reject' })
   })
+
+  // CN.3 section 7. A reason on a reject teaches the suggester; anywhere else
+  // it means nothing, and an empty one is no reason at all.
+  it('forwards a reject reason, trimmed', () => {
+    expect(call('decide_task_suggestion', { id: 's1', action: 'reject', reason: '  Already have it ' }).body)
+      .toEqual({ action: 'reject', reason: 'Already have it' })
+  })
+
+  it('drops an empty or non-string reason', () => {
+    expect(call('decide_task_suggestion', { id: 's1', action: 'reject', reason: '' }).body).toEqual({ action: 'reject' })
+    expect(call('decide_task_suggestion', { id: 's1', action: 'reject', reason: '   ' }).body).toEqual({ action: 'reject' })
+    expect(call('decide_task_suggestion', { id: 's1', action: 'reject', reason: 7 }).body).toEqual({ action: 'reject' })
+  })
+
+  it('never carries a reason on anything but a reject', () => {
+    expect(call('decide_task_suggestion', { id: 's1', action: 'approve', reason: 'why not' }).body)
+      .toEqual({ action: 'approve' })
+    expect(call('decide_task_suggestion', { id: 's1', action: 'snooze', snooze: 'tonight', reason: 'later' }).body)
+      .toEqual({ action: 'snooze', snooze: 'tonight' })
+  })
+})
+
+describe('cron_suggestion_digest', () => {
+  it('fires the Monday digest with no flags by default', () => {
+    expect(call('cron_suggestion_digest')).toEqual({ path: '/api/admin/cron/suggestion-digest', method: 'POST', body: {} })
+  })
+
+  it('puts dry_run and force in the query, where the route reads them', () => {
+    expect(call('cron_suggestion_digest', { dry_run: true }).path).toBe('/api/admin/cron/suggestion-digest?dry_run=1')
+    expect(call('cron_suggestion_digest', { force: true }).path).toBe('/api/admin/cron/suggestion-digest?force=1')
+    expect(call('cron_suggestion_digest', { dry_run: true, force: true }).path)
+      .toBe('/api/admin/cron/suggestion-digest?dry_run=1&force=1')
+  })
+
+  it('sends a flag only on a literal true', () => {
+    expect(call('cron_suggestion_digest', { dry_run: 'yes', force: false }).path).toBe('/api/admin/cron/suggestion-digest')
+    expect(call('cron_suggestion_digest', { dry_run: 1, force: 'true' }).path).toBe('/api/admin/cron/suggestion-digest')
+  })
+
+  it('is registered with both switches and says a dry run needs no Slack', () => {
+    const tool = TOOLS.find(t => t.name === 'cron_suggestion_digest')
+    expect(tool).toBeDefined()
+    const properties = tool?.inputSchema.properties as Record<string, unknown> | undefined
+    expect(properties).toHaveProperty('dry_run')
+    expect(properties).toHaveProperty('force')
+    expect(tool?.description).toContain('Monday')
+    expect(tool?.description).toContain('dry_run true')
+    expect(tool?.description).not.toMatch(/[\u2013\u2014]/)
+  })
 })
 
 describe('rebuild_task_suggestions', () => {
@@ -227,5 +276,12 @@ describe('the registered tool descriptions list the CN.1b request kinds', () => 
     expect(properties).toHaveProperty('target_kind')
     expect(properties).toHaveProperty('target_id')
     expect(properties).toHaveProperty('force')
+  })
+
+  it('decide_task_suggestion takes a reject reason and says it teaches the suggester', () => {
+    const tool = TOOLS.find(t => t.name === 'decide_task_suggestion')
+    const properties = tool?.inputSchema.properties as Record<string, unknown> | undefined
+    expect(properties).toHaveProperty('reason')
+    expect(description('decide_task_suggestion')).toContain('teach the suggester')
   })
 })

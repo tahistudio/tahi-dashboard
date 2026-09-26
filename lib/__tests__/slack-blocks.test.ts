@@ -24,6 +24,7 @@ import {
   formatCallDay,
   parseSuggestionActionId,
   quoteBlock,
+  slackLink,
   suggestionActionId,
   suggestionMessage,
   suggestionTweakUrl,
@@ -248,6 +249,45 @@ describe('the decided message', () => {
 
   it('says someone rather than nobody when the actor cannot be named', () => {
     expect(decidedLine({ outcome: 'approved', actorName: '  ', at: '09:41' })).toBe('Approved by someone, 09:41')
+  })
+
+  it('links an approved card to what it made, in the blocks only', () => {
+    const payload = decidedMessage({
+      outcome: 'approved',
+      actorName: 'Liam',
+      at: '09:41',
+      link: { url: 'https://portal.tahi.studio/requests/r1', label: 'Open #231' },
+    })
+    expect(payload.text).toBe('Approved by Liam, 09:41')
+    expect(payload.blocks).toEqual([{
+      type: 'section',
+      text: { type: 'mrkdwn', text: 'Approved by Liam, 09:41 · <https://portal.tahi.studio/requests/r1|Open #231>' },
+    }])
+    expect(payload.blocks.some(block => block.type === 'actions')).toBe(false)
+  })
+
+  it('reads the same with no link, a null link, or an empty one', () => {
+    const bare = decidedMessage({ outcome: 'approved', actorName: 'Liam', at: '09:41' })
+    expect(decidedMessage({ outcome: 'approved', actorName: 'Liam', at: '09:41', link: null })).toEqual(bare)
+    expect(decidedMessage({ outcome: 'approved', actorName: 'Liam', at: '09:41', link: { url: '', label: 'Open task' } })).toEqual(bare)
+    expect(textOf(bare)).toContain('"text":"Approved by Liam, 09:41"')
+  })
+
+  it('leaves decidedLine itself unchanged by a link', () => {
+    expect(decidedLine({ outcome: 'approved', actorName: 'Liam', at: '09:41', link: { url: 'https://x.test/t', label: 'Open task' } }))
+      .toBe('Approved by Liam, 09:41')
+  })
+})
+
+describe('slackLink', () => {
+  it('writes a mrkdwn link with the label escaped', () => {
+    expect(slackLink('https://portal.tahi.studio/tasks/t1', 'Fish & Chips')).toBe('<https://portal.tahi.studio/tasks/t1|Fish &amp; Chips>')
+  })
+
+  it('keeps a query string link whole', () => {
+    expect(slackLink(suggestionTweakUrl('s1'), 'Review'))
+      .toBe('<https://portal.tahi.studio/tasks?view=suggestions&amp;focus=s1|Review>')
+    expect(slackLink('https://x.test/a|b>c', 'Go')).toBe('<https://x.test/a%7Cb%3Ec|Go>')
   })
 })
 
