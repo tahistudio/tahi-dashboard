@@ -33,6 +33,31 @@ export async function expectNoHorizontalScroll(page: Page): Promise<void> {
   expect(overflow, 'the page scrolls horizontally').toBeLessThanOrEqual(1)
 }
 
+/**
+ * A phone rather than a narrow desktop window: 375 by 812 with isMobile and
+ * hasTouch. Chromium then applies the page's viewport meta, reports a touch
+ * screen to pointer and hover media queries, and emulates a mobile layout
+ * viewport, which a bare `viewport` option does not. For `test.use` or a
+ * `browser.newContext`, in the specs whose checks are pinned to 375px.
+ */
+export const PHONE_CONTEXT = {
+  viewport: { width: 375, height: 812 },
+  isMobile: true,
+  hasTouch: true,
+} as const
+
+/**
+ * expectNoHorizontalScroll on a PHONE_CONTEXT page, plus the window width. A
+ * mobile layout viewport can grow to fit content that is too wide, where the
+ * overflow check alone would see nothing to scroll; the window still being
+ * 375px wide rules that out.
+ */
+export async function expectFitsPhone(page: Page): Promise<void> {
+  await expectNoHorizontalScroll(page)
+  const width = await page.evaluate(() => window.innerWidth)
+  expect(width, 'the phone layout widened past the 375px screen').toBe(PHONE_CONTEXT.viewport.width)
+}
+
 /** True on the mobile-safari project, where tables become card lists. */
 export async function isNarrow(page: Page): Promise<boolean> {
   return (await page.evaluate(() => window.innerWidth)) < 768

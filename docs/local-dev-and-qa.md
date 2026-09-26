@@ -25,7 +25,22 @@ Recipes that used to live only in Claude's session memory. Written 2026-09-21 fr
 - Create: `git worktree add --detach ../tahi-qa main`, then in PowerShell `New-Item -ItemType Junction -Path ../tahi-qa/node_modules -Target (Resolve-Path ./node_modules)`, copy `.env.local` and `.wrangler` into it, start `npx next dev --port 3179` (webpack, NOT `--turbopack`: Turbopack refuses the junction with "Symlink node_modules is invalid"). Update with `git -C ../tahi-qa checkout --detach main`. The 3179 server goes stale after about 18 hours and serves old code even after a checkout; restart it.
 - `playwright.local.config.ts` (gitignored) points baseURL at 3179, runs the mobile project on chromium with the iPhone 13 descriptor (no webkit download), workers 2. Run `npx playwright test -c playwright.local.config.ts e2e/<spec>`. The `tahi-ship-studio=1` bypass cookie resolves to Liam's dev user (super_admin in the seeded D1), so gated UI is on.
 - Every spec calls `primePage(page)` from `e2e/helpers.ts` in a beforeEach (marks the product tour complete) and never waits on networkidle (the notification stream keeps a connection open).
-- Specs that mail through the real fan outs (e2e/sales-publish.spec.ts and e2e/public-viewers.spec.ts: a proposal decision, the contract signature notices, the signed PDF) skip unless `E2E_DEAD_RESEND_KEY=1` is set. Set it only when the server under test holds a dead Resend key: start the 3179 server with `set RESEND_API_KEY=re_e2e_harness_disabled&& npx next dev --port 3179` (cmd), then `E2E_DEAD_RESEND_KEY=1 npx playwright test -c playwright.local.config.ts e2e/sales-publish.spec.ts`. The key has to be dead rather than unset: with no key at all the contract fan out returns before it writes the signed PDF to R2, and public-viewers fails on that. The runner cannot see the server's key, so the flag is the operator's word; never set it against a server reading the live key from `.env.local`.
+- `E2E_DEAD_RESEND_KEY=1` is required by the two specs that drive the real mail fan outs, and every test in them skips without it: e2e/sales-publish.spec.ts (accepting a proposal mails the studio) and e2e/public-viewers.spec.ts (each contract signature mails the studio's admins, and the final one mails the signed PDF to every signer and to the creator, Liam's dev user). The flag says the server under test holds a dead Resend key, so Resend refuses every send, business@tahi.studio included. The runner cannot see the server's key, so the flag is the operator's word for it: never set it against a server reading the live key from `.env.local`, which is what `npm run dev` and the default Playwright config's webServer do. The dead key is about mail only; the contract fan out writes the signed PDF to R2 before it decides whether to send, so the PDF checks hold with any key. Two terminals, PowerShell in both, each from the QA worktree's root.
+
+  Terminal 1, the server with a dead key (a variable already in the shell wins over `.env.local`, since Next only fills keys the process does not have):
+
+  ```powershell
+  $env:RESEND_API_KEY = 're_e2e_harness_disabled'
+  npx next dev --port 3179
+  ```
+
+  Terminal 2, the runner, one spec file at a time:
+
+  ```powershell
+  $env:E2E_DEAD_RESEND_KEY = '1'
+  npx playwright test -c playwright.local.config.ts e2e/sales-publish.spec.ts --workers=1
+  npx playwright test -c playwright.local.config.ts e2e/public-viewers.spec.ts --workers=1
+  ```
 - Tenancy proof: `npm run test:e2e:tenancy` runs e2e/tenancy-isolation.spec.ts (two seeded client orgs, every portal read and write tried across the boundary). Re-run it after any change to lib/portal-access.ts, lib/permissions.ts or a portal route. Not in CI (needs a seeded D1 and Clerk dev keys on the runner).
 - Flake under load: 45 cases across three spec files in parallel produced "Target page, context or browser has been closed" failures that pass serially. Run per file, or `--last-failed --workers=1` before believing a red.
 - Render-check every merged UI slice before pushing: browser-free builders and reviewers once reasoned a table column into a 1,000,000px width and every check passed; only a screenshot caught it. Headless chromium screenshots work even when the shared Chrome window is backgrounded. Probe scripts, when present, live gitignored under `.claude/` (tasks-probe.mjs, detail-probe.mjs, rail-probe.mjs, parity-shots.mjs).

@@ -1,14 +1,24 @@
 import { expect, type APIRequestContext, type Locator } from '@playwright/test'
 import {
   bellRowsFor,
-  expectNoHorizontalScroll,
+  expectFitsPhone,
   markBellRead,
+  PHONE_CONTEXT,
   primePage,
   skipUnlessMailIsDead,
   testWithStudio as test,
 } from './helpers'
 
 /**
+ * RUN REQUIREMENT: E2E_DEAD_RESEND_KEY=1, against a dev server started with
+ * RESEND_API_KEY set to a dead value. Without the flag every test in this
+ * file skips. Accepting a proposal mails the studio, and business@tahi.studio
+ * is inside the email allowlist, so against a server reading the live key
+ * from .env.local a run lands in a real inbox. The runner cannot see the
+ * server's key, so the flag is the operator's word for it
+ * (skipUnlessMailIsDead in e2e/helpers.ts); the commands are in
+ * docs/local-dev-and-qa.md.
+ *
  * D3, the sales half: share, publish, view at 375px, accept, studio notified.
  *
  * What Batch C promised and what this holds the live handlers to:
@@ -49,13 +59,11 @@ import {
  * link from an email.
  *
  * Email: accepting fans out a studio email through lib/email-delivery.ts. The
- * allowlist holds back every address but business@tahi.studio, and the QA
- * harness runs its dev server with RESEND_API_KEY set to a dead value so even
- * that one is refused by Resend. The acceptor address is on example.com, which
- * the allowlist never passes. The file skips unless E2E_DEAD_RESEND_KEY=1 says
- * the server under test holds that dead key (skipUnlessMailIsDead in
- * e2e/helpers.ts), so a plain `npm run test:e2e`, whose dev server reads the
- * live key from .env.local, never mails the studio.
+ * allowlist holds back every address but business@tahi.studio, and the dead
+ * key in the run requirement above has Resend refuse even that one. The
+ * acceptor address is on example.com, which the allowlist never passes. A
+ * plain `npm run test:e2e`, whose dev server reads the live key from
+ * .env.local, skips the file rather than mail the studio.
  *
  * Data: every proposal is created here under a unique title and deleted in a
  * finally (or by createProposal itself when a later seed call fails, before
@@ -66,8 +74,9 @@ import {
  * unreachable from any list. The bell rows are marked read, since the bell has
  * no delete.
  *
- * One project only: the viewport is pinned to 375px for the whole file, so the
- * mobile project would repeat the same fixtures at the same width.
+ * One project only: the whole file runs on a 375px phone context (isMobile
+ * and hasTouch, PHONE_CONTEXT in e2e/helpers.ts), so the mobile project would
+ * repeat the same fixtures at the same width.
  */
 
 interface VariantSeed {
@@ -124,12 +133,12 @@ interface AdminProposalRead {
   acceptances: AcceptanceRow[]
 }
 
-test.use({ viewport: { width: 375, height: 812 } })
+test.use({ ...PHONE_CONTEXT })
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(
     testInfo.project.name !== 'chromium',
-    'The viewport is pinned to 375px in this file; a second project would only repeat the same fixtures.',
+    'The whole file runs on a 375px phone context; a second project would only repeat the same fixtures.',
   )
   skipUnlessMailIsDead()
   await primePage(page)
@@ -333,7 +342,7 @@ test.describe('Proposal share, publish and accept (D3)', () => {
       // ── The prospect's phone ─────────────────────────────────────────────
       await page.goto(`/p/proposal/${first.token}`)
       await expect(page.getByRole('heading', { name: title })).toBeVisible({ timeout: 60_000 })
-      await expectNoHorizontalScroll(page)
+      await expectFitsPhone(page)
 
       // C2. First the precondition, without which the rest proves nothing:
       // the tabs are wider than the strip, and the last one starts cut off.
@@ -356,7 +365,7 @@ test.describe('Proposal share, publish and accept (D3)', () => {
         .poll(() => isInsideStrip(lastTab), { message: `a sideways scroll of the strip never brought ${SCALE} into view` })
         .toBe(true)
       expect((await stripMetrics(strip)).scrollLeft, 'the strip itself did not move').toBeGreaterThan(before.scrollLeft)
-      await expectNoHorizontalScroll(page)
+      await expectFitsPhone(page)
 
       // Every tab still selects, stays in view once selected and meets the
       // 44px floor. The click scrolls its own target into view, so this loop
@@ -369,7 +378,7 @@ test.describe('Proposal share, publish and accept (D3)', () => {
         const box = await tab.boundingBox()
         expect(box?.height ?? 0, `the ${name} tab is under the 44px touch floor`).toBeGreaterThanOrEqual(44)
       }
-      await expectNoHorizontalScroll(page)
+      await expectFitsPhone(page)
 
       await strip.getByRole('tab', { name: GROWTH, exact: true }).click()
       await expect(page.getByText('NZ$1,800/mo', { exact: true })).toBeVisible()
@@ -384,7 +393,7 @@ test.describe('Proposal share, publish and accept (D3)', () => {
       await expect(page.getByText(`Accepted · ${GROWTH}`)).toBeVisible()
       await expect(page.getByRole('heading', { name: `Welcome aboard, ${GROWTH}` })).toBeVisible()
       await expect(page.getByRole('button', { name: `Accept ${GROWTH}` })).toHaveCount(0)
-      await expectNoHorizontalScroll(page)
+      await expectFitsPhone(page)
 
       // ── The studio heard about it ────────────────────────────────────────
       await expect
@@ -456,7 +465,7 @@ test.describe('Proposal share, publish and accept (D3)', () => {
       expect(lateAccept.status(), 'a revoked link still accepts').toBe(404)
       await page.goto(`/p/proposal/${first.token}`)
       await expect(page.getByRole('heading', { name: "This proposal isn't available" })).toBeVisible({ timeout: 60_000 })
-      await expectNoHorizontalScroll(page)
+      await expectFitsPhone(page)
 
       const revoked = await readAdmin(studio, seeded.id)
       expect(revoked.proposal.status).toBe('draft')
@@ -496,7 +505,7 @@ test.describe('Proposal share, publish and accept (D3)', () => {
       await expect(page.getByText(/This proposal expired on/)).toBeVisible({ timeout: 60_000 })
       await expect(page.getByText('This proposal has expired.')).toBeVisible()
       await expect(page.getByRole('button', { name: 'Accept Standard' })).toHaveCount(0)
-      await expectNoHorizontalScroll(page)
+      await expectFitsPhone(page)
 
       // The page hiding the button is a courtesy; the route is the guarantee.
       const refused = await request.post(`/api/public/proposals/${link.token}/accept`, {

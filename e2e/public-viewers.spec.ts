@@ -1,60 +1,71 @@
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import {
   bellRowsFor,
-  expectNoHorizontalScroll,
+  expectFitsPhone,
   markBellRead,
+  PHONE_CONTEXT,
   primePage,
   skipUnlessMailIsDead,
   testWithStudio as test,
 } from './helpers'
 
 /**
+ * RUN REQUIREMENT: E2E_DEAD_RESEND_KEY=1, against a dev server started with
+ * RESEND_API_KEY set to a dead value. Without the flag every test in this
+ * file skips. Each signature mails the studio's admins, and the final one
+ * mails the signed PDF to every signer and to the contract's creator, who is
+ * Liam's dev user on a tahi.studio address the email allowlist lets through.
+ * Against a server reading the live key from .env.local, a run lands in a
+ * real inbox. The runner cannot see the server's key, so the flag is the
+ * operator's word for it (skipUnlessMailIsDead in e2e/helpers.ts); the
+ * commands are in docs/local-dev-and-qa.md.
+ *
  * D3, the contract half: send, sign on a phone, signed PDF, studio notified.
  *
  * The reviewer's blocker on C2 was that nothing drove the public contract
- * viewer in a browser. This does, at 375px, against the live handlers:
+ * viewer in a browser. This does, on a 375px phone context (isMobile and
+ * hasTouch, see PHONE_CONTEXT), against the live handlers:
  *
  *   - A contract with two signers is created and sent through the admin
  *     routes. The send route mints the share token and hands back one sign
  *     path per signer; it mails nobody (see its own header).
- *   - The client signer opens their link at 375px on a touch screen, draws a
- *     signature with a finger on the real canvas, ticks the intent box and
- *     submits. The pad has to take the stroke as touch pointer events without
- *     the browser cancelling it to scroll the page (its touch-action), which a
- *     mouse stroke never tests. The page flips to "Your signature is in" and
- *     the studio bell gets a partial row.
- *   - The studio signer opens theirs in a browser whose dashboard theme is
- *     dark (localStorage tahi-theme=dark before the first paint, which is what
- *     the root layout's blocking script reads), and signs with a mouse. The
- *     public layout has to strip that `.dark` class so the deliverable renders
- *     in its own light theme, and the text has to stay readable. They sign;
- *     the page reads Fully signed.
- *
- *     What this does not catch: the class is on <html> from the blocking
- *     script until the public layout's effect removes it after hydration
- *     (app/p/layout.tsx), so a dark first frame is still possible. The check
- *     that the root layout applied the class records exactly that window; the
- *     spec does not fail on it, because that is how the layout works today.
+ *   - The client signer opens their link and draws a signature with a finger
+ *     on the real canvas, ticks the intent box and submits. The pad has to
+ *     take the stroke as touch pointer events without the browser cancelling
+ *     it to scroll the page (its touch-action), which a mouse stroke never
+ *     tests. The page flips to "Your signature is in" and the studio bell
+ *     gets a partial row.
+ *   - The studio signer opens theirs on a second phone whose dashboard theme
+ *     is dark (localStorage tahi-theme=dark before the first paint, which is
+ *     what the root layout's blocking script reads), and signs with a mouse
+ *     pointer, so the pad's mouse path is covered too. The blocking script
+ *     skips /p/ paths (lib/theme-boot-script.ts), so the contract must never
+ *     carry `.dark`, not even for a first frame, and its text has to stay
+ *     readable. The same phone opens /offline first, a public page outside
+ *     /p/, and has to paint dark there, so "never dark" cannot pass on a
+ *     phone that simply never read the preference. They sign; the page reads
+ *     Fully signed.
  *   - The document is signed with a final hash, both signatures carry a body
- *     hash, the stamped PDF is in R2 at contracts/<id>/signed.pdf and served
- *     by both the admin and the token-scoped download routes, and the bell has
- *     the final row.
+ *     hash and are more than a blank pad's export, and the stamped PDF is in
+ *     R2 at contracts/<id>/signed.pdf, written by the fully-signed fan out
+ *     before anyone downloads it, carrying both signers and both signature
+ *     images, and served by both the admin and the token-scoped download
+ *     routes. The bell has the final row.
  *
- * Then the two refusals the sign route owes: a cancelled contract 410s every
- * read and write, and a contract past its expiry refuses the signature (and
- * flips to expired) even though the page, which never looks at the date, lets
- * the signer draw one first.
+ * Then the two refusals. A cancelled contract 410s every read and write and
+ * the link says it is no longer active. A contract past its expiry is refused
+ * on the read, before any document or pad goes out: the link shows the
+ * expired state and no canvas ever renders, and a signature posted straight
+ * to the sign route is refused with a 410, which is also what flips the row to
+ * expired. Nothing is recorded, and the signer stays pending.
  *
- * Email and the signed PDF. The final signature starts the fully-signed fan
- * out (lib/contract-fully-signed-emails.ts), which renders the PDF, writes it
- * to R2 and only then mails it. That function returns before the R2 write when
- * RESEND_API_KEY is unset, so on a key-less server signedStorageKey stays null
- * until somebody downloads the PDF. The QA harness therefore runs its dev
- * server with RESEND_API_KEY set to a dead value: the PDF is written, and
- * every send is refused by Resend (the allowlist already holds back every
- * address but business@tahi.studio, and every signer here is on example.com).
- * The file skips unless E2E_DEAD_RESEND_KEY=1 says the server holds that dead
- * key (skipUnlessMailIsDead in e2e/helpers.ts).
+ * The signed PDF and the dead key. The final signature starts the fully-signed
+ * fan out (lib/contract-fully-signed-emails.ts), which renders the PDF and
+ * writes it to R2 and signedStorageKey before it decides whether to mail
+ * anyone, so the key is written on any server, with a key, a dead key or none.
+ * The dead key is there for the mail alone: Resend refuses every send, on top
+ * of the allowlist, which already holds back every address but
+ * business@tahi.studio (every signer here is on example.com).
  *
  * Data: every contract is created here under a unique name and deleted in a
  * finally, and its signers and signatures go with it through the ON DELETE
@@ -62,7 +73,7 @@ import {
  * e2e/sales-publish.spec.ts). The stamped PDF stays in the local R2 bucket,
  * which has no delete route; the bell rows are marked read.
  *
- * One project only: the viewport is pinned to 375px for the whole file.
+ * One project only: the whole file runs on the 375px phone context.
  */
 
 interface SignerSeed {
@@ -108,19 +119,21 @@ const TINY_SIGNATURE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCA
 /** WCAG AA for body text. */
 const MIN_CONTRAST = 4.5
 
-const PHONE = { width: 375, height: 812 }
+/** The expired state's deadline sentence; the date is in the reader's locale. */
+const DEADLINE_LAPSED = /Its signing deadline was .+, so it can no longer be signed from this link\./
 
 /**
- * A touch screen as well as the phone's width, so the client signer can sign
- * with a finger. Mouse input still works in the same page, and the dark mode
- * context below is opened without touch, so both input paths get a signer.
+ * A phone for every page in the file: the client signer's finger needs the
+ * touch screen, and the 375px checks need a mobile layout viewport rather
+ * than a narrow desktop window. Mouse input still works on the same context,
+ * which is how the studio signer below covers the pad's mouse path.
  */
-test.use({ viewport: PHONE, hasTouch: true })
+test.use({ ...PHONE_CONTEXT })
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(
     testInfo.project.name !== 'chromium',
-    'The viewport is pinned to 375px in this file; a second project would only repeat the same fixtures.',
+    'The whole file runs on a 375px phone context; a second project would only repeat the same fixtures.',
   )
   skipUnlessMailIsDead()
   await primePage(page)
@@ -310,6 +323,22 @@ async function inkedPixels(page: Page): Promise<number> {
   })
 }
 
+/**
+ * The length of a blank pad's PNG export: a fresh canvas the size of the pad's
+ * backing store, exported the way the pad submits (toDataURL 'image/png'). A
+ * stored signature no longer than this carries no ink, whatever the pad showed
+ * on screen.
+ */
+async function blankPadExportLength(page: Page): Promise<number> {
+  return page.locator('canvas').evaluate((el) => {
+    const pad = el as HTMLCanvasElement
+    const blank = document.createElement('canvas')
+    blank.width = pad.width
+    blank.height = pad.height
+    return blank.toDataURL('image/png').length
+  })
+}
+
 /** Both pad buttons at or over the 44px touch floor. */
 async function expectPadTouchTargets(page: Page): Promise<void> {
   for (const name of ['Clear', 'Sign and submit']) {
@@ -318,7 +347,11 @@ async function expectPadTouchTargets(page: Page): Promise<void> {
   }
 }
 
-async function signAs(page: Page, signerName: string, via: 'mouse' | 'touch'): Promise<void> {
+/**
+ * Draw, tick the intent box and submit. Returns the blank export length for
+ * this pad, so the caller can hold the stored signature to more than that.
+ */
+async function signAs(page: Page, signerName: string, via: 'mouse' | 'touch'): Promise<number> {
   if (via === 'touch') await watchPad(page)
   await drawSignature(page, via)
   if (via === 'touch') {
@@ -328,8 +361,30 @@ async function signAs(page: Page, signerName: string, via: 'mouse' | 'touch'): P
     expect(heard.cancels, 'the browser cancelled the stroke to scroll the page').toBe(0)
   }
   expect(await inkedPixels(page), 'the stroke left no ink on the pad').toBeGreaterThan(50)
+  const blankLength = await blankPadExportLength(page)
   await page.getByRole('checkbox', { name: new RegExp(`I am ${signerName}`) }).check()
   await page.getByRole('button', { name: 'Sign and submit' }).click()
+  return blankLength
+}
+
+/**
+ * Record, from before the first byte of the page parses, whether a canvas was
+ * ever in the document, so "no pad" covers the loading frames as well as the
+ * settled page. The observer hangs off the document for the reason the dark
+ * mode watcher's does.
+ */
+async function watchForPad(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const seen = window as Window & { __padSeen?: boolean }
+    seen.__padSeen = false
+    new MutationObserver(() => {
+      if (document.querySelector('canvas')) seen.__padSeen = true
+    }).observe(document, { subtree: true, childList: true })
+  })
+}
+
+async function padWasSeen(page: Page): Promise<boolean | undefined> {
+  return page.evaluate(() => (window as Window & { __padSeen?: boolean }).__padSeen)
 }
 
 /**
@@ -403,16 +458,21 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
       const studioLink = signerNamed(sent.signers, studioSide.name)
 
       // ── The client signs on a phone with a finger, light theme ───────────
+      // The pad watcher runs here too, as the control for the refusal tests
+      // below: it has to see a pad that is really there.
+      await watchForPad(page)
       await page.goto(clientLink.signPath)
       await expect(page.getByRole('heading', { name: 'Dana, draw your signature' })).toBeVisible({ timeout: 60_000 })
+      expect(await padWasSeen(page), 'the pad watcher missed a pad that is on screen').toBe(true)
       await expect(page.getByText(clause)).toBeVisible()
-      await expectNoHorizontalScroll(page)
+      await expectFitsPhone(page)
       await expectPadTouchTargets(page)
 
-      await signAs(page, client.name, 'touch')
+      const blankExport: Record<string, number> = {}
+      blankExport[clientLink.id] = await signAs(page, client.name, 'touch')
       await expect(page.getByRole('heading', { name: 'Your signature is in' })).toBeVisible()
       await expect(page.getByText('1 of 2 signed so far.')).toBeVisible()
-      await expectNoHorizontalScroll(page)
+      await expectFitsPhone(page)
 
       await expect.poll(() => contractStatus(studio, id)).toBe('partially_signed')
       await expect
@@ -420,7 +480,7 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
         .toContain('contract_partially_signed')
 
       // ── The studio signs with a mouse, dashboard theme dark ──────────────
-      const dark = await browser.newContext({ viewport: PHONE, baseURL })
+      const dark = await browser.newContext({ ...PHONE_CONTEXT, baseURL })
       try {
         const darkPage = await dark.newPage()
         await primePage(darkPage)
@@ -428,34 +488,35 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
           try {
             localStorage.setItem('tahi-theme', 'dark')
           } catch {
-            // Storage can be unavailable in some contexts; the check below says so.
+            // Storage can be unavailable in some contexts; the control below says so.
           }
-          // Record whether the root layout's blocking script ever applied the
-          // class, so "no .dark after hydration" cannot pass on a page that
-          // simply never read the preference. The observer hangs off the
-          // document rather than <html>, which does not exist yet when an init
-          // script runs.
+          // Record, per document, whether `.dark` was ever on <html>, from
+          // before the first byte parses: the class the root layout's
+          // blocking script adds is gone again after hydration on a page
+          // that strips it, so only a watcher this early sees a dark first
+          // frame. The observer hangs off the document rather than <html>,
+          // which does not exist yet when an init script runs.
           const seen = window as Window & { __tahiDarkSeen?: boolean }
           seen.__tahiDarkSeen = false
           new MutationObserver(() => {
             if (document.documentElement?.classList.contains('dark')) seen.__tahiDarkSeen = true
           }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] })
         })
+        const darkWasSeen = () =>
+          darkPage.evaluate(() => (window as Window & { __tahiDarkSeen?: boolean }).__tahiDarkSeen)
+
+        // The control: outside /p/ this phone's stored preference paints the
+        // page dark, so the watcher and the preference both work.
+        await darkPage.goto('/offline')
+        await expect
+          .poll(darkWasSeen, { message: 'the root layout never applied the dark class on /offline, so the check below proves nothing' })
+          .toBe(true)
+
         await darkPage.goto(studioLink.signPath)
         await expect(darkPage.getByRole('heading', { name: 'Sam, draw your signature' })).toBeVisible({ timeout: 60_000 })
-
-        // The preference really was dark and reached the page, and the public
-        // layout stripped it again.
         expect(await darkPage.evaluate(() => localStorage.getItem('tahi-theme'))).toBe('dark')
-        expect(
-          await darkPage.evaluate(() => (window as Window & { __tahiDarkSeen?: boolean }).__tahiDarkSeen),
-          'the root layout never applied the dark class, so this check proves nothing',
-        ).toBe(true)
-        await expect
-          .poll(() => darkPage.evaluate(() => document.documentElement.classList.contains('dark')), {
-            message: 'the dashboard dark class bled into the public contract',
-          })
-          .toBe(false)
+        expect(await darkWasSeen(), 'the dashboard dark class reached the public contract, if only for a frame').toBe(false)
+        expect(await darkPage.evaluate(() => document.documentElement.classList.contains('dark'))).toBe(false)
 
         for (const [label, locator] of [
           ['the agreement body', darkPage.getByText(clause)],
@@ -465,13 +526,14 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
         ] as const) {
           expect(await contrastOf(locator), `${label} is unreadable in dark mode`).toBeGreaterThanOrEqual(MIN_CONTRAST)
         }
-        await expectNoHorizontalScroll(darkPage)
+        await expectFitsPhone(darkPage)
         await expectPadTouchTargets(darkPage)
 
-        await signAs(darkPage, studioSide.name, 'mouse')
+        blankExport[studioLink.id] = await signAs(darkPage, studioSide.name, 'mouse')
         await expect(darkPage.getByRole('heading', { name: 'Fully signed' })).toBeVisible()
         await expect(darkPage.getByText('Contract executed')).toBeVisible()
-        await expectNoHorizontalScroll(darkPage)
+        await expectFitsPhone(darkPage)
+        expect(await darkWasSeen(), 'the signed state brought the dashboard dark class back').toBe(false)
       } finally {
         await dark.close()
       }
@@ -486,25 +548,46 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
       for (const signature of signed.signatures) {
         expect(signature.signatureDataUrl.startsWith('data:image/png')).toBe(true)
         expect(signature.bodyHash, 'a signature is not anchored to the body it signed').toBeTruthy()
+        const blankLength = blankExport[signature.signerId]
+        expect(blankLength, `no blank export was measured for signer ${signature.signerId}`).toBeGreaterThan(0)
+        expect(signature.signatureDataUrl.length, 'a stored signature is no bigger than a blank pad\'s export')
+          .toBeGreaterThan(blankLength)
       }
 
-      // ── The stamped PDF, stored and served ───────────────────────────────
-      // Written by the fully-signed fan out after the response went back, so
-      // it is polled rather than read once.
+      // ── The stamped PDF, stored by the fan out and served ────────────────
+      // The fan out runs after the signer's response went back, so the key is
+      // polled rather than read once. Nothing has downloaded the PDF yet, and
+      // the download routes are the only other writer of this key (they
+      // backfill it on a rebuild, lib/contract-signed-artifact.ts), so the
+      // key appearing here is the fan out's own write. It persists before any
+      // send decision, so the dead key has no say in it.
       await expect
         .poll(async () => (await readContract(studio, id)).contract.signedStorageKey, {
-          message: 'the signed PDF was never written to R2 (on a server with no RESEND_API_KEY at all the fan out '
-            + 'returns before the write, lib/contract-fully-signed-emails.ts; run the server with a dead key)',
+          message: 'the fully-signed fan out never wrote the signed PDF to R2 (lib/contract-fully-signed-emails.ts)',
           timeout: 30_000,
         })
         .toBe(`contracts/${id}/signed.pdf`)
       const adminPdf = await studio.get(`/api/admin/contracts/${id}/signed-pdf`)
       expect(adminPdf.status()).toBe(200)
       expect(adminPdf.headers()['content-type']).toContain('application/pdf')
-      expect((await adminPdf.body()).subarray(0, 5).toString('latin1')).toBe('%PDF-')
+      const stamped = (await adminPdf.body()).toString('latin1')
+      expect(stamped.startsWith('%PDF-')).toBe(true)
+      // jsPDF writes its text uncompressed, so the stamp is readable here.
+      for (const signerName of [client.name, studioSide.name]) {
+        expect(stamped, `the stamped PDF does not name ${signerName}`).toContain(signerName)
+      }
+      expect(stamped, 'the stamped PDF still lists a signer as awaiting').not.toContain('Awaiting signature')
+      expect(
+        stamped.match(/\/Subtype\s*\/Image/g)?.length ?? 0,
+        'the stamped PDF does not carry both signature images',
+      ).toBeGreaterThanOrEqual(2)
       const signerPdf = await request.get(`/api/public/contracts/${sent.token}/signed-pdf`)
       expect(signerPdf.status()).toBe(200)
-      expect((await signerPdf.body()).subarray(0, 5).toString('latin1')).toBe('%PDF-')
+      expect((await signerPdf.body()).toString('latin1'), 'the signer download is not the stored PDF').toBe(stamped)
+      expect(
+        (await readContract(studio, id)).contract.signedStorageKey,
+        'a download moved the stored key',
+      ).toBe(`contracts/${id}/signed.pdf`)
 
       // ── The studio heard about the final signature too ───────────────────
       await expect
@@ -517,7 +600,7 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
       await page.goto(`/p/contract/${sent.token}`)
       await expect(page.getByText('Every signatory has signed. The contract is fully executed.')).toBeVisible({ timeout: 60_000 })
       await expect(page.getByText('All signatures have been recorded.')).toBeVisible()
-      await expectNoHorizontalScroll(page)
+      await expectFitsPhone(page)
       await page.goto(clientLink.signPath)
       await expect(page.getByText(`${client.name}, you have already signed this contract.`)).toBeVisible({ timeout: 60_000 })
       await expect(page.locator('canvas')).toHaveCount(0)
@@ -543,16 +626,20 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
       const cancel = await studio.patch(`/api/admin/contracts/${id}`, { data: { status: 'cancelled' } })
       expect(cancel.ok(), 'the cancel was refused').toBeTruthy()
 
-      expect((await request.get(`/api/public/contracts/${sent.token}`)).status()).toBe(410)
+      const read = await request.get(`/api/public/contracts/${sent.token}`)
+      expect(read.status()).toBe(410)
+      expect(await read.json()).toMatchObject({ reason: 'cancelled' })
       const attempt = await request.post(`/api/public/contracts/${sent.token}/sign/${link.id}`, {
         data: { signatureDataUrl: TINY_SIGNATURE },
       })
       expect(attempt.status(), 'a cancelled contract took a signature').toBe(410)
 
+      await watchForPad(page)
       await page.goto(link.signPath)
-      await expect(page.getByRole('heading', { name: "This contract isn't available" })).toBeVisible({ timeout: 60_000 })
+      await expect(page.getByRole('heading', { name: 'This contract is no longer active' })).toBeVisible({ timeout: 60_000 })
       await expect(page.locator('canvas')).toHaveCount(0)
-      await expectNoHorizontalScroll(page)
+      expect(await padWasSeen(page), 'a signature pad rendered on a cancelled contract').toBe(false)
+      await expectFitsPhone(page)
 
       const record = await readContract(studio, id)
       expect(record.contract.status).toBe('cancelled')
@@ -562,14 +649,15 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
     }
   })
 
-  test('a contract past its expiry refuses the signature it lets the signer draw', async ({ page, studio }) => {
+  test('a contract past its expiry shows the expired state before any pad, and the sign route refuses it', async ({ page, request, studio }) => {
     test.setTimeout(120_000)
     const tag = runTag()
+    const clause = `A contract whose expiry passed before it was signed (${tag}).`
     const signer: SignerSeed = { role: 'client', name: 'Dana Whitlock', email: `d3-lapsed-${tag}@example.com` }
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
     const id = await createContract(studio, {
       name: `D3 lapsed ${tag}`,
-      clause: `A contract whose expiry passed before it was signed (${tag}).`,
+      clause,
       signers: [signer],
       expiresAt: yesterday,
     })
@@ -578,22 +666,57 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
       const sent = await sendContract(studio, id)
       const link = signerNamed(sent.signers, signer.name)
 
-      // The public read does not look at the date (only the sign route does),
-      // so the pad still renders. The refusal comes on submit.
+      // The read refuses once the deadline has passed, before any document
+      // goes out, and says why. It does not write: the row still reads
+      // 'sent', so the studio can extend the expiry and revive the link.
+      const read = await request.get(`/api/public/contracts/${sent.token}`)
+      expect(read.status(), 'the read served a contract past its signing deadline').toBe(410)
+      const refusal = await read.json() as { reason?: string; expiresAt?: string | null; contract?: unknown }
+      expect(refusal.reason).toBe('expired')
+      expect(refusal.expiresAt).toBe(yesterday)
+      expect(refusal.contract, 'the refusal carried the document anyway').toBeUndefined()
+      expect(await contractStatus(studio, id), 'the read wrote to the row').toBe('sent')
+
+      // The signer's link: the expired state, and no pad at any point, the
+      // loading frames included.
+      await watchForPad(page)
       await page.goto(link.signPath)
-      await expect(page.getByRole('heading', { name: 'Dana, draw your signature' })).toBeVisible({ timeout: 60_000 })
-      await signAs(page, signer.name, 'mouse')
-      await expect(page.getByText('This contract has expired.')).toBeVisible()
-      await expectNoHorizontalScroll(page)
+      await expect(page.getByRole('heading', { name: 'This contract has expired' })).toBeVisible({ timeout: 60_000 })
+      await expect(page.getByText(DEADLINE_LAPSED)).toBeVisible()
+      await expect(page.locator('canvas')).toHaveCount(0)
+      await expect(page.getByRole('button', { name: 'Sign and submit' })).toHaveCount(0)
+      await expect(page.getByText(clause)).toHaveCount(0)
+      expect(await padWasSeen(page), 'a signature pad rendered before the expired state').toBe(false)
+      await expectFitsPhone(page)
+
+      // The page offering no pad is a courtesy; the sign route is the
+      // guarantee. A signature posted straight to it is refused, and that
+      // attempt is what writes 'expired' onto the row.
+      const attempt = await request.post(`/api/public/contracts/${sent.token}/sign/${link.id}`, {
+        data: { signatureDataUrl: TINY_SIGNATURE },
+      })
+      expect(attempt.status(), 'a lapsed contract took a signature').toBe(410)
+      expect(await attempt.json()).toMatchObject({ error: 'This contract has expired.' })
 
       const record = await readContract(studio, id)
       expect(record.contract.status, 'the sign route should flip a lapsed contract to expired').toBe('expired')
+      expect(record.contract.signedAt, 'a lapsed contract was dated as signed').toBeNull()
       expect(record.signatures, 'a lapsed contract kept a signature').toHaveLength(0)
-      expect(record.signers.every(s => s.status === 'pending')).toBe(true)
+      expect(record.signers, 'the lapsed contract lost its signer').toHaveLength(1)
+      expect(record.signers.every(s => s.status === 'pending'), 'a signer on a lapsed contract is no longer pending').toBe(true)
 
-      // Once flipped, the link is closed for good.
+      // Once flipped, the route still refuses, and the link still reads as
+      // expired against the deadline that lapsed.
+      const again = await request.post(`/api/public/contracts/${sent.token}/sign/${link.id}`, {
+        data: { signatureDataUrl: TINY_SIGNATURE },
+      })
+      expect(again.status(), 'an expired contract took a signature').toBe(410)
       await page.reload()
-      await expect(page.getByRole('heading', { name: "This contract isn't available" })).toBeVisible({ timeout: 60_000 })
+      await expect(page.getByRole('heading', { name: 'This contract has expired' })).toBeVisible({ timeout: 60_000 })
+      await expect(page.getByText(DEADLINE_LAPSED)).toBeVisible()
+      expect(await padWasSeen(page), 'a signature pad rendered on an expired contract').toBe(false)
+      await expectFitsPhone(page)
+      expect((await readContract(studio, id)).signatures).toHaveLength(0)
     } finally {
       await deleteContract(studio, id)
     }

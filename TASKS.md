@@ -510,6 +510,27 @@ retires the dead C3 contract-signature template. D3 below. D4 = CT.15.
   finger (touch pointers, no pointercancel, so the pad's touch-action is held),
   contrastOf fails closed on colours it cannot parse, and both files skip
   unless E2E_DEAD_RESEND_KEY=1 (docs/local-dev-and-qa.md).
+  Second review, same day: the lapsed-contract test asserted the pad renders
+  on an expired contract, which enshrined the bug. Re-run against the
+  contract-truth fix (branch worktree-wf_ec5fab9c-8f3-3, merged into the spec
+  branch for the run only), the specs now hold the fixed behaviour: the read
+  410s with reason expired before any document goes out, the link shows the
+  expired state and no canvas ever renders, a signature posted straight to the
+  sign route 410s and is what flips the row to expired, no signature row, the
+  signer stays pending. A cancelled link reads "no longer active". The dark
+  mode check now requires no `.dark` on the public contract at all, not even
+  a first frame, with /offline as the control that the preference is live.
+  The signed PDF has to be written by the fan out before anything downloads it
+  (it persists before the send decision now), names both signers, embeds both
+  signature images, and the signer download is byte-identical to the stored
+  one; each stored signature has to be longer than a blank pad's export. Both
+  files run on a 375px phone context (isMobile and hasTouch, PHONE_CONTEXT in
+  e2e/helpers.ts) with the no-horizontal-scroll check re-verified there, and
+  the E2E_DEAD_RESEND_KEY requirement heads both files and the doc. Specs
+  green on the harness against the fixed product, each file alone with
+  --workers=1, three runs in a row (webpack dev from a detached worktree at
+  the merged commit, dead RESEND_API_KEY, local D1 with every migration
+  through 0110). Still owed: the live rehearsal with real inboxes (T3.QA).
 
 ## Batch E. Messages, unhidden
 
