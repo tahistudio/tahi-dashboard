@@ -18,9 +18,13 @@
  *   stops Slack's retry of a tapped Approve from deciding the same suggestion
  *   twice.
  *
- * The reply is a bare 200 with no body, which is what Slack wants for both
- * payload types: a message rewrite happens through chat.update from the
- * handler, not by returning a message here.
+ * A button click is answered with a bare 200 and no body: a message rewrite
+ * happens through chat.update from the handler, not by returning a message
+ * here. A modal submit is the one payload whose answer Slack reads, and it
+ * gets VIEW_SUBMISSION_ACK (`response_action: 'clear'`), which closes the
+ * modal whatever happens next. lib/slack/dispatch.ts says why it is that
+ * answer and why it is fixed; the work behind a submit plugs in on
+ * lib/slack/action-registry.ts, never here.
  */
 
 import { NextResponse } from 'next/server'
@@ -28,6 +32,7 @@ import { db } from '@/lib/db'
 import { verifySlackRequest } from '@/lib/slack/verify'
 import { deferSlackWork } from '@/lib/slack/defer'
 import {
+  VIEW_SUBMISSION_ACK,
   handleSlackInteraction,
   parseInteractivePayload,
   rememberSlackEvent,
@@ -68,6 +73,12 @@ export async function POST(req: Request) {
     if (!(await rememberSlackEvent(database, triggerId))) return
     await handleSlackInteraction(database, payload)
   })
+
+  // Decided from the payload type alone, before any identity or registry
+  // lookup, so the answer can never be the thing that misses three seconds.
+  if (payload.type === 'view_submission') {
+    return NextResponse.json(VIEW_SUBMISSION_ACK)
+  }
 
   return new NextResponse(null, { status: 200 })
 }
