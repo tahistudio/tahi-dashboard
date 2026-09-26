@@ -14,8 +14,18 @@
  * the acting contact and the right trigger, and that an upload BY THE STUDIO
  * does not.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
+// The Slack thread line (CN.3): armed only when the token is set, with the
+// queue recorded rather than deferred.
+vi.mock('@/lib/slack/work-sync', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/slack/work-sync')>('@/lib/slack/work-sync')
+  return {
+    ...actual,
+    workSyncArmed: () => !!process.env.SLACK_BOT_TOKEN,
+    queueWorkSync: vi.fn(async () => undefined),
+  }
+})
 vi.mock('@/lib/db', () => ({ db: vi.fn() }))
 vi.mock('@/lib/require-feature', () => ({ requirePortalFeature: vi.fn() }))
 vi.mock('@/lib/notify-request-team', () => ({ notifyRequestTeam: vi.fn() }))
@@ -39,6 +49,7 @@ import { getPortalAuth, getRequestAuth } from '@/lib/server-auth'
 import { requirePortalFeature } from '@/lib/require-feature'
 import { resolveOwnerOrgForUpload } from '@/lib/upload-access'
 import { handBackOnClientAction } from '@/lib/request-handoff'
+import { queueWorkSync } from '@/lib/slack/work-sync'
 import { NextRequest } from 'next/server'
 import { POST as REVIEW } from '@/app/api/portal/requests/[id]/review/route'
 import { POST as THREAD } from '@/app/api/portal/requests/[id]/messages/route'
@@ -132,6 +143,93 @@ describe('approving in client review hands the request back', () => {
     const res = await REVIEW(req({ decision: 'changes', note: 'Shorten the hero' }), params('req-1'))
     expect(res.status).toBe(200)
     expect(vi.mocked(handBackOnClientAction)).not.toHaveBeenCalled()
+  })
+})
+
+describe('the client review and the Slack thread line (CN.3)', () => {
+  function req(body: unknown) {
+    return new NextRequest('http://localhost:3000/api/portal/requests/req-1/review', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('queues an approval as the client, in their words', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const { handle } = makeDb([[REQUEST], [], [CONTACT]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await REVIEW(req({ decision: 'approve' }), params('req-1'))
+    expect(res.status).toBe(200)
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([{
+      entityType: 'request',
+      entityId: 'req-1',
+      actor: { type: 'client', contactId: 'contact-1', clerkUserId: 'user_ngaire', actingAsTeamMemberId: null },
+      changes: [{ field: 'status', from: 'client_review', to: 'delivered', phrase: 'approved it' }],
+    }])
+  })
+
+  it('queues a change request as "asked for changes"', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const { handle } = makeDb([[REQUEST], [], [CONTACT]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    await REVIEW(req({ decision: 'changes', note: 'Shorten the hero' }), params('req-1'))
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1][0].changes).toEqual([
+      { field: 'status', from: 'client_review', to: 'in_progress', phrase: 'asked for changes' },
+    ])
+  })
+
+  it('names the studio acting for the client, standing in the previewed seat', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    vi.mocked(getPortalAuth).mockResolvedValue({
+      orgId: 'org-a',
+      userId: 'user_liam',
+      clerkOrgId: 'org_clerk_a',
+      contactId: 'contact-1',
+      impersonating: true,
+      canWriteAsClient: true,
+      actingAs: {
+        adminUserId: 'user_liam',
+        adminTeamMemberId: 'tm_liam',
+        adminName: 'Liam Miller',
+        orgId: 'org-a',
+        contactId: 'contact-1',
+      },
+    } as never)
+    // The contact lookup by the admin's own login finds nobody.
+    const { handle } = makeDb([[REQUEST], [], []])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await REVIEW(req({ decision: 'approve' }), params('req-1'))
+    expect(res.status).toBe(200)
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1][0].actor).toEqual({
+      type: 'client', contactId: 'contact-1', clerkUserId: 'user_liam', actingAsTeamMemberId: 'tm_liam',
+    })
+  })
+
+  it('queues nothing while Slack is not configured', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', '')
+    const { handle } = makeDb([[REQUEST], [], [CONTACT]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await REVIEW(req({ decision: 'approve' }), params('req-1'))
+    expect(res.status).toBe(200)
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+  })
+
+  it('queues nothing for a request that is not in client review', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const { handle } = makeDb([[{ ...REQUEST, status: 'in_progress' }]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await REVIEW(req({ decision: 'approve' }), params('req-1'))
+    expect(res.status).toBe(400)
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
   })
 })
 

@@ -8,6 +8,7 @@ import { TASK_STATUSES } from '@/lib/status-config'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { createNotification, createNotificationsForRecipient } from '@/lib/notifications'
 import { resolveTeamMember } from '@/lib/team-identity'
+import { diffWorkFields, queueWorkSync, workSyncArmed, type WorkChange, type WorkField } from '@/lib/slack/work-sync'
 
 /**
  * How many tasks a bulk assign will name one by one before it summarises.
@@ -108,13 +109,18 @@ export async function PATCH(req: NextRequest) {
   // The title comes back with the id because the assignment notification
   // below names each task, exactly as the per-task door does, and the current
   // assignee comes back so re-running an assign over a selection that is
-  // already theirs stays quiet instead of ringing again per row.
+  // already theirs stays quiet instead of ringing again per row. The status,
+  // priority and due date come back as the before-state of the Slack thread
+  // lines (CN.3), in the same query.
   const idClause = inArray(schema.tasks.id, taskIds)
   const reachable = await drizzle
     .select({
       id: schema.tasks.id,
       title: schema.tasks.title,
       assigneeId: schema.tasks.assigneeId,
+      status: schema.tasks.status,
+      priority: schema.tasks.priority,
+      dueDate: schema.tasks.dueDate,
     })
     .from(schema.tasks)
     .where(scopeClause ? and(idClause, scopeClause) : idClause)
@@ -170,6 +176,29 @@ export async function PATCH(req: NextRequest) {
         )
       }
     }
+  }
+
+  // One Slack batch for the whole selection (CN.3), holding only the rows
+  // that actually moved. The engine caps how many lines one batch posts.
+  if (workSyncArmed()) {
+    const after: Partial<Record<WorkField, string | null>> = {}
+    if (updates.status !== undefined) after.status = updates.status
+    if (updates.assigneeId !== undefined) after.assignee = updates.assigneeId || null
+    if (updates.dueDate !== undefined) after.dueDate = updates.dueDate || null
+    if (updates.priority !== undefined) after.priority = updates.priority
+    const batch: WorkChange[] = []
+    for (const task of reachable) {
+      const changes = diffWorkFields({
+        status: task.status ?? null,
+        assignee: task.assigneeId ?? null,
+        dueDate: task.dueDate ?? null,
+        priority: task.priority ?? null,
+      }, after)
+      if (changes.length > 0) {
+        batch.push({ entityType: 'task', entityId: task.id, actor: { type: 'studio', clerkUserId: userId ?? null }, changes })
+      }
+    }
+    if (batch.length > 0) await queueWorkSync(drizzle, batch)
   }
 
   return NextResponse.json({ success: true, updatedCount: reachableIds.length })
