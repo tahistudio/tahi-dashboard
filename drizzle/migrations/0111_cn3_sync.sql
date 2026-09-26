@@ -27,6 +27,11 @@
 -- EXISTS, and the ALTER is re-run safe through the runner's duplicate-column
 -- catch, as 0109 is. Apply BEFORE deploying: db/schema.ts names
 -- reject_reason, so every full-row select of task_suggestions reads it.
+-- The runner deployed before this change does not know 0111, so the way to
+-- apply it first is this file:
+--   npx wrangler d1 execute tahi-db --remote --file=drizzle/migrations/0111_cn3_sync.sql
+-- once. A second run of this file fails on the ALTER (the column exists);
+-- the runner's '0111' after the deploy is the safe re-run.
 
 ALTER TABLE task_suggestions ADD COLUMN reject_reason text;
 CREATE INDEX IF NOT EXISTS idx_task_suggestions_applied_task ON task_suggestions(applied_task_id);
