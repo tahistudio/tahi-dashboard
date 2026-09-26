@@ -87,6 +87,13 @@ const CRONS: CronDef[] = [
     schedule: 'Daily 06:00 NZT',
   },
   {
+    cron: 'snapshot-metrics',
+    label: 'Monthly financial snapshot',
+    description: 'Freezes this month\'s cash, money owed, MRR, active clients, burn and runway into financial_snapshots, one row per month, rewritten daily until the month closes. Runs right after the Airwallex sync. The overview\'s MRR delta and the cash trend read these rows. Also sweeps week-old Slack retry ids. Run now writes the current month only. A missing past month is filled with ?fill=YYYY-MM, which inserts that one month and never overwrites.',
+    endpoint: '/api/admin/cron/snapshot-metrics',
+    schedule: 'Daily 06:00 NZT',
+  },
+  {
     cron: 'finance-anomaly-scan',
     label: 'Finance anomaly scan (AI)',
     description: 'Sonnet walks bank balances + commitments + AR + pipeline + MRR and surfaces 0-8 anomalies worth a look. Findings drop into Notifications as finance_anomaly events, deduped across 30-day windows.',
@@ -96,14 +103,14 @@ const CRONS: CronDef[] = [
   {
     cron: 'ideation',
     label: 'Content ideation',
-    description: 'Pulls GA4 + GSC + sitemap signals, asks Sonnet for 6-8 content ideas, drops them into /content-studio Ideas tab for triage. Disabled by default — toggle on in Settings → Content engine signals.',
+    description: 'Pulls GA4 + GSC + sitemap signals, asks Sonnet for 6-8 content ideas, drops them into /content-studio Ideas tab for triage. Disabled by default; toggle on in Settings → Content engine signals.',
     endpoint: '/api/admin/cron/ideation',
     schedule: 'Weekly Mon 08:00 UK (disabled by default)',
   },
   {
     cron: 'link-engine-scan',
     label: 'Internal link engine',
-    description: 'Scans every blog post published in the last 14 days, finds phrases in older posts where an inbound link to the fresh post would land naturally, drops the patches into /content-studio Links tab for Liam to approve. Disabled by default — toggle on via content.linkEngineEnabled setting.',
+    description: 'Scans every blog post published in the last 14 days, finds phrases in older posts where an inbound link to the fresh post would land naturally, drops the patches into /content-studio Links tab for Liam to approve. Disabled by default; toggle on via the content.linkEngineEnabled setting.',
     endpoint: '/api/admin/cron/link-engine-scan',
     schedule: 'Weekly Mon 09:00 UK (disabled by default)',
   },
@@ -138,7 +145,7 @@ export async function GET(req: NextRequest) {
 
   const database = await db() as unknown as D1
 
-  // Fetch the latest 10 runs per cron — small, single query per cron.
+  // Fetch the latest 10 runs per cron: small, a single query per cron.
   // Could be one window-function query but D1 doesn't love window funcs,
   // so we run a tight loop.
   const items = await Promise.all(CRONS.map(async (cron) => {

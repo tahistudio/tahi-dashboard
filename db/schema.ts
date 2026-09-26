@@ -1579,10 +1579,13 @@ export const airwallexTransactions = sqliteTable('airwallex_transactions', {
 // get corrected by late-arriving invoices. This table holds only the
 // point-in-time figures that would otherwise be lost.
 //
-// Backfilled rows (source = 'backfill') carry only cash_nzd, reconstructed
+// Backfilled rows (source = 'backfill') are rebuilt after the fact: cash_nzd
 // by walking the Airwallex transaction ledger backwards from today's
-// balance. MRR / owed / active_clients cannot be honestly reconstructed,
-// so they stay null for backfilled months.
+// balance, burn / runway from the stored Xero P&L. A single-month fill
+// (?fill=YYYY-MM) also carries owed_nzd when the invoice dates prove it.
+// MRR / active_clients have no stored history and cannot be honestly
+// reconstructed, so they stay null for backfilled months. Neither the
+// backfill nor the fill overwrites an existing row by default.
 export const financialSnapshots = sqliteTable('financial_snapshots', {
   monthKey: text('month_key').primaryKey(),          // YYYY-MM (UTC)
   // Real bank cash at month end, NZD, Airwallex-first (matches the Cash card).
@@ -1596,7 +1599,8 @@ export const financialSnapshots = sqliteTable('financial_snapshots', {
   burnNzd: real('burn_nzd'),
   // cash / burn. Null when burn is unknown or not positive.
   runwayMonths: real('runway_months'),
-  // 'cron' = full monthly snapshot; 'backfill' = cash-only reconstruction.
+  // 'cron' = full monthly snapshot; 'backfill' = rebuilt after the fact,
+  // with every field that could not be rebuilt left null.
   source: text('source').notNull().default('cron'),
   // ISO timestamp of the write that produced this row's values.
   capturedAt: text('captured_at').notNull(),

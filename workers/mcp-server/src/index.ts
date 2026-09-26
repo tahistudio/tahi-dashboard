@@ -11,6 +11,7 @@ import { requestToolCall } from './request-tools'
 import { taskCommentToolCall } from './task-comment-tools'
 import { taskSuggestionToolCall } from './task-suggestion-tools'
 import { feedbackToolCall } from './feedback-tools'
+import { snapshotToolCall } from './snapshot-tools'
 import {
   APPROVAL_ATTEMPT_LIMIT,
   APPROVAL_ATTEMPT_WINDOW_MS,
@@ -1174,7 +1175,7 @@ export const TOOLS: ToolDef[] = [
   }, ['dealId']),
 
   // ── Cron-style endpoints (admin-triggered, idempotent) ───────────────
-  tool('list_crons', 'List every scheduled job (pre-call digest, auto-promote, affiliate reactivation, daily summary, leads AI, calendar sync, drive transcripts) with each one\'s last-run status + summary + duration + most recent 10 runs. Reads from cron_runs (migration 0051).'),
+  tool('list_crons', 'List every scheduled job (pre-call digest, auto-promote, affiliate reactivation, daily summary, leads AI, calendar sync, drive transcripts, call-notes suggestions, Airwallex sync, monthly financial snapshot, finance anomaly scan, delivery watch, automation sweep and the content jobs) with each one\'s last-run status + summary + duration + most recent 10 runs. Reads from cron_runs (migration 0051). The monthly financial snapshot (cron snapshot-metrics) also records each snapshot_fill_month write, with mode fill in its summary.'),
   tool('cron_auto_promote_calls', 'Scans completed discovery_calls where outcome=\'promote\' and the linked lead isn\'t already promoted. Auto-creates a deal seeded with the call\'s budget signal + scope/summary notes. Idempotent via activity stamp dedup (30-day window).'),
   tool('cron_daily_summary', 'Computes day-over-day metrics (new leads, scoring, calls, replies, promotions) and pushes a single in-app notification to the default lead owner. Skip if a daily_summary was already pushed in the last 23h.'),
   tool('cron_affiliate_reactivation', 'Finds affiliateCode values that haven\'t sent a lead in the last 60 days (default), pushes a reactivation notification for each. Capped at 5 notifications per run; 30-day dedup per code.'),
@@ -1809,6 +1810,12 @@ export const TOOLS: ToolDef[] = [
     months: prop('number', 'Trailing months to include (default 12)'),
   }),
   tool('get_bank_balances', 'Current bank account balances + total NZD + runway months at current burn rate'),
+
+  // ── Monthly financial snapshots (financial_snapshots) ──────────────
+  tool('get_financial_snapshots', 'Read the stored monthly financial snapshots, oldest first: one row per month (monthKey YYYY-MM, UTC) with cashNzd, owedNzd, mrrNzd, activeClients, burnNzd, runwayMonths, source and capturedAt. source cron = the daily snapshot job\'s own reading, frozen when the month closed. source backfill = rebuilt after the fact, where any field that could not be honestly rebuilt is null. A month with no row was never captured. The overview\'s MRR delta compares live MRR against the latest earlier month whose mrrNzd is not null.'),
+  tool('snapshot_fill_month', 'Write ONE missing past month into financial_snapshots (source backfill), and nothing else: insert only, never an overwrite, no other month touched. Refused with nothing written: 409 when the month already has a row (whatever its source), 400 for the current month (the daily snapshot job owns it), a future month or a malformed month, 422 when no field can be rebuilt. Cash is rewound from the last synced Airwallex balances through the ledger (null if those balances were read before the month ended), burn is the trailing three months of the stored Xero P&L, runway is cash over burn, and money owed is rebuilt from invoice issue and paid dates only when every invoice\'s state at month end is provable (otherwise null, with the blocking invoices and the certain-to-possible range listed). MRR and active clients are always null: no history of custom_mrr or organisation status is kept. The response gives each field\'s value and basis, or why it was left null. Logged as a snapshot-metrics run (see list_crons).', {
+    month: prop('string', 'The month to fill, YYYY-MM (UTC), for example 2026-08. Must be a month that has ended and has no row.'),
+  }, ['month']),
   tool('fire_retainer_alerts', 'Send admin notifications for retainer churn risk (>=70) and upsell signals (>120% utilisation). Dedupes against alerts from the last 14 days.'),
   tool('list_migrations', 'List the database migrations baked into the dashboard runtime'),
   tool('run_migration', 'Apply a database migration by name. All statements use IF NOT EXISTS so re-running is safe.', {
@@ -2120,6 +2127,16 @@ async function executeTool(
   const feedbackCall = feedbackToolCall(name, args)
   if (feedbackCall) {
     return json(await apiWrite(feedbackCall.path, token, feedbackCall.method, feedbackCall.body))
+  }
+
+  // The monthly financial snapshot tools, same pattern again.
+  const snapshotCall = snapshotToolCall(name, args)
+  if (snapshotCall) {
+    return json(
+      snapshotCall.method === 'GET'
+        ? await apiGet(snapshotCall.path, token)
+        : await apiWrite(snapshotCall.path, token, snapshotCall.method, snapshotCall.body),
+    )
   }
 
   switch (name) {

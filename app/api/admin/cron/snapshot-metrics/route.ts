@@ -8,8 +8,28 @@
  * the freshest balances. Each run upserts the current month's row.
  *
  * ?backfill=1 additionally reconstructs past month-end cash from the
- * Airwallex ledger for months that have no snapshot yet, a one-time seed so
- * the cash trend has history rather than starting empty.
+ * Airwallex ledger for months that have NO row yet. It never overwrites an
+ * existing row: a re-run would otherwise restate settled months from
+ * today's FX and today's P&L.
+ *
+ * ?backfill=1&refresh=1 is the explicit opt-in to recompute the rows an
+ * earlier backfill wrote (source 'backfill'). A 'cron' row is never
+ * overwritten, refresh or not. refresh=1 without backfill=1 is refused (400).
+ *
+ * ?fill=YYYY-MM writes ONE missing past month and does nothing else: no
+ * current-month write, no backfill, no Slack sweep. Insert only, never an
+ * upsert; it touches no other month. Cash, burn and runway are rebuilt the
+ * way the backfill rebuilds them, money owed only when the invoice dates
+ * prove it, MRR and active clients never (no history of them is kept). The
+ * response names every field's value and basis, or why it was left null.
+ * See fillMonthSnapshot in lib/financial-snapshots.ts. Outcomes:
+ *   200 written, and logged to cron_runs as a snapshot-metrics run.
+ *   400 not YYYY-MM, the current month, a future month, or combined with
+ *       backfill / refresh.
+ *   409 the month already has a row. Nothing written.
+ *   422 no field could be rebuilt. Nothing written.
+ *   500 the write itself failed, logged to cron_runs as an error.
+ * Refusals write nothing and log nothing.
  *
  * It also carries one piece of daily housekeeping that has nothing to do with
  * money: the sweep of the Slack app's retry guard table (slack_events_seen,
@@ -19,7 +39,9 @@
  * after the snapshot and never decides the run's status, so a failed sweep
  * shows as a failed step and the snapshot still logs as a success.
  *
- * Response: { steps: [{ name, ok, error?, detail? }] }, always HTTP 200.
+ * Response (daily and backfill): { steps: [{ name, ok, error?, detail? }] },
+ * always HTTP 200. Fill: { mode: 'fill', steps } or { error, code }, with the
+ * statuses above.
  *
  * Auth: admin session (financial_reports feature) OR Bearer/x-cron-secret.
  */
@@ -28,7 +50,12 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logCronRun } from '@/lib/cron-runs'
-import { writeCurrentSnapshot, backfillCashFromLedger } from '@/lib/financial-snapshots'
+import {
+  writeCurrentSnapshot,
+  backfillCashFromLedger,
+  fillMonthSnapshot,
+  SnapshotFillRefusal,
+} from '@/lib/financial-snapshots'
 import { sweepSlackEventsSeen } from '@/lib/slack/events-seen'
 
 export const dynamic = 'force-dynamic'
@@ -57,15 +84,38 @@ export async function POST(req: NextRequest) {
     if (denied) return denied
   }
 
+  const params = new URL(req.url).searchParams
+  const fillMonth = params.get('fill')
+  const wantBackfill = params.get('backfill') === '1'
+  const wantRefresh = params.get('refresh') === '1'
+
+  // The fill is a one-month insert and nothing else, so it does not combine
+  // with the backfill flags.
+  if (fillMonth !== null && (wantBackfill || wantRefresh)) {
+    return NextResponse.json(
+      { error: 'fill runs on its own: drop backfill and refresh. A fill only ever inserts one missing month.', code: 'invalid_combination' },
+      { status: 400 },
+    )
+  }
+  if (wantRefresh && !wantBackfill) {
+    return NextResponse.json(
+      { error: 'refresh=1 only applies together with backfill=1.', code: 'invalid_combination' },
+      { status: 400 },
+    )
+  }
+
   const database = (await db()) as unknown as D1
+
+  if (fillMonth !== null) return runFill(database, fillMonth, t0)
+
   const steps: StepResult[] = []
 
-  // Optional one-time backfill of past month-end cash from the Airwallex
-  // ledger. Runs first so a fresh current-month write is never blocked by it.
-  const wantBackfill = new URL(req.url).searchParams.get('backfill') === '1'
+  // Optional backfill of past month-end cash from the Airwallex ledger, for
+  // months with no row (or, with refresh, the rows a backfill wrote). Runs
+  // first so a fresh current-month write is never blocked by it.
   if (wantBackfill) {
     try {
-      const detail = await backfillCashFromLedger(database)
+      const detail = await backfillCashFromLedger(database, new Date(), { refresh: wantRefresh })
       steps.push({ name: 'backfill-cash', ok: true, detail })
     } catch (err) {
       steps.push({ name: 'backfill-cash', ok: false, error: err instanceof Error ? err.message : 'Backfill failed' })
@@ -96,4 +146,29 @@ export async function POST(req: NextRequest) {
   await logCronRun(database, 'snapshot-metrics', status, Date.now() - t0, { steps }, currentOk ? null : 'Current-month snapshot write failed')
 
   return NextResponse.json({ steps })
+}
+
+/**
+ * The ?fill=YYYY-MM branch. A refusal is the caller's answer and writes
+ * nothing, so it is not logged; a write, or a write that failed, is logged
+ * under snapshot-metrics so it shows beside the daily runs.
+ */
+async function runFill(database: D1, monthKey: string, t0: number): Promise<NextResponse> {
+  try {
+    const detail = await fillMonthSnapshot(database, monthKey)
+    const steps: StepResult[] = [{ name: 'fill-month', ok: true, detail }]
+    await logCronRun(database, 'snapshot-metrics', 'success', Date.now() - t0, { mode: 'fill', monthKey, steps }, null)
+    return NextResponse.json({ mode: 'fill', steps })
+  } catch (err) {
+    if (err instanceof SnapshotFillRefusal) {
+      return NextResponse.json(
+        { error: err.message, code: err.code, monthKey, existing: err.existing },
+        { status: err.status },
+      )
+    }
+    const message = err instanceof Error ? err.message : 'Fill failed'
+    const steps: StepResult[] = [{ name: 'fill-month', ok: false, error: message }]
+    await logCronRun(database, 'snapshot-metrics', 'error', Date.now() - t0, { mode: 'fill', monthKey, steps }, `Fill of ${monthKey} failed`)
+    return NextResponse.json({ mode: 'fill', steps }, { status: 500 })
+  }
 }
