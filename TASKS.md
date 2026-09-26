@@ -483,13 +483,24 @@ Batch C (deliverable truth): all four merged as 23b5c681 and 32c78bee, migration
 D1 = T3.10 (starts after C2 and C4 merge, both done). D2 = T3.9, which also
 retires the dead C3 contract-signature template. D3 below. D4 = CT.15.
 
-- [ ] D3 Playwright specs the reviewers asked for: `e2e/sales-publish.spec.ts`
+- [~] D3 Playwright specs the reviewers asked for: `e2e/sales-publish.spec.ts`
   and `e2e/public-viewers.spec.ts` on the QA harness, then one live rehearsal.
-  Verified 2026-09-13: neither file exists in `e2e/`. Overlaps T3.QA, which adds
-  the live round trip with real inboxes.
+  Overlaps T3.QA, which adds the live round trip with real inboxes.
   Acceptance: share to publish to view at 375px to accept to admin notified, and
   send to sign to PDF in both inboxes, both green in Playwright and both
   rehearsed live once.
+  2026-09-26: both specs written and green on the QA harness (tahi-qa, webpack
+  dev on 3179, chromium at 375px), each file alone with --workers=1, three runs
+  in a row. sales-publish: share snapshots, a live edit stays pinned, re-share
+  does not clobber, publish re-arms, every package tab reachable at 375px, accept
+  reaches the studio bell with the published amounts frozen, revoke 404s and the
+  next share starts fresh, an expired proposal refuses with 410. public-viewers:
+  two signers draw on the real canvas at 375px (one with dashboard dark mode set,
+  stripped by the public layout), fully signed with a final hash, signed PDF in
+  R2 and served by both download routes, partial and final bell rows, cancelled
+  and lapsed contracts refuse the signature. The harness dev server runs with
+  RESEND_API_KEY set to a dead value, so nothing is mailed. Still owed: the live
+  rehearsal with real inboxes (T3.QA).
 
 ## Batch E. Messages, unhidden
 
