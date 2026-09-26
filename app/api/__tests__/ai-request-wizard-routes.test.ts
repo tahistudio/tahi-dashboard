@@ -72,12 +72,25 @@ vi.mock('@/lib/ai-request-org-context', async (importOriginal) => {
   }
 })
 
+// The portal wizard maps the caller's Clerk org to its D1 org before loading
+// context. Against the settings-only schema mock above the real lookup throws
+// and the route carries on without context, which is what every test but the
+// audience one wants; that one resolves an org so the loader is reached.
+vi.mock('@/lib/upload-access', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/upload-access')>()
+  return {
+    ...actual,
+    resolveD1OrgId: vi.fn().mockResolvedValue(null),
+  }
+})
+
 import { POST as adminPost } from '@/app/api/admin/ai/request-wizard/route'
 import { POST as portalPost } from '@/app/api/portal/ai/request-wizard/route'
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth } from '@/lib/server-auth'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { loadRequestOrgContext } from '@/lib/ai-request-org-context'
+import { resolveD1OrgId } from '@/lib/upload-access'
 
 function makeRequest(path: string): NextRequest {
   return new NextRequest(`http://localhost:3000${path}`, {
@@ -228,7 +241,9 @@ describe('POST /api/admin/ai/request-wizard', () => {
       const res = await adminPost(makeRequestWithOrgId('org-acme'))
       expect(res.status).toBe(200)
       expect(vi.mocked(requireAccessToOrg)).toHaveBeenCalledWith(expect.anything(), 'user_scoped', 'org-acme')
-      expect(vi.mocked(loadRequestOrgContext)).toHaveBeenCalledWith(expect.anything(), 'org-acme')
+      // CN.3: the admin wizard is the studio's, so its FROM RECENT CALLS block
+      // may carry every applied kind with its quote.
+      expect(vi.mocked(loadRequestOrgContext)).toHaveBeenCalledWith(expect.anything(), 'org-acme', { audience: 'studio' })
       const [[sentPayload]] = createMessage.mock.calls
       expect((sentPayload as { system: string }).system).toContain('CLIENT ON FILE: Acme Co')
     })
@@ -255,7 +270,7 @@ describe('POST /api/admin/ai/request-wizard', () => {
       const res = await adminPost(makeRequestWithOrgId('org-acme'))
       expect(res.status).toBe(200)
       expect(vi.mocked(requireAccessToOrg)).toHaveBeenCalledWith(expect.anything(), 'user_1', 'org-acme')
-      expect(vi.mocked(loadRequestOrgContext)).toHaveBeenCalledWith(expect.anything(), 'org-acme')
+      expect(vi.mocked(loadRequestOrgContext)).toHaveBeenCalledWith(expect.anything(), 'org-acme', { audience: 'studio' })
     })
   })
 })
@@ -270,6 +285,26 @@ describe('POST /api/portal/ai/request-wizard', () => {
     expect(system).toContain('CLIENT HISTORY')
     expect(system).toContain('coverage gaps')
     expect(system).toContain('two sentences')
+  })
+
+  // CN.3: the portal wizard talks to the client, so it asks for the client
+  // audience by name rather than leaning on the default: FROM RECENT CALLS
+  // then names only the client's own visible requests, with no quotes and no
+  // tasks.
+  it('loads the client audience of the org context for the caller\'s own org', async () => {
+    asClient()
+    vi.mocked(resolveD1OrgId).mockResolvedValueOnce('org-acme')
+    vi.mocked(loadRequestOrgContext).mockResolvedValueOnce('FROM RECENT CALLS: #231 Footer LinkedIn tag')
+    createMessage.mockResolvedValueOnce({ content: [{ type: 'text', text: 'Which page?' }] })
+
+    const res = await portalPost(makeRequest('/api/portal/ai/request-wizard'))
+    expect(res.status).toBe(200)
+    expect(vi.mocked(resolveD1OrgId)).toHaveBeenCalledWith(expect.anything(), 'org_client')
+    expect(vi.mocked(loadRequestOrgContext)).toHaveBeenCalledWith(expect.anything(), 'org-acme', { audience: 'client' })
+    const [[sentPayload]] = createMessage.mock.calls
+    const system = (sentPayload as { system: string }).system
+    expect(system).toContain('FROM RECENT CALLS: #231 Footer LinkedIn tag')
+    expect(system).toContain('name it by its number and do not draft it again')
   })
 
   it('502s when the model call throws, on the client-facing route too', async () => {
