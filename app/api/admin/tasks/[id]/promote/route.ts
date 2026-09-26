@@ -6,6 +6,9 @@ import { eq, sql } from 'drizzle-orm'
 import { guardTask } from '@/lib/task-access'
 import { emitRequestCreated } from '@/lib/request-status-effects'
 import { isRequestCategory } from '@/lib/request-vocabulary'
+import { queueWorkSync, workSyncArmed } from '@/lib/slack/work-sync'
+
+type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 /**
  * POST /api/admin/tasks/[id]/promote
@@ -40,7 +43,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const body = await req.json().catch(() => ({})) as { category?: string; size?: string }
 
   const database = await db()
-  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  const drizzle = database as Drizzle
 
   const denied = await guardTask(drizzle, userId, id)
   if (denied) return denied
@@ -119,5 +122,31 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     source: 'admin',
   })
 
+  // A task that came from a Slack card says so in the card's thread (CN.3):
+  // "Staci turned it into request #232". The number is read back only when a
+  // line could go out at all, so a studio without Slack does exactly the
+  // work it did before.
+  if (workSyncArmed()) {
+    await queueWorkSync(drizzle, [{
+      entityType: 'task',
+      entityId: id,
+      actor: { type: 'studio', clerkUserId: userId ?? null },
+      changes: [{ field: 'promoted', to: await requestNumberLabel(drizzle, requestId) }],
+    }])
+  }
+
   return NextResponse.json({ requestId }, { status: 201 })
+}
+
+/** "#232" for the request just written, or null when it cannot be read. */
+async function requestNumberLabel(drizzle: Drizzle, requestId: string): Promise<string | null> {
+  try {
+    const rows = await drizzle.all<{ request_number: number | null }>(sql`
+      SELECT request_number FROM requests WHERE id = ${requestId} LIMIT 1
+    `)
+    const number = rows?.[0]?.request_number
+    return typeof number === 'number' ? `#${number}` : null
+  } catch {
+    return null
+  }
 }

@@ -27,9 +27,18 @@ type TaskRow = {
 }
 
 const runs: { text: string; values: unknown[] }[] = []
+const reads: { text: string; values: unknown[] }[] = []
 const updates: Record<string, unknown>[] = []
 const events: Record<string, unknown>[] = []
 let taskRow: TaskRow | null = null
+let numberReadFails = false
+
+// The Slack thread line (CN.3): armed only when the token is set, with the
+// queue recorded rather than deferred.
+vi.mock('@/lib/slack/work-sync', () => ({
+  workSyncArmed: () => !!process.env.SLACK_BOT_TOKEN,
+  queueWorkSync: vi.fn(async () => undefined),
+}))
 
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: async () => ({ orgId: 'tahi-org', userId: 'user_1' }),
@@ -65,6 +74,11 @@ vi.mock('@/lib/db', () => ({
       }),
     }),
     run: async (query: { text: string; values: unknown[] }) => { runs.push(query) },
+    all: async (query: { text: string; values: unknown[] }) => {
+      reads.push(query)
+      if (numberReadFails) throw new Error('D1_ERROR: timeout')
+      return [{ request_number: 232 }]
+    },
     update: () => ({
       set: (values: Record<string, unknown>) => ({
         where: async () => { updates.push(values) },
@@ -74,6 +88,7 @@ vi.mock('@/lib/db', () => ({
 }))
 
 const { POST } = await import('../[id]/promote/route')
+const { queueWorkSync } = await import('@/lib/slack/work-sync')
 
 function promote(body: unknown = {}): Request {
   return new Request('http://localhost/api/admin/tasks/t1/promote', {
@@ -98,8 +113,12 @@ function boundValues(): unknown[] {
 
 beforeEach(() => {
   runs.length = 0
+  reads.length = 0
   updates.length = 0
   events.length = 0
+  numberReadFails = false
+  vi.mocked(queueWorkSync).mockClear()
+  vi.unstubAllEnvs()
   taskRow = {
     id: 't1',
     orgId: 'o1',
@@ -215,5 +234,43 @@ describe('POST /api/admin/tasks/[id]/promote', () => {
     const res = await POST(promote() as never, params)
     expect(res.status).toBe(404)
     expect(runs).toHaveLength(0)
+  })
+})
+
+describe('POST /api/admin/tasks/[id]/promote, the Slack thread line (CN.3)', () => {
+  it('reads nothing extra and queues nothing while Slack is not configured', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', '')
+    const res = await POST(promote() as never, params)
+    expect(res.status).toBe(201)
+    expect(reads).toHaveLength(0)
+    expect(queueWorkSync).not.toHaveBeenCalled()
+  })
+
+  it('queues "turned it into request #232" on the task, as the person who promoted it', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    await POST(promote() as never, params)
+    expect(reads).toHaveLength(1)
+    expect(reads[0].text).toContain('SELECT request_number FROM requests WHERE id =')
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([{
+      entityType: 'task',
+      entityId: 't1',
+      actor: { type: 'studio', clerkUserId: 'user_1' },
+      changes: [{ field: 'promoted', to: '#232' }],
+    }])
+  })
+
+  it('still queues the line, without a number, when the number cannot be read', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    numberReadFails = true
+    const res = await POST(promote() as never, params)
+    expect(res.status).toBe(201)
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1][0].changes).toEqual([{ field: 'promoted', to: null }])
+  })
+
+  it('queues nothing for a refused promotion', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    taskRow = { ...taskRow!, requestId: 'r_existing' }
+    await POST(promote() as never, params)
+    expect(queueWorkSync).not.toHaveBeenCalled()
   })
 })

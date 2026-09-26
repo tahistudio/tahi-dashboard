@@ -456,4 +456,54 @@ describe('DELETE handoff', () => {
     vi.mocked(db).mockResolvedValue(handle as never)
     expect((await DELETE(del(), params('req-1'))).status).toBe(404)
   })
+
+  describe('the Slack thread line (CN.3)', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it('reads nothing extra and queues nothing while Slack is not configured', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', '')
+      const { handle, queries } = makeDb([[handedOff]])
+      vi.mocked(db).mockResolvedValue(handle as never)
+
+      const res = await DELETE(del(), params('req-1'))
+      expect(res.status).toBe(200)
+      // The request read and the pointer write, as before CN.3. No contact read.
+      expect(queries.map(q => q[0].method)).toEqual(['select', 'update'])
+      expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+    })
+
+    it('queues "took it back from" the contact, in the studio voice', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+      const { handle } = makeDb([[handedOff], [], [{ name: 'Ngaire Hutchins' }]])
+      vi.mocked(db).mockResolvedValue(handle as never)
+
+      await DELETE(del(), params('req-1'))
+      expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([{
+        entityType: 'request',
+        entityId: 'req-1',
+        actor: { type: 'studio', clerkUserId: 'user_member' },
+        changes: [{ field: 'waitingOn', from: 'Ngaire Hutchins', to: null, phrase: 'took it back from Ngaire Hutchins' }],
+      }])
+    })
+
+    it('still says so when the contact cannot be read', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+      const { handle } = makeDb([[handedOff], [], []])
+      vi.mocked(db).mockResolvedValue(handle as never)
+
+      await DELETE(del(), params('req-1'))
+      expect(vi.mocked(queueWorkSync).mock.calls[0][1][0].changes[0].phrase).toBe('took it back from the client')
+    })
+
+    it('queues nothing when the request was already back with us', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+      const { handle } = makeDb([[REQUEST]])
+      vi.mocked(db).mockResolvedValue(handle as never)
+
+      await DELETE(del(), params('req-1'))
+      expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+    })
+  })
 })

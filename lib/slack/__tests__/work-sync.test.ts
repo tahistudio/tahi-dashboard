@@ -874,6 +874,13 @@ describe('renderWorkLine', () => {
     expect(phrase({ changes: [{ field: 'deleted', to: null }] })).toBe('deleted it')
   })
 
+  it('says a task became a request, by number when there is one', () => {
+    expect(phrase({ changes: [{ field: 'promoted', to: '#232' }] })).toBe('turned it into request #232')
+    expect(phrase({ changes: [{ field: 'promoted', to: null }] })).toBe('turned it into a client request')
+    expect(phrase({ changes: [{ field: 'status', from: 'todo', to: 'done' }, { field: 'promoted', to: '#232' }] }))
+      .toBe('marked it done and turned it into request #232')
+  })
+
   it('lets a caller phrase replace the default', () => {
     expect(phrase({ entityType: 'request', changes: [{ field: 'status', to: 'delivered', phrase: 'approved the delivery' }] }))
       .toBe('approved the delivery')

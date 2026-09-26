@@ -10,15 +10,19 @@
  * changed, so the person who approved it does not have to go looking.
  *
  * What a line is and is not. State, never conversation: status, assignee, due
- * date, priority, a rename, a hand-off and a deletion. Never a quote, a
- * description, a message body or a transcript line. Names, labels, a date,
- * the new title when it was renamed, and the link.
+ * date, priority, a rename, a task turned into a request, a hand-off (and the
+ * studio taking it back) and a deletion. Never a quote, a description, a
+ * message body or a transcript line. Names, labels, a date, the new title
+ * when it was renamed, and the link. Not structure either: sub-requests and
+ * nesting are to a request what subtasks and positions are to a task.
  *
  * Who hears it (section 2). A founders card (a call suggestion) hears
  * everything. A member's own note card hears it only while that member is
  * still a member in Slack AND their access scope still reaches the item's
- * current client. A client card hears nothing in CN.3. Nobody is told about
- * their own change, so the actor's own DM is skipped.
+ * current client. A client card hears nothing in CN.3: it is never on the
+ * copies table (the client copy policy, lib/slack/mirror.ts), and the thread
+ * query reads founders and member cards only. Nobody is told about their own
+ * change, so the actor's own DM is skipped.
  *
  * How often (section 3). Only real changes; a claim row before every post so
  * two requests racing on the same change post once; the same person changing
@@ -69,7 +73,9 @@ type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 export type WorkEntityType = 'task' | 'request'
 
-export type WorkField = 'status' | 'assignee' | 'dueDate' | 'priority' | 'title' | 'waitingOn' | 'deleted'
+/** 'promoted' is a task turned into a client request; its `to` is the
+ *  request's "#232", or null when the number could not be read. */
+export type WorkField = 'status' | 'assignee' | 'dueDate' | 'priority' | 'title' | 'promoted' | 'waitingOn' | 'deleted'
 
 export interface WorkFieldChange {
   field: WorkField
@@ -128,7 +134,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
 const ID_CHUNK = 90
 
 /** The order fields read in a line, and the order a change list is stored in. */
-const FIELD_ORDER: readonly WorkField[] = ['status', 'assignee', 'dueDate', 'priority', 'title', 'waitingOn', 'deleted']
+const FIELD_ORDER: readonly WorkField[] = ['status', 'assignee', 'dueDate', 'priority', 'title', 'promoted', 'waitingOn', 'deleted']
 
 const TITLE_LIMIT = 80
 
@@ -270,6 +276,8 @@ function phraseFor(input: WorkLineInput, change: WorkFieldChange): string {
       return change.to ? `set the priority to ${change.to}` : 'cleared the priority'
     case 'title':
       return change.to ? `renamed it to "${clip(change.to, TITLE_LIMIT)}"` : 'renamed it'
+    case 'promoted':
+      return change.to ? `turned it into request ${change.to}` : 'turned it into a client request'
     case 'waitingOn':
       return change.to ? `handed it to ${change.to}` : 'cleared the hand-off'
     case 'deleted':
