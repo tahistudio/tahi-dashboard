@@ -43,6 +43,7 @@ import {
   HANDOFF_CLEARED_COLUMNS,
   daysWaiting,
 } from '@/lib/request-handoff'
+import { queueWorkSync, workSyncArmed } from '@/lib/slack/work-sync'
 
 type Params = { params: Promise<{ id: string }> }
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -185,6 +186,22 @@ export async function POST(req: NextRequest, { params }: Params) {
         entityId: id,
       },
     )
+
+    // The Slack thread line (CN.3), when this request came from a studio
+    // card. `self` is already the previewed seat in act mode.
+    if (workSyncArmed()) {
+      await queueWorkSync(drizzle, [{
+        entityType: 'request',
+        entityId: id,
+        actor: {
+          type: 'client',
+          contactId: self?.id ?? null,
+          clerkUserId: userId,
+          actingAsTeamMemberId: acting?.adminTeamMemberId ?? null,
+        },
+        changes: [{ field: 'waitingOn', to: null, phrase: 'sent it back to the studio' }],
+      }])
+    }
 
     return NextResponse.json({ success: true, waitingOn: null })
   } catch (err) {

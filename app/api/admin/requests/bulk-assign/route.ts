@@ -24,6 +24,7 @@ import { schema } from '@/db/d1'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { notifyTeamMember, requestParticipantTitle } from '@/lib/notifications'
+import { queueWorkSync, workSyncArmed, type WorkChange } from '@/lib/slack/work-sync'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -64,6 +65,7 @@ export async function POST(req: NextRequest) {
     orgId: string
     title: string
     requestNumber: number | null
+    assigneeId: string | null
   }> = []
   for (const chunk of chunkIds(body!.requestIds!)) {
     const part = await drizzle
@@ -74,6 +76,9 @@ export async function POST(req: NextRequest) {
         // point of telling somebody they now own it.
         title: schema.requests.title,
         requestNumber: schema.requests.requestNumber,
+        // The owner before this call, for the Slack thread line (CN.3). The
+        // same query, so it costs nothing when Slack is not set up.
+        assigneeId: schema.requests.assigneeId,
       })
       .from(schema.requests)
       .where(inArray(schema.requests.id, chunk))
@@ -170,6 +175,27 @@ export async function POST(req: NextRequest) {
         })
         addedByMember.set(p.participantId, bucket)
       }
+    }
+  }
+
+  // The Slack thread line (CN.3): one batch, holding only the requests whose
+  // owner actually moved. The assignee slot is the last team member assignee
+  // in the list, exactly as the loop above wrote it. Nothing is read or
+  // queued while Slack is not set up.
+  if (workSyncArmed()) {
+    const owner = [...body!.participants!]
+      .reverse()
+      .find(p => p.role === 'assignee' && p.participantType === 'team_member' && !!p.participantId)
+    if (owner) {
+      const batch: WorkChange[] = requests
+        .filter(request => (request.assigneeId ?? null) !== owner.participantId)
+        .map(request => ({
+          entityType: 'request' as const,
+          entityId: request.id,
+          actor: { type: 'studio' as const, clerkUserId: userId ?? null },
+          changes: [{ field: 'assignee' as const, from: request.assigneeId ?? null, to: owner.participantId }],
+        }))
+      if (batch.length > 0) await queueWorkSync(drizzle, batch)
     }
   }
 

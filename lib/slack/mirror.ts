@@ -13,6 +13,18 @@
  * uninstalled, or not migrated yet is a Slack problem; the sweep still writes
  * its suggestions and a decision still decides (CN.2 contract section 3).
  *
+ * THE CLIENT COPY POLICY (CN.3 contract section 2). The copies table only
+ * ever holds studio channels: a founder's DM, or a member's own. A client's
+ * "Is this the request?" card is never recorded, not when it is posted
+ * (lib/slack/dispatch-dm.ts) and not when it is pressed
+ * (lib/slack/dispatch-actions.ts), so nothing that walks the copies (the
+ * decided rewrite, the undecided rewrite, a snooze coming back, the work-sync
+ * thread lines) can find a client's DM. The one thing that ever changes a
+ * client's card is that client's own press, and it goes through
+ * rewriteClientCard below, which rewrites that ONE message from fixed client
+ * wording. As a second fence, the three studio rewrites refuse a contact row
+ * outright, so a copy recorded by some older code path still hears nothing.
+ *
  * The copies table belongs to migration 0110, which slice S1 owns. Its shape,
  * for whoever writes that file:
  *
@@ -35,12 +47,14 @@
 
 import { eq, sql } from 'drizzle-orm'
 import { schema } from '@/db/d1'
+import { publicUrl } from '@/lib/app-url'
 import { STUDIO_TIME_ZONE } from '@/lib/call-time'
 import { SIMILAR_BLOCK } from '@/lib/text-similarity'
 import { openDm, postMessage, slackBotToken, updateMessage, type SlackMessageRef } from '@/lib/slack/api'
 import { listFounderIdentities, type SlackIdentity } from '@/lib/slack/identity'
 import {
   callHeaderMessage,
+  clientDecidedMessage,
   decidedMessage,
   suggestionMessage,
   type SlackMessagePayload,
@@ -136,12 +150,17 @@ export async function rewriteEverywhere(
  * attach need: the row is still pending, so the message still has to offer
  * the five things a founder can do about it, only saying something different
  * about what it proposes (contract section 3).
+ *
+ * A client's row is refused before anything is read: this message carries the
+ * Tweak link and the duplicate line, and a client's card is never recorded to
+ * be rewritten in the first place (the policy in the header).
  */
 export async function rewriteSuggestionMessage(
   drizzle: Drizzle,
-  row: SuggestionMessageInput,
+  row: SuggestionMessageInput & { approverType: string },
   options: { duplicate?: boolean } = {},
 ): Promise<number> {
+  if (row.approverType === 'contact') return 0
   const duplicate = options.duplicate ?? opensAsDuplicate(row)
   return rewriteEverywhere(drizzle, row.id, suggestionMessage(row, { duplicate }))
 }
@@ -279,11 +298,16 @@ export async function postSuggestionsForCall(
  * A snoozed suggestion whose time has come, back in the same DMs (contract
  * section 3). A fresh message rather than a rewrite, because the point of a
  * snooze ending is the notification.
+ *
+ * Never a client's row: a client cannot snooze their own card, and a studio
+ * snooze of a client's draft ends in the inbox, not in the client's DM with
+ * the studio's Tweak link and duplicate line on it.
  */
 export async function repostSuggestion(
   drizzle: Drizzle,
-  row: SuggestionMessageInput,
+  row: SuggestionMessageInput & { approverType: string },
 ): Promise<number> {
+  if (row.approverType === 'contact') return 0
   if (!slackBotToken()) return 0
   const copies = await listSuggestionMessages(drizzle, row.id)
   const channels = Array.from(new Set(copies.map(copy => copy.channelId)))
@@ -347,18 +371,28 @@ export function outcomeForStatus(status: string): SuggestionOutcome | null {
   }
 }
 
-/** A team member's first name, which is what "Approved by Liam" wants. */
+function firstName(name: string | null | undefined): string | null {
+  const trimmed = name?.trim()
+  if (!trimmed) return null
+  return trimmed.split(/\s+/)[0] ?? trimmed
+}
+
+/**
+ * The decider's first name, which is what "Approved by Liam" wants.
+ *
+ * A team member only. This line is only ever written on a studio card (a
+ * founders' call card or a member's own note), which only a studio person
+ * decides; a client's own card names the client through rewriteClientCard.
+ */
 async function actorName(drizzle: Drizzle, actorId: string | null): Promise<string | null> {
   if (!actorId) return null
   try {
-    const [row] = await drizzle
+    const [member] = await drizzle
       .select({ name: schema.teamMembers.name })
       .from(schema.teamMembers)
       .where(eq(schema.teamMembers.id, actorId))
       .limit(1)
-    const name = row?.name?.trim()
-    if (!name) return null
-    return name.split(/\s+/)[0] ?? name
+    return firstName(member?.name)
   } catch {
     return null
   }
@@ -373,6 +407,115 @@ export interface DecidedSuggestionRow {
   decidedAt: string | null
   updatedAt: string | null
   applyError: string | null
+  /** Optional so an older caller still fits; decideSuggestion hands the
+   *  whole row, which carries all three. */
+  kind?: string
+  appliedTaskId?: string | null
+  appliedRequestId?: string | null
+  /**
+   * 'founders' | 'member' | 'contact'. REQUIRED, because it is the fence:
+   * a contact row is never rewritten by the studio's decided line (which
+   * names who snoozed it and carries the apply error), only by
+   * rewriteClientCard. A caller that could forget it is a caller that could
+   * leak, so the type does not let it.
+   */
+  approverType: string
+  /** The contact a client row belongs to. Read by rewriteClientCard to tell
+   *  the client's own decision from the studio's. */
+  approverId?: string | null
+  /** The row's client. A client's card links only a request at this client. */
+  orgId?: string | null
+}
+
+/** The request half of the suggestion kinds. Spelled out here rather than
+ *  imported, because lib/task-suggestions.ts imports this module. */
+const REQUEST_KIND_NAMES: ReadonlySet<string> = new Set([
+  'create_request', 'update_request', 'request_note', 'hand_off_request',
+])
+
+interface LinkedRequest {
+  number: number | null
+  isInternal: boolean
+  orgId: string | null
+}
+
+/** The fields a link to a request needs, and whose client it is, or null when
+ *  the row cannot be read. */
+async function readLinkedRequest(drizzle: Drizzle, requestId: string): Promise<LinkedRequest | null> {
+  try {
+    const [row] = await drizzle
+      .select({
+        requestNumber: schema.requests.requestNumber,
+        isInternal: schema.requests.isInternal,
+        orgId: schema.requests.orgId,
+      })
+      .from(schema.requests)
+      .where(eq(schema.requests.id, requestId))
+      .limit(1)
+    if (!row) return null
+    const number = row.requestNumber
+    return {
+      number: typeof number === 'number' && Number.isFinite(number) ? number : null,
+      isInternal: !!row.isInternal,
+      orgId: typeof row.orgId === 'string' ? row.orgId : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+/** "Open #231", or "Open request" when there is no number to show. */
+function requestLinkLabel(request: LinkedRequest | null): string {
+  return request?.number != null ? `Open #${request.number}` : 'Open request'
+}
+
+function requestLink(requestId: string, request: LinkedRequest | null): { url: string; label: string } {
+  return { url: publicUrl(`/requests/${encodeURIComponent(requestId)}`), label: requestLinkLabel(request) }
+}
+
+/**
+ * Where an approved card points: the request or the task the suggestion
+ * made or changed (CN.3 contract section 1). Null for every other outcome,
+ * and for an applied row that names nothing, which is a row this function
+ * has no business guessing about.
+ *
+ * applySuggestion stamps exactly one of the two ids, by kind; the kind is
+ * read first anyway so a row carrying both would still link the thing its
+ * kind is about.
+ *
+ * A client's own card (rewriteClientCard) links to their request and nothing
+ * else (contract section 2). A founder can attach a client's draft to a
+ * task, or to an internal request, from the dashboard, and neither is
+ * anything the client's portal shows. So a contact row links only a request
+ * that reads back as not internal and at the row's own client, and a request
+ * that cannot be read (or a row whose client is not known) gets no link.
+ */
+export async function decidedLinkFor(
+  drizzle: Drizzle,
+  row: Pick<DecidedSuggestionRow, 'status' | 'kind' | 'appliedTaskId' | 'appliedRequestId' | 'orgId'> & { approverType?: string },
+): Promise<{ url: string; label: string } | null> {
+  if (outcomeForStatus(row.status) !== 'approved') return null
+  const requestId = row.appliedRequestId ?? null
+  const taskId = row.appliedTaskId ?? null
+
+  if (row.approverType === 'contact') {
+    if (!requestId || !row.orgId) return null
+    const request = await readLinkedRequest(drizzle, requestId)
+    if (!request || request.isInternal || request.orgId !== row.orgId) return null
+    return requestLink(requestId, request)
+  }
+
+  const preferRequest = row.kind ? REQUEST_KIND_NAMES.has(row.kind) : !!requestId
+  if (preferRequest && requestId) {
+    return requestLink(requestId, await readLinkedRequest(drizzle, requestId))
+  }
+  if (taskId) {
+    return { url: publicUrl(`/tasks/${encodeURIComponent(taskId)}`), label: 'Open task' }
+  }
+  if (requestId) {
+    return requestLink(requestId, await readLinkedRequest(drizzle, requestId))
+  }
+  return null
 }
 
 /**
@@ -382,12 +525,20 @@ export interface DecidedSuggestionRow {
  * Returns the number of copies rewritten, and NEVER throws. A decision made
  * in the dashboard is a fact about the database; whether Slack heard about it
  * is a separate and lesser question.
+ *
+ * A client's own draft (approver_type 'contact') is refused before anything
+ * is read or rewritten. This line names who snoozed a row and carries the raw
+ * apply error, both written for the studio, and a client's card is never on
+ * the copies table anyway (the policy in the header). A studio decision on a
+ * client's draft therefore changes nothing in the client's DM: no Slack
+ * message reaches a client that the client did not trigger.
  */
 export async function mirrorSuggestionDecision(
   drizzle: Drizzle,
   row: DecidedSuggestionRow,
 ): Promise<number> {
   try {
+    if (row.approverType === 'contact') return 0
     if (!slackBotToken()) return 0
     const outcome = outcomeForStatus(row.status)
     if (!outcome) return 0
@@ -397,9 +548,68 @@ export async function mirrorSuggestionDecision(
       at: studioClock(row.decidedAt ?? row.updatedAt ?? null),
       until: outcome === 'snoozed' ? studioWhen(row.snoozeUntil) : null,
       error: row.applyError,
+      link: await decidedLinkFor(drizzle, row),
     })
     return await rewriteEverywhere(drizzle, row.id, payload)
   } catch {
     return 0
+  }
+}
+
+// ── A client's own card ─────────────────────────────────────────────────────
+
+/** A contact's first name, read from contacts only: a client's card never
+ *  names anybody but that client. */
+async function contactFirstName(drizzle: Drizzle, contactId: string | null | undefined): Promise<string | null> {
+  if (!contactId) return null
+  try {
+    const [contact] = await drizzle
+      .select({ name: schema.contacts.name })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.id, contactId))
+      .limit(1)
+    return firstName(contact?.name)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The one message in a client's DM that a decision may change: the card the
+ * client just pressed, identified by the channel and ts Slack sent with the
+ * press. Never recorded, never looked up, never any other message.
+ *
+ * Written by clientDecidedMessage from fixed client wording: the client's own
+ * first name when the decision was theirs (nobody's name when it was the
+ * studio's), the studio clock, and on an approval a link to the request only
+ * when it reads back as not internal (decidedLinkFor's contact rule). Never
+ * the apply error, never who snoozed it, never a task, never a Tweak link.
+ *
+ * Only for a contact row; anything else answers false before a read. No bot
+ * token, no rewrite. Never throws.
+ */
+export async function rewriteClientCard(
+  drizzle: Drizzle,
+  card: { channelId: string | null; ts: string | null },
+  row: DecidedSuggestionRow,
+): Promise<boolean> {
+  try {
+    if (row.approverType !== 'contact') return false
+    if (!card.channelId || !card.ts) return false
+    if (!slackBotToken()) return false
+    const outcome = outcomeForStatus(row.status)
+    if (!outcome) return false
+    const own = !!row.decidedById && !!row.approverId && row.decidedById === row.approverId
+    const payload = clientDecidedMessage({
+      outcome,
+      ownName: own ? await contactFirstName(drizzle, row.approverId) : null,
+      at: studioClock(row.decidedAt ?? row.updatedAt ?? null),
+      link: outcome === 'approved' ? await decidedLinkFor(drizzle, row) : null,
+    })
+    if (!payload) return false
+    await updateMessage({ channel: card.channelId, ts: card.ts, text: payload.text, blocks: payload.blocks })
+    return true
+  } catch {
+    return false
   }
 }

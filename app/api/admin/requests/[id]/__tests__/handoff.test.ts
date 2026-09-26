@@ -16,8 +16,18 @@
  *
  * Fake-D1 pattern borrowed from app/api/admin/calls/__tests__.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
+// The Slack thread line (CN.3): armed only when the token is set, with the
+// queue recorded rather than deferred.
+vi.mock('@/lib/slack/work-sync', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/slack/work-sync')>('@/lib/slack/work-sync')
+  return {
+    ...actual,
+    workSyncArmed: () => !!process.env.SLACK_BOT_TOKEN,
+    queueWorkSync: vi.fn(async () => undefined),
+  }
+})
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn().mockResolvedValue({ userId: 'user_member', orgId: 'org_tahi' }),
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org_tahi'),
@@ -36,6 +46,7 @@ import { logAudit } from '@/lib/audit'
 import { createNotification } from '@/lib/notifications'
 import { notifyRequestTeam } from '@/lib/notify-request-team'
 import { ensureClientInvite } from '@/lib/onboarding-invites'
+import { queueWorkSync } from '@/lib/slack/work-sync'
 import { NextRequest, NextResponse } from 'next/server'
 import { POST, DELETE } from '@/app/api/admin/requests/[id]/handoff/route'
 
@@ -314,6 +325,83 @@ describe('POST handoff, the write', () => {
   })
 })
 
+describe('POST handoff, the Slack thread line (CN.3)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('queues the hand-off in the studio voice, naming the contact and the reason', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const { handle } = makeDb([[REQUEST], [CONTACT]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await POST(post({ contactId: 'contact-1', reason: 'approval' }), params('req-1'))
+    expect(res.status).toBe(200)
+    expect(vi.mocked(queueWorkSync)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([{
+      entityType: 'request',
+      entityId: 'req-1',
+      actor: { type: 'studio', clerkUserId: 'user_member' },
+      changes: [{
+        field: 'waitingOn',
+        to: 'Ngaire Hutchins',
+        phrase: 'handed it to Ngaire Hutchins, waiting on approval',
+      }],
+    }])
+  })
+
+  it('uses the short reason word for every reason', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const { handle } = makeDb([[REQUEST], [CONTACT]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    await POST(post({ contactId: 'contact-1', reason: 'file' }), params('req-1'))
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1][0].changes[0].phrase)
+      .toBe('handed it to Ngaire Hutchins, waiting on a file')
+  })
+
+  it('queues nothing while Slack is not configured', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', '')
+    const { handle } = makeDb([[REQUEST], [CONTACT]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await POST(post({ contactId: 'contact-1', reason: 'approval' }), params('req-1'))
+    expect(res.status).toBe(200)
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+  })
+
+  it('queues nothing when it is handed again to the same person for the same reason', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const waiting = { ...REQUEST, waitingOnContactId: 'contact-1', waitingReason: 'approval' }
+    const { handle } = makeDb([[waiting], [CONTACT]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await POST(post({ contactId: 'contact-1', reason: 'approval' }), params('req-1'))
+    expect(res.status).toBe(200)
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+  })
+
+  it('still queues a re-hand-off to the same person for a different reason', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const waiting = { ...REQUEST, waitingOnContactId: 'contact-1', waitingReason: 'approval' }
+    const { handle } = makeDb([[waiting], [CONTACT]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    await POST(post({ contactId: 'contact-1', reason: 'file' }), params('req-1'))
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1][0].changes[0].phrase)
+      .toBe('handed it to Ngaire Hutchins, waiting on a file')
+  })
+
+  it('queues nothing for a refused hand-off', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const { handle } = makeDb([[REQUEST], []])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    await POST(post({ contactId: 'contact-elsewhere', reason: 'approval' }), params('req-1'))
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+  })
+})
+
 describe('DELETE handoff', () => {
   const handedOff = {
     ...REQUEST,
@@ -367,5 +455,55 @@ describe('DELETE handoff', () => {
     const { handle } = makeDb([[]])
     vi.mocked(db).mockResolvedValue(handle as never)
     expect((await DELETE(del(), params('req-1'))).status).toBe(404)
+  })
+
+  describe('the Slack thread line (CN.3)', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it('reads nothing extra and queues nothing while Slack is not configured', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', '')
+      const { handle, queries } = makeDb([[handedOff]])
+      vi.mocked(db).mockResolvedValue(handle as never)
+
+      const res = await DELETE(del(), params('req-1'))
+      expect(res.status).toBe(200)
+      // The request read and the pointer write, as before CN.3. No contact read.
+      expect(queries.map(q => q[0].method)).toEqual(['select', 'update'])
+      expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+    })
+
+    it('queues "took it back from" the contact, in the studio voice', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+      const { handle } = makeDb([[handedOff], [], [{ name: 'Ngaire Hutchins' }]])
+      vi.mocked(db).mockResolvedValue(handle as never)
+
+      await DELETE(del(), params('req-1'))
+      expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([{
+        entityType: 'request',
+        entityId: 'req-1',
+        actor: { type: 'studio', clerkUserId: 'user_member' },
+        changes: [{ field: 'waitingOn', from: 'Ngaire Hutchins', to: null, phrase: 'took it back from Ngaire Hutchins' }],
+      }])
+    })
+
+    it('still says so when the contact cannot be read', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+      const { handle } = makeDb([[handedOff], [], []])
+      vi.mocked(db).mockResolvedValue(handle as never)
+
+      await DELETE(del(), params('req-1'))
+      expect(vi.mocked(queueWorkSync).mock.calls[0][1][0].changes[0].phrase).toBe('took it back from the client')
+    })
+
+    it('queues nothing when the request was already back with us', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+      const { handle } = makeDb([[REQUEST]])
+      vi.mocked(db).mockResolvedValue(handle as never)
+
+      await DELETE(del(), params('req-1'))
+      expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+    })
   })
 })

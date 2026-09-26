@@ -431,13 +431,15 @@ export async function POST(req: NextRequest) {
   //
   // Once access is confirmed, the context read itself is best effort: a read
   // that fails costs the model some helpful background, never the draft.
+  // This is the studio's wizard, so FROM RECENT CALLS carries every applied
+  // kind with its quote (the portal wizard asks for the client audience).
   if (context?.orgId) {
     try {
       const database = await db()
       const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
       const denied = await requireAccessToOrg(drizzle, userId, context.orgId)
       if (denied) return denied
-      const orgContext = await loadRequestOrgContext(drizzle, context.orgId)
+      const orgContext = await loadRequestOrgContext(drizzle, context.orgId, { audience: 'studio' })
       if (orgContext) contextParts.push(orgContext)
     } catch {
       // No context this turn. The interview still works, it just has to ask.

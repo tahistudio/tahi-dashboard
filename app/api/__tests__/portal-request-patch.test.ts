@@ -12,10 +12,17 @@
  *     structurally on the captured where clause.
  *   - Tahi org / unauthenticated / impersonation are all 403.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 type Row = Record<string, unknown>
 interface Op { __op: string; col?: unknown; val?: unknown; parts?: unknown[] }
+
+// The Slack thread line (CN.3): armed only when the token is set, with the
+// queue recorded rather than deferred.
+vi.mock('@/lib/slack/work-sync', () => ({
+  workSyncArmed: () => !!process.env.SLACK_BOT_TOKEN,
+  queueWorkSync: vi.fn(async () => undefined),
+}))
 
 const state: { rows: Row[]; selectWheres: Op[]; updateSets: Row[] } = {
   rows: [],
@@ -75,6 +82,7 @@ vi.mock('@/lib/db', () => ({
 import { PATCH } from '@/app/api/portal/requests/[id]/route'
 import { NextRequest } from 'next/server'
 import { getPortalAuth } from '@/lib/server-auth'
+import { queueWorkSync } from '@/lib/slack/work-sync'
 
 type PortalAuth = Awaited<ReturnType<typeof getPortalAuth>>
 
@@ -168,5 +176,41 @@ describe('PATCH /api/portal/requests/[id]', () => {
     expect((await PATCH(makePatch({ status: 'delivered' }), ctx)).status).toBe(403)
 
     expect(state.updateSets).toHaveLength(0)
+  })
+
+  describe('the Slack thread line (CN.3)', () => {
+    const IN_REVIEW = { id: 'r1', orgId: 'org_client', title: 'Homepage', status: 'client_review', assigneeId: 'tm1' }
+
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it('queues the client\'s approval of the delivery, found from their login later', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+      state.rows = [IN_REVIEW]
+      const res = await PATCH(makePatch({ status: 'delivered' }), ctx)
+      expect(res.status).toBe(200)
+      expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([{
+        entityType: 'request',
+        entityId: 'r1',
+        actor: { type: 'client', contactId: null, clerkUserId: 'user_client', actingAsTeamMemberId: null },
+        changes: [{ field: 'status', from: 'client_review', to: 'delivered', phrase: 'approved the delivery' }],
+      }])
+    })
+
+    it('queues nothing while Slack is not configured', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', '')
+      state.rows = [IN_REVIEW]
+      const res = await PATCH(makePatch({ status: 'delivered' }), ctx)
+      expect(res.status).toBe(200)
+      expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+    })
+
+    it('queues nothing for a refused approval', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+      state.rows = [{ ...IN_REVIEW, status: 'submitted' }]
+      await PATCH(makePatch({ status: 'delivered' }), ctx)
+      expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+    })
   })
 })

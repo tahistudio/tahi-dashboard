@@ -12,8 +12,14 @@
  * studio actually being told, because this is the only signal that a hand-off
  * is not going to resolve itself.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
+// The Slack thread line (CN.3): armed only when the token is set, with the
+// queue recorded rather than deferred.
+vi.mock('@/lib/slack/work-sync', () => ({
+  workSyncArmed: () => !!process.env.SLACK_BOT_TOKEN,
+  queueWorkSync: vi.fn(async () => undefined),
+}))
 vi.mock('@/lib/server-auth', () => ({ getPortalAuth: vi.fn() }))
 vi.mock('@/lib/db', () => ({ db: vi.fn() }))
 vi.mock('@/lib/require-feature', () => ({ requirePortalFeature: vi.fn() }))
@@ -29,6 +35,7 @@ import { db } from '@/lib/db'
 import { requirePortalFeature } from '@/lib/require-feature'
 import { logAudit } from '@/lib/audit'
 import { notifyRequestTeam } from '@/lib/notify-request-team'
+import { queueWorkSync } from '@/lib/slack/work-sync'
 import { NextRequest } from 'next/server'
 import { POST } from '@/app/api/portal/requests/[id]/handback/route'
 
@@ -233,5 +240,45 @@ describe('POST handback, the write', () => {
     expect(await res.json()).toEqual({ success: true, waitingOn: null })
     expect(queries).toHaveLength(2)
     expect(vi.mocked(logAudit)).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST handback, the Slack thread line (CN.3)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('queues the hand back as the client sending it back to the studio', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const { handle } = makeDb([[HANDED_OFF], [NAMED]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await POST(post({ note: 'Not mine to approve' }), params('req-1'))
+    expect(res.status).toBe(200)
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([{
+      entityType: 'request',
+      entityId: 'req-1',
+      actor: { type: 'client', contactId: 'contact-1', clerkUserId: 'user_ngaire', actingAsTeamMemberId: null },
+      changes: [{ field: 'waitingOn', to: null, phrase: 'sent it back to the studio' }],
+    }])
+  })
+
+  it('queues nothing while Slack is not configured', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', '')
+    const { handle } = makeDb([[HANDED_OFF], [NAMED]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await POST(post(), params('req-1'))
+    expect(res.status).toBe(200)
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+  })
+
+  it('queues nothing when there was nothing to hand back', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const { handle } = makeDb([[{ ...HANDED_OFF, waitingOnContactId: null }], [ADMIN]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    await POST(post(), params('req-1'))
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
   })
 })

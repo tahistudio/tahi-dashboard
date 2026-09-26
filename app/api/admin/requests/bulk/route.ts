@@ -36,6 +36,7 @@ import { eq, inArray, sql } from 'drizzle-orm'
 import { getOrgScope } from '@/lib/require-access'
 import { isPatchableStatus, PATCHABLE_STATUSES } from '@/lib/request-vocabulary'
 import { emitRequestStatusChanged, emitRequestCreated } from '@/lib/request-status-effects'
+import { diffWorkFields, queueWorkSync, workSyncArmed, type WorkChange, type WorkField } from '@/lib/slack/work-sync'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -70,6 +71,8 @@ type BulkRow = { id: string; orgId: string; title: string; assigneeId: string | 
    *  list is. Without it a brand-scoped contact hears about a row they would
    *  be refused if they clicked it. */
   brandId: string | null
+  /** The status before the write, for the Slack thread lines (CN.3). */
+  status: string | null
 }
 
 /** Load the given requests in chunks D1 will accept. */
@@ -84,6 +87,7 @@ async function loadRequestRows(drizzle: Drizzle, ids: readonly string[]): Promis
         assigneeId: schema.requests.assigneeId,
         isInternal: schema.requests.isInternal,
         brandId: schema.requests.brandId,
+        status: schema.requests.status,
       })
       .from(schema.requests)
       .where(inArray(schema.requests.id, chunk))
@@ -343,6 +347,23 @@ export async function PATCH(req: NextRequest) {
         brandId: row.brandId ?? null,
       }, nextStatus, { clientEmail: touchedPerOrg.get(row.orgId) === 1 })
     }
+  }
+
+  // One Slack batch for the whole selection (CN.3), holding only the rows
+  // that actually moved; `rows` is the before-state, read ahead of the write.
+  // The archive flag is a status change to archived, as it is above.
+  if (workSyncArmed()) {
+    const after: Partial<Record<WorkField, string | null>> = {}
+    if (nextStatus) after.status = nextStatus
+    if (body.assigneeId !== undefined) after.assignee = body.assigneeId || null
+    const batch: WorkChange[] = []
+    for (const row of rows) {
+      const changes = diffWorkFields({ status: row.status ?? null, assignee: row.assigneeId ?? null }, after)
+      if (changes.length > 0) {
+        batch.push({ entityType: 'request', entityId: row.id, actor: { type: 'studio', clerkUserId: userId ?? null }, changes })
+      }
+    }
+    if (batch.length > 0) await queueWorkSync(drizzle, batch)
   }
 
   // The count of rows actually touched, not the count asked for: the bulk bar

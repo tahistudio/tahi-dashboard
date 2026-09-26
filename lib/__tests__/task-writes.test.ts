@@ -13,13 +13,25 @@
  * system actor that applies a suggestion without a signed-in human to gate
  * the client on.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { NextResponse } from 'next/server'
 import { schema } from '@/db/d1'
 
 const accessChecked: Array<string | null | undefined> = []
 let deniedOrgIds: string[] = []
 const notified: Array<Record<string, unknown>> = []
+
+// The Slack thread line (CN.3): armed only when the token is set, exactly as
+// the real gate is, with the queue recorded rather than deferred.
+vi.mock('@/lib/slack/work-sync', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/slack/work-sync')>('@/lib/slack/work-sync')
+  return {
+    ...actual,
+    workSyncArmed: () => !!process.env.SLACK_BOT_TOKEN,
+    queueWorkSync: vi.fn(async () => undefined),
+  }
+})
+const { queueWorkSync } = await import('@/lib/slack/work-sync')
 
 vi.mock('@/lib/require-access', () => ({
   requireAccessToOrg: async (_drizzle: unknown, _userId: string | null, targetOrgId: string | null) => {
@@ -51,9 +63,14 @@ const { createTaskRecord, updateTaskRecord } = await import('../task-writes')
 
 interface Recorded { table: unknown; values: Record<string, unknown> }
 
-function fakeDrizzle(taskRow: Record<string, unknown> | null = { id: 't1', title: 'A task', status: 'todo' }) {
+function fakeDrizzle(
+  taskRow: Record<string, unknown> | null = { id: 't1', title: 'A task', status: 'todo' },
+  /** Rows the first selects answer with, in order, before `taskRow` takes over. */
+  firstSelects: Array<Record<string, unknown> | null> = [],
+) {
   const inserted: Recorded[] = []
   const updated: Array<Record<string, unknown>> = []
+  const selects = { count: 0 }
   const database = {
     insert(table: unknown) {
       return {
@@ -72,18 +89,21 @@ function fakeDrizzle(taskRow: Record<string, unknown> | null = { id: 't1', title
       }
     },
     select() {
+      const index = selects.count
+      selects.count += 1
+      const row = index < firstSelects.length ? firstSelects[index] : taskRow
       return {
         from() {
           return {
             where() {
-              return { limit: async () => (taskRow ? [taskRow] : []) }
+              return { limit: async () => (row ? [row] : []) }
             },
           }
         },
       }
     },
   }
-  return { database: database as unknown as Parameters<typeof createTaskRecord>[0], inserted, updated }
+  return { database: database as unknown as Parameters<typeof createTaskRecord>[0], inserted, updated, selects }
 }
 
 const HUMAN = { actorType: 'team_member' as const, actorId: 'user_1' }
@@ -93,6 +113,11 @@ beforeEach(() => {
   accessChecked.length = 0
   deniedOrgIds = []
   notified.length = 0
+  vi.mocked(queueWorkSync).mockClear()
+})
+
+afterEach(() => {
+  vi.unstubAllEnvs()
 })
 
 describe('createTaskRecord', () => {
@@ -198,5 +223,70 @@ describe('updateTaskRecord', () => {
     if (result.ok) return
     expect(result.failure).toEqual({ status: 400, error: 'Invalid status' })
     expect(updated).toHaveLength(0)
+  })
+})
+
+describe('updateTaskRecord and the Slack thread line (CN.3)', () => {
+  const BEFORE = { status: 'todo', assigneeId: null, dueDate: null, priority: 'standard', title: 'A task' }
+
+  it('reads nothing extra and queues nothing while Slack is not configured', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', '')
+    const { database, selects } = fakeDrizzle()
+    const result = await updateTaskRecord(database, 't1', { status: 'done' }, HUMAN)
+
+    expect(result.ok).toBe(true)
+    // The one select is readTask, which the writer has always done.
+    expect(selects.count).toBe(1)
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+  })
+
+  it('queues a person\'s status change with the before and after', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const { database, selects } = fakeDrizzle({ id: 't1', title: 'A task', status: 'done' }, [BEFORE])
+    await updateTaskRecord(database, 't1', { status: 'done' }, HUMAN)
+
+    expect(selects.count).toBe(2)
+    expect(vi.mocked(queueWorkSync)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([{
+      entityType: 'task',
+      entityId: 't1',
+      actor: { type: 'studio', clerkUserId: 'user_1' },
+      changes: [{ field: 'status', from: 'todo', to: 'done' }],
+    }])
+  })
+
+  it('diffs only the fields the patch wrote, with the assignee under its own name', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const { database } = fakeDrizzle(undefined, [BEFORE])
+    await updateTaskRecord(database, 't1', {
+      assigneeId: 'tm_staci', dueDate: '2026-10-02', title: 'A task', description: 'not a line',
+    }, HUMAN)
+
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1][0].changes).toEqual([
+      { field: 'assignee', from: null, to: 'tm_staci' },
+      { field: 'dueDate', from: null, to: '2026-10-02' },
+    ])
+  })
+
+  it('queues nothing when the value did not move', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const { database } = fakeDrizzle(undefined, [BEFORE])
+    await updateTaskRecord(database, 't1', { status: 'todo' }, HUMAN)
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+  })
+
+  it('never reads or queues for a system apply, whose card already says it', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const { database, selects } = fakeDrizzle()
+    await updateTaskRecord(database, 't1', { status: 'done' }, SYSTEM)
+    expect(selects.count).toBe(1)
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+  })
+
+  it('queues nothing for a refused patch', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const { database } = fakeDrizzle()
+    await updateTaskRecord(database, 't1', { status: 'shipped' }, HUMAN)
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
   })
 })

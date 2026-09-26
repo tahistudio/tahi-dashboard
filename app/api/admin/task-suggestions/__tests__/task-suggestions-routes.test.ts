@@ -263,6 +263,47 @@ describe('POST /api/admin/task-suggestions/[id]/decide', () => {
     expect(decisions).toHaveLength(0)
   })
 
+  it('carries a reject reason through, tidied, and only on a reject (CN.3)', async () => {
+    await DECIDE(
+      req('http://localhost/x', { method: 'POST', body: { action: 'reject', reason: '  Not said\n on the call ' } }) as never,
+      params('s1'),
+    )
+    expect(decisions[0].decision).toEqual({ action: 'reject', reason: 'Not said on the call' })
+
+    await DECIDE(
+      req('http://localhost/x', { method: 'POST', body: { action: 'approve', reason: 'Looks right' } }) as never,
+      params('s1'),
+    )
+    expect(decisions[1].decision).toEqual({ action: 'approve' })
+
+    await DECIDE(
+      req('http://localhost/x', { method: 'POST', body: { action: 'snooze', snooze: { until: '2026-10-01T07:00:00Z' }, reason: 'Later' } }) as never,
+      params('s1'),
+    )
+    expect(decisions[2].decision).toEqual({ action: 'snooze', until: '2026-10-01T07:00:00Z' })
+  })
+
+  it('says whether a reason was recorded, including on a row that was already rejected', async () => {
+    decideResultFor = { suggestion: { id: 's1', status: 'rejected' }, changed: false, reasonRecorded: true }
+    const late = await DECIDE(
+      req('http://localhost/x', { method: 'POST', body: { action: 'reject', reason: 'Already have it' } }) as never,
+      params('s1'),
+    )
+    expect(await late.json()).toMatchObject({ changed: false, reasonRecorded: true })
+
+    decideResultFor = null
+    const plain = await DECIDE(req('http://localhost/x', { method: 'POST', body: { action: 'reject' } }) as never, params('s1'))
+    expect(await plain.json()).toMatchObject({ changed: true, reasonRecorded: false })
+  })
+
+  it('sends a reject with no reason, or a blank or non-text one, as the plain reject it always was', async () => {
+    for (const reason of [undefined, '', '   ', 42, { text: 'x' }]) {
+      decisions.length = 0
+      await DECIDE(req('http://localhost/x', { method: 'POST', body: { action: 'reject', reason } }) as never, params('s1'))
+      expect(decisions[0].decision).toEqual({ action: 'reject' })
+    }
+  })
+
   it('records the surface the decision was made on', async () => {
     await DECIDE(req('http://localhost/x', { method: 'POST', body: { action: 'reject' } }) as never, params('s1'))
     expect(decisions[0].ctx).toEqual({ actorId: 'user_1', via: 'dashboard' })

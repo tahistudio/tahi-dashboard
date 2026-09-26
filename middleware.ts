@@ -77,6 +77,10 @@ const isPublicRoute = createRouteMatcher([
   '/api/admin/cron/schema-watchdog(.*)',
   '/api/admin/cron/indexing-reverser(.*)',
   '/api/admin/cron/publish-scheduled(.*)',
+  // The Monday suggestions digest. The route checks the cron secret or an
+  // admin session itself through assertCronAuth, like the targets above, and
+  // logs its own cron_runs row with logCronRun (a skipped run reads skipped).
+  '/api/admin/cron/suggestion-digest(.*)',
   // The call-notes suggester lives under /crons/ (plural). workers/cron-trigger
   // sends only x-cron-secret, no Bearer, so without this line Clerk 404'd every
   // scheduled run from 22 Sep until 26 Sep and no call produced suggestions.
