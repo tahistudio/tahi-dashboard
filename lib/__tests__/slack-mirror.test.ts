@@ -349,6 +349,15 @@ describe('the decided rewrite', () => {
     expect(updated[0].text).toBe('Could not apply: Task not found')
   })
 
+  it('keeps the apply error off a client draft card', async () => {
+    const { database } = fakeDb({ copies: [{ suggestion_id: 's1', channel_id: 'D_TIM', ts: '1.1' }] })
+    await mirrorSuggestionDecision(database, {
+      ...decided, status: 'failed', approverType: 'contact', applyError: 'D1_ERROR: no such column: org_id',
+    })
+    expect(updated[0].text).toBe('Could not apply')
+    expect(JSON.stringify(updated[0].blocks)).not.toContain('D1_ERROR')
+  })
+
   it('leaves a pending row alone, because pending is not a decision', async () => {
     const { database } = fakeDb({ copies: [{ suggestion_id: 's1', channel_id: 'D_LIAM', ts: '1.1' }] })
     expect(await mirrorSuggestionDecision(database, { ...decided, status: 'pending' })).toBe(0)

@@ -489,9 +489,11 @@ export function buildStudioDigest(
 
   const context: string[] = []
   if (snoozed.length > 0) {
+    // Only a time still ahead: a snooze that has ended but that the sweep has
+    // not brought back yet would otherwise name a time already gone.
     const next = snoozed
       .map(row => row.snoozeUntil)
-      .filter((iso): iso is string => timeOf(iso) !== null)
+      .filter((iso): iso is string => (timeOf(iso) ?? -Infinity) > now)
       .sort((a, b) => (timeOf(a) ?? 0) - (timeOf(b) ?? 0))[0] ?? null
     const when = studioWhen(next)
     context.push(when ? `${snoozed.length} snoozed, next back ${when}` : `${snoozed.length} snoozed`)
@@ -600,7 +602,14 @@ async function planDigest(database: Drizzle, at: Date): Promise<DigestPlan> {
       continue
     }
     const clerkUserId = identity.teamMemberId ? clerkUserIds.get(identity.teamMemberId) ?? null : null
-    const scope = await resolveAccessScoping(database, clerkUserId)
+    // One member's scoping lookup failing is that member's problem: it reads
+    // as nothing reachable, so they get no digest and the founders still do.
+    let scope: string[] | null
+    try {
+      scope = await resolveAccessScoping(database, clerkUserId)
+    } catch {
+      scope = []
+    }
     const reachable = notes.filter(note => reaches(scope, note.orgId))
     messages.push({ identity, content: buildPersonalDigest(reachable, at) })
   }

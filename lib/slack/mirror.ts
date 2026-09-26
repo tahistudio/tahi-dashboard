@@ -398,6 +398,9 @@ export interface DecidedSuggestionRow {
   kind?: string
   appliedTaskId?: string | null
   appliedRequestId?: string | null
+  /** 'founders' | 'member' | 'contact'. Optional for the same reason; read
+   *  only to keep the apply error off a client's own card. */
+  approverType?: string
 }
 
 /** The request half of the suggestion kinds. Spelled out here rather than
@@ -458,6 +461,11 @@ export async function decidedLinkFor(
  * Returns the number of copies rewritten, and NEVER throws. A decision made
  * in the dashboard is a fact about the database; whether Slack heard about it
  * is a separate and lesser question.
+ *
+ * A client's own draft that failed to apply reads "Could not apply" with no
+ * detail. The apply error can be a thrown D1 message or an internal lookup
+ * failure, which is ours to read on the row, not the client's to read in
+ * their DM.
  */
 export async function mirrorSuggestionDecision(
   drizzle: Drizzle,
@@ -472,7 +480,7 @@ export async function mirrorSuggestionDecision(
       actorName: await actorName(drizzle, row.decidedById),
       at: studioClock(row.decidedAt ?? row.updatedAt ?? null),
       until: outcome === 'snoozed' ? studioWhen(row.snoozeUntil) : null,
-      error: row.applyError,
+      error: row.approverType === 'contact' ? null : row.applyError,
       link: await decidedLinkFor(drizzle, row),
     })
     return await rewriteEverywhere(drizzle, row.id, payload)

@@ -84,7 +84,7 @@ describe('GET /api/admin/crons', () => {
     expect(digest).toBeDefined()
     expect(digest?.label).toBe('Suggestions digest')
     expect(digest?.endpoint).toBe('/api/admin/cron/suggestion-digest')
-    expect(digest?.schedule).toBe('Weekly (Mon 08:30 NZ)')
+    expect(digest?.schedule).toBe('Weekly (Mon 08:30 NZDT, 08:00 NZST)')
     expect(digest?.description).toContain('Slack is not set up')
     expect(digest?.description).not.toMatch(/[\u2013\u2014]/)
     expect(digest?.lastRun).toEqual(RUN)

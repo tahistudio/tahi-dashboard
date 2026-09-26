@@ -23,10 +23,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { schema } from '@/db/d1'
 
 const scopes = vi.hoisted(() => new Map<string | null, string[] | null>())
+const scopeFailures = vi.hoisted(() => new Set<string | null>())
 
 vi.mock('@/lib/access-scoping', () => ({
-  resolveAccessScoping: async (_database: unknown, clerkUserId: string | null) =>
-    (scopes.has(clerkUserId) ? scopes.get(clerkUserId) : []) ?? null,
+  resolveAccessScoping: async (_database: unknown, clerkUserId: string | null) => {
+    if (scopeFailures.has(clerkUserId)) throw new Error('D1_ERROR: scoping lookup failed')
+    return (scopes.has(clerkUserId) ? scopes.get(clerkUserId) : []) ?? null
+  },
 }))
 
 // The real Slack must never be reached from here: every run below injects
@@ -335,6 +338,7 @@ beforeEach(() => {
   opened.length = 0
   postFails = () => false
   scopes.clear()
+  scopeFailures.clear()
   scopes.set('clerk_nathan', ['o_ver'])
   scopes.set('clerk_old', [])
   vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
@@ -536,6 +540,26 @@ describe('the studio digest', () => {
     expect(liam).toContain('Last week: 9 approved, 4 rejected')
   })
 
+  it('names only a snooze still ahead as next back, and no time once every snooze has ended', async () => {
+    // 18:00 UTC Sunday is 07:00 Monday in Auckland, before this run at 08:30.
+    const ended = '2026-09-27T18:00:00.000Z'
+    await runSuggestionDigest(fakeDb(baseStore([
+      waiting('w1', 'o_ver', 'Verandela', 2),
+      suggestion({ status: 'snoozed', snoozeUntil: ended }),
+      suggestion({ status: 'snoozed', snoozeUntil: '2026-10-01T20:00:00.000Z' }),
+    ])), { at: MONDAY, deps })
+    expect(sentTo('D_LIAM')).toContain('2 snoozed, next back Fri 09:00')
+
+    posted.length = 0
+    await runSuggestionDigest(fakeDb(baseStore([
+      waiting('w1', 'o_ver', 'Verandela', 2),
+      suggestion({ status: 'snoozed', snoozeUntil: ended }),
+    ])), { at: MONDAY, deps })
+    const liam = sentTo('D_LIAM')
+    expect(liam).toContain('1 snoozed')
+    expect(liam).not.toContain('next back')
+  })
+
   it('adds the founder own notes, and only to that founder', async () => {
     await runSuggestionDigest(fakeDb(baseStore()), { at: MONDAY, deps })
     const liam = sentTo('D_LIAM')
@@ -615,6 +639,13 @@ describe('who hears what', () => {
     const result = await runSuggestionDigest(fakeDb(baseStore()), { at: MONDAY, deps })
     expect(result.sent).toBe(2)
     expect(posted.some(p => p.channel === 'D_NATHAN')).toBe(false)
+  })
+
+  it('reads a member whose scoping lookup throws as reaching nothing, and still sends the founders theirs', async () => {
+    scopeFailures.add('clerk_nathan')
+    const result = await runSuggestionDigest(fakeDb(baseStore()), { at: MONDAY, deps })
+    expect(result).toMatchObject({ ran: true, sent: 2, failed: 0 })
+    expect(posted.map(p => p.channel).sort()).toEqual(['D_LIAM', 'D_STACI'])
   })
 
   it('gives a founder whose super_admin role has ended nothing', async () => {

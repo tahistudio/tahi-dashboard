@@ -82,9 +82,9 @@ const CRONS: CronDef[] = [
   {
     cron: 'suggestion-digest',
     label: 'Suggestions digest',
-    description: 'Monday 08:30 NZ: a Slack DM to each founder with the suggestions still waiting, and to anyone whose own notes are waiting. Quiet when nothing is waiting or Slack is not set up.',
+    description: 'Monday morning NZ (08:30 in daylight saving, 08:00 outside it): a Slack DM to each founder with the suggestions still waiting, and to anyone whose own notes are waiting. Quiet when nothing is waiting or Slack is not set up.',
     endpoint: '/api/admin/cron/suggestion-digest',
-    schedule: 'Weekly (Mon 08:30 NZ)',
+    schedule: 'Weekly (Mon 08:30 NZDT, 08:00 NZST)',
   },
   {
     cron: 'sync-airwallex',
