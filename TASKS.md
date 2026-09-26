@@ -101,7 +101,7 @@ agent side is done unless the line says otherwise.
   (in_1TGQaE2MOtshRPkATn4r8ByV) and delete the "test manual" org on /clients
   (the importer no longer demotes the local write-off, but the org is a dummy).
 - [ ] A5 - The real-session lap (see "The one proof nobody else can give").
-- [ ] LIAM - Pay-rise decision: 74k each (Liam's figure, with Meditrain at
+- [x] LIAM - Pay-rise decision (resolved 2026-09-26: the rise already happened, pay stays at the configured 64k each; Liam thinks 64k, possibly 62k, and the 74k or 78k step below was not taken. Kept for the record): 74k each (Liam's figure, with Meditrain at
   2,200 a month per Bharat's 17 September call) or 78k each (the model's
   recommendation from the live numbers) from the 1 October payroll; top the tax
   pot from NZ$15k to the full IRD balance before the January instalment. The
