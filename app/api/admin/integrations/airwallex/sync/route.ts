@@ -22,6 +22,7 @@ import { schema } from '@/db/d1'
 import { eq, inArray, like, sql } from 'drizzle-orm'
 import { listBalances, listTransactions, AirwallexNotConfiguredError, getAirwallexToken } from '@/lib/airwallex'
 import { logCronRun } from '@/lib/cron-runs'
+import { recordYieldHeld, YIELD_HOLDINGS_KEY } from '@/lib/yield-history'
 
 export const dynamic = 'force-dynamic'
 
@@ -90,6 +91,7 @@ export async function POST(req: NextRequest) {
   let updated = 0
   let yieldRows = 0
   let yieldMalformed = false
+  let yieldMarked = false
   try {
     // Balances: one row per currency, keyed on accountId. Bulk upsert in
     // chunks; on conflict refresh the amounts + timestamps from the new row.
@@ -182,11 +184,13 @@ export async function POST(req: NextRequest) {
     // reader (overview cash, financial-reports summary, bank-balances,
     // forward snapshots) includes them with no special cases. Rows for
     // currencies removed from the setting are deleted. The snapshot
-    // BACKFILL and the Xero drift check both exclude 'yield:' rows by key.
+    // BACKFILL and the Xero drift check both exclude 'yield:' rows by key,
+    // and the first holding any sync sees is recorded in
+    // finance.yieldFirstHeldAt, which nothing clears.
     const [yieldSetting] = await database
       .select({ value: schema.settings.value })
       .from(schema.settings)
-      .where(eq(schema.settings.key, 'finance.yieldHoldings'))
+      .where(eq(schema.settings.key, YIELD_HOLDINGS_KEY))
       .limit(1)
     // A missing setting or an empty array means "no yield held" and clears
     // the materialised rows. A document that fails to parse, or contains
@@ -220,12 +224,22 @@ export async function POST(req: NextRequest) {
       }
     }
     yieldMalformed = !holdingsReadable
+    const existingYield = await database
+      .select({ accountId: schema.airwallexBalances.accountId, balance: schema.airwallexBalances.balance })
+      .from(schema.airwallexBalances)
+      .where(like(schema.airwallexBalances.accountId, 'yield:%'))
+    // Before any yield row is written or deleted: a holding seen here, in
+    // the rows or in the setting, is recorded for good in
+    // finance.yieldFirstHeldAt, so the month-end cash rebuild still knows
+    // yield was held after the setting is emptied and the rows go
+    // (lib/yield-history.ts).
+    yieldMarked = await recordYieldHeld(
+      database,
+      [...existingYield.map(r => r.balance), ...(holdingsReadable ? holdingsByCurrency.values() : [])],
+      nowIso,
+    )
     if (holdingsReadable) {
       const wanted = new Set([...holdingsByCurrency.keys()].map(cur => `yield:${cur}`))
-      const existingYield = await database
-        .select({ accountId: schema.airwallexBalances.accountId })
-        .from(schema.airwallexBalances)
-        .where(like(schema.airwallexBalances.accountId, 'yield:%'))
       const stale = existingYield.map(r => r.accountId).filter(id => !wanted.has(id))
       for (let i = 0; i < stale.length; i += PARAM_BUDGET) {
         await database
@@ -287,6 +301,7 @@ export async function POST(req: NextRequest) {
     transactions: { fetched: transactions.length, created, updated },
     yieldRows,
     yieldMalformed,
+    yieldMarked,
   }
   await logCronRun(database, 'sync-airwallex', 'success', Date.now() - t0, summary, null)
   return NextResponse.json(summary)

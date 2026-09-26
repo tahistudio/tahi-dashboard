@@ -7,8 +7,10 @@
  * revenue / profit trends live in xero_pnl_snapshots.
  *
  * Each row carries `source` ('cron' = full monthly snapshot, 'backfill' =
- * cash-only reconstruction from the Airwallex ledger) so the UI can mark
- * which months have complete data.
+ * rebuilt after the fact from the Airwallex ledger, the Xero P&L and, for a
+ * single-month fill, the invoice dates, with every field that could not be
+ * honestly rebuilt left null) so the UI can mark which months have complete
+ * data. The MCP get_financial_snapshots tool reads this route.
  *
  * Auth: admin session, financial_reports feature.
  */
