@@ -54,8 +54,13 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     )
   }
   if (isContractPastExpiry(doc.status, doc.expiresAt)) {
+    // The viewer prints expiresAt as the deadline that lapsed, so it goes out
+    // only once it has actually passed. A row set to 'expired' by hand (admin
+    // PATCH or MCP update_contract) can still carry a future date.
+    const deadline = doc.expiresAt ? Date.parse(doc.expiresAt) : Number.NaN
+    const lapsedOn = Number.isFinite(deadline) && deadline < Date.now() ? doc.expiresAt : null
     return NextResponse.json(
-      { error: 'This contract has expired.', reason: 'expired', expiresAt: doc.expiresAt },
+      { error: 'This contract has expired.', reason: 'expired', expiresAt: lapsedOn },
       { status: 410 },
     )
   }

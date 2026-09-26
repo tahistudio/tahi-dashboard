@@ -166,7 +166,16 @@ describe('GET /api/public/contracts/[token], refusing a lapsed contract on the r
     seed('expired', PAST)
     const res = await read(readReq(), readParams)
     expect(res.status).toBe(410)
-    expect((await res.json() as { reason: string }).reason).toBe('expired')
+    expect(await res.json()).toEqual({ error: 'This contract has expired.', reason: 'expired', expiresAt: PAST })
+  })
+
+  it('sends no deadline for a row set to expired by hand while its date is still ahead', async () => {
+    // The viewer prints expiresAt as "Its signing deadline was <date>", which
+    // would name a date that has not come yet.
+    seed('expired', FUTURE)
+    const res = await read(readReq(), readParams)
+    expect(res.status).toBe(410)
+    expect(await res.json()).toEqual({ error: 'This contract has expired.', reason: 'expired', expiresAt: null })
   })
 
   it('answers 410 with reason cancelled for a cancelled contract', async () => {

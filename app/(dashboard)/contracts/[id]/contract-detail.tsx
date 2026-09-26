@@ -684,8 +684,9 @@ export function ContractDetail({ id }: { id: string }) {
           {markedSigned && (
             <RailSection title="Signed PDF">
               <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: 0, lineHeight: 1.5 }}>
-                None on file. This contract was marked signed by hand, so there are no signatures
-                here to stamp into one.
+                {signatures.length === 0
+                  ? 'None on file. This contract was marked signed by hand, so there are no signatures here to stamp into one.'
+                  : 'None on file. This contract was marked signed by hand before every signer signed here, so no signed PDF was made. The signatures that were collected are under Activity.'}
               </p>
             </RailSection>
           )}
@@ -937,7 +938,7 @@ function SignersPane({
           signer={s}
           link={signerLinks[s.id] ?? null}
           isLocked={isLocked}
-          signedElsewhere={markedSigned && s.status !== 'signed'}
+          signedElsewhere={markedSigned && s.status === 'pending'}
           onCopy={onCopy}
           onResend={onResend}
           onRemove={onRemove}
@@ -953,7 +954,8 @@ function SignerCard({
   signer: Signer
   link: string | null
   isLocked: boolean
-  /** Contract marked signed by hand while this signer never signed here. */
+  /** Contract marked signed by hand while this signer was still pending.
+   *  A skipped signer was removed from the contract, so never this. */
   signedElsewhere: boolean
   onCopy: (url: string) => void
   onResend: (signerId: string) => void
@@ -1117,7 +1119,9 @@ function ActivityPane({
     events.push({
       icon: <Check size={13} />,
       title: 'Marked signed',
-      detail: 'Set by hand, outside the signing flow. No signatures or signing date on record here.',
+      detail: signatures.length === 0
+        ? 'Set by hand, outside the signing flow. No signatures or signing date on record here.'
+        : 'Set by hand, outside the signing flow, after the signatures above. No completion date on record here.',
       timestamp: contract.signedAt,
       accent: 'brand',
     })

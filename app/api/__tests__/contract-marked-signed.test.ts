@@ -28,10 +28,13 @@ vi.mock('@/lib/db', () => ({ db: vi.fn() }))
 
 import { db } from '@/lib/db'
 import { NextRequest } from 'next/server'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { GET as publicRead } from '@/app/api/public/contracts/[token]/route'
 import { GET as previewData } from '@/app/api/admin/contracts/[id]/preview-data/route'
 import { GET as adminList } from '@/app/api/admin/contracts/route'
 import { isMarkedSigned } from '@/lib/contract-signing-state'
+import { SignedHero, countSignedHere } from '@/app/p/contract/[token]/contract-viewer'
 
 interface BoundStatement {
   all(): Promise<{ results: unknown[] }>
@@ -63,6 +66,7 @@ function d1Adapter(sqlite: DatabaseSync) {
 
 const MARKED_TOKEN = 'm'.repeat(32)
 const FLOW_TOKEN = 'f'.repeat(32)
+const PARTIAL_TOKEN = 'p'.repeat(32)
 
 function seed() {
   const sqlite = new DatabaseSync(':memory:')
@@ -105,10 +109,39 @@ function seed() {
     VALUES ('f-1', 'doc-flow', 'client', 'Jo Yarnall', 'jo@acme.com', 1, 'signed', '2026-05-07T09:52:26.730Z', 'sig-1')`).run()
   sqlite.prepare(`INSERT INTO contract_signatures (id, contract_id, signer_id, signature_data_url, chain_hash, signed_at)
     VALUES ('sig-1', 'doc-flow', 'f-1', 'data:image/png;base64,AAAA', 'final-hash', '2026-05-07T09:52:26.730Z')`).run()
+  // Partially signed, then closed out by hand: the client signed through the
+  // link (the sign route leaves finalHash null on a partial sign), then the
+  // studio set 'signed' through update_contract instead of countersigning.
+  sqlite.prepare(`INSERT INTO contract_documents
+    (id, org_id, type, name, status, body_html, public_share_token, sent_at, signed_at, expires_at, final_hash, created_by_id, created_at, updated_at)
+    VALUES ('doc-partial', 'org-l', 'sow', 'Partial SoW', 'signed', '<p>Terms</p>', ?, '2026-09-01T00:00:00Z', NULL, NULL, NULL, 'user_liam', '2026-09-01T00:00:00Z', '2026-09-12T00:00:00Z')`)
+    .run(PARTIAL_TOKEN)
+  sqlite.prepare(`INSERT INTO contract_signers (id, contract_id, role, name, email, position, status, signed_at, signature_id)
+    VALUES ('p-1', 'doc-partial', 'client', 'Jo Yarnall', 'jo@acme.com', 1, 'signed', '2026-09-10T02:00:00.000Z', 'sig-p'),
+           ('p-2', 'doc-partial', 'tahi', 'Liam Miller', 'business@tahi.studio', 2, 'pending', NULL, NULL)`).run()
+  sqlite.prepare(`INSERT INTO contract_signatures (id, contract_id, signer_id, signature_data_url, chain_hash, signed_at)
+    VALUES ('sig-p', 'doc-partial', 'p-1', 'data:image/png;base64,BBBB', 'chain-1', '2026-09-10T02:00:00.000Z')`).run()
   vi.mocked(db).mockResolvedValue(drizzle(d1Adapter(sqlite) as unknown as AnyD1Database) as never)
 }
 
-type ContractPayload = { contract: Record<string, unknown>; signers: unknown[]; signatures: unknown[] }
+type ContractPayload = {
+  contract: Record<string, unknown>
+  signers: Array<{ id: string; status: string }>
+  signatures: Array<{ signerId: string }>
+}
+
+/** The viewer's hero for a marked-signed contract read in read mode. */
+function markedHero(signedHereCount: number, totalSigners: number): string {
+  return renderToStaticMarkup(createElement(SignedHero, {
+    justSigned: false,
+    activeSignerName: null,
+    allSigned: true,
+    markedSigned: true,
+    signedOn: null,
+    signedHereCount,
+    totalSigners,
+  }))
+}
 
 async function readPublic(token: string): Promise<ContractPayload> {
   const res = await publicRead(new NextRequest(`http://localhost:3000/api/public/contracts/${token}`), {
@@ -160,6 +193,43 @@ describe('GET /api/public/contracts/[token]', () => {
     const body = await readPublic(FLOW_TOKEN)
     expect(body.contract).not.toHaveProperty('finalHash')
   })
+
+  it('flags a partially signed contract closed out by hand, and its hero owns up to the signature on the page', async () => {
+    // The hero used to say "this page holds no signatures" directly above
+    // the client's own signer card, drawn signature and date included.
+    seed()
+    const body = await readPublic(PARTIAL_TOKEN)
+    expect(body.contract.markedSigned).toBe(true)
+    expect(body.contract.signedAt).toBeNull()
+    expect(body.signatures).toHaveLength(1)
+    const signedHere = countSignedHere(body.signers, body.signatures)
+    expect(signedHere).toBe(1)
+    const html = markedHero(signedHere, body.signers.length)
+    expect(html).toContain('Some signatures were collected on this page and the rest outside it')
+    expect(html).not.toContain('holds no signatures')
+    expect(html).not.toContain('Signed on')
+  })
+})
+
+describe('the viewer on a contract marked signed', () => {
+  it('says the page holds no signatures only when it holds none', () => {
+    const html = markedHero(0, 2)
+    expect(html).toContain('It was signed outside this page, so this page holds no signatures or signing date for it.')
+  })
+
+  it('does not call the rest "outside" when every signer signed here before the studio closed it', () => {
+    const html = markedHero(2, 2)
+    expect(html).toContain('The signatures below were collected on this page')
+    expect(html).not.toContain('holds no signatures')
+    expect(html).not.toContain('the rest outside it')
+  })
+
+  it('counts a signer as signed here only with a signature row behind them', () => {
+    // The raw signer PATCH can set status 'signed' with no signature.
+    const signers = [{ id: 'a', status: 'signed' }, { id: 'b', status: 'signed' }]
+    expect(countSignedHere(signers, [{ signerId: 'a' }])).toBe(1)
+    expect(countSignedHere(signers, [])).toBe(0)
+  })
 })
 
 describe('GET /api/admin/contracts/[id]/preview-data', () => {
@@ -185,8 +255,10 @@ describe('GET /api/admin/contracts', () => {
     const { items } = await res.json() as { items: Array<Record<string, unknown>> }
     const marked = items.find(i => i.id === 'doc-marked')
     const flow = items.find(i => i.id === 'doc-flow')
+    const partial = items.find(i => i.id === 'doc-partial')
     expect(marked).toMatchObject({ status: 'signed', markedSigned: true, signedCount: 0, totalSigners: 2 })
     expect(flow).toMatchObject({ status: 'signed', markedSigned: false, signedCount: 1, totalSigners: 1 })
+    expect(partial).toMatchObject({ status: 'signed', markedSigned: true, signedCount: 1, totalSigners: 2 })
     expect(marked).not.toHaveProperty('finalHash')
   })
 })

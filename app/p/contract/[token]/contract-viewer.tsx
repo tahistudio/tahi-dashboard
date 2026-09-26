@@ -317,6 +317,11 @@ export function ContractViewer({
   const markedSigned = allSigned && !!contract.markedSigned
   const signersByPosition = [...signers].sort((a, b) => a.position - b.position)
   const signedCount = signers.filter(s => s.status === 'signed').length
+  // Signed on this page means a signature row exists. On a contract marked
+  // signed by hand this is the count every sentence below uses: the studio
+  // can close out a partially signed contract, which leaves real signatures
+  // here, and the raw signer PATCH can set a signer 'signed' with none.
+  const signedHereCount = countSignedHere(signers, signatures)
 
   // Sign-mode guard rails: invalid signer, already signed, etc.
   let signGuardMessage: string | null = null
@@ -376,6 +381,8 @@ export function ContractViewer({
             allSigned={allSigned}
             markedSigned={markedSigned}
             signedOn={signedOn}
+            signedHereCount={signedHereCount}
+            totalSigners={signers.length}
           />
         </FadeSection>
       )}
@@ -387,8 +394,9 @@ export function ContractViewer({
           What you are <span style={{ color: BRAND.green }}>signing</span>
         </h2>
         <p style={slideSub}>
-          Read in full below. The full document remains on this page and is bound to your
-          signature once you submit.
+          {markedSigned
+            ? 'Read in full below. This is the document Tahi Studio recorded as signed.'
+            : 'Read in full below. The full document remains on this page and is bound to your signature once you submit.'}
         </p>
         <div style={proseFrame}>
           <div style={prose} dangerouslySetInnerHTML={{ __html: contract.bodyHtml }} />
@@ -403,9 +411,9 @@ export function ContractViewer({
         </h2>
         <p style={slideSub}>
           {markedSigned
-            ? (signedCount === 0
+            ? (signedHereCount === 0
                 ? 'Signed outside this page. Tahi Studio marked the contract signed, so no signatures are recorded here.'
-                : `${signedCount} of ${signers.length} signed on this page. Tahi Studio marked the contract signed.`)
+                : `${signedHereCount} of ${signers.length} signed on this page. Tahi Studio marked the contract signed.`)
             : signedCount === signers.length
               ? 'All signatures have been recorded.'
               : `${signedCount} of ${signers.length} signed so far.`}
@@ -420,7 +428,7 @@ export function ContractViewer({
                 signer={s}
                 signature={sig ?? null}
                 isYou={isYou}
-                signedElsewhere={markedSigned && !sig}
+                signedElsewhere={markedSigned && !sig && s.status !== 'skipped'}
               />
             )
           })}
@@ -452,8 +460,11 @@ export function ContractViewer({
       <footer style={footer}>
         <BrandMark size="sm" />
         <span style={footerNote}>
-          Tamper-evident · each signature is anchored to a SHA-256 hash chain. Confidential
-          to the named recipient.
+          {!markedSigned
+            ? 'Tamper-evident · each signature is anchored to a SHA-256 hash chain. Confidential to the named recipient.'
+            : signedHereCount > 0
+              ? 'Signatures collected on this page are anchored to a SHA-256 hash chain. Confidential to the named recipient.'
+              : 'Confidential to the named recipient.'}
         </span>
       </footer>
     </div>
@@ -631,7 +642,11 @@ function SignerCard({
             <span>on {formatDate(signature.signedAt)}</span>
           </div>
         ) : (
-          <span>{signedElsewhere ? 'No signature recorded on this page' : 'Awaiting signature'}</span>
+          <span>
+            {signer.status === 'skipped'
+              ? 'Removed from this contract'
+              : signedElsewhere ? 'No signature recorded on this page' : 'Awaiting signature'}
+          </span>
         )}
       </div>
 
@@ -708,8 +723,8 @@ function pillBase(kind: 'success' | 'warning' | 'neutral' | 'brand'): React.CSSP
 
 // ─── Signed hero (post-sign confirmation) ───────────────────────────────
 
-function SignedHero({
-  justSigned, activeSignerName, allSigned, markedSigned, signedOn,
+export function SignedHero({
+  justSigned, activeSignerName, allSigned, markedSigned, signedOn, signedHereCount, totalSigners,
 }: {
   justSigned: boolean
   activeSignerName: string | null
@@ -717,8 +732,13 @@ function SignedHero({
   markedSigned: boolean
   /** From the records only; null leaves the "Signed on" row out. */
   signedOn: string | null
+  /** Signers with a signature collected on this page (countSignedHere). */
+  signedHereCount: number
+  totalSigners: number
 }) {
-  if (markedSigned && !justSigned) return <MarkedSignedHero />
+  if (markedSigned && !justSigned) {
+    return <MarkedSignedHero signedHereCount={signedHereCount} totalSigners={totalSigners} />
+  }
 
   const headline = justSigned
     ? (allSigned ? 'Fully signed' : 'Your signature is in')
@@ -776,12 +796,20 @@ function SignedHero({
 }
 
 /**
- * The contract was marked signed by Tahi Studio, not signed on this page
- * (lib/contract-signing-state.ts). No audit trail: there is no hash chain,
- * no signing date and no recorded signature to vouch for, so this states
- * only what the studio recorded.
+ * The contract was marked signed by Tahi Studio rather than completed by
+ * the last signature on this page (lib/contract-signing-state.ts). No audit
+ * trail: there is no final hash and no completion date to vouch for, so this
+ * states only what the studio recorded. Some signatures may still have been
+ * collected here first, when the studio closed out a partially signed
+ * contract by hand; the signer cards below show them, so the sentence here
+ * has to agree with them.
  */
-function MarkedSignedHero() {
+function MarkedSignedHero({ signedHereCount, totalSigners }: { signedHereCount: number; totalSigners: number }) {
+  const detail = signedHereCount === 0
+    ? 'It was signed outside this page, so this page holds no signatures or signing date for it.'
+    : signedHereCount < totalSigners
+      ? 'Some signatures were collected on this page and the rest outside it, so there is no single signing date here.'
+      : 'The signatures below were collected on this page, but the contract was closed by hand rather than by the last signature, so there is no signing date for it here.'
   return (
     <div style={signedHeroShell}>
       <div style={signedHeroBackdrop} aria-hidden="true" />
@@ -799,8 +827,7 @@ function MarkedSignedHero() {
           <span style={{ color: BRAND.green }}>signed</span>
         </h2>
         <p style={{ ...slideSub, marginTop: '0.625rem', marginBottom: 0 }}>
-          Tahi Studio has recorded this contract as signed. It was signed outside this page,
-          so this page holds no signatures or signing date for it.
+          Tahi Studio has recorded this contract as signed. {detail}
         </p>
       </div>
     </div>
@@ -1182,6 +1209,19 @@ function UnavailableState({ title, children }: { title: string; children: React.
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
+
+/**
+ * Signers who have a signature row on this contract, which is what "signed
+ * on this page" means. The signer's own status is not enough: the raw signer
+ * PATCH can set it to 'signed' without a signature behind it.
+ */
+export function countSignedHere(
+  signers: ReadonlyArray<{ id: string }>,
+  signatures: ReadonlyArray<{ signerId: string }>,
+): number {
+  const withSignature = new Set(signatures.map(s => s.signerId))
+  return signers.filter(s => withSignature.has(s.id)).length
+}
 
 function labelForType(t: string): string {
   return ({
