@@ -141,6 +141,14 @@
   --color-danger: #dc2626;
   --color-danger-bg: #fef2f2;
   --color-danger-dot: #ef4444;
+  /* Danger as INK: the red a user reads as text straight on a surface (a
+     destructive menu item, an inline destructive action), plus the wash it
+     sits on when hovered. Light mode is --color-danger and --color-danger-bg
+     unchanged. They exist because neither of those can move in .dark (see
+     the note in the .dark block) and --color-danger reads 3.6:1 on the dark
+     card and popover. Chips keep using --badge-danger-*. */
+  --color-danger-ink: var(--color-danger);
+  --color-danger-tint: var(--color-danger-bg);
   --color-info: #60a5fa;
   --color-info-bg: #eff6ff;
 
@@ -1521,6 +1529,14 @@ html.tahi-private [data-private] button {
   --color-overdue-text:  #F4A0A0;
   --color-due-soon-bg:   rgba(245, 158, 11, 0.15);
   --color-due-soon-text: #F4C77A;
+
+  /* Danger ink (dark). The lighter red is text only, never a fill, so it can
+     lift where --color-danger cannot: 6.2:1 on the #1C1B19 card and popover,
+     5.1:1 on the #2C2B27 overlay, 5.3:1 on its own hover tint. The tint is
+     the badge-danger wash, since the light #fef2f2 would flash near-white
+     behind a hovered menu item. */
+  --color-danger-ink:  #F87171;
+  --color-danger-tint: rgba(239, 68, 68, 0.15);
 }
 
 /* ============================================================

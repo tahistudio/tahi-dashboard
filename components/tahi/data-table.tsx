@@ -676,6 +676,7 @@ export function DataTable<Row>({
                       onRowClick={onRowClick}
                       onRowPreview={onRowPreview}
                       paddingY={rowPaddingY}
+                      compact={density === 'compact'}
                       isLast={isLast}
                       isSelected={isSelected}
                       selectable={selectable}
@@ -780,6 +781,9 @@ interface DataRowProps<Row> {
   onRowClick?: (row: Row) => void
   onRowPreview?: (row: Row) => void
   paddingY: string
+  /** density === 'compact'. The actions cell pads by class rather than by
+   *  `paddingY`, so it needs to know which of the two it is. */
+  compact: boolean
   isLast: boolean
   isSelected: boolean
   selectable: boolean
@@ -810,6 +814,7 @@ function DataRow<Row>({
   onRowClick,
   onRowPreview,
   paddingY,
+  compact,
   isLast,
   isSelected,
   selectable,
@@ -950,14 +955,27 @@ function DataRow<Row>({
         {rowActions && (
           <td
             data-row-control
+            // Vertical padding by class so it can drop to zero where the
+            // trigger grows to 2.75rem: the other cells' padding already sets
+            // the row height there and the trigger centres in it, so the row
+            // does not grow past it. Against a mouse this is the same
+            // paddingY the other cells carry, so desktop rows keep their
+            // height to the pixel.
+            className={compact
+              ? 'py-2 max-md:py-0 pointer-coarse:py-0'
+              : 'py-3 max-md:py-0 pointer-coarse:py-0'}
             style={{
-              padding: `${paddingY} 0.5rem`,
+              paddingLeft: '0.5rem',
+              paddingRight: '0.5rem',
               borderBottom: isLast && !isExpanded ? 'none' : '1px solid var(--color-border-subtle)',
               verticalAlign: 'middle',
               width: '3rem',
               textAlign: 'right',
             }}
           >
+            {/* 1.75rem against a mouse, 2.75rem under a thumb or below md,
+                whatever the pointer reports. Sized by class so the media
+                variants can apply; desktop density is untouched. */}
             <button
               ref={actionsRef}
               type="button"
@@ -965,10 +983,8 @@ function DataRow<Row>({
                 e.stopPropagation()
                 setMenuOpen(v => !v)
               }}
-              className="inline-flex items-center justify-center"
+              className="tahi-focus-ring inline-flex items-center justify-center size-7 max-md:size-11 pointer-coarse:size-11"
               style={{
-                width: '1.75rem',
-                height: '1.75rem',
                 borderRadius: 'var(--radius-md)',
                 background: 'transparent',
                 border: 'none',
@@ -1480,6 +1496,10 @@ function ChipCell<Row>({
 }
 
 // ── Action menu (both 3-dots popover and right-click variant share this) ───
+//
+// Items measure about 2.3rem against a mouse and clear 2.75rem under a thumb
+// or below md. Danger items read in the ink / tint pair, which lifts in dark
+// mode where --color-danger sits at 3.6:1 on the popover.
 
 function ActionMenuList({
   actions,
@@ -1497,7 +1517,7 @@ function ActionMenuList({
           role="menuitem"
           disabled={action.disabled}
           onClick={(e) => runRowAction(e, action, onClose)}
-          className="w-full inline-flex items-center"
+          className="w-full inline-flex items-center max-md:min-h-11 pointer-coarse:min-h-11"
           style={{
             gap: '0.5rem',
             padding: '0.5rem 0.625rem',
@@ -1505,7 +1525,7 @@ function ActionMenuList({
             border: 'none',
             borderRadius: 'var(--radius-sm)',
             fontSize: 'var(--text-sm)',
-            color: action.tone === 'danger' ? 'var(--color-danger)' : 'var(--color-text)',
+            color: action.tone === 'danger' ? 'var(--color-danger-ink)' : 'var(--color-text)',
             cursor: action.disabled ? 'not-allowed' : 'pointer',
             opacity: action.disabled ? 0.5 : 1,
             textAlign: 'left',
@@ -1514,14 +1534,14 @@ function ActionMenuList({
           onMouseEnter={e => {
             if (action.disabled) return
             e.currentTarget.style.background = action.tone === 'danger'
-              ? 'var(--color-danger-bg)'
+              ? 'var(--color-danger-tint)'
               : 'var(--color-bg-secondary)'
           }}
           onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
         >
           {action.icon && (
             <span style={{
-              color: action.tone === 'danger' ? 'var(--color-danger)' : 'var(--color-text-muted)',
+              color: action.tone === 'danger' ? 'var(--color-danger-ink)' : 'var(--color-text-muted)',
               display: 'inline-flex',
             }}>
               {action.icon}
