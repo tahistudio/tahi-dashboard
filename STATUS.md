@@ -1,7 +1,7 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-09-21** by Claude (handoff sync: the 2026-09-13 to 2026-09-20 week written up, known bugs and operator steps refreshed). Triage snapshot below is still the 2026-08-18 audit. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-09-26** by Claude (the 2026-09-21 to 2026-09-26 work written up, known bugs and operator steps refreshed). Triage snapshot below is still the 2026-08-18 audit. Reading order for any agent: AGENTS.md.
 
 ## The plan (2026-08-18)
 
@@ -10,6 +10,26 @@ Liam's call: ship every surface a client touches first (proposals, contracts, sc
 ## DEPLOY GATE - RESOLVED 2026-09-10
 
 **Pushes to main DO auto-deploy to production now.** The `production` GitHub environment carries no protection rules any more (checked through the API on 2026-09-12: `protection_rules: []`), so the "Deploy dashboard" workflow's production job runs straight through: 4e43bd9d was pushed at 01:07 NZST on 2026-09-10 and was live at 01:14 with nobody clicking anything. The Aug 10 story (dc41442a sat behind a required reviewer for 8 days) is history. If the gate ever comes back it shows up as a run stuck on "waiting" at GitHub -> Actions -> the run -> Review deployments.
+
+## Since the last update (2026-09-21 to 2026-09-26)
+
+Detail with commit ids is in TASKS.md (CN.1c, CN.2, LW.34, LW.40, LW.43, D3, and "Follow-ups from the 2026-09-26 batch").
+
+- **Crons fire from a Cloudflare Worker** (LW.43, 2026-09-22): workers/cron-trigger replaced the GitHub schedules, which dropped most runs. **But the call-notes suggester never reached its handler from 22 to 26 September**: it lives under /api/admin/crons/ (plural), the worker sends only x-cron-secret, and the path was missing from the middleware's public list, so Clerk answered every run with a 404. Fixed and deployed 33f61601 on 2026-09-26; the 05:13 UTC run read the missed call and filed a suggestion. middleware.test.ts now walks every cron-trigger target through the middleware, so a new schedule entry cannot ship without its public line.
+- **The Slack app (CN.2) is deployed** (b06b0d91, migration 0110) and waits only on Liam's manifest, reinstall and the two secrets. Its three loose ends shipped 2026-09-26: a channel mention answers with a pointer to a DM and never creates a note, a modal submit is acknowledged cleanly, and slack_events_seen is swept daily after seven days.
+- **Suggestions (CN.1c) deployed ed2d4385**: a re-read adds to what is waiting instead of replacing it (only an explicit replace expires rows), and every call is read twice, the second read shown the first and asked for what it missed. The sweep has a 75 s budget under the worker's 120 s cut, about one call per half-hour run; calls that do not fit wait unstamped for the next run.
+- **Tests (LW.34)**: the three files that failed only under a full parallel run were fixed at the root; 387 files green.
+- **Phone and dark (LW.40 round two, ed2d4385)**: the morning's live pass at 375 found five of the eight fixes good and three not: the brief's Refresh and Nudge buttons at 26px, the Wire ticker with no hanging indent, and the contracts list as a sideways desktop table with its row menu 900px off screen. All three are fixed and deployed (44px targets, the Wire indent, mobile contract cards, 44px row menus on every DataTable, a dark danger ink token). **Not yet seen live**: the extension disconnected after the deploy.
+- **Contract truth (ed2d4385)**: a contract past its expiry now shows its expired state before any signature pad (it used to let the client draw and then refuse); the viewer's fine print says what the link really does; a contract marked signed by hand (the Lingorama SoW) no longer reads "Fully signed, 0 of 2 signed" with today's date invented as the signing date; the admin preview pill and audit trail hold at 375; the signed PDF is stored even when no email goes; public links no longer flash dark. Not yet seen live.
+- **Deliverable specs (D3)**: e2e/sales-publish.spec.ts and e2e/public-viewers.spec.ts green on the QA harness (proposal share to accept to studio notified, contract send to two signatures to stored PDF, revoke, expiry, 375 and dark). The live rehearsal with real inboxes is still owed.
+- **Financial snapshots**: August 2026 has no row and cannot be honestly rebuilt: yield was held in August and past yield balances are not stored, so month-end cash is unknown; MRR and active clients never have history. The backfill used to overwrite earlier backfilled months (May and June) and now never overwrites without an explicit refresh; a single-month fill (?fill=YYYY-MM, MCP snapshot_fill_month) inserts only what it can prove. The home's MRR change reads "vs Jul (no Aug MRR)" until 1 October, when September's row becomes the basis. The Airwallex sync now records finance.yieldFirstHeldAt ('unknown' the first time it sees yield), which blocks cash rebuilds for later months until someone sets the real date of the first transfer into yield.
+
+### Operator steps waiting on Liam (2026-09-26)
+
+- Slack: apply docs/superpowers/plans/2026-09-22-slack-app-manifest.md to the existing Tahi Dashboard app, reinstall, set SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET, then DM it once (a voice note too: confirm one recording gives one card).
+- Reconnect Chrome's Claude extension (or look yourself) so the ed2d4385 phone and dark pass can run; the list is in TASKS.md under LIAM.
+- Optional: set finance.yieldFirstHeldAt to the date of the first transfer into Airwallex yield (YYYY-MM-DD) if you want months before it rebuilt.
+- Everything in the 2026-09-21 list below that is not ticked: Google reconnect, Mark Ramsey's address, the "test manual" invoice, the real-session lap, the pay-rise decision (1 October payroll), the design review, PM.0.
 
 ## Since the last update (2026-09-13 to 2026-09-20)
 
@@ -129,16 +149,15 @@ Full detail with commit ids is in docs/superpowers/plans/2026-09-13-overnight-ru
 
 ## Known live bugs (priority order)
 
-Refreshed 2026-09-21. The older items are kept at the bottom with their state.
+Refreshed 2026-09-26. The older items are kept at the bottom with their state.
 
-1. **P1 - never seen live at 375px or in dark:** the eight LW.40 comment-ball fixes (overview brief meta, the Wire ticker, contracts header and More menu, client cards, the deal-linked call row) rest on reviewers' reading and the DataTable tests. The real-session lap (A5: greeting, bell, invite path, second seat) is Liam's or Staci's and has not happened.
+1. **P1 - deployed, not yet seen live:** the three LW.40 fixes that failed the 2026-09-26 morning pass and the contract truth fixes (ed2d4385); the list is in TASKS.md under LIAM. The real-session lap (A5: greeting, bell, invite path, second seat) is Liam's or Staci's and has not happened.
 2. **P1 - `finance.yieldHoldings` may be stale** (last noted 2026-08-18: Xero showed Yield USD 33,956.89 / AUD 638.80 vs the setting's 20,014.13 / 531.51; not re-checked since). Confirm in the Airwallex UI and update through update_settings; the home cash figure (NZ$76.1k on 17 Sep) depends on it, and Liam quoted NZ$85k on 2026-09-19.
-3. **P2 - CN.1c:** a rebuild of call suggestions replaces the previous pass instead of merging it, so sampling variance can drop items a human never saw (Sonnet 5 rejects a temperature parameter).
-4. **P2 - flaky under a full parallel vitest run** (LW.34): middleware.test.ts, utils formatDate, server-client-boundary; all green alone. The gate retries a failed file in isolation before calling the suite red.
-5. **P2 - the August financial snapshot is missing** (the monthly cron did not fire); the MRR delta reads against July until September's snapshot lands. The writer is idempotent; what is owed is a manual write of the August row or a cron re-run.
-6. **P3 - HO.5:** request_waiting_on_you has no notification preference toggle (bell and email on, cannot be muted); add when a client asks.
-7. **P3 - board drop targets**: on the Tasks board a card in the SAME column as the dragged card still lights as a drop target. Cosmetic, inside `KanbanBoard`, so it shows on the Requests board too.
-8. **Older items, for the record:** the production deploy gate is RESOLVED (2026-09-10); T0.2 (sync-airwallex plus a get_bank_balances check) stays open on its own merits; migrations 0081/0082 apply state on prod D1 (C0.4) was never re-verified; the five portal blockers (C2) shipped 2026-09-05; the proposal and schedule share leaks and the silent accept and sign (C1) were closed by Catalogue Batch C on 2026-09-13.
+3. **P2 - FU.1:** the suggester's time budget decides when a read starts, not how long it runs; a hanging Anthropic read can still pass the worker's 120 s cut. Watch cron_runs durations. (CN.1c itself, rebuilds replacing passes, is fixed and deployed.)
+4. **P3 - August 2026 has no financial snapshot and will not get one:** its month-end cash cannot be honestly rebuilt (yield was held), so the cash trend skips August and the MRR change reads against July until 1 October. (The LW.34 flaky tests are fixed.)
+5. **P3 - HO.5:** request_waiting_on_you has no notification preference toggle (bell and email on, cannot be muted); add when a client asks.
+6. **P3 - board drop targets**: on the Tasks board a card in the SAME column as the dragged card still lights as a drop target. Cosmetic, inside `KanbanBoard`, so it shows on the Requests board too.
+7. **Older items, for the record:** the production deploy gate is RESOLVED (2026-09-10); T0.2 (sync-airwallex plus a get_bank_balances check) stays open on its own merits; migrations 0081/0082 apply state on prod D1 (C0.4) was never re-verified; the five portal blockers (C2) shipped 2026-09-05; the proposal and schedule share leaks and the silent accept and sign (C1) were closed by Catalogue Batch C on 2026-09-13.
 
 ### Corrections to previous STATUS claims
 
