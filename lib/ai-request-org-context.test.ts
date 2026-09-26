@@ -255,6 +255,7 @@ describe('CLIENT_HISTORY_PROMPT_RULES', () => {
 function requestRow(overrides: Partial<CallAgreementRow> = {}): CallAgreementRow {
   return {
     orgId: 'org-acme',
+    sourceKind: 'call',
     kind: 'create_request',
     status: 'applied',
     appliedAt: '2026-09-18T10:00:00Z',
@@ -390,6 +391,16 @@ describe('selectCallAgreements, client audience', () => {
     const [item] = selectCallAgreements([requestRow({ callReceivedAt: null })], 'org-acme', 'client')
     expect(item.callDate).toBeNull()
   })
+
+  it('drops a request filed from a Slack note, which was never agreed on a call', () => {
+    const rows = [
+      requestRow({ sourceKind: 'note', callReceivedAt: null }),
+      requestRow({ sourceKind: null, appliedRequestId: 'req-240', requestId: 'req-240', requestNumber: 240 }),
+    ]
+    expect(selectCallAgreements(rows, 'org-acme', 'client')).toEqual([])
+    const block = formatCallAgreements(selectCallAgreements(rows, 'org-acme', 'client'), 'client')
+    expect(block).toBe('')
+  })
 })
 
 describe('selectCallAgreements, studio audience', () => {
@@ -403,6 +414,14 @@ describe('selectCallAgreements, studio audience', () => {
       ['create_task', 'Send Tim the footer copy', null],
       ['update_task', 'Chase the logo files', null],
     ])
+  })
+
+  it('keeps a row filed from a Slack note, and its line says so rather than naming a call', () => {
+    const [item] = selectCallAgreements([requestRow({ sourceKind: 'note', callReceivedAt: null })], 'org-acme', 'studio')
+    expect(item.fromNote).toBe(true)
+    expect(formatCallAgreements([item], 'studio')).toContain('- #231 Footer LinkedIn tag (new request, Slack note)')
+    const [fromCall] = selectCallAgreements([requestRow()], 'org-acme', 'studio')
+    expect(fromCall.fromNote).toBeUndefined()
   })
 
   it('keeps request_note, titled from the request', () => {

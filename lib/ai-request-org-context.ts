@@ -25,8 +25,9 @@
  * not the wizard's). It lets the wizard name the existing request by its
  * number instead of drafting a duplicate. The block has two audiences
  * because the portal wizard talks to the client: the client sees only the
- * request kinds, by number and CURRENT title, never a quote, a task or an
- * internal thread note; the studio sees every applied kind with its quote.
+ * request kinds read off a call, by number and CURRENT title, never a quote,
+ * a task, an internal thread note or a request filed from a Slack DM; the
+ * studio sees every applied kind with its quote, a Slack note marked as one.
  *
  * Split into pure formatters (unit tested, no DB) and a thin loader that
  * runs the reads: the org row, its brands, its last few requests, the full
@@ -128,6 +129,10 @@ export interface CallAgreement {
   /** The transcript lines the row rests on, clipped. Always null for the
    *  client audience. */
   quote: string | null
+  /** Set only on the studio audience, for a row filed from a Slack note
+   *  rather than read off a call, so its line does not claim a call. The
+   *  client audience never carries a note row at all. */
+  fromNote?: true
 }
 
 export interface RequestOrgContextInput {
@@ -286,6 +291,10 @@ const CALL_TITLE_MAX_CHARS = 120
  */
 const CLIENT_CALL_KINDS: readonly string[] = ['create_request', 'update_request', 'hand_off_request']
 
+/** task_suggestions.source_kind for a row read off a call transcript. The
+ *  other value today is 'note', a Slack DM (lib/slack/notes.ts). */
+const CALL_SOURCE_KIND = 'call'
+
 /** Every request kind, for deciding whether a row names a request or a task. */
 const REQUEST_CALL_KINDS: readonly string[] = [...CLIENT_CALL_KINDS, 'request_note']
 
@@ -313,6 +322,9 @@ const CALL_KIND_WORDS: Record<string, string> = {
  */
 export interface CallAgreementRow {
   orgId: string | null
+  /** task_suggestions.source_kind: 'call' for a transcript, 'note' for a
+   *  Slack DM. */
+  sourceKind: string | null
   kind: string
   status: string
   appliedAt: string | null
@@ -401,16 +413,19 @@ function proposalTitle(raw: string | null): string {
  * by applied date; one line per request or task (the newest row wins); at
  * most CALL_AGREEMENT_LIMIT.
  *
- * Client: only create_request, update_request and hand_off_request, and only
- * when the request they touched still exists, belongs to `orgId`, is not
- * internal and is not archived, which is exactly what the portal request list
- * shows. The title is the request's current title, never the proposal's, and
- * there is never a quote.
+ * Client: only rows read off a call (source_kind 'call'), because every line
+ * says "from the call" and a request filed from somebody's Slack DM was not
+ * agreed on one; only create_request, update_request and hand_off_request;
+ * and only when the request they touched still exists, belongs to `orgId`,
+ * is not internal and is not archived, which is exactly what the portal
+ * request list shows. The title is the request's current title, never the
+ * proposal's, and there is never a quote.
  *
- * Studio: every kind, titled from the request or task it touched (then the
- * proposal's title, then the kind itself), with the quote clipped. A row
- * whose request or task has since moved to another client is dropped rather
- * than naming that client's work here.
+ * Studio: every kind, from a call or a Slack note (a note row is marked
+ * fromNote so its line says so), titled from the request or task it touched
+ * (then the proposal's title, then the kind itself), with the quote clipped.
+ * A row whose request or task has since moved to another client is dropped
+ * rather than naming that client's work here.
  */
 export function selectCallAgreements(
   rows: readonly CallAgreementRow[],
@@ -432,6 +447,7 @@ export function selectCallAgreements(
     let title: string
     let quote: string | null = null
     if (audience === 'client') {
+      if (row.sourceKind !== CALL_SOURCE_KIND) continue
       if (!CLIENT_CALL_KINDS.includes(row.kind)) continue
       if (!row.requestId || row.requestOrgId !== orgId) continue
       if (row.requestIsInternal !== false || row.requestStatus === 'archived') continue
@@ -465,6 +481,7 @@ export function selectCallAgreements(
       callDate: datePart(row.callReceivedAt),
       appliedOn: datePart(row.appliedAt) ?? '',
       quote,
+      ...(audience === 'studio' && row.sourceKind !== CALL_SOURCE_KIND ? { fromNote: true as const } : {}),
     })
   }
 
@@ -508,7 +525,7 @@ export function formatCallAgreements(items: readonly CallAgreement[], audience: 
       const name = item.requestNumber != null
         ? `#${item.requestNumber} ${title}`
         : TASK_CALL_KINDS.includes(item.kind) ? `Task: ${title}` : `Request: ${title}`
-      const when = item.callDate ? `, call ${item.callDate}` : ''
+      const when = item.fromNote ? ', Slack note' : item.callDate ? `, call ${item.callDate}` : ''
       const quote = item.quote ? clipLine(item.quote, CALL_QUOTE_MAX_CHARS) : ''
       lines.push(`- ${name} (${kindWords(item.kind)}${when})${quote ? `: "${quote}"` : ''}`)
     }
@@ -567,12 +584,14 @@ export async function loadCallAgreements(
       gte(schema.taskSuggestions.appliedAt, since),
     ]
     if (audience === 'client') {
+      conditions.push(eq(schema.taskSuggestions.sourceKind, CALL_SOURCE_KIND))
       conditions.push(inArray(schema.taskSuggestions.kind, [...CLIENT_CALL_KINDS]))
     }
 
     const rows: CallAgreementRow[] = await drizzle
       .select({
         orgId: schema.taskSuggestions.orgId,
+        sourceKind: schema.taskSuggestions.sourceKind,
         kind: schema.taskSuggestions.kind,
         status: schema.taskSuggestions.status,
         appliedAt: schema.taskSuggestions.appliedAt,
