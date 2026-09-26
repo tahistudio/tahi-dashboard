@@ -12,8 +12,10 @@
  *   a second fill of the same month is refused and the first row stands.
  *
  *   ITS FIELDS are only what the data proves. Cash is the ledger rewind the
- *   backfill uses, and null while Airwallex yield is held (the Cash card
- *   counts yield, and what sat in yield at a past month end is not stored).
+ *   backfill uses, and null for any month that ended after Airwallex yield
+ *   was first held (the Cash card counts yield, and what sat in yield at a
+ *   past month end is not stored), whether or not any yield is left today:
+ *   finance.yieldFirstHeldAt, not today's yield rows, says which months.
  *   Burn is the trailing P&L (a month synced before it closed is left out).
  *   Owed comes from invoice dates and goes null the moment one invoice with
  *   money on it cannot be placed at month end, or when the invoice ledger
@@ -22,10 +24,15 @@
  *   balances were read before it ended, and a month where neither cash nor
  *   owed can be rebuilt are refused with nothing written.
  *
+ *   THE MONTH END is half-open: anything stamped exactly at it (a Xero
+ *   invoice dated the 1st, a payment on the 1st, a transaction at midnight)
+ *   belongs to the next month.
+ *
  *   THE BACKFILL no longer rewrites settled months. Without refresh an
  *   existing row is never touched, whatever its source; with refresh only
- *   rows it wrote itself are recomputed, and a cron row never is. While
- *   yield is held it writes nothing at all.
+ *   rows it wrote itself are recomputed, and a cron row never is. It writes
+ *   no month that ended after yield was first held, and nothing at all while
+ *   that date is unknown.
  */
 import { readFileSync } from 'fs'
 import { join } from 'path'
@@ -37,6 +44,7 @@ import {
   fillMonthSnapshot,
   owedAsOf,
   parseInstant,
+  readYieldHeldSince,
   SnapshotFillRefusal,
   type OwedInvoiceRow,
 } from '../financial-snapshots'
@@ -47,8 +55,11 @@ interface BoundStatement {
   raw(): Promise<unknown[][]>
 }
 
-/** `afterRead` runs after every read, so a test can play a concurrent writer. */
-function d1Adapter(sqlite: DatabaseSync, afterRead?: (query: string) => void) {
+/**
+ * `afterRead` runs after every read, so a test can play a concurrent writer;
+ * `beforeRun` runs before every write, so a test can make one fail.
+ */
+function d1Adapter(sqlite: DatabaseSync, afterRead?: (query: string) => void, beforeRun?: (query: string) => void) {
   return {
     prepare(query: string) {
       const stmt = sqlite.prepare(query)
@@ -59,6 +70,7 @@ function d1Adapter(sqlite: DatabaseSync, afterRead?: (query: string) => void) {
           return { results }
         },
         async run() {
+          beforeRun?.(query)
           const info = stmt.run(...(params as never[]))
           return { success: true, meta: { changes: Number(info.changes) } }
         },
@@ -102,6 +114,7 @@ const TABLES = `
     id text PRIMARY KEY, number text, status text NOT NULL, total_usd real NOT NULL,
     currency text, source text, sent_at text, paid_at text, created_at text NOT NULL, updated_at text NOT NULL
   );
+  CREATE TABLE settings (key text PRIMARY KEY, value text, updated_at text NOT NULL);
 `
 
 // "Today": late September 2026, so August is the last closed month.
@@ -155,6 +168,10 @@ interface SeedOptions {
   balancesAsOf?: string
   /** Airwallex yield rows, [currency, amount] (default: none held). */
   yieldHoldings?: Array<[string, number]>
+  /** The finance.yieldFirstHeldAt value (default: no row). */
+  yieldMarker?: string | null
+  /** The finance.yieldHoldings value (default: no row). */
+  yieldHoldingsSetting?: string | null
 }
 
 function seed(options: SeedOptions = {}) {
@@ -170,6 +187,10 @@ function seed(options: SeedOptions = {}) {
   const sqlite = new DatabaseSync(':memory:')
   sqlite.exec(MIGRATION_0085)
   sqlite.exec(TABLES)
+
+  const setting = sqlite.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)')
+  if (options.yieldMarker !== undefined) setting.run('finance.yieldFirstHeldAt', options.yieldMarker, '2026-09-20T18:00:00.000Z')
+  if (options.yieldHoldingsSetting !== undefined) setting.run('finance.yieldHoldings', options.yieldHoldingsSetting, '2026-09-20T18:00:00.000Z')
 
   // 1 USD = 1.7 NZD.
   const rate = sqlite.prepare('INSERT INTO exchange_rates VALUES (?, ?, ?)')
@@ -329,6 +350,22 @@ describe('fillMonthSnapshot: what it refuses', () => {
     expect(refusal.message).toContain('Run the Airwallex sync')
     expect(allSnapshots(sqlite)).toEqual([])
   })
+
+  it('names the wallet row holding the balances back, since the sync never deletes one it stopped refreshing', async () => {
+    // This morning's sync refreshed NZD and USD, but an old 'default:GBP'
+    // row from June is still there, and the anchor is only as fresh as its
+    // stalest row.
+    const { sqlite, database } = seed({ snapshots: false })
+    sqlite.prepare('INSERT INTO airwallex_balances (account_id, account_name, currency, balance, available_balance, as_of, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run('default:GBP', 'Airwallex GBP', 'GBP', 0, 0, '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z')
+    const refusal = await refusalOf(fillMonthSnapshot(database, '2026-08', NOW))
+    expect(refusal.code).toBe('balances_stale')
+    expect(refusal.message).toContain('default:GBP (as_of 2026-06-01T00:00:00.000Z)')
+
+    const backfill = await backfillCashFromLedger(database, NOW)
+    expect(backfill.note).toContain('default:GBP')
+    expect(allSnapshots(sqlite).map((row) => row.month_key)).toEqual(['2026-05'])
+  })
 })
 
 describe('fillMonthSnapshot: while Airwallex yield is held', () => {
@@ -371,6 +408,117 @@ describe('fillMonthSnapshot: while Airwallex yield is held', () => {
     expect(refusal.message).toContain('Neither month-end cash nor money owed')
     expect(refusal.message).toContain('yield')
     expect(allSnapshots(sqlite)).toEqual([])
+  })
+})
+
+describe('fillMonthSnapshot and the backfill: after the yield has been withdrawn', () => {
+  // USD 20,000 moved into yield on 5 August and came back on 15 September.
+  // Liam then emptied finance.yieldHoldings, so the sync deleted the yield
+  // rows: nothing held today. What is left is the marker the sync wrote the
+  // first time it saw the holding.
+  function seedWithdrawn(yieldMarker?: string | null, yieldHoldingsSetting?: string | null) {
+    const seeded = seed({
+      snapshots: false,
+      ...(yieldMarker !== undefined ? { yieldMarker } : {}),
+      ...(yieldHoldingsSetting !== undefined ? { yieldHoldingsSetting } : {}),
+    })
+    const txn = seeded.sqlite.prepare('INSERT INTO airwallex_transactions (id, account_id, amount, currency, type, settled_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    txn.run('t-into-yield', 'acct_1', -20000, 'USD', 'unknown', null, '2026-08-05T00:00:00.000Z')
+    txn.run('t-out-of-yield', 'acct_1', 20000, 'USD', 'unknown', null, '2026-09-15T00:00:00.000Z')
+    return seeded
+  }
+
+  it('leaves August cash null on a fill, and writes nothing on a backfill, with no yield rows left', async () => {
+    const fill = seedWithdrawn('unknown')
+    const result = await fillMonthSnapshot(fill.database, '2026-08', NOW)
+    // The wallet-only figure would be NZ$8,850 (the control below), low by
+    // the USD 20,000 (NZ$34,000) that sat in yield on 31 August.
+    expect(result.fields.cashNzd.value).toBeNull()
+    expect(result.fields.cashNzd.basis).toContain('finance.yieldFirstHeldAt is "unknown"')
+    expect(result.fields.cashNzd.basis).toContain('None is held today')
+    expect(result.fields.cashNzd.basis).toContain('date of the first transfer into yield')
+    expect(result.fields.runwayMonths.value).toBeNull()
+    expect(allSnapshots(fill.sqlite)).toEqual([
+      expect.objectContaining({ month_key: '2026-08', cash_nzd: null, owed_nzd: 1850, runway_months: null }),
+    ])
+
+    for (const refresh of [false, true]) {
+      const backfill = seedWithdrawn('unknown')
+      const done = await backfillCashFromLedger(backfill.database, NOW, { refresh })
+      expect(done.monthsWritten).toBe(0)
+      expect(done.monthsRefreshed).toBe(0)
+      expect(done.note).toMatch(/^Nothing written\./)
+      expect(done.note).toContain('finance.yieldFirstHeldAt')
+      expect(allSnapshots(backfill.sqlite)).toEqual([])
+    }
+  })
+
+  it('treats an emptied finance.yieldHoldings row as evidence when the yield went before any sync wrote the marker', async () => {
+    const fill = seedWithdrawn(undefined, '[]')
+    const result = await fillMonthSnapshot(fill.database, '2026-08', NOW)
+    expect(result.fields.cashNzd.value).toBeNull()
+    expect(result.fields.cashNzd.basis).toContain('finance.yieldHoldings setting was recorded')
+
+    const backfill = seedWithdrawn(undefined, '[]')
+    const done = await backfillCashFromLedger(backfill.database, NOW)
+    expect(done.monthsWritten).toBe(0)
+    expect(allSnapshots(backfill.sqlite)).toEqual([])
+  })
+
+  it('with no record of yield anywhere, rebuilds wallet cash alone, which is what the records exist to stop', async () => {
+    const { database } = seedWithdrawn()
+    const result = await fillMonthSnapshot(database, '2026-08', NOW)
+    // NZD 42,000 as before; USD 1,000 - 500 (t3) - 20,000 (back from yield
+    // in September) = -19,500, which is NZ$-33,150. The move into yield on
+    // 5 August is inside August and stays, so the wallet reads the whole
+    // USD 20,000 short: that money sat in yield on 31 August.
+    expect(result.fields.cashNzd.value).toBe(8850)
+    expect(result.fields.cashNzd.basis).toContain('No Airwallex yield holding has been recorded')
+  })
+
+  it('with the date of the first transfer into yield, rebuilds the months that ended by then and only those', async () => {
+    const july = seedWithdrawn('2026-08-05')
+    const julyResult = await fillMonthSnapshot(july.database, '2026-07', NOW)
+    // July ended on 1 August, before the move into yield, so the wallet held
+    // everything: NZD 45,000, and USD 1,000 - 500 - 20,000 + 20,000 = 500
+    // (NZ$850), since both yield transfers came after July's end.
+    expect(julyResult.fields.cashNzd.value).toBe(45850)
+    expect(julyResult.fields.cashNzd.basis).toContain('first held on or after 2026-08-05T00:00:00.000Z')
+
+    const august = seedWithdrawn('2026-08-05')
+    const augustResult = await fillMonthSnapshot(august.database, '2026-08', NOW)
+    expect(augustResult.fields.cashNzd.value).toBeNull()
+    expect(augustResult.fields.cashNzd.basis).toContain('held since 2026-08-05T00:00:00.000Z')
+
+    const backfill = seedWithdrawn('2026-08-05')
+    const done = await backfillCashFromLedger(backfill.database, NOW)
+    expect(done.writtenMonths).toEqual(['2026-05', '2026-06', '2026-07'])
+    expect(done.note).toContain('ended after Airwallex yield was first held: 2026-08')
+    expect(allSnapshots(backfill.sqlite).find((row) => row.month_key === '2026-07')?.cash_nzd).toBe(45850)
+  })
+
+  it('with a dated marker and yield still held, rebuilds an earlier month from the wallet, transfer into yield rewound', async () => {
+    const { database, sqlite } = seed({ snapshots: false, yieldHoldings: [['USD', 20000]], yieldMarker: '2026-08-05' })
+    sqlite.prepare('INSERT INTO airwallex_transactions (id, account_id, amount, currency, type, settled_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run('t-into-yield', 'acct_1', -20000, 'USD', 'unknown', null, '2026-08-05T00:00:00.000Z')
+    const result = await fillMonthSnapshot(database, '2026-07', NOW)
+    // NZD 45,000; USD 1,000 - 500 + 20,000 = 20,500 in the wallet on 31 July
+    // (NZ$34,850), none of it in yield yet.
+    expect(result.fields.cashNzd.value).toBe(79850)
+  })
+})
+
+describe('readYieldHeldSince', () => {
+  it('reads a date from the marker, and anything else as held since a date not recorded', () => {
+    expect(readYieldHeldSince(null, false)).toBeNull()
+    expect(readYieldHeldSince(null, true)).toBe(-Infinity)
+    expect(readYieldHeldSince({ value: 'unknown' }, false)).toBe(-Infinity)
+    expect(readYieldHeldSince({ value: null }, false)).toBe(-Infinity)
+    expect(readYieldHeldSince({ value: '5 Aug 2026' }, false)).toBe(-Infinity)
+    // A dated marker wins over the rows and the setting: they only say that
+    // yield was held, the marker says since when.
+    expect(readYieldHeldSince({ value: '2026-08-05' }, true)).toBe(Date.parse('2026-08-05T00:00:00.000Z'))
+    expect(readYieldHeldSince({ value: ' 2026-08-05T09:30:00Z ' }, false)).toBe(Date.parse('2026-08-05T09:30:00.000Z'))
   })
 })
 
@@ -442,6 +590,25 @@ describe('fillMonthSnapshot: the write', () => {
     expect(allSnapshots(sqlite).find((row) => row.month_key === '2026-08')).toMatchObject({ cash_nzd: 88888, source: 'cron' })
   })
 
+  it('throws a write that failed for any other reason, rather than calling it a race', async () => {
+    const { sqlite } = seed()
+    const database = drizzle(d1Adapter(sqlite, undefined, (query) => {
+      if (/insert into "financial_snapshots"/i.test(query)) throw new Error('NOT NULL constraint failed: financial_snapshots.captured_at')
+    }) as unknown as AnyD1Database)
+
+    let thrown: unknown = null
+    try {
+      await fillMonthSnapshot(database, '2026-08', NOW)
+    } catch (err) {
+      thrown = err
+    }
+    expect(thrown).toBeInstanceOf(Error)
+    expect(thrown).not.toBeInstanceOf(SnapshotFillRefusal)
+    const cause = (thrown as Error).cause instanceof Error ? ((thrown as Error).cause as Error).message : ''
+    expect(`${(thrown as Error).message} ${cause}`).toContain('NOT NULL constraint failed')
+    expect(allSnapshots(sqlite).find((row) => row.month_key === '2026-08')).toBeUndefined()
+  })
+
   it('leaves owed null when one written-off invoice cannot be placed at month end, and says why', async () => {
     const { sqlite, database } = seed({ invoices: [...CLEAN_INVOICES, AMBIGUOUS_WRITE_OFF] })
     const result = await fillMonthSnapshot(database, '2026-08', NOW)
@@ -469,6 +636,16 @@ describe('fillMonthSnapshot: the write', () => {
     expect(result.fields.burnNzd.value).toBe(15500)
     expect(result.fields.burnNzd.basis).toContain('2026-06, 2026-07')
     expect(result.fields.burnNzd.basis).not.toContain('2026-08')
+  })
+
+  it('rewinds a transaction stamped exactly at month end out of the month, since it belongs to the next one', async () => {
+    const { sqlite, database } = seed({ snapshots: false })
+    sqlite.prepare('INSERT INTO airwallex_transactions (id, account_id, amount, currency, type, settled_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run('t-midnight', 'acct_1', 4000, 'NZD', 'deposit', null, '2026-09-01T00:00:00.000Z')
+    const result = await fillMonthSnapshot(database, '2026-08', NOW)
+    // 42,850 as before, less the NZ$4,000 that landed on 1 September.
+    expect(result.fields.cashNzd.value).toBe(38850)
+    expect(result.fields.cashNzd.basis).toContain('4 ledger transactions')
   })
 
   it('does not subtract a transaction dated after the balances were read', async () => {
@@ -584,6 +761,33 @@ describe('owedAsOf', () => {
 
   it('ignores a status no bucket knows, as the live owed figure does', () => {
     expect(owedAsOf([cover, { ...base, status: 'mystery' }], AUG_END, RATES)).toMatchObject({ owedNzd: 0, ambiguous: [] })
+  })
+
+  it('puts a Xero date-only stamp on the 1st in the next month, for the issue date and the paid date alike', () => {
+    // Xero rows carry created_at = the invoice's DateString (midnight, no
+    // zone) and paid_at = normaliseXeroDate(FullyPaidOnDate) (midnight UTC),
+    // so both land exactly on August's end.
+    const datedFirst: OwedInvoiceRow = { ...base, id: 'sep-1', status: 'sent', totalUsd: 5000, createdAt: '2026-09-01T00:00:00', updatedAt: '2026-09-01T00:00:00' }
+    expect(owedAsOf([cover, datedFirst], AUG_END, RATES)).toMatchObject({ owedNzd: 0, certainCount: 0 })
+    // With nothing issued in August, nothing shows the ledger reaches it.
+    expect(owedAsOf([datedFirst], AUG_END, RATES)).toMatchObject({ owedNzd: null, beforeLedger: true, certainCount: 0 })
+
+    const paidFirst: OwedInvoiceRow = {
+      ...base, id: 'aug-20', status: 'paid', totalUsd: 3000, createdAt: '2026-08-20T00:00:00', paidAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z',
+    }
+    expect(owedAsOf([paidFirst], AUG_END, RATES)).toMatchObject({ owedNzd: 3000, certainCount: 1 })
+  })
+
+  it('treats a row rewritten, or a draft sent, exactly at month end as after it', () => {
+    // A paid invoice with no paid date, last written at the stroke of
+    // midnight: that write happened in September, so August's state is open.
+    const touched = owedAsOf([{ ...base, status: 'paid', updatedAt: '2026-09-01T00:00:00.000Z' }], AUG_END, RATES)
+    expect(touched.owedNzd).toBeNull()
+    expect(touched.ambiguous[0]?.reason).toContain('no paid date')
+
+    // A draft first sent at that same instant was never out in August.
+    const draft = owedAsOf([cover, { ...base, status: 'draft', sentAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-10T00:00:00.000Z' }], AUG_END, RATES)
+    expect(draft).toMatchObject({ owedNzd: 0, ambiguous: [] })
   })
 
   it('reads a zone-less date as UTC wherever the code runs', () => {

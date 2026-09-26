@@ -10,9 +10,11 @@
  * ?backfill=1 additionally reconstructs past month-end cash from the
  * Airwallex ledger for months that have NO row yet. It never overwrites an
  * existing row: a re-run would otherwise restate settled months from
- * today's FX and today's P&L. While Airwallex yield is held it writes
- * nothing, because the yield held at a past month end is not stored and the
- * Cash card counts it.
+ * today's FX and today's P&L. It writes no month that ended after Airwallex
+ * yield was first held (finance.yieldFirstHeldAt, which the Airwallex sync
+ * writes and nothing clears; nothing at all while it says 'unknown'),
+ * because the yield held at a past month end is not stored and the Cash
+ * card counts it.
  *
  * ?backfill=1&refresh=1 is the explicit opt-in to recompute the rows an
  * earlier backfill wrote (source 'backfill'). A 'cron' row is never
@@ -21,7 +23,8 @@
  * ?fill=YYYY-MM writes ONE missing past month and does nothing else: no
  * current-month write, no backfill, no Slack sweep. Insert only, never an
  * upsert; it touches no other month. Cash, burn and runway are rebuilt the
- * way the backfill rebuilds them (no cash or runway while yield is held),
+ * way the backfill rebuilds them (no cash or runway for a month that ended
+ * after yield was first held),
  * money owed only when the invoice dates prove it and the invoice ledger
  * reaches back to the month, MRR and active clients never (no history of
  * them is kept). The response names every field's value and basis, or why
@@ -63,6 +66,7 @@ import {
   backfillCashFromLedger,
   fillMonthSnapshot,
   SnapshotFillRefusal,
+  type FillMonthResult,
 } from '@/lib/financial-snapshots'
 import { sweepSlackEventsSeen } from '@/lib/slack/events-seen'
 
@@ -156,6 +160,23 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ steps })
 }
 
+/** How many blocking invoices a logged fill keeps; the response keeps them all. */
+const LOGGED_AMBIGUOUS = 10
+
+/**
+ * A fill's result as cron_runs keeps it: everything but the long tail of
+ * owed.ambiguous, which is capped with its full count beside it, so a month
+ * with many rows in doubt does not bloat the run log.
+ */
+function fillLogDetail(detail: FillMonthResult): unknown {
+  const owed = detail.owed as FillMonthResult['owed'] | undefined
+  if (!owed || owed.ambiguous.length <= LOGGED_AMBIGUOUS) return detail
+  return {
+    ...detail,
+    owed: { ...owed, ambiguous: owed.ambiguous.slice(0, LOGGED_AMBIGUOUS), ambiguousCount: owed.ambiguous.length },
+  }
+}
+
 /**
  * The ?fill=YYYY-MM branch. A refusal is the caller's answer and writes
  * nothing, so it is not logged; a write, or a write that failed, is logged
@@ -165,7 +186,8 @@ async function runFill(database: D1, monthKey: string, t0: number): Promise<Next
   try {
     const detail = await fillMonthSnapshot(database, monthKey)
     const steps: StepResult[] = [{ name: 'fill-month', ok: true, detail }]
-    await logCronRun(database, 'snapshot-metrics', 'success', Date.now() - t0, { mode: 'fill', monthKey, steps }, null)
+    const logged: StepResult[] = [{ name: 'fill-month', ok: true, detail: fillLogDetail(detail) }]
+    await logCronRun(database, 'snapshot-metrics', 'success', Date.now() - t0, { mode: 'fill', monthKey, steps: logged }, null)
     return NextResponse.json({ mode: 'fill', steps })
   } catch (err) {
     if (err instanceof SnapshotFillRefusal) {

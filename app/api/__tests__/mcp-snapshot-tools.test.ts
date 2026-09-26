@@ -39,9 +39,10 @@ describe('snapshot_fill_month', () => {
     expect(description).toContain('MRR and active clients are always null')
   })
 
-  it('says cash is null while yield is held, and owed is never a made-up 0', () => {
+  it('says cash is null for any month after yield was first held, and owed is never a made-up 0', () => {
     const description = toolNamed('snapshot_fill_month').description
-    expect(description).toContain('null while any Airwallex yield is held')
+    expect(description).toContain('null for any month that ended after Airwallex yield was first held, held today or not')
+    expect(description).toContain('finance.yieldFirstHeldAt')
     expect(description).toContain('never a made-up 0')
   })
 
@@ -63,6 +64,12 @@ describe('snapshot_fill_month', () => {
 })
 
 describe('get_financial_snapshots', () => {
+  it('says the current month\'s cron row still moves', () => {
+    const description = toolNamed('get_financial_snapshots').description
+    expect(description).toContain('rewritten every day')
+    expect(description).not.toContain('frozen when the month closed')
+  })
+
   it('is registered and reads the stored months', () => {
     expect(toolNamed('get_financial_snapshots').inputSchema.required ?? []).toEqual([])
     expect(snapshotToolCall('get_financial_snapshots', {})).toEqual({

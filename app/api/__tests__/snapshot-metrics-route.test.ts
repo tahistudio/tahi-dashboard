@@ -134,6 +134,19 @@ describe('POST /api/admin/cron/snapshot-metrics?fill=YYYY-MM', () => {
     expect(error).toBeNull()
   })
 
+  it('logs at most ten blocking invoices, with the full count, and answers with all of them', async () => {
+    const ambiguous = Array.from({ length: 12 }, (_, i) => ({ id: `inv-${i}`, number: null, status: 'written_off', amountNzd: 100, reason: 'rewritten since' }))
+    vi.mocked(fillMonthSnapshot).mockResolvedValue({ ...FILLED, owed: { owedNzd: null, ambiguous } } as never)
+
+    const res = await snapshotMetrics(req('?fill=2026-08'))
+    const body = await res.json() as { steps: Array<{ detail: { owed: { ambiguous: unknown[] } } }> }
+    expect(body.steps[0].detail.owed.ambiguous).toHaveLength(12)
+
+    const summary = vi.mocked(logCronRun).mock.calls[0][4] as { steps: Array<{ detail: { owed: { ambiguous: unknown[]; ambiguousCount: number } } }> }
+    expect(summary.steps[0].detail.owed.ambiguous).toHaveLength(10)
+    expect(summary.steps[0].detail.owed.ambiguousCount).toBe(12)
+  })
+
   it('answers a refusal with its own status and message, and logs nothing', async () => {
     vi.mocked(fillMonthSnapshot).mockRejectedValue(
       new SnapshotFillRefusal('exists', 409, '2026-07 already has a snapshot (source cron, captured 2026-07-10T18:00:00.000Z). A fill never overwrites; nothing was written.', { source: 'cron', capturedAt: '2026-07-10T18:00:00.000Z' }),
