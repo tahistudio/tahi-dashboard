@@ -22,6 +22,13 @@
  *
  *   THE ASSISTANT PANE (contract section 6b): a new thread gets one welcome
  *   line for the level and the three suggested prompts.
+ *
+ *   A MENTION IN A CHANNEL is answered once, in its thread, with a line
+ *   pointing to the DM, and never reaches the note path; a stranger gets the
+ *   refusal line there instead.
+ *
+ *   A MODAL SUBMIT goes to whatever claimed its callback_id on the registry,
+ *   never to a button handler, never for a stranger, and says nothing itself.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { schema } from '@/db/d1'
@@ -36,6 +43,17 @@ vi.mock('../api', () => ({
   filesInfo: async (fileId: string) => ({ id: fileId, mimetype: 'audio/mp4', urlPrivate: 'https://files.slack.com/f', name: 'note.m4a', size: 2048 }),
   setStatus: async (input: Record<string, unknown>) => { statuses.push(input) },
   setSuggestedPrompts: async (input: Record<string, unknown>) => { prompts.push(input) },
+  usersInfo: async () => ({ email: null, isBot: false }),
+}))
+
+// The whole-delivery tests below (handleSlackEvent, handleSlackInteraction)
+// decide who is talking through resolveSlackIdentity, which reads D1 and
+// calls users.info. Everything else in the module stays real, DENIAL_LINE
+// included, so the refusal these tests expect is the one a stranger gets.
+let resolvedLevel: 'founder' | 'member' | 'client' | 'unknown' = 'founder'
+vi.mock('../identity', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../identity')>()),
+  resolveSlackIdentity: async () => identity(resolvedLevel),
 }))
 
 const {
@@ -46,12 +64,22 @@ const {
   handleDm,
   handleAction,
   handleAssistantThreadStarted,
+  handleSlackEvent,
+  handleSlackInteraction,
   ASSISTANT_PROMPTS,
   NOT_WIRED_LINE,
+  CHANNEL_MENTION_LINE,
+  VIEW_SUBMISSION_ACK,
 } = await import('../dispatch')
 
 const { registerSlackDmHandler, resetSlackDmHandler } = await import('../dm-hook')
-const { registerBlockActionHandler, clearBlockActionHandlers } = await import('../action-registry')
+const {
+  registerBlockActionHandler,
+  registerViewSubmissionHandler,
+  resolveBlockActionHandler,
+  resolveViewSubmissionHandler,
+  clearBlockActionHandlers,
+} = await import('../action-registry')
 
 const { DENIAL_LINE } = await import('../identity')
 
@@ -83,6 +111,7 @@ beforeEach(() => {
   posted.length = 0
   statuses.length = 0
   prompts.length = 0
+  resolvedLevel = 'founder'
   resetSlackDmHandler()
   clearBlockActionHandlers()
 })
@@ -95,6 +124,17 @@ describe('isHandledEvent', () => {
   it('handles an audio file shared in a DM', () => {
     expect(isHandledEvent({ type: 'message', subtype: 'file_share', channel_type: 'im', user: 'U1', channel: 'D1' })).toBe(true)
     expect(isHandledEvent({ type: 'file_shared', user: 'U1', channel: 'D1' })).toBe(true)
+    // The shape Slack actually sends: user_id and channel_id.
+    expect(isHandledEvent({ type: 'file_shared', user_id: 'U1', channel_id: 'D1', file_id: 'F1' })).toBe(true)
+  })
+
+  it('ignores a file shared in a channel, which Slack sends for any channel the bot has joined', () => {
+    expect(isHandledEvent({ type: 'file_shared', user_id: 'U1', channel_id: 'C_GENERAL', file_id: 'F1' })).toBe(false)
+    expect(isHandledEvent({ type: 'file_shared', user_id: 'U1', channel_id: 'G_PRIVATE', file_id: 'F1' })).toBe(false)
+  })
+
+  it('ignores a file_shared that names no channel, because where it was shared cannot be told', () => {
+    expect(isHandledEvent({ type: 'file_shared', user_id: 'U1', file_id: 'F1' })).toBe(false)
   })
 
   it('handles an app mention', () => {
@@ -354,5 +394,258 @@ describe('the assistant pane (contract section 6b)', () => {
     await handleAssistantThreadStarted(identity('unknown'), started)
     expect(posted[0]).toMatchObject({ text: DENIAL_LINE })
     expect(prompts).toHaveLength(0)
+  })
+})
+
+/** Registers a DM handler that only records that it was reached. */
+function spyOnDmHook(): { calls: number } {
+  const spy = { calls: 0 }
+  registerSlackDmHandler(async () => {
+    spy.calls += 1
+    return { handled: true, reason: 'ok', voice: false, posted: 0 }
+  })
+  return spy
+}
+
+describe('a mention in a channel (channels come later, contract section 7)', () => {
+  function mention(event: Record<string, unknown> = {}) {
+    return {
+      type: 'event_callback',
+      team_id: 'T',
+      event_id: 'Ev_mention',
+      event: {
+        type: 'app_mention',
+        user: 'U',
+        channel: 'C_GENERAL',
+        text: '<@B1> can you log the Verandela header fix',
+        ts: '1758.5',
+        event_ts: '1758.5',
+        ...event,
+      },
+    }
+  }
+
+  it('answers in a thread under the mention, pointing to a DM, and drafts nothing', async () => {
+    const dm = spyOnDmHook()
+    await handleSlackEvent(fakeDrizzle, mention())
+    expect(dm.calls).toBe(0)
+    expect(posted).toEqual([{ channel: 'C_GENERAL', text: CHANNEL_MENTION_LINE, threadTs: '1758.5' }])
+  })
+
+  it('answers inside the thread the mention was made in', async () => {
+    await handleSlackEvent(fakeDrizzle, mention({ ts: '1758.9', thread_ts: '1758.1' }))
+    expect(posted).toEqual([{ channel: 'C_GENERAL', text: CHANNEL_MENTION_LINE, threadTs: '1758.1' }])
+  })
+
+  it('says plainly that nothing was created, and never uses a dash', () => {
+    expect(CHANNEL_MENTION_LINE).toContain('nothing was created')
+    expect(CHANNEL_MENTION_LINE).toContain('direct message')
+    // En dash and em dash, by code point so this file carries neither.
+    const dashes = [0x2013, 0x2014].map((code) => String.fromCharCode(code))
+    for (const dash of dashes) expect(CHANNEL_MENTION_LINE).not.toContain(dash)
+  })
+
+  it('points every known level to the DM, a client included', async () => {
+    for (const level of ['member', 'client'] as const) {
+      posted.length = 0
+      resolvedLevel = level
+      const dm = spyOnDmHook()
+      await handleSlackEvent(fakeDrizzle, mention())
+      expect(dm.calls).toBe(0)
+      expect(posted.map((p) => p.text)).toEqual([CHANNEL_MENTION_LINE])
+    }
+  })
+
+  it('gives a stranger the refusal line in the thread, and still no note', async () => {
+    resolvedLevel = 'unknown'
+    const dm = spyOnDmHook()
+    await handleSlackEvent(fakeDrizzle, mention())
+    expect(dm.calls).toBe(0)
+    expect(posted).toEqual([{ channel: 'C_GENERAL', text: DENIAL_LINE, threadTs: '1758.5' }])
+  })
+
+  it('answers a mention in a private channel the same way', async () => {
+    const dm = spyOnDmHook()
+    await handleSlackEvent(fakeDrizzle, mention({ channel: 'G_PRIVATE' }))
+    expect(dm.calls).toBe(0)
+    expect(posted[0]).toMatchObject({ channel: 'G_PRIVATE', text: CHANNEL_MENTION_LINE })
+  })
+
+  it('treats a mention inside the 1:1 as the DM it is', async () => {
+    const dm = spyOnDmHook()
+    await handleSlackEvent(fakeDrizzle, mention({ channel: 'D1' }))
+    expect(dm.calls).toBe(1)
+    expect(posted).toHaveLength(0)
+  })
+
+  it('still sends an ordinary DM to the note path', async () => {
+    const dm = spyOnDmHook()
+    await handleSlackEvent(fakeDrizzle, {
+      type: 'event_callback',
+      team_id: 'T',
+      event_id: 'Ev_dm',
+      event: { type: 'message', channel_type: 'im', user: 'U', channel: 'D1', text: 'note this', ts: '1758.2' },
+    })
+    expect(dm.calls).toBe(1)
+  })
+})
+
+describe('a file shared in a channel (the file_shared twin of a mention)', () => {
+  // Slack sends file_shared for every file the app can see. A mention with a
+  // voice clip attached in #general arrives as an app_mention AND as this,
+  // under a different event_id, so the retry guard does not pair them up.
+  function fileShared(channelId: string) {
+    return {
+      type: 'event_callback',
+      team_id: 'T',
+      event_id: `Ev_file_${channelId}`,
+      event: {
+        type: 'file_shared',
+        user_id: 'U',
+        channel_id: channelId,
+        file_id: 'F1',
+        file: { id: 'F1' },
+        event_ts: '1758.6',
+      },
+    }
+  }
+
+  it('never reaches the note path and posts nothing, not even at the channel top level', async () => {
+    const dm = spyOnDmHook()
+    await handleSlackEvent(fakeDrizzle, fileShared('C_GENERAL'))
+    expect(dm.calls).toBe(0)
+    expect(posted).toHaveLength(0)
+    expect(statuses).toHaveLength(0)
+  })
+
+  it('gives a stranger no public refusal for a file they posted in a channel', async () => {
+    resolvedLevel = 'unknown'
+    const dm = spyOnDmHook()
+    await handleSlackEvent(fakeDrizzle, fileShared('C_GENERAL'))
+    expect(dm.calls).toBe(0)
+    expect(posted).toHaveLength(0)
+  })
+
+  it('still sends a file shared in the 1:1 to the voice path', async () => {
+    const seen: Array<Record<string, unknown>> = []
+    registerSlackDmHandler(async (event) => {
+      seen.push({ channelId: event.channelId, files: event.files })
+      return { handled: true, reason: 'ok', voice: true, posted: 0 }
+    })
+
+    await handleSlackEvent(fakeDrizzle, fileShared('D1'))
+
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ channelId: 'D1', files: [{ id: 'F1' }] })
+  })
+})
+
+describe('a modal submit (view_submission)', () => {
+  function submit(callbackId: string) {
+    return {
+      type: 'view_submission',
+      team: { id: 'T' },
+      user: { id: 'U' },
+      trigger_id: 'trig_view',
+      view: {
+        id: 'V1',
+        callback_id: callbackId,
+        private_metadata: '{"suggestionId":"s1","channel":"D1"}',
+        state: { values: { title: { title_input: { type: 'plain_text_input', value: 'Header fix' } } } },
+      },
+    }
+  }
+
+  it('closes the whole modal stack, which is a body Slack accepts for a submit', () => {
+    expect(VIEW_SUBMISSION_ACK).toEqual({ response_action: 'clear' })
+  })
+
+  it('hands the submit to whatever claimed the callback id prefix, flattened', async () => {
+    const seen: Array<Record<string, unknown>> = []
+    registerViewSubmissionHandler('tweak', async (ctx) => {
+      seen.push({ payload: ctx.payload, level: ctx.identity.level })
+    })
+
+    await handleSlackInteraction(fakeDrizzle, submit('tweak:s1'))
+
+    expect(seen).toHaveLength(1)
+    expect(seen[0].level).toBe('founder')
+    expect(seen[0].payload).toEqual({
+      callbackId: 'tweak:s1',
+      privateMetadata: '{"suggestionId":"s1","channel":"D1"}',
+      values: { title: { title_input: { type: 'plain_text_input', value: 'Header fix' } } },
+      slackUserId: 'U',
+      slackTeamId: 'T',
+    })
+    // The modal is already closed by the ack; the handler says what it wants
+    // to say itself, so dispatch posts nothing.
+    expect(posted).toHaveLength(0)
+  })
+
+  it('never reaches a button handler, even one that owns the same prefix', async () => {
+    let buttonCalls = 0
+    registerBlockActionHandler('sugg', async () => {
+      buttonCalls += 1
+      return { handled: true, reply: 'should not be said' }
+    })
+
+    await handleSlackInteraction(fakeDrizzle, submit('sugg:tweak:s1'))
+
+    expect(buttonCalls).toBe(0)
+    expect(posted).toHaveLength(0)
+  })
+
+  it('posts nothing for a callback id nothing has claimed, which is every one today', async () => {
+    await handleSlackInteraction(fakeDrizzle, submit('nudge:s1'))
+    expect(posted).toHaveLength(0)
+  })
+
+  it('never reaches the handler for a stranger, and says nothing to them', async () => {
+    resolvedLevel = 'unknown'
+    let calls = 0
+    registerViewSubmissionHandler('tweak', async () => { calls += 1 })
+
+    await handleSlackInteraction(fakeDrizzle, submit('tweak:s1'))
+
+    expect(calls).toBe(0)
+    expect(posted).toHaveLength(0)
+  })
+
+  it('still routes a button click to the button handler', async () => {
+    const seen: string[] = []
+    registerBlockActionHandler('sugg', async (ctx) => {
+      seen.push(ctx.payload.actionId)
+      return { handled: true, reply: null }
+    })
+
+    await handleSlackInteraction(fakeDrizzle, {
+      type: 'block_actions',
+      team: { id: 'T' },
+      user: { id: 'U' },
+      trigger_id: 'trig_click',
+      container: { channel_id: 'D1', message_ts: '1758.1' },
+      actions: [{ action_id: 'sugg:approve:s1', value: 's1' }],
+    })
+
+    expect(seen).toEqual(['sugg:approve:s1'])
+  })
+})
+
+describe('the registry keeps buttons and modals apart', () => {
+  it('resolves a modal handler by the callback id prefix, and only as a modal', () => {
+    const modal = async () => {}
+    registerViewSubmissionHandler('tweak', modal)
+    expect(resolveViewSubmissionHandler('tweak:s1')).toBe(modal)
+    expect(resolveBlockActionHandler('tweak:s1')).toBeNull()
+    expect(resolveViewSubmissionHandler('other:s1')).toBeNull()
+    expect(resolveViewSubmissionHandler('')).toBeNull()
+  })
+
+  it('clears both maps for the next test', () => {
+    registerViewSubmissionHandler('tweak', async () => {})
+    registerBlockActionHandler('sugg', async () => ({ handled: true, reply: null }))
+    clearBlockActionHandlers()
+    expect(resolveViewSubmissionHandler('tweak:s1')).toBeNull()
+    expect(resolveBlockActionHandler('sugg:approve:s1')).toBeNull()
   })
 })

@@ -77,6 +77,11 @@ const isPublicRoute = createRouteMatcher([
   '/api/admin/cron/schema-watchdog(.*)',
   '/api/admin/cron/indexing-reverser(.*)',
   '/api/admin/cron/publish-scheduled(.*)',
+  // The call-notes suggester lives under /crons/ (plural). workers/cron-trigger
+  // sends only x-cron-secret, no Bearer, so without this line Clerk 404'd every
+  // scheduled run from 22 Sep until 26 Sep and no call produced suggestions.
+  // middleware.test.ts now walks every cron-trigger target through here.
+  '/api/admin/crons/suggest-from-transcripts(.*)',
   '/api/admin/integrations/google/sync-calendar(.*)',
   '/api/admin/integrations/google/sync-drive-transcripts(.*)',
   '/api/admin/integrations/airwallex/sync(.*)',

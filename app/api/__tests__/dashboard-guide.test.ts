@@ -9,10 +9,41 @@
  * worker sits outside the Next app, and vitest.config.ts excludes
  * `workers/**` from collection while still resolving an import into it (see
  * app/api/__tests__/mcp-plan-tools.test.ts, which does the same).
+ *
+ * The two routes are imported once, statically, against one hoisted auth mock
+ * whose caller each test sets (LW.34). They used to be re-imported inside every
+ * test after vi.resetModules(), which re-evaluated next/server and the route
+ * from scratch six times over, each inside that test's own 5 second budget:
+ * the slowest remaining test under a full parallel run with other suites on
+ * the machine (1.9s), the same shape that timed out middleware.test.ts. It
+ * also left each test's vi.doMock in place whenever an assertion failed
+ * before the closing vi.doUnmock. The routes hold no module state, so
+ * nothing needs a fresh copy.
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { NextRequest } from 'next/server'
 import { GUIDE_SECTIONS, getGuideSection, guideSectionsFor } from '@/lib/dashboard-guide'
 import { TOOLS } from '../../../workers/mcp-server/src/index'
+import { GET as getAdminGuide } from '@/app/api/admin/guide/route'
+import { GET as getPortalGuide } from '@/app/api/portal/guide/route'
+
+/** Who the routes see as the caller. Reset before every test. */
+const caller = vi.hoisted(() => ({ orgId: null as string | null, userId: null as string | null }))
+
+vi.mock('@/lib/server-auth', () => ({
+  getRequestAuth: async () => ({ orgId: caller.orgId, userId: caller.userId }),
+  getPortalAuth: async () => ({ orgId: caller.orgId, userId: caller.userId }),
+  isTahiAdmin: (orgId: string | null) => orgId === 'org_tahi',
+}))
+
+function callAs(orgId: string | null, userId: string | null): void {
+  caller.orgId = orgId
+  caller.userId = userId
+}
+
+beforeEach(() => {
+  callAs(null, null)
+})
 
 const TOOL_NAMES = new Set(TOOLS.map((t) => t.name))
 
@@ -114,74 +145,41 @@ describe('the MCP section names only real tools', () => {
 
 describe('GET /api/admin/guide', () => {
   it('403s a non-admin caller', async () => {
-    vi.resetModules()
-    vi.doMock('@/lib/server-auth', () => ({
-      getRequestAuth: async () => ({ orgId: 'org_client', userId: 'user_1' }),
-      isTahiAdmin: (orgId: string | null) => orgId === 'org_tahi',
-    }))
-    const { GET } = await import('@/app/api/admin/guide/route')
-    const { NextRequest } = await import('next/server')
-    const res = await GET(new NextRequest('http://localhost/api/admin/guide'))
+    callAs('org_client', 'user_1')
+    const res = await getAdminGuide(new NextRequest('http://localhost/api/admin/guide'))
     expect(res.status).toBe(403)
-    vi.doUnmock('@/lib/server-auth')
   })
 
   it('returns every section for an admin caller', async () => {
-    vi.resetModules()
-    vi.doMock('@/lib/server-auth', () => ({
-      getRequestAuth: async () => ({ orgId: 'org_tahi', userId: 'user_1' }),
-      isTahiAdmin: (orgId: string | null) => orgId === 'org_tahi',
-    }))
-    const { GET } = await import('@/app/api/admin/guide/route')
-    const { NextRequest } = await import('next/server')
-    const res = await GET(new NextRequest('http://localhost/api/admin/guide'))
+    callAs('org_tahi', 'user_1')
+    const res = await getAdminGuide(new NextRequest('http://localhost/api/admin/guide'))
     expect(res.status).toBe(200)
     const json = (await res.json()) as { sections: { key: string }[] }
     expect(json.sections.length).toBe(GUIDE_SECTIONS.length)
     expect(json.sections.some((s) => s.key === 'mcp-guide')).toBe(true)
-    vi.doUnmock('@/lib/server-auth')
   })
 
   it('returns one section when ?key is given, 404 for an unknown key', async () => {
-    vi.resetModules()
-    vi.doMock('@/lib/server-auth', () => ({
-      getRequestAuth: async () => ({ orgId: 'org_tahi', userId: 'user_1' }),
-      isTahiAdmin: (orgId: string | null) => orgId === 'org_tahi',
-    }))
-    const { GET } = await import('@/app/api/admin/guide/route')
-    const { NextRequest } = await import('next/server')
-    const ok = await GET(new NextRequest('http://localhost/api/admin/guide?key=blockers'))
+    callAs('org_tahi', 'user_1')
+    const ok = await getAdminGuide(new NextRequest('http://localhost/api/admin/guide?key=blockers'))
     expect(ok.status).toBe(200)
     const okJson = (await ok.json()) as { section: { key: string } }
     expect(okJson.section.key).toBe('blockers')
 
-    const notFound = await GET(new NextRequest('http://localhost/api/admin/guide?key=nope'))
+    const notFound = await getAdminGuide(new NextRequest('http://localhost/api/admin/guide?key=nope'))
     expect(notFound.status).toBe(404)
-    vi.doUnmock('@/lib/server-auth')
   })
 })
 
 describe('GET /api/portal/guide', () => {
   it('401s an unauthenticated caller', async () => {
-    vi.resetModules()
-    vi.doMock('@/lib/server-auth', () => ({
-      getPortalAuth: async () => ({ orgId: null, userId: null }),
-    }))
-    const { GET } = await import('@/app/api/portal/guide/route')
-    const { NextRequest } = await import('next/server')
-    const res = await GET(new NextRequest('http://localhost/api/portal/guide'))
+    const res = await getPortalGuide(new NextRequest('http://localhost/api/portal/guide'))
     expect(res.status).toBe(401)
-    vi.doUnmock('@/lib/server-auth')
   })
 
   it('returns only client-audience sections, never the team-only MCP section', async () => {
-    vi.resetModules()
-    vi.doMock('@/lib/server-auth', () => ({
-      getPortalAuth: async () => ({ orgId: 'org_client_1', userId: 'user_contact_1' }),
-    }))
-    const { GET } = await import('@/app/api/portal/guide/route')
-    const { NextRequest } = await import('next/server')
-    const res = await GET(new NextRequest('http://localhost/api/portal/guide'))
+    callAs('org_client_1', 'user_contact_1')
+    const res = await getPortalGuide(new NextRequest('http://localhost/api/portal/guide'))
     expect(res.status).toBe(200)
     const json = (await res.json()) as { sections: { key: string; audience: string }[] }
     expect(json.sections.length).toBeGreaterThan(0)
@@ -189,21 +187,14 @@ describe('GET /api/portal/guide', () => {
       expect(['client', 'both']).toContain(section.audience)
     }
     expect(json.sections.some((s) => s.key === 'mcp-guide')).toBe(false)
-    vi.doUnmock('@/lib/server-auth')
   })
 
   it('404s an unknown ?key and never leaks a team-only section by key', async () => {
-    vi.resetModules()
-    vi.doMock('@/lib/server-auth', () => ({
-      getPortalAuth: async () => ({ orgId: 'org_client_1', userId: 'user_contact_1' }),
-    }))
-    const { GET } = await import('@/app/api/portal/guide/route')
-    const { NextRequest } = await import('next/server')
-    const teamOnly = await GET(new NextRequest('http://localhost/api/portal/guide?key=mcp-guide'))
+    callAs('org_client_1', 'user_contact_1')
+    const teamOnly = await getPortalGuide(new NextRequest('http://localhost/api/portal/guide?key=mcp-guide'))
     expect(teamOnly.status).toBe(404)
 
-    const ok = await GET(new NextRequest('http://localhost/api/portal/guide?key=hand-offs'))
+    const ok = await getPortalGuide(new NextRequest('http://localhost/api/portal/guide?key=hand-offs'))
     expect(ok.status).toBe(200)
-    vi.doUnmock('@/lib/server-auth')
   })
 })

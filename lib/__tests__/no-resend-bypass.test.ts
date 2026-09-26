@@ -40,7 +40,7 @@
  * to move into it too, and that is a conversation with Liam.
  */
 import { describe, it, expect } from 'vitest'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync, type Dirent } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 
 /** Repo root, from lib/__tests__. */
@@ -99,47 +99,69 @@ const RULES: Rule[] = [
   },
 ]
 
+/**
+ * The entry type comes with the directory listing, so the walk costs one
+ * readdir per folder instead of a stat per entry (a stat opens a handle on
+ * Windows). A symlink still goes through stat, so it is followed as before.
+ */
 function walk(dir: string, out: string[]): string[] {
-  let entries: string[]
+  let entries: Dirent[]
   try {
-    entries = readdirSync(dir)
+    entries = readdirSync(dir, { withFileTypes: true })
   } catch {
     return out
   }
   for (const entry of entries) {
-    if (SKIP_DIRS.has(entry)) continue
-    const full = join(dir, entry)
-    let stats
-    try {
-      stats = statSync(full)
-    } catch {
-      continue
+    if (SKIP_DIRS.has(entry.name)) continue
+    const full = join(dir, entry.name)
+    let isDir = entry.isDirectory()
+    if (entry.isSymbolicLink()) {
+      try {
+        isDir = statSync(full).isDirectory()
+      } catch {
+        continue
+      }
     }
-    if (stats.isDirectory()) walk(full, out)
-    else if (EXTENSIONS.some(ext => entry.endsWith(ext))) out.push(full)
+    if (isDir) walk(full, out)
+    else if (EXTENSIONS.some(ext => entry.name.endsWith(ext))) out.push(full)
   }
   return out
 }
 
-function sourceFiles(): string[] {
-  const files: string[] = []
-  for (const dir of SCANNED) walk(join(ROOT, dir), files)
-  return files
+interface SourceFile {
+  /** Repo-relative, in the platform's separator, to match the allowances. */
+  rel: string
+  source: string
 }
 
-describe('the Resend client lives in exactly one file', () => {
-  const files = sourceFiles()
+/**
+ * The whole scanned tree, walked once and each file read once, while the spec
+ * is collected. Every rule below used to walk or re-read all of it inside its
+ * own test (five full reads of some 1,600 files), which took them to 4.9s
+ * against a 5 second budget under a full parallel run with other suites on
+ * the machine (LW.34). Collection has no per-test timeout, and the rules are
+ * now regexes over strings already in memory.
+ */
+function readTree(): SourceFile[] {
+  const files: string[] = []
+  for (const dir of SCANNED) walk(join(ROOT, dir), files)
+  return files.map(file => ({
+    rel: relative(ROOT, file).split('/').join(sep),
+    source: readFileSync(file, 'utf8'),
+  }))
+}
 
+const TREE = readTree()
+
+describe('the Resend client lives in exactly one file', () => {
   it('finds a source tree to scan at all (guards against a silently empty walk)', () => {
-    expect(files.length).toBeGreaterThan(300)
+    expect(TREE.length).toBeGreaterThan(300)
   })
 
   it.each(RULES)('no file except the gate $label', ({ pattern }) => {
     const offenders: string[] = []
-    for (const file of files) {
-      const rel = relative(ROOT, file).split('/').join(sep)
+    for (const { rel, source } of TREE) {
       if (rel === THE_ONE_DOOR || TEST_FILES.has(rel)) continue
-      const source = readFileSync(file, 'utf8')
       if (pattern.test(source)) offenders.push(rel)
     }
     expect(offenders).toEqual([])
@@ -166,14 +188,10 @@ describe('the Resend client lives in exactly one file', () => {
 const CALLS_CREATE_ORG_INVITATION = /createOrganizationInvitation\s*\(|\.invitations\s*\.\s*create\s*\(/
 
 describe('no seat invite asks Clerk to email it', () => {
-  const files = sourceFiles()
-
   it('nothing in product code still calls createOrganizationInvitation', () => {
     const offenders: string[] = []
-    for (const file of files) {
-      const rel = relative(ROOT, file).split('/').join(sep)
+    for (const { rel, source } of TREE) {
       if (TEST_FILES.has(rel) || rel.includes(`__tests__${sep}`)) continue
-      const source = readFileSync(file, 'utf8')
       if (CALLS_CREATE_ORG_INVITATION.test(source)) offenders.push(rel)
     }
     expect(offenders).toEqual([])
