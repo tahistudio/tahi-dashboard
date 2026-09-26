@@ -124,6 +124,17 @@ describe('isHandledEvent', () => {
   it('handles an audio file shared in a DM', () => {
     expect(isHandledEvent({ type: 'message', subtype: 'file_share', channel_type: 'im', user: 'U1', channel: 'D1' })).toBe(true)
     expect(isHandledEvent({ type: 'file_shared', user: 'U1', channel: 'D1' })).toBe(true)
+    // The shape Slack actually sends: user_id and channel_id.
+    expect(isHandledEvent({ type: 'file_shared', user_id: 'U1', channel_id: 'D1', file_id: 'F1' })).toBe(true)
+  })
+
+  it('ignores a file shared in a channel, which Slack sends for any channel the bot has joined', () => {
+    expect(isHandledEvent({ type: 'file_shared', user_id: 'U1', channel_id: 'C_GENERAL', file_id: 'F1' })).toBe(false)
+    expect(isHandledEvent({ type: 'file_shared', user_id: 'U1', channel_id: 'G_PRIVATE', file_id: 'F1' })).toBe(false)
+  })
+
+  it('ignores a file_shared that names no channel, because where it was shared cannot be told', () => {
+    expect(isHandledEvent({ type: 'file_shared', user_id: 'U1', file_id: 'F1' })).toBe(false)
   })
 
   it('handles an app mention', () => {
@@ -476,6 +487,56 @@ describe('a mention in a channel (channels come later, contract section 7)', () 
       event: { type: 'message', channel_type: 'im', user: 'U', channel: 'D1', text: 'note this', ts: '1758.2' },
     })
     expect(dm.calls).toBe(1)
+  })
+})
+
+describe('a file shared in a channel (the file_shared twin of a mention)', () => {
+  // Slack sends file_shared for every file the app can see. A mention with a
+  // voice clip attached in #general arrives as an app_mention AND as this,
+  // under a different event_id, so the retry guard does not pair them up.
+  function fileShared(channelId: string) {
+    return {
+      type: 'event_callback',
+      team_id: 'T',
+      event_id: `Ev_file_${channelId}`,
+      event: {
+        type: 'file_shared',
+        user_id: 'U',
+        channel_id: channelId,
+        file_id: 'F1',
+        file: { id: 'F1' },
+        event_ts: '1758.6',
+      },
+    }
+  }
+
+  it('never reaches the note path and posts nothing, not even at the channel top level', async () => {
+    const dm = spyOnDmHook()
+    await handleSlackEvent(fakeDrizzle, fileShared('C_GENERAL'))
+    expect(dm.calls).toBe(0)
+    expect(posted).toHaveLength(0)
+    expect(statuses).toHaveLength(0)
+  })
+
+  it('gives a stranger no public refusal for a file they posted in a channel', async () => {
+    resolvedLevel = 'unknown'
+    const dm = spyOnDmHook()
+    await handleSlackEvent(fakeDrizzle, fileShared('C_GENERAL'))
+    expect(dm.calls).toBe(0)
+    expect(posted).toHaveLength(0)
+  })
+
+  it('still sends a file shared in the 1:1 to the voice path', async () => {
+    const seen: Array<Record<string, unknown>> = []
+    registerSlackDmHandler(async (event) => {
+      seen.push({ channelId: event.channelId, files: event.files })
+      return { handled: true, reason: 'ok', voice: true, posted: 0 }
+    })
+
+    await handleSlackEvent(fakeDrizzle, fileShared('D1'))
+
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ channelId: 'D1', files: [{ id: 'F1' }] })
   })
 })
 

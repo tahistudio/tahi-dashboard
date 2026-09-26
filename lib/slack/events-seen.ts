@@ -24,9 +24,13 @@
  * alongside the table, so the delete below walks the index from the oldest
  * row up to the cutoff instead of scanning the table.
  *
- * Fired once a day as its own step of /api/admin/cron/snapshot-metrics
- * (workers/cron-trigger, 18:00 UTC), where a failure is reported on the step
- * and never fails the snapshot.
+ * Runs as its own step of /api/admin/cron/snapshot-metrics, where a failure
+ * is reported on the step and never fails the snapshot. That route is daily
+ * at 18:00 UTC but is fired by two schedulers (workers/cron-trigger and the
+ * GitHub Actions dashboard-crons workflow) and can be run by an admin, so the
+ * sweep usually runs more than once a day. That is harmless: the delete is
+ * idempotent, and a second run the same day only removes whatever crossed the
+ * cutoff in between.
  */
 
 import { lt } from 'drizzle-orm'

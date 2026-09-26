@@ -12,16 +12,18 @@
  *   WHAT WE REFUSE TO LOOK AT. The bot's own messages, because a bot that
  *   answers itself is an infinite loop one reply at a time. Edits, deletions
  *   and joins, because none of them is a person saying something. Channel
- *   messages, because this phase is DMs only (section 7 of the CN.2 contract).
- *   The one channel delivery that is answered is a mention, and only with a
- *   line pointing the person to a DM: nothing is ever drafted from a channel.
+ *   messages, and files shared in a channel, because this phase is DMs only
+ *   (section 7 of the CN.2 contract). The one channel delivery that is
+ *   answered is a mention, and only with a line pointing the person to a DM:
+ *   nothing is ever drafted from a channel.
  *
  *   THE RETRY GUARD. Slack re-delivers anything it does not see a 200 for
  *   within three seconds, up to three times. rememberSlackEvent claims the
  *   delivery id in slack_events_seen, and that id is the table's PRIMARY KEY,
  *   so two concurrent retries are settled by the database rather than by a
  *   read-then-write that both sides win. The rows are only worth anything for
- *   minutes, and lib/slack/events-seen.ts sweeps them once a day.
+ *   minutes, and lib/slack/events-seen.ts sweeps out the ones older than a
+ *   week.
  *
  *   WHO IS TALKING. Every delivery resolves to a SlackIdentity before a
  *   handler sees it, so a handler can never act for somebody it has not
@@ -196,7 +198,9 @@ export function eventThreadTs(event: SlackEventLike): string | null {
 
 /**
  * Slack DM channel ids start with a D. Checked before caching a channel id as
- * somebody's DM, so a button pressed in a channel never overwrites the 1:1.
+ * somebody's DM, so a button pressed in a channel never overwrites the 1:1,
+ * and before a file_shared is handled, so a file posted in a channel never
+ * becomes a voice note.
  */
 function isDmChannel(channelId: string | null): boolean {
   return typeof channelId === 'string' && channelId.startsWith('D')
@@ -229,9 +233,18 @@ export function isHandledEvent(event: SlackEventLike | null | undefined): boolea
   // deliveries and only bot_profile on others.
   if (event.bot_id || event.bot_profile) return false
 
-  // A voice note. Slack sends this alongside the message.im delivery, and the
-  // file id is the only place the audio is named.
-  if (event.type === 'file_shared') return true
+  // A voice note, and only one shared in the person's 1:1. In the 1:1 Slack
+  // sends this alongside the message.im delivery, and the file id is the only
+  // place the audio is named. But Slack sends file_shared for every file the
+  // app can see, which includes every file posted in a channel the bot has
+  // joined, and the bot has to be in a channel before a mention can reach it
+  // at all. Handling those would transcribe and draft from a channel, and post
+  // the cards at the channel's top level, since a file_shared carries no ts to
+  // thread under (and a stranger's file would draw a public refusal). So the
+  // channel decides: a D channel is the 1:1, a C or G channel is ignored, and
+  // a file_shared naming no channel is ignored too, because where it was
+  // shared cannot be told.
+  if (event.type === 'file_shared') return isDmChannel(eventChannelId(event))
 
   // A fresh assistant thread: the welcome line and the suggested prompts.
   if (event.type === 'assistant_thread_started') return true
