@@ -136,6 +136,9 @@ export const REJECTED_SCAN_LIMIT = 30
 const REJECTED_SUMMARY_CHARS = 140
 const REJECTED_QUOTE_CHARS = 160
 const REJECTED_REASON_CHARS = 120
+/** A reject reason saying the call was filed under the wrong client (the
+ *  inbox chip reads "Wrong client"). Such a row is never shown as an example. */
+const WRONG_CLIENT_REASON = /\bwrong\s+client\b/i
 
 const REJECTED_HEADER = 'REJECTED BEFORE (a person turned these down for this client; never propose them again):'
 
@@ -529,6 +532,11 @@ function parseProposalLoose(proposal: string): unknown {
  *   * the same client: the row's org equals `orgId`. Never another client's
  *     row, and nothing at all when `orgId` is empty, since a null org is an
  *     unidentified client rather than the studio (see above).
+ *   * not rejected as the wrong client. That reason says the call was filed
+ *     under this client by mistake, so the row is another client's words
+ *     (their title, their quote) and not a verdict on what this client
+ *     wants; shown here it would put one client's work in another's prompt
+ *     for the whole window.
  *
  * Then one example per folded summary, so the same item rejected off three
  * calls is one line rather than three, and at most REJECTED_EXAMPLE_LIMIT.
@@ -545,7 +553,8 @@ export function selectRejectedExamples(
   const eligible = rows
     .filter(row => row.status === 'rejected'
       && row.approverType === 'founders'
-      && row.orgId === scope)
+      && row.orgId === scope
+      && !WRONG_CLIENT_REASON.test(asString(row.rejectReason) ?? ''))
     .map(row => ({ row, time: row.decidedAt ? Date.parse(row.decidedAt) : Number.NaN }))
     .filter(entry => Number.isFinite(entry.time) && entry.time >= since)
     .sort((a, b) => b.time - a.time)

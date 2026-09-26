@@ -450,6 +450,14 @@ describe('the switches', () => {
     expect(posted).toHaveLength(0)
   })
 
+  it('reads a JSON-quoted false the same way, as the work-sync switch does', async () => {
+    const store = baseStore()
+    store.settings.push({ key: DIGEST_ENABLED_SETTING, value: '"false"' })
+    const result = await runSuggestionDigest(fakeDb(store), { at: MONDAY, deps })
+    expect(result).toMatchObject({ ran: false, reason: 'disabled', sent: 0 })
+    expect(posted).toHaveLength(0)
+  })
+
   it('reads any other value as on', async () => {
     const store = baseStore()
     store.settings.push({ key: DIGEST_ENABLED_SETTING, value: 'true' })

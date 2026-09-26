@@ -19,6 +19,7 @@ vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn(),
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org_tahi'),
 }))
+vi.mock('@/lib/access-scoping', () => ({ resolveAccessScoping: vi.fn() }))
 // The run is stubbed; the flag parser is the real one, because reading the
 // query is the only logic this route has.
 vi.mock('@/lib/slack/digest', async (importOriginal) => {
@@ -30,6 +31,7 @@ vi.mock('@/lib/slack/digest', async (importOriginal) => {
 })
 
 import { db } from '@/lib/db'
+import { resolveAccessScoping } from '@/lib/access-scoping'
 import { getRequestAuth } from '@/lib/server-auth'
 import { runSuggestionDigest } from '@/lib/slack/digest'
 import { NextRequest } from 'next/server'
@@ -67,6 +69,7 @@ beforeEach(() => {
     }),
   } as never)
   vi.mocked(getRequestAuth).mockResolvedValue({ userId: null, orgId: null } as never)
+  vi.mocked(resolveAccessScoping).mockResolvedValue(null)
   vi.mocked(runSuggestionDigest).mockResolvedValue(SUMMARY)
   vi.stubEnv('TAHI_CRON_SECRET', 'shhh')
 })
@@ -124,6 +127,49 @@ describe('POST /api/admin/cron/suggestion-digest', () => {
   it('reads anything else as off', async () => {
     await POST(post({ 'x-cron-secret': 'shhh' }, '?force=0&dry_run=maybe'))
     expect(runSuggestionDigest).toHaveBeenLastCalledWith(expect.anything(), { force: false, dryRun: false })
+  })
+})
+
+describe('the two knobs are for an unrestricted caller only (rule 11)', () => {
+  it('lets an unrestricted admin session preview and force', async () => {
+    vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_liam', orgId: 'org_tahi' } as never)
+    const preview = await POST(post({}, '?dry_run=1'))
+    const forced = await POST(post({}, '?force=1'))
+    expect([preview.status, forced.status]).toEqual([200, 200])
+    expect(resolveAccessScoping).toHaveBeenCalledWith(expect.anything(), 'user_liam')
+    expect(runSuggestionDigest).toHaveBeenCalledTimes(2)
+  })
+
+  it('refuses a scoped team member a dry run, whose answer names every client, and a forced send', async () => {
+    vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_nathan', orgId: 'org_tahi' } as never)
+    vi.mocked(resolveAccessScoping).mockResolvedValue(['o_ver'])
+    const preview = await POST(post({}, '?dry_run=1'))
+    const forced = await POST(post({}, '?force=1'))
+    expect([preview.status, forced.status]).toEqual([403, 403])
+    expect(runSuggestionDigest).not.toHaveBeenCalled()
+    expect(cronRuns).toHaveLength(0)
+  })
+
+  it('refuses when the scoping lookup fails', async () => {
+    vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_liam', orgId: 'org_tahi' } as never)
+    vi.mocked(resolveAccessScoping).mockRejectedValue(new Error('D1_ERROR: boom'))
+    const res = await POST(post({}, '?dry_run=1'))
+    expect(res.status).toBe(403)
+    expect(runSuggestionDigest).not.toHaveBeenCalled()
+  })
+
+  it('still lets a scoped member fire a plain run, which answers with counts only', async () => {
+    vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_nathan', orgId: 'org_tahi' } as never)
+    vi.mocked(resolveAccessScoping).mockResolvedValue(['o_ver'])
+    const res = await POST(post())
+    expect(res.status).toBe(200)
+    expect(resolveAccessScoping).not.toHaveBeenCalled()
+  })
+
+  it('never asks the scoping for the scheduler', async () => {
+    await POST(post({ 'x-cron-secret': 'shhh' }, '?dry_run=1&force=1'))
+    expect(resolveAccessScoping).not.toHaveBeenCalled()
+    expect(runSuggestionDigest).toHaveBeenCalledTimes(1)
   })
 })
 

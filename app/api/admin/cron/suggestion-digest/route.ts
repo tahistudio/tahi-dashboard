@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { resolveAccessScoping } from '@/lib/access-scoping'
 import { assertCronAuth, logCronRun } from '@/lib/cron-runs'
 import { parseDigestFlag, runSuggestionDigest } from '@/lib/slack/digest'
 
@@ -40,6 +41,15 @@ const CRON = 'suggestion-digest'
 //               Slack, and returns the studio preview and each payload.
 //   ?force=1    send outside the Monday window. Never skips the weekly
 //               claim, so it cannot send anybody a second digest that week.
+//
+// Both knobs are for an unrestricted caller only: the scheduler, the MCP
+// service user, or a team member whose access scoping resolves to every
+// client (a super_admin or admin role). A dry run answers with every
+// founder's studio digest, which names every client and summarises their
+// waiting suggestions, and every member's own notes; a scoped member reading
+// that would see clients the inbox hides from them (CLAUDE.md rule 11). A
+// plain run by hand stays open to any admin session, as every other cron is:
+// it answers with counts only. A scoping lookup that fails refuses.
 export async function POST(req: NextRequest) {
   const auth = await assertCronAuth(req)
   if (!auth.ok) return auth.response!
@@ -49,6 +59,17 @@ export async function POST(req: NextRequest) {
   const dryRun = parseDigestFlag(params.get('dry_run'))
 
   const database = await db() as unknown as D1
+
+  if ((dryRun || force) && auth.userId !== 'system') {
+    let unrestricted = false
+    try {
+      unrestricted = (await resolveAccessScoping(database, auth.userId)) === null
+    } catch {
+      unrestricted = false
+    }
+    if (!unrestricted) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
   const t0 = Date.now()
   try {
     const summary = await runSuggestionDigest(database, { force, dryRun })

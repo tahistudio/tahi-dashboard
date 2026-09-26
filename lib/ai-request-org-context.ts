@@ -488,7 +488,14 @@ export function selectCallAgreements(
   return picked
 }
 
-/** The client line's tail, in the client's own terms. */
+/**
+ * The client line's tail, in the client's own terms.
+ *
+ * A hand-off says what happened, not what is true now: "handed to your team",
+ * never "waiting on you". The line is read to whichever contact opens the
+ * wizard, who may not be the person it was handed to, and the hand-off may
+ * since have been handed back or taken back by the studio.
+ */
 function clientCallPhrase(kind: string, callDate: string | null): string | null {
   switch (kind) {
     case 'create_request':
@@ -496,7 +503,7 @@ function clientCallPhrase(kind: string, callDate: string | null): string | null 
     case 'update_request':
       return callDate ? `updated after the call on ${callDate}` : 'updated after a call'
     case 'hand_off_request':
-      return callDate ? `waiting on you since the call on ${callDate}` : 'waiting on you since a call'
+      return callDate ? `handed to your team after the call on ${callDate}` : 'handed to your team after a call'
     default:
       return null
   }
@@ -680,10 +687,15 @@ export async function loadRequestOrgContext(
     }
   }
 
+  // The client audience reads what the portal's own list shows, which never
+  // includes an internal request: its title is the studio's, and the portal
+  // wizard's model would otherwise be free to name it to the client.
   const recentRequests = await drizzle
     .select({ title: schema.requests.title, category: schema.requests.category })
     .from(schema.requests)
-    .where(eq(schema.requests.orgId, orgId))
+    .where(audience === 'client'
+      ? and(eq(schema.requests.orgId, orgId), eq(schema.requests.isInternal, false))
+      : eq(schema.requests.orgId, orgId))
     .orderBy(desc(schema.requests.createdAt))
     .limit(RECENT_REQUEST_LIMIT)
 

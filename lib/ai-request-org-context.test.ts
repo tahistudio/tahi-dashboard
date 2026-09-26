@@ -551,7 +551,7 @@ describe('formatCallAgreements', () => {
       'FROM RECENT CALLS (agreed on a call with the studio and already filed; never draft these again):',
       '- #231 Footer LinkedIn tag, filed from the call on 2026-09-18',
       '- #232 Hero video, updated after the call on 2026-09-18',
-      '- #233 Brand fonts, waiting on you since the call on 2026-09-18',
+      '- #233 Brand fonts, handed to your team after the call on 2026-09-18',
     ].join('\n'))
   })
 
@@ -563,7 +563,7 @@ describe('formatCallAgreements', () => {
     ], 'client')
     expect(text).toContain('- #231 Footer LinkedIn tag, filed from a call')
     expect(text).toContain('- #232 Hero video, updated after a call')
-    expect(text).toContain('- #233 Brand fonts, waiting on you since a call')
+    expect(text).toContain('- #233 Brand fonts, handed to your team after a call')
   })
 
   it('never prints a quote, a task or a request note to the client, even when handed one', () => {
@@ -738,10 +738,15 @@ function fakeDrizzle(options: {
     if (table === schema.taskSuggestions) return options.suggestions ?? []
     return []
   }
+  const wheres: Array<{ table: unknown; condition: unknown }> = []
   const select = vi.fn(() => {
     let table: unknown
     const chain: Record<string, unknown> = {}
-    for (const method of ['where', 'orderBy', 'leftJoin', 'innerJoin']) chain[method] = vi.fn(() => chain)
+    for (const method of ['orderBy', 'leftJoin', 'innerJoin']) chain[method] = vi.fn(() => chain)
+    chain.where = vi.fn((condition: unknown) => {
+      wheres.push({ table, condition })
+      return chain
+    })
     chain.limit = vi.fn((n: number) => {
       if (table === schema.taskSuggestions) limits.push(n)
       return chain
@@ -760,7 +765,22 @@ function fakeDrizzle(options: {
     return chain
   })
   const all = vi.fn(async () => [{ custom_mrr: null }])
-  return { drizzle: { select, all } as unknown as LoaderDrizzle, limits }
+  return { drizzle: { select, all } as unknown as LoaderDrizzle, limits, wheres }
+}
+
+/** The columns a drizzle condition compares, by their SQL name. */
+function columnsIn(condition: unknown): string[] {
+  const out: string[] = []
+  const walk = (node: unknown): void => {
+    if (node && typeof node === 'object' && 'name' in node && 'table' in node) {
+      out.push(String((node as { name: unknown }).name))
+      return
+    }
+    const chunks = (node as { queryChunks?: unknown[] } | null)?.queryChunks
+    if (Array.isArray(chunks)) chunks.forEach(walk)
+  }
+  walk(condition)
+  return out
 }
 
 describe('loadCallAgreements', () => {
@@ -812,6 +832,18 @@ describe('loadRequestOrgContext', () => {
     expect(text).toContain('- #231 Footer LinkedIn tag, filed from the call on 2026-09-18')
     expect(text).not.toContain('Send Tim the footer copy')
     expect(text).not.toContain('LinkedIn tag into the footer this week')
+  })
+
+  it('lists only non-internal requests under CLIENT ON FILE for the client, as the portal list does', async () => {
+    const client = fakeDrizzle()
+    await loadRequestOrgContext(client.drizzle, 'org-acme')
+    const clientRead = client.wheres.find(entry => entry.table === schema.requests)
+    expect(columnsIn(clientRead?.condition)).toEqual(['org_id', 'is_internal'])
+
+    const studio = fakeDrizzle()
+    await loadRequestOrgContext(studio.drizzle, 'org-acme', { audience: 'studio' })
+    const studioRead = studio.wheres.find(entry => entry.table === schema.requests)
+    expect(columnsIn(studioRead?.condition)).toEqual(['org_id'])
   })
 
   it('carries tasks and quotes for the studio audience', async () => {

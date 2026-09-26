@@ -1701,6 +1701,17 @@ describe('selectRejectedExamples', () => {
     expect(examples.map(e => e.summary)).toEqual(['A founder said no to this - development'])
   })
 
+  it('never shows a row rejected as the wrong client: those are another client\'s words, filed here by mistake', () => {
+    const examples = selectRejectedExamples([
+      rejectedRow({ title: 'Kept: a real no from this client', rejectReason: 'Already have it' }),
+      rejectedRow({ title: 'Rebuild the Verandela booking flow', quote: 'Verandela wants the booking flow rebuilt', rejectReason: 'Wrong client' }),
+      rejectedRow({ title: 'Another misfiled one', rejectReason: 'wrong  client, this was the Elevate call' }),
+    ], 'org-a', AT_CN3)
+
+    expect(examples.map(e => e.summary)).toEqual(['Kept: a real no from this client - development'])
+    expect(JSON.stringify(examples)).not.toContain('Verandela')
+  })
+
   it('forgets a rejection after REJECTED_WINDOW_DAYS, and a row with no decision time', () => {
     expect(REJECTED_WINDOW_DAYS).toBe(120)
     const examples = selectRejectedExamples([

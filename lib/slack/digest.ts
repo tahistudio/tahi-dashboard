@@ -291,7 +291,9 @@ async function loadClerkUserIds(database: Drizzle, teamMemberIds: readonly strin
   return map
 }
 
-/** The kill switch. A read that fails reads as absent, which is on. */
+/** The kill switch. 'false', plain or JSON-quoted, turns it off: the same
+ *  rule work-sync's switch reads, so one value means one thing for both. A
+ *  read that fails reads as absent, which is on. */
 async function digestDisabled(database: Drizzle): Promise<boolean> {
   try {
     const rows = await database
@@ -300,7 +302,8 @@ async function digestDisabled(database: Drizzle): Promise<boolean> {
       .where(eq(schema.settings.key, DIGEST_ENABLED_SETTING))
       .limit(1)
     const row = (rows ?? []).find(candidate => candidate.key === DIGEST_ENABLED_SETTING)
-    return row?.value?.trim().toLowerCase() === 'false'
+    const value = row?.value?.trim().toLowerCase() ?? null
+    return value === 'false' || value === '"false"'
   } catch {
     return false
   }
