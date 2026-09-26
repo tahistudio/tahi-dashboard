@@ -30,6 +30,18 @@
  *     component without type information.
  * Both are one edit away from being real, so treat a green run as "the known
  * shape of the outage cannot come back", not as "the boundary is sound".
+ *
+ * WHY EVERY FILE IS READ ONCE, UP FRONT (LW.34). The scan resolves about 3,300
+ * local imports across some 1,250 files, but only a few hundred distinct
+ * targets. It used to read each target afresh on every import that named it,
+ * after up to five existsSync / statSync probes, and walked the tree with a
+ * stat per entry. That repeated I/O took the last test past its 5 second
+ * budget under a full parallel run (6.8s on 2026-09-19, 12 to 14s with three
+ * suites at once) though it needs about 1.4s alone. Now the walk takes each
+ * entry's type from the directory listing, every source is read exactly once
+ * while the file is collected (where no per-test timeout applies, the same
+ * place the file list was already built), and import resolution is memoised,
+ * so the tests themselves are pure string work over what is in memory.
  */
 import { describe, it, expect } from 'vitest'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
@@ -41,19 +53,54 @@ const ROOTS = ['app', 'lib', 'components', 'emails']
 const EXTRA_FILES = ['middleware.ts']
 const SKIP_DIRS = new Set(['node_modules', '__tests__', '.next', '.open-next'])
 
+/**
+ * Every .ts/.tsx under a root. The entry type comes with the listing, so this
+ * is one readdir per folder rather than a stat per file (a stat opens a handle
+ * on Windows). A symlink still goes through stat, so one is followed exactly
+ * as it was before.
+ */
 function sourceFiles(dir: string): string[] {
   const out: string[] = []
   if (!existsSync(dir)) return out
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry)
-    if (statSync(full).isDirectory()) {
-      if (SKIP_DIRS.has(entry)) continue
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    const isDir = entry.isSymbolicLink() ? statSync(full).isDirectory() : entry.isDirectory()
+    if (isDir) {
+      if (SKIP_DIRS.has(entry.name)) continue
       out.push(...sourceFiles(full))
-    } else if (/\.tsx?$/.test(entry) && !/\.d\.ts$/.test(entry)) {
+    } else if (/\.tsx?$/.test(entry.name) && !/\.d\.ts$/.test(entry.name)) {
       out.push(full)
     }
   }
   return out
+}
+
+/** File contents by absolute path. Filled once below, topped up by readSource. */
+const SOURCE_CACHE = new Map<string, string>()
+
+/**
+ * A file's source, read from disk at most once. Import targets outside the
+ * scanned roots (db/, for one) land here on first use.
+ */
+function readSource(file: string): string {
+  let source = SOURCE_CACHE.get(file)
+  if (source === undefined) {
+    source = readFileSync(file, 'utf8')
+    SOURCE_CACHE.set(file, source)
+  }
+  return source
+}
+
+const CLIENT_CACHE = new Map<string, boolean>()
+
+/** Whether a file opens with 'use client', decided once per file. */
+function isClientModule(file: string): boolean {
+  let client = CLIENT_CACHE.get(file)
+  if (client === undefined) {
+    client = hasUseClientDirective(readSource(file))
+    CLIENT_CACHE.set(file, client)
+  }
+  return client
 }
 
 /** Repo-relative, forward slashes, so a failure reads the same on any OS. */
@@ -88,18 +135,31 @@ export function hasUseClientDirective(source: string): boolean {
 
 const CANDIDATE_SUFFIXES = ['.ts', '.tsx', '/index.ts', '/index.tsx']
 
+/** Resolved file (or null) by unsuffixed base path, so each base is probed once. */
+const RESOLVE_CACHE = new Map<string, string | null>()
+
 /** Resolve a local import specifier to a file on disk, or null if it is a package. */
 function resolveLocal(spec: string, fromFile: string): string | null {
   let base: string
   if (spec.startsWith('@/')) base = join(REPO_ROOT, spec.slice(2))
   else if (spec.startsWith('.')) base = resolve(dirname(fromFile), spec)
   else return null
-  if (existsSync(base) && statSync(base).isFile()) return base
-  for (const suffix of CANDIDATE_SUFFIXES) {
-    const candidate = base + suffix
-    if (existsSync(candidate)) return candidate
+  const cached = RESOLVE_CACHE.get(base)
+  if (cached !== undefined) return cached
+  let found: string | null = null
+  if (existsSync(base) && statSync(base).isFile()) {
+    found = base
+  } else {
+    for (const suffix of CANDIDATE_SUFFIXES) {
+      const candidate = base + suffix
+      if (existsSync(candidate)) {
+        found = candidate
+        break
+      }
+    }
   }
-  return null
+  RESOLVE_CACHE.set(base, found)
+  return found
 }
 
 interface ImportedSymbol {
@@ -160,12 +220,11 @@ interface Violation {
 function findViolations(files: string[]): Violation[] {
   const out: Violation[] = []
   for (const file of files) {
-    const source = readFileSync(file, 'utf8')
-    if (hasUseClientDirective(source)) continue
-    for (const match of source.matchAll(IMPORT_RE)) {
+    if (isClientModule(file)) continue
+    for (const match of readSource(file).matchAll(IMPORT_RE)) {
       const target = resolveLocal(match[2], file)
       if (!target) continue
-      if (!hasUseClientDirective(readFileSync(target, 'utf8'))) continue
+      if (!isClientModule(target)) continue
       for (const symbol of importedSymbols(match[1])) {
         if (symbol.typeOnly) continue
         if (isComponentName(symbol.name)) continue
@@ -181,6 +240,9 @@ const ALL_SOURCES = [
   ...EXTRA_FILES.map((f) => join(REPO_ROOT, f)).filter((f) => existsSync(f)),
 ]
 
+// The one read of the tree, at collection. See the header for why here.
+for (const file of ALL_SOURCES) readSource(file)
+
 describe('the server / client module boundary', () => {
   it('reads the directive the way the compiler does', () => {
     expect(hasUseClientDirective("'use client'\nexport const a = 1\n")).toBe(true)
@@ -192,7 +254,7 @@ describe('the server / client module boundary', () => {
 
   it('finds the tree it is meant to be scanning', () => {
     expect(ALL_SOURCES.length).toBeGreaterThan(200)
-    const clientModules = ALL_SOURCES.filter((f) => hasUseClientDirective(readFileSync(f, 'utf8')))
+    const clientModules = ALL_SOURCES.filter((f) => isClientModule(f))
     expect(clientModules.length).toBeGreaterThan(50)
   })
 

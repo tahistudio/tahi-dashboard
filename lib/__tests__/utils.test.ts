@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   formatCurrency,
   convertCurrency,
@@ -97,8 +97,32 @@ describe('convertCurrency', () => {
 // formatDate
 // ---------------------------------------------------------------------------
 describe('formatDate', () => {
-  // Use a fixed date string to avoid timezone flakiness
+  // Midday UTC, so the calendar day is 15 or 16 June 2024 in every time zone
+  // and the year and month assertions below hold on any machine.
   const testDate = '2024-06-15T12:00:00Z'
+
+  // The relative ladder measures against `new Date()` inside formatDate. These
+  // tests used to read the real clock once themselves and let formatDate read
+  // it again, so each pair only agreed while the clock moved forward between
+  // the two reads. '3d ago' sits exactly on a day boundary: any backwards step
+  // of the wall clock in that gap (a time sync on a busy machine) makes it
+  // '2d ago' (LW.34). Freezing Date gives both reads one instant, which also
+  // lets the assertions pin the exact label instead of a substring. Only Date
+  // is faked, so the runner's own timers are untouched.
+  const NOW = new Date('2026-03-10T12:00:00Z')
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function ago(ms: number): string {
+    return new Date(NOW.getTime() - ms).toISOString()
+  }
 
   it('formats short date (default)', () => {
     const result = formatDate(testDate)
@@ -122,40 +146,34 @@ describe('formatDate', () => {
   })
 
   it('shows relative time for recent dates', () => {
-    const now = new Date()
-    const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000).toISOString()
-    const result = formatDate(fiveMinAgo, 'relative')
-    expect(result).toContain('m ago')
+    expect(formatDate(ago(5 * 60 * 1000), 'relative')).toBe('5m ago')
   })
 
   it('shows "just now" for very recent dates', () => {
-    const now = new Date()
-    const justNow = new Date(now.getTime() - 10 * 1000).toISOString()
-    const result = formatDate(justNow, 'relative')
-    expect(result).toBe('just now')
+    expect(formatDate(ago(10 * 1000), 'relative')).toBe('just now')
   })
 
   it('shows hours ago for relative dates within a day', () => {
-    const now = new Date()
-    const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString()
-    const result = formatDate(twoHoursAgo, 'relative')
-    expect(result).toContain('h ago')
+    expect(formatDate(ago(2 * 60 * 60 * 1000), 'relative')).toBe('2h ago')
   })
 
   it('shows days ago for relative dates within a week', () => {
-    const now = new Date()
-    const threeDaysAgo = new Date(now.getTime() - 3 * 86400 * 1000).toISOString()
-    const result = formatDate(threeDaysAgo, 'relative')
-    expect(result).toBe('3d ago')
+    expect(formatDate(ago(3 * 86400 * 1000), 'relative')).toBe('3d ago')
+  })
+
+  it('counts a whole day only once it has fully elapsed', () => {
+    // One millisecond short of three days is still two. Only a frozen clock
+    // can pin this boundary; against the real one it was a race.
+    expect(formatDate(ago(3 * 86400 * 1000 - 1), 'relative')).toBe('2d ago')
   })
 
   it('falls through to short format for relative dates older than a week', () => {
-    const now = new Date()
-    const twoWeeksAgo = new Date(now.getTime() - 14 * 86400 * 1000).toISOString()
-    const result = formatDate(twoWeeksAgo, 'relative')
-    // Should fall through and return a short-format date string
+    // 24 February 2026 at midday UTC: the 24th or 25th depending on the zone,
+    // so only the zone-independent parts are pinned.
+    const result = formatDate(ago(14 * 86400 * 1000), 'relative')
     expect(result).not.toContain('ago')
-    expect(result).toBeTruthy()
+    expect(result).toContain('Feb')
+    expect(result).toContain('2026')
   })
 })
 

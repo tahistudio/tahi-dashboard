@@ -13,19 +13,29 @@
  * Tahi org id has to be named here, with the reason it is allowed to.
  */
 import { describe, it, expect } from 'vitest'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync, type Dirent } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 
 const REPO_ROOT = join(__dirname, '..', '..')
 const DASHBOARD = join(REPO_ROOT, 'app', '(dashboard)')
 
+/**
+ * Whether a listed entry is a folder. The type comes with the listing, so the
+ * walks below cost one readdir per folder rather than a stat per file (a stat
+ * opens a handle on Windows); a symlink still goes through stat, so it is
+ * followed exactly as before.
+ */
+function isDirectory(full: string, entry: Dirent): boolean {
+  return entry.isSymbolicLink() ? statSync(full).isDirectory() : entry.isDirectory()
+}
+
 function pageFiles(dir: string): string[] {
   const out: string[] = []
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry)
-    if (statSync(full).isDirectory()) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (isDirectory(full, entry)) {
       out.push(...pageFiles(full))
-    } else if (entry === 'page.tsx') {
+    } else if (entry.name === 'page.tsx') {
       out.push(full)
     }
   }
@@ -35,11 +45,11 @@ function pageFiles(dir: string): string[] {
 /** Every .ts/.tsx under a directory, skipping this test folder. */
 function sourceFiles(dir: string): string[] {
   const out: string[] = []
-  for (const entry of readdirSync(dir)) {
-    if (entry === '__tests__' || entry === 'node_modules') continue
-    const full = join(dir, entry)
-    if (statSync(full).isDirectory()) out.push(...sourceFiles(full))
-    else if (/\.tsx?$/.test(entry)) out.push(full)
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === '__tests__' || entry.name === 'node_modules') continue
+    const full = join(dir, entry.name)
+    if (isDirectory(full, entry)) out.push(...sourceFiles(full))
+    else if (/\.tsx?$/.test(entry.name)) out.push(full)
   }
   return out
 }
@@ -50,6 +60,22 @@ function rel(file: string): string {
 }
 
 const PAGES = pageFiles(DASHBOARD).map((file) => ({
+  path: rel(file),
+  source: readFileSync(file, 'utf8'),
+}))
+
+/**
+ * lib/, app/ and components/, each file read once while the spec is collected,
+ * like PAGES above. The two whole-tree checks at the end of the first describe
+ * used to walk and read these inside their own tests, lib/ twice over, and
+ * reached 1.7s of a 5 second budget under a full parallel run with other
+ * suites on the machine (LW.34). Collection has no per-test timeout.
+ */
+const TREE = [
+  ...sourceFiles(join(REPO_ROOT, 'lib')),
+  ...sourceFiles(join(REPO_ROOT, 'app')),
+  ...sourceFiles(join(REPO_ROOT, 'components')),
+].map((file) => ({
   path: rel(file),
   source: readFileSync(file, 'utf8'),
 }))
@@ -158,12 +184,10 @@ describe('dashboard pages resolve the audience, not just the Clerk org', () => {
     // value, so a junk cookie was "not previewing" to the middleware and to
     // getViewAudience (studio shell, /clients reachable) while every portal
     // API underneath answered for a non-existent org.
-    const handRolled = [
-      ...sourceFiles(join(REPO_ROOT, 'lib')),
-      ...sourceFiles(join(REPO_ROOT, 'app', 'api')),
-    ]
-      .filter((file) => /\.get\(('|")tahi-impersonate-org\1\)/.test(readFileSync(file, 'utf8')))
-      .map(rel)
+    const handRolled = TREE
+      .filter((f) => f.path.startsWith('lib/') || f.path.startsWith('app/api/'))
+      .filter((f) => /\.get\(('|")tahi-impersonate-org\1\)/.test(f.source))
+      .map((f) => f.path)
     expect(handRolled).toEqual([])
   })
 
@@ -172,13 +196,9 @@ describe('dashboard pages resolve the audience, not just the Clerk org', () => {
     // so a second reader with its own idea of what counts is worse here than it
     // was for the org cookie: two answers to "are writes real" means a write
     // landing from a surface that believed it could not make one.
-    const handRolled = [
-      ...sourceFiles(join(REPO_ROOT, 'lib')),
-      ...sourceFiles(join(REPO_ROOT, 'app')),
-      ...sourceFiles(join(REPO_ROOT, 'components')),
-    ]
-      .filter((file) => /\.get\(('|")tahi-impersonate-mode\1\)/.test(readFileSync(file, 'utf8')))
-      .map(rel)
+    const handRolled = TREE
+      .filter((f) => /\.get\(('|")tahi-impersonate-mode\1\)/.test(f.source))
+      .map((f) => f.path)
     expect(handRolled).toEqual([])
   })
 
