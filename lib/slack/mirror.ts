@@ -35,6 +35,7 @@
 
 import { eq, sql } from 'drizzle-orm'
 import { schema } from '@/db/d1'
+import { publicUrl } from '@/lib/app-url'
 import { STUDIO_TIME_ZONE } from '@/lib/call-time'
 import { SIMILAR_BLOCK } from '@/lib/text-similarity'
 import { openDm, postMessage, slackBotToken, updateMessage, type SlackMessageRef } from '@/lib/slack/api'
@@ -347,18 +348,37 @@ export function outcomeForStatus(status: string): SuggestionOutcome | null {
   }
 }
 
-/** A team member's first name, which is what "Approved by Liam" wants. */
+function firstName(name: string | null | undefined): string | null {
+  const trimmed = name?.trim()
+  if (!trimmed) return null
+  return trimmed.split(/\s+/)[0] ?? trimmed
+}
+
+/**
+ * The decider's first name, which is what "Approved by Liam" wants.
+ *
+ * A team member first, then a client contact: since CN.3 a client approves
+ * their own "Is this the request?" card in Slack, and the decision is
+ * recorded against their contact id (contract section 6), so their card
+ * reads "Approved by Tim, 09:41" rather than "Approved by someone".
+ */
 async function actorName(drizzle: Drizzle, actorId: string | null): Promise<string | null> {
   if (!actorId) return null
   try {
-    const [row] = await drizzle
+    const [member] = await drizzle
       .select({ name: schema.teamMembers.name })
       .from(schema.teamMembers)
       .where(eq(schema.teamMembers.id, actorId))
       .limit(1)
-    const name = row?.name?.trim()
-    if (!name) return null
-    return name.split(/\s+/)[0] ?? name
+    const memberName = firstName(member?.name)
+    if (memberName) return memberName
+
+    const [contact] = await drizzle
+      .select({ name: schema.contacts.name })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.id, actorId))
+      .limit(1)
+    return firstName(contact?.name)
   } catch {
     return null
   }
@@ -373,6 +393,99 @@ export interface DecidedSuggestionRow {
   decidedAt: string | null
   updatedAt: string | null
   applyError: string | null
+  /** Optional so an older caller still fits; decideSuggestion hands the
+   *  whole row, which carries all three. */
+  kind?: string
+  appliedTaskId?: string | null
+  appliedRequestId?: string | null
+  /** 'founders' | 'member' | 'contact'. Optional for the same reason; read
+   *  to keep the apply error, and any studio-only link, off a client's own
+   *  card. */
+  approverType?: string
+}
+
+/** The request half of the suggestion kinds. Spelled out here rather than
+ *  imported, because lib/task-suggestions.ts imports this module. */
+const REQUEST_KIND_NAMES: ReadonlySet<string> = new Set([
+  'create_request', 'update_request', 'request_note', 'hand_off_request',
+])
+
+interface LinkedRequest {
+  number: number | null
+  isInternal: boolean
+}
+
+/** The two fields a link to a request needs, or null when the row cannot be
+ *  read. */
+async function readLinkedRequest(drizzle: Drizzle, requestId: string): Promise<LinkedRequest | null> {
+  try {
+    const [row] = await drizzle
+      .select({ requestNumber: schema.requests.requestNumber, isInternal: schema.requests.isInternal })
+      .from(schema.requests)
+      .where(eq(schema.requests.id, requestId))
+      .limit(1)
+    if (!row) return null
+    const number = row.requestNumber
+    return {
+      number: typeof number === 'number' && Number.isFinite(number) ? number : null,
+      isInternal: !!row.isInternal,
+    }
+  } catch {
+    return null
+  }
+}
+
+/** "Open #231", or "Open request" when there is no number to show. */
+function requestLinkLabel(request: LinkedRequest | null): string {
+  return request?.number != null ? `Open #${request.number}` : 'Open request'
+}
+
+function requestLink(requestId: string, request: LinkedRequest | null): { url: string; label: string } {
+  return { url: publicUrl(`/requests/${encodeURIComponent(requestId)}`), label: requestLinkLabel(request) }
+}
+
+/**
+ * Where an approved card points: the request or the task the suggestion
+ * made or changed (CN.3 contract section 1). Null for every other outcome,
+ * and for an applied row that names nothing, which is a row this function
+ * has no business guessing about.
+ *
+ * applySuggestion stamps exactly one of the two ids, by kind; the kind is
+ * read first anyway so a row carrying both would still link the thing its
+ * kind is about.
+ *
+ * A client's own card links to their request and nothing else (contract
+ * section 2). A founder can attach a client's draft to a task, or to an
+ * internal request, from the dashboard, and neither is anything the client's
+ * portal shows. So a contact row links only a request that reads back as
+ * not internal, and a request that cannot be read gets no link.
+ */
+export async function decidedLinkFor(
+  drizzle: Drizzle,
+  row: Pick<DecidedSuggestionRow, 'status' | 'kind' | 'appliedTaskId' | 'appliedRequestId' | 'approverType'>,
+): Promise<{ url: string; label: string } | null> {
+  if (outcomeForStatus(row.status) !== 'approved') return null
+  const requestId = row.appliedRequestId ?? null
+  const taskId = row.appliedTaskId ?? null
+
+  if (row.approverType === 'contact') {
+    if (!requestId) return null
+    const request = await readLinkedRequest(drizzle, requestId)
+    if (!request || request.isInternal) return null
+    return requestLink(requestId, request)
+  }
+
+  const preferRequest = row.kind ? REQUEST_KIND_NAMES.has(row.kind) : !!requestId
+  if (preferRequest && requestId) {
+    return requestLink(requestId, await readLinkedRequest(drizzle, requestId))
+  }
+  if (taskId) {
+    return { url: publicUrl(`/tasks/${encodeURIComponent(taskId)}`), label: 'Open task' }
+  }
+  if (requestId) {
+    return requestLink(requestId, await readLinkedRequest(drizzle, requestId))
+  }
+  return null
 }
 
 /**
@@ -382,6 +495,11 @@ export interface DecidedSuggestionRow {
  * Returns the number of copies rewritten, and NEVER throws. A decision made
  * in the dashboard is a fact about the database; whether Slack heard about it
  * is a separate and lesser question.
+ *
+ * A client's own draft that failed to apply reads "Could not apply" with no
+ * detail. The apply error can be a thrown D1 message or an internal lookup
+ * failure, which is ours to read on the row, not the client's to read in
+ * their DM.
  */
 export async function mirrorSuggestionDecision(
   drizzle: Drizzle,
@@ -396,7 +514,8 @@ export async function mirrorSuggestionDecision(
       actorName: await actorName(drizzle, row.decidedById),
       at: studioClock(row.decidedAt ?? row.updatedAt ?? null),
       until: outcome === 'snoozed' ? studioWhen(row.snoozeUntil) : null,
-      error: row.applyError,
+      error: row.approverType === 'contact' ? null : row.applyError,
+      link: await decidedLinkFor(drizzle, row),
     })
     return await rewriteEverywhere(drizzle, row.id, payload)
   } catch {

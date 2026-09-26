@@ -77,6 +77,14 @@ const ACTION_NAMES: readonly SuggestionActionName[] = [
   'approve', 'approve_anyway', 'tweak', 'snooze_tonight', 'snooze_week', 'reject', 'attach',
 ]
 
+/**
+ * The Monday digest's one button (CN.3 contract section 5). It is a url
+ * button, so Slack opens the inbox by itself; the interaction Slack still
+ * sends is claimed under this prefix and answered with nothing, rather than
+ * drawing the "not switched on yet" line from the dispatcher.
+ */
+export const DIGEST_ACTION_PREFIX = 'digest'
+
 /** `sugg:<action>:<id>`. A suggestion id is a uuid, so the third segment
  *  never carries a colon of its own. */
 export function suggestionActionId(action: SuggestionActionName, suggestionId: string): string {
@@ -115,6 +123,24 @@ function plain(text: string): SlackTextObject {
  *  not become a stray entity. */
 export function escapeSlackText(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/**
+ * A mrkdwn link, `<url|label>`.
+ *
+ * The label is escaped like any other text. The url keeps its meaning but
+ * loses the three characters that would end the link early: an ampersand in
+ * a query string becomes the entity Slack itself writes, and a pipe or an
+ * angle bracket is percent encoded, which a browser reads back as the same
+ * character.
+ */
+export function slackLink(url: string, label: string): string {
+  const safeUrl = url
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '%3C')
+    .replace(/>/g, '%3E')
+    .replace(/\|/g, '%7C')
+  return `<${safeUrl}|${escapeSlackText(label)}>`
 }
 
 /** A quote block: every line prefixed, empty lines kept so a two-paragraph
@@ -326,6 +352,14 @@ export interface DecidedLineInput {
   until?: string | null
   /** For a failure: the one line explaining what did not land. */
   error?: string | null
+  /**
+   * What an approved card points at once the thing exists: "Open #231" to
+   * the request, "Open task" to the task (CN.3 contract section 1). The card
+   * is the parent of the thread the dashboard's later changes reply in, so
+   * the parent names the thing the replies are about. Only the blocks carry
+   * it; the notification text stays the bare line.
+   */
+  link?: { url: string; label: string } | null
 }
 
 /** "Approved by Liam, 09:41". One line, no buttons: the decision is made and
@@ -347,9 +381,12 @@ export function decidedLine(input: DecidedLineInput): string {
   }
 }
 
-/** The whole message a decided suggestion becomes: the line, and nothing
- *  else to press. */
+/** The whole message a decided suggestion becomes: the line, a link to what
+ *  it made when there is one, and nothing else to press. */
 export function decidedMessage(input: DecidedLineInput): SlackMessagePayload {
   const line = decidedLine(input)
-  return { text: line, blocks: [{ type: 'section', text: mrkdwn(escapeSlackText(line)) }] }
+  const link = input.link && input.link.url && input.link.label
+    ? ` · ${slackLink(input.link.url, input.link.label)}`
+    : ''
+  return { text: line, blocks: [{ type: 'section', text: mrkdwn(`${escapeSlackText(line)}${link}`) }] }
 }

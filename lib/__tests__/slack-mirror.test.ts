@@ -14,9 +14,15 @@
  *   ONE COPY PER SUGGESTION PER RUN. The sweep re-reads the pending rows for
  *   a call, so a row that already has a copy must not be posted twice, or a
  *   founder's DM fills up with the same suggestion every thirty minutes.
+ *
+ *   THE APPROVED CARD POINTS AT WHAT IT MADE (CN.3 section 1). "Approved by
+ *   Liam, 09:41 · Open #231", because the card is the parent of the thread
+ *   the later changes reply in. A number that cannot be read is "Open
+ *   request", never a throw, and only an approval carries a link.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { sql } from 'drizzle-orm'
+import { schema } from '@/db/d1'
 
 const posted: Array<{ channel: string; text: string; blocks: unknown[] }> = []
 const updated: Array<{ channel: string; ts: string; text: string; blocks: unknown[] }> = []
@@ -47,6 +53,7 @@ vi.mock('@/lib/slack/api', () => ({
 }))
 
 const {
+  decidedLinkFor,
   listSuggestionMessages,
   mirrorSuggestionDecision,
   outcomeForStatus,
@@ -83,10 +90,30 @@ function renderSql(query: unknown): { text: string; params: unknown[] } {
   return { text, params }
 }
 
-function fakeDb(options: { copies?: CopyRow[]; members?: Array<{ id: string; name: string }>; tableMissing?: boolean } = {}) {
+interface FakeDbOptions {
+  copies?: CopyRow[]
+  members?: Array<{ id: string; name: string }>
+  contacts?: Array<{ id: string; name: string }>
+  requests?: Array<{ id: string; requestNumber: number | null; isInternal?: boolean }>
+  requestReadFails?: boolean
+  tableMissing?: boolean
+}
+
+/** A database that answers each Drizzle select by the table it names and
+ *  ignores the WHERE: every test hands it only the rows it means. */
+function fakeDb(options: FakeDbOptions = {}) {
   const copies = options.copies ?? []
   const members = options.members ?? [{ id: 'tm_liam', name: 'Liam Miller' }]
+  const contacts = options.contacts ?? []
+  const requests = options.requests ?? []
   const stamped: Array<Record<string, unknown>> = []
+
+  function rowsFor(table: unknown): Array<Record<string, unknown>> {
+    if (table === schema.teamMembers) return members
+    if (table === schema.contacts) return contacts
+    if (table === schema.requests) return requests
+    return []
+  }
 
   const database = {
     all: async (query: unknown) => {
@@ -110,11 +137,16 @@ function fakeDb(options: { copies?: CopyRow[]; members?: Array<{ id: string; nam
       return {}
     },
     select: () => ({
-      from: () => {
+      from: (table: unknown) => {
         const node: Record<string, unknown> = {}
         node.where = () => node
         node.limit = () => node
-        node.then = <T>(resolve: (value: Array<Record<string, unknown>>) => T) => Promise.resolve(members).then(resolve)
+        node.then = <T>(resolve: (value: Array<Record<string, unknown>>) => T, reject?: (reason: unknown) => T) => {
+          if (table === schema.requests && options.requestReadFails) {
+            return Promise.reject(new Error('D1_ERROR: no such column')).then(resolve, reject)
+          }
+          return Promise.resolve(rowsFor(table)).then(resolve, reject)
+        }
         return node
       },
     }),
@@ -152,6 +184,7 @@ beforeEach(() => {
   openDmFails = false
   ts = 0
   vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+  vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://portal.tahi.studio')
 })
 
 afterEach(() => {
@@ -316,6 +349,15 @@ describe('the decided rewrite', () => {
     expect(updated[0].text).toBe('Could not apply: Task not found')
   })
 
+  it('keeps the apply error off a client draft card', async () => {
+    const { database } = fakeDb({ copies: [{ suggestion_id: 's1', channel_id: 'D_TIM', ts: '1.1' }] })
+    await mirrorSuggestionDecision(database, {
+      ...decided, status: 'failed', approverType: 'contact', applyError: 'D1_ERROR: no such column: org_id',
+    })
+    expect(updated[0].text).toBe('Could not apply')
+    expect(JSON.stringify(updated[0].blocks)).not.toContain('D1_ERROR')
+  })
+
   it('leaves a pending row alone, because pending is not a decision', async () => {
     const { database } = fakeDb({ copies: [{ suggestion_id: 's1', channel_id: 'D_LIAM', ts: '1.1' }] })
     expect(await mirrorSuggestionDecision(database, { ...decided, status: 'pending' })).toBe(0)
@@ -346,6 +388,129 @@ describe('the decided rewrite', () => {
     expect(studioClock('2026-09-22T21:41:00Z')).toBe('09:41')
     expect(studioClock(null)).toBeNull()
     expect(studioClock('not a date')).toBeNull()
+  })
+})
+
+describe('the approved card links to what it made', () => {
+  const COPY = [{ suggestion_id: 's1', channel_id: 'D_LIAM', ts: '1.1' }]
+  const approved = {
+    id: 's1', status: 'applied', snoozeUntil: null, decidedById: 'tm_liam',
+    decidedAt: '2026-09-22T21:41:00Z', updatedAt: '2026-09-22T21:41:00Z', applyError: null,
+  }
+
+  function sectionText(index = 0): string {
+    const block = updated[index].blocks[0] as { type: string; text: { text: string } }
+    return block.text.text
+  }
+
+  it('links an approved task row to the task', async () => {
+    const { database } = fakeDb({ copies: COPY })
+    expect(await mirrorSuggestionDecision(database, {
+      ...approved, kind: 'create_task', appliedTaskId: 't_new', appliedRequestId: null,
+    })).toBe(1)
+    expect(updated[0].text).toBe('Approved by Liam, 09:41')
+    expect(sectionText()).toBe('Approved by Liam, 09:41 · <https://portal.tahi.studio/tasks/t_new|Open task>')
+  })
+
+  it('links an approved request row by its number', async () => {
+    const { database } = fakeDb({ copies: COPY, requests: [{ id: 'r_new', requestNumber: 231 }] })
+    await mirrorSuggestionDecision(database, {
+      ...approved, kind: 'create_request', appliedTaskId: null, appliedRequestId: 'r_new',
+    })
+    expect(updated[0].text).toBe('Approved by Liam, 09:41')
+    expect(sectionText()).toBe('Approved by Liam, 09:41 · <https://portal.tahi.studio/requests/r_new|Open #231>')
+  })
+
+  it('still links the request, as Open request, when its number cannot be read', async () => {
+    const { database } = fakeDb({ copies: COPY, requestReadFails: true })
+    expect(await mirrorSuggestionDecision(database, {
+      ...approved, kind: 'hand_off_request', appliedTaskId: null, appliedRequestId: 'r_new',
+    })).toBe(1)
+    expect(sectionText()).toBe('Approved by Liam, 09:41 · <https://portal.tahi.studio/requests/r_new|Open request>')
+  })
+
+  it('says Open request for a request with no number yet', async () => {
+    const { database } = fakeDb({ copies: COPY, requests: [{ id: 'r_new', requestNumber: null }] })
+    await mirrorSuggestionDecision(database, { ...approved, kind: 'update_request', appliedRequestId: 'r_new' })
+    expect(sectionText()).toContain('|Open request>')
+  })
+
+  it('carries no link on a rejected or a snoozed card, whatever the row names', async () => {
+    const { database } = fakeDb({ copies: COPY })
+    await mirrorSuggestionDecision(database, { ...approved, status: 'rejected', kind: 'update_task', appliedTaskId: 't1' })
+    await mirrorSuggestionDecision(database, {
+      ...approved, status: 'snoozed', snoozeUntil: '2026-09-25T21:00:00Z', kind: 'update_task', appliedTaskId: 't1',
+    })
+    expect(sectionText(0)).toBe('Rejected by Liam, 09:41')
+    expect(sectionText(1)).not.toContain('<')
+  })
+
+  it('carries no link on an approved row that names nothing', async () => {
+    const { database } = fakeDb({ copies: COPY })
+    await mirrorSuggestionDecision(database, { ...approved, kind: 'note', appliedTaskId: null, appliedRequestId: null })
+    expect(sectionText()).toBe('Approved by Liam, 09:41')
+  })
+
+  it('names a client who confirmed their own request by first name', async () => {
+    const { database } = fakeDb({ copies: COPY, members: [], contacts: [{ id: 'c_tim', name: 'Tim Lyons' }] })
+    await mirrorSuggestionDecision(database, { ...approved, decidedById: 'c_tim' })
+    expect(updated[0].text).toBe('Approved by Tim, 09:41')
+  })
+
+  it('prefers the team member when both could answer', async () => {
+    const { database } = fakeDb({ copies: COPY, contacts: [{ id: 'c_tim', name: 'Tim Lyons' }] })
+    await mirrorSuggestionDecision(database, approved)
+    expect(updated[0].text).toBe('Approved by Liam, 09:41')
+  })
+
+  it("links a client's own card to the request they confirmed", async () => {
+    const { database } = fakeDb({ copies: COPY, members: [], contacts: [{ id: 'c_tim', name: 'Tim Lyons' }], requests: [{ id: 'r_new', requestNumber: 231, isInternal: false }] })
+    await mirrorSuggestionDecision(database, {
+      ...approved, decidedById: 'c_tim', approverType: 'contact', kind: 'create_request', appliedTaskId: null, appliedRequestId: 'r_new',
+    })
+    expect(sectionText()).toBe('Approved by Tim, 09:41 · <https://portal.tahi.studio/requests/r_new|Open #231>')
+  })
+
+  it("gives a client's card no link when a founder attached their draft to a task", async () => {
+    const { database } = fakeDb({ copies: COPY, members: [], contacts: [{ id: 'c_tim', name: 'Tim Lyons' }] })
+    await mirrorSuggestionDecision(database, {
+      ...approved, decidedById: 'c_tim', approverType: 'contact', kind: 'note', appliedTaskId: 't_studio', appliedRequestId: null,
+    })
+    expect(sectionText()).toBe('Approved by Tim, 09:41')
+    expect(JSON.stringify(updated[0].blocks)).not.toContain('/tasks/')
+  })
+
+  it("gives a client's card no link to an internal request, or to one that cannot be read", async () => {
+    const internal = fakeDb({ requests: [{ id: 'r_int', requestNumber: 240, isInternal: true }] })
+    expect(await decidedLinkFor(internal.database, {
+      status: 'applied', approverType: 'contact', kind: 'note', appliedTaskId: null, appliedRequestId: 'r_int',
+    })).toBeNull()
+    const unreadable = fakeDb({ requestReadFails: true })
+    expect(await decidedLinkFor(unreadable.database, {
+      status: 'applied', approverType: 'contact', kind: 'create_request', appliedTaskId: null, appliedRequestId: 'r_new',
+    })).toBeNull()
+    const missing = fakeDb({ requests: [] })
+    expect(await decidedLinkFor(missing.database, {
+      status: 'applied', approverType: 'contact', kind: 'create_request', appliedTaskId: null, appliedRequestId: 'r_new',
+    })).toBeNull()
+  })
+
+  it('still links a studio card to an internal request, which the studio can open', async () => {
+    const { database } = fakeDb({ requests: [{ id: 'r_int', requestNumber: 240, isInternal: true }] })
+    expect(await decidedLinkFor(database, { status: 'applied', approverType: 'founders', kind: 'update_request', appliedRequestId: 'r_int' }))
+      .toEqual({ url: 'https://portal.tahi.studio/requests/r_int', label: 'Open #240' })
+  })
+
+  it('picks the link by kind', async () => {
+    const { database } = fakeDb({ requests: [{ id: 'r1', requestNumber: 7 }] })
+    expect(await decidedLinkFor(database, { status: 'applied', kind: 'complete_task', appliedTaskId: 't1', appliedRequestId: null }))
+      .toEqual({ url: 'https://portal.tahi.studio/tasks/t1', label: 'Open task' })
+    expect(await decidedLinkFor(database, { status: 'applied', kind: 'request_note', appliedTaskId: null, appliedRequestId: 'r1' }))
+      .toEqual({ url: 'https://portal.tahi.studio/requests/r1', label: 'Open #7' })
+    expect(await decidedLinkFor(database, { status: 'applied', appliedRequestId: 'r1' }))
+      .toEqual({ url: 'https://portal.tahi.studio/requests/r1', label: 'Open #7' })
+    expect(await decidedLinkFor(database, { status: 'failed', kind: 'create_task', appliedTaskId: 't1' })).toBeNull()
+    expect(await decidedLinkFor(database, { status: 'pending', kind: 'create_task', appliedTaskId: 't1' })).toBeNull()
   })
 })
 
