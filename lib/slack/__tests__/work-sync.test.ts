@@ -566,6 +566,20 @@ describe('when Slack is configured', () => {
       expect(result).toEqual({ posted: 0, rewritten: 0, skipped: 1 })
       expect(posted).toEqual([])
     })
+
+    it('never reads a client card as a thread at all, even beside a founders card on the same request', async () => {
+      const w = world()
+      card(w, { requestId: 'r1', copies: [['D_LIAM', '1759300000.000100']] })
+      card(w, { requestId: 'r1', approverType: 'contact', approverId: 'c_tim', copies: [['D_TIM', '1759300000.000900']] })
+      await syncWorkChanges(w.database, [{
+        entityType: 'request', entityId: 'r1', actor: studio('user_staci'), changes: [{ field: 'status', from: 'submitted', to: 'in_progress' }],
+      }], deps())
+      expect(posted.map(p => p.channel)).toEqual(['D_LIAM'])
+      expect(workRows(w).map(row => row.channel_id)).toEqual(['D_LIAM'])
+      const threadQueries = w.statements.filter(statement => statement.includes('INNER JOIN slack_suggestion_messages'))
+      expect(threadQueries.length).toBeGreaterThan(0)
+      for (const statement of threadQueries) expect(statement).toContain("s.approver_type IN ('founders', 'member')")
+    })
   })
 
   describe('client actors', () => {

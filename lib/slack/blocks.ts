@@ -12,6 +12,13 @@
  * link into the dashboard, because editing a proposal is a screen, not a
  * button.
  *
+ * A client's own "Is this the request?" card is NOT this message. It has its
+ * own two renderers below (clientDraftMessage and clientDecidedMessage),
+ * built from a narrower input, because everything suggestionMessage and
+ * decidedMessage can carry (the Tweak link, the duplicate line and its
+ * internal titles, the suggested assignee, who snoozed it, the apply error)
+ * was written for studio eyes (CN.3 contract section 2).
+ *
  * Pure: it renders JSON and reads the deploy origin, nothing else. No
  * database, no fetch, no Slack call. Posting and rewriting live in
  * lib/slack/mirror.ts.
@@ -320,6 +327,56 @@ export function suggestionMessage(
   return { text: fallbackText(input), blocks }
 }
 
+// ── A client's own card ─────────────────────────────────────────────────────
+
+/**
+ * Everything a client's own card may be built from (CN.3 contract section 2).
+ *
+ * Deliberately narrower than SuggestionMessageInput: the client's own words
+ * (the quote, and the title drafted from them), their own client's name and
+ * the kind. No similar matches, no target request, no suggested assignee, no
+ * confidence, no call. A field that is not on this type cannot reach a
+ * client's DM, whatever the row carries.
+ */
+export interface ClientDraftInput {
+  id: string
+  kind: string
+  proposal: unknown
+  quote: string
+  orgName?: string | null
+}
+
+/**
+ * "Is this the request?", as the card in a client's own DM.
+ *
+ * Two buttons. Approve files the request; Reject says no. There is no Tweak
+ * (/tasks is not a page a client can open) and no Tonight or This week: a
+ * client's card is never filed as a copy, so a snoozed draft could never come
+ * back to them, and a button that makes their ask vanish from Slack for good
+ * is worse than no button.
+ */
+export function clientDraftMessage(input: ClientDraftInput): SlackMessagePayload {
+  const blocks: SlackBlock[] = [
+    { type: 'section', text: mrkdwn(input.orgName ? `*${escapeSlackText(input.orgName)}*` : '*Your request*') },
+    { type: 'context', elements: [mrkdwn(escapeSlackText(suggestionKindLabel(input.kind)))] },
+    { type: 'section', text: mrkdwn(escapeSlackText(summariseProposal(input.kind, input.proposal))) },
+  ]
+  if (input.quote.trim()) {
+    blocks.push({ type: 'section', text: mrkdwn(quoteBlock(input.quote)) })
+  }
+  blocks.push({
+    type: 'actions',
+    elements: [
+      { type: 'button', text: plain('Approve'), action_id: suggestionActionId('approve', input.id), style: 'primary' },
+      { type: 'button', text: plain('Reject'), action_id: suggestionActionId('reject', input.id), style: 'danger' },
+    ],
+  })
+  return {
+    text: `${suggestionKindLabel(input.kind)}: ${summariseProposal(input.kind, input.proposal)}`,
+    blocks,
+  }
+}
+
 /** The header message that opens a call's run of suggestions in the DM. */
 export function callHeaderMessage(input: {
   callTitle: string | null
@@ -384,9 +441,63 @@ export function decidedLine(input: DecidedLineInput): string {
 /** The whole message a decided suggestion becomes: the line, a link to what
  *  it made when there is one, and nothing else to press. */
 export function decidedMessage(input: DecidedLineInput): SlackMessagePayload {
-  const line = decidedLine(input)
-  const link = input.link && input.link.url && input.link.label
-    ? ` · ${slackLink(input.link.url, input.link.label)}`
-    : ''
-  return { text: line, blocks: [{ type: 'section', text: mrkdwn(`${escapeSlackText(line)}${link}`) }] }
+  return lineMessage(decidedLine(input), input.link ?? null)
+}
+
+function lineMessage(line: string, link: { url: string; label: string } | null): SlackMessagePayload {
+  const tail = link && link.url && link.label ? ` · ${slackLink(link.url, link.label)}` : ''
+  return { text: line, blocks: [{ type: 'section', text: mrkdwn(`${escapeSlackText(line)}${tail}`) }] }
+}
+
+/** What a client's decided card is written from. Fixed words plus these four
+ *  values; nothing else about the row reaches it. */
+export interface ClientDecidedInput {
+  outcome: SuggestionOutcome
+  /** The client's own first name when THEY made this decision; null otherwise. */
+  ownName: string | null
+  /** The studio wall-clock time, already formatted: "09:41". */
+  at: string | null
+  /** Their own request, once approved. The caller only ever passes a request
+   *  that reads back as the client's and not internal. */
+  link?: { url: string; label: string } | null
+}
+
+/** The notice a client's own approval that did not land reads. */
+export const CLIENT_CARD_FAILED_LINE = 'Could not file this request just now. The studio can see it on their side.'
+
+/**
+ * What a client's own card becomes once it is decided (CN.3 contract
+ * section 2). The only decided rewrite a client's DM ever gets, and it is
+ * written from fixed words, never from the row's studio fields:
+ *
+ *   approved  "Approved by Tim, 09:41" and a link to their own request
+ *   rejected  "Rejected by Tim, 09:41"
+ *   failed    one plain sentence, never the apply error
+ *
+ * The name is the client's own and only ever theirs: when somebody at the
+ * studio made the decision the line names nobody ("Approved, 09:41", "Not
+ * filed, 09:41"), so who triages what stays on the studio's side. A snooze,
+ * an expiry or a pending row has no client wording and answers null, which
+ * leaves the card as it is.
+ */
+export function clientDecidedLine(input: ClientDecidedInput): string | null {
+  const name = input.ownName?.trim() || null
+  const when = input.at ? `, ${input.at}` : ''
+  switch (input.outcome) {
+    case 'approved':
+      return name ? `Approved by ${name}${when}` : `Approved${when}`
+    case 'rejected':
+      return name ? `Rejected by ${name}${when}` : `Not filed${when}`
+    case 'failed':
+      return CLIENT_CARD_FAILED_LINE
+    case 'snoozed':
+    case 'expired':
+      return null
+  }
+}
+
+export function clientDecidedMessage(input: ClientDecidedInput): SlackMessagePayload | null {
+  const line = clientDecidedLine(input)
+  if (!line) return null
+  return lineMessage(line, input.outcome === 'approved' ? input.link ?? null : null)
 }

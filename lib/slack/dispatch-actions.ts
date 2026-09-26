@@ -30,6 +30,13 @@
  * person is told it is gone, anybody else gets the same refusal as for a row
  * that is somebody else's.
  *
+ * A CLIENT'S PRESS IS ITS OWN PATH (CN.3 section 2, the client copy policy in
+ * lib/slack/mirror.ts). A client may Approve or Reject their own draft and
+ * nothing else. Their press is never filed as a copy, never re-renders the
+ * studio's card, and never reaches mirrorSuggestionDecision: the one message
+ * it changes is the card they pressed, rewritten by rewriteClientCard from
+ * fixed client wording.
+ *
  * Registered with the interactive route through the S1 hook in
  * lib/slack/action-registry.ts, by prefix, so the route never learns the
  * verbs: importing this module is enough to claim `sugg:*`, and the Monday
@@ -54,6 +61,7 @@ import { findSlackIdentity, isStudioLevel, SLACK_DENIED_LINE, type SlackIdentity
 import {
   mirrorSuggestionDecision,
   recordSuggestionMessage,
+  rewriteClientCard,
   rewriteSuggestionMessage,
   type DecidedSuggestionRow,
 } from '@/lib/slack/mirror'
@@ -181,20 +189,29 @@ function decisionFor(action: SuggestionActionName, value: string | null): Decisi
 }
 
 /**
- * A client's press, as the decision the gate is sent.
+ * A client's press, as the decision the gate is sent. Approve and Reject,
+ * which are the only two buttons on a client's card, and nothing else.
  *
  * Approve goes with force: the client's DM IS the request (CN.2 section 4),
  * the studio triages duplicates on its own side, and the duplicate answer
  * must never reach a client because its match list names the studio's
  * internal task titles. The two buttons that only exist on the duplicate
  * answer, attach and approve anyway, are therefore never a client's to
- * press, and answer null here, which the caller turns into the refusal.
+ * press. Nor are Tonight and This week: a client's card is never filed as a
+ * copy, so a snoozed draft could never come back to them, and a snooze would
+ * quietly take their ask out of Slack for good. Every refused press answers
+ * null here, which the caller turns into the refusal.
  */
-function clientDecisionFor(action: SuggestionActionName, value: string | null): DecisionInput | null {
-  if (action === 'attach' || action === 'approve_anyway') return null
+function clientDecisionFor(action: SuggestionActionName): DecisionInput | null {
   if (action === 'approve') return { action: 'approve', force: true }
-  return decisionFor(action, value)
+  if (action === 'reject') return { action: 'reject' }
+  return null
 }
+
+/** The one kind a client's card shows. A draft the studio has since
+ *  re-pointed (an attach from the dashboard) is not what the client's card
+ *  says any more, so the client's Approve must not apply it. */
+const CLIENT_CARD_KIND = 'create_request'
 
 function answer(reply: string | null): SlackBlockActionResult {
   return { handled: true, reply }
@@ -243,18 +260,16 @@ export async function handleSuggestionAction(ctx: SlackBlockActionContext): Prom
   // outside them reads as the same refusal as a row that is not theirs.
   if (studio && !await studioReachesRow(ctx.drizzle, actorId, row.orgId)) return answer(SLACK_DENIED_LINE)
 
-  // A client's attach or approve anyway comes back null from
-  // clientDecisionFor and is refused here, before anything is recorded.
-  const decision = client
-    ? clientDecisionFor(parsed.action, ctx.payload.value)
-    : decisionFor(parsed.action, ctx.payload.value)
-  if (!decision) return answer(client ? SLACK_DENIED_LINE : DISPATCH_LINES.attachUnreadable)
+  if (client) return clientPress(ctx, parsed.action, parsed.suggestionId, row.kind, actorId)
+
+  const decision = decisionFor(parsed.action, ctx.payload.value)
+  if (!decision) return answer(DISPATCH_LINES.attachUnreadable)
 
   // File the clicked message as a copy before deciding. The sweep records
   // every copy it posts, but a message the bot posted before the table
   // existed, or one whose record failed, would otherwise keep its buttons
   // after the decision. INSERT OR IGNORE, so this costs nothing when the copy
-  // is already known.
+  // is already known. A studio press only: a client's card is never filed.
   if (ctx.payload.channelId && ctx.payload.messageTs) {
     await recordSuggestionMessage(ctx.drizzle, {
       suggestionId: parsed.suggestionId,
@@ -264,13 +279,14 @@ export async function handleSuggestionAction(ctx: SlackBlockActionContext): Prom
   }
 
   const result = await decideSuggestion(ctx.drizzle, parsed.suggestionId, decision, { actorId, via: 'slack' })
-  if (!result) return answer(studio ? DISPATCH_LINES.gone : SLACK_DENIED_LINE)
+  if (!result) return answer(DISPATCH_LINES.gone)
 
   // The gate refused a create because the client already has the thing. The
   // same message becomes the duplicate answer: "Looks like #226 Design
   // directions", with Use #226 instead beside Approve anyway (contract
   // section 3). Nothing was decided, so nothing is struck through. A client
-  // never reaches this: their approve carries force.
+  // never reaches this: their press took clientPress above, and their
+  // approve carries force.
   if (result.error === POSSIBLE_DUPLICATE) {
     await rerender(ctx, parsed.suggestionId, true)
     return answer(null)
@@ -291,6 +307,42 @@ export async function handleSuggestionAction(ctx: SlackBlockActionContext): Prom
   // who decided and when. The second click differs only in that it is worth
   // telling the person their press did nothing.
   await tidy(ctx, result.suggestion)
+  return answer(result.changed ? null : DISPATCH_LINES.alreadyDecided)
+}
+
+/**
+ * A client's press on their own card, after canDecideSuggestion has held
+ * them to their own draft at their own client.
+ *
+ * Nothing is recorded, nothing studio side is re-rendered, and the only
+ * Slack write is the card they pressed, through rewriteClientCard. Every
+ * answer is null, the plain refusal, or "already decided", none of which
+ * says anything about the studio's side.
+ */
+async function clientPress(
+  ctx: SlackBlockActionContext,
+  action: SuggestionActionName,
+  suggestionId: string,
+  kind: string,
+  contactId: string,
+): Promise<SlackBlockActionResult> {
+  const decision = clientDecisionFor(action)
+  if (!decision) return answer(SLACK_DENIED_LINE)
+  if (decision.action === 'approve' && kind !== CLIENT_CARD_KIND) return answer(SLACK_DENIED_LINE)
+
+  const result = await decideSuggestion(ctx.drizzle, suggestionId, decision, { actorId: contactId, via: 'slack' })
+  if (!result || result.error) return answer(SLACK_DENIED_LINE)
+
+  try {
+    await rewriteClientCard(
+      ctx.drizzle,
+      { channelId: ctx.payload.channelId, ts: ctx.payload.messageTs },
+      result.suggestion,
+    )
+  } catch {
+    // The decision landed; a card that still shows its buttons is refused on
+    // the next press by the gate.
+  }
   return answer(result.changed ? null : DISPATCH_LINES.alreadyDecided)
 }
 

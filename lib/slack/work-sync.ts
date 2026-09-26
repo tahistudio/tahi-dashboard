@@ -367,6 +367,11 @@ interface ThreadRow {
  * The threads for a batch of items of one kind, keyed by item. Per item and
  * channel, one thread: the card with the highest ts, which is the most
  * recently posted copy of the most recently applied suggestion there.
+ *
+ * Only founders and member cards are read at all. A client's card is never on
+ * the copies table (the client copy policy, lib/slack/mirror.ts), and the
+ * query says so too, so a client's DM cannot become a thread here even if a
+ * copy were somehow on file; the audience check below is the third fence.
  */
 async function findThreads(
   drizzle: Drizzle,
@@ -383,6 +388,7 @@ async function findThreads(
           FROM task_suggestions s
           INNER JOIN slack_suggestion_messages m ON m.suggestion_id = s.id
           WHERE s.status = 'applied'
+            AND s.approver_type IN ('founders', 'member')
             AND s.applied_task_id IN ${inList(part)}
             AND s.applied_at >= ${horizon}
         `)
@@ -392,6 +398,7 @@ async function findThreads(
           FROM task_suggestions s
           INNER JOIN slack_suggestion_messages m ON m.suggestion_id = s.id
           WHERE s.status = 'applied'
+            AND s.approver_type IN ('founders', 'member')
             AND s.applied_request_id IN ${inList(part)}
             AND s.applied_at >= ${horizon}
         `)

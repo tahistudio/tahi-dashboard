@@ -665,6 +665,23 @@ describe('who hears what', () => {
     expect(result.recipients).toBe(4)
   })
 
+  it("counts a client's own drafts and never names one, in any message to anybody", async () => {
+    const store = baseStore([
+      ...busyStudio(),
+      suggestion({
+        approverType: 'contact', approverId: 'c1', kind: 'create_request',
+        proposal: JSON.stringify({ title: 'CLIENT OWN WORDS footer icons' }),
+      }),
+    ])
+    const dry = await runSuggestionDigest(fakeDb(store), { at: MONDAY, dryRun: true, deps })
+    await runSuggestionDigest(fakeDb(store), { at: MONDAY, deps })
+    const everything = [JSON.stringify(dry.preview), JSON.stringify(dry.payloads), ...posted.map(allText)].join('\n')
+    expect(everything).toContain('3 client drafts not confirmed by the client yet')
+    expect(everything).not.toContain('CLIENT OWN WORDS')
+    expect(posted.some(p => p.channel === 'D_CLIENT')).toBe(false)
+    expect(dry.payloads?.some(p => p.slackUserId === 'U_CLIENT')).toBe(false)
+  })
+
   it('never carries a quote or an em or en dash', async () => {
     const store = baseStore()
     const dry = await runSuggestionDigest(fakeDb(store), { at: MONDAY, dryRun: true, deps })

@@ -60,6 +60,7 @@ const {
   postSuggestionsForCall,
   recordSuggestionMessage,
   repostSuggestion,
+  rewriteClientCard,
   rewriteEverywhere,
   rewriteSuggestionMessage,
   studioClock,
@@ -94,7 +95,7 @@ interface FakeDbOptions {
   copies?: CopyRow[]
   members?: Array<{ id: string; name: string }>
   contacts?: Array<{ id: string; name: string }>
-  requests?: Array<{ id: string; requestNumber: number | null; isInternal?: boolean }>
+  requests?: Array<{ id: string; requestNumber: number | null; isInternal?: boolean; orgId?: string }>
   requestReadFails?: boolean
   tableMissing?: boolean
 }
@@ -163,6 +164,7 @@ function fakeDb(options: FakeDbOptions = {}) {
 function row(overrides: Record<string, unknown> = {}) {
   return {
     id: 's1',
+    approverType: 'founders',
     kind: 'create_task',
     proposal: { title: 'Cut the hero video', assigneeName: 'Staci', assigneeReason: 'said she would do it' },
     quote: 'We still need the hero video cut to thirty seconds.',
@@ -329,6 +331,7 @@ describe('the decided rewrite', () => {
   const decided = {
     id: 's1', status: 'applied', snoozeUntil: null, decidedById: 'tm_liam',
     decidedAt: '2026-09-22T21:41:00Z', updatedAt: '2026-09-22T21:41:00Z', applyError: null,
+    approverType: 'founders',
   }
 
   it('names the founder and the studio clock time', async () => {
@@ -349,13 +352,17 @@ describe('the decided rewrite', () => {
     expect(updated[0].text).toBe('Could not apply: Task not found')
   })
 
-  it('keeps the apply error off a client draft card', async () => {
+  it('never rewrites a client draft, even when a copy of it is somehow on file', async () => {
     const { database } = fakeDb({ copies: [{ suggestion_id: 's1', channel_id: 'D_TIM', ts: '1.1' }] })
-    await mirrorSuggestionDecision(database, {
-      ...decided, status: 'failed', approverType: 'contact', applyError: 'D1_ERROR: no such column: org_id',
-    })
-    expect(updated[0].text).toBe('Could not apply')
-    expect(JSON.stringify(updated[0].blocks)).not.toContain('D1_ERROR')
+    const client = { ...decided, approverType: 'contact', approverId: 'c_tim', orgId: 'o_ver' }
+    expect(await mirrorSuggestionDecision(database, {
+      ...client, status: 'failed', applyError: 'D1_ERROR: no such column: org_id',
+    })).toBe(0)
+    expect(await mirrorSuggestionDecision(database, {
+      ...client, status: 'snoozed', snoozeUntil: '2026-09-25T21:00:00Z',
+    })).toBe(0)
+    expect(await mirrorSuggestionDecision(database, client)).toBe(0)
+    expect(updated).toHaveLength(0)
   })
 
   it('leaves a pending row alone, because pending is not a decision', async () => {
@@ -396,6 +403,7 @@ describe('the approved card links to what it made', () => {
   const approved = {
     id: 's1', status: 'applied', snoozeUntil: null, decidedById: 'tm_liam',
     decidedAt: '2026-09-22T21:41:00Z', updatedAt: '2026-09-22T21:41:00Z', applyError: null,
+    approverType: 'founders',
   }
 
   function sectionText(index = 0): string {
@@ -451,47 +459,32 @@ describe('the approved card links to what it made', () => {
     expect(sectionText()).toBe('Approved by Liam, 09:41')
   })
 
-  it('names a client who confirmed their own request by first name', async () => {
+  it('names only a team member on a studio card, never a contact', async () => {
     const { database } = fakeDb({ copies: COPY, members: [], contacts: [{ id: 'c_tim', name: 'Tim Lyons' }] })
     await mirrorSuggestionDecision(database, { ...approved, decidedById: 'c_tim' })
-    expect(updated[0].text).toBe('Approved by Tim, 09:41')
+    expect(updated[0].text).toBe('Approved by someone, 09:41')
   })
 
-  it('prefers the team member when both could answer', async () => {
-    const { database } = fakeDb({ copies: COPY, contacts: [{ id: 'c_tim', name: 'Tim Lyons' }] })
-    await mirrorSuggestionDecision(database, approved)
-    expect(updated[0].text).toBe('Approved by Liam, 09:41')
-  })
-
-  it("links a client's own card to the request they confirmed", async () => {
-    const { database } = fakeDb({ copies: COPY, members: [], contacts: [{ id: 'c_tim', name: 'Tim Lyons' }], requests: [{ id: 'r_new', requestNumber: 231, isInternal: false }] })
-    await mirrorSuggestionDecision(database, {
-      ...approved, decidedById: 'c_tim', approverType: 'contact', kind: 'create_request', appliedTaskId: null, appliedRequestId: 'r_new',
-    })
-    expect(sectionText()).toBe('Approved by Tim, 09:41 · <https://portal.tahi.studio/requests/r_new|Open #231>')
-  })
-
-  it("gives a client's card no link when a founder attached their draft to a task", async () => {
-    const { database } = fakeDb({ copies: COPY, members: [], contacts: [{ id: 'c_tim', name: 'Tim Lyons' }] })
-    await mirrorSuggestionDecision(database, {
-      ...approved, decidedById: 'c_tim', approverType: 'contact', kind: 'note', appliedTaskId: 't_studio', appliedRequestId: null,
-    })
-    expect(sectionText()).toBe('Approved by Tim, 09:41')
-    expect(JSON.stringify(updated[0].blocks)).not.toContain('/tasks/')
-  })
-
-  it("gives a client's card no link to an internal request, or to one that cannot be read", async () => {
-    const internal = fakeDb({ requests: [{ id: 'r_int', requestNumber: 240, isInternal: true }] })
+  it("gives a client's card no link to an internal request, another client's, or one that cannot be read", async () => {
+    const internal = fakeDb({ requests: [{ id: 'r_int', requestNumber: 240, isInternal: true, orgId: 'o_ver' }] })
     expect(await decidedLinkFor(internal.database, {
-      status: 'applied', approverType: 'contact', kind: 'note', appliedTaskId: null, appliedRequestId: 'r_int',
+      status: 'applied', approverType: 'contact', orgId: 'o_ver', kind: 'note', appliedTaskId: null, appliedRequestId: 'r_int',
+    })).toBeNull()
+    const elsewhere = fakeDb({ requests: [{ id: 'r_new', requestNumber: 12, isInternal: false, orgId: 'o_other' }] })
+    expect(await decidedLinkFor(elsewhere.database, {
+      status: 'applied', approverType: 'contact', orgId: 'o_ver', kind: 'create_request', appliedTaskId: null, appliedRequestId: 'r_new',
+    })).toBeNull()
+    const noClient = fakeDb({ requests: [{ id: 'r_new', requestNumber: 231, isInternal: false, orgId: 'o_ver' }] })
+    expect(await decidedLinkFor(noClient.database, {
+      status: 'applied', approverType: 'contact', orgId: null, kind: 'create_request', appliedTaskId: null, appliedRequestId: 'r_new',
     })).toBeNull()
     const unreadable = fakeDb({ requestReadFails: true })
     expect(await decidedLinkFor(unreadable.database, {
-      status: 'applied', approverType: 'contact', kind: 'create_request', appliedTaskId: null, appliedRequestId: 'r_new',
+      status: 'applied', approverType: 'contact', orgId: 'o_ver', kind: 'create_request', appliedTaskId: null, appliedRequestId: 'r_new',
     })).toBeNull()
     const missing = fakeDb({ requests: [] })
     expect(await decidedLinkFor(missing.database, {
-      status: 'applied', approverType: 'contact', kind: 'create_request', appliedTaskId: null, appliedRequestId: 'r_new',
+      status: 'applied', approverType: 'contact', orgId: 'o_ver', kind: 'create_request', appliedTaskId: null, appliedRequestId: 'r_new',
     })).toBeNull()
   })
 
@@ -532,6 +525,122 @@ describe('the undecided rewrite', () => {
     expect(blocks).toContain('Looks like #226 Design directions')
     expect(blocks).toContain('Approve anyway')
     expect(blocks).toContain('Use #226 instead')
+  })
+})
+
+/**
+ * THE CLIENT COPY POLICY (CN.3 section 2). A client's DM only ever shows text
+ * written for the client. The copies table never holds a client's channel,
+ * the studio rewrites refuse a contact row even if one were on file, and the
+ * one message a client's decision changes is the card they pressed, through
+ * rewriteClientCard.
+ */
+describe('a client DM hears nothing studio side', () => {
+  const TIM_COPY = [{ suggestion_id: 's1', channel_id: 'D_TIM', ts: '1.1' }]
+  /** Everything studio side a client's DM must never read. */
+  const STUDIO_ONLY = [
+    '/tasks', 'Tweak', 'Tonight', 'This week', 'Snoozed', 'Liam', 'Looks like', 'Approve anyway',
+    'Use #', 'Brand refresh internal', 'D1_ERROR', 'Could not apply', 'Suggested:', 'Kickoff call',
+  ]
+
+  function clientRow(overrides: Record<string, unknown> = {}) {
+    return row({
+      approverType: 'contact',
+      approverId: 'c_tim',
+      kind: 'create_request',
+      proposal: { title: 'New footer icons', suggestedAssigneeName: 'Liam', assigneeReason: 'owns this client' },
+      similar: [{ kind: 'task', id: 't_int', number: null, title: 'Brand refresh internal', status: 'todo', score: 0.95 }],
+      ...overrides,
+    })
+  }
+
+  function everythingSentTo(channel: string): string {
+    return JSON.stringify([...posted, ...updated].filter(message => message.channel === channel))
+  }
+
+  it('never reposts a client draft whose snooze ended, even with a copy on file', async () => {
+    const { database } = fakeDb({ copies: TIM_COPY })
+    expect(await repostSuggestion(database, clientRow())).toBe(0)
+    expect(posted).toHaveLength(0)
+  })
+
+  it('never re-renders a client draft with its buttons, even with a copy on file', async () => {
+    const { database } = fakeDb({ copies: TIM_COPY })
+    expect(await rewriteSuggestionMessage(database, clientRow(), { duplicate: true })).toBe(0)
+    expect(await rewriteSuggestionMessage(database, clientRow())).toBe(0)
+    expect(updated).toHaveLength(0)
+  })
+
+  const decidedByTim = {
+    id: 's1', status: 'applied', snoozeUntil: null, decidedById: 'c_tim',
+    decidedAt: '2026-09-22T21:41:00Z', updatedAt: '2026-09-22T21:41:00Z', applyError: null,
+    approverType: 'contact', approverId: 'c_tim', orgId: 'o_ver',
+    kind: 'create_request', appliedTaskId: null, appliedRequestId: 'r_new',
+  }
+  const card = { channelId: 'D_TIM', ts: '1758500000.0009' }
+
+  it("rewrites the pressed card to the client's own approval, with a link to their request", async () => {
+    const { database } = fakeDb({
+      members: [{ id: 'tm_liam', name: 'Liam Miller' }],
+      contacts: [{ id: 'c_tim', name: 'Tim Lyons' }],
+      requests: [{ id: 'r_new', requestNumber: 231, isInternal: false, orgId: 'o_ver' }],
+    })
+    expect(await rewriteClientCard(database, card, decidedByTim)).toBe(true)
+    expect(updated).toHaveLength(1)
+    expect(updated[0]).toMatchObject({ channel: 'D_TIM', ts: '1758500000.0009', text: 'Approved by Tim, 09:41' })
+    expect((updated[0].blocks[0] as { text: { text: string } }).text.text)
+      .toBe('Approved by Tim, 09:41 · <https://portal.tahi.studio/requests/r_new|Open #231>')
+  })
+
+  it('names nobody when the studio decided, and never who snoozed it or why an apply failed', async () => {
+    const { database } = fakeDb({
+      members: [{ id: 'tm_liam', name: 'Liam Miller' }],
+      contacts: [{ id: 'c_tim', name: 'Tim Lyons' }],
+      requests: [{ id: 'r_new', requestNumber: 231, isInternal: false, orgId: 'o_ver' }],
+    })
+    await rewriteClientCard(database, card, { ...decidedByTim, decidedById: 'tm_liam', status: 'rejected', appliedRequestId: null })
+    await rewriteClientCard(database, card, { ...decidedByTim, status: 'failed', applyError: 'D1_ERROR: no such column: org_id', appliedRequestId: null })
+    expect(await rewriteClientCard(database, card, { ...decidedByTim, decidedById: 'tm_liam', status: 'snoozed', snoozeUntil: '2026-09-25T21:00:00Z' })).toBe(false)
+    expect(updated.map(message => message.text)).toEqual([
+      'Not filed, 09:41',
+      'Could not file this request just now. The studio can see it on their side.',
+    ])
+    const sent = everythingSentTo('D_TIM')
+    for (const phrase of STUDIO_ONLY) expect(sent).not.toContain(phrase)
+  })
+
+  it("gives the client's card no link to a task or an internal request the studio attached it to", async () => {
+    const { database } = fakeDb({
+      contacts: [{ id: 'c_tim', name: 'Tim Lyons' }],
+      requests: [{ id: 'r_int', requestNumber: 240, isInternal: true, orgId: 'o_ver' }],
+    })
+    await rewriteClientCard(database, card, { ...decidedByTim, kind: 'note', appliedTaskId: 't_studio', appliedRequestId: null })
+    await rewriteClientCard(database, card, { ...decidedByTim, kind: 'request_note', appliedRequestId: 'r_int' })
+    expect(updated.map(message => message.text)).toEqual(['Approved by Tim, 09:41', 'Approved by Tim, 09:41'])
+    const sent = everythingSentTo('D_TIM')
+    expect(sent).not.toContain('/tasks/')
+    expect(sent).not.toContain('#240')
+  })
+
+  it('touches nothing for a studio row, a card with no ts, or without a bot token', async () => {
+    const { database } = fakeDb({ contacts: [{ id: 'c_tim', name: 'Tim Lyons' }] })
+    expect(await rewriteClientCard(database, card, { ...decidedByTim, approverType: 'founders' })).toBe(false)
+    expect(await rewriteClientCard(database, { channelId: 'D_TIM', ts: null }, decidedByTim)).toBe(false)
+    vi.stubEnv('SLACK_BOT_TOKEN', '')
+    expect(await rewriteClientCard(database, card, decidedByTim)).toBe(false)
+    expect(updated).toHaveLength(0)
+  })
+
+  it('never records the client card as a copy', async () => {
+    const { database, copies } = fakeDb({ contacts: [{ id: 'c_tim', name: 'Tim Lyons' }] })
+    await rewriteClientCard(database, card, decidedByTim)
+    expect(copies).toHaveLength(0)
+  })
+
+  it('returns false rather than throwing when Slack refuses the edit', async () => {
+    updateFails = () => true
+    const { database } = fakeDb({ contacts: [{ id: 'c_tim', name: 'Tim Lyons' }] })
+    expect(await rewriteClientCard(database, card, decidedByTim)).toBe(false)
   })
 })
 

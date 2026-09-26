@@ -27,7 +27,7 @@
  * through lib/slack/notes.ts, and a human presses the button.
  */
 
-import { suggestionMessage } from './blocks'
+import { clientDraftMessage, suggestionMessage } from './blocks'
 import { SLACK_DENIED_REPLY, type SlackIdentity } from './identity'
 import { recordSuggestionMessage } from './mirror'
 import { draftFromNote, type NoteSuggestionRow } from './notes'
@@ -206,24 +206,19 @@ function isMessageRef(value: unknown): value is { channel: string; ts: string } 
 /**
  * The bot's own copy of the sender's words, as a card per filed row.
  *
- * Studio people get the Tweak deep link because /tasks is theirs; a client's
- * card carries no Tweak button at all, because the link would land them on a
- * page they cannot open. Every other button is the same on both, and the
- * interactive route gates what each one is allowed to do.
+ * A studio person's card is the studio's suggestion message, Tweak link and
+ * all, because /tasks is theirs. It is filed as a copy the moment it lands
+ * (CN.3), exactly as a call card is: a decision in the dashboard can then
+ * rewrite it, and once the note is applied its thread is where later changes
+ * to the item are told.
  *
- * A studio person's card is filed as a copy the moment it lands (CN.3),
- * exactly as a call card is: a decision in the dashboard can then rewrite it,
- * and once the note is applied its thread is where later changes to the item
- * are told.
- *
- * A client's card is NOT filed, on purpose. Everything that reads the copies
- * today was written for studio eyes: a snoozed draft that wakes up is reposted
- * into every recorded channel with the studio Tweak link and the "looks like
- * <task>" line, whose candidates include the studio's internal tasks and
- * requests for that client, and a decision rewrites the card with who snoozed
- * it and any raw apply error. Until lib/slack/mirror.ts renders a contact's
- * row without those, a copy in the client's own DM is a leak waiting for
- * SLACK_BOT_TOKEN.
+ * A client's card is its own message (clientDraftMessage): their words,
+ * their client's name, Approve and Reject, and nothing else. It is NEVER
+ * filed as a copy. That is the client copy policy (lib/slack/mirror.ts, CN.3
+ * section 2): everything that walks the copies table (the decided rewrite, a
+ * snooze coming back, the work-sync thread lines) was written for studio
+ * eyes, so a client's DM is kept off the table entirely, and the only thing
+ * that ever changes this card is the client's own press.
  */
 async function postCards(
   deps: SlackDmDeps,
@@ -233,21 +228,15 @@ async function postCards(
 ): Promise<number> {
   let posted = 0
   for (const row of rows) {
-    const assignee = suggestedAssignee(row.proposal)
-    const message = suggestionMessage(
-      {
+    const message = options.studio
+      ? studioCard(row, options.orgName)
+      : clientDraftMessage({
         id: row.id,
         kind: row.kind,
         proposal: row.proposal,
         quote: row.quote,
         orgName: options.orgName,
-        suggestedAssigneeName: assignee.name,
-        assigneeReason: assignee.reason,
-      },
-      // A studio card gets the dashboard link (the default). A client's card
-      // gets no Tweak button at all, because /tasks is not theirs to open.
-      options.studio ? {} : { tweakUrl: null },
-    )
+      })
     const ref = await deps.postMessage({ channel, text: message.text, blocks: message.blocks })
     if (options.studio && isMessageRef(ref)) {
       await recordSuggestionMessage(deps.database, { suggestionId: row.id, channelId: ref.channel, ts: ref.ts })
@@ -255,6 +244,21 @@ async function postCards(
     posted += 1
   }
   return posted
+}
+
+/** A founder's or member's note card: the studio suggestion message with the
+ *  dashboard's Tweak link (the default) and the suggested owner. */
+function studioCard(row: NoteSuggestionRow, orgName: string | null) {
+  const assignee = suggestedAssignee(row.proposal)
+  return suggestionMessage({
+    id: row.id,
+    kind: row.kind,
+    proposal: row.proposal,
+    quote: row.quote,
+    orgName,
+    suggestedAssigneeName: assignee.name,
+    assigneeReason: assignee.reason,
+  })
 }
 
 /**

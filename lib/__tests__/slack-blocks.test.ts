@@ -17,7 +17,11 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
+  CLIENT_CARD_FAILED_LINE,
   callHeaderMessage,
+  clientDecidedLine,
+  clientDecidedMessage,
+  clientDraftMessage,
   decidedLine,
   decidedMessage,
   escapeSlackText,
@@ -276,6 +280,54 @@ describe('the decided message', () => {
   it('leaves decidedLine itself unchanged by a link', () => {
     expect(decidedLine({ outcome: 'approved', actorName: 'Liam', at: '09:41', link: { url: 'https://x.test/t', label: 'Open task' } }))
       .toBe('Approved by Liam, 09:41')
+  })
+})
+
+describe("a client's own card (CN.3 section 2)", () => {
+  const draft = {
+    id: 's9',
+    kind: 'create_request',
+    proposal: { title: 'New footer icons', suggestedAssigneeName: 'Staci', assigneeReason: 'owns the brand work' },
+    quote: 'Can we get new footer icons?',
+    orgName: 'Giant & Co',
+  }
+
+  it('carries their words, their client, Approve and Reject, and nothing else', () => {
+    const message = clientDraftMessage(draft)
+    const actions = message.blocks.find(block => block.type === 'actions') as Extract<SlackBlock, { type: 'actions' }>
+    expect(actions.elements.map(button => button.action_id)).toEqual(['sugg:approve:s9', 'sugg:reject:s9'])
+    expect(actions.elements.every(button => button.url === undefined)).toBe(true)
+    const everything = JSON.stringify(message)
+    expect(everything).toContain('New footer icons')
+    expect(everything).toContain('Can we get new footer icons?')
+    expect(everything).toContain('Giant &amp; Co')
+    for (const studioOnly of ['/tasks', 'Tweak', 'Tonight', 'This week', 'Suggested:', 'Staci', 'owns the brand work']) {
+      expect(everything).not.toContain(studioOnly)
+    }
+  })
+
+  it("names the client when the decision was theirs, and nobody when it was the studio's", () => {
+    expect(clientDecidedLine({ outcome: 'approved', ownName: 'Tim', at: '09:41' })).toBe('Approved by Tim, 09:41')
+    expect(clientDecidedLine({ outcome: 'rejected', ownName: 'Tim', at: '09:41' })).toBe('Rejected by Tim, 09:41')
+    expect(clientDecidedLine({ outcome: 'approved', ownName: null, at: '09:41' })).toBe('Approved, 09:41')
+    expect(clientDecidedLine({ outcome: 'rejected', ownName: null, at: null })).toBe('Not filed')
+  })
+
+  it('says a failed approval in one plain sentence, and has no words for a snooze or an expiry', () => {
+    expect(clientDecidedLine({ outcome: 'failed', ownName: 'Tim', at: '09:41' })).toBe(CLIENT_CARD_FAILED_LINE)
+    expect(clientDecidedMessage({ outcome: 'snoozed', ownName: null, at: '09:41' })).toBeNull()
+    expect(clientDecidedMessage({ outcome: 'expired', ownName: null, at: '09:41' })).toBeNull()
+  })
+
+  it('links their request on an approval only, with no buttons left to press', () => {
+    const link = { url: 'https://portal.tahi.studio/requests/r1', label: 'Open #231' }
+    const sectionOf = (payload: SlackMessagePayload) => (payload.blocks[0] as Extract<SlackBlock, { type: 'section' }>).text.text
+    const approved = clientDecidedMessage({ outcome: 'approved', ownName: 'Tim', at: '09:41', link })!
+    expect(approved.text).toBe('Approved by Tim, 09:41')
+    expect(sectionOf(approved)).toBe('Approved by Tim, 09:41 · <https://portal.tahi.studio/requests/r1|Open #231>')
+    expect(approved.blocks.some(block => block.type === 'actions')).toBe(false)
+    const rejected = clientDecidedMessage({ outcome: 'rejected', ownName: 'Tim', at: '09:41', link })!
+    expect(sectionOf(rejected)).toBe('Rejected by Tim, 09:41')
   })
 })
 

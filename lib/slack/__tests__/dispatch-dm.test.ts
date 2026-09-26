@@ -493,6 +493,39 @@ describe('a studio card is filed as a copy the moment it lands, a client card ne
     expect(runs).toEqual([])
   })
 
+  it("renders a client's card as Approve and Reject only, with nothing studio side on it", async () => {
+    noteResult = {
+      ...noteResult,
+      rows: [{
+        id: 's9',
+        kind: 'create_request',
+        proposal: { title: 'New footer icons', suggestedAssigneeName: 'Staci', assigneeReason: 'owns the brand work' },
+        quote: 'Can we get new footer icons?',
+      }],
+    }
+    const sent: Array<{ text: string; blocks?: unknown[] }> = []
+    const { runs, database } = recordingDatabase()
+    await handleSlackDm(event(), deps({
+      database,
+      identity: identity({ level: 'client', email: 'tim@giantgroup.com', teamMemberId: null, contactId: 'c_tim', orgId: 'o_giant' }),
+      postMessage: async (message: { channel: string; text: string; blocks?: unknown[] }) => {
+        sent.push({ text: message.text, blocks: message.blocks })
+        return { channel: 'D_TIM', ts: '1758500000.000300' }
+      },
+    }))
+    const card = sent.find(message => Array.isArray(message.blocks))
+    expect(card).toBeDefined()
+    const actions = (card!.blocks as Array<{ type: string; elements?: Array<{ action_id: string; url?: string }> }>)
+      .find(block => block.type === 'actions')
+    expect(actions?.elements?.map(button => button.action_id)).toEqual(['sugg:approve:s9', 'sugg:reject:s9'])
+    const everything = JSON.stringify(card)
+    for (const studioOnly of ['/tasks', 'Tweak', 'Tonight', 'This week', 'Suggested:', 'Staci', 'owns the brand work']) {
+      expect(everything).not.toContain(studioOnly)
+    }
+    expect(everything).toContain('New footer icons')
+    expect(runs).toEqual([])
+  })
+
   it('records nothing when a post answers without a ts', async () => {
     const { runs, database } = recordingDatabase()
     await handleSlackDm(event(), deps({

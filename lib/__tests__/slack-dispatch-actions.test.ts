@@ -16,6 +16,11 @@
  *   A CLIENT NEVER SEES THE DUPLICATE ANSWER. Their approve carries force,
  *   and the two buttons that only exist on that answer are refused.
  *
+ *   A CLIENT'S PRESS STAYS IN THEIR OWN CARD (the client copy policy, CN.3
+ *   section 2). Approve and Reject only; nothing recorded as a copy; no
+ *   studio re-render and no studio decided line; the one write is the card
+ *   they pressed, through rewriteClientCard.
+ *
  *   THE DASHBOARD'S SCOPING. A studio press passes the same access rule the
  *   decide route runs through guardSuggestion. A member scoped away from a
  *   client cannot approve their own note about that client here either.
@@ -31,6 +36,7 @@ const decideCalls: Array<{ id: string; decision: unknown; ctx: unknown }> = []
 const mirrored: Array<{ id: string; status: string }> = []
 const rewritten: Array<{ id: string; duplicate: boolean }> = []
 const recorded: Array<{ suggestionId: string; channelId: string; ts: string }> = []
+const clientCards: Array<{ channelId: string | null; ts: string | null; id: string; status: string }> = []
 
 let decideResult: Record<string, unknown> | null = null
 let decoratedRow: Record<string, unknown> | null = null
@@ -78,6 +84,14 @@ vi.mock('@/lib/slack/mirror', () => ({
   },
   recordSuggestionMessage: async (_drizzle: unknown, copy: { suggestionId: string; channelId: string; ts: string }) => {
     recorded.push(copy)
+    return true
+  },
+  rewriteClientCard: async (
+    _drizzle: unknown,
+    card: { channelId: string | null; ts: string | null },
+    row: { id: string; status: string },
+  ) => {
+    clientCards.push({ channelId: card.channelId, ts: card.ts, id: row.id, status: row.status })
     return true
   },
 }))
@@ -132,7 +146,7 @@ const CLIENT = {
 
 /** The stored row the gate reads before anything is decided. */
 function stored(overrides: Record<string, unknown> = {}) {
-  return { id: 's1', status: 'pending', approverType: 'founders', approverId: null, orgId: 'o_ver', ...overrides }
+  return { id: 's1', kind: 'create_task', status: 'pending', approverType: 'founders', approverId: null, orgId: 'o_ver', ...overrides }
 }
 
 function row(overrides: Record<string, unknown> = {}) {
@@ -193,6 +207,7 @@ beforeEach(() => {
   mirrored.length = 0
   rewritten.length = 0
   recorded.length = 0
+  clientCards.length = 0
   decideResult = { suggestion: row(), changed: true, appliedTaskId: 'task_new', appliedRequestId: null }
   decoratedRow = { id: 's1', kind: 'create_task', proposal: { title: 'Cut the hero video' }, quote: 'Cut it to thirty seconds.', similar: [] }
   loadedRow = stored()
@@ -409,7 +424,7 @@ describe('the dashboard scoping, in Slack (guardSuggestion)', () => {
   })
 
   it('does not look a client up in the studio scoping at all', async () => {
-    loadedRow = stored({ approverType: 'contact', approverId: 'c_tim', orgId: 'o_ver' })
+    loadedRow = stored({ kind: 'create_request', approverType: 'contact', approverId: 'c_tim', orgId: 'o_ver' })
     await handleSuggestionAction({ ...click('approve'), identity: CLIENT as Identity })
     expect(scopeLookups).toHaveLength(0)
     expect(decideCalls).toHaveLength(1)
@@ -417,19 +432,90 @@ describe('the dashboard scoping, in Slack (guardSuggestion)', () => {
 })
 
 describe('a client confirms their own request', () => {
+  /** A press on Tim's own card, in Tim's own DM. */
+  function timClick(action: string, overrides: Record<string, unknown> = {}) {
+    const base = click(action, { slackUserId: 'U_TIM', channelId: 'D_TIM', messageTs: '1758500000.0042', ...overrides })
+    return { ...base, identity: CLIENT as Identity }
+  }
+
   beforeEach(() => {
-    loadedRow = stored({ approverType: 'contact', approverId: 'c_tim', orgId: 'o_ver' })
+    loadedRow = stored({ kind: 'create_request', approverType: 'contact', approverId: 'c_tim', orgId: 'o_ver' })
+    decideResult = {
+      suggestion: row({ decidedById: 'c_tim', approverType: 'contact', approverId: 'c_tim', orgId: 'o_ver' }),
+      changed: true,
+      appliedTaskId: null,
+      appliedRequestId: 'r_new',
+    }
   })
 
   it('sends their approve with force, recorded against their contact id', async () => {
-    const result = await handleSuggestionAction({ ...click('approve'), identity: CLIENT as Identity })
+    const result = await handleSuggestionAction(timClick('approve'))
     expect(decideCalls).toEqual([{
       id: 's1',
       decision: { action: 'approve', force: true },
       ctx: { actorId: 'c_tim', via: 'slack' },
     }])
     expect(result).toEqual({ handled: true, reply: null })
-    expect(mirrored).toEqual([{ id: 's1', status: 'applied' }])
+  })
+
+  it('rewrites only the card they pressed, through the client renderer, and files no copy of it', async () => {
+    await handleSuggestionAction(timClick('approve'))
+    expect(clientCards).toEqual([{ channelId: 'D_TIM', ts: '1758500000.0042', id: 's1', status: 'applied' }])
+    expect(recorded).toHaveLength(0)
+    expect(mirrored).toHaveLength(0)
+    expect(rewritten).toHaveLength(0)
+  })
+
+  it('lets a client reject their own draft, through the same client path', async () => {
+    decideResult = { suggestion: row({ status: 'rejected', decidedById: 'c_tim', approverType: 'contact' }), changed: true }
+    const result = await handleSuggestionAction(timClick('reject'))
+    expect(decideCalls.map(call => call.decision)).toEqual([{ action: 'reject' }])
+    expect(result.reply).toBeNull()
+    expect(clientCards.map(card => card.status)).toEqual(['rejected'])
+    expect(recorded).toHaveLength(0)
+    expect(mirrored).toHaveLength(0)
+  })
+
+  it('refuses Tonight and This week, which a client card never offers, and decides nothing', async () => {
+    const tonight = await handleSuggestionAction(timClick('snooze_tonight'))
+    const week = await handleSuggestionAction(timClick('snooze_week'))
+    expect(tonight.reply).toBe(SLACK_DENIED_LINE)
+    expect(week.reply).toBe(SLACK_DENIED_LINE)
+    expect(decideCalls).toHaveLength(0)
+    expect(recorded).toHaveLength(0)
+    expect(clientCards).toHaveLength(0)
+  })
+
+  it('refuses their approve once the studio has re-pointed the draft, but still takes a reject', async () => {
+    loadedRow = stored({ kind: 'request_note', approverType: 'contact', approverId: 'c_tim', orgId: 'o_ver' })
+    const approve = await handleSuggestionAction(timClick('approve'))
+    expect(approve.reply).toBe(SLACK_DENIED_LINE)
+    expect(decideCalls).toHaveLength(0)
+    decideResult = { suggestion: row({ status: 'rejected', decidedById: 'c_tim', approverType: 'contact' }), changed: true }
+    await handleSuggestionAction(timClick('reject'))
+    expect(decideCalls.map(call => (call.decision as { action: string }).action)).toEqual(['reject'])
+  })
+
+  it('answers a second press with the plain line and tidies only their own card', async () => {
+    decideResult = { suggestion: row({ status: 'rejected', decidedById: 'tm_liam', approverType: 'contact' }), changed: false }
+    const result = await handleSuggestionAction(timClick('approve'))
+    expect(result.reply).toBe(DISPATCH_LINES.alreadyDecided)
+    expect(clientCards).toEqual([{ channelId: 'D_TIM', ts: '1758500000.0042', id: 's1', status: 'rejected' }])
+    expect(mirrored).toHaveLength(0)
+  })
+
+  it('reads any refusal from the gate as the plain refusal, and re-renders nothing', async () => {
+    decideResult = {
+      suggestion: row({ status: 'pending', approverType: 'contact' }),
+      changed: false,
+      error: POSSIBLE_DUPLICATE,
+      similar: [{ kind: 'task', id: 't_int', number: null, title: 'Brand refresh internal', status: 'todo', score: 0.95 }],
+    }
+    const result = await handleSuggestionAction(timClick('approve'))
+    expect(result.reply).toBe(SLACK_DENIED_LINE)
+    expect(rewritten).toHaveLength(0)
+    expect(clientCards).toHaveLength(0)
+    expect(mirrored).toHaveLength(0)
   })
 
   it('refuses a client attach and approve anyway, which only the duplicate answer offers', async () => {
@@ -442,14 +528,6 @@ describe('a client confirms their own request', () => {
     expect(anyway.reply).toBe(SLACK_DENIED_LINE)
     expect(decideCalls).toHaveLength(0)
     expect(recorded).toHaveLength(0)
-  })
-
-  it('lets a client reject or snooze their own draft', async () => {
-    decideResult = { suggestion: row({ status: 'rejected' }), changed: true }
-    await handleSuggestionAction({ ...click('reject'), identity: CLIENT as Identity })
-    await handleSuggestionAction({ ...click('snooze_week'), identity: CLIENT as Identity })
-    expect(decideCalls.map(call => (call.decision as { action: string }).action)).toEqual(['reject', 'snooze'])
-    expect(decideCalls.every(call => (call.ctx as { actorId: string }).actorId === 'c_tim')).toBe(true)
   })
 
   it('refuses another contact at the same client', async () => {
