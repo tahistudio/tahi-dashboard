@@ -6,6 +6,10 @@
  * fire it, that the two knobs reach the run exactly as the query spelled
  * them, and that the run's summary comes back intact, because that summary
  * is what a dry run through the MCP tool reads.
+ *
+ * And the cron_runs line (contract sections 4 and 5): a run that stopped
+ * early is logged as skipped with its reason, and a dry run, whose summary
+ * carries every recipient's message, writes nothing at all.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
@@ -49,8 +53,19 @@ function post(headers: Record<string, string> = {}, query = '') {
   })
 }
 
+/** Every cron_runs row the route wrote, as inserted. */
+const cronRuns: Array<{ cron: string; status: string; summary: string | null; error: string | null }> = []
+
 beforeEach(() => {
-  vi.mocked(db).mockResolvedValue({ insert: () => ({ values: async () => ({}) }) } as never)
+  cronRuns.length = 0
+  vi.mocked(db).mockResolvedValue({
+    insert: () => ({
+      values: async (row: { cron: string; status: string; summary: string | null; error: string | null }) => {
+        cronRuns.push(row)
+        return {}
+      },
+    }),
+  } as never)
   vi.mocked(getRequestAuth).mockResolvedValue({ userId: null, orgId: null } as never)
   vi.mocked(runSuggestionDigest).mockResolvedValue(SUMMARY)
   vi.stubEnv('TAHI_CRON_SECRET', 'shhh')
@@ -109,5 +124,49 @@ describe('POST /api/admin/cron/suggestion-digest', () => {
   it('reads anything else as off', async () => {
     await POST(post({ 'x-cron-secret': 'shhh' }, '?force=0&dry_run=maybe'))
     expect(runSuggestionDigest).toHaveBeenLastCalledWith(expect.anything(), { force: false, dryRun: false })
+  })
+})
+
+describe('the cron_runs line', () => {
+  it('logs a run without Slack as skipped, with the reason in the summary', async () => {
+    await POST(post({ 'x-cron-secret': 'shhh' }))
+    expect(cronRuns).toHaveLength(1)
+    expect(cronRuns[0]).toMatchObject({ cron: 'suggestion-digest', status: 'skipped', error: null })
+    expect(JSON.parse(cronRuns[0].summary ?? '{}')).toMatchObject({ ran: false, reason: 'slack_not_configured' })
+  })
+
+  it('logs the other early stops as skipped too', async () => {
+    vi.mocked(runSuggestionDigest).mockResolvedValueOnce({ ...SUMMARY, reason: 'outside_window' })
+    vi.mocked(runSuggestionDigest).mockResolvedValueOnce({ ...SUMMARY, reason: 'disabled' })
+    await POST(post({ 'x-cron-secret': 'shhh' }))
+    await POST(post({ 'x-cron-secret': 'shhh' }))
+    expect(cronRuns.map(row => row.status)).toEqual(['skipped', 'skipped'])
+  })
+
+  it('logs a run that reached the recipients as success', async () => {
+    vi.mocked(runSuggestionDigest).mockResolvedValueOnce({
+      ...SUMMARY, ran: true, reason: undefined, recipients: 3, sent: 2, nothingToSay: 1,
+    })
+    await POST(post({ 'x-cron-secret': 'shhh' }))
+    expect(cronRuns).toHaveLength(1)
+    expect(cronRuns[0].status).toBe('success')
+  })
+
+  it('writes nothing for a dry run, whose summary names every client and message', async () => {
+    vi.mocked(runSuggestionDigest).mockResolvedValueOnce({
+      ...SUMMARY, reason: 'dry_run', preview: null, payloads: [],
+    })
+    const res = await POST(post({ 'x-cron-secret': 'shhh' }, '?dry_run=1'))
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({ reason: 'dry_run', payloads: [] })
+    expect(cronRuns).toHaveLength(0)
+  })
+
+  it('logs a run that threw as an error and answers 500', async () => {
+    vi.mocked(runSuggestionDigest).mockRejectedValueOnce(new Error('D1_ERROR: no such table'))
+    const res = await POST(post({ 'x-cron-secret': 'shhh' }))
+    expect(res.status).toBe(500)
+    expect(cronRuns).toHaveLength(1)
+    expect(cronRuns[0]).toMatchObject({ status: 'error', error: 'D1_ERROR: no such table' })
   })
 })

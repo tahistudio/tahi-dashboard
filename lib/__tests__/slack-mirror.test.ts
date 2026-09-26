@@ -94,7 +94,7 @@ interface FakeDbOptions {
   copies?: CopyRow[]
   members?: Array<{ id: string; name: string }>
   contacts?: Array<{ id: string; name: string }>
-  requests?: Array<{ id: string; requestNumber: number | null }>
+  requests?: Array<{ id: string; requestNumber: number | null; isInternal?: boolean }>
   requestReadFails?: boolean
   tableMissing?: boolean
 }
@@ -461,6 +461,44 @@ describe('the approved card links to what it made', () => {
     const { database } = fakeDb({ copies: COPY, contacts: [{ id: 'c_tim', name: 'Tim Lyons' }] })
     await mirrorSuggestionDecision(database, approved)
     expect(updated[0].text).toBe('Approved by Liam, 09:41')
+  })
+
+  it("links a client's own card to the request they confirmed", async () => {
+    const { database } = fakeDb({ copies: COPY, members: [], contacts: [{ id: 'c_tim', name: 'Tim Lyons' }], requests: [{ id: 'r_new', requestNumber: 231, isInternal: false }] })
+    await mirrorSuggestionDecision(database, {
+      ...approved, decidedById: 'c_tim', approverType: 'contact', kind: 'create_request', appliedTaskId: null, appliedRequestId: 'r_new',
+    })
+    expect(sectionText()).toBe('Approved by Tim, 09:41 · <https://portal.tahi.studio/requests/r_new|Open #231>')
+  })
+
+  it("gives a client's card no link when a founder attached their draft to a task", async () => {
+    const { database } = fakeDb({ copies: COPY, members: [], contacts: [{ id: 'c_tim', name: 'Tim Lyons' }] })
+    await mirrorSuggestionDecision(database, {
+      ...approved, decidedById: 'c_tim', approverType: 'contact', kind: 'note', appliedTaskId: 't_studio', appliedRequestId: null,
+    })
+    expect(sectionText()).toBe('Approved by Tim, 09:41')
+    expect(JSON.stringify(updated[0].blocks)).not.toContain('/tasks/')
+  })
+
+  it("gives a client's card no link to an internal request, or to one that cannot be read", async () => {
+    const internal = fakeDb({ requests: [{ id: 'r_int', requestNumber: 240, isInternal: true }] })
+    expect(await decidedLinkFor(internal.database, {
+      status: 'applied', approverType: 'contact', kind: 'note', appliedTaskId: null, appliedRequestId: 'r_int',
+    })).toBeNull()
+    const unreadable = fakeDb({ requestReadFails: true })
+    expect(await decidedLinkFor(unreadable.database, {
+      status: 'applied', approverType: 'contact', kind: 'create_request', appliedTaskId: null, appliedRequestId: 'r_new',
+    })).toBeNull()
+    const missing = fakeDb({ requests: [] })
+    expect(await decidedLinkFor(missing.database, {
+      status: 'applied', approverType: 'contact', kind: 'create_request', appliedTaskId: null, appliedRequestId: 'r_new',
+    })).toBeNull()
+  })
+
+  it('still links a studio card to an internal request, which the studio can open', async () => {
+    const { database } = fakeDb({ requests: [{ id: 'r_int', requestNumber: 240, isInternal: true }] })
+    expect(await decidedLinkFor(database, { status: 'applied', approverType: 'founders', kind: 'update_request', appliedRequestId: 'r_int' }))
+      .toEqual({ url: 'https://portal.tahi.studio/requests/r_int', label: 'Open #240' })
   })
 
   it('picks the link by kind', async () => {

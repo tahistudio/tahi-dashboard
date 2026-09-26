@@ -17,6 +17,13 @@
  * alone. CN.2 checked the level only, so a member pressing Approve on their
  * own note, and a client confirming their own request, both got the refusal.
  *
+ * Staying in step includes access scoping. The dashboard's decide route runs
+ * guardSuggestion before it decides anything, so a studio press here passes
+ * the same rule: a row at a client the presser cannot reach in the dashboard
+ * is refused in Slack too. A member's note picks its client from the whole
+ * roster, so without this a member scoped away from a client could approve
+ * work there by naming it in a DM.
+ *
  * Every answer is either a rewritten message or one plain sentence. A refusal
  * says nothing about what exists, because the person asking is not allowed to
  * know (contract section 1). That includes a row that is not there: a studio
@@ -29,6 +36,9 @@
  * digest's `digest:*` url button with it.
  */
 
+import { eq } from 'drizzle-orm'
+import { schema } from '@/db/d1'
+import { resolveAccessScoping } from '@/lib/access-scoping'
 import {
   registerBlockActionHandler,
   type SlackBlockActionContext,
@@ -99,6 +109,34 @@ export function canDecideSuggestion(
         && identity.orgId === row.orgId
     default:
       return false
+  }
+}
+
+type Drizzle = SlackBlockActionContext['drizzle']
+
+/**
+ * Whether a studio person can reach the row's client under the access
+ * scoping the dashboard enforces (guardSuggestion, which is
+ * requireAccessToOrg on the row's client).
+ *
+ * Scoping keys on the Clerk user id, so the team member's own is read first.
+ * A row with no client is studio housekeeping and is open, as it is in the
+ * dashboard. A founder holding super_admin resolves to unrestricted, so this
+ * changes nothing for them. Anything that cannot be read, including a member
+ * with no Clerk login and a lookup that throws, is false: deny by default.
+ */
+async function studioReachesRow(drizzle: Drizzle, teamMemberId: string, orgId: string | null): Promise<boolean> {
+  if (!orgId) return true
+  try {
+    const [member] = await drizzle
+      .select({ clerkUserId: schema.teamMembers.clerkUserId })
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.id, teamMemberId))
+      .limit(1)
+    const scope = await resolveAccessScoping(drizzle, member?.clerkUserId ?? null)
+    return scope === null || scope.includes(orgId)
+  } catch {
+    return false
   }
 }
 
@@ -198,6 +236,12 @@ export async function handleSuggestionAction(ctx: SlackBlockActionContext): Prom
   // already required one, so a missing id here is only ever a refusal.
   const actorId = client ? identity.contactId : identity.teamMemberId
   if (!actorId) return answer(client ? SLACK_DENIED_LINE : DISPATCH_LINES.unknownActor)
+
+  // The dashboard's scoping, before anything is recorded or decided. A client
+  // is already held to their own client by canDecideSuggestion; a studio
+  // person is held to the clients they can reach in the dashboard, and a row
+  // outside them reads as the same refusal as a row that is not theirs.
+  if (studio && !await studioReachesRow(ctx.drizzle, actorId, row.orgId)) return answer(SLACK_DENIED_LINE)
 
   // A client's attach or approve anyway comes back null from
   // clientDecisionFor and is refused here, before anything is recorded.

@@ -16,10 +16,16 @@
  *   A CLIENT NEVER SEES THE DUPLICATE ANSWER. Their approve carries force,
  *   and the two buttons that only exist on that answer are refused.
  *
+ *   THE DASHBOARD'S SCOPING. A studio press passes the same access rule the
+ *   decide route runs through guardSuggestion. A member scoped away from a
+ *   client cannot approve their own note about that client here either.
+ *
  *   THE SECOND CLICK. Two founders hold the same message. The second press
  *   must be a no-op that tidies the message, not a second task.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { Param, is } from 'drizzle-orm'
+import { schema } from '@/db/d1'
 
 const decideCalls: Array<{ id: string; decision: unknown; ctx: unknown }> = []
 const mirrored: Array<{ id: string; status: string }> = []
@@ -30,6 +36,22 @@ let decideResult: Record<string, unknown> | null = null
 let decoratedRow: Record<string, unknown> | null = null
 let loadedRow: Record<string, unknown> | null = null
 let mirrorThrows = false
+
+/** Team member id to Clerk user id, which is what scoping keys on. */
+const clerkIds = new Map<string, string | null>()
+/** Clerk user id to the clients that person can reach; null is everything.
+ *  Anybody missing reaches nothing, as the real resolver answers them. */
+const scopes = new Map<string | null, string[] | null>()
+const scopeLookups: Array<string | null> = []
+let scopeThrows = false
+
+vi.mock('@/lib/access-scoping', () => ({
+  resolveAccessScoping: async (_database: unknown, clerkUserId: string | null) => {
+    scopeLookups.push(clerkUserId)
+    if (scopeThrows) throw new Error('D1_ERROR: scoping lookup failed')
+    return scopes.has(clerkUserId) ? scopes.get(clerkUserId) ?? null : []
+  },
+}))
 
 vi.mock('@/lib/task-suggestions', async () => {
   const actual = await vi.importActual<typeof import('@/lib/task-suggestions')>('@/lib/task-suggestions')
@@ -126,9 +148,33 @@ function row(overrides: Record<string, unknown> = {}) {
   }
 }
 
+/** The value bound into a drizzle `eq(column, value)`. */
+function boundValue(condition: unknown): unknown {
+  const chunks = (condition as { queryChunks?: unknown[] }).queryChunks ?? []
+  const param = chunks.find(chunk => is(chunk, Param))
+  return param ? (param as Param).value : undefined
+}
+
+/** The one read the handler makes itself: a team member's Clerk user id. */
+function scopingDb() {
+  return {
+    select: () => ({
+      from: (table: unknown) => ({
+        where: (condition: unknown) => ({
+          limit: async () => {
+            if (table !== schema.teamMembers) return []
+            const id = boundValue(condition)
+            return typeof id === 'string' && clerkIds.has(id) ? [{ clerkUserId: clerkIds.get(id) ?? null }] : []
+          },
+        }),
+      }),
+    }),
+  }
+}
+
 function click(action: string, overrides: Record<string, unknown> = {}) {
   return {
-    drizzle: {} as never,
+    drizzle: scopingDb() as never,
     identity: FOUNDER as Identity,
     payload: {
       actionId: suggestionActionId(action as never, 's1'),
@@ -151,6 +197,16 @@ beforeEach(() => {
   decoratedRow = { id: 's1', kind: 'create_task', proposal: { title: 'Cut the hero video' }, quote: 'Cut it to thirty seconds.', similar: [] }
   loadedRow = stored()
   mirrorThrows = false
+  // Liam holds super_admin, which the resolver answers as everything. Nathan
+  // is scoped to Verandela alone.
+  clerkIds.clear()
+  clerkIds.set('tm_liam', 'clerk_liam')
+  clerkIds.set('tm_nathan', 'clerk_nathan')
+  scopes.clear()
+  scopes.set('clerk_liam', null)
+  scopes.set('clerk_nathan', ['o_ver'])
+  scopeLookups.length = 0
+  scopeThrows = false
 })
 
 describe('canDecideSuggestion', () => {
@@ -287,6 +343,76 @@ describe('the sender approves their own note (CN.3 section 6)', () => {
     loadedRow = stored({ approverType: 'member', approverId: 'tm_nathan' })
     await handleSuggestionAction(click('reject'))
     expect(decideCalls).toEqual([{ id: 's1', decision: { action: 'reject' }, ctx: { actorId: 'tm_liam', via: 'slack' } }])
+  })
+})
+
+describe('the dashboard scoping, in Slack (guardSuggestion)', () => {
+  it('refuses a member their own note at a client outside their scope, and records and decides nothing', async () => {
+    loadedRow = stored({ approverType: 'member', approverId: 'tm_nathan', orgId: 'o_ele' })
+    const result = await handleSuggestionAction({ ...click('approve'), identity: MEMBER as Identity })
+    expect(result).toEqual({ handled: true, reply: SLACK_DENIED_LINE })
+    expect(scopeLookups).toEqual(['clerk_nathan'])
+    expect(decideCalls).toHaveLength(0)
+    expect(recorded).toHaveLength(0)
+    expect(rewritten).toHaveLength(0)
+    expect(mirrored).toHaveLength(0)
+  })
+
+  it('still lets a member approve their own note at a client in their scope', async () => {
+    loadedRow = stored({ approverType: 'member', approverId: 'tm_nathan', orgId: 'o_ver' })
+    const result = await handleSuggestionAction({ ...click('approve'), identity: MEMBER as Identity })
+    expect(result).toEqual({ handled: true, reply: null })
+    expect(decideCalls).toEqual([{ id: 's1', decision: { action: 'approve' }, ctx: { actorId: 'tm_nathan', via: 'slack' } }])
+    expect(recorded).toHaveLength(1)
+  })
+
+  it('leaves a founder unaffected, at any client', async () => {
+    loadedRow = stored({ orgId: 'o_ele' })
+    await handleSuggestionAction(click('approve'))
+    loadedRow = stored({ approverType: 'member', approverId: 'tm_nathan', orgId: 'o_somewhere_else' })
+    await handleSuggestionAction(click('reject'))
+    expect(scopeLookups).toEqual(['clerk_liam', 'clerk_liam'])
+    expect(decideCalls.map(call => (call.ctx as { actorId: string }).actorId)).toEqual(['tm_liam', 'tm_liam'])
+  })
+
+  it('holds a cached founder whose super_admin has ended to their scope, as the dashboard does', async () => {
+    scopes.set('clerk_liam', ['o_ver'])
+    loadedRow = stored({ orgId: 'o_ele' })
+    const result = await handleSuggestionAction(click('approve'))
+    expect(result.reply).toBe(SLACK_DENIED_LINE)
+    expect(decideCalls).toHaveLength(0)
+  })
+
+  it('reads a note with no client as studio housekeeping, open without a lookup', async () => {
+    loadedRow = stored({ approverType: 'member', approverId: 'tm_nathan', orgId: null })
+    await handleSuggestionAction({ ...click('approve'), identity: MEMBER as Identity })
+    expect(scopeLookups).toHaveLength(0)
+    expect(decideCalls).toHaveLength(1)
+  })
+
+  it('refuses when the scoping lookup throws', async () => {
+    scopeThrows = true
+    loadedRow = stored({ approverType: 'member', approverId: 'tm_nathan', orgId: 'o_ver' })
+    const result = await handleSuggestionAction({ ...click('approve'), identity: MEMBER as Identity })
+    expect(result.reply).toBe(SLACK_DENIED_LINE)
+    expect(decideCalls).toHaveLength(0)
+    expect(recorded).toHaveLength(0)
+  })
+
+  it('refuses a member with no Clerk login, whom the dashboard would refuse too', async () => {
+    clerkIds.delete('tm_nathan')
+    loadedRow = stored({ approverType: 'member', approverId: 'tm_nathan', orgId: 'o_ver' })
+    const result = await handleSuggestionAction({ ...click('approve'), identity: MEMBER as Identity })
+    expect(result.reply).toBe(SLACK_DENIED_LINE)
+    expect(scopeLookups).toEqual([null])
+    expect(decideCalls).toHaveLength(0)
+  })
+
+  it('does not look a client up in the studio scoping at all', async () => {
+    loadedRow = stored({ approverType: 'contact', approverId: 'c_tim', orgId: 'o_ver' })
+    await handleSuggestionAction({ ...click('approve'), identity: CLIENT as Identity })
+    expect(scopeLookups).toHaveLength(0)
+    expect(decideCalls).toHaveLength(1)
   })
 })
 

@@ -399,7 +399,8 @@ export interface DecidedSuggestionRow {
   appliedTaskId?: string | null
   appliedRequestId?: string | null
   /** 'founders' | 'member' | 'contact'. Optional for the same reason; read
-   *  only to keep the apply error off a client's own card. */
+   *  to keep the apply error, and any studio-only link, off a client's own
+   *  card. */
   approverType?: string
 }
 
@@ -409,19 +410,38 @@ const REQUEST_KIND_NAMES: ReadonlySet<string> = new Set([
   'create_request', 'update_request', 'request_note', 'hand_off_request',
 ])
 
-/** "Open #231", or "Open request" when the number cannot be read. */
-async function requestLinkLabel(drizzle: Drizzle, requestId: string): Promise<string> {
+interface LinkedRequest {
+  number: number | null
+  isInternal: boolean
+}
+
+/** The two fields a link to a request needs, or null when the row cannot be
+ *  read. */
+async function readLinkedRequest(drizzle: Drizzle, requestId: string): Promise<LinkedRequest | null> {
   try {
     const [row] = await drizzle
-      .select({ requestNumber: schema.requests.requestNumber })
+      .select({ requestNumber: schema.requests.requestNumber, isInternal: schema.requests.isInternal })
       .from(schema.requests)
       .where(eq(schema.requests.id, requestId))
       .limit(1)
-    const number = row?.requestNumber
-    return typeof number === 'number' && Number.isFinite(number) ? `Open #${number}` : 'Open request'
+    if (!row) return null
+    const number = row.requestNumber
+    return {
+      number: typeof number === 'number' && Number.isFinite(number) ? number : null,
+      isInternal: !!row.isInternal,
+    }
   } catch {
-    return 'Open request'
+    return null
   }
+}
+
+/** "Open #231", or "Open request" when there is no number to show. */
+function requestLinkLabel(request: LinkedRequest | null): string {
+  return request?.number != null ? `Open #${request.number}` : 'Open request'
+}
+
+function requestLink(requestId: string, request: LinkedRequest | null): { url: string; label: string } {
+  return { url: publicUrl(`/requests/${encodeURIComponent(requestId)}`), label: requestLinkLabel(request) }
 }
 
 /**
@@ -433,23 +453,37 @@ async function requestLinkLabel(drizzle: Drizzle, requestId: string): Promise<st
  * applySuggestion stamps exactly one of the two ids, by kind; the kind is
  * read first anyway so a row carrying both would still link the thing its
  * kind is about.
+ *
+ * A client's own card links to their request and nothing else (contract
+ * section 2). A founder can attach a client's draft to a task, or to an
+ * internal request, from the dashboard, and neither is anything the client's
+ * portal shows. So a contact row links only a request that reads back as
+ * not internal, and a request that cannot be read gets no link.
  */
 export async function decidedLinkFor(
   drizzle: Drizzle,
-  row: Pick<DecidedSuggestionRow, 'status' | 'kind' | 'appliedTaskId' | 'appliedRequestId'>,
+  row: Pick<DecidedSuggestionRow, 'status' | 'kind' | 'appliedTaskId' | 'appliedRequestId' | 'approverType'>,
 ): Promise<{ url: string; label: string } | null> {
   if (outcomeForStatus(row.status) !== 'approved') return null
   const requestId = row.appliedRequestId ?? null
   const taskId = row.appliedTaskId ?? null
+
+  if (row.approverType === 'contact') {
+    if (!requestId) return null
+    const request = await readLinkedRequest(drizzle, requestId)
+    if (!request || request.isInternal) return null
+    return requestLink(requestId, request)
+  }
+
   const preferRequest = row.kind ? REQUEST_KIND_NAMES.has(row.kind) : !!requestId
   if (preferRequest && requestId) {
-    return { url: publicUrl(`/requests/${encodeURIComponent(requestId)}`), label: await requestLinkLabel(drizzle, requestId) }
+    return requestLink(requestId, await readLinkedRequest(drizzle, requestId))
   }
   if (taskId) {
     return { url: publicUrl(`/tasks/${encodeURIComponent(taskId)}`), label: 'Open task' }
   }
   if (requestId) {
-    return { url: publicUrl(`/requests/${encodeURIComponent(requestId)}`), label: await requestLinkLabel(drizzle, requestId) }
+    return requestLink(requestId, await readLinkedRequest(drizzle, requestId))
   }
   return null
 }
