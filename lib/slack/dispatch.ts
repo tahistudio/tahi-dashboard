@@ -13,23 +13,28 @@
  *   answers itself is an infinite loop one reply at a time. Edits, deletions
  *   and joins, because none of them is a person saying something. Channel
  *   messages, because this phase is DMs only (section 7 of the CN.2 contract).
+ *   The one channel delivery that is answered is a mention, and only with a
+ *   line pointing the person to a DM: nothing is ever drafted from a channel.
  *
  *   THE RETRY GUARD. Slack re-delivers anything it does not see a 200 for
  *   within three seconds, up to three times. rememberSlackEvent claims the
  *   delivery id in slack_events_seen, and that id is the table's PRIMARY KEY,
  *   so two concurrent retries are settled by the database rather than by a
- *   read-then-write that both sides win.
+ *   read-then-write that both sides win. The rows are only worth anything for
+ *   minutes, and lib/slack/events-seen.ts sweeps them once a day.
  *
  *   WHO IS TALKING. Every delivery resolves to a SlackIdentity before a
  *   handler sees it, so a handler can never act for somebody it has not
  *   identified, and an unmapped stranger is refused here rather than deeper in.
  *
- *   THE TWO HOOKS. handleDm delegates to lib/slack/dispatch-dm.ts (S3: a
- *   note, a voice note, a client's request) and handleAction delegates to
- *   whatever has claimed the action id on lib/slack/action-registry.ts (S2:
- *   Approve, Tweak, Tonight, This week, Reject). Both check the identity
- *   FIRST: the 'unknown' branch is a security answer, not a placeholder, and
- *   nothing is delegated to before it has run.
+ *   THE HOOKS. handleDm delegates to lib/slack/dispatch-dm.ts (S3: a note, a
+ *   voice note, a client's request), handleAction delegates to whatever has
+ *   claimed the action id on lib/slack/action-registry.ts (S2: Approve,
+ *   Tweak, Tonight, This week, Reject), and handleViewSubmission delegates a
+ *   modal submit to whatever has claimed its callback_id on the same
+ *   registry. All three check the identity FIRST: the 'unknown' branch is a
+ *   security answer, not a placeholder, and nothing is delegated to before it
+ *   has run.
  *
  *   THE ASSISTANT PANE. The app runs in Slack's Agents and Apps mode, so a
  *   new 1:1 opens as an assistant thread rather than an empty DM. That
@@ -49,7 +54,7 @@ import {
 } from './api'
 import { DENIAL_LINE, resolveSlackIdentity, type SlackIdentity, type SlackLevel } from './identity'
 import { dispatchSlackDm, type SlackDmEvent } from './dm-hook'
-import { resolveBlockActionHandler } from './action-registry'
+import { resolveBlockActionHandler, resolveViewSubmissionHandler } from './action-registry'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -62,6 +67,50 @@ type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  */
 export const NOT_WIRED_LINE =
   'Got your message. I can hear you, but this part of me is not switched on yet, so nothing has been created.'
+
+/**
+ * What the bot says, in the thread, when somebody mentions it in a channel.
+ *
+ * Channels come later (contract section 7), so a mention is never a note and
+ * never a suggestion. The line says so plainly, for the same reason as
+ * NOT_WIRED_LINE: whoever asked must not walk away believing something was
+ * filed. Then it points at the one place the bot does work today.
+ */
+export const CHANNEL_MENTION_LINE =
+  'I only work in a direct message for now, so nothing was created from this. Send me a direct message and I will pick it up there.'
+
+/**
+ * The body the interactive route answers every view_submission with.
+ *
+ * A modal submit is the one interaction whose HTTP answer Slack actually
+ * reads: it has three seconds, and the body decides what happens to the
+ * modal. Anything slower, or any body Slack does not recognise, shows the
+ * person an error inside the modal. Slack accepts two answers that close it:
+ * an EMPTY 200, which closes only the submitted view and drops the person
+ * back onto whatever view is beneath it, and `response_action: 'clear'`,
+ * which closes the whole stack.
+ *
+ * Clear, because every Slack handler in this app runs after the ack under
+ * waitUntil (the same rule as every other delivery, see lib/slack/defer.ts).
+ * No view in the stack can ever show what the submit went on to do, so
+ * leaving a parent view open would leave the person looking at a form whose
+ * outcome is reported somewhere else.
+ *
+ * Fixed, because at ack time the route knows none of the things a smarter
+ * answer would need: who pressed Submit and whether their level allows it
+ * are a database read and possibly a users.info call away, and spending
+ * those inside the three seconds is exactly how a submit turns into a Slack
+ * error. So a stranger's submit, a submit nothing has registered for, and a
+ * submit a handler will act on all get the same answer.
+ *
+ * A future modal that must keep itself open with field errors
+ * (`response_action: 'errors'`) needs that answer inside the three seconds.
+ * It would add a synchronous, pure validate step to its registry entry in
+ * lib/slack/action-registry.ts, and this constant would become a function of
+ * the payload that asks the registry. The work itself still plugs in through
+ * registerViewSubmissionHandler, which is where it goes today.
+ */
+export const VIEW_SUBMISSION_ACK = { response_action: 'clear' } as const
 
 /** The one line a fresh assistant thread opens with, per level. */
 const WELCOME_LINES: Record<SlackLevel, string> = {
@@ -154,6 +203,19 @@ function isDmChannel(channelId: string | null): boolean {
 }
 
 /**
+ * Was this said in the person's 1:1 with the app?
+ *
+ * Only asked of a mention. Slack documents that app_mention is never sent for
+ * a DM (message.im carries those), so for a mention this is false in
+ * practice. It is checked rather than assumed so that if Slack ever does send
+ * one, it is answered as the DM it is instead of being told to go to the DM
+ * it is already in.
+ */
+function isDirectMessage(event: SlackEventLike): boolean {
+  return event.channel_type === 'im' || isDmChannel(eventChannelId(event))
+}
+
+/**
  * Is this an event a human sent to the bot, in a place this phase answers?
  *
  * Answering false is not an error: the route still returns 200 (so Slack stops
@@ -180,6 +242,9 @@ export function isHandledEvent(event: SlackEventLike | null | undefined): boolea
   // contract asks for. Answering false here also spends no dedupe row on it.
   if (event.type === 'assistant_thread_context_changed') return false
 
+  // A mention. Handled, so it claims a dedupe row and is answered exactly
+  // once, but in a channel the answer is only CHANNEL_MENTION_LINE in the
+  // thread (handleSlackEvent decides which): nothing is drafted from it.
   if (event.type === 'app_mention') return true
 
   if (event.type === 'message') {
@@ -441,14 +506,15 @@ export async function handleDm(
 }
 
 /**
- * Somebody pressed a button or submitted a modal.
+ * Somebody pressed a button.
  *
  * Only the channel the interaction happened in is answered. The identity's
- * cached DM is deliberately NOT a fallback here: a modal submit has no
- * channel, and replying to it in a DM the person is not looking at would be a
- * message arriving out of nowhere. That also means a view_submission reaches
- * no handler this phase, which is correct: the only modal the app opens is
- * Tweak, and Tweak is a link to the dashboard.
+ * cached DM is deliberately NOT a fallback here: an interaction with no
+ * channel is answered nowhere rather than in a DM the person is not looking
+ * at, where it would be a message arriving out of nowhere. A modal submit
+ * never reaches this function (handleSlackInteraction sends it to
+ * handleViewSubmission), and if one is passed in anyway it has no channel and
+ * stops at the first line.
  */
 export async function handleAction(
   identity: SlackIdentity,
@@ -488,6 +554,70 @@ export async function handleAction(
   if (result.reply) {
     await postMessage({ channel: action.channelId, text: result.reply })
   }
+}
+
+/**
+ * Somebody pressed Submit on a modal.
+ *
+ * By the time this runs the route has already answered VIEW_SUBMISSION_ACK
+ * and the modal is closed, so nothing here can answer in it. What is left is
+ * the work, and the registry owns that: whatever claimed the callback_id's
+ * prefix on lib/slack/action-registry.ts gets the flattened submit.
+ *
+ * Two cases post nothing at all. A stranger, because a submit has no channel
+ * to refuse them in and a DM out of nowhere is worse than silence (the
+ * handler is never reached, which is the part that matters). And a callback_id
+ * nothing has claimed, which today is every one of them: the app opens no
+ * modal yet (Tweak is a link to the dashboard), so there is nobody who could
+ * have filled one in expecting a result.
+ */
+export async function handleViewSubmission(
+  identity: SlackIdentity,
+  action: SlackActionInput,
+  database: Drizzle,
+): Promise<void> {
+  if (action.type !== 'view_submission') return
+  if (identity.level === 'unknown') return
+
+  const handler = resolveViewSubmissionHandler(action.actionId)
+  if (!handler) return
+
+  await handler({
+    drizzle: database,
+    identity,
+    payload: {
+      callbackId: action.actionId,
+      privateMetadata: action.value,
+      values: action.viewState ?? null,
+      slackUserId: action.userId,
+      slackTeamId: action.teamId,
+    },
+  })
+}
+
+/**
+ * Somebody mentioned the bot in a channel.
+ *
+ * One line, in the thread, and nothing else: no note, no suggestion, no
+ * model call, because channels come later (contract section 7). The thread
+ * is the mention's own (a top-level mention starts one under itself, a
+ * mention inside a thread answers in that thread), so the reply lands where
+ * the person is looking and not in the channel at large.
+ *
+ * A stranger gets the refusal line instead, the one every unknown user gets
+ * (contract section 1): pointing somebody the bot will refuse at a DM would
+ * only move the refusal.
+ */
+export async function handleChannelMention(
+  identity: SlackIdentity,
+  event: SlackEventLike,
+): Promise<void> {
+  const channel = eventChannelId(event)
+  const threadTs = eventThreadTs(event)
+  if (!channel || !threadTs) return
+
+  const text = identity.level === 'unknown' ? DENIAL_LINE : CHANNEL_MENTION_LINE
+  await postMessage({ channel, text, threadTs })
 }
 
 /**
@@ -552,8 +682,15 @@ export async function handleSlackEvent(
     return
   }
 
-  // An app_mention is still somebody addressing the bot, so it goes through the
-  // same hook; S3 decides whether a mention in a channel is answered at all.
+  // A mention in a channel is answered with the pointer line and never
+  // reaches the DM hook, so it can never become a note. A mention inside the
+  // 1:1 (Slack documents that it sends none) would fall through and be
+  // treated as the DM it is.
+  if (event.type === 'app_mention' && !isDirectMessage(event)) {
+    await handleChannelMention(identity, event)
+    return
+  }
+
   await handleDm(identity, event, database)
 }
 
@@ -572,6 +709,11 @@ export async function handleSlackInteraction(
     dmChannelId: isDmChannel(action.channelId) ? action.channelId : null,
     fetchProfile: profileReader(action.userId),
   })
+
+  if (action.type === 'view_submission') {
+    await handleViewSubmission(identity, action, database)
+    return
+  }
 
   await handleAction(identity, action, database)
 }

@@ -19,6 +19,10 @@
  *
  *   THE DEDUPE RUNS AT THE ROUTE, not inside a handler, because it is the
  *   retry that it defends against and a retry never reaches a handler.
+ *
+ *   THE MODAL ACK. A view_submission is answered with response_action clear,
+ *   decided from the payload type alone, so a submit closes cleanly whatever
+ *   the work behind it does.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -37,7 +41,9 @@ vi.mock('@/lib/slack/verify', () => ({
   verifySlackRequest: async () => verdict,
 }))
 
-vi.mock('@/lib/slack/dispatch', () => ({
+vi.mock('@/lib/slack/dispatch', async (importOriginal) => ({
+  // The real ack body, so the test below pins what Slack is actually sent.
+  VIEW_SUBMISSION_ACK: (await importOriginal<typeof import('@/lib/slack/dispatch')>()).VIEW_SUBMISSION_ACK,
   isHandledEvent: () => handled,
   rememberSlackEvent: async (_db: unknown, id: string | null) => { remembered.push(id); return firstSeen },
   handleSlackEvent: async (_db: unknown, envelope: Record<string, unknown>) => { events.push(envelope) },
@@ -225,5 +231,51 @@ describe('POST /api/webhooks/slack/interactive', () => {
 
   it('answers 400 to a body with no payload field', async () => {
     expect((await interactiveRoute(post('', 'application/x-www-form-urlencoded'))).status).toBe(400)
+  })
+
+  it('answers a click with an empty body, because a click ack carries nothing', async () => {
+    const res = await interactiveRoute(post(form(), 'application/x-www-form-urlencoded'))
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('')
+    await settle()
+  })
+
+  // A modal submit is the one payload whose answer Slack reads. A body it does
+  // not accept is an error shown inside the modal, so the answer is pinned to
+  // Slack's own shape here, not to the constant's name.
+  describe('a modal submit', () => {
+    const submit = {
+      type: 'view_submission',
+      team: { id: 'T_TAHI' },
+      user: { id: 'U_LIAM' },
+      trigger_id: 'trig_view',
+      view: { id: 'V1', callback_id: 'tweak:s1', private_metadata: 's1', state: { values: {} } },
+    }
+    const submitForm = () => new URLSearchParams({ payload: JSON.stringify(submit) }).toString()
+
+    it('closes the modal stack with response_action clear, as JSON', async () => {
+      const res = await interactiveRoute(post(submitForm(), 'application/x-www-form-urlencoded'))
+      expect(res.status).toBe(200)
+      expect(res.headers.get('content-type')).toContain('application/json')
+      expect(await res.json()).toEqual({ response_action: 'clear' })
+      await settle()
+    })
+
+    it('still does the work after the response, behind the same dedupe', async () => {
+      await interactiveRoute(post(submitForm(), 'application/x-www-form-urlencoded'))
+      expect(interactions).toHaveLength(0)
+      await settle()
+      expect(remembered).toEqual(['trig_view'])
+      expect(interactions).toHaveLength(1)
+      expect(interactions[0]).toMatchObject({ type: 'view_submission' })
+    })
+
+    it('closes the modal even for a replayed submit that does no work', async () => {
+      firstSeen = false
+      const res = await interactiveRoute(post(submitForm(), 'application/x-www-form-urlencoded'))
+      expect(await res.json()).toEqual({ response_action: 'clear' })
+      await settle()
+      expect(interactions).toHaveLength(0)
+    })
   })
 })
