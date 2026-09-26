@@ -130,10 +130,21 @@ export async function resolveContractSignedPdfBytes(
     ? publicUrl(`/p/contract/${doc.publicShareToken}`)
     : publicUrl(`/contracts/${doc.id}`)
 
+  // Never today's date. A missing signedAt falls back to the latest
+  // signature's own timestamp (the moment the contract became fully signed),
+  // and to no date at all when even that is missing. The routes that call
+  // this refuse a contract marked signed by hand before getting here
+  // (lib/contract-signing-state.ts).
+  const latestSignatureAt = signatures
+    .map((s) => s.signedAt)
+    .filter((t): t is string => !!t)
+    .sort()
+    .at(-1) ?? null
+
   const base64 = buildSignedPdfBase64({
     contractName: doc.name,
     contractType: doc.type,
-    signedAt: doc.signedAt ?? new Date().toISOString(),
+    signedAt: doc.signedAt ?? latestSignatureAt,
     finalHash: doc.finalHash,
     publicViewerUrl,
     bodyHtml: doc.bodyHtml,

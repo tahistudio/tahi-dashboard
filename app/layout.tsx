@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { ClerkProvider } from '@clerk/nextjs'
+import { themeBootScript } from '@/lib/theme-boot-script'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -30,6 +31,14 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
 }
+
+// The public document viewers (/p/proposal, /p/schedule, /p/contract) carry
+// their own light/dark slide theming and must never pick up the dashboard's
+// stored dark preference. The theme script below skips them before first
+// paint (lib/theme-boot-script.ts); app/p/layout.tsx still strips the class
+// on mount for the one case this cannot see, a client-side navigation into
+// /p/ from the dashboard.
+const PUBLIC_DOCUMENT_PREFIX = `${process.env.NEXT_PUBLIC_BASEPATH ?? ''}/p/`
 
 export default function RootLayout({
   children,
@@ -77,7 +86,7 @@ export default function RootLayout({
           <link rel="apple-touch-icon" href="/favicon.png" />
           <script
             dangerouslySetInnerHTML={{
-              __html: `try{if(localStorage.getItem('tahi-theme')==='dark'){document.documentElement.classList.add('dark')}if(localStorage.getItem('tahi-reduce-motion')==='true'){document.documentElement.classList.add('reduce-motion')}}catch(e){}`,
+              __html: themeBootScript(PUBLIC_DOCUMENT_PREFIX),
             }}
           />
           {/* Sidebar collapsed-state persistence. Runs before body

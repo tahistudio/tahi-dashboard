@@ -28,6 +28,7 @@ import {
   Hourglass, FileSignature, Download,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { isMarkedSigned } from '@/lib/contract-signing-state'
 import { useToast } from '@/components/tahi/toast'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { PromptDialog } from '@/components/tahi/prompt-dialog'
@@ -433,10 +434,18 @@ export function ContractDetail({ id }: { id: string }) {
   // ── Derived state ────────────────────────────────────────────────────
 
   const isLocked = contract.status === 'signed' || contract.status === 'cancelled' || contract.status === 'expired'
+  // Status set to 'signed' by hand (a PATCH or the MCP update_contract tool)
+  // rather than by the last signature: no signatures, signing date or signed
+  // PDF exist for it, so nothing below may imply they do.
+  const markedSigned = isMarkedSigned(contract)
   const sortedSigners = [...signers].sort((a, b) => a.position - b.position)
-  const pendingCount = sortedSigners.filter(s => s.status === 'pending').length
+  // A signer still 'pending' on a contract marked signed is not waiting on
+  // anything; counting them as pending would put "2 pending" under "Signed".
+  const pendingCount = markedSigned ? 0 : sortedSigners.filter(s => s.status === 'pending').length
   const signedCount = sortedSigners.filter(s => s.status === 'signed').length
-  const palette = STATUS_PALETTE[contract.status]
+  const palette = markedSigned
+    ? { ...STATUS_PALETTE.signed, label: 'Marked signed' }
+    : STATUS_PALETTE[contract.status]
   const publicUrl = contract.publicShareToken
     ? `${typeof window !== 'undefined' ? window.location.origin : ''}/p/contract/${contract.publicShareToken}`
     : null
@@ -588,6 +597,7 @@ export function ContractDetail({ id }: { id: string }) {
                 signers={sortedSigners}
                 signerLinks={signerLinks}
                 isLocked={isLocked}
+                markedSigned={markedSigned}
                 onCopy={copyLink}
                 onResend={resendSigner}
                 onRemove={deleteSigner}
@@ -599,6 +609,7 @@ export function ContractDetail({ id }: { id: string }) {
             <BuilderEditorShell eyebrow="Document" kicker="Activity">
               <ActivityPane
                 contract={contract}
+                markedSigned={markedSigned}
                 signers={sortedSigners}
                 signatures={signatures}
               />
@@ -621,7 +632,11 @@ export function ContractDetail({ id }: { id: string }) {
               onClick={() => setActiveView('signers')}
               icon={<Users size={12} />}
               label="Signers"
-              hint={signers.length === 0 ? 'No signers yet' : `${signedCount} of ${signers.length} signed`}
+              hint={signers.length === 0
+                ? 'No signers yet'
+                : markedSigned
+                  ? (signedCount === 0 ? 'Signed elsewhere' : `${signedCount} here, the rest elsewhere`)
+                  : `${signedCount} of ${signers.length} signed`}
               badge={pendingCount > 0 ? `${pendingCount} pending` : undefined}
             />
             <BuilderNavItem
@@ -662,7 +677,9 @@ export function ContractDetail({ id }: { id: string }) {
               </p>
             ) : isLocked ? (
               <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: 0, lineHeight: 1.5 }}>
-                {contract.status === 'signed' ? 'Fully signed.' : contract.status === 'cancelled' ? 'Cancelled.' : 'Expired.'} No further signing.
+                {markedSigned
+                  ? 'Marked signed by hand, outside the signing flow.'
+                  : contract.status === 'signed' ? 'Fully signed.' : contract.status === 'cancelled' ? 'Cancelled.' : 'Expired.'} No further signing.
               </p>
             ) : (
               <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: 0, lineHeight: 1.5 }}>
@@ -671,7 +688,17 @@ export function ContractDetail({ id }: { id: string }) {
             )}
           </RailSection>
 
-          {contract.status === 'signed' && (
+          {markedSigned && (
+            <RailSection title="Signed PDF">
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: 0, lineHeight: 1.5 }}>
+                {signatures.length === 0
+                  ? 'None on file. This contract was marked signed by hand, so there are no signatures here to stamp into one.'
+                  : 'None on file. This contract was marked signed by hand before every signer signed here, so no signed PDF was made. The signatures that were collected are under Activity.'}
+              </p>
+            </RailSection>
+          )}
+
+          {contract.status === 'signed' && !markedSigned && (
             <RailSection title="Signed PDF">
               <div style={{ display: 'grid', gap: '0.5rem' }}>
                 <button
@@ -873,11 +900,12 @@ export function ContractDetail({ id }: { id: string }) {
 // ─── Signers pane ────────────────────────────────────────────────────────
 
 function SignersPane({
-  signers, signerLinks, isLocked, onCopy, onResend, onRemove,
+  signers, signerLinks, isLocked, markedSigned, onCopy, onResend, onRemove,
 }: {
   signers: Signer[]
   signerLinks: Record<string, string>
   isLocked: boolean
+  markedSigned: boolean
   onCopy: (url: string) => void
   onResend: (signerId: string) => void
   onRemove: (signerId: string) => void
@@ -917,6 +945,7 @@ function SignersPane({
           signer={s}
           link={signerLinks[s.id] ?? null}
           isLocked={isLocked}
+          signedElsewhere={markedSigned && s.status === 'pending'}
           onCopy={onCopy}
           onResend={onResend}
           onRemove={onRemove}
@@ -927,11 +956,14 @@ function SignersPane({
 }
 
 function SignerCard({
-  signer, link, isLocked, onCopy, onResend, onRemove,
+  signer, link, isLocked, signedElsewhere, onCopy, onResend, onRemove,
 }: {
   signer: Signer
   link: string | null
   isLocked: boolean
+  /** Contract marked signed by hand while this signer was still pending.
+   *  A skipped signer was removed from the contract, so never this. */
+  signedElsewhere: boolean
   onCopy: (url: string) => void
   onResend: (signerId: string) => void
   onRemove: (signerId: string) => void
@@ -939,6 +971,7 @@ function SignerCard({
   // Badge tone tokens for the same reason as the header's STATUS_PALETTE: the
   // old light-only hex stayed pale on a dark card.
   const palette =
+    signedElsewhere ? { fg: 'var(--color-text-muted)', bg: 'var(--color-bg-secondary)', bd: 'var(--color-border-subtle)', label: 'Signed elsewhere', icon: <Check size={12} /> } :
     signer.status === 'signed' ? { fg: 'var(--badge-positive-text)', bg: 'var(--badge-positive-bg)', bd: 'var(--badge-positive-border)', label: 'Signed', icon: <Check size={12} /> } :
     signer.status === 'skipped' ? { fg: 'var(--color-text-subtle)', bg: 'var(--color-bg-secondary)', bd: 'var(--color-border-subtle)', label: 'Skipped', icon: <X size={12} /> } :
     { fg: 'var(--badge-warning-text)', bg: 'var(--badge-warning-bg)', bd: 'var(--badge-warning-border)', label: 'Pending', icon: <Hourglass size={12} /> }
@@ -1042,19 +1075,22 @@ function SignerCard({
 // ─── Activity / audit pane ───────────────────────────────────────────────
 
 function ActivityPane({
-  contract, signers, signatures,
+  contract, markedSigned, signers, signatures,
 }: {
   contract: ContractDoc
+  markedSigned: boolean
   signers: Signer[]
   signatures: Signature[]
 }) {
   // Build a chronological event stream: created -> sent -> per-signature -> finalised.
-  // Each event carries an icon, label, sub-line, and timestamp.
+  // Each event carries an icon, label, sub-line, and timestamp. A null
+  // timestamp is an event with no date on record; it sorts last and says so
+  // rather than borrowing one.
   type Event = {
     icon: React.ReactNode
     title: React.ReactNode
     detail: string | null
-    timestamp: string
+    timestamp: string | null
     accent?: 'brand' | 'success' | 'info' | 'muted'
   }
   const events: Event[] = []
@@ -1088,7 +1124,17 @@ function ActivityPane({
     })
   }
 
-  if (contract.signedAt) {
+  if (markedSigned) {
+    events.push({
+      icon: <Check size={13} />,
+      title: 'Marked signed',
+      detail: signatures.length === 0
+        ? 'Set by hand, outside the signing flow. No signatures or signing date on record here.'
+        : 'Set by hand, outside the signing flow, after the signatures above. No completion date on record here.',
+      timestamp: contract.signedAt,
+      accent: 'brand',
+    })
+  } else if (contract.signedAt) {
     events.push({
       icon: <Check size={13} />,
       title: 'Fully signed',
@@ -1098,8 +1144,9 @@ function ActivityPane({
     })
   }
 
-  // Sort ascending by time.
-  events.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+  // Sort ascending by time, undated events last.
+  const at = (e: Event) => (e.timestamp ? new Date(e.timestamp).getTime() : Number.POSITIVE_INFINITY)
+  events.sort((a, b) => (at(a) === at(b) ? 0 : at(a) < at(b) ? -1 : 1))
 
   return (
     <div style={{ display: 'grid', gap: '1.5rem' }}>
@@ -1135,7 +1182,9 @@ function ActivityPane({
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text)' }}>{e.title}</div>
                   {e.detail && <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{e.detail}</div>}
-                  <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>{formatDate(e.timestamp)}</div>
+                  <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-subtle)', marginTop: '0.125rem' }}>
+                    {e.timestamp ? formatDate(e.timestamp) : 'Date not recorded'}
+                  </div>
                 </div>
               </li>
             )
