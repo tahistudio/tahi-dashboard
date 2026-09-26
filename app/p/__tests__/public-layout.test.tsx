@@ -1,13 +1,13 @@
 /**
  * app/p/layout.tsx: no localStorage bleed between documents.
  *
- * app/layout.tsx runs a blocking inline script that adds `.dark` to
- * <html> from `localStorage['tahi-theme']` on every route, including the
- * public, no-auth document viewers. A visitor who once toggled the
- * dashboard's dark mode on this browser must not have that preference
- * corrupt a shared proposal or schedule link, so this layout strips the
- * class on mount and mounts the toast provider these viewers need for
- * their non-alert() error state.
+ * A visitor who once toggled the dashboard's dark mode on this browser must
+ * not have that preference corrupt a shared proposal or schedule link. The
+ * blocking theme script in app/layout.tsx skips /p/ paths on a direct load
+ * (lib/__tests__/theme-boot-script.test.ts runs it); this layout still
+ * strips the class on mount for a client-side navigation in from the
+ * dashboard, and mounts the toast provider these viewers need for their
+ * non-alert() error state.
  *
  * No jsdom/testing-library in this repo's Vitest harness, so the DOM
  * effect itself is exercised end to end by Playwright; this pins the

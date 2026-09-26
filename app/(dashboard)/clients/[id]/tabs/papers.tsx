@@ -37,6 +37,8 @@ export interface ContractRow {
   createdAt: string
   signedCount?: number
   totalSigners?: number
+  /** 'signed' set by hand, not by the last signature (lib/contract-signing-state.ts). */
+  markedSigned?: boolean
 }
 
 export interface ProposalRow {
@@ -153,16 +155,22 @@ export function PapersTab({
       key: 'status',
       header: 'Status',
       width: '7rem',
-      render: r => <Badge tone={PAPER_TONES[r.status] ?? 'neutral'} size="sm" className="capitalize">{r.status}</Badge>,
+      render: r => r.markedSigned
+        ? <Badge tone={PAPER_TONES.signed} size="sm">Marked signed</Badge>
+        : <Badge tone={PAPER_TONES[r.status] ?? 'neutral'} size="sm" className="capitalize">{r.status}</Badge>,
     },
     {
       key: 'signers',
       header: 'Signed',
       muted: true,
       width: '7rem',
-      render: r => (r.totalSigners ?? 0) > 0
-        ? `${r.signedCount ?? 0} of ${r.totalSigners}`
-        : (r.signedAt ? fmt(r.signedAt) : '--'),
+      // A contract marked signed by hand has no signatures here, so a count
+      // would read "0 of 2" beside "Marked signed".
+      render: r => r.markedSigned
+        ? 'Elsewhere'
+        : (r.totalSigners ?? 0) > 0
+          ? `${r.signedCount ?? 0} of ${r.totalSigners}`
+          : (r.signedAt ? fmt(r.signedAt) : '--'),
     },
     {
       key: 'expires',
@@ -277,7 +285,9 @@ export function PapersTab({
           {msa ? (
             <span>
               <strong style={{ color: 'var(--color-text)', fontWeight: 700 }}>
-                Master agreement signed {fmt(msa.signedAt)}.
+                {msa.signedAt
+                  ? `Master agreement signed ${fmt(msa.signedAt)}.`
+                  : 'Master agreement marked signed.'}
               </strong>{' '}
               {msaLeft == null
                 ? 'No end date.'

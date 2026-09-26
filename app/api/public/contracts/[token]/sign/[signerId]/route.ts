@@ -6,6 +6,7 @@ import { getCloudflareContext } from '@opennextjs/cloudflare'
 import { sendFullySignedContractEmails } from '@/lib/contract-fully-signed-emails'
 import { sha256Hex, computeChainHash } from '@/lib/contract-chain'
 import { notifyStudioOfContractSignature } from '@/lib/contract-signature-notify'
+import { isContractPastExpiry } from '@/lib/contract-signing-state'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ token: string; signerId: string }> }
@@ -77,7 +78,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   if (doc.status === 'signed') {
     return NextResponse.json({ error: 'This contract is already fully signed.' }, { status: 409 })
   }
-  if (doc.expiresAt && new Date(doc.expiresAt).getTime() < Date.now()) {
+  // Same rule the read route applies (lib/contract-signing-state.ts), so the
+  // viewer never offers a pad this route would refuse. The read route leaves
+  // the row alone; this write is where the status actually flips.
+  if (isContractPastExpiry(doc.status, doc.expiresAt)) {
     await database.update(schema.contractDocuments)
       .set({ status: 'expired', updatedAt: now })
       .where(eq(schema.contractDocuments.id, doc.id))

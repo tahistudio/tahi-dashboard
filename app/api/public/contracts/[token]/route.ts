@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, asc } from 'drizzle-orm'
+import { isContractPastExpiry, isMarkedSigned } from '@/lib/contract-signing-state'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ token: string }> }
@@ -10,6 +11,18 @@ type RouteContext = { params: Promise<{ token: string }> }
  * GET /api/public/contracts/[token]
  * Public read of contract document + signers + signatures (sans audit data).
  * Used by the public sign page.
+ *
+ * A contract past its signing deadline answers 410 with reason 'expired'
+ * here, on the read, so the viewer shows the expired state before any
+ * signature pad renders. It used to answer 200 until the status itself said
+ * 'expired', which only the sign route writes, so a client on a lapsed link
+ * drew a signature, submitted it, and only then heard it had expired.
+ *
+ * The status is not flipped here. A GET stays free of side effects (link
+ * unfurlers and prefetchers call it too), and a row still reading 'sent'
+ * keeps its expiry date editable in the admin, so the studio can extend it
+ * and the same link works again. The sign route still refuses a lapsed
+ * contract and still writes 'expired' lazily, on the first attempt.
  */
 export async function GET(_req: NextRequest, ctx: RouteContext) {
   const { token } = await ctx.params
@@ -28,13 +41,23 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       sentAt: schema.contractDocuments.sentAt,
       signedAt: schema.contractDocuments.signedAt,
       expiresAt: schema.contractDocuments.expiresAt,
+      finalHash: schema.contractDocuments.finalHash,
     })
     .from(schema.contractDocuments)
     .where(eq(schema.contractDocuments.publicShareToken, token))
     .limit(1)
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  if (doc.status === 'cancelled' || doc.status === 'expired') {
-    return NextResponse.json({ error: 'This contract is no longer active.' }, { status: 410 })
+  if (doc.status === 'cancelled') {
+    return NextResponse.json(
+      { error: 'This contract is no longer active.', reason: 'cancelled' },
+      { status: 410 },
+    )
+  }
+  if (isContractPastExpiry(doc.status, doc.expiresAt)) {
+    return NextResponse.json(
+      { error: 'This contract has expired.', reason: 'expired', expiresAt: doc.expiresAt },
+      { status: 410 },
+    )
   }
 
   const signers = await database
@@ -64,5 +87,14 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     .where(eq(schema.contractSignatures.contractId, doc.id))
     .orderBy(asc(schema.contractSignatures.signedAt))
 
-  return NextResponse.json({ contract: doc, signers, signatures })
+  // The final hash stays server-side; the viewer only needs to know whether
+  // 'signed' came from the signatures below or from the studio marking it
+  // (lib/contract-signing-state.ts), so it never implies a signing it has
+  // no record of.
+  const { finalHash, ...contract } = doc
+  return NextResponse.json({
+    contract: { ...contract, markedSigned: isMarkedSigned({ status: doc.status, finalHash }) },
+    signers,
+    signatures,
+  })
 }

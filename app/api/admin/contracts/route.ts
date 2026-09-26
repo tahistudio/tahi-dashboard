@@ -9,6 +9,7 @@ import {
   scopedOrgCondition,
   scopedOrgIds,
 } from '@/app/api/admin/_sales-access/artifact-scope'
+import { isMarkedSigned } from '@/lib/contract-signing-state'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -63,6 +64,7 @@ export async function GET(req: NextRequest) {
       sentAt: schema.contractDocuments.sentAt,
       signedAt: schema.contractDocuments.signedAt,
       expiresAt: schema.contractDocuments.expiresAt,
+      finalHash: schema.contractDocuments.finalHash,
       createdAt: schema.contractDocuments.createdAt,
       updatedAt: schema.contractDocuments.updatedAt,
       orgName: schema.organisations.name,
@@ -104,8 +106,12 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const withSigners = items.map(item => ({
+  // markedSigned: 'signed' set by the studio rather than by the last
+  // signature (lib/contract-signing-state.ts), so a list never pairs
+  // "Signed" with "0 of 2". The hash itself stays off the list payload.
+  const withSigners = items.map(({ finalHash, ...item }) => ({
     ...item,
+    markedSigned: isMarkedSigned({ status: item.status, finalHash }),
     signedCount: signedMap.get(item.id) ?? 0,
     totalSigners: totalMap.get(item.id) ?? 0,
   }))

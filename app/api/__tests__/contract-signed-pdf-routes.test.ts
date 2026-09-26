@@ -68,6 +68,7 @@ vi.mock('@/lib/contract-fully-signed-emails', () => ({
 import { db } from '@/lib/db'
 import { scopedOrgIds } from '@/lib/access-scope'
 import { sendFullySignedContractEmails } from '@/lib/contract-fully-signed-emails'
+import { resolveContractSignedPdfBytes } from '@/lib/contract-signed-artifact'
 import { NextRequest } from 'next/server'
 import { GET as adminGet, POST as adminPost } from '@/app/api/admin/contracts/[id]/signed-pdf/route'
 import { GET as publicGet } from '@/app/api/public/contracts/[token]/signed-pdf/route'
@@ -104,8 +105,18 @@ describe('GET /api/admin/contracts/[id]/signed-pdf', () => {
     expect(res.status).toBe(409)
   })
 
+  it('409s a contract the studio marked signed by hand, without building a PDF', async () => {
+    const { handle } = makeDb([[{ id: 'doc-1', name: 'Acme SOW', status: 'signed', finalHash: null, signedAt: null }]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+    const res = await adminGet(req('/api/admin/contracts/doc-1/signed-pdf'), routeParams('doc-1'))
+    expect(res.status).toBe(409)
+    const body = await res.json() as { error: string }
+    expect(body.error).toMatch(/marked signed by hand/)
+    expect(resolveContractSignedPdfBytes).not.toHaveBeenCalled()
+  })
+
   it('streams the PDF with an attachment filename when signed', async () => {
-    const { handle } = makeDb([[{ id: 'doc-1', name: 'Acme SOW', status: 'signed' }]])
+    const { handle } = makeDb([[{ id: 'doc-1', name: 'Acme SOW', status: 'signed', finalHash: 'final-hash' }]])
     vi.mocked(db).mockResolvedValue(handle as never)
     const res = await adminGet(req('/api/admin/contracts/doc-1/signed-pdf'), routeParams('doc-1'))
     expect(res.status).toBe(200)
@@ -125,8 +136,16 @@ describe('POST /api/admin/contracts/[id]/signed-pdf (resend)', () => {
     expect(sendFullySignedContractEmails).not.toHaveBeenCalled()
   })
 
+  it('409s a contract marked signed by hand and sends nothing, so no client is told every party just signed', async () => {
+    const { handle } = makeDb([[{ status: 'signed', finalHash: null }]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+    const res = await adminPost(req('/api/admin/contracts/doc-1/signed-pdf'), routeParams('doc-1'))
+    expect(res.status).toBe(409)
+    expect(sendFullySignedContractEmails).not.toHaveBeenCalled()
+  })
+
   it('re-sends the fully-signed email fan-out when signed', async () => {
-    const { handle } = makeDb([[{ status: 'signed' }]])
+    const { handle } = makeDb([[{ status: 'signed', finalHash: 'final-hash' }]])
     vi.mocked(db).mockResolvedValue(handle as never)
     const res = await adminPost(req('/api/admin/contracts/doc-1/signed-pdf'), routeParams('doc-1'))
     expect(res.status).toBe(200)
@@ -151,9 +170,17 @@ describe('GET /api/public/contracts/[token]/signed-pdf', () => {
     expect(res.status).toBe(404)
   })
 
+  it('404s a contract marked signed by hand: there is no signed copy to hand out', async () => {
+    const token = 'a'.repeat(32)
+    const { handle } = makeDb([[{ id: 'doc-1', name: 'Acme SOW', status: 'signed', finalHash: null }]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+    const res = await publicGet(req(`/api/public/contracts/${token}/signed-pdf`), tokenParams(token))
+    expect(res.status).toBe(404)
+  })
+
   it('streams the PDF once the contract is signed', async () => {
     const token = 'a'.repeat(32)
-    const { handle } = makeDb([[{ id: 'doc-1', name: 'Acme SOW', status: 'signed' }]])
+    const { handle } = makeDb([[{ id: 'doc-1', name: 'Acme SOW', status: 'signed', finalHash: 'final-hash' }]])
     vi.mocked(db).mockResolvedValue(handle as never)
     const res = await publicGet(req(`/api/public/contracts/${token}/signed-pdf`), tokenParams(token))
     expect(res.status).toBe(200)

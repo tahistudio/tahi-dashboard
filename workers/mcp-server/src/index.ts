@@ -837,7 +837,7 @@ export const TOOLS: ToolDef[] = [
   // ── Contracts (e-signature) ──────────────────────────────────────────
   // Statuses: draft | sent | partially_signed | signed | expired | cancelled
   // Types:    nda | sla | msa | sow | mou | other
-  tool('list_contracts', 'List all contracts. Optional filters by orgId, dealId, status. Returns lightweight summaries — call get_contract for the full body, signers, signatures.', {
+  tool('list_contracts', 'List all contracts. Optional filters by orgId, dealId, status. Returns lightweight summaries; call get_contract for the full body, signers, signatures. Each summary carries signedCount/totalSigners and markedSigned: true when status "signed" was set by hand (update_contract) rather than by the last signature, so no signatures, signing date or signed PDF exist for it.', {
     orgId: prop('string', 'Filter by organisation ID'),
     dealId: prop('string', 'Filter by deal ID'),
     status: prop('string', 'Filter by status'),
@@ -857,7 +857,7 @@ export const TOOLS: ToolDef[] = [
     expiresAt: prop('string', 'ISO timestamp when contract expires (optional)'),
     signers: { type: 'array', description: 'Initial signers [{role, name, email, position?}]', items: { type: 'object' } },
   }, ['name']),
-  tool('update_contract', 'Patch an existing contract. Only provided fields are updated. Linkage fields (orgId, dealId, leadId, proposalId) accept null to detach.', {
+  tool('update_contract', 'Patch an existing contract. Only provided fields are updated. Linkage fields (orgId, dealId, leadId, proposalId) accept null to detach. Setting status "signed" here marks the contract signed by hand (for an agreement executed elsewhere): it records no signing date or hash, every surface shows "Marked signed", and there is no signed PDF to download or resend.', {
     contractId: prop('string', 'Contract ID'),
     name: prop('string', 'Updated name'),
     status: prop('string', 'Updated status'),
@@ -890,7 +890,7 @@ export const TOOLS: ToolDef[] = [
   tool('revoke_contract_share', 'Clear the public share token, and actually undo signing: every non-pending signer goes back to pending, every signature on the contract is deleted (its ids are audit-logged first), and the document returns to draft with finalHash and signedAt cleared.', {
     contractId: prop('string', 'Contract ID'),
   }, ['contractId']),
-  tool('resend_contract_signed_pdf', 'Re-send the fully-signed covering email (with the signed PDF attached) to every signer and the creator. Only valid once the contract status is "signed".', {
+  tool('resend_contract_signed_pdf', 'Re-send the fully-signed covering email (with the signed PDF attached) to every signer and the creator. Only valid once the contract status is "signed" through the signing flow; a contract marked signed by hand (update_contract) is refused with a 409, since it has no signatures or signing date to put in the PDF.', {
     contractId: prop('string', 'Contract ID'),
   }, ['contractId']),
   tool('list_contract_templates', 'List reusable contract templates (NDA / SOW / MSA bodies with {{variable}} slots).'),

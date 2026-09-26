@@ -134,6 +134,9 @@ interface PublicContract {
   sentAt: string | null
   signedAt: string | null
   expiresAt: string | null
+  /** 'signed' set by the studio, not by the last signature: no signing
+   *  record or date exists here (lib/contract-signing-state.ts). */
+  markedSigned?: boolean
 }
 interface PublicSigner {
   id: string
@@ -172,7 +175,14 @@ export function ContractViewer({
   const [contract, setContract] = useState<PublicContract | null>(null)
   const [signers, setSigners] = useState<PublicSigner[]>([])
   const [signatures, setSignatures] = useState<PublicSignature[]>([])
-  const [state, setState] = useState<'loading' | 'ok' | 'not_found'>('loading')
+  // 'expired' and 'inactive' come from the public route's 410, which it
+  // answers before sending any document, so neither state ever renders a
+  // signature pad.
+  const [state, setState] = useState<'loading' | 'ok' | 'not_found' | 'expired' | 'inactive'>('loading')
+  const [expiredOn, setExpiredOn] = useState<string | null>(null)
+  // Admin preview only: the preview endpoint still returns a lapsed contract
+  // so the studio can read it, and flags what the client gets instead.
+  const [previewExpired, setPreviewExpired] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [justSigned, setJustSigned] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -187,6 +197,12 @@ export function ContractViewer({
         ? apiPath(`/api/admin/contracts/${encodeURIComponent(previewContractId!)}/preview-data`)
         : apiPath(`/api/public/contracts/${encodeURIComponent(token!)}`)
       const res = await fetch(url)
+      if (res.status === 410) {
+        const gone = await res.json().catch(() => ({})) as { reason?: string; expiresAt?: string | null }
+        setExpiredOn(gone.expiresAt ?? null)
+        setState(gone.reason === 'expired' ? 'expired' : 'inactive')
+        return
+      }
       if (!res.ok) {
         setState('not_found')
         return
@@ -195,10 +211,12 @@ export function ContractViewer({
         contract: PublicContract
         signers: PublicSigner[]
         signatures: PublicSignature[]
+        expired?: boolean
       }
       setContract(data.contract)
       setSigners(data.signers ?? [])
       setSignatures(data.signatures ?? [])
+      setPreviewExpired(!!data.expired)
       setState('ok')
     } catch {
       setState('not_found')
@@ -232,6 +250,12 @@ export function ContractViewer({
           body: JSON.stringify({ signatureDataUrl: dataUrl }),
         },
       )
+      if (res.status === 410) {
+        // The deadline passed (or the contract was withdrawn) while the page
+        // sat open. Reload so the expired or inactive state replaces the pad.
+        void reload()
+        return
+      }
       if (!res.ok) {
         const errData = await res.json().catch(() => ({})) as { error?: string }
         setError(errData.error ?? 'Could not record signature. Please try again.')
@@ -257,24 +281,40 @@ export function ContractViewer({
     )
   }
 
+  if (state === 'expired') {
+    return (
+      <UnavailableState title="This contract has expired">
+        {expiredOn
+          ? `Its signing deadline was ${formatDate(expiredOn)}, so it can no longer be signed from this link.`
+          : 'It can no longer be signed from this link.'}
+        {' '}Ask Tahi Studio for a fresh link if you still need to sign.
+      </UnavailableState>
+    )
+  }
+
+  if (state === 'inactive') {
+    return (
+      <UnavailableState title="This contract is no longer active">
+        Tahi Studio has withdrawn it, so there is nothing to sign here. Reach out to the
+        sender if you were expecting a contract.
+      </UnavailableState>
+    )
+  }
+
   if (state === 'not_found' || !contract) {
     return (
-      <div style={{ ...pageWrap, alignItems: 'center', justifyContent: 'center', display: 'flex' }}>
-        <div style={{ textAlign: 'center', maxWidth: '24rem', padding: '2rem' }}>
-          <BrandMark />
-          <h1 style={{ fontSize: '1.25rem', fontWeight: 700, color: BRAND.inkDeep, marginTop: '1rem', marginBottom: '0.5rem' }}>
-            This contract isn&apos;t available
-          </h1>
-          <p style={{ fontSize: '0.875rem', color: BRAND.textMuted, lineHeight: 1.55 }}>
-            The link may have been revoked or copied incorrectly. Reach out to the sender if
-            you were expecting to see a contract to sign.
-          </p>
-        </div>
-      </div>
+      <UnavailableState title={"This contract isn't available"}>
+        The link may have been revoked or copied incorrectly. Reach out to the sender if
+        you were expecting to see a contract to sign.
+      </UnavailableState>
     )
   }
 
   const allSigned = contract.status === 'signed'
+  // Marked signed by the studio (lib/contract-signing-state.ts): there are
+  // no signatures behind the status, so every surface below says so rather
+  // than pairing "Fully signed" with "0 of 2 signed" or dating it today.
+  const markedSigned = allSigned && !!contract.markedSigned
   const signersByPosition = [...signers].sort((a, b) => a.position - b.position)
   const signedCount = signers.filter(s => s.status === 'signed').length
 
@@ -284,6 +324,7 @@ export function ContractViewer({
     if (!activeSigner) signGuardMessage = 'This sign link is invalid. Ask the sender for a fresh link.'
     else if (activeSigner.status === 'signed') signGuardMessage = `${activeSigner.name}, you have already signed this contract. Thank you.`
     else if (activeSigner.status === 'skipped') signGuardMessage = 'This signer was removed from the contract.'
+    else if (markedSigned) signGuardMessage = 'Tahi Studio has marked this contract as signed, so there is nothing left to sign here.'
     else if (allSigned) signGuardMessage = 'This contract is already fully signed.'
   }
 
@@ -292,14 +333,35 @@ export function ContractViewer({
   // the moment.
   const showSignedHero = justSigned || (mode === 'read' && allSigned)
 
+  // The date the audit trail shows, taken only from records: the contract's
+  // own signedAt (or its last signature) once fully signed, this signer's
+  // signature after a partial sign. Null hides the row. It used to fall
+  // back to the viewer's clock, which dated a contract marked signed by hand
+  // "today" on every visit.
+  const latestSignatureAt = signatures.map(s => s.signedAt).filter(Boolean).sort().at(-1) ?? null
+  const signedOn = markedSigned
+    ? null
+    : allSigned
+      ? (contract.signedAt ?? latestSignatureAt)
+      : (signatures.find(s => s.signerId === signerId)?.signedAt ?? null)
+
   return (
     <div style={pageWrap}>
       {/* Preview-mode pill */}
       {isPreview && <PreviewPill />}
 
+      {isPreview && previewExpired && (
+        <StatusBanner kind="warning">
+          Past its signing deadline{contract.expiresAt ? ` (${formatDate(contract.expiresAt)})` : ''}. A
+          client opening the link sees an expired notice instead of this contract.
+        </StatusBanner>
+      )}
+
       {/* ── Slide 1 : Cover ── */}
       <CoverSlide
         contract={contract}
+        markedSigned={markedSigned}
+        pastExpiry={isPreview && previewExpired}
         signedCount={signedCount}
         totalSigners={signers.length}
       />
@@ -309,10 +371,11 @@ export function ContractViewer({
       {showSignedHero && (
         <FadeSection style={{ width: '100%', maxWidth: '64rem', margin: '0 auto' }}>
           <SignedHero
-            contract={contract}
             justSigned={justSigned}
             activeSignerName={activeSigner?.name ?? null}
             allSigned={allSigned}
+            markedSigned={markedSigned}
+            signedOn={signedOn}
           />
         </FadeSection>
       )}
@@ -339,9 +402,13 @@ export function ContractViewer({
           Who <span style={{ color: BRAND.green }}>signs</span> this
         </h2>
         <p style={slideSub}>
-          {signedCount === signers.length
-            ? 'All signatures have been recorded.'
-            : `${signedCount} of ${signers.length} signed so far.`}
+          {markedSigned
+            ? (signedCount === 0
+                ? 'Signed outside this page. Tahi Studio marked the contract signed, so no signatures are recorded here.'
+                : `${signedCount} of ${signers.length} signed on this page. Tahi Studio marked the contract signed.`)
+            : signedCount === signers.length
+              ? 'All signatures have been recorded.'
+              : `${signedCount} of ${signers.length} signed so far.`}
         </p>
         <div style={signerGrid}>
           {signersByPosition.map(s => {
@@ -353,6 +420,7 @@ export function ContractViewer({
                 signer={s}
                 signature={sig ?? null}
                 isYou={isYou}
+                signedElsewhere={markedSigned && !sig}
               />
             )
           })}
@@ -395,12 +463,17 @@ export function ContractViewer({
 // ─── Cover slide ─────────────────────────────────────────────────────────
 
 function CoverSlide({
-  contract, signedCount, totalSigners,
+  contract, markedSigned, pastExpiry, signedCount, totalSigners,
 }: {
   contract: PublicContract
+  markedSigned: boolean
+  /** Admin preview of a lapsed contract still reading 'sent': say so. */
+  pastExpiry: boolean
   signedCount: number
   totalSigners: number
 }) {
+  const chipLabel = markedSigned ? 'Marked signed' : pastExpiry ? 'Expired' : statusLabel(contract.status)
+  const chipKind = pastExpiry ? 'warning' : statusChipKind(contract.status)
   return (
     <section style={coverShell}>
       {/* Layered radial glows + brand circle ring : matches the proposal
@@ -415,8 +488,12 @@ function CoverSlide({
         </div>
         <div style={{ marginTop: 'auto' }}>
           <div style={coverChips}>
-            <CoverChip label={statusLabel(contract.status)} kind={statusChipKind(contract.status)} />
-            <CoverChip label={`${signedCount} of ${totalSigners} signed`} kind="neutral" />
+            <CoverChip label={chipLabel} kind={chipKind} />
+            {/* A signing count beside "Marked signed" would read "0 of 2
+                signed" under a signed contract; the signers slide explains. */}
+            {!markedSigned && (
+              <CoverChip label={`${signedCount} of ${totalSigners} signed`} kind="neutral" />
+            )}
           </div>
           <div style={coverMetaGrid}>
             {contract.sentAt && <CoverMeta label="Sent" value={formatDate(contract.sentAt)} />}
@@ -475,11 +552,14 @@ function statusChipKind(s: PublicContract['status']): 'success' | 'warning' | 'n
 // ─── Signer card ────────────────────────────────────────────────────────
 
 function SignerCard({
-  signer, signature, isYou,
+  signer, signature, isYou, signedElsewhere,
 }: {
   signer: PublicSigner
   signature: PublicSignature | null
   isYou: boolean
+  /** The contract was marked signed by the studio and this signer has no
+   *  signature here, so "Pending" / "Awaiting signature" would be untrue. */
+  signedElsewhere: boolean
 }) {
   const initials = initialsFromName(signer.name)
   const cardBg = isYou ? BRAND.green50 : BRAND.surfaceTint
@@ -537,7 +617,9 @@ function SignerCard({
       {/* Pills row */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem' }}>
         <RolePill role={signer.role} />
-        <StatusPill status={signer.status} />
+        {signedElsewhere
+          ? <span style={pillBase('neutral')}>Signed elsewhere</span>
+          : <StatusPill status={signer.status} />}
         {isYou && <YouPill />}
       </div>
 
@@ -549,7 +631,7 @@ function SignerCard({
             <span>on {formatDate(signature.signedAt)}</span>
           </div>
         ) : (
-          <span>Awaiting signature</span>
+          <span>{signedElsewhere ? 'No signature recorded on this page' : 'Awaiting signature'}</span>
         )}
       </div>
 
@@ -627,13 +709,17 @@ function pillBase(kind: 'success' | 'warning' | 'neutral' | 'brand'): React.CSSP
 // ─── Signed hero (post-sign confirmation) ───────────────────────────────
 
 function SignedHero({
-  contract, justSigned, activeSignerName, allSigned,
+  justSigned, activeSignerName, allSigned, markedSigned, signedOn,
 }: {
-  contract: PublicContract
   justSigned: boolean
   activeSignerName: string | null
   allSigned: boolean
+  markedSigned: boolean
+  /** From the records only; null leaves the "Signed on" row out. */
+  signedOn: string | null
 }) {
+  if (markedSigned && !justSigned) return <MarkedSignedHero />
+
   const headline = justSigned
     ? (allSigned ? 'Fully signed' : 'Your signature is in')
     : 'Fully signed'
@@ -642,7 +728,6 @@ function SignedHero({
         ? `Thank you${activeSignerName ? `, ${activeSignerName.split(' ')[0]}` : ''}. The contract is now fully executed.`
         : `Thank you${activeSignerName ? `, ${activeSignerName.split(' ')[0]}` : ''}. The other parties will be notified.`)
     : 'Every signatory has signed. The contract is fully executed.'
-  const dateString = formatDate(contract.signedAt) || formatDate(new Date().toISOString())
 
   return (
     <div style={signedHeroShell}>
@@ -674,7 +759,7 @@ function SignedHero({
             </span>
           </div>
           <dl style={assuranceList}>
-            <AssuranceRow label="Signed on" value={dateString} mono />
+            {signedOn && <AssuranceRow label="Signed on" value={formatDate(signedOn)} mono />}
             <AssuranceRow label="Hash algorithm" value="SHA-256 chain" mono />
             <AssuranceRow label="IP address" value="Stored as one-way hash" mono />
             <AssuranceRow label="Document fingerprint" value="Locked at signature" mono />
@@ -690,22 +775,62 @@ function SignedHero({
   )
 }
 
+/**
+ * The contract was marked signed by Tahi Studio, not signed on this page
+ * (lib/contract-signing-state.ts). No audit trail: there is no hash chain,
+ * no signing date and no recorded signature to vouch for, so this states
+ * only what the studio recorded.
+ */
+function MarkedSignedHero() {
+  return (
+    <div style={signedHeroShell}>
+      <div style={signedHeroBackdrop} aria-hidden="true" />
+      <div style={{ position: 'relative', zIndex: 1 }}>
+        <div style={signedHeroCheck}>
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        </div>
+        <div style={{ ...slideEyebrow, color: BRAND.greenDark, marginBottom: '0.625rem' }}>
+          Recorded by Tahi Studio
+        </div>
+        <h2 style={{ ...slideTitle, color: BRAND.inkDeep }}>
+          <span>Marked </span>
+          <span style={{ color: BRAND.green }}>signed</span>
+        </h2>
+        <p style={{ ...slideSub, marginTop: '0.625rem', marginBottom: 0 }}>
+          Tahi Studio has recorded this contract as signed. It was signed outside this page,
+          so this page holds no signatures or signing date for it.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function AssuranceRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  // Wrapping flex, not a fixed two-column grid: on a phone the label column
+  // left the value about 6rem, and monospace values broke word by word
+  // ("26 / Sept / 2026", "SHA- / 256 / chain"). When label and value no
+  // longer fit side by side the value drops beneath its label at full width.
   return (
     <div style={{
-      display: 'grid',
-      gridTemplateColumns: 'minmax(8rem, 12rem) 1fr',
-      gap: '0.875rem',
+      display: 'flex',
+      flexWrap: 'wrap',
+      columnGap: '0.875rem',
+      rowGap: '0.25rem',
       alignItems: 'baseline',
       padding: '0.5rem 0',
       borderTop: `1px dashed ${BRAND.borderSubtle}`,
     }}>
-      <dt style={{ fontSize: '0.6875rem', color: BRAND.textSubtle, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</dt>
+      <dt style={{ flex: '0 0 12rem', maxWidth: '100%', fontSize: '0.6875rem', color: BRAND.textSubtle, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</dt>
       <dd style={{
+        flex: '1 1 9rem',
+        minWidth: 0,
         fontSize: '0.8125rem',
         color: BRAND.ink,
         fontWeight: 600,
         margin: 0,
+        overflowWrap: 'anywhere',
         ...(mono ? { fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace', letterSpacing: '0.02em' } : {}),
       }}>
         {value}
@@ -969,8 +1094,10 @@ function FinePrintBlock({ open, onToggle }: { open: boolean; onToggle: () => voi
           </p>
           <p style={{ margin: 0 }}>
             This page is private to the named recipients. If you forwarded the link by mistake,
-            ask the sender to revoke it. The link expires when the contract is fully signed,
-            cancelled, or its expiry date passes.
+            ask the sender to revoke it. Signing closes once every party has signed, and the
+            link then stays open as a read-only copy of the signed contract. It stops working
+            if the sender revokes it or cancels the contract, or if the signing deadline passes
+            before everyone has signed.
           </p>
         </div>
       )}
@@ -1003,14 +1130,19 @@ function BrandMark({ size = 'md', dark = false }: { size?: 'sm' | 'md'; dark?: b
   )
 }
 
+/**
+ * In the page flow on a phone, floating above it from 640px up. Fixed at
+ * every width, it sat on top of the cover's Tahi Studio wordmark at 375px
+ * and over the content beneath it while scrolling. Position lives in the
+ * classes (static below sm) because an inline position would beat them.
+ */
 function PreviewPill() {
   return (
     <div
+      className="sm:fixed sm:top-4 sm:left-1/2 sm:-translate-x-1/2"
       style={{
-        position: 'fixed',
-        top: '1rem',
-        left: '50%',
-        transform: 'translateX(-50%)',
+        alignSelf: 'center',
+        maxWidth: '100%',
         zIndex: 50,
         padding: '0.5rem 1rem',
         background: BRAND.inkDeep,
@@ -1023,10 +1155,28 @@ function PreviewPill() {
         display: 'inline-flex',
         alignItems: 'center',
         gap: '0.5rem',
+        whiteSpace: 'nowrap',
       }}
     >
-      <span style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: '#93c98a' }} />
-      Admin preview · live, unpublished state
+      <span style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: '#93c98a', flexShrink: 0 }} />
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>Admin preview · live, unpublished state</span>
+    </div>
+  )
+}
+
+/** Centred brand card for a link that cannot show a contract. */
+function UnavailableState({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ ...pageWrap, alignItems: 'center', justifyContent: 'center', display: 'flex' }}>
+      <div style={{ textAlign: 'center', maxWidth: '24rem', padding: '2rem' }}>
+        <BrandMark />
+        <h1 style={{ fontSize: '1.25rem', fontWeight: 700, color: BRAND.inkDeep, marginTop: '1rem', marginBottom: '0.5rem' }}>
+          {title}
+        </h1>
+        <p style={{ fontSize: '0.875rem', color: BRAND.textMuted, lineHeight: 1.55 }}>
+          {children}
+        </p>
+      </div>
     </div>
   )
 }
