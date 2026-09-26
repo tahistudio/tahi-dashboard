@@ -1,4 +1,5 @@
-import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { test as base, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { adminRequestContext } from './helpers/invites'
 
 /**
  * The dev-only Ship Studio auth bypass, as a storageState. Six specs had
@@ -30,6 +31,31 @@ export async function expectNoHorizontalScroll(page: Page): Promise<void> {
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   )
   expect(overflow, 'the page scrolls horizontally').toBeLessThanOrEqual(1)
+}
+
+/**
+ * A phone rather than a narrow desktop window: 375 by 812 with isMobile and
+ * hasTouch. Chromium then applies the page's viewport meta, reports a touch
+ * screen to pointer and hover media queries, and emulates a mobile layout
+ * viewport, which a bare `viewport` option does not. For `test.use` or a
+ * `browser.newContext`, in the specs whose checks are pinned to 375px.
+ */
+export const PHONE_CONTEXT = {
+  viewport: { width: 375, height: 812 },
+  isMobile: true,
+  hasTouch: true,
+} as const
+
+/**
+ * expectNoHorizontalScroll on a PHONE_CONTEXT page, plus the window width. A
+ * mobile layout viewport can grow to fit content that is too wide, where the
+ * overflow check alone would see nothing to scroll; the window still being
+ * 375px wide rules that out.
+ */
+export async function expectFitsPhone(page: Page): Promise<void> {
+  await expectNoHorizontalScroll(page)
+  const width = await page.evaluate(() => window.innerWidth)
+  expect(width, 'the phone layout widened past the 375px screen').toBe(PHONE_CONTEXT.viewport.width)
 }
 
 /** True on the mobile-safari project, where tables become card lists. */
@@ -353,4 +379,101 @@ export function pickPipelineRequest(
       titles.filter(t => t === r.title).length === 1)
     .sort((a, b) => a.id.localeCompare(b.id))
   return candidates[skip] ?? null
+}
+
+// ── A studio beside an anonymous page ────────────────────────────────────────
+
+/**
+ * `test` plus a `studio` fixture: an API context carrying the Ship Studio
+ * bypass (adminRequestContext), disposed after each test.
+ *
+ * For specs whose browser page has to stay anonymous, a prospect opening a
+ * public link, while the same test seeds and reads back as the studio. Setting
+ * the bypass through `test.use` would put it on the page as well, and a public
+ * viewer read by the admin proves nothing about the visitor.
+ *
+ * The fixture's second parameter is Playwright's `use`, renamed: the React
+ * hooks lint rule reads any call to a function named `use` as a hook.
+ */
+export const testWithStudio = base.extend<{ studio: APIRequestContext }>({
+  studio: async ({ baseURL }, provide) => {
+    const context = await adminRequestContext(baseURL)
+    await provide(context)
+    await context.dispose()
+  },
+})
+
+/**
+ * Skip the calling test unless the operator has said the server under test
+ * cannot deliver mail. Call it from a beforeEach.
+ *
+ * The deliverable specs (sales-publish, public-viewers) drive the real fan
+ * outs: a proposal decision and a contract signature both mail the studio, and
+ * business@tahi.studio is inside the allowlist. The default config starts
+ * `npm run dev`, which reads the live Resend key from .env.local, so a plain
+ * `npm run test:e2e` would put a proposal decision, the signature notices and a
+ * signed PDF in Liam's inbox on every pass. The runner cannot see the server's
+ * key (global-setup loads .env.local into this process, not that one), so the
+ * flag is the operator's word for it: start the server with RESEND_API_KEY set
+ * to a dead value, then run with E2E_DEAD_RESEND_KEY=1. The recipe is in
+ * docs/local-dev-and-qa.md.
+ */
+export function skipUnlessMailIsDead(): void {
+  base.skip(
+    process.env.E2E_DEAD_RESEND_KEY !== '1',
+    'Mails the studio for real unless the server holds a dead RESEND_API_KEY; set E2E_DEAD_RESEND_KEY=1 once it does.',
+  )
+}
+
+// ── The studio bell ──────────────────────────────────────────────────────────
+//
+// A client's decision on a public link reaches the studio as a bell row for
+// every team member with a login (lib/notifications.ts notifyAllAdmins). The
+// Ship Studio bypass reads GET /api/notifications as Liam's own Clerk id, so a
+// spec holding an admin request context sees exactly the rows Liam's bell
+// would. Shared by the two deliverable specs (sales-publish, public-viewers),
+// which both have to prove "the studio heard about it".
+
+/** One row of GET /api/notifications, the fields a spec asserts on. */
+export interface BellRow {
+  id: string
+  eventType: string
+  title: string
+  body: string | null
+  entityType: string | null
+  entityId: string | null
+  read: boolean
+}
+
+/**
+ * The bell rows that point at one entity, newest first.
+ *
+ * Reads the newest hundred rows (the route's ceiling) and filters here: the
+ * route has no entity filter, and a fixture made seconds ago is always inside
+ * the newest hundred on a harness nobody else is writing to.
+ */
+export async function bellRowsFor(
+  request: APIRequestContext,
+  entityType: string,
+  entityId: string,
+): Promise<BellRow[]> {
+  const res = await request.get('/api/notifications?limit=100')
+  expect(res.ok(), 'the studio bell could not be read').toBeTruthy()
+  const { items } = await res.json() as { items: BellRow[] }
+  return items.filter(row => row.entityType === entityType && row.entityId === entityId)
+}
+
+/**
+ * Mark a fixture's bell rows read. There is no delete on the bell (read is a
+ * one-way flag, see the PATCH route), so this is the closest a spec can come
+ * to leaving the harness as it found it: the rows stay, the unread count does
+ * not climb with every run. Soft, for the reason deleteTask is.
+ */
+export async function markBellRead(
+  request: APIRequestContext,
+  entityType: string,
+  entityId: string,
+): Promise<void> {
+  const res = await request.patch('/api/notifications', { data: { entityType, entityId } })
+  expect.soft(res.ok(), `the bell rows for ${entityType} ${entityId} were not marked read`).toBeTruthy()
 }
