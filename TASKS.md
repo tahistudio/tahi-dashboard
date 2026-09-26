@@ -513,7 +513,7 @@ retires the dead C3 contract-signature template. D3 below. D4 = CT.15.
   Second review, same day: the lapsed-contract test asserted the pad renders
   on an expired contract, which enshrined the bug. Re-run against the
   contract-truth fix (branch worktree-wf_ec5fab9c-8f3-3, merged into the spec
-  branch for the run only), the specs now hold the fixed behaviour: the read
+  branch at e1170f3b), the specs now hold the fixed behaviour: the read
   410s with reason expired before any document goes out, the link shows the
   expired state and no canvas ever renders, a signature posted straight to the
   sign route 410s and is what flips the row to expired, no signature row, the
@@ -521,9 +521,9 @@ retires the dead C3 contract-signature template. D3 below. D4 = CT.15.
   mode check now requires no `.dark` on the public contract at all, not even
   a first frame, with /offline as the control that the preference is live.
   The signed PDF has to be written by the fan out before anything downloads it
-  (it persists before the send decision now), names both signers, embeds both
-  signature images, and the signer download is byte-identical to the stored
-  one; each stored signature has to be longer than a blank pad's export. Both
+  (it persists before the send decision now), names both signers, and the
+  signer download is byte-identical to the stored one; each stored signature
+  has to be longer than a blank pad's export. Both
   files run on a 375px phone context (isMobile and hasTouch, PHONE_CONTEXT in
   e2e/helpers.ts) with the no-horizontal-scroll check re-verified there, and
   the E2E_DEAD_RESEND_KEY requirement heads both files and the doc. Specs
@@ -531,6 +531,22 @@ retires the dead C3 contract-signature template. D3 below. D4 = CT.15.
   --workers=1, three runs in a row (webpack dev from a detached worktree at
   the merged commit, dead RESEND_API_KEY, local D1 with every migration
   through 0110). Still owed: the live rehearsal with real inboxes (T3.QA).
+  Third review, same day: the "both signature images" check could not fail.
+  jsPDF stores an alpha PNG as two image objects (the colour and an SMask),
+  so one signature alone counted two, and both signers drew the same
+  waypoints, so their stored signatures were byte-identical and every PDF the
+  earlier runs stored held one image drawn twice. Now the two signers draw
+  different strokes, each stored signature has to equal the export its own
+  pad submitted, the two have to differ, and the stamped PDF has to hold two
+  SMasks and draw two different image XObjects (`/I0 Do`, `/I1 Do`). The new
+  check fails on all six PDFs the earlier runs left in local R2 and passes on
+  the new ones; with both signers forced back onto one stroke the spec goes
+  red at "both signers stored the same image". public-viewers green three runs
+  in a row the same way as above. Merge order: this branch carries the
+  contract-truth fix, so that branch reaches main first or with it; the specs
+  alone are red on the harness. docs/local-dev-and-qa.md now has the cold
+  server warm-up, what a trailing "Test timeout of 30000ms" means, and the
+  local cleanup for the contract rows the cascade-less QA sqlite leaves behind.
 
 ## Batch E. Messages, unhidden
 

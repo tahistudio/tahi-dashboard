@@ -46,11 +46,14 @@ import {
  *     phone that simply never read the preference. They sign; the page reads
  *     Fully signed.
  *   - The document is signed with a final hash, both signatures carry a body
- *     hash and are more than a blank pad's export, and the stamped PDF is in
- *     R2 at contracts/<id>/signed.pdf, written by the fully-signed fan out
- *     before anyone downloads it, carrying both signers and both signature
- *     images, and served by both the admin and the token-scoped download
- *     routes. The bell has the final row.
+ *     hash and are more than a blank pad's export, and each stored signature
+ *     is the export its own signer's pad submitted. The two signers draw
+ *     different strokes, so the two stored images differ and the PDF can be
+ *     held to carrying both rather than one of them twice. The stamped PDF is
+ *     in R2 at contracts/<id>/signed.pdf, written by the fully-signed fan out
+ *     before anyone downloads it, naming both signers and drawing two
+ *     different signature images, and served by both the admin and the
+ *     token-scoped download routes. The bell has the final row.
  *
  * Then the two refusals. A cancelled contract 410s every read and write and
  * the link says it is no longer active. A contract past its expiry is refused
@@ -111,6 +114,12 @@ interface PadPointers {
   touchDowns: number
   touchMoves: number
   cancels: number
+}
+
+/** What a signer's pad held at submit: a blank pad's export length and the export sent. */
+interface PadExport {
+  blankLength: number
+  submitted: string
 }
 
 /** A 1x1 transparent PNG, the smallest thing the sign route accepts. */
@@ -209,13 +218,44 @@ async function bellEvents(studio: APIRequestContext, contractId: string): Promis
 const STROKE_STEPS = 8
 
 /**
+ * A stroke as waypoints in fractions of the pad's box, 0 to 1 across and down,
+ * so it lands the same way on any pad size.
+ */
+type Stroke = readonly Point[]
+
+/**
+ * The client's stroke: three legs, so a finger sends 3 * STROKE_STEPS moves
+ * (the 24 watchPad's note counts).
+ */
+const CLIENT_STROKE: Stroke = [
+  { x: 0.15, y: 0.45 },
+  { x: 0.35, y: 0.25 },
+  { x: 0.55, y: 0.6 },
+  { x: 0.8, y: 0.35 },
+]
+
+/**
+ * The studio's stroke, a W with four legs. It has to differ from the client's:
+ * the same waypoints ink the same pixels, both pads export the same PNG, and
+ * jsPDF stores identical images once and draws that one twice, so the PDF
+ * check could not tell two signatures from one signer's in both slots.
+ */
+const STUDIO_STROKE: Stroke = [
+  { x: 0.1, y: 0.35 },
+  { x: 0.3, y: 0.75 },
+  { x: 0.5, y: 0.4 },
+  { x: 0.7, y: 0.75 },
+  { x: 0.9, y: 0.3 },
+]
+
+/**
  * Draw a signature on the pad with a real pointer, a mouse or a finger.
  *
  * The pad sits in a FadeSection that lifts 0.625rem into place as it scrolls
  * into view, so the stroke waits for that to settle: a box read mid-lift would
  * put the pointer a few pixels off the canvas the handlers measure against.
  */
-async function drawSignature(page: Page, via: 'mouse' | 'touch'): Promise<void> {
+async function drawSignature(page: Page, via: 'mouse' | 'touch', stroke: Stroke): Promise<void> {
   const canvas = page.locator('canvas')
   await canvas.scrollIntoViewIfNeeded()
   await expect
@@ -230,13 +270,10 @@ async function drawSignature(page: Page, via: 'mouse' | 'touch'): Promise<void> 
 
   const box = await canvas.boundingBox()
   if (!box) throw new Error('the signature pad has no box')
-  const y = box.y + box.height * 0.45
-  const waypoints: Point[] = [
-    { x: box.x + box.width * 0.15, y },
-    { x: box.x + box.width * 0.35, y: y - box.height * 0.2 },
-    { x: box.x + box.width * 0.55, y: y + box.height * 0.15 },
-    { x: box.x + box.width * 0.8, y: y - box.height * 0.1 },
-  ]
+  const waypoints: Point[] = stroke.map(point => ({
+    x: box.x + box.width * point.x,
+    y: box.y + box.height * point.y,
+  }))
 
   if (via === 'touch') {
     await touchStroke(page, waypoints)
@@ -349,11 +386,13 @@ async function expectPadTouchTargets(page: Page): Promise<void> {
 
 /**
  * Draw, tick the intent box and submit. Returns the blank export length for
- * this pad, so the caller can hold the stored signature to more than that.
+ * this pad, so the caller can hold the stored signature to more than that,
+ * and the pad's own export at submit (the same toDataURL call the pad makes),
+ * so the caller can hold each stored signature to the one its signer drew.
  */
-async function signAs(page: Page, signerName: string, via: 'mouse' | 'touch'): Promise<number> {
+async function signAs(page: Page, signerName: string, via: 'mouse' | 'touch', stroke: Stroke): Promise<PadExport> {
   if (via === 'touch') await watchPad(page)
-  await drawSignature(page, via)
+  await drawSignature(page, via, stroke)
   if (via === 'touch') {
     const heard = await padPointers(page)
     expect(heard.touchDowns, 'the finger never reached the pad as a touch pointer').toBeGreaterThan(0)
@@ -362,9 +401,10 @@ async function signAs(page: Page, signerName: string, via: 'mouse' | 'touch'): P
   }
   expect(await inkedPixels(page), 'the stroke left no ink on the pad').toBeGreaterThan(50)
   const blankLength = await blankPadExportLength(page)
+  const submitted = await page.locator('canvas').evaluate(el => (el as HTMLCanvasElement).toDataURL('image/png'))
   await page.getByRole('checkbox', { name: new RegExp(`I am ${signerName}`) }).check()
   await page.getByRole('button', { name: 'Sign and submit' }).click()
-  return blankLength
+  return { blankLength, submitted }
 }
 
 /**
@@ -468,8 +508,8 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
       await expectFitsPhone(page)
       await expectPadTouchTargets(page)
 
-      const blankExport: Record<string, number> = {}
-      blankExport[clientLink.id] = await signAs(page, client.name, 'touch')
+      const padExports: Record<string, PadExport> = {}
+      padExports[clientLink.id] = await signAs(page, client.name, 'touch', CLIENT_STROKE)
       await expect(page.getByRole('heading', { name: 'Your signature is in' })).toBeVisible()
       await expect(page.getByText('1 of 2 signed so far.')).toBeVisible()
       await expectFitsPhone(page)
@@ -524,12 +564,15 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
           ['the signer name', darkPage.getByText(studioSide.name, { exact: true }).first()],
           ['the intent line', darkPage.getByText('and I intend to sign this contract.')],
         ] as const) {
-          expect(await contrastOf(locator), `${label} is unreadable in dark mode`).toBeGreaterThanOrEqual(MIN_CONTRAST)
+          expect(
+            await contrastOf(locator),
+            `${label} is unreadable under a dark preference; the public contract has to stay light`,
+          ).toBeGreaterThanOrEqual(MIN_CONTRAST)
         }
         await expectFitsPhone(darkPage)
         await expectPadTouchTargets(darkPage)
 
-        blankExport[studioLink.id] = await signAs(darkPage, studioSide.name, 'mouse')
+        padExports[studioLink.id] = await signAs(darkPage, studioSide.name, 'mouse', STUDIO_STROKE)
         await expect(darkPage.getByRole('heading', { name: 'Fully signed' })).toBeVisible()
         await expect(darkPage.getByText('Contract executed')).toBeVisible()
         await expectFitsPhone(darkPage)
@@ -548,11 +591,20 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
       for (const signature of signed.signatures) {
         expect(signature.signatureDataUrl.startsWith('data:image/png')).toBe(true)
         expect(signature.bodyHash, 'a signature is not anchored to the body it signed').toBeTruthy()
-        const blankLength = blankExport[signature.signerId]
-        expect(blankLength, `no blank export was measured for signer ${signature.signerId}`).toBeGreaterThan(0)
+        const pad = padExports[signature.signerId]
+        if (!pad) throw new Error(`no pad export was captured for signer ${signature.signerId}`)
+        expect(pad.blankLength, `no blank export was measured for signer ${signature.signerId}`).toBeGreaterThan(0)
         expect(signature.signatureDataUrl.length, 'a stored signature is no bigger than a blank pad\'s export')
-          .toBeGreaterThan(blankLength)
+          .toBeGreaterThan(pad.blankLength)
+        expect(
+          signature.signatureDataUrl === pad.submitted,
+          `the signature stored for signer ${signature.signerId} is not the one their pad submitted`,
+        ).toBe(true)
       }
+      expect(
+        new Set(signed.signatures.map(s => s.signatureDataUrl)).size,
+        'both signers stored the same image, so the PDF cannot show whether it carries one signature or two',
+      ).toBe(2)
 
       // ── The stamped PDF, stored by the fan out and served ────────────────
       // The fan out runs after the signer's response went back, so the key is
@@ -577,9 +629,23 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
         expect(stamped, `the stamped PDF does not name ${signerName}`).toContain(signerName)
       }
       expect(stamped, 'the stamped PDF still lists a signer as awaiting').not.toContain('Awaiting signature')
+      // Counting `/Subtype /Image` proves nothing here. A pad export is an
+      // alpha PNG, which jsPDF stores as two image objects (the colour and an
+      // SMask for the alpha), so one signature alone counts two. jsPDF also
+      // stores identical images once, so one signer's image in both slots is
+      // one image drawn twice. What does tell: one SMask per distinct
+      // signature, and two different image XObjects drawn (`/I0 Do`, `/I1 Do`
+      // in the page stream, which jsPDF leaves uncompressed). With the two
+      // stored signatures different (asserted above), that is both of them.
       expect(
-        stamped.match(/\/Subtype\s*\/Image/g)?.length ?? 0,
-        'the stamped PDF does not carry both signature images',
+        stamped.match(/\/SMask \d+ 0 R/g)?.length ?? 0,
+        'the stamped PDF does not store two distinct signature images',
+      ).toBeGreaterThanOrEqual(2)
+      const drawnImages = Array.from(stamped.matchAll(/\/(I\d+) Do/g), match => match[1])
+      expect(drawnImages.length, 'the stamped PDF does not draw a signature in both slots').toBeGreaterThanOrEqual(2)
+      expect(
+        new Set(drawnImages).size,
+        'the stamped PDF draws the same signature image in both slots',
       ).toBeGreaterThanOrEqual(2)
       const signerPdf = await request.get(`/api/public/contracts/${sent.token}/signed-pdf`)
       expect(signerPdf.status()).toBe(200)
