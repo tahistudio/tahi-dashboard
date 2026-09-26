@@ -71,6 +71,44 @@ export const SWEEP_BATCH = 5
 export const MAX_SWEEP_BATCH = 20
 
 /**
+ * How long one sweep may keep starting reads, in milliseconds.
+ *
+ * workers/cron-trigger gives up on its POST after 120 seconds
+ * (FETCH_TIMEOUT_MS), and a Worker whose caller has gone can be cancelled
+ * part way through, which loses the cron_runs row and whatever the
+ * transcript in hand had not yet written. Production reads take 20 to 27
+ * seconds each and a call is read twice, so a batch of five is four minutes
+ * of model time: the batch is the most a run may take on, and this is the
+ * most it may spend. A read is only started when it is expected to finish
+ * inside this budget, which leaves the last 45 seconds for a read slower
+ * than expected, the snooze and org repairs, Slack and the run log.
+ */
+export const SWEEP_BUDGET_MS = 75_000
+
+/** What one read is taken to cost before this run has timed one: a little
+ *  over the slowest production read. The sweep uses the larger of this and
+ *  the slowest read it has actually seen. */
+export const READ_ESTIMATE_MS = 30_000
+
+/**
+ * A transcript left for the scheduled sweep has to still be inside the
+ * sweep's window when its turn comes, and a queue of deferred calls drains
+ * at about one call per run. So a caller deferring work (the rebuild) only
+ * leaves a transcript for the sweep when it is at least this many days
+ * inside the window; anything older is read now or not at all.
+ */
+export const DEFER_MARGIN_DAYS = 3
+
+/**
+ * Whether a transcript received at `receivedAt` can safely be left for the
+ * scheduled sweep to read, as of `at`. Lives here, beside the window it is
+ * measured against, because a route.ts may only export HTTP handlers.
+ */
+export function sweepWillReach(receivedAt: string, at: Date): boolean {
+  return receivedAt >= daysBefore(at, SWEEP_WINDOW_DAYS - DEFER_MARGIN_DAYS)
+}
+
+/**
  * `?limit=` as the cron route reads it: the cron's own default when the query
  * says nothing or says nonsense, clamped to one transcript at the bottom and
  * twenty at the top. Lives here rather than in the route because a route.ts
@@ -948,7 +986,17 @@ function deterministicFallback(input: SuggestFromTranscriptInput, source: string
 // ── The sweep ────────────────────────────────────────────────────────────────
 
 export interface SweepSummary {
+  /** Transcripts this run took on and stamped: read, skipped by the gate, or failed. */
   looked: number
+  /**
+   * Transcripts the run found but did not start, because starting one more
+   * would have risked the time budget (SWEEP_BUDGET_MS). They are left
+   * unread and unstamped, so the next run picks them up, oldest first.
+   * `deferredIds` names them, in the order they were found. Optional because
+   * a summary written before the budget existed is still a summary.
+   */
+  deferred?: number
+  deferredIds?: string[]
   eligible: number
   skipped: Array<{ transcriptId: string; reason: string }>
   inserted: number
@@ -969,18 +1017,24 @@ export interface SweepSummary {
   /** Why items the model proposed were dropped, counted by reason, so a rule change can be judged from the run log. */
   dropReasons: Record<string, number>
   /**
-   * The second read of each call (CN.1c). `ran` counts the transcripts read
-   * twice, `proposed` the new items the second read found that the first
-   * had not (before the writer's own dedupe, which may still find some of
-   * them on file), `failed` the second reads that threw, whose first read was
-   * written anyway. Optional because a summary written before this existed
-   * is still a summary.
+   * The second read of each call (CN.1c). With it enabled, every call whose
+   * first read came back lands in exactly one of three places: `ran` counts
+   * the second reads that came back too, `failed` names the ones that threw
+   * (the first read was written anyway), and `skipped` names the ones never
+   * started, either because the first read already filled the ceiling
+   * ('full') or because a second read would have risked the time budget
+   * ('out_of_time'; the first read is written and the call is stamped, since
+   * it was read). `proposed` counts the new items the second reads found
+   * that the first had not, before the writer's own dedupe, which may still
+   * find some of them on file. Optional because a summary written before
+   * this existed is still a summary.
    */
   secondPass?: {
     enabled: boolean
     ran: number
     proposed: number
     failed: Array<{ transcriptId: string; reason: string }>
+    skipped?: Array<{ transcriptId: string; reason: 'full' | 'out_of_time' }>
   }
 }
 
@@ -998,13 +1052,33 @@ export interface SweepOptions {
    */
   secondPass?: boolean
   /**
-   * Read exactly these transcripts, if they are unread, whatever their age.
-   * The rebuild uses it to re-read the calls it just un-read, straight away
-   * and without the sweep window, which would otherwise leave a call older
-   * than thirty days cleared and never read again. Keep it short: it goes
-   * into one IN clause.
+   * Read exactly these transcripts, whatever their age and whether or not
+   * they carry a read mark. The rebuild uses it to re-read calls straight
+   * away, without the sweep window (a call older than thirty days would
+   * otherwise never be read again) and without having to clear the mark
+   * first on a call the budget may not reach. A transcript with no linked
+   * call is still never read. Keep it short: it goes into one IN clause.
    */
   transcriptIds?: readonly string[]
+  /**
+   * The time budget, in milliseconds from `startedAt`. Defaults to
+   * SWEEP_BUDGET_MS. A transcript is started only when its reads are
+   * expected to finish inside it, except the first one to need the model,
+   * which is always started so a run can never make no progress at all.
+   */
+  budgetMs?: number
+  /** When the budget started counting, by `clock`. Defaults to the moment the sweep began; a route that did work first passes its own start. */
+  startedAt?: number
+  /** Milliseconds now. Defaults to Date.now; injected in tests. */
+  clock?: () => number
+  /**
+   * Called once per transcript, after the budget has admitted it and the
+   * gate has passed it, immediately before its first read. The rebuild uses
+   * it to expire (with `replace`) or count what the transcript already has
+   * on file at the last moment, so a transcript the budget never reaches is
+   * left exactly as it was. A throw stops the sweep.
+   */
+  beforeRead?: (transcriptId: string) => Promise<void>
 }
 
 /** The words `?second_pass=` takes to mean off. Anything else, or nothing, is on. */
@@ -1060,6 +1134,15 @@ export function mergeSecondRead(
  * failure that leaves the column null is a transcript this job re-reads, and
  * re-pays for, every thirty minutes until somebody notices the bill.
  *
+ * The converse holds as strictly: a transcript the sweep did NOT take on is
+ * never stamped. The run has a time budget (SWEEP_BUDGET_MS) because its
+ * caller hangs up at 120 seconds, and a transcript is only started when its
+ * reads are expected to fit, judged on the slowest read seen so far. What
+ * does not fit is left unread and unstamped for the next run and counted in
+ * `deferred`. A second read that would not fit is skipped rather than
+ * started; the first read is written and the call is stamped, because it
+ * was read.
+ *
  * Each eligible call is read twice by default (CN.1c, `mergeSecondRead`),
  * and whatever the two reads propose is ADDED to what the transcript already
  * has on file. A transcript read again after a rebuild therefore keeps every
@@ -1074,16 +1157,38 @@ export async function runSuggestionSweep(
   const nowIso = iso(at)
   const suggest = options.suggest ?? suggestFromTranscript
   const since = daysBefore(at, options.windowDays ?? SWEEP_WINDOW_DAYS)
+  const clock = options.clock ?? Date.now
+  const startedAt = options.startedAt ?? clock()
+  const budgetMs = options.budgetMs ?? SWEEP_BUDGET_MS
   const secondPass = {
     enabled: options.secondPass ?? true,
     ran: 0,
     proposed: 0,
     failed: [] as Array<{ transcriptId: string; reason: string }>,
+    skipped: [] as Array<{ transcriptId: string; reason: 'full' | 'out_of_time' }>,
   }
   const targeted = options.transcriptIds ? Array.from(new Set(options.transcriptIds)) : null
 
+  // The slowest read this run has timed, never below the prior. Every read,
+  // failed or not, feeds it: a read that took ninety seconds to throw is the
+  // best evidence there is that the next one may too.
+  let slowestRead = READ_ESTIMATE_MS
+  const timed = async <T>(read: () => Promise<T>): Promise<T> => {
+    const began = clock()
+    try {
+      return await read()
+    } finally {
+      slowestRead = Math.max(slowestRead, clock() - began)
+    }
+  }
+  const readsPerCall = secondPass.enabled ? 2 : 1
+  const fits = (reads: number): boolean => clock() - startedAt + reads * slowestRead <= budgetMs
+  let started = 0
+
   const summary: SweepSummary = {
     looked: 0,
+    deferred: 0,
+    deferredIds: [],
     eligible: 0,
     skipped: [],
     inserted: 0,
@@ -1114,20 +1219,29 @@ export async function runSuggestionSweep(
     })
     .from(schema.callTranscripts)
     .where(and(
-      isNull(schema.callTranscripts.suggestedAt),
       isNotNull(schema.callTranscripts.callId),
-      // Named transcripts are read whatever their age; the window is the
-      // scheduled sweep's rule for finding work, not a rule about reading it.
+      // Named transcripts are read whatever their age and whatever their
+      // mark; the window and the mark are the scheduled sweep's rules for
+      // finding work, not rules about reading it.
       targeted
         ? inArray(schema.callTranscripts.id, targeted)
-        : gte(schema.callTranscripts.receivedAt, since),
+        : and(isNull(schema.callTranscripts.suggestedAt), gte(schema.callTranscripts.receivedAt, since)),
     ))
     .orderBy(asc(schema.callTranscripts.receivedAt))
     .limit(options.batch ?? (targeted ? targeted.length : SWEEP_BATCH))
 
-  summary.looked = transcripts.length
+  for (const [index, transcript] of transcripts.entries()) {
+    // The budget, checked before anything is written for this transcript.
+    // Everything from here on is left exactly as it was found: unread,
+    // unstamped, and first in line for the next run, which also reads
+    // oldest first.
+    if (started > 0 && !fits(readsPerCall)) {
+      summary.deferredIds = transcripts.slice(index).map(t => t.id)
+      summary.deferred = summary.deferredIds.length
+      break
+    }
 
-  for (const transcript of transcripts) {
+    summary.looked++
     const gate = await resolveCallGate(database, transcript.callKind, transcript.callId)
 
     if (!gate.eligible) {
@@ -1137,6 +1251,8 @@ export async function runSuggestionSweep(
     }
 
     summary.eligible++
+    started++
+    if (options.beforeRead) await options.beforeRead(transcript.id)
 
     let base: SuggestFromTranscriptInput
     let result: SuggestResult
@@ -1148,7 +1264,8 @@ export async function runSuggestionSweep(
         callDate: transcript.receivedAt.slice(0, 10),
         context: await buildSuggestionContext(database, gate.orgId, at),
       }
-      result = await suggest(secondPass.enabled ? { ...base, cacheSource: true } : base)
+      const first = base
+      result = await timed(() => suggest(secondPass.enabled ? { ...first, cacheSource: true } : first))
     } catch (err) {
       // The summary has one slot for "this transcript produced nothing and
       // why", so a failure is reported there rather than in a field the
@@ -1171,22 +1288,32 @@ export async function runSuggestionSweep(
     // and one question, "anything missed?". Its new items join the first
     // read's before the writer sees either, so both go through exactly one
     // dedupe. Skipped when the first read already filled the ceiling, since a
-    // second read could add nothing. A failure here costs the second read
-    // only: the first is already in hand and is written regardless.
+    // second read could add nothing, and when it would risk the budget. A
+    // failure here costs the second read only: the first is already in hand
+    // and is written regardless.
     let drafts = result.suggestions
     const room = MAX_SUGGESTIONS - drafts.length
-    if (secondPass.enabled && room > 0) {
-      secondPass.ran++
-      try {
-        const again = await suggest({ ...base, cacheSource: true, alreadyProposed: drafts, maxNew: room })
-        summary.costCents += await recordSpend(database, transcript, again.usage, 'second_pass')
-        const merged = mergeSecondRead(drafts, again, room)
-        tally(merged.dropped)
-        secondPass.proposed += merged.added.length
-        drafts = [...drafts, ...merged.added]
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        secondPass.failed.push({ transcriptId: transcript.id, reason: `suggester_failed: ${message}` })
+    if (secondPass.enabled) {
+      if (room <= 0) {
+        secondPass.skipped.push({ transcriptId: transcript.id, reason: 'full' })
+      } else if (!fits(1)) {
+        secondPass.skipped.push({ transcriptId: transcript.id, reason: 'out_of_time' })
+      } else {
+        try {
+          const firstDrafts = drafts
+          const again = await timed(() => suggest({ ...base, cacheSource: true, alreadyProposed: firstDrafts, maxNew: room }))
+          summary.costCents += await recordSpend(database, transcript, again.usage, 'second_pass')
+          const merged = mergeSecondRead(drafts, again, room)
+          tally(merged.dropped)
+          secondPass.proposed += merged.added.length
+          drafts = [...drafts, ...merged.added]
+          // Counted last, so a second read whose answer never made it into
+          // the drafts is a failure and not both.
+          secondPass.ran++
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          secondPass.failed.push({ transcriptId: transcript.id, reason: `suggester_failed: ${message}` })
+        }
       }
     }
 

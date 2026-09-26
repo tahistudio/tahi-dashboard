@@ -16,15 +16,21 @@
  *      same call every thirty minutes forever.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import type { SQL } from 'drizzle-orm'
+import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core'
 import { schema } from '@/db/d1'
 import {
   CONTEXT_CONTACT_LIMIT,
   CONTEXT_REQUEST_LIMIT,
   CONTEXT_TASK_LIMIT,
+  DEFER_MARGIN_DAYS,
   MAX_SUGGESTIONS,
   MAX_SWEEP_BATCH,
+  READ_ESTIMATE_MS,
   SUGGESTER_SYSTEM_PROMPT,
   SWEEP_BATCH,
+  SWEEP_BUDGET_MS,
+  SWEEP_WINDOW_DAYS,
   SuggesterUnavailableError,
   buildSecondReadMessage,
   buildSuggestionContext,
@@ -35,6 +41,7 @@ import {
   runSuggestionSweep,
   suggestFromTranscript,
   suggestionContextWindows,
+  sweepWillReach,
   validateSuggestionItems,
   type SuggestFromTranscriptInput,
   type SuggestionContext,
@@ -75,6 +82,8 @@ vi.mock('@/lib/task-suggestions', async (importOriginal) => {
 // a test can assert what was written without a database.
 
 interface Recorded { table: unknown; values?: unknown; set?: unknown }
+
+const dialect = new SQLiteSyncDialect()
 
 function makeDb(selectResults: unknown[]) {
   const queue = [...selectResults]
@@ -1208,7 +1217,7 @@ describe('runSuggestionSweep reads every call twice', () => {
       { kind: 'update_task', targetTaskId: 'task-2' },
     ])
     expect(summary.inserted).toBe(2)
-    expect(summary.secondPass).toEqual({ enabled: true, ran: 1, proposed: 1, failed: [] })
+    expect(summary.secondPass).toEqual({ enabled: true, ran: 1, proposed: 1, failed: [], skipped: [] })
     expect(summary.dropReasons.second_read_repeat).toBe(1)
 
     // Each read is its own line in the spend log.
@@ -1238,6 +1247,9 @@ describe('runSuggestionSweep reads every call twice', () => {
     expect(summary.inserted).toBe(1)
     expect(summary.skipped).toEqual([])
     expect(summary.secondPass?.failed).toEqual([{ transcriptId: 'ct-1', reason: 'suggester_failed: 529 overloaded' }])
+    // `ran` counts second reads that came back, so a thrown one is in
+    // `failed` and nowhere else.
+    expect(summary.secondPass?.ran).toBe(0)
     expect(updates.find(u => u.table === schema.callTranscripts)).toBeTruthy()
   })
 
@@ -1250,7 +1262,7 @@ describe('runSuggestionSweep reads every call twice', () => {
     expect(suggest).toHaveBeenCalledTimes(1)
     expect(suggest.mock.calls[0][0].cacheSource).toBeUndefined()
     expect(summary.inserted).toBe(1)
-    expect(summary.secondPass).toEqual({ enabled: false, ran: 0, proposed: 0, failed: [] })
+    expect(summary.secondPass).toEqual({ enabled: false, ran: 0, proposed: 0, failed: [], skipped: [] })
   })
 
   it('skips the second read when the first already filled the ceiling', async () => {
@@ -1265,6 +1277,7 @@ describe('runSuggestionSweep reads every call twice', () => {
 
     expect(suggest).toHaveBeenCalledTimes(1)
     expect(summary.secondPass?.ran).toBe(0)
+    expect(summary.secondPass?.skipped).toEqual([{ transcriptId: 'ct-1', reason: 'full' }])
   })
 })
 
@@ -1352,6 +1365,159 @@ describe('runSuggestionSweep over named transcripts', () => {
     expect(summary.looked).toBe(1)
     const read = selects[0]
     expect(read.args[read.methods.indexOf('limit') - 1]).toEqual([2])
+  })
+
+  it('finds named transcripts whatever their read mark, and the scheduled run only unread ones', async () => {
+    // The rebuild names calls it has not cleared yet, so the budget can leave
+    // the ones it never reaches exactly as they were. Rendered to SQL rather
+    // than trusted to the shape of the call.
+    const whereOf = async (options: Parameters<typeof runSuggestionSweep>[1]) => {
+      const { handle, selects } = makeDb([[]])
+      await runSuggestionSweep(handle, { suggest: okSuggest, now: NOW_CN1C, ...options })
+      const read = selects[0]
+      return dialect.sqlToQuery(read.args[read.methods.indexOf('where') - 1][0] as SQL).sql
+    }
+
+    const named = await whereOf({ transcriptIds: ['ct-1'] })
+    expect(named).toContain('"call_id" is not null')
+    expect(named).not.toContain('suggested_at')
+
+    const scheduled = await whereOf({})
+    expect(scheduled).toContain('"suggested_at" is null')
+    expect(scheduled).toContain('"received_at" >= ?')
+  })
+})
+
+// ── The time budget ──────────────────────────────────────────────────────────
+// workers/cron-trigger hangs up at 120 seconds and a production read takes 20
+// to 27, twice per call. The sweep only starts a call it expects to finish
+// inside SWEEP_BUDGET_MS, judged on the slowest read it has timed, and leaves
+// the rest unread and unstamped for the next run. The clock is injected, so
+// each read below "takes" exactly as long as the test says.
+
+describe('runSuggestionSweep inside its time budget', () => {
+  const rows = ['ct-1', 'ct-2', 'ct-3'].map((id, i) => ({
+    ...TRANSCRIPT_ROW,
+    id,
+    receivedAt: `2026-09-1${5 + i}T02:00:00Z`,
+  }))
+
+  /** Every select a sweep over these client transcripts makes, in order, for the first `n` of them. */
+  function clientTranscripts(n: number) {
+    const perCall = () => [[{ orgId: 'org-a', meetingType: null }], ...contextSelects(), []]
+    return [rows, ...Array.from({ length: n }, perCall).flat(), [], []]
+  }
+
+  /** A model stand-in whose reads take the given times, in order, on a clock the test owns. */
+  function slowReads(times: number[]) {
+    const clock = { now: 0 }
+    let call = 0
+    const suggest = vi.fn(async (input: SuggestFromTranscriptInput) => {
+      clock.now += times[Math.min(call, times.length - 1)]
+      call++
+      return input.alreadyProposed === undefined
+        ? { suggestions: [FAQ], usage: USAGE, dropped: [] }
+        : { suggestions: [], usage: USAGE, dropped: [] }
+    })
+    return { suggest, clock: () => clock.now }
+  }
+
+  const stamps = (updates: Recorded[]) => updates.filter(u => u.table === schema.callTranscripts)
+
+  it('holds a budget with room under the scheduler\'s two minutes, and a prior above the slowest production read', () => {
+    expect(SWEEP_BUDGET_MS).toBeLessThanOrEqual(90_000)
+    expect(READ_ESTIMATE_MS).toBeGreaterThanOrEqual(27_000)
+    // Two reads of one call fit, so the scheduled run always reads a call.
+    expect(2 * READ_ESTIMATE_MS).toBeLessThanOrEqual(SWEEP_BUDGET_MS)
+  })
+
+  it('reads the first call, then leaves the calls it has no time for unread and unstamped', async () => {
+    const { suggest, clock } = slowReads([25_000])
+    const beforeRead = vi.fn(async () => {})
+    const { handle, updates } = makeDb(clientTranscripts(1))
+
+    const summary = await runSuggestionSweep(handle, { suggest, clock, beforeRead, now: NOW_CN1C })
+
+    // One call, both reads: fifty seconds in, a second call would need sixty more.
+    expect(suggest).toHaveBeenCalledTimes(2)
+    expect(summary.looked).toBe(1)
+    expect(summary.deferred).toBe(2)
+    expect(summary.deferredIds).toEqual(['ct-2', 'ct-3'])
+    expect(summary.secondPass).toMatchObject({ ran: 1, skipped: [] })
+    // Only the call it read is stamped, and only that one was prepared.
+    expect(stamps(updates)).toHaveLength(1)
+    expect(beforeRead.mock.calls).toEqual([['ct-1']])
+  })
+
+  it('keeps starting calls while their reads are expected to fit', async () => {
+    const { suggest, clock } = slowReads([1_000])
+    const { handle, updates } = makeDb(clientTranscripts(3))
+
+    const summary = await runSuggestionSweep(handle, { suggest, clock, now: NOW_CN1C })
+
+    expect(suggest).toHaveBeenCalledTimes(6)
+    expect(summary.looked).toBe(3)
+    expect(summary.deferred).toBe(0)
+    expect(summary.deferredIds).toEqual([])
+    expect(stamps(updates)).toHaveLength(3)
+  })
+
+  it('judges the next call on the slowest read it has timed, not on the prior', async () => {
+    // One read per call. Forty seconds in, the prior of thirty would still
+    // fit a call inside seventy five; the forty it just watched does not.
+    const { suggest, clock } = slowReads([40_000])
+    const { handle } = makeDb(clientTranscripts(1))
+
+    const summary = await runSuggestionSweep(handle, { suggest, clock, secondPass: false, now: NOW_CN1C })
+
+    expect(suggest).toHaveBeenCalledTimes(1)
+    expect(summary.deferredIds).toEqual(['ct-2', 'ct-3'])
+  })
+
+  it('skips a second read that would not fit, and still writes and stamps the first', async () => {
+    const { suggest, clock } = slowReads([50_000])
+    const { handle, updates } = makeDb(clientTranscripts(1))
+
+    const summary = await runSuggestionSweep(handle, { suggest, clock, now: NOW_CN1C })
+
+    expect(suggest).toHaveBeenCalledTimes(1)
+    expect(summary.inserted).toBe(1)
+    expect(summary.secondPass).toMatchObject({ ran: 0, failed: [], skipped: [{ transcriptId: 'ct-1', reason: 'out_of_time' }] })
+    expect(stamps(updates)).toHaveLength(1)
+    expect(summary.deferredIds).toEqual(['ct-2', 'ct-3'])
+  })
+
+  it('counts from the caller\'s start when the caller did work first, and still reads one call', async () => {
+    // A second read-once call would fit from the sweep's own start (one
+    // second in, thirty more), not from a start fifty seconds earlier.
+    const { suggest, clock } = slowReads([1_000])
+    const { handle } = makeDb(clientTranscripts(1))
+
+    const summary = await runSuggestionSweep(handle, { suggest, clock, startedAt: -50_000, secondPass: false, now: NOW_CN1C })
+
+    expect(suggest).toHaveBeenCalledTimes(1)
+    expect(summary.deferredIds).toEqual(['ct-2', 'ct-3'])
+  })
+
+  it('leaves a call for the sweep only while it is safely inside the sweep\'s window', () => {
+    const at = new Date('2026-09-26T00:00:00Z')
+    const daysAgo = (days: number) => new Date(at.getTime() - days * 86_400_000).toISOString()
+    expect(sweepWillReach(daysAgo(1), at)).toBe(true)
+    expect(sweepWillReach(daysAgo(SWEEP_WINDOW_DAYS - DEFER_MARGIN_DAYS - 0.1), at)).toBe(true)
+    // Inside the window today, but not for as long as a queue can take to drain.
+    expect(sweepWillReach(daysAgo(SWEEP_WINDOW_DAYS - 1), at)).toBe(false)
+    expect(sweepWillReach(daysAgo(SWEEP_WINDOW_DAYS + 5), at)).toBe(false)
+  })
+
+  it('never starves: a spent budget still reads the oldest call', async () => {
+    const { suggest, clock } = slowReads([1_000])
+    const { handle } = makeDb(clientTranscripts(1))
+
+    const summary = await runSuggestionSweep(handle, { suggest, clock, budgetMs: 0, now: NOW_CN1C })
+
+    expect(summary.looked).toBe(1)
+    expect(summary.secondPass?.skipped).toEqual([{ transcriptId: 'ct-1', reason: 'out_of_time' }])
+    expect(summary.deferred).toBe(2)
   })
 })
 
