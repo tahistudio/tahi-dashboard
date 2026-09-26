@@ -18,14 +18,39 @@
  * called directly with a fake `auth()`; `createRouteMatcher` is left real
  * (via importOriginal) since it is pure path matching and middleware.ts relies
  * on it to decide /sign-in, /sign-up etc. are public routes.
+ *
+ * WHY THE MODULE IS IMPORTED STATICALLY (LW.34). Loading middleware.ts pulls in
+ * the real Clerk server package through importOriginal, which takes about
+ * 250ms alone and 2.5s under a full parallel run. Every test used to do that
+ * load itself with `await import('@/middleware')`, so the first test paid for
+ * it inside its own 5 second budget, and while that import was still in
+ * flight every later test awaited the SAME pending import and burned its own 5
+ * seconds too: one slow load times out test after test (reproduced with a
+ * deliberately slow module), which fits all eight going red at once on
+ * 2026-09-14 while passing alone. A static import loads the module while the
+ * file is collected, where no per-test timeout applies.
+ *
+ * The mocks are built in vi.hoisted so the factories below can hold them
+ * directly, and every test starts from vi.resetAllMocks(): unlike
+ * clearAllMocks, a reset also drops a queued `mockRejectedValueOnce` that a
+ * failed or timed-out test never consumed, and puts each mock back on the
+ * implementation it was created with, so no test inherits another's script.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest, NextResponse } from 'next/server'
+import middlewareModule from '@/middleware'
 
-const inviteState: { value: Record<string, unknown> | null } = { value: null }
-const seatState: { value: boolean } = { value: false }
-const resolveInvite = vi.fn().mockImplementation(() => Promise.resolve(inviteState.value))
-const isSeatInvite = vi.fn().mockImplementation(() => Promise.resolve(seatState.value))
+const { inviteState, seatState, resolveInvite, isSeatInvite, db } = vi.hoisted(() => {
+  const inviteState: { value: Record<string, unknown> | null } = { value: null }
+  const seatState: { value: boolean } = { value: false }
+  return {
+    inviteState,
+    seatState,
+    resolveInvite: vi.fn(() => Promise.resolve(inviteState.value)),
+    isSeatInvite: vi.fn(() => Promise.resolve(seatState.value)),
+    db: vi.fn(() => Promise.resolve({})),
+  }
+})
 
 vi.mock('@clerk/nextjs/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@clerk/nextjs/server')>()
@@ -37,22 +62,14 @@ vi.mock('@clerk/nextjs/server', async (importOriginal) => {
   }
 })
 
-vi.mock('@/lib/db', () => ({
-  db: vi.fn().mockResolvedValue({}),
-}))
+vi.mock('@/lib/db', () => ({ db }))
 
-vi.mock('@/lib/onboarding-invites', () => ({
-  resolveInvite: (...args: unknown[]) => resolveInvite(...args),
-  isSeatInvite: (...args: unknown[]) => isSeatInvite(...args),
-}))
+vi.mock('@/lib/onboarding-invites', () => ({ resolveInvite, isSeatInvite }))
 
 type FakeAuth = () => Promise<{ userId: string | null; orgId?: string | null }>
 type MiddlewareHandler = (auth: FakeAuth, req: NextRequest) => Promise<NextResponse>
 
-async function loadMiddleware(): Promise<MiddlewareHandler> {
-  const mod = await import('@/middleware')
-  return mod.default as unknown as MiddlewareHandler
-}
+const middleware = middlewareModule as unknown as MiddlewareHandler
 
 function signedOut(): FakeAuth {
   return async () => ({ userId: null, orgId: null })
@@ -75,13 +92,12 @@ function invite(overrides: Record<string, unknown> = {}) {
 
 describe('middleware: invite-token entry', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     inviteState.value = null
     seatState.value = false
   })
 
   it('sends a signed-out visitor with no token to /sign-in, carrying redirect_url', async () => {
-    const middleware = await loadMiddleware()
     const req = new NextRequest('https://portal.tahi.studio/onboarding')
     const res = await middleware(signedOut(), req)
 
@@ -95,7 +111,6 @@ describe('middleware: invite-token entry', () => {
     inviteState.value = invite()
     seatState.value = false // the org has nobody else on it yet
 
-    const middleware = await loadMiddleware()
     const req = new NextRequest('https://portal.tahi.studio/onboarding?token=tok_1')
     const res = await middleware(signedOut(), req)
 
@@ -108,7 +123,6 @@ describe('middleware: invite-token entry', () => {
     inviteState.value = invite()
     seatState.value = true // the org already has someone else on it
 
-    const middleware = await loadMiddleware()
     const req = new NextRequest('https://portal.tahi.studio/onboarding?token=tok_1')
     const res = await middleware(signedOut(), req)
 
@@ -121,7 +135,6 @@ describe('middleware: invite-token entry', () => {
     inviteState.value = invite()
     seatState.value = true
 
-    const middleware = await loadMiddleware()
     const req = new NextRequest('https://portal.tahi.studio/onboarding?token=tok_1')
     const res = await middleware(signedOut(), req)
 
@@ -131,7 +144,6 @@ describe('middleware: invite-token entry', () => {
   it('falls back to /sign-in when the invite fails to resolve (fail-safe, never a hard failure)', async () => {
     resolveInvite.mockRejectedValueOnce(new Error('D1 unavailable'))
 
-    const middleware = await loadMiddleware()
     const req = new NextRequest('https://portal.tahi.studio/onboarding?token=tok_broken')
     const res = await middleware(signedOut(), req)
 
@@ -143,7 +155,6 @@ describe('middleware: invite-token entry', () => {
     inviteState.value = invite({ flow: 'team', orgId: null })
     seatState.value = true
 
-    const middleware = await loadMiddleware()
     const req = new NextRequest('https://portal.tahi.studio/welcome?token=tok_team')
     const res = await middleware(signedOut(), req)
 
@@ -156,7 +167,6 @@ describe('middleware: invite-token entry', () => {
     inviteState.value = invite({ expired: true })
     seatState.value = true
 
-    const middleware = await loadMiddleware()
     const req = new NextRequest('https://portal.tahi.studio/onboarding?token=tok_expired')
     const res = await middleware(signedOut(), req)
 
@@ -169,7 +179,6 @@ describe('middleware: invite-token entry', () => {
     inviteState.value = invite()
     seatState.value = true
 
-    const middleware = await loadMiddleware()
     const req = new NextRequest('https://portal.tahi.studio/onboarding?token=tok_1')
     const res = await middleware(signedIn(), req)
 

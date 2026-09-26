@@ -235,24 +235,31 @@ describe('no money query hand-rolls an invoice status list', () => {
     /status\s+IN\s*\(\s*'sent'/i,
   ]
 
+  // The entry type comes with the listing (one readdir per folder, not a stat
+  // per file); a symlink still goes through stat so it is followed as before.
   function walk(dir: string, out: string[] = []): string[] {
-    for (const entry of readdirSync(dir)) {
-      if (SKIP_DIRS.has(entry)) continue
-      const full = join(dir, entry)
-      if (statSync(full).isDirectory()) walk(full, out)
-      else if (/\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry)) out.push(full)
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (SKIP_DIRS.has(entry.name)) continue
+      const full = join(dir, entry.name)
+      const isDir = entry.isSymbolicLink() ? statSync(full).isDirectory() : entry.isDirectory()
+      if (isDir) walk(full, out)
+      else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) out.push(full)
     }
     return out
   }
 
+  // Read while the spec is collected, where no per-test timeout applies: the
+  // walk and read inside the test took it to 2.7s of a 5 second budget under a
+  // full parallel run with other suites on the machine (LW.34).
+  const SOURCES = ROOTS.flatMap(root => walk(root)).map(file => ({
+    file,
+    source: readFileSync(file, 'utf8'),
+  }))
+
   it('finds no inline owed-status array left behind', () => {
-    const offenders: string[] = []
-    for (const root of ROOTS) {
-      for (const file of walk(root)) {
-        const source = readFileSync(file, 'utf8')
-        if (BANNED.some(re => re.test(source))) offenders.push(file)
-      }
-    }
+    const offenders = SOURCES
+      .filter(({ source }) => BANNED.some(re => re.test(source)))
+      .map(({ file }) => file)
     expect(offenders).toEqual([])
   })
 })

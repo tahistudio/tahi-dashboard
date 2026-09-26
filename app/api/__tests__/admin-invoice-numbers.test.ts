@@ -186,15 +186,28 @@ beforeEach(() => {
 
 describe('POST /api/admin/invoices, minting', () => {
   it('stamps a number in the expected format and returns it', async () => {
-    const { handle, queries } = makeDb({ prefix: 'INV-' })
-    vi.mocked(db).mockResolvedValue(handle as never)
+    // The year is the STUDIO's (Pacific/Auckland, lib/invoice-number.ts
+    // studioCalendarYear), and this test used to expect the runner's own
+    // `new Date().getFullYear()`. Those agree on a machine in New Zealand and
+    // disagree on a UTC runner for the thirteen hours after NZ midnight every
+    // New Year (LW.34). The clock is frozen inside exactly that window, at
+    // 01:00 on 1 January 2027 in Auckland and still 2026 in UTC, so the label
+    // is pinned to the studio's year on any machine instead of by the hour.
+    // Only Date is faked; the mocked D1 handle needs no timers.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-12-31T12:00:00Z'))
+    try {
+      const { handle, queries } = makeDb({ prefix: 'INV-' })
+      vi.mocked(db).mockResolvedValue(handle as never)
 
-    const res = await createInvoice(createReq({ orgId: 'org-a', lineItems: LINE_ITEMS }))
-    const body = await res.json() as { id: string; number: string | null }
+      const res = await createInvoice(createReq({ orgId: 'org-a', lineItems: LINE_ITEMS }))
+      const body = await res.json() as { id: string; number: string | null }
 
-    const year = new Date().getFullYear()
-    expect(body.number).toBe(`INV-${year}-0001`)
-    expect(invoiceWrites(queries)[0].number).toBe(`INV-${year}-0001`)
+      expect(body.number).toBe('INV-2027-0001')
+      expect(invoiceWrites(queries)[0].number).toBe('INV-2027-0001')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('increments across two invoices', async () => {
