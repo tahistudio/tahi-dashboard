@@ -283,6 +283,19 @@ describe('POST /api/admin/task-suggestions/[id]/decide', () => {
     expect(decisions[2].decision).toEqual({ action: 'snooze', until: '2026-10-01T07:00:00Z' })
   })
 
+  it('says whether a reason was recorded, including on a row that was already rejected', async () => {
+    decideResultFor = { suggestion: { id: 's1', status: 'rejected' }, changed: false, reasonRecorded: true }
+    const late = await DECIDE(
+      req('http://localhost/x', { method: 'POST', body: { action: 'reject', reason: 'Already have it' } }) as never,
+      params('s1'),
+    )
+    expect(await late.json()).toMatchObject({ changed: false, reasonRecorded: true })
+
+    decideResultFor = null
+    const plain = await DECIDE(req('http://localhost/x', { method: 'POST', body: { action: 'reject' } }) as never, params('s1'))
+    expect(await plain.json()).toMatchObject({ changed: true, reasonRecorded: false })
+  })
+
   it('sends a reject with no reason, or a blank or non-text one, as the plain reject it always was', async () => {
     for (const reason of [undefined, '', '   ', 42, { text: 'x' }]) {
       decisions.length = 0

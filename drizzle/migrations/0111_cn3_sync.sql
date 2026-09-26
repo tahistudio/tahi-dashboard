@@ -16,6 +16,12 @@
 -- slack_digests                    one claim per NZ week per Slack user for
 --                                  the Monday digest
 --
+-- slack_work_posts.actor_key is who made the change, the coalescing key:
+-- 'tm:<teamMemberId>', 'contact:<contactId>', 'acting:<teamMemberId>:<contactId>'
+-- (the studio acting as that client), 'acting:<teamMemberId>' (acting, the
+-- contact not resolved), 'service' (the MCP service user), 'unknown', or
+-- 'cap' (the day's last line in a thread).
+--
 -- See the runner entry in app/api/admin/db/migrate/route.ts for the full
 -- description. Everything is additive: the tables and indexes are IF NOT
 -- EXISTS, and the ALTER is re-run safe through the runner's duplicate-column

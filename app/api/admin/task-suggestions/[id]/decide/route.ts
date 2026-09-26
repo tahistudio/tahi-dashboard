@@ -128,6 +128,10 @@ export async function POST(
     error: result.error ?? null,
     // What that duplicate is, so the inbox can name it without a second read.
     similar: result.similar ?? null,
+    // True when this call stored a reject reason (CN.3 section 7). A reason
+    // sent after the Reject tap comes back changed false and this true, which
+    // is how the caller tells it landed from a second Reject that did nothing.
+    reasonRecorded: result.reasonRecorded === true,
   })
 }
 

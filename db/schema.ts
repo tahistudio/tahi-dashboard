@@ -4178,7 +4178,11 @@ export const slackWorkPosts = sqliteTable('slack_work_posts', {
   threadTs: text('thread_ts').notNull(),
   // The posted reply. Null while claimed.
   ts: text('ts'),
-  // 'tm:<teamMemberId>' | 'contact:<contactId>' | 'service' | 'unknown' | 'cap'
+  // Who made the change, the coalescing key: 'tm:<teamMemberId>' |
+  // 'contact:<contactId>' | 'acting:<teamMemberId>:<contactId>' (the studio
+  // acting as that client) | 'acting:<teamMemberId>' (acting, contact not
+  // resolved) | 'service' (the MCP service user) | 'unknown' | 'cap' (the
+  // day's last line, "the dashboard has the rest").
   actorKey: text('actor_key').notNull(),
   // JSON array of { field, from, to, phrase }.
   changes: text('changes').notNull(),
