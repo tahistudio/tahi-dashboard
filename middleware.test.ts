@@ -39,6 +39,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest, NextResponse } from 'next/server'
 import middlewareModule from '@/middleware'
+import { targetToPath } from './workers/cron-trigger/src/schedule'
 
 const { inviteState, seatState, resolveInvite, isSeatInvite, db } = vi.hoisted(() => {
   const inviteState: { value: Record<string, unknown> | null } = { value: null }
@@ -184,5 +185,36 @@ describe('middleware: invite-token entry', () => {
 
     expect(res.headers.get('location')).toBeNull()
     expect(res.cookies.get('tahi-invite-token')?.value).toBe('tok_1')
+  })
+})
+
+/**
+ * Every scheduled target reaches its route handler.
+ *
+ * workers/cron-trigger POSTs each target with x-cron-secret and no Bearer, so
+ * the Bearer bypass never applies: a target path that is missing from
+ * isPublicRoute falls through to auth.protect(), which Clerk answers with a
+ * 404 before the handler can check the secret. That is how the call-notes
+ * suggester (/api/admin/crons/, plural) silently stopped running for four days
+ * after the schedule moved off GitHub. Walking targetToPath here means a new
+ * schedule entry cannot ship without its middleware line.
+ */
+describe('middleware: cron-trigger targets are public', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+  })
+
+  it.each(Object.entries(targetToPath))('lets the %s target through without a session', async (_target, path) => {
+    const protect = vi.fn(() => Promise.reject(new Error('Clerk would 404 here')))
+    const auth = Object.assign(signedOut(), { protect }) as FakeAuth
+    const req = new NextRequest(`https://portal.tahi.studio/api/admin/${path}`, {
+      method: 'POST',
+      headers: { 'x-cron-secret': 'secret' },
+    })
+
+    const res = await middleware(auth, req)
+
+    expect(protect).not.toHaveBeenCalled()
+    expect(res.headers.get('location')).toBeNull()
   })
 })
