@@ -5,8 +5,9 @@
  * pinned word for word: reject_reason on task_suggestions, the three indexes,
  * slack_work_posts and slack_digests. What is pinned besides:
  *
- *   ORDER. '0111' follows '0110' and is the last entry, so "all" applies it
- *   after the tables it indexes exist.
+ *   ORDER. '0111' comes straight after '0110', so "all" applies it after the
+ *   tables it indexes exist. Nothing is said about what follows it, so a
+ *   later 0112 does not break this file.
  *
  *   RE-RUN SAFETY. The ALTER is the one statement without IF NOT EXISTS; a
  *   second run hits "duplicate column name" and the runner counts it as
@@ -79,13 +80,13 @@ beforeEach(() => {
 })
 
 describe('migration 0111', () => {
-  it('is listed straight after 0110, as the last migration', async () => {
+  it('is listed straight after 0110', async () => {
     const res = await GET(new Request('http://localhost/api/admin/db/migrate') as never)
     const body = await res.json() as { migrations: Array<{ name: string; description: string; statementCount: number }> }
     const names = body.migrations.map(m => m.name)
 
+    expect(names).toContain('0110')
     expect(names.indexOf('0111')).toBe(names.indexOf('0110') + 1)
-    expect(names.at(-1)).toBe('0111')
     const entry = body.migrations.find(m => m.name === '0111')
     expect(entry?.statementCount).toBe(EXPECTED.length)
     expect(entry?.description).toContain('Apply BEFORE deploying: db/schema.ts names reject_reason, so every full-row select of task_suggestions reads it.')

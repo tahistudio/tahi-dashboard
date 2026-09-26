@@ -868,7 +868,7 @@ describe('runSuggestionSweep', () => {
       [{ orgId: null, meetingType: 'client', dealId: null, attendees: JSON.stringify([{ email: 'a@one.com' }, { email: 'b@two.com' }]) }],
       [{ orgId: 'org-a', email: 'a@one.com' }, { orgId: 'org-b', email: 'b@two.com' }],
       ...contextSelects().slice(0, 2),
-      NO_REJECTIONS,
+      // No rejected-examples read: a call with no client is shown none.
       [],
       [],
       [],
@@ -905,7 +905,7 @@ describe('runSuggestionSweep', () => {
       [{ orgId: null, meetingType: 'client' }],
       // A null org is studio housekeeping: roster and tasks, no client requests.
       ...contextSelects().slice(0, 2),
-      NO_REJECTIONS,
+      // No rejected-examples read: a call with no client is shown none.
       [],                                   // insertSuggestions: no existing keys
       [],                                   // resurfaceSnoozed
     ])
@@ -918,6 +918,26 @@ describe('runSuggestionSweep', () => {
     expect(summary.eligible).toBe(1)
     expect(summary.inserted).toBe(1)
     expect(summary.dropped).toBe(1)
+  })
+
+  it('shows a call with no client no rejections, and never asks for the null-org ones', async () => {
+    const { handle, selects } = makeDb([
+      [TRANSCRIPT_ROW],
+      [{ orgId: null, meetingType: 'client' }],
+      ...contextSelects().slice(0, 2),
+      [],                                   // insertSuggestions: no existing keys
+      [],                                   // resurfaceSnoozed
+    ])
+
+    await runSuggestionSweep(handle, { suggest: okSuggest, now: new Date('2026-09-19T00:00:00Z'), secondPass: false })
+
+    const calls = okSuggest.mock.calls as unknown as Array<[SuggestFromTranscriptInput]>
+    expect(calls[0][0].context.rejected).toEqual([])
+    const rejectedRead = selects.find(record => {
+      const where = record.methods.indexOf('where')
+      return where > 0 && dialect.sqlToQuery(record.args[where - 1][0] as SQL).sql.includes('"approver_type" = ?')
+    })
+    expect(rejectedRead).toBeUndefined()
   })
 
   it('records the spend under the call_suggestions scope, against the transcript', async () => {
@@ -1692,13 +1712,17 @@ describe('selectRejectedExamples', () => {
     expect(examples.map(e => e.summary)).toEqual(['Rejected 119 days ago - development'])
   })
 
-  it('uses studio rows (no client) only when the call itself has no client', () => {
+  it('shows nothing when the call has no client, even when handed rows with no org', () => {
+    // A founders row with no org is some client's call whose client was never
+    // worked out, not studio housekeeping, so two such calls from two clients
+    // must not see each other's rejections.
     const rows = [
-      rejectedRow({ orgId: null, title: 'Renew the studio domain' }),
+      rejectedRow({ orgId: null, title: 'Rebuild the Verandela booking flow', quote: 'Verandela wants the booking flow rebuilt' }),
       rejectedRow({ orgId: 'org-a', title: 'Add the LinkedIn tag to the footer' }),
     ]
 
-    expect(selectRejectedExamples(rows, null, AT_CN3).map(e => e.summary)).toEqual(['Renew the studio domain - development'])
+    expect(selectRejectedExamples(rows, null, AT_CN3)).toEqual([])
+    expect(selectRejectedExamples(rows, '', AT_CN3)).toEqual([])
     expect(selectRejectedExamples(rows, 'org-a', AT_CN3).map(e => e.summary)).toEqual(['Add the LinkedIn tag to the footer - development'])
   })
 
@@ -1860,12 +1884,11 @@ describe('loadRejectedExamples', () => {
     expect(read.args[read.methods.indexOf('limit') - 1]).toEqual([REJECTED_SCAN_LIMIT])
   })
 
-  it('asks for studio rows by null org when the call has no client', async () => {
-    const { handle, selects } = makeDb([[]])
-    await loadRejectedExamples(handle, null, AT_CN3)
-    const where = whereSql(selects[0])
-    expect(where.sql).toContain('"org_id" is null')
-    expect(where.params).not.toContain(null)
+  it('makes no read at all when the call has no client', async () => {
+    const { handle, selects } = makeDb([[rejectedRow({ orgId: null })]])
+    await expect(loadRejectedExamples(handle, null, AT_CN3)).resolves.toEqual([])
+    await expect(loadRejectedExamples(handle, '', AT_CN3)).resolves.toEqual([])
+    expect(selects).toHaveLength(0)
   })
 
   it('applies every rule again to what the query hands back', async () => {

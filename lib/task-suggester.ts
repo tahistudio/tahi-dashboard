@@ -477,6 +477,14 @@ export async function buildSuggestionContext(
 // come back as a proposal filed on the wrong client, and a request title is
 // client visible once approved. So the org is filtered in SQL and then again
 // here, in a pure function the tests hand another client's rows to.
+//
+// NO CLIENT, NO EXAMPLES. A call suggestion with no org is not studio
+// housekeeping: scheduled calls always carry an org and Slack notes are never
+// 'founders' rows, so a null org on a founders row means some client's
+// discovery call whose client could not be worked out, and the repair pass
+// only mends pending rows. Two such calls from two different clients would
+// share the null, so matching null to null would show one client's title and
+// quote in the other's prompt. A call with no org is read with no block.
 
 /** One task_suggestions row as the rejected-examples reader selects it. */
 export interface RejectedSuggestionRow {
@@ -518,8 +526,9 @@ function parseProposalLoose(proposal: string): unknown {
  *     ask, not a verdict on what the client wants.
  *   * decided inside REJECTED_WINDOW_DAYS of `at`. Older than that and the
  *     client may well want it now.
- *   * the same client: the row's org equals `orgId`, or both are null for
- *     studio housekeeping. Never another client's row.
+ *   * the same client: the row's org equals `orgId`. Never another client's
+ *     row, and nothing at all when `orgId` is empty, since a null org is an
+ *     unidentified client rather than the studio (see above).
  *
  * Then one example per folded summary, so the same item rejected off three
  * calls is one line rather than three, and at most REJECTED_EXAMPLE_LIMIT.
@@ -530,12 +539,13 @@ export function selectRejectedExamples(
   at: Date,
 ): RejectedExample[] {
   const scope = orgId || null
+  if (!scope) return []
   const since = at.getTime() - REJECTED_WINDOW_DAYS * 86_400_000
 
   const eligible = rows
     .filter(row => row.status === 'rejected'
       && row.approverType === 'founders'
-      && (row.orgId || null) === scope)
+      && row.orgId === scope)
     .map(row => ({ row, time: row.decidedAt ? Date.parse(row.decidedAt) : Number.NaN }))
     .filter(entry => Number.isFinite(entry.time) && entry.time >= since)
     .sort((a, b) => b.time - a.time)
@@ -568,15 +578,17 @@ export function selectRejectedExamples(
  * applies every rule again. Never throws: a sweep that cannot read its
  * rejections reads the call without them, exactly as it did before CN.3,
  * rather than failing a call over a hint. That includes the window before
- * migration 0111 is applied, when reject_reason does not exist yet.
+ * migration 0111 is applied, when reject_reason does not exist yet. A call
+ * with no org reads nothing at all, not the null-org rows (see above).
  */
 export async function loadRejectedExamples(
   database: Drizzle,
   orgId: string | null,
   at: Date,
 ): Promise<RejectedExample[]> {
+  const scope = orgId || null
+  if (!scope) return []
   try {
-    const scope = orgId || null
     const rows = await database
       .select({
         kind: schema.taskSuggestions.kind,
@@ -592,7 +604,7 @@ export async function loadRejectedExamples(
       .where(and(
         eq(schema.taskSuggestions.status, 'rejected'),
         eq(schema.taskSuggestions.approverType, 'founders'),
-        scope ? eq(schema.taskSuggestions.orgId, scope) : isNull(schema.taskSuggestions.orgId),
+        eq(schema.taskSuggestions.orgId, scope),
         gte(schema.taskSuggestions.decidedAt, daysBefore(at, REJECTED_WINDOW_DAYS)),
       ))
       .orderBy(desc(schema.taskSuggestions.decidedAt))
