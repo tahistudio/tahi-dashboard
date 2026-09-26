@@ -175,13 +175,16 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     // The Slack thread line (CN.3), when this request came from a studio
     // card. In act mode the seat is the previewed contact, not the login.
+    // Otherwise no contact is named here: the lookup above is by login alone,
+    // so a person with seats at two clients could come back as the other one.
+    // The engine finds the seat at this request's client from the login.
     if (workSyncArmed()) {
       await queueWorkSync(drizzle, [{
         entityType: 'request',
         entityId: id,
         actor: {
           type: 'client',
-          contactId: acting ? acting.contactId : (contact?.id ?? null),
+          contactId: acting ? acting.contactId : null,
           clerkUserId: userId,
           actingAsTeamMemberId: acting?.adminTeamMemberId ?? null,
         },

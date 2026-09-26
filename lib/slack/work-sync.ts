@@ -513,7 +513,8 @@ async function killSwitchOn(drizzle: Drizzle): Promise<boolean> {
 
 interface ResolvedActor {
   label: string
-  /** 'tm:<id>' | 'service' | 'contact:<id>' | 'unknown', the coalescing key. */
+  /** 'tm:<id>' | 'service' | 'contact:<id>' | 'acting:<tmId>:<contactId>' |
+   *  'unknown', the coalescing key. */
   key: string
   /** For "took it on". */
   teamMemberId: string | null
@@ -568,11 +569,13 @@ function resolveActor(actor: WorkActor, item: Item | null, lookups: Lookups): Re
 
     if (acting) {
       // The studio standing in the client's seat: "Liam as Tim". It was
-      // Liam's change, so Liam's own DM does not hear about it either.
+      // Liam's change, so Liam's own DM does not hear about it either. Keyed
+      // apart from the real client, so "Liam as Tim" and Tim himself acting
+      // on the same item inside ten minutes stay two lines under two names.
       const admin = firstName(lookups.membersById.get(acting)?.name) ?? 'Someone'
       return {
         label: `${admin} as ${contactFirst ?? 'the client'}`,
-        key,
+        key: contactKey ? `acting:${acting}:${contactKey}` : `acting:${acting}`,
         teamMemberId: null,
         ownChannels: ownChannelsOf(lookups, acting),
       }

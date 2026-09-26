@@ -771,8 +771,11 @@ export async function handOffRequest(
   }
 
   // The Slack thread line (CN.3). Only a person's hand-off: an approved
-  // hand_off_request suggestion is the card itself.
-  if (actor.actorType === 'team_member' && workSyncArmed()) {
+  // hand_off_request suggestion is the card itself. Handing it again to the
+  // same person for the same reason moves nothing the line would say, so it
+  // stays quiet, the way a double-clicked PATCH does.
+  const rehanded = request.waitingOnContactId === contact.id && request.waitingReason === reason
+  if (actor.actorType === 'team_member' && !rehanded && workSyncArmed()) {
     const name = contact.name?.trim() || 'the client'
     await queueWorkSync(drizzle, [{
       entityType: 'request',

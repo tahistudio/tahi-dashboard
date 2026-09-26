@@ -165,10 +165,12 @@ describe('the client review and the Slack thread line (CN.3)', () => {
 
     const res = await REVIEW(req({ decision: 'approve' }), params('req-1'))
     expect(res.status).toBe(200)
+    // No contact is named: the route's own lookup is by login alone, so the
+    // engine picks the seat at this request's client from the login instead.
     expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([{
       entityType: 'request',
       entityId: 'req-1',
-      actor: { type: 'client', contactId: 'contact-1', clerkUserId: 'user_ngaire', actingAsTeamMemberId: null },
+      actor: { type: 'client', contactId: null, clerkUserId: 'user_ngaire', actingAsTeamMemberId: null },
       changes: [{ field: 'status', from: 'client_review', to: 'delivered', phrase: 'approved it' }],
     }])
   })

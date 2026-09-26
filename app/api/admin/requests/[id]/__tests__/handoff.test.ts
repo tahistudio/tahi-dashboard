@@ -370,6 +370,28 @@ describe('POST handoff, the Slack thread line (CN.3)', () => {
     expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
   })
 
+  it('queues nothing when it is handed again to the same person for the same reason', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const waiting = { ...REQUEST, waitingOnContactId: 'contact-1', waitingReason: 'approval' }
+    const { handle } = makeDb([[waiting], [CONTACT]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await POST(post({ contactId: 'contact-1', reason: 'approval' }), params('req-1'))
+    expect(res.status).toBe(200)
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+  })
+
+  it('still queues a re-hand-off to the same person for a different reason', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const waiting = { ...REQUEST, waitingOnContactId: 'contact-1', waitingReason: 'approval' }
+    const { handle } = makeDb([[waiting], [CONTACT]])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    await POST(post({ contactId: 'contact-1', reason: 'file' }), params('req-1'))
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1][0].changes[0].phrase)
+      .toBe('handed it to Ngaire Hutchins, waiting on a file')
+  })
+
   it('queues nothing for a refused hand-off', async () => {
     vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
     const { handle } = makeDb([[REQUEST], []])

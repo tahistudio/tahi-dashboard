@@ -608,6 +608,31 @@ describe('when Slack is configured', () => {
         threadTs: '1759300000.000200',
         text: `Liam as Tim approved it · 14:02 · ${LINK_REQUEST}`,
       }])
+      expect(workRows(w)[0].actor_key).toBe('acting:tm_liam:c_tim')
+    })
+
+    it('never merges the studio acting as a client with the client themselves', async () => {
+      const w = world()
+      card(w, { requestId: 'r1', copies: [['D_STACI', '1759300000.000200']] })
+      await syncWorkChanges(w.database, [{
+        entityType: 'request',
+        entityId: 'r1',
+        actor: { type: 'client', contactId: 'c_tim', clerkUserId: 'user_liam', actingAsTeamMemberId: 'tm_liam' },
+        changes: [{ field: 'status', from: 'client_review', to: 'delivered', phrase: 'approved it' }],
+      }], deps())
+      const second = await syncWorkChanges(w.database, [{
+        entityType: 'request',
+        entityId: 'r1',
+        actor: { type: 'client', contactId: 'c_tim', clerkUserId: 'user_tim' },
+        changes: [{ field: 'waitingOn', to: null, phrase: 'sent it back to the studio' }],
+      }], deps(new Date(NOW.getTime() + 5 * 60_000)))
+
+      expect(second).toEqual({ posted: 1, rewritten: 0, skipped: 0 })
+      expect(updated).toEqual([])
+      expect(posted.map(line => line.text)).toEqual([
+        `Liam as Tim approved it · 14:02 · ${LINK_REQUEST}`,
+        `Tim at Verandela sent it back to the studio · 14:07 · ${LINK_REQUEST}`,
+      ])
     })
   })
 
