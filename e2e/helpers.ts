@@ -378,6 +378,28 @@ export const testWithStudio = base.extend<{ studio: APIRequestContext }>({
   },
 })
 
+/**
+ * Skip the calling test unless the operator has said the server under test
+ * cannot deliver mail. Call it from a beforeEach.
+ *
+ * The deliverable specs (sales-publish, public-viewers) drive the real fan
+ * outs: a proposal decision and a contract signature both mail the studio, and
+ * business@tahi.studio is inside the allowlist. The default config starts
+ * `npm run dev`, which reads the live Resend key from .env.local, so a plain
+ * `npm run test:e2e` would put a proposal decision, the signature notices and a
+ * signed PDF in Liam's inbox on every pass. The runner cannot see the server's
+ * key (global-setup loads .env.local into this process, not that one), so the
+ * flag is the operator's word for it: start the server with RESEND_API_KEY set
+ * to a dead value, then run with E2E_DEAD_RESEND_KEY=1. The recipe is in
+ * docs/local-dev-and-qa.md.
+ */
+export function skipUnlessMailIsDead(): void {
+  base.skip(
+    process.env.E2E_DEAD_RESEND_KEY !== '1',
+    'Mails the studio for real unless the server holds a dead RESEND_API_KEY; set E2E_DEAD_RESEND_KEY=1 once it does.',
+  )
+}
+
 // ── The studio bell ──────────────────────────────────────────────────────────
 //
 // A client's decision on a public link reaches the studio as a bell row for

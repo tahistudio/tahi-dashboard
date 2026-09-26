@@ -492,15 +492,24 @@ retires the dead C3 contract-signature template. D3 below. D4 = CT.15.
   2026-09-26: both specs written and green on the QA harness (tahi-qa, webpack
   dev on 3179, chromium at 375px), each file alone with --workers=1, three runs
   in a row. sales-publish: share snapshots, a live edit stays pinned, re-share
-  does not clobber, publish re-arms, every package tab reachable at 375px, accept
-  reaches the studio bell with the published amounts frozen, revoke 404s and the
-  next share starts fresh, an expired proposal refuses with 410. public-viewers:
-  two signers draw on the real canvas at 375px (one with dashboard dark mode set,
-  stripped by the public layout), fully signed with a final hash, signed PDF in
-  R2 and served by both download routes, partial and final bell rows, cancelled
-  and lapsed contracts refuse the signature. The harness dev server runs with
-  RESEND_API_KEY set to a dead value, so nothing is mailed. Still owed: the live
-  rehearsal with real inboxes (T3.QA).
+  does not clobber, publish re-arms, accept reaches the studio bell with the
+  published amounts frozen, revoke 404s and the next share starts fresh, an
+  expired proposal refuses with 410. public-viewers: two signers draw on the real
+  canvas at 375px (one with dashboard dark mode set, stripped by the public
+  layout), fully signed with a final hash, signed PDF in R2 and served by both
+  download routes, partial and final bell rows, cancelled and lapsed contracts
+  refuse the signature. The harness dev server runs with RESEND_API_KEY set to a
+  dead value, so nothing is mailed. Still owed: the live rehearsal with real
+  inboxes (T3.QA).
+  Review fixes, same day: the package tab check never overflowed (Starter,
+  Growth and Scale fit the strip at 375px, and a click scrolls even an overflow
+  hidden strip). The packages now carry realistic names (437px of tabs in a
+  307px strip), the spec asserts that overflow first, and reaches the last tab
+  with a sideways wheel; a browser-only probe with the pre-fix overflow hidden
+  injected leaves the last tab cut off. The client signer now signs with a
+  finger (touch pointers, no pointercancel, so the pad's touch-action is held),
+  contrastOf fails closed on colours it cannot parse, and both files skip
+  unless E2E_DEAD_RESEND_KEY=1 (docs/local-dev-and-qa.md).
 
 ## Batch E. Messages, unhidden
 

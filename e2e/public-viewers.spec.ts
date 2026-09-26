@@ -4,6 +4,7 @@ import {
   expectNoHorizontalScroll,
   markBellRead,
   primePage,
+  skipUnlessMailIsDead,
   testWithStudio as test,
 } from './helpers'
 
@@ -16,14 +17,24 @@ import {
  *   - A contract with two signers is created and sent through the admin
  *     routes. The send route mints the share token and hands back one sign
  *     path per signer; it mails nobody (see its own header).
- *   - The client signer opens their link at 375px, draws a signature with the
- *     pointer on the real canvas, ticks the intent box and submits. The page
- *     flips to "Your signature is in" and the studio bell gets a partial row.
+ *   - The client signer opens their link at 375px on a touch screen, draws a
+ *     signature with a finger on the real canvas, ticks the intent box and
+ *     submits. The pad has to take the stroke as touch pointer events without
+ *     the browser cancelling it to scroll the page (its touch-action), which a
+ *     mouse stroke never tests. The page flips to "Your signature is in" and
+ *     the studio bell gets a partial row.
  *   - The studio signer opens theirs in a browser whose dashboard theme is
  *     dark (localStorage tahi-theme=dark before the first paint, which is what
- *     the root layout's blocking script reads). The public layout has to strip
- *     that `.dark` class so the deliverable renders in its own light theme,
- *     and the text has to stay readable. They sign; the page reads Fully signed.
+ *     the root layout's blocking script reads), and signs with a mouse. The
+ *     public layout has to strip that `.dark` class so the deliverable renders
+ *     in its own light theme, and the text has to stay readable. They sign;
+ *     the page reads Fully signed.
+ *
+ *     What this does not catch: the class is on <html> from the blocking
+ *     script until the public layout's effect removes it after hydration
+ *     (app/p/layout.tsx), so a dark first frame is still possible. The check
+ *     that the root layout applied the class records exactly that window; the
+ *     spec does not fail on it, because that is how the layout works today.
  *   - The document is signed with a final hash, both signatures carry a body
  *     hash, the stamped PDF is in R2 at contracts/<id>/signed.pdf and served
  *     by both the admin and the token-scoped download routes, and the bell has
@@ -42,7 +53,8 @@ import {
  * server with RESEND_API_KEY set to a dead value: the PDF is written, and
  * every send is refused by Resend (the allowlist already holds back every
  * address but business@tahi.studio, and every signer here is on example.com).
- * Never point this file at a server holding a live key.
+ * The file skips unless E2E_DEAD_RESEND_KEY=1 says the server holds that dead
+ * key (skipUnlessMailIsDead in e2e/helpers.ts).
  *
  * Data: every contract is created here under a unique name and deleted in a
  * finally, and its signers and signatures go with it through the ON DELETE
@@ -78,6 +90,18 @@ interface ContractRead {
   signatures: Array<{ signerId: string; signatureDataUrl: string; bodyHash: string | null; chainHash: string }>
 }
 
+interface Point {
+  x: number
+  y: number
+}
+
+/** What the pad heard during a touch stroke. */
+interface PadPointers {
+  touchDowns: number
+  touchMoves: number
+  cancels: number
+}
+
 /** A 1x1 transparent PNG, the smallest thing the sign route accepts. */
 const TINY_SIGNATURE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
 
@@ -86,13 +110,19 @@ const MIN_CONTRAST = 4.5
 
 const PHONE = { width: 375, height: 812 }
 
-test.use({ viewport: PHONE })
+/**
+ * A touch screen as well as the phone's width, so the client signer can sign
+ * with a finger. Mouse input still works in the same page, and the dark mode
+ * context below is opened without touch, so both input paths get a signer.
+ */
+test.use({ viewport: PHONE, hasTouch: true })
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(
     testInfo.project.name !== 'chromium',
     'The viewport is pinned to 375px in this file; a second project would only repeat the same fixtures.',
   )
+  skipUnlessMailIsDead()
   await primePage(page)
 })
 
@@ -162,14 +192,17 @@ async function bellEvents(studio: APIRequestContext, contractId: string): Promis
   return (await bellRowsFor(studio, 'contract', contractId)).map(row => row.eventType)
 }
 
+/** Moves between two waypoints, for both the mouse and the finger. */
+const STROKE_STEPS = 8
+
 /**
- * Draw a signature on the pad with a real pointer.
+ * Draw a signature on the pad with a real pointer, a mouse or a finger.
  *
  * The pad sits in a FadeSection that lifts 0.625rem into place as it scrolls
  * into view, so the stroke waits for that to settle: a box read mid-lift would
  * put the pointer a few pixels off the canvas the handlers measure against.
  */
-async function drawSignature(page: Page): Promise<void> {
+async function drawSignature(page: Page, via: 'mouse' | 'touch'): Promise<void> {
   const canvas = page.locator('canvas')
   await canvas.scrollIntoViewIfNeeded()
   await expect
@@ -185,12 +218,83 @@ async function drawSignature(page: Page): Promise<void> {
   const box = await canvas.boundingBox()
   if (!box) throw new Error('the signature pad has no box')
   const y = box.y + box.height * 0.45
-  await page.mouse.move(box.x + box.width * 0.15, y)
+  const waypoints: Point[] = [
+    { x: box.x + box.width * 0.15, y },
+    { x: box.x + box.width * 0.35, y: y - box.height * 0.2 },
+    { x: box.x + box.width * 0.55, y: y + box.height * 0.15 },
+    { x: box.x + box.width * 0.8, y: y - box.height * 0.1 },
+  ]
+
+  if (via === 'touch') {
+    await touchStroke(page, waypoints)
+    return
+  }
+  const [start, ...rest] = waypoints
+  await page.mouse.move(start.x, start.y)
   await page.mouse.down()
-  await page.mouse.move(box.x + box.width * 0.35, y - box.height * 0.2, { steps: 8 })
-  await page.mouse.move(box.x + box.width * 0.55, y + box.height * 0.15, { steps: 8 })
-  await page.mouse.move(box.x + box.width * 0.8, y - box.height * 0.1, { steps: 8 })
+  for (const point of rest) await page.mouse.move(point.x, point.y, { steps: STROKE_STEPS })
   await page.mouse.up()
+}
+
+/**
+ * One finger drag through the waypoints.
+ *
+ * Playwright's touchscreen only taps, so the drag goes through the DevTools
+ * protocol, which Chromium turns into pointer events with pointerType "touch"
+ * and runs past the page's touch-action the way a phone would. Needs a context
+ * with hasTouch, which this file sets.
+ */
+async function touchStroke(page: Page, waypoints: Point[]): Promise<void> {
+  const cdp = await page.context().newCDPSession(page)
+  try {
+    const [start, ...rest] = waypoints
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [start] })
+    let from = start
+    for (const to of rest) {
+      for (let step = 1; step <= STROKE_STEPS; step += 1) {
+        const t = step / STROKE_STEPS
+        await cdp.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [{ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }],
+        })
+      }
+      from = to
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  } finally {
+    await cdp.detach()
+  }
+}
+
+/**
+ * Start counting the pointer events the pad receives. A touch stroke has to
+ * arrive as touch pointers, and none of it may be cancelled: a pad that let
+ * the browser pan gets a pointercancel a few pixels in and keeps only a stub
+ * of the signature. The ink count alone misses that. On the harness the pad
+ * as built hears all 24 moves and no cancel; with touch-action auto injected
+ * it hears 2 moves and one pointercancel, and still inks about 60 pixels.
+ * Moves are counted with their coalesced events, so a busy machine folding
+ * several into one frame cannot read as a short stroke.
+ */
+async function watchPad(page: Page): Promise<void> {
+  await page.locator('canvas').evaluate((el) => {
+    const counts = { touchDowns: 0, touchMoves: 0, cancels: 0 }
+    ;(window as Window & { __padPointers?: typeof counts }).__padPointers = counts
+    el.addEventListener('pointerdown', (e) => {
+      if ((e as PointerEvent).pointerType === 'touch') counts.touchDowns += 1
+    })
+    el.addEventListener('pointermove', (e) => {
+      const move = e as PointerEvent
+      if (move.pointerType === 'touch') counts.touchMoves += Math.max(move.getCoalescedEvents?.().length ?? 0, 1)
+    })
+    el.addEventListener('pointercancel', () => { counts.cancels += 1 })
+  })
+}
+
+async function padPointers(page: Page): Promise<PadPointers> {
+  const counts = await page.evaluate(() => (window as Window & { __padPointers?: PadPointers }).__padPointers)
+  if (!counts) throw new Error('watchPad was not called before the stroke')
+  return counts
 }
 
 /** How many pixels on the pad carry ink, so an empty stroke cannot pass. */
@@ -214,43 +318,68 @@ async function expectPadTouchTargets(page: Page): Promise<void> {
   }
 }
 
-async function signAs(page: Page, signerName: string): Promise<void> {
-  await drawSignature(page)
+async function signAs(page: Page, signerName: string, via: 'mouse' | 'touch'): Promise<void> {
+  if (via === 'touch') await watchPad(page)
+  await drawSignature(page, via)
+  if (via === 'touch') {
+    const heard = await padPointers(page)
+    expect(heard.touchDowns, 'the finger never reached the pad as a touch pointer').toBeGreaterThan(0)
+    expect(heard.touchMoves, 'the pad heard almost none of the finger stroke').toBeGreaterThan(STROKE_STEPS)
+    expect(heard.cancels, 'the browser cancelled the stroke to scroll the page').toBe(0)
+  }
   expect(await inkedPixels(page), 'the stroke left no ink on the pad').toBeGreaterThan(50)
   await page.getByRole('checkbox', { name: new RegExp(`I am ${signerName}`) }).check()
   await page.getByRole('button', { name: 'Sign and submit' }).click()
 }
 
 /**
- * WCAG contrast of an element's text against the first opaque background
- * behind it. Gradients are background-image, not background-color, so an
- * element on a gradient reads through to the colour under it; every element
- * this is pointed at sits on a flat fill.
+ * WCAG contrast of an element's text against what is painted behind it: every
+ * background colour from the element up to the first opaque one, translucent
+ * layers composited over the ones beneath (white when nothing is opaque), and
+ * the text colour composited over that. Gradients are background-image, not
+ * background-color, so an element on a gradient reads through to the colour
+ * under it; every element this is pointed at sits on a flat fill.
+ *
+ * Fails closed: a colour it cannot parse (oklch, color(), color-mix) throws
+ * instead of reading as transparent black, which would pass dark text on
+ * anything light.
  */
 async function contrastOf(locator: Locator): Promise<number> {
   return locator.evaluate((el) => {
-    function rgba(value: string): [number, number, number, number] {
-      const match = value.match(/rgba?\(([^)]+)\)/)
-      if (!match) return [0, 0, 0, 0]
-      const parts = match[1].split(',').map(part => parseFloat(part))
-      return [parts[0], parts[1], parts[2], parts.length > 3 ? parts[3] : 1]
+    type Rgba = [number, number, number, number]
+    function rgba(value: string): Rgba {
+      const match = value.trim().match(/^rgba?\(([^)]+)\)$/)
+      const parts = match ? match[1].split(/[\s,/]+/).filter(Boolean).map(Number) : []
+      if (parts.length < 3 || parts.length > 4 || parts.some(part => Number.isNaN(part))) {
+        throw new Error(`contrastOf cannot read the colour "${value}"; teach it the format rather than guess`)
+      }
+      return [parts[0], parts[1], parts[2], parts.length === 4 ? parts[3] : 1]
     }
-    function luminance(colour: [number, number, number, number]): number {
+    /** Source-over: `top` painted on `under`. */
+    function over(top: Rgba, under: Rgba): Rgba {
+      const alpha = top[3] + under[3] * (1 - top[3])
+      if (alpha === 0) return [0, 0, 0, 0]
+      const mix = (i: number) => (top[i] * top[3] + under[i] * under[3] * (1 - top[3])) / alpha
+      return [mix(0), mix(1), mix(2), alpha]
+    }
+    function luminance(colour: Rgba): number {
       const channel = (v: number) => {
         const s = v / 255
         return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
       }
       return 0.2126 * channel(colour[0]) + 0.7152 * channel(colour[1]) + 0.0722 * channel(colour[2])
     }
-    const fg = rgba(getComputedStyle(el).color)
-    let bg: [number, number, number, number] = [255, 255, 255, 1]
+
+    const layers: Rgba[] = []
     for (let node: Element | null = el; node; node = node.parentElement) {
       const colour = rgba(getComputedStyle(node).backgroundColor)
-      if (colour[3] > 0) {
-        bg = colour
-        break
-      }
+      if (colour[3] > 0) layers.push(colour)
+      if (colour[3] >= 1) break
     }
+    let bg: Rgba = [255, 255, 255, 1]
+    for (let i = layers.length - 1; i >= 0; i -= 1) bg = over(layers[i], bg)
+    const fg = over(rgba(getComputedStyle(el).color), bg)
+
     const a = luminance(fg)
     const b = luminance(bg)
     return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
@@ -273,14 +402,14 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
       const clientLink = signerNamed(sent.signers, client.name)
       const studioLink = signerNamed(sent.signers, studioSide.name)
 
-      // ── The client signs on a phone, light theme ─────────────────────────
+      // ── The client signs on a phone with a finger, light theme ───────────
       await page.goto(clientLink.signPath)
       await expect(page.getByRole('heading', { name: 'Dana, draw your signature' })).toBeVisible({ timeout: 60_000 })
       await expect(page.getByText(clause)).toBeVisible()
       await expectNoHorizontalScroll(page)
       await expectPadTouchTargets(page)
 
-      await signAs(page, client.name)
+      await signAs(page, client.name, 'touch')
       await expect(page.getByRole('heading', { name: 'Your signature is in' })).toBeVisible()
       await expect(page.getByText('1 of 2 signed so far.')).toBeVisible()
       await expectNoHorizontalScroll(page)
@@ -290,7 +419,7 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
         .poll(() => bellEvents(studio, id), { message: 'the partial signature never reached the studio bell' })
         .toContain('contract_partially_signed')
 
-      // ── The studio signs in a browser whose dashboard theme is dark ──────
+      // ── The studio signs with a mouse, dashboard theme dark ──────────────
       const dark = await browser.newContext({ viewport: PHONE, baseURL })
       try {
         const darkPage = await dark.newPage()
@@ -339,7 +468,7 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
         await expectNoHorizontalScroll(darkPage)
         await expectPadTouchTargets(darkPage)
 
-        await signAs(darkPage, studioSide.name)
+        await signAs(darkPage, studioSide.name, 'mouse')
         await expect(darkPage.getByRole('heading', { name: 'Fully signed' })).toBeVisible()
         await expect(darkPage.getByText('Contract executed')).toBeVisible()
         await expectNoHorizontalScroll(darkPage)
@@ -364,7 +493,8 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
       // it is polled rather than read once.
       await expect
         .poll(async () => (await readContract(studio, id)).contract.signedStorageKey, {
-          message: 'the signed PDF was never written to R2',
+          message: 'the signed PDF was never written to R2 (on a server with no RESEND_API_KEY at all the fan out '
+            + 'returns before the write, lib/contract-fully-signed-emails.ts; run the server with a dead key)',
           timeout: 30_000,
         })
         .toBe(`contracts/${id}/signed.pdf`)
@@ -452,7 +582,7 @@ test.describe('Contract send, sign and signed PDF (D3)', () => {
       // so the pad still renders. The refusal comes on submit.
       await page.goto(link.signPath)
       await expect(page.getByRole('heading', { name: 'Dana, draw your signature' })).toBeVisible({ timeout: 60_000 })
-      await signAs(page, signer.name)
+      await signAs(page, signer.name, 'mouse')
       await expect(page.getByText('This contract has expired.')).toBeVisible()
       await expectNoHorizontalScroll(page)
 
