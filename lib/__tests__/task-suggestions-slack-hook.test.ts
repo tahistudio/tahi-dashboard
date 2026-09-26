@@ -114,6 +114,7 @@ function suggestionRow(overrides: Record<string, unknown> = {}): Record<string, 
     appliedTaskId: null,
     appliedRequestId: null,
     applyError: null,
+    rejectReason: null,
     dedupeKey: 'key1',
     slackChannelId: 'D_LIAM',
     slackMessageTs: '1758500000.0001',
@@ -170,6 +171,22 @@ describe('the Slack rewrite hook on decideSuggestion', () => {
     const result = await decideSuggestion(db, 's1', { action: 'approve' }, CTX)
     expect(result?.changed).toBe(false)
     expect(mirrored).toHaveLength(0)
+  })
+
+  it('does not rewrite when a reason is added to a row already rejected (CN.3)', async () => {
+    // The card already reads "Rejected by ..." from the tap; a reason picked
+    // afterwards is for the suggester, not a second decision to announce.
+    const db = fakeDb({ task_suggestions: [suggestionRow({ status: 'rejected', decidedById: 'tm_staci', decidedAt: '2026-09-20T01:00:00Z' })] })
+    const result = await decideSuggestion(db, 's1', { action: 'reject', reason: 'Already have it' }, CTX)
+    expect(result?.changed).toBe(false)
+    expect(result?.reasonRecorded).toBe(true)
+    expect(mirrored).toHaveLength(0)
+  })
+
+  it('rewrites once for a reject that carries its reason, like any other reject', async () => {
+    const db = fakeDb({ task_suggestions: [suggestionRow()] })
+    await decideSuggestion(db, 's1', { action: 'reject', reason: 'Wrong client' }, CTX)
+    expect(mirrored).toEqual([{ id: 's1', status: 'rejected', decidedById: 'tm_liam', applyError: null }])
   })
 
   it('does not rewrite on a refused approve, because the row is still waiting', async () => {

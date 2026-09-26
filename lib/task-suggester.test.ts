@@ -27,6 +27,10 @@ import {
   MAX_SUGGESTIONS,
   MAX_SWEEP_BATCH,
   READ_ESTIMATE_MS,
+  REJECTED_BLOCK_MAX_CHARS,
+  REJECTED_EXAMPLE_LIMIT,
+  REJECTED_SCAN_LIMIT,
+  REJECTED_WINDOW_DAYS,
   SUGGESTER_SYSTEM_PROMPT,
   SWEEP_BATCH,
   SWEEP_BUDGET_MS,
@@ -34,15 +38,21 @@ import {
   SuggesterUnavailableError,
   buildSecondReadMessage,
   buildSuggestionContext,
+  buildUserMessage,
+  formatRejectedBlock,
+  loadRejectedExamples,
   mergeSecondRead,
   parseSecondPass,
   parseSuggestionsBlock,
   parseSweepLimit,
   runSuggestionSweep,
+  selectRejectedExamples,
   suggestFromTranscript,
   suggestionContextWindows,
   sweepWillReach,
   validateSuggestionItems,
+  type RejectedExample,
+  type RejectedSuggestionRow,
   type SuggestFromTranscriptInput,
   type SuggestionContext,
   type SuggestionDraft,
@@ -487,6 +497,14 @@ describe('the system prompt', () => {
     expect(SUGGESTER_SYSTEM_PROMPT).toContain('hand_off_request')
     expect(SUGGESTER_SYSTEM_PROMPT.toLowerCase()).toContain('never both')
   })
+
+  it('says what REJECTED BEFORE means, as rule 8 after rule 7 (CN.3 section 7)', () => {
+    const rule8 = '8. REJECTED BEFORE, when present, lists items a person already turned down for this client. Do not propose any of them again, reworded or not, and be slow to propose anything of the same shape. Only when this call clearly asks for the same thing again, in its own words, propose it and say so in the rationale.'
+    expect(SUGGESTER_SYSTEM_PROMPT).toContain(rule8)
+    expect(SUGGESTER_SYSTEM_PROMPT.indexOf('7. At most 12 items.')).toBeLessThan(SUGGESTER_SYSTEM_PROMPT.indexOf(rule8))
+    // Built from code points, so this file never holds the glyphs it checks for.
+    for (const dash of [0x2013, 0x2014]) expect(SUGGESTER_SYSTEM_PROMPT).not.toContain(String.fromCharCode(dash))
+  })
 })
 
 describe('validateSuggestionItems for the request kinds', () => {
@@ -767,6 +785,9 @@ function contextSelects() {
   ]
 }
 
+/** The sweep's rejected-examples read (CN.3), which follows the context: nothing turned down lately. */
+const NO_REJECTIONS: unknown[] = []
+
 const okSuggest = vi.fn(async () => ({
   suggestions: [{
     kind: 'create_task' as const,
@@ -809,6 +830,7 @@ describe('runSuggestionSweep', () => {
       [{ orgId: null, meetingType: 'client', dealId: 'deal-1', attendees: '[]' }],
       [{ orgId: 'org-9' }],                 // deals lookup
       ...contextSelects(),
+      NO_REJECTIONS,
       [],                                   // insertSuggestions: no existing keys
       [],                                   // resurfaceSnoozed
       [],                                   // repair: nothing orgless
@@ -828,6 +850,7 @@ describe('runSuggestionSweep', () => {
       [{ orgId: null, meetingType: 'client', dealId: null, attendees: JSON.stringify([{ email: 'Ella@elevate.uk' }, { email: 'staci@tahi.studio' }]) }],
       [{ orgId: 'org-e', email: 'ella@elevate.uk' }],   // contacts lookup
       ...contextSelects(),
+      NO_REJECTIONS,
       [],
       [],
       [],
@@ -845,6 +868,7 @@ describe('runSuggestionSweep', () => {
       [{ orgId: null, meetingType: 'client', dealId: null, attendees: JSON.stringify([{ email: 'a@one.com' }, { email: 'b@two.com' }]) }],
       [{ orgId: 'org-a', email: 'a@one.com' }, { orgId: 'org-b', email: 'b@two.com' }],
       ...contextSelects().slice(0, 2),
+      NO_REJECTIONS,
       [],
       [],
       [],
@@ -881,6 +905,7 @@ describe('runSuggestionSweep', () => {
       [{ orgId: null, meetingType: 'client' }],
       // A null org is studio housekeeping: roster and tasks, no client requests.
       ...contextSelects().slice(0, 2),
+      NO_REJECTIONS,
       [],                                   // insertSuggestions: no existing keys
       [],                                   // resurfaceSnoozed
     ])
@@ -900,6 +925,7 @@ describe('runSuggestionSweep', () => {
       [TRANSCRIPT_ROW],
       [{ orgId: 'org-a', meetingType: null }],
       ...contextSelects(),
+      NO_REJECTIONS,
       [],
       [],
     ])
@@ -931,6 +957,7 @@ describe('runSuggestionSweep', () => {
       [TRANSCRIPT_ROW],
       [{ orgId: 'org-a', meetingType: null }],
       ...contextSelects(),
+      NO_REJECTIONS,
       [{ dedupeKey: key }],                 // already in the table
       [],                                   // resurfaceSnoozed
     ])
@@ -948,6 +975,7 @@ describe('runSuggestionSweep', () => {
       [TRANSCRIPT_ROW],
       [{ orgId: 'org-a', meetingType: null }],
       ...contextSelects(),
+      NO_REJECTIONS,
       [],
     ])
 
@@ -993,6 +1021,7 @@ describe('runSuggestionSweep', () => {
       [TRANSCRIPT_ROW],
       [{ orgId: 'org-a', meetingType: null }],
       ...contextSelects(),
+      NO_REJECTIONS,
       [],                                   // insertSuggestions: no existing keys
       [],                                   // resurfaceSnoozed
       [],                                   // repair: nothing orgless
@@ -1015,6 +1044,7 @@ describe('runSuggestionSweep', () => {
       [TRANSCRIPT_ROW],
       [{ orgId: 'org-9', meetingType: 'client', dealId: null, attendees: '[]' }],
       ...contextSelects(),
+      NO_REJECTIONS,
       // One pending create suggestion for this client, from an earlier call,
       // saying the same thing in different words.
       [{ id: 'sug-9', orgId: 'org-9', kind: 'create_task', status: 'pending', proposal: JSON.stringify({ title: 'FAQ section on the pricing page' }), dedupeKey: 'zzz' }],
@@ -1103,11 +1133,12 @@ function twoReads(first: SuggestionDraft[], second: SuggestionDraft[] | Error) {
 }
 
 /** Every select a sweep over one client transcript makes, in order. */
-function oneClientTranscript(onFile: unknown[] = []) {
+function oneClientTranscript(onFile: unknown[] = [], rejected: unknown[] = NO_REJECTIONS) {
   return [
     [TRANSCRIPT_ROW],
     [{ orgId: 'org-a', meetingType: null }],
     ...contextSelects(),
+    rejected,                             // loadRejectedExamples (CN.3)
     onFile,                               // insertSuggestions: keys, pending creates, rows on file
     [],                                   // resurfaceSnoozed
     [],                                   // repair: nothing orgless
@@ -1404,7 +1435,7 @@ describe('runSuggestionSweep inside its time budget', () => {
 
   /** Every select a sweep over these client transcripts makes, in order, for the first `n` of them. */
   function clientTranscripts(n: number) {
-    const perCall = () => [[{ orgId: 'org-a', meetingType: null }], ...contextSelects(), []]
+    const perCall = () => [[{ orgId: 'org-a', meetingType: null }], ...contextSelects(), NO_REJECTIONS, []]
     return [rows, ...Array.from({ length: n }, perCall).flat(), [], []]
   }
 
@@ -1572,5 +1603,373 @@ describe('suggestFromTranscript, the request each read sends', () => {
     expect(result.suggestions.map(s => s.kind)).toEqual(['update_task'])
     expect(result.dropped.map(d => d.reason)).toEqual(['quote_not_in_source'])
     expect(result.usage.inputTokens).toBe(4300)
+  })
+})
+
+// ── Rejections as negative examples (CN.3 section 7) ─────────────────────────
+// A person pressing Reject is the clearest signal the suggester ever gets. The
+// sweep shows the model what was turned down for THIS client lately, and only
+// this client: a title or a quote from one client's call in another client's
+// prompt could come back as a proposal filed on the wrong client. The pure
+// selector is handed other clients' rows on purpose, because the SQL filter is
+// the easy one to loosen by accident.
+
+const AT_CN3 = new Date('2026-09-26T00:00:00Z')
+
+function daysAgo(days: number): string {
+  return new Date(AT_CN3.getTime() - days * 86_400_000).toISOString().replace(/\.\d{3}Z$/, 'Z')
+}
+
+function rejectedRow(overrides: Partial<RejectedSuggestionRow> & { title?: string } = {}): RejectedSuggestionRow {
+  const { title, ...rest } = overrides
+  return {
+    kind: 'create_request',
+    proposal: JSON.stringify({ title: title ?? 'Add the LinkedIn tag to the footer', category: 'development' }),
+    quote: 'Can you pop the LinkedIn tag in the footer while you are there',
+    status: 'rejected',
+    approverType: 'founders',
+    orgId: 'org-a',
+    decidedAt: '2026-09-20T01:00:00Z',
+    rejectReason: null,
+    ...rest,
+  }
+}
+
+const FOOTER_EXAMPLE: RejectedExample = {
+  kind: 'create_request',
+  summary: 'Add the LinkedIn tag to the footer - development',
+  quote: 'Can you pop the LinkedIn tag in the footer while you are there',
+  reason: 'Already have it',
+  decidedOn: '2026-09-20',
+}
+
+describe('selectRejectedExamples', () => {
+  it('keeps this client\'s rejections and drops another client\'s, even when handed them', () => {
+    const examples = selectRejectedExamples([
+      rejectedRow(),
+      rejectedRow({ orgId: 'org-b', title: 'Rebuild the Verandela booking flow', quote: 'Verandela wants the booking flow rebuilt' }),
+      rejectedRow({ orgId: null, title: 'Renew the studio domain', quote: 'renew our own domain' }),
+    ], 'org-a', AT_CN3)
+
+    expect(examples).toHaveLength(1)
+    expect(examples[0].summary).toContain('LinkedIn tag')
+    const printed = JSON.stringify(examples)
+    expect(printed).not.toContain('Verandela')
+    expect(printed).not.toContain('domain')
+  })
+
+  it('keeps rejected rows only: never expired, pending, snoozed, applied or failed ones', () => {
+    const examples = selectRejectedExamples([
+      rejectedRow({ title: 'The one a person turned down' }),
+      rejectedRow({ status: 'expired', title: 'Expired by a rebuild' }),
+      rejectedRow({ status: 'pending', title: 'Still waiting' }),
+      rejectedRow({ status: 'snoozed', title: 'Snoozed for later' }),
+      rejectedRow({ status: 'applied', title: 'Approved and filed' }),
+      rejectedRow({ status: 'failed', title: 'Approved and failed' }),
+    ], 'org-a', AT_CN3)
+
+    expect(examples.map(e => e.summary)).toEqual(['The one a person turned down - development'])
+  })
+
+  it('keeps call suggestions only: a member\'s or a contact\'s rejected note is their own change of mind', () => {
+    const examples = selectRejectedExamples([
+      rejectedRow({ title: 'A founder said no to this' }),
+      rejectedRow({ approverType: 'member', title: 'A member dropped their own note' }),
+      rejectedRow({ approverType: 'contact', title: 'A client dropped their own draft' }),
+    ], 'org-a', AT_CN3)
+
+    expect(examples.map(e => e.summary)).toEqual(['A founder said no to this - development'])
+  })
+
+  it('forgets a rejection after REJECTED_WINDOW_DAYS, and a row with no decision time', () => {
+    expect(REJECTED_WINDOW_DAYS).toBe(120)
+    const examples = selectRejectedExamples([
+      rejectedRow({ title: 'Rejected 119 days ago', decidedAt: daysAgo(119) }),
+      rejectedRow({ title: 'Rejected 121 days ago', decidedAt: daysAgo(121) }),
+      rejectedRow({ title: 'Rejected at no known time', decidedAt: null }),
+    ], 'org-a', AT_CN3)
+
+    expect(examples.map(e => e.summary)).toEqual(['Rejected 119 days ago - development'])
+  })
+
+  it('uses studio rows (no client) only when the call itself has no client', () => {
+    const rows = [
+      rejectedRow({ orgId: null, title: 'Renew the studio domain' }),
+      rejectedRow({ orgId: 'org-a', title: 'Add the LinkedIn tag to the footer' }),
+    ]
+
+    expect(selectRejectedExamples(rows, null, AT_CN3).map(e => e.summary)).toEqual(['Renew the studio domain - development'])
+    expect(selectRejectedExamples(rows, 'org-a', AT_CN3).map(e => e.summary)).toEqual(['Add the LinkedIn tag to the footer - development'])
+  })
+
+  it('shows the same item rejected twice once, the newest, judged on the folded summary', () => {
+    const examples = selectRejectedExamples([
+      rejectedRow({ decidedAt: '2026-09-01T01:00:00Z', quote: 'the older quote' }),
+      rejectedRow({ title: '  add the LINKEDIN tag   to the footer ', decidedAt: '2026-09-20T01:00:00Z', quote: 'the newer quote' }),
+    ], 'org-a', AT_CN3)
+
+    expect(examples).toHaveLength(1)
+    expect(examples[0].quote).toBe('the newer quote')
+  })
+
+  it('keeps the eight newest, newest first', () => {
+    expect(REJECTED_EXAMPLE_LIMIT).toBe(8)
+    const rows = Array.from({ length: 12 }, (_, i) => rejectedRow({
+      title: `Distinct rejected piece of work ${i}`,
+      decidedAt: daysAgo(12 - i),
+    }))
+
+    const examples = selectRejectedExamples(rows, 'org-a', AT_CN3)
+
+    expect(examples).toHaveLength(REJECTED_EXAMPLE_LIMIT)
+    expect(examples[0].summary).toContain('work 11')
+    expect(examples.at(-1)?.summary).toContain('work 4')
+    const dates = examples.map(e => e.decidedOn)
+    expect([...dates].sort().reverse()).toEqual(dates)
+  })
+
+  it('clips each field and carries the reason only when a person gave one', () => {
+    const long = (word: string) => Array.from({ length: 80 }, () => word).join(' ')
+    const [clipped] = selectRejectedExamples([rejectedRow({
+      title: long('title'),
+      quote: long('quote'),
+      rejectReason: long('reason'),
+    })], 'org-a', AT_CN3)
+
+    expect(clipped.summary.length).toBeLessThanOrEqual(140)
+    expect(clipped.quote.length).toBeLessThanOrEqual(160)
+    expect(clipped.reason?.length).toBeLessThanOrEqual(120)
+    expect(clipped.decidedOn).toBe('2026-09-20')
+
+    const [blank] = selectRejectedExamples([rejectedRow({ rejectReason: '   ' })], 'org-a', AT_CN3)
+    expect(blank.reason).toBeNull()
+    const [given] = selectRejectedExamples([rejectedRow({ rejectReason: '  Already   have it ' })], 'org-a', AT_CN3)
+    expect(given.reason).toBe('Already have it')
+  })
+
+  it('summarises every kind in the inbox\'s own words', () => {
+    const [update] = selectRejectedExamples([rejectedRow({
+      kind: 'update_request',
+      proposal: JSON.stringify({ fields: { dueDate: '2026-10-01' } }),
+    })], 'org-a', AT_CN3)
+    expect(update).toMatchObject({ kind: 'update_request', summary: 'Changes due date' })
+  })
+})
+
+describe('formatRejectedBlock', () => {
+  it('is empty when nothing was turned down', () => {
+    expect(formatRejectedBlock([])).toBe('')
+  })
+
+  it('prints one line per example, with the reason only when there is one', () => {
+    const block = formatRejectedBlock([FOOTER_EXAMPLE, { ...FOOTER_EXAMPLE, summary: 'Rebuild the careers page', reason: null, decidedOn: '2026-09-02' }])
+
+    expect(block.split('\n')).toEqual([
+      'REJECTED BEFORE (a person turned these down for this client; never propose them again):',
+      '- 2026-09-20 | create_request | Add the LinkedIn tag to the footer - development | quote "Can you pop the LinkedIn tag in the footer while you are there" | reason: Already have it',
+      '- 2026-09-02 | create_request | Rebuild the careers page | quote "Can you pop the LinkedIn tag in the footer while you are there"',
+    ])
+  })
+
+  it('never runs past REJECTED_BLOCK_MAX_CHARS, dropping the oldest first', () => {
+    const full = (day: number): RejectedExample => ({
+      kind: 'create_request',
+      summary: `Day ${day} `.padEnd(140, 's'),
+      quote: 'q'.repeat(160),
+      reason: 'r'.repeat(120),
+      decidedOn: `2026-09-${String(day).padStart(2, '0')}`,
+    })
+    const examples = Array.from({ length: REJECTED_EXAMPLE_LIMIT }, (_, i) => full(20 - i))
+
+    const block = formatRejectedBlock(examples)
+
+    expect(REJECTED_BLOCK_MAX_CHARS).toBe(2000)
+    expect(block.length).toBeLessThanOrEqual(REJECTED_BLOCK_MAX_CHARS)
+    expect(block).toContain('2026-09-20')
+    expect(block).not.toContain('2026-09-13')
+    const lines = block.split('\n').slice(1)
+    expect(lines.length).toBeGreaterThan(0)
+    expect(lines.length).toBeLessThan(REJECTED_EXAMPLE_LIMIT)
+  })
+
+  it('drops the oldest even when the examples arrive out of order', () => {
+    const big = (decidedOn: string): RejectedExample => ({ ...FOOTER_EXAMPLE, summary: `${decidedOn} `.padEnd(900, 'x'), decidedOn })
+    const block = formatRejectedBlock([big('2026-09-01'), big('2026-09-20')])
+    expect(block).toContain('2026-09-20')
+    expect(block).not.toContain('2026-09-01')
+  })
+
+  it('is empty rather than a header over nothing when even one line cannot fit', () => {
+    expect(formatRejectedBlock([{ ...FOOTER_EXAMPLE, summary: 'x'.repeat(REJECTED_BLOCK_MAX_CHARS) }])).toBe('')
+  })
+})
+
+describe('buildUserMessage and REJECTED BEFORE', () => {
+  const INPUT: SuggestFromTranscriptInput = {
+    transcript: TRANSCRIPT,
+    wrapUp: 'Wrap up: FAQ section before the launch.',
+    callTitle: 'Check-in',
+    callDate: '2026-09-19',
+    context: { ...CONTEXT, rejected: [FOOTER_EXAMPLE] },
+  }
+
+  it('puts the block after CONTACTS and before WRAP UP, inside the notes', () => {
+    const notes = buildUserMessage(INPUT)
+    const contacts = notes.indexOf('CONTACTS')
+    const rejected = notes.indexOf('REJECTED BEFORE')
+    const wrapUp = notes.indexOf('WRAP UP:')
+    expect(contacts).toBeGreaterThan(-1)
+    expect(rejected).toBeGreaterThan(contacts)
+    expect(wrapUp).toBeGreaterThan(rejected)
+    expect(notes.indexOf('TRANSCRIPT:')).toBeGreaterThan(wrapUp)
+    expect(notes).toContain('reason: Already have it')
+  })
+
+  it('leaves the block out when nothing was rejected, and when the context carries no list at all', () => {
+    expect(buildUserMessage({ ...INPUT, context: { ...CONTEXT, rejected: [] } })).not.toContain('REJECTED BEFORE')
+    expect(buildUserMessage({ ...INPUT, context: CONTEXT })).not.toContain('REJECTED BEFORE')
+    // Without the block the notes are exactly what they were before CN.3.
+    expect(buildUserMessage({ ...INPUT, context: { ...CONTEXT, rejected: [] } })).toBe(buildUserMessage({ ...INPUT, context: CONTEXT }))
+  })
+
+  it('still places the block before the transcript on a studio call with no contacts', () => {
+    const notes = buildUserMessage({ ...INPUT, wrapUp: null, context: { ...CONTEXT, requests: [], contacts: [], rejected: [FOOTER_EXAMPLE] } })
+    expect(notes.indexOf('PEOPLE')).toBeLessThan(notes.indexOf('REJECTED BEFORE'))
+    expect(notes.indexOf('REJECTED BEFORE')).toBeLessThan(notes.indexOf('TRANSCRIPT:'))
+  })
+})
+
+describe('loadRejectedExamples', () => {
+  const whereSql = (record: { methods: string[]; args: unknown[][] }) =>
+    dialect.sqlToQuery(record.args[record.methods.indexOf('where') - 1][0] as SQL)
+
+  it('filters in SQL: rejected, founders, this client, the window, newest first, a scan of thirty', async () => {
+    const { handle, selects } = makeDb([[]])
+    await loadRejectedExamples(handle, 'org-a', AT_CN3)
+
+    const read = selects[0]
+    expect(read.args[read.methods.indexOf('from') - 1][0]).toBe(schema.taskSuggestions)
+    const where = whereSql(read)
+    expect(where.sql).toContain('"status" = ?')
+    expect(where.sql).toContain('"approver_type" = ?')
+    expect(where.sql).toContain('"org_id" = ?')
+    expect(where.sql).toContain('"decided_at" >= ?')
+    expect(where.params).toEqual(['rejected', 'founders', 'org-a', daysAgo(REJECTED_WINDOW_DAYS)])
+    expect(read.methods).toContain('orderBy')
+    expect(REJECTED_SCAN_LIMIT).toBe(30)
+    expect(read.args[read.methods.indexOf('limit') - 1]).toEqual([REJECTED_SCAN_LIMIT])
+  })
+
+  it('asks for studio rows by null org when the call has no client', async () => {
+    const { handle, selects } = makeDb([[]])
+    await loadRejectedExamples(handle, null, AT_CN3)
+    const where = whereSql(selects[0])
+    expect(where.sql).toContain('"org_id" is null')
+    expect(where.params).not.toContain(null)
+  })
+
+  it('applies every rule again to what the query hands back', async () => {
+    const { handle } = makeDb([[
+      rejectedRow(),
+      rejectedRow({ orgId: 'org-b', title: 'Another client entirely' }),
+      rejectedRow({ status: 'expired', title: 'Expired by a rebuild' }),
+    ]])
+    const examples = await loadRejectedExamples(handle, 'org-a', AT_CN3)
+    expect(examples.map(e => e.summary)).toEqual(['Add the LinkedIn tag to the footer - development'])
+  })
+
+  it('returns nothing rather than throwing when the database throws', async () => {
+    const throwing = {
+      select: () => { throw new Error('D1_ERROR: no such column: reject_reason') },
+    } as unknown as Parameters<typeof loadRejectedExamples>[0]
+    await expect(loadRejectedExamples(throwing, 'org-a', AT_CN3)).resolves.toEqual([])
+  })
+
+  it('returns nothing rather than throwing when the query rejects', async () => {
+    const node: Record<string, unknown> = {}
+    node.from = () => node
+    node.where = () => node
+    node.orderBy = () => node
+    node.limit = () => Promise.reject(new Error('D1_ERROR: network'))
+    const rejecting = { select: () => node } as unknown as Parameters<typeof loadRejectedExamples>[0]
+    await expect(loadRejectedExamples(rejecting, 'org-a', AT_CN3)).resolves.toEqual([])
+  })
+})
+
+describe('runSuggestionSweep shows the model what this client turned down', () => {
+  it('hands both reads the loader\'s examples, and both reads build the same notes', async () => {
+    const suggest = twoReads([FAQ], [])
+    const { handle } = makeDb(oneClientTranscript([], [rejectedRow({ rejectReason: 'Already have it' })]))
+
+    await runSuggestionSweep(handle, { suggest, now: AT_CN3 })
+
+    expect(suggest).toHaveBeenCalledTimes(2)
+    const [first, second] = suggest.mock.calls.map(call => call[0])
+    expect(first.context.rejected).toEqual([FOOTER_EXAMPLE])
+    expect(second.context.rejected).toEqual([FOOTER_EXAMPLE])
+    const notes = buildUserMessage(first)
+    expect(notes).toContain('REJECTED BEFORE')
+    expect(notes).toContain('Add the LinkedIn tag to the footer')
+    // The second read's notes are the first read's, byte for byte, which is
+    // what lets it read the block from the cache.
+    expect(buildUserMessage(second)).toBe(notes)
+  })
+
+  it('reads the rejections for the call\'s own client', async () => {
+    const { handle, selects } = makeDb(oneClientTranscript())
+    await runSuggestionSweep(handle, { suggest: twoReads([FAQ], []), now: AT_CN3 })
+
+    const rejectedRead = selects.find(record => {
+      const where = record.methods.indexOf('where')
+      return where > 0 && dialect.sqlToQuery(record.args[where - 1][0] as SQL).sql.includes('"approver_type" = ?')
+    })
+    expect(rejectedRead).toBeTruthy()
+    expect(dialect.sqlToQuery(rejectedRead!.args[rejectedRead!.methods.indexOf('where') - 1][0] as SQL).params).toContain('org-a')
+  })
+
+  it('reads the call anyway, with no examples, when the rejections cannot be read', async () => {
+    const unreadable = [{ get status(): string { throw new Error('D1_ERROR: no such column: reject_reason') } }]
+    const suggest = twoReads([FAQ], [])
+    const { handle } = makeDb(oneClientTranscript([], unreadable))
+
+    const summary = await runSuggestionSweep(handle, { suggest, now: AT_CN3 })
+
+    expect(summary.inserted).toBe(1)
+    expect(suggest.mock.calls[0][0].context.rejected).toEqual([])
+    expect(buildUserMessage(suggest.mock.calls[0][0])).not.toContain('REJECTED BEFORE')
+  })
+})
+
+describe('suggestFromTranscript sends REJECTED BEFORE in the cached notes', () => {
+  const INPUT: SuggestFromTranscriptInput = {
+    transcript: TRANSCRIPT,
+    wrapUp: null,
+    callTitle: 'Check-in',
+    callDate: '2026-09-19',
+    context: { ...CONTEXT, rejected: [FOOTER_EXAMPLE] },
+  }
+
+  beforeEach(() => {
+    sdk.calls.length = 0
+    sdk.reply = 'Nothing new.\n<suggestions>[]</suggestions>'
+    vi.stubEnv('ANTHROPIC_API_KEY', 'test-key')
+  })
+
+  afterEach(() => { vi.unstubAllEnvs() })
+
+  type Block = { type: string; text: string; cache_control?: { type: string } }
+  const userContent = (index: number) => (sdk.calls[index].messages as Array<{ content: string | Block[] }>)[0].content as Block[]
+
+  it('carries the block in the first read\'s cached notes and repeats it exactly on the second', async () => {
+    await suggestFromTranscript({ ...INPUT, cacheSource: true })
+    await suggestFromTranscript({ ...INPUT, alreadyProposed: [FAQ], maxNew: 11 })
+
+    const first = userContent(0)
+    const second = userContent(1)
+    expect(first[0].cache_control).toEqual({ type: 'ephemeral' })
+    expect(first[0].text).toContain('REJECTED BEFORE')
+    expect(second[0]).toEqual(first[0])
+    // The question the second read asks is not where the block lives.
+    expect(second[1].text).not.toContain('REJECTED BEFORE')
   })
 })
