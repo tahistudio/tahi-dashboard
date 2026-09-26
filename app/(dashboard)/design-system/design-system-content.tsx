@@ -253,6 +253,7 @@ const SEMANTIC_SWATCHES: Swatch[] = [
   { token: '--color-success', hex: '#4ADE80', label: 'Delivered, paid, complete.' },
   { token: '--color-warning', hex: '#FB923C', label: 'Needs attention, due soon.' },
   { token: '--color-danger',  hex: '#DC2626', label: 'High priority, overdue, error.' },
+  { token: '--color-danger-ink', hex: '#DC2626', label: 'Danger as text on a surface: destructive menu items. Lifts to #F87171 in dark.' },
   { token: '--color-info',    hex: '#60A5FA', label: 'Submitted, incoming.' },
   { token: '--color-accent',  hex: '#78C45E', label: 'Lime CTA.' },
   { token: '--color-highlight', hex: '#F7CE48', label: 'Sticky-note callout only.' },

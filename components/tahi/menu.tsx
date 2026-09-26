@@ -105,9 +105,12 @@ function MenuItem({
   trailing,
 }: MenuItemProps) {
   const isDanger = tone === 'danger'
-  const fg = isDanger ? 'var(--color-danger)' : 'var(--color-text)'
-  const iconFg = isDanger ? 'var(--color-danger)' : 'var(--color-text-muted)'
-  const hoverBg = isDanger ? 'var(--color-danger-bg)' : 'var(--color-bg-secondary)'
+  // The ink / tint pair, not --color-danger / --color-danger-bg: those stay
+  // put in dark mode, where the red read 3.6:1 on the popover and the hover
+  // flashed a near-white wash.
+  const fg = isDanger ? 'var(--color-danger-ink)' : 'var(--color-text)'
+  const iconFg = isDanger ? 'var(--color-danger-ink)' : 'var(--color-text-muted)'
+  const hoverBg = isDanger ? 'var(--color-danger-tint)' : 'var(--color-bg-secondary)'
 
   const baseStyle: React.CSSProperties = {
     display: 'flex',
@@ -125,9 +128,13 @@ function MenuItem({
     width: '100%',
     textAlign: 'left',
     textDecoration: 'none',
-    minHeight: '2rem',
     transition: 'background var(--motion-quick, 220ms) var(--ease-out)',
   }
+
+  // 2rem against a mouse; 2.75rem under a thumb or below md, whatever the
+  // pointer reports. On classes rather than the inline style so the media
+  // variants can win.
+  const sizeClass = 'min-h-8 max-md:min-h-11 pointer-coarse:min-h-11'
 
   const onEnter = (e: React.MouseEvent<HTMLElement>) => {
     if (disabled) return
@@ -157,7 +164,7 @@ function MenuItem({
 
   if (href && !disabled) {
     return (
-      <Link href={href} role="menuitem" style={baseStyle} onClick={onClick} onMouseEnter={onEnter} onMouseLeave={onLeave}>
+      <Link href={href} role="menuitem" className={sizeClass} style={baseStyle} onClick={onClick} onMouseEnter={onEnter} onMouseLeave={onLeave}>
         {content}
       </Link>
     )
@@ -168,6 +175,7 @@ function MenuItem({
       role="menuitem"
       onClick={onClick}
       disabled={disabled}
+      className={sizeClass}
       style={baseStyle}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}

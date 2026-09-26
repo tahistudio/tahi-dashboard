@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   FileSignature, Plus, RefreshCw, Calendar, Building2, Trash2, ExternalLink,
-  Save,
+  Save, MoreHorizontal,
 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { EmptyState } from '@/components/tahi/empty-state'
@@ -14,7 +14,8 @@ import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { Card } from '@/components/tahi/card'
-import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
+import { DataTable, type DataTableAction, type DataTableColumn } from '@/components/tahi/data-table'
+import { Menu } from '@/components/tahi/menu'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
 import { Input, Select } from '@/components/tahi/input'
 import { PageHeader } from '@/components/tahi/page-header'
@@ -75,6 +76,160 @@ function formatDate(iso: string | null): string {
   } catch {
     return iso
   }
+}
+
+// -- Phone card --
+
+/**
+ * One contract, reshaped for a phone. Below md the table is six columns and
+ * wider than 70rem, so it sat in a sideways scroller with the 3-dots menu
+ * about 900px off screen. The card stacks the same facts instead: the name on
+ * its own line, the type and status badges, the org, then sent and expiry.
+ * DataTable unmounts the 3-dots column along with the table, so the card
+ * carries the row actions itself behind an overflow control offering exactly
+ * what the desktop menu does. Tapping anywhere else opens the contract; the
+ * name is a real link so the card is reachable by keyboard too. Every control
+ * is a 2.75rem target.
+ *
+ * The card is inset from its Card by a margin on all four sides with its own
+ * full hairline, so neighbours sit 0.5rem apart instead of sharing a rule.
+ */
+function ContractMobileCard({
+  contract,
+  actions,
+  onOpen,
+}: {
+  contract: ContractListItem
+  actions: DataTableAction[]
+  onOpen: () => void
+}) {
+  const typeDef = TYPE_BY_VALUE.get(contract.type as ContractType)
+  const statusDef = STATUS_BY_VALUE.get(contract.status)
+  return (
+    <div
+      onClick={onOpen}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.5rem',
+        margin: '0.5rem',
+        padding: '0.5rem 0.5rem 0.75rem 0.875rem',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: 'var(--radius-md)',
+        background: 'var(--color-bg)',
+        cursor: 'pointer',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+        <Link
+          href={`/contracts/${contract.id}`}
+          onClick={e => e.stopPropagation()}
+          className="tahi-focus-ring"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            minHeight: '2.75rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            color: 'var(--color-text)',
+            textDecoration: 'none',
+            borderRadius: 'var(--radius-sm)',
+          }}
+        >
+          <FileSignature size={15} aria-hidden="true" style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
+          <span
+            data-private
+            style={{
+              fontWeight: 600,
+              fontSize: '0.9375rem',
+              lineHeight: 1.35,
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              overflowWrap: 'anywhere',
+            }}
+          >
+            {contract.name}
+          </span>
+        </Link>
+        {/* Menu items render in a portal, but React still bubbles their
+            clicks through this subtree, so the wrapper stops them here before
+            they reach the card and open the contract as well. */}
+        <span onClick={e => e.stopPropagation()} style={{ flexShrink: 0, display: 'inline-flex' }}>
+          <Menu
+            align="end"
+            width="12rem"
+            trigger={
+              <button
+                type="button"
+                aria-label={`Actions for ${contract.name}`}
+                className="tahi-focus-ring inline-flex items-center justify-center"
+                style={{
+                  width: '2.75rem',
+                  height: '2.75rem',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'var(--color-bg)',
+                  color: 'var(--color-text-muted)',
+                  cursor: 'pointer',
+                }}
+              >
+                <MoreHorizontal size={16} aria-hidden="true" />
+              </button>
+            }
+          >
+            {actions.map(a => (
+              <Menu.Item key={a.label} icon={a.icon} tone={a.tone} disabled={a.disabled} onClick={a.onClick}>
+                {a.label}
+              </Menu.Item>
+            ))}
+          </Menu>
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.375rem' }}>
+        <Badge tone={typeDef?.tone ?? 'neutral'} variant="soft" size="sm">
+          {typeDef?.label ?? contract.type.toUpperCase()}
+        </Badge>
+        <Badge tone={statusDef?.tone ?? 'neutral'} variant="soft" size="sm" dot>
+          {statusDef?.label ?? contract.status}
+        </Badge>
+      </div>
+
+      {contract.orgName && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.3125rem',
+            minWidth: 0,
+            fontSize: '0.8125rem',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          <Building2 size={13} aria-hidden="true" style={{ flexShrink: 0 }} />
+          <span data-private style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {contract.orgName}
+          </span>
+        </div>
+      )}
+
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '0.25rem 0.875rem',
+          fontSize: '0.75rem',
+          color: 'var(--color-text-muted)',
+        }}
+      >
+        <span>{contract.sentAt ? `Sent ${formatDate(contract.sentAt)}` : 'Not sent yet'}</span>
+        <span>{contract.expiresAt ? `Expires ${formatDate(contract.expiresAt)}` : 'No expiry'}</span>
+      </div>
+    </div>
+  )
 }
 
 // -- Main component --
@@ -146,6 +301,32 @@ export function ContractsContent() {
       setDeleteTarget(null)
       void mutateContracts()
     }
+  }
+
+  // One action list for both layouts, so the desktop 3-dots menu and the phone
+  // card's overflow menu can never offer different things.
+  function actionsFor(r: ContractListItem): DataTableAction[] {
+    const actions: DataTableAction[] = [
+      {
+        label: 'Open',
+        icon: <FileSignature size={14} />,
+        onClick: () => router.push(`/contracts/${r.id}`),
+      },
+    ]
+    if (r.publicShareToken) {
+      actions.push({
+        label: 'Public viewer',
+        icon: <ExternalLink size={14} />,
+        onClick: () => window.open(`/p/contract/${r.publicShareToken}`, '_blank', 'noreferrer'),
+      })
+    }
+    actions.push({
+      label: 'Delete',
+      icon: <Trash2 size={14} />,
+      tone: 'danger',
+      onClick: () => setDeleteTarget(r),
+    })
+    return actions
   }
 
   // -- DataTable columns. Mirrors docs-content.tsx structure. --
@@ -318,28 +499,14 @@ export function ContractsContent() {
             />
           }
           onRowClick={r => router.push(`/contracts/${r.id}`)}
-          rowActions={r => {
-            const actions = [
-              {
-                label: 'Open',
-                icon: <FileSignature size={14} />,
-                onClick: () => router.push(`/contracts/${r.id}`),
-              },
-            ]
-            if (r.publicShareToken) {
-              actions.push({
-                label: 'Public viewer',
-                icon: <ExternalLink size={14} />,
-                onClick: () => window.open(`/p/contract/${r.publicShareToken}`, '_blank', 'noreferrer'),
-              })
-            }
-            actions.push({
-              label: 'Delete',
-              icon: <Trash2 size={14} />,
-              onClick: () => setDeleteTarget(r),
-            })
-            return actions.map(a => a.label === 'Delete' ? { ...a, tone: 'danger' as const } : a)
-          }}
+          rowActions={actionsFor}
+          mobileCard={r => (
+            <ContractMobileCard
+              contract={r}
+              actions={actionsFor(r)}
+              onOpen={() => router.push(`/contracts/${r.id}`)}
+            />
+          )}
         />
       </Card>
 

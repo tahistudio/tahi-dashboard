@@ -674,9 +674,7 @@ function DailyBrief({ go, ro }: { go: (id: string) => void; ro: boolean }) {
             <span className="ov-brief-clock">{clockStr}</span>
           </span>
         )}
-        {updatedStr && (
-          <span style={{ font: "500 11.5px 'Manrope',sans-serif", color: 'var(--text-faint)' }}>{updatedStr}</span>
-        )}
+        {updatedStr && <span className="ov-brief-upd">{updatedStr}</span>}
         {!ro && (
           <button
             type="button"

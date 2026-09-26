@@ -41,7 +41,11 @@
 .ov-brief-h{ display:flex; align-items:baseline; gap:10px; margin-bottom:12px; }
 .ov-brief-ic{ width:28px; height:28px; border-radius:8px; background:linear-gradient(135deg,var(--brand-100),transparent); color:var(--brand-strong); display:flex; align-items:center; justify-content:center; box-shadow:inset 0 0 0 1px var(--brand-100); flex-shrink:0; }
 .ov-brief-h h3{ margin:0; font:700 13.5px 'Manrope',sans-serif; color:var(--text); }
-.ov-brief-time{ margin-left:auto; display:inline-flex; align-items:baseline; gap:5px; font:500 11.5px 'Manrope',sans-serif; color:var(--text-faint); }
+/* The date, time and "Updated Xh ago" meta. --text-faint is 3.2:1 on the dark
+   card, under AA for 11.5px text, so the meta takes --text-muted (5.9:1 dark,
+   6.8:1 light) rather than moving --text-faint for every caller. */
+.ov-brief-time{ margin-left:auto; display:inline-flex; align-items:baseline; gap:5px; font:500 11.5px 'Manrope',sans-serif; color:var(--text-muted); }
+.ov-brief-upd{ font:500 0.71875rem 'Manrope',sans-serif; color:var(--text-muted); }
 .ov-brief-lede{ margin:0; font:500 14px/1.6 'Manrope',sans-serif; color:var(--text); text-wrap:pretty; }
 /* accordion sections */
 .ov-brief-accs{ margin-top:16px; display:flex; flex-direction:column; gap:8px; }
@@ -62,6 +66,13 @@
 .bs-row .bs-txt{ flex:1; min-width:0; }
 .bs-act{ flex-shrink:0; height:26px; padding:0 11px; border-radius:8px; border:1px solid var(--border); background:var(--bg); font:600 11.5px 'Manrope',sans-serif; color:var(--text); cursor:pointer; transition:background .14s,border-color .14s,color .14s; }
 .bs-act:hover{ background:var(--brand); border-color:var(--brand); color:#fff; }
+/* The brief's Refresh and every row verb (Nudge, Chase, Open) share .bs-act.
+   26px suits a mouse in a dense row and is barely half the 44px minimum under
+   a thumb, so it clears 2.75rem wherever the pointer is coarse or the
+   container has gone narrow, the same treatment .ov-cta.ov-pay gets. */
+@media (pointer: coarse){
+  .bs-act{ height:2.75rem; min-width:2.75rem; padding:0 0.875rem; font-size:0.8125rem; border-radius:0.625rem; }
+}
 .bs-row .bs-dot{ flex-shrink:0; width:5px; height:5px; border-radius:50%; background:var(--brand); }
 .bs-row .bs-dot.warn{ background:#B0761F; } .bs-row .bs-dot.risk{ background:#C0392E; }
 .bs-row b{ color:var(--text); font-weight:600; }
@@ -439,6 +450,7 @@
   /* Narrow enough to be a phone whatever the pointer reports. */
   .ln-q .ln-q-ctl button{ width:2.75rem; height:2.75rem; }
   .ov-cta.ov-pay{ height:2.75rem; padding:0 1rem; font-size:0.8125rem; }
+  .bs-act{ height:2.75rem; min-width:2.75rem; padding:0 0.875rem; font-size:0.8125rem; border-radius:0.625rem; }
   /* mobile fit fixes */
   .ov-hero-fig{ display:none; }
   .ov-hero .ov-hero-num{ font-size:36px; }
@@ -474,14 +486,20 @@
   .ov-clock{ display:none; }
   /* Wire ticker item ("Automation ran: ...") was pinned to a fixed 1.6rem
      row with overflow hidden, so a two-line item on a narrow viewport had
-     its second line clipped. Let it grow: the dot stays on line 1, the
-     text wraps inside its own flex box (a free hanging indent, since it
-     never shares the dot's column), and the timestamp drops to its own
-     line at the same indent instead of breaking mid word. */
+     its second line clipped. Let it grow: the dot stays on line 1 and the
+     timestamp drops to its own line at the text's indent instead of
+     breaking mid word.
+     The text needs a zero flex basis and a zero min-width to share line 1
+     with the dot. Left at flex:0 1 auto its hypothetical size is its whole
+     max-content width, so in a wrapping row it took a flex line of its own
+     and started under the dot with no indent. With a zero basis it always
+     fits beside the dot, then grows into the rest of the row and wraps
+     inside its own box, which is the hanging indent. */
   .ov-wire{ height:auto; min-height:1.6rem; align-items:flex-start; overflow:visible; }
   .ov-wire-track{ position:static; height:auto; }
   .ov-wire-item{ position:static; align-items:flex-start; flex-wrap:wrap; row-gap:2px; padding:2px 0; }
   .ov-wire-item .ov-wire-dot{ margin-top:6px; }
+  .ov-wire-txt{ flex:1 1 0; min-width:0; overflow-wrap:anywhere; }
   .ov-wire-when{ margin-left:0; flex-basis:100%; padding-left:16px; }
 }
 

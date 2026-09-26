@@ -122,13 +122,17 @@ const TYPE_OPTIONS: Array<{ value: ContractDoc['type']; label: string }> = [
   { value: 'other', label: 'Other' },
 ]
 
+// The header status pill reads the <Badge> tone tokens (globals.css), on the
+// same tones the contracts list gives each status, so both surfaces agree and
+// the pill turns with the theme. It used to carry light-only hex, which left
+// a pale mint 'Signed' on the dark header.
 const STATUS_PALETTE: Record<ContractDoc['status'], { bg: string; fg: string; bd: string; label: string }> = {
-  draft:            { bg: '#f7f9f6', fg: '#5a6657', bd: '#e8f0e6', label: 'Draft' },
-  sent:             { bg: '#eff6ff', fg: '#1e40af', bd: '#bfdbfe', label: 'Sent' },
-  partially_signed: { bg: '#fff7ed', fg: '#9a3412', bd: '#fed7aa', label: 'Partial' },
-  signed:           { bg: '#f0fdf4', fg: '#15803d', bd: '#bbf7d0', label: 'Signed' },
-  expired:          { bg: '#f5f5f4', fg: '#525252', bd: '#e7e5e4', label: 'Expired' },
-  cancelled:        { bg: '#fef2f2', fg: '#dc2626', bd: '#fecaca', label: 'Cancelled' },
+  draft:            { bg: 'var(--badge-neutral-bg)',  fg: 'var(--badge-neutral-text)',  bd: 'var(--badge-neutral-border)',  label: 'Draft' },
+  sent:             { bg: 'var(--badge-info-bg)',     fg: 'var(--badge-info-text)',     bd: 'var(--badge-info-border)',     label: 'Sent' },
+  partially_signed: { bg: 'var(--badge-warning-bg)',  fg: 'var(--badge-warning-text)',  bd: 'var(--badge-warning-border)',  label: 'Partial' },
+  signed:           { bg: 'var(--badge-positive-bg)', fg: 'var(--badge-positive-text)', bd: 'var(--badge-positive-border)', label: 'Signed' },
+  expired:          { bg: 'var(--badge-neutral-bg)',  fg: 'var(--badge-neutral-text)',  bd: 'var(--badge-neutral-border)',  label: 'Expired' },
+  cancelled:        { bg: 'var(--badge-danger-bg)',   fg: 'var(--badge-danger-text)',   bd: 'var(--badge-danger-border)',   label: 'Cancelled' },
 }
 
 function formatDate(iso: string | null): string {
@@ -444,11 +448,13 @@ export function ContractDetail({ id }: { id: string }) {
       {/* Sticky header */}
       <header style={builderHeader}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', minWidth: 0, flex: 1 }}>
+          {/* Header controls are 2.75rem targets below md and keep their
+              compact desktop size from md up, the BuilderMoreMenu pattern. */}
           <Link
             href="/contracts"
             aria-label="All contracts"
-            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '2rem', height: '2rem', borderRadius: '0.5rem', color: 'var(--color-text-muted)', flexShrink: 0 }}
-            className="nav-item-hover"
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '0.5rem', color: 'var(--color-text-muted)', flexShrink: 0 }}
+            className="nav-item-hover tahi-focus-ring w-11 h-11 md:w-8 md:h-8"
           >
             <ArrowLeft size={16} />
           </Link>
@@ -479,6 +485,7 @@ export function ContractDetail({ id }: { id: string }) {
             <button
               onClick={() => setShowEmail(true)}
               style={toolbarPrimary}
+              className="min-h-11 md:min-h-0"
               title="Send signing emails"
             >
               <Mail size={13} />
@@ -489,7 +496,7 @@ export function ContractDetail({ id }: { id: string }) {
             href={`/preview/contract/${id}`}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center"
+            className="inline-flex items-center min-h-11 md:min-h-0"
             style={toolbarBtn}
           >
             <Eye size={13} />
@@ -719,7 +726,7 @@ export function ContractDetail({ id }: { id: string }) {
                       <RefreshCw size={12} />
                       Rotate
                     </button>
-                    <button onClick={() => setShowRevoke(true)} className="inline-flex items-center" style={{ ...railBtn, flex: 1, color: 'var(--color-danger)', justifyContent: 'center' }}>
+                    <button onClick={() => setShowRevoke(true)} className="inline-flex items-center" style={{ ...railBtn, flex: 1, color: 'var(--color-danger-ink)', justifyContent: 'center' }}>
                       Revoke
                     </button>
                   </div>
@@ -929,10 +936,12 @@ function SignerCard({
   onResend: (signerId: string) => void
   onRemove: (signerId: string) => void
 }) {
+  // Badge tone tokens for the same reason as the header's STATUS_PALETTE: the
+  // old light-only hex stayed pale on a dark card.
   const palette =
-    signer.status === 'signed' ? { fg: '#15803d', bg: '#f0fdf4', bd: '#bbf7d0', label: 'Signed', icon: <Check size={12} /> } :
+    signer.status === 'signed' ? { fg: 'var(--badge-positive-text)', bg: 'var(--badge-positive-bg)', bd: 'var(--badge-positive-border)', label: 'Signed', icon: <Check size={12} /> } :
     signer.status === 'skipped' ? { fg: 'var(--color-text-subtle)', bg: 'var(--color-bg-secondary)', bd: 'var(--color-border-subtle)', label: 'Skipped', icon: <X size={12} /> } :
-    { fg: '#9a3412', bg: '#fff7ed', bd: '#fed7aa', label: 'Pending', icon: <Hourglass size={12} /> }
+    { fg: 'var(--badge-warning-text)', bg: 'var(--badge-warning-bg)', bd: 'var(--badge-warning-border)', label: 'Pending', icon: <Hourglass size={12} /> }
 
   return (
     <div style={{
