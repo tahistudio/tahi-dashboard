@@ -14,12 +14,17 @@
  *                          yet. Never overwrites a row unless it is asked to
  *                          refresh, and even then only rows it wrote itself.
  *                          Cash only: MRR / owed / active clients stay null.
+ *                          Writes nothing while Airwallex yield is held (see
+ *                          reconstructCashNzd).
  *
- * fillMonthSnapshot      : write ONE missing past month, insert only. Same
- *                          cash, burn and runway as the backfill, plus money
- *                          owed when the invoice dates can prove it. Refuses
- *                          a month that already has a row, the current month
- *                          and any future month. Touches no other month.
+ * fillMonthSnapshot      : write ONE missing past month, insert only. Cash
+ *                          rebuilt the way the backfill rebuilds it, burn and
+ *                          runway, plus money owed when the invoice dates can
+ *                          prove it. Refuses a month that already has a row,
+ *                          the current month, any future month, a month from
+ *                          before the data we hold, and a month for which
+ *                          neither cash nor money owed can be rebuilt.
+ *                          Touches no other month.
  *
  * See db/schema.ts (financial_snapshots) for the table contract.
  */
@@ -43,8 +48,13 @@ function monthKeyOf(d: Date): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
-/** A month key is four digits, a dash, and a real month (01 to 12). */
-const MONTH_KEY_RE = /^\d{4}-(0[1-9]|1[0-2])$/
+/**
+ * A month key is a year from 2000 on, a dash, and a real month (01 to 12).
+ * The year floor keeps out keys like 0050-01, which Date.UTC would quietly
+ * read as 1950; the real lower bound is the data we hold, checked in
+ * fillMonthSnapshot.
+ */
+const MONTH_KEY_RE = /^20\d{2}-(0[1-9]|1[0-2])$/
 
 /**
  * The month-end instant for the month starting at `monthStart`: the first
@@ -126,6 +136,12 @@ interface ReconstructionContext {
    * row's as_of cannot be read.
    */
   anchorAsOf: number | null
+  /**
+   * Airwallex yield holdings with money in them (accountId 'yield:CUR'), kept
+   * out of the wallet anchor. Any entry here stops the cash rebuild; see
+   * reconstructCashNzd.
+   */
+  yieldHeld: Array<{ currency: string; balance: number }>
   ledger: LedgerEntry[]
   /** Earliest usable transaction time; Infinity when the ledger is empty. */
   earliestTime: number
@@ -140,18 +156,23 @@ interface ReconstructionContext {
  * bare accountId plus a currency, so the two only reconcile on CURRENCY: a
  * USD transaction moves the USD balance.
  *
- * Wallet rows only: yield rows (accountId 'yield:CUR', materialised from the
- * finance.yieldHoldings setting) are excluded because the wallet ledger
- * already records the outbound transfer when funds moved into yield.
- * Rewinding a wallet-plus-yield anchor past that transfer would double-count
- * the amount in every reconstructed month.
+ * Wallet rows only in the anchor: yield rows (accountId 'yield:CUR',
+ * materialised from the finance.yieldHoldings setting) are kept apart,
+ * because the wallet ledger already records the outbound transfer when funds
+ * moved into yield. Rewinding a wallet-plus-yield anchor past that transfer
+ * would double-count the amount. They are still read, into yieldHeld, because
+ * the Cash card counts them.
  */
 async function loadReconstructionContext(drizzle: D1): Promise<ReconstructionContext> {
   const rates = await drizzle.select().from(schema.exchangeRates)
   const rateMap = buildRateMap(rates)
 
-  const balances = (await drizzle.select().from(schema.airwallexBalances))
-    .filter(b => !b.accountId.startsWith('yield:'))
+  const allBalances = await drizzle.select().from(schema.airwallexBalances)
+  const isYield = (b: { accountId: string }) => b.accountId.startsWith('yield:')
+  const yieldHeld = allBalances
+    .filter(b => isYield(b) && Math.abs(b.balance) >= 0.005)
+    .map(b => ({ currency: b.currency ?? 'NZD', balance: b.balance }))
+  const balances = allBalances.filter(b => !isYield(b))
   const oldest = (a: number | null, b: number | null): number | null => (a == null || b == null ? null : Math.min(a, b))
   const balByCurrency = new Map<string, { balance: number; asOf: number | null }>()
   let anchorAsOf: number | null = balances.length > 0 ? Infinity : null
@@ -201,15 +222,27 @@ async function loadReconstructionContext(drizzle: D1): Promise<ReconstructionCon
     })
   }
 
-  return { rateMap, balByCurrency, anchorAsOf, ledger, earliestTime, pnlByMonth }
+  return { rateMap, balByCurrency, anchorAsOf, yieldHeld, ledger, earliestTime, pnlByMonth }
+}
+
+/** Today's yield holdings in words, e.g. "USD 25100, AUD 534; about NZ$43300 at today's FX". */
+function describeYield(ctx: ReconstructionContext): string {
+  const parts = ctx.yieldHeld.map(y => `${y.currency} ${Math.round(y.balance)}`)
+  const nzd = ctx.yieldHeld.reduce((sum, y) => sum + toNzd(y.balance, y.currency, ctx.rateMap), 0)
+  return `${parts.join(', ')}; about NZ$${Math.round(nzd)} at today's FX`
+}
+
+/** Why no month-end cash can be rebuilt while yield is held. */
+function yieldNotStoredReason(ctx: ReconstructionContext): string {
+  return `The Cash card counts the Airwallex yield holdings as cash (${describeYield(ctx)}), and what sat in yield at a past month end is not stored: the yield rows are rewritten from the finance.yieldHoldings setting on every sync, and the wallet ledger does not mark transfers into or out of yield. A wallet-only rewind would read low by the holding, and adding today's holding would be off by whatever has moved since, so month-end cash cannot be rebuilt on the Cash card's basis.`
 }
 
 type CashRewind =
   | { cashNzd: number; txnsRewound: number }
-  | { cashNzd: null; reason: 'no_anchor' | 'anchor_before_month_end' | 'ledger_too_short' }
+  | { cashNzd: null; reason: 'no_anchor' | 'yield_not_stored' | 'ledger_too_short' | 'anchor_before_month_end' }
 
 /**
- * Month-end cash in NZD, rewound from the stored balances.
+ * Month-end cash in NZD, rewound from the stored wallet balances.
  *
  * balance(T) = balance(read) minus the sum of every same-currency
  * transaction after T, up to when the balance was read. Amounts are signed
@@ -218,15 +251,24 @@ type CashRewind =
  * was read is not in that balance, so it is not subtracted from it. Foreign
  * balances convert at the CURRENT FX rate; historical rates are not stored.
  *
- * Null, with the reason, when there is no anchor, when the balances were
- * read before the month end (a rewind cannot move forward), or when the
- * ledger does not reach back to the month end (before the earliest
- * transaction we hold it is incomplete).
+ * Null, with the reason, when there is no anchor; while any yield is held;
+ * when the ledger does not reach back to the month end (before the earliest
+ * transaction we hold it is incomplete); or when the balances were read
+ * before the month end (a rewind cannot move forward).
+ *
+ * The yield case. The Cash card, and every cron row written since yield
+ * rows existed, counts wallet plus yield. The wallet ledger rewinds wallet
+ * cash only, and the yield held at a past month end is not stored anywhere
+ * (see yieldNotStoredReason), so for any month after money first moved into
+ * yield a wallet-only figure is low by the holding. Which months those are
+ * cannot be told either, because the ledger does not mark the transfers. So
+ * while yield is held, no month-end cash is rebuilt at all.
  */
 function reconstructCashNzd(ctx: ReconstructionContext, monthEnd: number): CashRewind {
   if (ctx.balByCurrency.size === 0) return { cashNzd: null, reason: 'no_anchor' }
-  if (ctx.anchorAsOf == null || ctx.anchorAsOf < monthEnd) return { cashNzd: null, reason: 'anchor_before_month_end' }
+  if (ctx.yieldHeld.length > 0) return { cashNzd: null, reason: 'yield_not_stored' }
   if (!Number.isFinite(ctx.earliestTime) || monthEnd <= ctx.earliestTime) return { cashNzd: null, reason: 'ledger_too_short' }
+  if (ctx.anchorAsOf == null || ctx.anchorAsOf < monthEnd) return { cashNzd: null, reason: 'anchor_before_month_end' }
   let cashNzd = 0
   let txnsRewound = 0
   for (const [cur, anchor] of ctx.balByCurrency) {
@@ -268,6 +310,16 @@ function trailingBurnEndingAt(ctx: ReconstructionContext, monthStart: Date): { b
 
 // ── Backfill ────────────────────────────────────────────────────────────────
 
+/**
+ * True when a write reports that it changed no row. A driver that reports no
+ * count at all is taken at its word that the write landed, which is what the
+ * backfill assumed before it read the count.
+ */
+function changedNothing(result: unknown): boolean {
+  const changes = (result as { meta?: { changes?: unknown } } | null | undefined)?.meta?.changes
+  return typeof changes === 'number' && changes === 0
+}
+
 export interface BackfillOptions {
   /**
    * Recompute months that already hold a row this backfill wrote (source
@@ -308,6 +360,14 @@ export interface BackfillResult {
  * today's P&L. `refresh: true` is the explicit opt-in to recompute the rows a
  * previous backfill wrote (cash, burn and runway only; any money-owed figure
  * a fill stored stays). A 'cron' row is never overwritten.
+ *
+ * While any Airwallex yield is held nothing is written, refresh or not: no
+ * month-end cash can be rebuilt on the Cash card's basis (reconstructCashNzd).
+ *
+ * The month lists report what the database actually changed: a row that
+ * appeared between the read and the write leaves the insert (or the
+ * source-guarded update) changing nothing, and that month is reported as
+ * left untouched, not as written.
  */
 export async function backfillCashFromLedger(
   drizzle: D1,
@@ -330,6 +390,7 @@ export async function backfillCashFromLedger(
 
   const ctx = await loadReconstructionContext(drizzle)
   if (ctx.balByCurrency.size === 0) return empty('No Airwallex balances to anchor reconstruction.')
+  if (ctx.yieldHeld.length > 0) return empty(`Nothing written. ${yieldNotStoredReason(ctx)}`)
   if (!Number.isFinite(ctx.earliestTime)) return empty('No Airwallex transactions with a usable timestamp to reconstruct from.')
 
   const existing = await drizzle
@@ -374,18 +435,19 @@ export async function backfillCashFromLedger(
     if (isRefresh) {
       // The WHERE on source is the second lock: if a cron row landed since
       // the read above, this update matches nothing.
-      await drizzle
+      const result = await drizzle
         .update(schema.financialSnapshots)
         .set({ cashNzd, burnNzd, runwayMonths, capturedAt: nowIso })
         .where(and(
           eq(schema.financialSnapshots.monthKey, monthKey),
           eq(schema.financialSnapshots.source, 'backfill'),
         ))
-      refreshedMonths.push(monthKey)
+      if (changedNothing(result)) skippedMonths.push(monthKey)
+      else refreshedMonths.push(monthKey)
     } else {
       // Insert only. A row that appeared since the read above wins, and this
       // write becomes a no-op rather than an overwrite.
-      await drizzle
+      const result = await drizzle
         .insert(schema.financialSnapshots)
         .values({
           monthKey,
@@ -400,7 +462,8 @@ export async function backfillCashFromLedger(
           createdAt: nowIso,
         })
         .onConflictDoNothing({ target: schema.financialSnapshots.monthKey })
-      writtenMonths.push(monthKey)
+      if (changedNothing(result)) skippedMonths.push(monthKey)
+      else writtenMonths.push(monthKey)
     }
   }
 
@@ -409,18 +472,21 @@ export async function backfillCashFromLedger(
   const earliestMonth = touched[0] ?? null
   const latestMonth = touched[touched.length - 1] ?? null
 
-  let note: string
-  if (touched.length === 0) {
-    note = skippedMonths.length > 0
-      ? `Nothing written: every month the ledger reaches already has a row (${skippedMonths.sort().join(', ')}). Existing rows are never overwritten${refresh ? ', and none of them is a backfill row refresh may recompute' : '; pass refresh=1 to recompute earlier backfill rows'}.`
-      : 'No months to backfill (the ledger is too short).'
-  } else {
-    note = `Reconstructed month-end cash for ${earliestMonth}..${latestMonth} from the Airwallex ledger (total-balance basis, current FX).`
-    if (skippedMonths.length > 0) note += ` Left untouched: ${skippedMonths.sort().join(', ')}.`
+  const noteParts: string[] = [
+    touched.length > 0
+      ? `Reconstructed month-end cash for ${earliestMonth}..${latestMonth} from the Airwallex wallet ledger (total-balance basis, current FX).`
+      : 'Nothing written.',
+  ]
+  if (skippedMonths.length > 0) {
+    noteParts.push(`Left untouched, because they already have a row: ${skippedMonths.sort().join(', ')}. ${refresh ? 'A cron row is never overwritten, refresh or not.' : 'Existing rows are never overwritten; pass refresh=1 to recompute earlier backfill rows.'}`)
   }
   if (afterAnchorMonths.length > 0) {
-    note += ` Not reconstructed, because the Airwallex balances were last synced before they ended: ${afterAnchorMonths.sort().join(', ')}.`
+    noteParts.push(`Not reconstructed, because the Airwallex balances were last synced before they ended: ${afterAnchorMonths.sort().join(', ')}. Run the Airwallex sync, then backfill again.`)
   }
+  if (touched.length === 0 && skippedMonths.length === 0 && afterAnchorMonths.length === 0) {
+    noteParts.push('The Airwallex ledger does not reach back to any past month end.')
+  }
+  const note = noteParts.join(' ')
 
   return {
     refresh,
@@ -444,6 +510,8 @@ export interface OwedInvoiceRow {
   status: string
   totalUsd: number
   currency: string | null
+  /** Which importer wrote the row ('xero', 'stripe', 'manyrequests', 'manual'). */
+  source: string | null
   sentAt: string | null
   paidAt: string | null
   createdAt: string | null
@@ -459,7 +527,10 @@ export interface AmbiguousInvoice {
 }
 
 export interface OwedAsOfResult {
-  /** Money owed at the instant, NZD. Null when any invoice's state then cannot be told. */
+  /**
+   * Money owed at the instant, NZD. Null when any invoice's state then cannot
+   * be told, or when the ledger does not reach back to the instant.
+   */
   owedNzd: number | null
   /** Invoices certainly issued and unpaid at the instant. */
   certainCount: number
@@ -467,6 +538,10 @@ export interface OwedAsOfResult {
   /** Invoices that may or may not have been owed at the instant. */
   ambiguous: AmbiguousInvoice[]
   ambiguousNzd: number
+  /** The earliest issue date of any issued invoice the ledger holds (ISO), or null when it holds none. */
+  ledgerFrom: string | null
+  /** True when no invoice in the ledger was issued at or before the instant. */
+  beforeLedger: boolean
 }
 
 /**
@@ -480,21 +555,36 @@ export interface OwedAsOfResult {
  * paid_at, so "paid after the instant" is provable.
  *
  * Some states cannot be placed in time. Write-offs carry no date at all, and
- * a paid invoice can lack paid_at. Such a row is only settled when its
+ * a paid invoice can lack paid_at. A ManyRequests row whose paid_at equals
+ * its created_at counts as lacking one: when ManyRequests sends no payment
+ * date the importer copies the invoice date across (mapInvoicePaidAt), so the
+ * invoice would read as never owed. (A Stripe charge row has the two equal
+ * for real, since a charge is paid the moment it exists, so the rule is
+ * limited to ManyRequests rows.) Such a row is only settled when its
  * updated_at is at or before the instant: every status writer stamps
  * updated_at, so an untouched row had the status it has now. Otherwise the
  * row is ambiguous, and one ambiguous row with any money on it makes the
  * whole figure unknowable, so owedNzd is null and the rows are listed. Zero
  * totals are never ambiguous; they cannot move the figure.
  *
- * Caveats that stand either way: FX is today's rate, and an invoice deleted
- * since (a deduplicated twin, a test row) is not in the ledger to count.
+ * A zero is only a figure when the ledger reaches the instant. If no invoice
+ * in it was issued at or before the instant, nothing shows the ledger goes
+ * back that far (the Xero importer pages newest first, so its older end can
+ * be thin), and owedNzd is null with beforeLedger set, never a made-up 0.
+ *
+ * Caveats that stand either way: FX is today's rate; an invoice deleted since
+ * (a deduplicated twin, a test row) or issued before the ledger's earliest
+ * row and never imported is not there to count; and a Xero row imported or
+ * synced as paid when Xero sent no payment date carries that sync's time as
+ * paid_at (lib/xero-sync.ts, lib/xero-status.ts), so it reads as owed until
+ * that sync.
  */
 export function owedAsOf(rows: readonly OwedInvoiceRow[], instant: number, rateMap: RateMap): OwedAsOfResult {
   let certainCount = 0
   let certainNzd = 0
   let ambiguousNzd = 0
   const ambiguous: AmbiguousInvoice[] = []
+  let earliestIssuedAt: number | null = null
 
   for (const row of rows) {
     const status = normaliseInvoiceStatus(row.status)
@@ -502,7 +592,8 @@ export function owedAsOf(rows: readonly OwedInvoiceRow[], instant: number, rateM
     const updatedAt = parseInstant(row.updatedAt)
     const untouchedSince = updatedAt != null && updatedAt <= instant
     const sentAt = parseInstant(row.sentAt)
-    const issuedAt = sentAt ?? parseInstant(row.createdAt)
+    const createdAt = parseInstant(row.createdAt)
+    const issuedAt = sentAt ?? createdAt
 
     let reason: string | null = null
     let owed = false
@@ -514,15 +605,22 @@ export function owedAsOf(rows: readonly OwedInvoiceRow[], instant: number, rateM
         reason = 'A draft now, but first sent before month end and rewritten since, so it may have been owed then.'
       }
     } else if (isOwedInvoice(status) || isPaidInvoice(status) || isVoidInvoice(status)) {
+      if (issuedAt != null && (earliestIssuedAt == null || issuedAt < earliestIssuedAt)) earliestIssuedAt = issuedAt
       if (issuedAt == null) {
         reason = 'No issue date: neither sent_at nor created_at can be read.'
       } else if (issuedAt <= instant) {
         if (isOwedInvoice(status)) {
           owed = true
         } else if (isPaidInvoice(status)) {
-          const paidAt = parseInstant(row.paidAt)
+          const storedPaidAt = parseInstant(row.paidAt)
+          const copiedFromCreated = storedPaidAt != null && row.source === 'manyrequests' && storedPaidAt === createdAt
+          const paidAt = copiedFromCreated ? null : storedPaidAt
           if (paidAt != null) owed = paidAt > instant
-          else if (!untouchedSince) reason = 'Paid, but with no paid date, and rewritten since month end, so it may have been paid after.'
+          else if (!untouchedSince) {
+            reason = copiedFromCreated
+              ? 'Paid, but its paid date is only a copy of its invoice date (the ManyRequests import fallback when no payment date came across), and rewritten since month end, so it may have been paid after.'
+              : 'Paid, but with no paid date, and rewritten since month end, so it may have been paid after.'
+          }
         } else if (!untouchedSince) {
           reason = `Now ${status}, which carries no date, and rewritten since month end, so it may still have been owed then.`
         }
@@ -538,18 +636,27 @@ export function owedAsOf(rows: readonly OwedInvoiceRow[], instant: number, rateM
     }
   }
 
+  const beforeLedger = earliestIssuedAt == null || earliestIssuedAt > instant
   return {
-    owedNzd: ambiguous.length === 0 ? Math.round(certainNzd) : null,
+    owedNzd: ambiguous.length === 0 && !beforeLedger ? Math.round(certainNzd) : null,
     certainCount,
     certainNzd: Math.round(certainNzd),
     ambiguous,
     ambiguousNzd: Math.round(ambiguousNzd),
+    ledgerFrom: earliestIssuedAt != null ? new Date(earliestIssuedAt).toISOString() : null,
+    beforeLedger,
   }
 }
 
 // ── Single-month fill ───────────────────────────────────────────────────────
 
-export type SnapshotFillRefusalCode = 'invalid_month' | 'not_past' | 'exists' | 'nothing_derivable'
+export type SnapshotFillRefusalCode =
+  | 'invalid_month'
+  | 'not_past'
+  | 'before_data'
+  | 'exists'
+  | 'balances_stale'
+  | 'nothing_derivable'
 
 /** A fill that was refused before anything was written. */
 export class SnapshotFillRefusal extends Error {
@@ -589,7 +696,7 @@ export interface FillMonthResult {
   filled: SnapshotField[]
   leftNull: SnapshotField[]
   /** The working behind owedNzd, including every invoice that blocked it. */
-  owed: OwedAsOfResult | null
+  owed: OwedAsOfResult
 }
 
 const FIELD_ORDER: SnapshotField[] = ['cashNzd', 'owedNzd', 'mrrNzd', 'activeClients', 'burnNzd', 'runwayMonths']
@@ -598,21 +705,52 @@ const NO_HISTORY =
   'organisations.custom_mrr and organisations.status are overwritten in place (client edits, importers) and no history or audit of their old values is kept, so their values at month end cannot be recovered. Left null rather than guessed.'
 
 /**
+ * The earliest instant any of the data a fill rebuilds from reaches: the
+ * first Airwallex transaction, the first stored Xero P&L month, the first
+ * issued invoice. Null when none of them holds anything.
+ */
+function earliestDataAt(ctx: ReconstructionContext, owed: OwedAsOfResult): number | null {
+  const candidates: number[] = []
+  if (Number.isFinite(ctx.earliestTime)) candidates.push(ctx.earliestTime)
+  for (const key of ctx.pnlByMonth.keys()) {
+    const start = parseInstant(`${key}-01`)
+    if (start != null) candidates.push(start)
+  }
+  const ledgerFrom = parseInstant(owed.ledgerFrom)
+  if (ledgerFrom != null) candidates.push(ledgerFrom)
+  return candidates.length > 0 ? Math.min(...candidates) : null
+}
+
+/**
  * Write the snapshot for ONE past month that has no row, insert only.
  *
  * Refuses, writing nothing:
- *   invalid_month      (400) not YYYY-MM.
+ *   invalid_month      (400) not YYYY-MM from 2000 on.
  *   not_past           (400) the current month (the daily cron owns it) or a
  *                            month that has not happened.
  *   exists             (409) the month already has a row, whatever its source.
- *   nothing_derivable  (422) no field could be rebuilt, so a row of nulls
- *                            would only block a later, better fill.
+ *   before_data        (400) the month ended before the earliest Airwallex
+ *                            transaction, Xero P&L month and issued invoice
+ *                            we hold, so there is nothing to rebuild it from.
+ *   balances_stale     (422) the Airwallex balances were read before the
+ *                            month ended. Syncing them makes cash rebuildable,
+ *                            so the fill waits for that rather than writing a
+ *                            row without it that a second fill could not add
+ *                            to.
+ *   nothing_derivable  (422) neither month-end cash nor money owed can be
+ *                            rebuilt. Those are the point-in-time figures the
+ *                            table exists to keep; burn is recomputable from
+ *                            the stored P&L at any time, so a row holding only
+ *                            burn would add nothing and would block a later,
+ *                            better fill.
  *
- * Fields: cash, burn and runway exactly as backfillCashFromLedger rebuilds
- * them; money owed via owedAsOf when the invoice dates prove it; MRR and
- * active clients always null (see NO_HISTORY). Written with source
- * 'backfill'. Never reads or writes any other month's row beyond the
- * existence check.
+ * Fields: cash, burn and runway as backfillCashFromLedger rebuilds them (so
+ * no cash, and no runway, while Airwallex yield is held); money owed via
+ * owedAsOf when the invoice dates prove it; MRR and active clients always
+ * null (see NO_HISTORY). Written with source 'backfill'. Never reads or
+ * writes any other month's row beyond the existence check. A failed read
+ * throws, so a fill never writes a row with a field missing only because a
+ * query failed.
  */
 export async function fillMonthSnapshot(drizzle: D1, monthKey: string, now: Date = new Date()): Promise<FillMonthResult> {
   if (!MONTH_KEY_RE.test(monthKey)) {
@@ -647,17 +785,48 @@ export async function fillMonthSnapshot(drizzle: D1, monthKey: string, now: Date
   const monthStart = new Date(Date.UTC(year, month - 1, 1))
   const monthEnd = monthEndOf(monthStart)
   const ctx = await loadReconstructionContext(drizzle)
+  const invoiceRows = await drizzle
+    .select({
+      id: schema.invoices.id,
+      number: schema.invoices.number,
+      status: schema.invoices.status,
+      totalUsd: schema.invoices.totalUsd,
+      currency: schema.invoices.currency,
+      source: schema.invoices.source,
+      sentAt: schema.invoices.sentAt,
+      paidAt: schema.invoices.paidAt,
+      createdAt: schema.invoices.createdAt,
+      updatedAt: schema.invoices.updatedAt,
+    })
+    .from(schema.invoices)
+  const owed = owedAsOf(invoiceRows, monthEnd, ctx.rateMap)
+
+  const earliest = earliestDataAt(ctx, owed)
+  if (earliest != null && monthEnd <= earliest) {
+    throw new SnapshotFillRefusal(
+      'before_data',
+      400,
+      `${monthKey} ended before the earliest data we hold (${new Date(earliest).toISOString()}, the first of the Airwallex ledger, the stored Xero P&L and the issued invoices), so there is nothing to rebuild it from. Nothing was written.`,
+    )
+  }
 
   // Cash.
   const cash = reconstructCashNzd(ctx, monthEnd)
+  if (cash.cashNzd == null && cash.reason === 'anchor_before_month_end') {
+    throw new SnapshotFillRefusal(
+      'balances_stale',
+      422,
+      `The Airwallex balances were last synced ${ctx.anchorAsOf != null ? new Date(ctx.anchorAsOf).toISOString() : 'at an unreadable time'}, before ${monthKey} ended, and a rewind cannot move forward. Run the Airwallex sync, then fill again. Nothing was written, so the fill can still run in full.`,
+    )
+  }
   let cashBasis: string
   if (cash.cashNzd != null) {
     const anchor = ctx.anchorAsOf != null ? new Date(ctx.anchorAsOf).toISOString() : 'unknown'
-    cashBasis = `Rewound from the Airwallex wallet balances synced ${anchor} (total incl. pending, yield excluded) through ${cash.txnsRewound} ledger transactions dated after month end; foreign balances at today's FX. Same method as the other backfill rows.`
+    cashBasis = `Rewound from the Airwallex wallet balances synced ${anchor} (total incl. pending) through ${cash.txnsRewound} ledger transactions dated after month end and before those balances were read; foreign balances at today's FX. No yield is held, so wallet cash is the Cash card's whole Airwallex figure.`
   } else if (cash.reason === 'no_anchor') {
     cashBasis = 'No Airwallex balances to anchor the rewind. Left null.'
-  } else if (cash.reason === 'anchor_before_month_end') {
-    cashBasis = `The Airwallex balances were last synced ${ctx.anchorAsOf != null ? new Date(ctx.anchorAsOf).toISOString() : 'at an unreadable time'}, before this month ended, and a rewind cannot move forward. Run the Airwallex sync, then fill. Left null.`
+  } else if (cash.reason === 'yield_not_stored') {
+    cashBasis = `${yieldNotStoredReason(ctx)} Left null.`
   } else {
     cashBasis = 'The Airwallex ledger we hold does not reach back to this month end, so the rewind would be incomplete. Left null.'
   }
@@ -666,7 +835,7 @@ export async function fillMonthSnapshot(drizzle: D1, monthKey: string, now: Date
   // Burn and runway.
   const burn = trailingBurnEndingAt(ctx, monthStart)
   const burnBasis = burn.burnNzd != null
-    ? `Average monthly expenses plus cost of sales from the stored Xero P&L for ${burn.months.join(', ')} (months synced after they closed), same window as the other backfill rows.`
+    ? `Average monthly expenses plus cost of sales from the stored Xero P&L for ${burn.months.join(', ')}, leaving out any month last synced before it closed.`
     : 'No Xero P&L month in the trailing three that was synced after it closed. Left null.'
   const runwayMonths = cashNzd != null && burn.burnNzd != null ? computeRunwayMonths(cashNzd, burn.burnNzd) : null
   const runwayBasis = runwayMonths != null
@@ -674,30 +843,15 @@ export async function fillMonthSnapshot(drizzle: D1, monthKey: string, now: Date
     : 'Needs both month-end cash and a positive trailing burn. Left null.'
 
   // Money owed.
-  let owed: OwedAsOfResult | null = null
   let owedBasis: string
-  try {
-    const invoiceRows = await drizzle
-      .select({
-        id: schema.invoices.id,
-        number: schema.invoices.number,
-        status: schema.invoices.status,
-        totalUsd: schema.invoices.totalUsd,
-        currency: schema.invoices.currency,
-        sentAt: schema.invoices.sentAt,
-        paidAt: schema.invoices.paidAt,
-        createdAt: schema.invoices.createdAt,
-        updatedAt: schema.invoices.updatedAt,
-      })
-      .from(schema.invoices)
-    owed = owedAsOf(invoiceRows, monthEnd, ctx.rateMap)
-    owedBasis = owed.owedNzd != null
-      ? `${owed.certainCount} invoices issued by month end and not paid by then (issue date = sent_at, else the source invoice date in created_at; paid_at for payment), at today's FX.`
-      : `${owed.ambiguous.length} invoices worth NZ$${owed.ambiguousNzd} cannot be placed at month end (listed under owed.ambiguous, each with its reason; typically a write-off, which carries no date, on a row rewritten after month end). Certainly owed then: NZ$${owed.certainNzd} across ${owed.certainCount} invoices, so the true figure lies between that and NZ$${owed.certainNzd + owed.ambiguousNzd}. Left null rather than guessed.`
-  } catch (err) {
-    owedBasis = `Invoices could not be read (${err instanceof Error ? err.message : 'unknown error'}). Left null.`
+  if (owed.beforeLedger) {
+    owedBasis = `No invoice in the ledger was issued by month end (${owed.ledgerFrom != null ? `the earliest issue date held is ${owed.ledgerFrom}` : 'it holds no issued invoice'}), so nothing shows the ledger reaches back this far, and a 0 here would be a guess. Left null.`
+  } else if (owed.owedNzd != null) {
+    owedBasis = `${owed.certainCount} invoices issued by month end and not paid by then (issue date = sent_at, else the source invoice date in created_at; paid_at for payment), at today's FX. Counts only what the ledger holds, which reaches back to ${owed.ledgerFrom}. A Xero invoice synced as paid without a payment date carries the sync's time as paid_at, so it reads as owed until then.`
+  } else {
+    owedBasis = `${owed.ambiguous.length} invoices worth NZ$${owed.ambiguousNzd} cannot be placed at month end (listed under owed.ambiguous, each with its reason; typically a write-off, which carries no date, on a row rewritten after month end). Certainly owed then: NZ$${owed.certainNzd} across ${owed.certainCount} invoices, so the true figure lies between that and NZ$${owed.certainNzd + owed.ambiguousNzd}. Left null rather than guessed.`
   }
-  const owedNzd = owed?.owedNzd ?? null
+  const owedNzd = owed.owedNzd
 
   const fields: Record<SnapshotField, FilledField> = {
     cashNzd: { value: cashNzd, basis: cashBasis },
@@ -710,11 +864,11 @@ export async function fillMonthSnapshot(drizzle: D1, monthKey: string, now: Date
   const filled = FIELD_ORDER.filter(f => fields[f].value != null)
   const leftNull = FIELD_ORDER.filter(f => fields[f].value == null)
 
-  if (filled.length === 0) {
+  if (cashNzd == null && owedNzd == null) {
     throw new SnapshotFillRefusal(
       'nothing_derivable',
       422,
-      `Nothing about ${monthKey} can be rebuilt honestly, so no row was written and a later fill is still possible. Cash: ${cashBasis} Owed: ${owedBasis} Burn: ${burnBasis}`,
+      `Neither month-end cash nor money owed for ${monthKey} can be rebuilt honestly, so no row was written and a later fill is still possible. (Burn alone is not written: it is recomputable from the stored Xero P&L at any time, and a row holding only burn would block a later fill.) Cash: ${cashBasis} Owed: ${owedBasis} Burn: ${burnBasis}`,
     )
   }
 

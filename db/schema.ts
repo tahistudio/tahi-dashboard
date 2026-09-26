@@ -1581,8 +1581,10 @@ export const airwallexTransactions = sqliteTable('airwallex_transactions', {
 //
 // Backfilled rows (source = 'backfill') are rebuilt after the fact: cash_nzd
 // by walking the Airwallex transaction ledger backwards from today's
-// balance, burn / runway from the stored Xero P&L. A single-month fill
-// (?fill=YYYY-MM) also carries owed_nzd when the invoice dates prove it.
+// balance, burn / runway from the stored Xero P&L. No cash is rebuilt while
+// Airwallex yield is held: the yield held at a past month end is not stored.
+// A single-month fill (?fill=YYYY-MM) also carries owed_nzd when the invoice
+// dates prove it.
 // MRR / active_clients have no stored history and cannot be honestly
 // reconstructed, so they stay null for backfilled months. Neither the
 // backfill nor the fill overwrites an existing row by default.

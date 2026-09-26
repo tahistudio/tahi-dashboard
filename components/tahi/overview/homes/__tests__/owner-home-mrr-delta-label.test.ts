@@ -4,7 +4,8 @@
  * The Hero always read "vs last month" whenever a delta existed, even when
  * the prior snapshot was two or more months old (a skipped snapshot-metrics
  * cron day). This checks the label actually names the basis month, and
- * calls out a skipped month rather than passing it off as "last month".
+ * calls out a month with no MRR on record rather than passing it off as
+ * "last month".
  */
 import { describe, it, expect } from 'vitest'
 import { mrrDeltaLabel } from '@/components/tahi/overview/homes/owner-home'
@@ -22,14 +23,15 @@ describe('mrrDeltaLabel', () => {
     expect(mrrDeltaLabel('2026-08', NOW)).toBe('vs Aug')
   })
 
-  it('calls out a skipped snapshot when the basis is more than one month back', () => {
-    // Basis is July; August's snapshot never landed.
-    expect(mrrDeltaLabel('2026-07', NOW)).toBe('vs Jul (no Aug snapshot)')
+  it('calls out a month with no MRR when the basis is more than one month back', () => {
+    // Basis is July; August has no MRR on record (its snapshot never landed,
+    // or it was backfilled, and a backfilled row never carries MRR).
+    expect(mrrDeltaLabel('2026-07', NOW)).toBe('vs Jul (no Aug MRR)')
   })
 
-  it('calls out a skipped snapshot across a year boundary', () => {
+  it('calls out a month with no MRR across a year boundary', () => {
     const jan = new Date('2027-01-15T00:00:00.000Z')
-    // Basis is November; December's snapshot never landed.
-    expect(mrrDeltaLabel('2026-11', jan)).toBe('vs Nov (no Dec snapshot)')
+    // Basis is November; December has no MRR on record.
+    expect(mrrDeltaLabel('2026-11', jan)).toBe('vs Nov (no Dec MRR)')
   })
 })

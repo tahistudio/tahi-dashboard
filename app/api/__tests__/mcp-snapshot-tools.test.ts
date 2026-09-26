@@ -33,7 +33,16 @@ describe('snapshot_fill_month', () => {
     expect(description).toContain('409')
     expect(description).toContain('current month')
     expect(description).toContain('422')
+    expect(description).toContain('before_data')
+    expect(description).toContain('balances_stale')
+    expect(description).toContain('nothing_derivable')
     expect(description).toContain('MRR and active clients are always null')
+  })
+
+  it('says cash is null while yield is held, and owed is never a made-up 0', () => {
+    const description = toolNamed('snapshot_fill_month').description
+    expect(description).toContain('null while any Airwallex yield is held')
+    expect(description).toContain('never a made-up 0')
   })
 
   it('posts the fill for that month and nothing else', () => {
@@ -47,7 +56,7 @@ describe('snapshot_fill_month', () => {
 
   it('refuses a missing or malformed month before any call is made', () => {
     expect(() => snapshotToolCall('snapshot_fill_month', {})).toThrow('month is required')
-    for (const month of ['2026-8', '2026-13', 'August', '2026-08&backfill=1']) {
+    for (const month of ['2026-8', '2026-13', 'August', '2026-08&backfill=1', '0050-01']) {
       expect(() => snapshotToolCall('snapshot_fill_month', { month })).toThrow('YYYY-MM')
     }
   })

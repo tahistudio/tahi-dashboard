@@ -20,7 +20,8 @@ export interface McpApiCall {
   body?: Record<string, unknown>
 }
 
-const MONTH_KEY_RE = /^\d{4}-(0[1-9]|1[0-2])$/
+/** Same shape the route accepts: a year from 2000 on and a real month. */
+const MONTH_KEY_RE = /^20\d{2}-(0[1-9]|1[0-2])$/
 
 /**
  * The dashboard call one snapshot tool maps to, or null when the name

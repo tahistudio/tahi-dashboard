@@ -234,16 +234,17 @@ function monthKeyBefore(now: Date, monthsBack: number): string {
  * `basisMonth` is the monthKey of the financial_snapshots row the delta was
  * computed against (mrrDeltaBasisMonth from the overview route). When it is
  * exactly last calendar month this reads "vs Jul" - a real month-over-month
- * comparison. When the snapshot cron skipped a month (or several) the basis
- * is older than that, and the label says so rather than silently passing an
- * unlabelled percentage off as "vs last month" when it may be vs two months
- * ago.
+ * comparison. When last month has no MRR on record (the snapshot cron skipped
+ * it, or its row was backfilled, and a backfilled row never carries MRR) the
+ * basis is older than that, and the label says so rather than silently
+ * passing an unlabelled percentage off as "vs last month" when it may be vs
+ * two months ago.
  */
 export function mrrDeltaLabel(basisMonth: string | null | undefined, now: Date = new Date()): string {
   if (!basisMonth) return 'vs last month'
   const expected = monthKeyBefore(now, 1)
   if (basisMonth === expected) return `vs ${shortMonth(basisMonth)}`
-  return `vs ${shortMonth(basisMonth)} (no ${shortMonth(expected)} snapshot)`
+  return `vs ${shortMonth(basisMonth)} (no ${shortMonth(expected)} MRR)`
 }
 
 function initials(s: string | null): string {

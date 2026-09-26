@@ -10,7 +10,9 @@
  * ?backfill=1 additionally reconstructs past month-end cash from the
  * Airwallex ledger for months that have NO row yet. It never overwrites an
  * existing row: a re-run would otherwise restate settled months from
- * today's FX and today's P&L.
+ * today's FX and today's P&L. While Airwallex yield is held it writes
+ * nothing, because the yield held at a past month end is not stored and the
+ * Cash card counts it.
  *
  * ?backfill=1&refresh=1 is the explicit opt-in to recompute the rows an
  * earlier backfill wrote (source 'backfill'). A 'cron' row is never
@@ -19,16 +21,22 @@
  * ?fill=YYYY-MM writes ONE missing past month and does nothing else: no
  * current-month write, no backfill, no Slack sweep. Insert only, never an
  * upsert; it touches no other month. Cash, burn and runway are rebuilt the
- * way the backfill rebuilds them, money owed only when the invoice dates
- * prove it, MRR and active clients never (no history of them is kept). The
- * response names every field's value and basis, or why it was left null.
- * See fillMonthSnapshot in lib/financial-snapshots.ts. Outcomes:
+ * way the backfill rebuilds them (no cash or runway while yield is held),
+ * money owed only when the invoice dates prove it and the invoice ledger
+ * reaches back to the month, MRR and active clients never (no history of
+ * them is kept). The response names every field's value and basis, or why
+ * it was left null. See fillMonthSnapshot in lib/financial-snapshots.ts.
+ * Outcomes:
  *   200 written, and logged to cron_runs as a snapshot-metrics run.
- *   400 not YYYY-MM, the current month, a future month, or combined with
- *       backfill / refresh.
+ *   400 not YYYY-MM from 2000 on, the current month, a future month, a
+ *       month that ended before any data we hold (code before_data), or
+ *       combined with backfill / refresh.
  *   409 the month already has a row. Nothing written.
- *   422 no field could be rebuilt. Nothing written.
- *   500 the write itself failed, logged to cron_runs as an error.
+ *   422 the Airwallex balances were read before the month ended (code
+ *       balances_stale: run the Airwallex sync, then fill), or neither cash
+ *       nor money owed can be rebuilt (code nothing_derivable; burn alone is
+ *       not written). Nothing written.
+ *   500 a read or the write failed, logged to cron_runs as an error.
  * Refusals write nothing and log nothing.
  *
  * It also carries one piece of daily housekeeping that has nothing to do with
