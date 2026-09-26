@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, asc } from 'drizzle-orm'
 import { requireContractAccess } from '@/app/api/admin/_sales-access/artifact-scope'
+import { isContractPastExpiry, isMarkedSigned } from '@/lib/contract-signing-state'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -35,11 +36,13 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       sentAt: schema.contractDocuments.sentAt,
       signedAt: schema.contractDocuments.signedAt,
       expiresAt: schema.contractDocuments.expiresAt,
+      finalHash: schema.contractDocuments.finalHash,
     })
     .from(schema.contractDocuments)
     .where(eq(schema.contractDocuments.id, id))
     .limit(1)
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const { finalHash, ...contract } = doc
 
   const signers = await database
     .select({
@@ -66,5 +69,13 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     .where(eq(schema.contractSignatures.contractId, id))
     .orderBy(asc(schema.contractSignatures.signedAt))
 
-  return NextResponse.json({ contract: doc, signers, signatures, isPreview: true })
+  // `expired` lets the preview say what the client would see instead: the
+  // public route answers 410 for the same contract and renders no document.
+  return NextResponse.json({
+    contract: { ...contract, markedSigned: isMarkedSigned({ status: doc.status, finalHash }) },
+    signers,
+    signatures,
+    isPreview: true,
+    expired: isContractPastExpiry(doc.status, doc.expiresAt),
+  })
 }

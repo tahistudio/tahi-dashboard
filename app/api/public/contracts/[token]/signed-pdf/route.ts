@@ -18,6 +18,7 @@ import { eq } from 'drizzle-orm'
 import { getCloudflareContext } from '@opennextjs/cloudflare'
 import { resolveContractSignedPdfBytes } from '@/lib/contract-signed-artifact'
 import { slugify } from '@/lib/contract-fully-signed-emails'
+import { isMarkedSigned } from '@/lib/contract-signing-state'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ token: string }> }
@@ -45,7 +46,11 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     .where(eq(schema.contractDocuments.publicShareToken, token))
     .limit(1)
 
-  if (!doc || doc.status !== 'signed') {
+  // A contract the studio marked signed by hand has no signatures to stamp
+  // and no signing date (lib/contract-signing-state.ts), so there is no
+  // signed copy to hand out; building one would print today as the signing
+  // date.
+  if (!doc || doc.status !== 'signed' || isMarkedSigned(doc)) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 

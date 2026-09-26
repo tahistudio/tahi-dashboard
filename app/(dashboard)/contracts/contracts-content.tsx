@@ -38,6 +38,8 @@ interface ContractListItem {
   expiresAt: string | null
   createdAt: string
   updatedAt: string
+  /** 'signed' set by hand, not by the last signature (lib/contract-signing-state.ts). */
+  markedSigned?: boolean
 }
 
 interface OrgOption { id: string; name: string }
@@ -214,7 +216,7 @@ export function ContractsContent() {
         const def = STATUS_BY_VALUE.get(r.status)
         return (
           <Badge tone={def?.tone ?? 'neutral'} variant="soft" size="sm" dot>
-            {def?.label ?? r.status}
+            {r.markedSigned ? 'Marked signed' : def?.label ?? r.status}
           </Badge>
         )
       },

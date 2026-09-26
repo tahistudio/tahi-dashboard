@@ -24,6 +24,7 @@ import { putContractSignedPdf } from '@/lib/contract-signed-artifact'
 import { publicUrl } from '@/lib/app-url'
 import { emailFromAddress } from '@/lib/email'
 import { deliverEmail, resolveDeliveryPolicy } from '@/lib/email-delivery'
+import { isMarkedSigned } from '@/lib/contract-signing-state'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -74,6 +75,14 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
       console.error(`[contract-fully-signed-emails] contract ${contractId} status is ${doc.status}, expected 'signed'`)
       return
     }
+    // Marked signed by hand (lib/contract-signing-state.ts): no signatures,
+    // no signing date, nothing to stamp. Sending would tell every recipient
+    // that each party had just signed, dated today.
+    const signedAt = doc.signedAt
+    if (isMarkedSigned(doc) || !signedAt) {
+      console.error(`[contract-fully-signed-emails] contract ${contractId} was marked signed without a signing record, skipping`)
+      return
+    }
 
     const signers = await database
       .select({
@@ -98,6 +107,68 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
 
     const sigBySigner = new Map<string, typeof signatures[number]>()
     for (const s of signatures) sigBySigner.set(s.signerId, s)
+
+    const publicViewerUrl = doc.token
+      ? publicUrl(`/p/contract/${doc.token}`)
+      : publicUrl(`/contracts/${contractId}`)
+
+    // ── Build the PDF via jsPDF (pure JS, runs cleanly on Workers).
+    //    The previous implementation used @react-pdf/renderer which
+    //    depends on pdfkit + Node APIs that nodejs_compat doesn't
+    //    fully cover. If anything still goes wrong we fall back to a
+    //    no-attachment covering email so signers always get notified.
+    const pdfFilename = `${slugify(doc.name)}-signed.pdf`
+    const signerNames = signers.map(s => s.name).filter(Boolean)
+
+    let pdfBase64: string | null = null
+    let pdfError: string | null = null
+    try {
+      pdfBase64 = buildSignedPdfBase64({
+        contractName: doc.name,
+        contractType: doc.type,
+        signedAt,
+        finalHash: doc.finalHash,
+        publicViewerUrl,
+        bodyHtml: doc.bodyHtml,
+        signers: signers.map(s => {
+          const sig = sigBySigner.get(s.id)
+          return {
+            id: s.id,
+            name: s.name,
+            email: s.email,
+            role: s.role,
+            signedAt: sig?.signedAt ?? s.signedAt ?? null,
+            signatureDataUrl: sig?.signatureDataUrl ?? null,
+          }
+        }),
+      })
+    } catch (err) {
+      pdfError = err instanceof Error ? err.message : 'Unknown PDF render error'
+      console.error('[contract-fully-signed-emails] PDF render failed, falling back to no-attachment email:', pdfError)
+    }
+
+    // ── Persist the PDF to R2 before anything decides whether to send, so a
+    // lost or filtered email, a contract with nobody to email, or an
+    // environment with no Resend key never means the signed agreement exists
+    // nowhere at all. This used to sit after both of those early returns, so
+    // either one skipped it and signedStorageKey was never written. Best
+    // effort: a storage failure costs the download/resend routes a rebuild
+    // later (lib/contract-signed-artifact.ts regenerates on the fly), never
+    // this send.
+    if (pdfBase64) {
+      try {
+        const cfCtx = await getCloudflareContext({ async: true })
+        const storage = (cfCtx?.env as { STORAGE?: R2Bucket } | undefined)?.STORAGE
+        if (storage) {
+          const key = await putContractSignedPdf({ STORAGE: storage }, contractId, pdfBase64)
+          await database.update(schema.contractDocuments)
+            .set({ signedStorageKey: key })
+            .where(eq(schema.contractDocuments.id, contractId))
+        }
+      } catch (err) {
+        console.error('[contract-fully-signed-emails] R2 persist failed:', err)
+      }
+    }
 
     // Resolve creator email via team_members. createdById is a Clerk user
     // ID (matches teamMembers.clerk_user_id) for normal flows, but older
@@ -160,65 +231,6 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
       return
     }
 
-    const publicViewerUrl = doc.token
-      ? publicUrl(`/p/contract/${doc.token}`)
-      : publicUrl(`/contracts/${contractId}`)
-
-    // ── Build the PDF via jsPDF (pure JS, runs cleanly on Workers).
-    //    The previous implementation used @react-pdf/renderer which
-    //    depends on pdfkit + Node APIs that nodejs_compat doesn't
-    //    fully cover. If anything still goes wrong we fall back to a
-    //    no-attachment covering email so signers always get notified.
-    const pdfFilename = `${slugify(doc.name)}-signed.pdf`
-    const signerNames = signers.map(s => s.name).filter(Boolean)
-
-    let pdfBase64: string | null = null
-    let pdfError: string | null = null
-    try {
-      pdfBase64 = buildSignedPdfBase64({
-        contractName: doc.name,
-        contractType: doc.type,
-        signedAt: doc.signedAt ?? new Date().toISOString(),
-        finalHash: doc.finalHash,
-        publicViewerUrl,
-        bodyHtml: doc.bodyHtml,
-        signers: signers.map(s => {
-          const sig = sigBySigner.get(s.id)
-          return {
-            id: s.id,
-            name: s.name,
-            email: s.email,
-            role: s.role,
-            signedAt: sig?.signedAt ?? s.signedAt ?? null,
-            signatureDataUrl: sig?.signatureDataUrl ?? null,
-          }
-        }),
-      })
-    } catch (err) {
-      pdfError = err instanceof Error ? err.message : 'Unknown PDF render error'
-      console.error('[contract-fully-signed-emails] PDF render failed, falling back to no-attachment email:', pdfError)
-    }
-
-    // ── Persist the PDF to R2, before the send, so a lost or filtered email
-    // never means the signed agreement exists nowhere at all. Best effort:
-    // a storage failure costs the download/resend routes a rebuild later
-    // (lib/contract-signed-artifact.ts regenerates on the fly), never this
-    // send.
-    if (pdfBase64) {
-      try {
-        const cfCtx = await getCloudflareContext({ async: true })
-        const storage = (cfCtx?.env as { STORAGE?: R2Bucket } | undefined)?.STORAGE
-        if (storage) {
-          const key = await putContractSignedPdf({ STORAGE: storage }, contractId, pdfBase64)
-          await database.update(schema.contractDocuments)
-            .set({ signedStorageKey: key })
-            .where(eq(schema.contractDocuments.id, contractId))
-        }
-      } catch (err) {
-        console.error('[contract-fully-signed-emails] R2 persist failed:', err)
-      }
-    }
-
     // ── Send to each recipient. Failures are tracked but never thrown ─
     // Through lib/email-delivery.ts, the one door out, so the tahi.studio
     // allowlist applies to a countersigned contract the same as to anything
@@ -239,7 +251,7 @@ export async function sendFullySignedContractEmails(contractId: string): Promise
           recipientWasSigner: r.wasSigner,
           contractName: doc.name,
           contractType: doc.type,
-          signedAt: doc.signedAt ?? new Date().toISOString(),
+          signedAt,
           publicViewerUrl,
           signerNames,
           pdfAttached: pdfBase64 !== null,

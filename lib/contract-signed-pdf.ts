@@ -29,7 +29,8 @@ interface Signer {
 export interface SignedPdfInputs {
   contractName: string
   contractType: string
-  signedAt: string
+  /** Null prints "Fully signed" with no date rather than an invented one. */
+  signedAt: string | null
   finalHash: string | null
   publicViewerUrl: string
   bodyHtml: string
@@ -200,7 +201,7 @@ export function buildSignedPdfBase64(inputs: SignedPdfInputs): string {
   doc.setFontSize(9)
   doc.setFont('helvetica', 'normal')
   doc.setTextColor(TEXT_MUTED)
-  doc.text(`Fully signed at ${formatTimestamp(inputs.signedAt)}`, PAGE_MARGIN, y)
+  doc.text(inputs.signedAt ? `Fully signed at ${formatTimestamp(inputs.signedAt)}` : 'Fully signed', PAGE_MARGIN, y)
   y += 10
 
   // ── Body ────────────────────────────────────────────────────────
