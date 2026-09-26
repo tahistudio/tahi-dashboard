@@ -75,7 +75,7 @@ const CRONS: CronDef[] = [
   {
     cron: 'suggest-from-transcripts',
     label: 'Task suggestions from call notes',
-    description: 'Reads the call transcripts nobody has read yet, asks Sonnet what the call changed, and writes task_suggestions for approval. Never applies anything. Gate: the call must belong to a client. Every transcript it looks at is stamped so nothing is read twice.',
+    description: 'Reads the call transcripts nobody has read yet, asks Sonnet what the call changed, and writes task_suggestions for approval. Never applies anything. Gate: the call must belong to a client. Every transcript it looks at is stamped so nothing is read twice. Stops starting calls after about 75 seconds, so a run reads one or two and leaves the rest, unread, for the next.',
     endpoint: '/api/admin/crons/suggest-from-transcripts',
     schedule: 'Every 30 min',
   },

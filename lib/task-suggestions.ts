@@ -43,7 +43,7 @@ import { slackBotToken } from '@/lib/slack/api'
 import { mirrorSuggestionDecision, repostSuggestion } from '@/lib/slack/mirror'
 import { TAHI_BOT } from '@/lib/tahi-bot'
 import { postRequestBotMessage, postTaskComment } from '@/lib/task-comments'
-import { SIMILAR_BLOCK, SIMILAR_WARN, findSimilar } from '@/lib/text-similarity'
+import { SIMILAR_BLOCK, SIMILAR_WARN, findSimilar, similarityScore } from '@/lib/text-similarity'
 import { createTaskRecord, updateTaskRecord, type TaskPatchInput } from '@/lib/task-writes'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -516,15 +516,145 @@ export async function buildDedupeKey(input: DedupeInput): Promise<string> {
   return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
+// ── re-reads merge, they do not replace (CN.1c) ──────────────────────────────
+//
+// Sonnet 5 refuses a temperature, so two reads of one call are two samples:
+// the same three Elevate calls gave five items one afternoon and none the
+// next. A re-read therefore ADDS to what the earlier reads left rather than
+// standing in for them, and what follows is the rule that stops the union
+// filing one thing twice. The dedupe key catches an item proposed again in
+// the same words; this catches it proposed again in different ones.
+
+/** What a comparison reads. Every stored row and every draft has these. */
+export interface ComparableSuggestion {
+  kind: string
+  targetTaskId: string | null
+  targetRequestId?: string | null
+  /** A parsed proposal, or the stored JSON text; both are read the same way. */
+  proposal: unknown
+}
+
+/**
+ * The rows of a transcript a re-read is compared against: every status but
+ * 'expired'.
+ *
+ * Open rows (pending, snoozed) because a second row for something already
+ * waiting is the duplicate this whole section exists to stop. Decided rows
+ * (applied, rejected, failed) because the same words off the same call were
+ * already judged by a founder, and proposing them again in a new wording is
+ * the inbox arguing with the decision. Expired rows are the one exception:
+ * nobody decided them, their dedupe keys were retired with them (af5c2991),
+ * and an item they held has to be able to come back.
+ */
+export const ON_FILE_STATUSES: readonly SuggestionStatus[] = ['pending', 'snoozed', 'applied', 'rejected', 'failed']
+
+function proposalRecord(proposal: unknown): Record<string, unknown> {
+  const parsed = typeof proposal === 'string' ? parseProposalLoose(proposal) : proposal
+  return (parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}) as Record<string, unknown>
+}
+
+function textOf(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+/** Two pieces of prose that say the same thing, at the bar the approve guard uses. */
+function sayTheSame(a: unknown, b: unknown): boolean {
+  const left = textOf(a)
+  const right = textOf(b)
+  if (!left || !right) return false
+  return left.toLowerCase() === right.toLowerCase() || similarityScore(left, right) >= SIMILAR_BLOCK
+}
+
+function fieldKeys(fields: unknown): string {
+  const record = fields && typeof fields === 'object' && !Array.isArray(fields) ? fields as Record<string, unknown> : {}
+  return Object.keys(record).filter(key => record[key] !== undefined).sort().join(',')
+}
+
+function folded(values: unknown): string[] {
+  return Array.isArray(values)
+    ? values.map(textOf).filter(value => value.length > 0).map(value => collapse(value).toLowerCase())
+    : []
+}
+
+/**
+ * Does `candidate` say nothing that `existing` does not already say?
+ *
+ * One question per kind, because "the same item" means something different
+ * for each:
+ *
+ *   * a create is the same when its title scores at or above SIMILAR_BLOCK
+ *     against the other create's, across the two create kinds, because a
+ *     second read filing a task for what the first filed as a request is the
+ *     same item in a different family, not a new one;
+ *   * a note is the same when its body does, on the same target;
+ *   * an update is the same when it touches the same fields of the same
+ *     target, whatever values it gives them: a read that moves the due date
+ *     to the 3rd and a read that moves it to the 4th are two samples of one
+ *     sentence, and the human decides it once;
+ *   * a completion is the same on the same target;
+ *   * a subtask list is the same when every subtask in it is already in the
+ *     other list, so a read that found one more subtask is still filed;
+ *   * a hand-off is the same when it names the same person on the same
+ *     request.
+ *
+ * Deliberately asymmetric, which is why it is not called "same": the
+ * candidate is the newcomer, and the question is only whether it adds
+ * anything.
+ */
+export function isRepeatOf(candidate: ComparableSuggestion, existing: ComparableSuggestion): boolean {
+  const mine = proposalRecord(candidate.proposal)
+  const theirs = proposalRecord(existing.proposal)
+
+  const candidateCreates = isCreateKind(candidate.kind)
+  const existingCreates = isCreateKind(existing.kind)
+  if (candidateCreates || existingCreates) {
+    return candidateCreates && existingCreates && sayTheSame(proposalTitleOf(mine), proposalTitleOf(theirs))
+  }
+
+  if (candidate.kind !== existing.kind) return false
+  const target = candidate.targetRequestId ?? candidate.targetTaskId ?? null
+  const otherTarget = existing.targetRequestId ?? existing.targetTaskId ?? null
+  if (!target || target !== otherTarget) return false
+
+  switch (candidate.kind) {
+    case 'note':
+    case 'request_note':
+      return sayTheSame(mine.body, theirs.body)
+    case 'update_task':
+    case 'update_request': {
+      const keys = fieldKeys(mine.fields)
+      return keys.length > 0 && keys === fieldKeys(theirs.fields)
+    }
+    case 'complete_task':
+      return true
+    case 'add_subtasks': {
+      const already = new Set(folded(theirs.subtasks))
+      const proposed = folded(mine.subtasks)
+      return proposed.length > 0 && proposed.every(subtask => already.has(subtask))
+    }
+    case 'hand_off_request': {
+      const contactId = textOf(mine.contactId)
+      if (contactId && contactId === textOf(theirs.contactId)) return true
+      const name = collapse(textOf(mine.contactName)).toLowerCase()
+      return name.length > 0 && name === collapse(textOf(theirs.contactName)).toLowerCase()
+    }
+    default:
+      return false
+  }
+}
+
 // ── writing ──────────────────────────────────────────────────────────────────
 
 /**
- * Insert a batch, skipping anything already on the table and anything the
- * batch proposes twice.
+ * Insert a batch, skipping anything already on the table, anything the batch
+ * proposes twice, and anything an earlier read of the same transcript already
+ * filed in other words (CN.1c, `isRepeatOf`).
  *
  * Duplicates are counted rather than reported as an error: a cron re-reading
  * a transcript it has already seen is the normal case, not a fault, and the
- * summary reads better for saying so.
+ * summary reads better for saying so. Only ever inserts: a row already on the
+ * table is never updated, expired or deleted from here, which is what makes a
+ * re-read a union rather than a replacement.
  */
 /**
  * The pending create suggestions that could be the twin of a batch of drafts:
@@ -563,34 +693,72 @@ export async function insertSuggestions(
     }),
   })))
 
-  // ONE READ FOR BOTH GUARDS. The dedupe keys already on the table and the
-  // pending create rows this batch might repeat come back from the same
+  // ONE READ FOR EVERY GUARD. The dedupe keys already on the table, the
+  // pending create rows this batch might repeat, and everything the same
+  // transcripts already have on file (CN.1c) come back from the same
   // statement: they are the same table, and a second round trip per sweep
-  // buys nothing. Rows arrive tagged by which half matched them.
+  // buys nothing. Rows arrive tagged by which part matched them, and each
+  // part is re-checked below rather than trusted to the WHERE.
   const wantedKeys = new Set(keyed.map(entry => entry.dedupeKey))
   const pendingScope = keyed.some(entry => isCreateKind(entry.draft.kind))
     ? pendingCreateScope(keyed.map(entry => entry.draft.orgId))
     : null
+  const transcriptIds = unique(keyed.map(entry => entry.draft.transcriptId))
+  const wantedTranscripts = new Set(transcriptIds)
+  const onFileScope = transcriptIds.length > 0
+    ? and(
+      inArray(schema.taskSuggestions.transcriptId, transcriptIds),
+      inArray(schema.taskSuggestions.status, [...ON_FILE_STATUSES]),
+    )!
+    : null
+  const scopes = [pendingScope, onFileScope].filter((scope): scope is SQL => scope !== null)
 
   const existing = new Set<string>()
   const pending: SimilarCandidate[] = []
   const pendingOrg = new Map<string, string>()
+  // What each transcript already has on file, from earlier reads, and then
+  // from this batch as it is written.
+  const onFile = new Map<string, ComparableSuggestion[]>()
+  const onFileIds = new Set<string>()
+  const fileUnder = (transcriptId: string, row: ComparableSuggestion): void => {
+    const list = onFile.get(transcriptId)
+    if (list) list.push(row)
+    else onFile.set(transcriptId, [row])
+  }
+
   for (const batch of chunk(keyed.map(entry => entry.dedupeKey))) {
     const keyMatch = inArray(schema.taskSuggestions.dedupeKey, batch)
     const rows = await drizzle
       .select({
         id: schema.taskSuggestions.id,
         orgId: schema.taskSuggestions.orgId,
+        transcriptId: schema.taskSuggestions.transcriptId,
         kind: schema.taskSuggestions.kind,
+        targetTaskId: schema.taskSuggestions.targetTaskId,
+        targetRequestId: schema.taskSuggestions.targetRequestId,
         status: schema.taskSuggestions.status,
         proposal: schema.taskSuggestions.proposal,
         dedupeKey: schema.taskSuggestions.dedupeKey,
       })
       .from(schema.taskSuggestions)
-      .where(pendingScope ? or(keyMatch, pendingScope) : keyMatch)
+      .where(scopes.length > 0 ? or(keyMatch, ...scopes) : keyMatch)
 
     for (const row of rows) {
       if (row.dedupeKey && wantedKeys.has(row.dedupeKey)) existing.add(row.dedupeKey)
+      if (
+        row.transcriptId
+        && wantedTranscripts.has(row.transcriptId)
+        && (ON_FILE_STATUSES as readonly string[]).includes(row.status ?? '')
+        && !onFileIds.has(row.id)
+      ) {
+        onFileIds.add(row.id)
+        fileUnder(row.transcriptId, {
+          kind: row.kind ?? '',
+          targetTaskId: row.targetTaskId ?? null,
+          targetRequestId: row.targetRequestId ?? null,
+          proposal: row.proposal ?? '',
+        })
+      }
       if (row.status !== 'pending' || !isCreateKind(row.kind ?? '') || pendingOrg.has(row.id)) continue
       const title = proposalTitleOf(parseProposalLoose(row.proposal ?? ''))
       if (!title) continue
@@ -615,25 +783,39 @@ export async function insertSuggestions(
     // inbox longer and the decision no easier. A match against an existing
     // REQUEST or TASK is deliberately NOT dropped: the human may still want
     // it, and the read-time warning will say so.
-    if (isCreateKind(entry.draft.kind)) {
+    const createTitle = isCreateKind(entry.draft.kind) ? proposalTitleOf(entry.draft.proposal).trim() : ''
+    if (createTitle) {
       const key = orgKeyOf(entry.draft.orgId)
       const mine = pending.filter(candidate => pendingOrg.get(candidate.id) === key)
-      const title = proposalTitleOf(entry.draft.proposal)
-      const twin = title.trim() ? findSimilar(title, mine, SIMILAR_BLOCK)[0] : undefined
-      if (twin) {
+      if (findSimilar(createTitle, mine, SIMILAR_BLOCK)[0]) {
         similarDropped++
         continue
       }
-      if (title.trim()) {
-        // Added before the write, so a batch proposing one thing twice in two
-        // wordings inserts it once.
-        pendingOrg.set(`draft:${entry.dedupeKey}`, key)
-        pending.push({ kind: 'suggestion', id: `draft:${entry.dedupeKey}`, number: null, title, status: 'pending' })
-      }
     }
-    // Added to the seen set before the write, so a batch proposing the same
-    // change twice inserts it once.
+
+    // A re-read proposing, in new words, something this transcript already
+    // has on file (CN.1c): a snoozed or decided row, a pending one filed
+    // under another client since, or a non-create item the check above never
+    // looks at. Counted as a duplicate, because that is what it is, and the
+    // row on file stays exactly as it was: a founder may be reading it, Slack
+    // may be holding it, and a rewrite of its proposal under them would
+    // change what they are deciding. Nothing here ever touches an existing
+    // row.
+    const earlier = entry.draft.transcriptId ? onFile.get(entry.draft.transcriptId) : undefined
+    if (earlier?.some(row => isRepeatOf(entry.draft, row))) {
+      duplicates++
+      continue
+    }
+
+    // Everything below is recorded before the write, so a batch proposing one
+    // thing twice, in the same words or in two wordings, inserts it once.
+    if (createTitle) {
+      const key = orgKeyOf(entry.draft.orgId)
+      pendingOrg.set(`draft:${entry.dedupeKey}`, key)
+      pending.push({ kind: 'suggestion', id: `draft:${entry.dedupeKey}`, number: null, title: createTitle, status: 'pending' })
+    }
     existing.add(entry.dedupeKey)
+    if (entry.draft.transcriptId) fileUnder(entry.draft.transcriptId, entry.draft)
 
     await drizzle.insert(schema.taskSuggestions).values({
       id: crypto.randomUUID(),

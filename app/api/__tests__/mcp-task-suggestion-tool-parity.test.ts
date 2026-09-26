@@ -140,6 +140,35 @@ describe('rebuild_task_suggestions', () => {
     const mapped = call('rebuild_task_suggestions', { transcript_ids: ['tr1', '  ', 7] })
     expect(mapped.body).toEqual({ transcriptIds: ['tr1'] })
   })
+
+  // CN.1c. A rebuild adds to the inbox by default; each switch travels only
+  // when it leaves its default, so a habit cannot expire anybody's inbox.
+  it('carries replace only when it is a literal true', () => {
+    expect(call('rebuild_task_suggestions', { all: true, replace: true }).body).toEqual({ all: true, replace: true })
+    expect(call('rebuild_task_suggestions', { all: true, replace: 'yes' }).body).toEqual({ all: true })
+    expect(call('rebuild_task_suggestions', { all: true, replace: false }).body).toEqual({ all: true })
+  })
+
+  it('switches the second read and the immediate read off only on a literal false', () => {
+    expect(call('rebuild_task_suggestions', { transcript_ids: ['tr1'], second_pass: false, read_now: false }).body)
+      .toEqual({ transcriptIds: ['tr1'], secondPass: false, readNow: false })
+    expect(call('rebuild_task_suggestions', { transcript_ids: ['tr1'], second_pass: true, read_now: 'no' }).body)
+      .toEqual({ transcriptIds: ['tr1'] })
+  })
+})
+
+describe('cron_suggest_from_transcripts', () => {
+  it('fires the sweep with the scheduled defaults', () => {
+    const mapped = call('cron_suggest_from_transcripts')
+    expect(mapped).toEqual({ path: '/api/admin/crons/suggest-from-transcripts', method: 'POST', body: {} })
+  })
+
+  it('puts limit and second_pass in the query, where the route reads them', () => {
+    expect(call('cron_suggest_from_transcripts', { limit: 12, second_pass: false }).path)
+      .toBe('/api/admin/crons/suggest-from-transcripts?limit=12&second_pass=0')
+    expect(call('cron_suggest_from_transcripts', { second_pass: true }).path)
+      .toBe('/api/admin/crons/suggest-from-transcripts')
+  })
 })
 
 describe('names outside this module', () => {
@@ -173,6 +202,23 @@ describe('the registered tool descriptions list the CN.1b request kinds', () => 
     expect(desc).toContain('possible_duplicate')
     expect(desc).toContain('attach')
     expect(desc).toContain('force')
+  })
+
+  it('rebuild_task_suggestions says a rebuild adds rather than replaces, and takes the three switches', () => {
+    const desc = description('rebuild_task_suggestions')
+    expect(desc).toContain('Nothing already filed is expired or changed')
+    expect(desc).toContain('replace true')
+    const properties = TOOLS.find(t => t.name === 'rebuild_task_suggestions')?.inputSchema.properties as Record<string, unknown> | undefined
+    expect(properties).toHaveProperty('replace')
+    expect(properties).toHaveProperty('second_pass')
+    expect(properties).toHaveProperty('read_now')
+  })
+
+  it('cron_suggest_from_transcripts says each call is read twice and takes the two knobs', () => {
+    expect(description('cron_suggest_from_transcripts')).toContain('read twice')
+    const properties = TOOLS.find(t => t.name === 'cron_suggest_from_transcripts')?.inputSchema.properties as Record<string, unknown> | undefined
+    expect(properties).toHaveProperty('limit')
+    expect(properties).toHaveProperty('second_pass')
   })
 
   it('decide_task_suggestion takes the attach arguments', () => {

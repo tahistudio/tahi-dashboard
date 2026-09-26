@@ -15,11 +15,15 @@ vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn(),
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org_tahi'),
 }))
-// The sweep is stubbed; the limit parser is the real one, because what this
-// route does with ?limit is the only logic it has.
+// The sweep is stubbed; the two query parsers are the real ones, because
+// what this route does with ?limit and ?second_pass is the only logic it has.
 vi.mock('@/lib/task-suggester', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/task-suggester')>()
-  return { runSuggestionSweep: vi.fn(), parseSweepLimit: actual.parseSweepLimit }
+  return {
+    runSuggestionSweep: vi.fn(),
+    parseSweepLimit: actual.parseSweepLimit,
+    parseSecondPass: actual.parseSecondPass,
+  }
 })
 
 import { db } from '@/lib/db'
@@ -38,7 +42,8 @@ const SUMMARY = {
   resurfaced: 0,
   costCents: 4,
   repaired: 0,
-    dropReasons: {},
+  dropReasons: {},
+  secondPass: { enabled: true, ran: 1, proposed: 1, failed: [] },
 }
 
 function post(headers: Record<string, string> = {}, query = '') {
@@ -83,16 +88,33 @@ describe('POST /api/admin/crons/suggest-from-transcripts', () => {
 
   it('sweeps five transcripts when nobody asked for more', async () => {
     await POST(post({ 'x-cron-secret': 'shhh' }))
-    expect(runSuggestionSweep).toHaveBeenCalledWith(expect.anything(), { batch: 5 })
+    expect(runSuggestionSweep).toHaveBeenCalledWith(expect.anything(), { batch: 5, secondPass: true })
   })
 
   it('takes a bigger batch from ?limit for a manual cutover pass', async () => {
     await POST(post({ 'x-cron-secret': 'shhh' }, '?limit=8'))
-    expect(runSuggestionSweep).toHaveBeenCalledWith(expect.anything(), { batch: 8 })
+    expect(runSuggestionSweep).toHaveBeenCalledWith(expect.anything(), { batch: 8, secondPass: true })
   })
 
   it('never sweeps more than twenty in one run, whatever the query says', async () => {
     await POST(post({ 'x-cron-secret': 'shhh' }, '?limit=500'))
-    expect(runSuggestionSweep).toHaveBeenCalledWith(expect.anything(), { batch: 20 })
+    expect(runSuggestionSweep).toHaveBeenCalledWith(expect.anything(), { batch: 20, secondPass: true })
+  })
+
+  // CN.1c. Every call is read twice unless a person firing the job by hand
+  // says otherwise, and only for that run: the scheduled job never passes it.
+  it('reads every call twice by default', async () => {
+    await POST(post({ 'x-cron-secret': 'shhh' }))
+    expect(vi.mocked(runSuggestionSweep).mock.calls[0][1]).toMatchObject({ secondPass: true })
+  })
+
+  it('reads each call once when ?second_pass=0 says so', async () => {
+    await POST(post({ 'x-cron-secret': 'shhh' }, '?second_pass=0&limit=3'))
+    expect(runSuggestionSweep).toHaveBeenCalledWith(expect.anything(), { batch: 3, secondPass: false })
+  })
+
+  it('keeps the second read on for a value it does not recognise', async () => {
+    await POST(post({ 'x-cron-secret': 'shhh' }, '?second_pass=maybe'))
+    expect(vi.mocked(runSuggestionSweep).mock.calls[0][1]).toMatchObject({ secondPass: true })
   })
 })
