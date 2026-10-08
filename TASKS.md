@@ -946,8 +946,8 @@ not need re-scoping, only executing.
 
 # (f) North star and the long pool
 
-10 open ids, plus the queued phases and the post-launch groups, which TASKS.md
-carries as prose rather than checkboxes and which stay that way here.
+10 open ids, plus 14 in the 2026-10-09 ideas pool, plus the queued phases and
+the post-launch groups, which TASKS.md carries as prose rather than checkboxes and which stay that way here.
 
 ## North-star phases (queued, unchanged)
 
@@ -1009,6 +1009,54 @@ The standalone /messages surface (8d), the testimonial pipeline, automated healt
 scoring (the scorer exists with zero callers), Slack and digests, request steps
 and client checklists (documented, not built), file-level proofing (ManyRequests
 has none either), ratings and NPS, a persisted per-request activity log.
+
+## Ideas pool, 2026-10-09
+
+Liam, 2026-10-09: "one day i want a QA tester ... and also recordings for calls
+... research what they have in features that we dont. and then we can pinch a
+few." Research and gap list in
+docs/superpowers/plans/2026-10-09-loopsii-qa-recording-ideas.md (Loopsii
+teardown, eight website feedback tools, call recording routes with costs). Not
+scheduled; each needs a scope before building.
+
+- [ ] WQA.0 - [Scope] Website QA tester: clients pin comments on sites we are
+  building and suggest copy edits (before and after, a "Copy edited text"
+  button), guests by signed review link with name and email, an embed script in
+  a Shadow DOM served by the Worker, screenshots to R2, team-only or everyone
+  visibility, pins become requests through the suggestion gate, MCP tools.
+  Reuses the beta feedback ball (feedback_comments, lib/feedback-anchor.ts).
+  Interim with no build: pull Webflow comment-only guest comments into request
+  suggestions.
+- [ ] REC.0 - [Scope] Recordings beyond Gemini: (1) upload a recording,
+  transcribe with Whisper on Workers AI (already bound for Slack voice), file it
+  as a call transcript; (2) a browser screen and mic recorder to R2 with a share
+  page and timecoded comments; (3) Meet, Teams and Zoom capture, Liam to pick
+  between the Recall.ai bot, the Recall.ai desktop SDK, or buying Granola or
+  Loopsii and syncing transcripts in.
+- [ ] LP.1 - [BE] Scope changes caught on a call: the suggester proposes a
+  change request with the quote, included or billable, cost and days added
+  (extends CN.1 and the scope-creep flag).
+- [ ] LP.2 - [BE/FE] Ask the dashboard: a question box over calls, requests and
+  projects that quotes its source with a link.
+- [ ] LP.3 - [BE] Suggest the client for an unlinked call note instead of only
+  parking it.
+- [ ] LP.4 - [BE] Pre-call brief for client calls (past calls, open requests,
+  hand-offs), not just discovery calls.
+- [ ] LP.5 - [FE/BE] "Client owes us" checklist per project (brand files, copy,
+  CMS access; uploaded or waiting), visible in the portal.
+- [ ] LP.6 - [FE/BE] Weekly timesheet grid and a PDF time report.
+- [ ] LP.7 - [FE] Income goal bar: paid, invoiced, unbilled, pipeline, gap to
+  the take-home target.
+- [ ] LP.8 - [BE/FE] Share links for notes, transcripts, recordings and files,
+  public or invite-only, with the existing share view analytics.
+- [ ] LP.9 - [BE] Client-scoped MCP on the Loopsii model: OAuth consent,
+  short-lived tokens, no delete, a Connected apps revoke screen (folds into the
+  Giant Group per-client MCP idea).
+- [ ] LP.10 - [FE] Plain-words capacity line on the capacity card: "Free about
+  60 hours a month, can start 8 Sep" (the forecast and start-date routes exist).
+- [ ] LP.11 - [BE] Chapters on call transcripts, written by the summariser.
+- [ ] LP.12 - [BE/FE] Per-call recording choice once REC.0 lands: bot,
+  bot-free, audio and transcript, or transcript only.
 
 ---
 
