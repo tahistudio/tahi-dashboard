@@ -304,3 +304,41 @@ Read STATUS.md, TASKS.md and this file. `git log --oneline -15` for what landed.
   dark checks. Documentation gate and push recorded with the follow-up commit.
 - Follow-up documentation gate: type-check and lint passed with zero errors
   (existing lint warnings); git diff whitespace check passed.
+
+## 2026-10-10: remaining dashboard tasks triaged
+
+- Liam asked to triage the remaining dashboard work. Used the sprint-planning
+  skill for readiness/dependency ranking, without inventing a sprint capacity
+  or deadline. Saved the ranked plan in
+  docs/superpowers/plans/2026-10-10-dashboard-task-triage.md and linked it near
+  the top of TASKS.md and STATUS.md. Existing ids retain their canonical homes.
+- First work recommended: SW.1 billing recovery, remaining permissions/global
+  search, FU.1/FU.7 runtime hardening, contract expiry and dark/phone repairs,
+  then shared live QA, truthful affordances, remaining MCP invoice mismatch,
+  CN.3 integration and bounded client/invoice ports. REC.0 and WQA.0 scoping
+  can proceed alongside the repairs. No new product/schema choices settled.
+- Corrected stale briefs: MCP consent and roleless deny are implemented,
+  hire linking exists, batch-B index scoping exists, messaging API aliases
+  work, Cloudflare replaced GH cron schedules, and the nineteen unchecked
+  ports no longer wait for advance design review. Kept live checks owed.
+  Removed the repeated A5 checkbox and misleading combined LW.21/LW.24
+  completion line; their canonical checkboxes retain the live-proof state.
+- Source-confirmed remaining access gap: global search applies no feature or
+  organisation scope after Tahi membership auth. Logged under existing T1.16
+  and STATUS P1 for scoped seats. No other person's session was used to probe it.
+- CN.3 is built on cn3-ready (d1103abe, tip 5955e851), 23 commits ahead and
+  8 behind main, 72 files changed from the merge base. Production PRAGMA
+  confirms task_suggestions lacks reject_reason. 0111 must be reviewed/applied
+  before deployment; its raw ALTER is not safe to rerun blindly. Slack
+  verification still depends on CN.2 configuration.
+- Read-only production SELECTs: calendar sync fetched 27 and matched 20,
+  transcript/suggestion jobs succeeded, observed suggestion run had zero
+  eligible calls; Airwallex last synced successfully with two yield rows;
+  Stripe imports still reported zero; schema-watchdog's existing LW.45 finding
+  remained 0/50 passing. No cron, mail, financial mutation or migration fired.
+- Available-migration GET is a catalogue, not proof of apply state. T0.4 needs
+  schema/column/index verification. No checklist was newly marked complete.
+- Triage documentation validation: type-check and lint passed with zero errors
+  (existing warnings); whitespace and edited-id uniqueness checks passed.
+  Previous documentation deploy 6f47476c is green (run 38043210208).
+  This change contains only the triage report and backlog/status/run-log edits.

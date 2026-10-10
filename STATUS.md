@@ -1,11 +1,31 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-10** by Codex (Stripe webhook delivery restored; invoice reconciliation remains open; other sections retain their recorded dates). Triage snapshot below is still the 2026-08-18 audit. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-10** by Codex (task triage refreshed; Stripe delivery restored, invoice reconciliation open; older sections retain their dates). Triage snapshot below is still the 2026-08-18 audit. Reading order for any agent: AGENTS.md.
 
 ## The plan (2026-08-18)
 
 Liam's call: ship every surface a client touches first (proposals, contracts, schedules, portal), cut over from ManyRequests, then improve team/owner surfaces slowly. TASKS.md now carries five sprints: **C0 ops unblock -> C1 sell without embarrassment (deliverable money paths, ~5d) -> C2 portal truth (five blockers, ~12d) -> C3 client-facing redesign stragglers (~4d) -> C4 live QA gate.** Roughly 4-5 focused weeks to a defensible cutover.
+
+## Next work, triaged 2026-10-10
+
+See docs/superpowers/plans/2026-10-10-dashboard-task-triage.md for readiness,
+source evidence and dependencies. Recommended order: SW.1 billing recovery;
+remaining search/permission gaps (T1.6/T1.16); suggestion timeout and route
+export repairs (FU.1/FU.7); contract expiry and responsive/dark fixes; shared
+live QA; then CN.3 integration and bounded invoice/client design ports.
+REC.0 meeting audio and WQA.0 website QA can be scoped alongside repairs.
+
+MCP consent hardening, roleless deny, core hire linking and most named entity
+scoping are already implemented. They need verification, not the old rebuild
+briefs. CN.3 exists on cn3-ready and requires reviewed migration 0111 plus
+integration. The nineteen design ports may proceed as "ported, unchecked"
+under Liam's 2026-09-26 instruction, with the review boxes kept empty.
+
+Live cron SELECTs on 2026-10-10 show calendar, transcript and suggestion jobs
+succeeding. Calendar read sync does not prove calendar write permission, and
+successful bank sync does not prove the manually maintained yield is current.
+No feature was built or production data changed during the triage.
 
 ## DEPLOY GATE - RESOLVED 2026-09-10
 
@@ -154,6 +174,13 @@ the dashboard and its existing org has no Stripe customer mapping. Link and
 reconcile through the app as Liam, checking for duplicate clients/invoices.
 A successful webhook response alone does not recover an unknown customer.
 See TASKS.md and docs/superpowers/plans/2026-10-10-stripe-webhook-investigation.md.
+
+**P1 before adding a scoped teammate (T1.16, source-confirmed 2026-10-10):**
+/api/admin/search checks Tahi organisation membership but does not apply the
+feature/organisation guards used by the entity routes. Search can therefore
+return out-of-scope entity names/content previews. Repair and verify with
+controlled scoped/denied seats. This triage did not demonstrate an attack
+using somebody else's account.
 
 **Resolved 2026-10-10 (SW.0, tracking commit b361968f):** Liam authorised
 applying the existing live endpoint secret from his PC. Wrangler updated

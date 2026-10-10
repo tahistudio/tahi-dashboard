@@ -7,7 +7,7 @@ Proposed replacement for TASKS.md. Written 2026-09-13 from evidence, not memory:
 `docs/superpowers/plans/2026-09-13-overnight-run-log.md`, and the merge commits of
 tonight (Batch B, Batch C, LW.1 to LW.20).
 
-## Open id count
+## Open id count, historical 2026-09-13 snapshot
 
 - Open lines in TASKS.md before this pass: **112** (75 `[ ]`, 37 `[~]`).
 - Two of those lines repeat an id that is already written elsewhere in the open
@@ -27,6 +27,27 @@ tonight (Batch B, Batch C, LW.1 to LW.20).
   counted twice.
 - An item only flips to `[x]` when the evidence names a commit AND a live
   observation. Merged with no live look stays `[~]` with the commit named.
+
+## Current triage, 2026-10-10
+
+Execution order and evidence:
+docs/superpowers/plans/2026-10-10-dashboard-task-triage.md.
+This scheduling view references existing ids; it does not duplicate checkboxes.
+
+1. SW.1: recover the missing payment after identity/duplicate checks.
+2. T1.6/T1.16: remaining permission gaps, global search first.
+3. FU.1/FU.7: suggestion request timeouts and valid route exports.
+4. FU.2/FU.4, then FU.5/FU.6: contract expiry and responsive/dark repairs.
+5. V1-QA.2/FU.9 plus the grouped client/studio/deliverable live laps.
+6. CT.15/T3.8/T3.9 and CT.17: truthful actions and remaining MCP mismatch.
+7. CN.3 integration with migration 0111, then bounded invoice/client ports.
+8. REC.0 and WQA.0 scope alongside repairs; no provider or new schema chosen.
+
+MCP consent, roleless deny, most named entity scoping and calendar/transcript
+scheduling already exist. Nineteen design ports may proceed under Liam's
+2026-09-26 instruction as "ported, unchecked". Product choices and operator
+steps remain explicit in the triage document. Existing live evidence rules
+still apply; this review alone marks no new feature complete.
 
 ## Definition of Done (verbatim, CLAUDE.md rule 8)
 
@@ -129,7 +150,7 @@ agent side is done unless the line says otherwise.
 - [ ] LW.36b LIAM - Void the "test manual" Stripe invoice
   (in_1TGQaE2MOtshRPkATn4r8ByV) and delete the "test manual" org on /clients
   (the importer no longer demotes the local write-off, but the org is a dummy).
-- [ ] A5 - The real-session lap (see "The one proof nobody else can give").
+- A5: see its single checkbox under "The one proof nobody else can give".
 - [x] LIAM - Pay-rise decision (resolved 2026-09-26: the rise already happened, pay stays at the configured 64k each; Liam thinks 64k, possibly 62k, and the 74k or 78k step below was not taken. Kept for the record): 74k each (Liam's figure, with Meditrain at
   2,200 a month per Bharat's 17 September call) or 78k each (the model's
   recommendation from the live numbers) from the 1 October payroll; top the tax
@@ -141,7 +162,9 @@ agent side is done unless the line says otherwise.
 - [ ] LIAM - Work the Suggestions inbox on /tasks as calls come in (CN.1); the
   first similarity warnings show on the next call's suggestions.
 - [ ] LIAM - Mark docs/superpowers/plans/2026-09-14-design-review-for-liam.md
-  (19 modules, 13 SHIP, 6 FIX); nothing is ported until he has.
+  (19 modules, 13 SHIP, 6 FIX). His 2026-09-26 instruction permits ports
+  without advance review, using existing patterns and labelled "ported, unchecked".
+  This review remains owed but does not block those ports.
 - [ ] LIAM - Say go on PM.0 (product manager AI scope). CN.2 is built and
   deployed: apply the manifest to the existing Tahi Dashboard app, reinstall,
   set SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET, then DM it once.
@@ -273,10 +296,19 @@ One table, task_suggestions, sits between "something was said" and "a task chang
 - [x] CN.0b - [BE] Gemini export parsed empty on production since the sync shipped (b4188ec4): the export asked Drive for text/plain while the parser was written against the markdown export, so no doc ever parsed and no discovery call was ever stamped gemini_drive (found on the CN.0 smoke, 2026-09-19). f8c8adb7 makes a dry run report what the parser saw; the preview showed the 2026-09 doc shape (a Quick notes block with its own Next steps, then Full notes with Summary, Next steps and Details, then an emoji Transcript heading, star bullets). ba4970c0 exports as text/markdown and reads bare headings too; the follow-up commit starts at Full notes and accepts star bullets. Then f7af0585 (one heading matcher for hashed, bold-wrapped, emoji-prefixed and bare headings; Decisions ends the summary) and 342a450d (timestamp links flattened). Live 2026-09-19: a dry run over 30 days parsed all 15 docs; the real run as Liam filed 14 rows (12 matched discovery calls written with transcript, summary and next steps; 2 parked: the 31 Aug Weekly catchup tied between two calls, a 191-character 25 Aug Charles stub with no candidate), 1 already filed by the cron itself. The cron keeps a 72-hour window every 30 minutes. Polish after the live look at /calls (59398f6f): prose previews on the unlinked card, a 44px Attach target, transcript text without the markdown anchors and entities, and force=1 on the sync to re-export filed docs after a parser change; live after 4deaac11 (a forced pass also rewrites the discovery mirror the sync stamped itself): forced re-sync over 30 days refreshed all 15 transcript rows and rewrote the 13 discovery calls; /calls shows prose previews and 44px Attach buttons.
 - [x] CN.1 - [BE/FE/MCP] Suggestions and the dashboard gate (about 4 days): the suggester (Sonnet, the org's open tasks and requests as context, a verbatim quote or the suggestion is dropped, never applies); the Suggestions view on /tasks and a studio home card; Approve, Tweak, Snooze (tonight, this week), Reject, Approve all; one idempotent apply function; MCP list_task_suggestions and decide_task_suggestion. Built 2026-09-19 as workflow cn1-suggestions-build against docs/superpowers/plans/2026-09-19-cn1-build-contract.md: S1 server library and routes (opus, cc125c5b), S2 suggester and cron (opus, 3d7e8d5b), S3 inbox, home card, MCP and guide (sonnet, dff93aaa); all reviews non-blocking. Merged 6916239f with integration fixes; migrations 0107 (task_suggestions) and 0108 (call_transcripts.suggested_at) applied on tahi-db before the push. Follow-up cd75950f. Live after it: the next sweep repaired all 39 orgless rows and filed 9 more (6 dropped for lacking a verbatim quote, 2 sales calls skipped, 10 cents); 48 suggestions pending across 8 calls, every one with a client (Verandela 28, Elevate 13, Giant Group 7), titles and descriptions rendering, the home card counting them. Approvals left to Liam. Total model spend across three sweeps about 30 cents.
 - [x] CN.1b - [BE/FE/MCP] Suggestions become requests as well as tasks (Liam, 2026-09-19: these are tasks and requests, especially requests from a client). Kinds create_request, update_request, request_note, hand_off_request; the Tasks vs Requests rule in the prompt; request writes extracted like the task writes; a rebuild route to re-read the eight calls. Contract docs/superpowers/plans/2026-09-19-cn1b-requests-contract.md. Built 2026-09-19 as workflow cn1b-requests-build: R1 request writes extracted (lib/request-writes.ts), the four request kinds with dedupe, apply and decoration, migration 0109, the rebuild route and rebuild_task_suggestions (opus, bb3b746d); R2 the prompt rule with the vocabulary printed from the modules, contacts and request details in the context, validation and name resolution, ?limit= on the cron (opus, b91b00de); R3 chips, summaries, Tweak into the New Request dialog through initialDraft, inline editors, the hand-off contact gate, MCP descriptions, guide (sonnet, 45bb9c46); reviews non-blocking, one major fixed at merge (the keyboard y skipped the contact gate). Merged and deployed 41d0b049; 0109 applied on tahi-db before the push. Cutover live: the first pass still filed site work as tasks, so rule 2 now states the test (what the client will see) with examples (d7153487); expired rows kept their dedupe keys and blocked five re-proposed items, so a rebuild now retires them (af5c2991); a temperature 0 attempt was rejected by Sonnet 5 and reverted (279fda59). Final state 2026-09-19: 27 pending across 7 calls, 16 new requests, 5 hand-offs (Mickey Day on #244, Charles on #226, Tim Lyons and Ella Wilde on #237, Andrew Stout), 2 request notes, 4 tasks (the studio's own follow-ups); Verandela 14, Elevate 8, Giant Group 2. Five full passes cost about 2.7 dollars. Approvals left to Liam.
-- [~] CN.1c - [BE/MCP] A rebuild should merge passes, not replace them: two reads of the same three Elevate calls gave five items and then none (sampling variance; Sonnet 5 rejects a temperature parameter, 400 "temperature is deprecated for this model"). Keep the union: on a re-read, rows from the previous pass that the model did not propose again stay pending instead of expiring, and only rows the human already decided are left alone. Also worth a second model pass per transcript with the first pass shown as context ("anything missed?") before the union. Built 2026-09-26 (opus, 7f6e8223, on a branch; not merged or deployed, no migration). A re-read is now a union: insertSuggestions compares each draft against everything its transcript already has on file except expired rows, through the new isRepeatOf in lib/task-suggestions.ts (a create at SIMILAR_BLOCK across both create kinds, a note on the same target, an update to the same fields, a subtask list with nothing new, a hand-off to the same person), counts a repeat as a duplicate and never touches the row on file; expired rows keep their retired keys and are not compared, so af5c2991 holds. The rebuild route expires nothing by default (pending and snoozed stay, applied, rejected and failed are never touched) and re-reads straight away through runSuggestionSweep with transcriptIds (oldest first, at most 20, no 30-day window, whatever the read mark), returning mode, transcripts, kept, expired, read, deferred and skipped; replace is the one path that still expires, for vocabulary changes. Every call is read twice (lib/task-suggester.ts: the second read is shown the first read's items with their quotes and asked only for what it missed, notes read back from the prompt cache, mergeSecondRead keeps both reads inside the twelve item ceiling); on by default, ?second_pass=0 on the cron and secondPass false on the rebuild switch it off per call; each read logs its own ai_cost_log row (stages suggest and second_pass). Expected extra spend roughly 3 cents per transcript at Sonnet 5 rates (the log line reads about 6, because the rate card prices cached input at the full rate). MCP: rebuild_task_suggestions gains replace, second_pass and read_now; cron_suggest_from_transcripts gains limit and second_pass, its mapping moved into task-suggestion-tools.ts so the parity test covers it; the guide says each call is read twice and a rebuild adds. Tests in lib/task-suggester.test.ts, lib/__tests__/task-suggestions.test.ts, the rebuild and cron route tests and the MCP parity test; full vitest 5771 green. Review follow-up 2026-09-26 (opus, same branch, after main gained 33f61601, the middleware fix that let the scheduled sweep run at all for the first time since 22 Sep): a time budget, because two reads of 20 to 27 seconds per call put a batch of five far past workers/cron-trigger's 120 second fetch timeout. The sweep only starts a call whose reads should finish inside SWEEP_BUDGET_MS (75 s), judged on the larger of READ_ESTIMATE_MS (30 s) and the slowest read it has timed, always taking the first so a run cannot starve; the rest are left unread and unstamped and reported as deferred and deferredIds, and a second read that would not fit is skipped (secondPass.skipped out_of_time; the first read is written and the call stamped). secondPass.ran now counts only second reads that came back; skipped also names full ones. The rebuild reads inside the same budget from the request start and prepares a call (count or expire, retire keys, clear) only through the sweep's new beforeRead hook, once the budget has admitted it; what the read did not reach is deferred (prepared and cleared) only when the sweep will find it: linked to a call and at least DEFER_MARGIN_DAYS (3) inside the 30-day window (sweepWillReach). Everything else is left untouched and listed in skipped: unlinked (all no longer clears transcripts with a null call_id), not_found, too_old_to_defer. replace is one rule for body and query (true, 1, or 1, true, yes in any case). The replace expiry runs in chunks of 80 ids. The oldest-first test now feeds rows out of order and the route sorts them itself; the route test renders each condition with Drizzle's SQLite dialect. Throughput is now about one call per half-hour run; the guide says so. Contract section 3 and both MCP descriptions updated. Tests: budget paths on an injected clock in lib/task-suggester.test.ts, route tests rewritten; full vitest 379 files, 5840 tests green; type-check and lint clean. Merged a6592326, deployed ed2d4385 (2026-09-26). Next: watch two scheduled runs in cron_runs (durationMs under 90 s, deferred counts draining), then rebuild the three Elevate transcripts and check nothing drops out of the inbox.
+- [~] CN.1c - [BE/MCP] A rebuild should merge passes, not replace them: two reads of the same three Elevate calls gave five items and then none (sampling variance; Sonnet 5 rejects a temperature parameter, 400 "temperature is deprecated for this model"). Keep the union: on a re-read, rows from the previous pass that the model did not propose again stay pending instead of expiring, and only rows the human already decided are left alone. Also worth a second model pass per transcript with the first pass shown as context ("anything missed?") before the union. Built 2026-09-26 (opus, 7f6e8223), subsequently merged a6592326 and deployed ed2d4385; no migration. Live drain/union checks remain. A re-read is now a union: insertSuggestions compares each draft against everything its transcript already has on file except expired rows, through the new isRepeatOf in lib/task-suggestions.ts (a create at SIMILAR_BLOCK across both create kinds, a note on the same target, an update to the same fields, a subtask list with nothing new, a hand-off to the same person), counts a repeat as a duplicate and never touches the row on file; expired rows keep their retired keys and are not compared, so af5c2991 holds. The rebuild route expires nothing by default (pending and snoozed stay, applied, rejected and failed are never touched) and re-reads straight away through runSuggestionSweep with transcriptIds (oldest first, at most 20, no 30-day window, whatever the read mark), returning mode, transcripts, kept, expired, read, deferred and skipped; replace is the one path that still expires, for vocabulary changes. Every call is read twice (lib/task-suggester.ts: the second read is shown the first read's items with their quotes and asked only for what it missed, notes read back from the prompt cache, mergeSecondRead keeps both reads inside the twelve item ceiling); on by default, ?second_pass=0 on the cron and secondPass false on the rebuild switch it off per call; each read logs its own ai_cost_log row (stages suggest and second_pass). Expected extra spend roughly 3 cents per transcript at Sonnet 5 rates (the log line reads about 6, because the rate card prices cached input at the full rate). MCP: rebuild_task_suggestions gains replace, second_pass and read_now; cron_suggest_from_transcripts gains limit and second_pass, its mapping moved into task-suggestion-tools.ts so the parity test covers it; the guide says each call is read twice and a rebuild adds. Tests in lib/task-suggester.test.ts, lib/__tests__/task-suggestions.test.ts, the rebuild and cron route tests and the MCP parity test; full vitest 5771 green. Review follow-up 2026-09-26 (opus, same branch, after main gained 33f61601, the middleware fix that let the scheduled sweep run at all for the first time since 22 Sep): a time budget, because two reads of 20 to 27 seconds per call put a batch of five far past workers/cron-trigger's 120 second fetch timeout. The sweep only starts a call whose reads should finish inside SWEEP_BUDGET_MS (75 s), judged on the larger of READ_ESTIMATE_MS (30 s) and the slowest read it has timed, always taking the first so a run cannot starve; the rest are left unread and unstamped and reported as deferred and deferredIds, and a second read that would not fit is skipped (secondPass.skipped out_of_time; the first read is written and the call stamped). secondPass.ran now counts only second reads that came back; skipped also names full ones. The rebuild reads inside the same budget from the request start and prepares a call (count or expire, retire keys, clear) only through the sweep's new beforeRead hook, once the budget has admitted it; what the read did not reach is deferred (prepared and cleared) only when the sweep will find it: linked to a call and at least DEFER_MARGIN_DAYS (3) inside the 30-day window (sweepWillReach). Everything else is left untouched and listed in skipped: unlinked (all no longer clears transcripts with a null call_id), not_found, too_old_to_defer. replace is one rule for body and query (true, 1, or 1, true, yes in any case). The replace expiry runs in chunks of 80 ids. The oldest-first test now feeds rows out of order and the route sorts them itself; the route test renders each condition with Drizzle's SQLite dialect. Throughput is now about one call per half-hour run; the guide says so. Contract section 3 and both MCP descriptions updated. Tests: budget paths on an injected clock in lib/task-suggester.test.ts, route tests rewritten; full vitest 379 files, 5840 tests green; type-check and lint clean. Merged a6592326, deployed ed2d4385 (2026-09-26). Next: watch two scheduled runs in cron_runs (durationMs under 90 s, deferred counts draining), then rebuild the three Elevate transcripts and check nothing drops out of the inbox.
 - [x] CN.1d - [BE/FE/MCP] Suggestions never duplicate what exists (Liam, 2026-09-19: make sure it checks for requests that are close or similar). Similarity scoring in lib/text-similarity.ts; the inbox warns Looks like #226 with Use #226 instead and Approve anyway; approve is blocked at 0.8 without force; the sweep drops cross-call duplicates; the model also sees requests delivered in the last 90 days. Contract docs/superpowers/plans/2026-09-19-cn1d-duplicate-guard-contract.md. Built 2026-09-19 as workflow cn1d-duplicate-guard: D1 lib/text-similarity.ts, similar computed on read against the org's requests (open or delivered in 90 days), tasks and other pending suggestions, approve blocked at 0.8 without force, the attach action, the sweep dropping similar_pending, delivered requests marked in the model context, MCP arguments (opus, 766b0721); D2 the Looks like line with Use #NNN instead and Approve anyway behind a confirm, types mirror, guide (sonnet, ebfb2e6d); reviews non-blocking. Merged and deployed ad18431a. Live: the inbox was empty by then (Liam approved 8, all landed as Verandela requests #228 to #235 with bot lines and audit entries, and rejected 19), so the first warnings will show on the next call's suggestions; the guard is unit tested at all three points.
 - [~] CN.2 - [BE/Slack] The Slack app, DM first with permission levels (Liam, 2026-09-22). Built as workflow cn2-slack-app (S1 identity, verification, routes, opus c7e00396; S2 approvals in DMs with in-place rewrites, opus 171791cf; S3 notes and voice through Workers AI, opus acff94e1; A1 assignee suggestions, sonnet ea50d1e3; reviews non-blocking), integrated by one agent (19 stub mismatches, route wiring, voice size check before download, agent-mode events), merged b06b0d91, migration 0110 applied on tahi-db, deployed a2471632 after a CI fix (the AI binding forces a remote dev proxy, skipped on CI). Live: both webhook routes answer 401 to a bad signature. Waiting on Liam: apply the manifest to the existing Tahi Dashboard app, reinstall, set SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET, then the live DM checks. Loose ends closed in ebc7e0a3 plus a review fix 5fbe654b, merged dc73687b and deployed 33f61601 (2026-09-26): view_submission is done (the interactive route answers response_action clear, and a future modal plugs in through registerViewSubmissionHandler on the action registry), app_mention in a channel is done (one line in the thread pointing to a DM, the refusal line for a stranger, never a note; a file posted in a channel is ignored as well, so only a file in the 1:1 reaches the voice path), slack_events_seen sweep is done (rows older than seven days, a daily step of the snapshot-metrics cron; no migration, the 0110 seen_at index serves the delete). For the live DM checks: a voice note in the DM arrives twice (message.im with the file inline, and file_shared, under different event ids), so confirm one recording gives one card.
-- [ ] CN.3 - [BE] Keeping in sync (later, about 3 days): dashboard task changes post to the Slack thread, a weekly digest of unreviewed suggestions, rejections as negative examples, GI.4 learns from applied suggestions.
+- [ ] CN.3 - [BE] Keeping in sync is BUILT on cn3-ready (d1103abe;
+  branch tip 5955e851), not integrated into main or deployed. Includes Slack
+  thread updates, weekly digest, rejection reasons and wizard learning from
+  applied suggestions. Triage 2026-10-10: 72 files differ from the merge base,
+  23 commits ahead and 8 behind main. Review/integrate current main, apply
+  reviewed 0111_cn3_sync.sql before deploying, then full gates and live checks.
+  Production task_suggestions has no reject_reason column. The SQL ALTER is
+  not safe to rerun blindly; check the column first or use the runner's
+  duplicate-column handling once that runner is deployed. Slack verification
+  depends on CN.2 configuration. Contract: 2026-09-26-cn3-sync-contract.md.
 
 ## Product manager AI (Liam, 2026-09-20: "I want a product manager AI")
 
@@ -341,7 +373,8 @@ Audit by the lead against production payloads; every card traced to its route. W
 - [~] LW.27 (MERGED b268d048) - [FE] Client home empty state: keep the dark header panel, drop the leaf badge (Liam: "remove that badge with the fern in it, I liked the full dark mode header"). Agent home-empty-onboarding-exit.
 - [~] LW.28 (MERGED b268d048) - [FE] Onboarding has no way out: a "Sign out and return to sign in" line on every step and on /welcome. Same agent.
 - [~] LW.29 (MERGED 62d905c6; cause confirmed: the contact was linked to the Clerk user by email while Clerk held no membership, and the old route turned that into a 502) - [BE/FE] Settings > People: the bin on a teammate row does nothing for a person who signed up by hand and never joined the Clerk org; route made resilient to a missing membership, ConfirmDialog, honest errors. Agent people-delete-fix.
-- [x] LW.21 and LW.24 MERGED bdf333c4 (board strip overflow-y hidden, composer textarea ring removed). LW.22 MERGED 349b4462. LW.23 MERGED 24ae1753.
+- Merge evidence for the canonical LW.21 to LW.24 checkboxes above: bdf333c4
+  fixes board/composer overflow; LW.22 349b4462; LW.23 24ae1753. Live proof still owed.
 - [~] LW.26 (MERGED 6c683a69; Liam re-tests the link signed out) - [BE/FE] Seat invite flow (Blah Blah Inc repro): the accept link lands on sign-in ("Couldn't find your account") for a new address, and a hand-made sign-up is sent through the plan chooser instead of into the invited org, so the Clerk membership never gets created. Fix: signed-out plus token goes to sign-up with the email prefilled (sign-in when the account exists), acceptance runs on arrival (membership, contact link, onboarding stamp), then the invited org opens; seat versus first contact decided from the org's existing members. Agent seat-invite-flow.
 - [x] LW.25 - Comment ball: click, then pick the element the comment is about; soft snap to the nearest edge (b0b5eb17, live, migration 0101 applied).
 
@@ -424,8 +457,9 @@ integrations work; they are homed in section (a) because they gate the beta.
 
 # (c) Design pass 2026-09-13
 
-7 open ids. The design pass runs in Claude Design and is held for Liam's review
-before any port.
+7 ids in this historical section. The nineteen 2026-09-14 modules now have
+written port plans. Liam permitted porting without advance review on 2026-09-26;
+keep them "ported, unchecked" until he looks. New product decisions still wait.
 
 Context, not tasks: 27 requirement documents landed under
 `docs/superpowers/design/requirements` (195a6073, b5eddbbe), one per surface
@@ -460,7 +494,7 @@ order inside catalogue batches G and H.
 
 ## Designs that still need doing
 
-Overnight 2026-09-14: every module in this section has a fresh design in Claude Design (see docs/superpowers/plans/2026-09-14-design-review-for-liam.md, verdicts per module). Lines below stay open until Liam marks SHIP, FIX or REDO on that document; the port order follows his marks.
+Overnight 2026-09-14: every module in this section has a fresh design in Claude Design (see docs/superpowers/plans/2026-09-14-design-review-for-liam.md). Update 2026-10-10: Liam's 2026-09-26 instruction permits the nineteen ports using existing patterns without advance review. Follow docs/superpowers/design/port-plans; keep the review boxes empty and record "ported, unchecked" until he reviews.
 
 
 - [ ] AR.4 - [Design] Proposals individual page (editor) needs a lot more work;
@@ -472,22 +506,23 @@ Overnight 2026-09-14: every module in this section has a fresh design in Claude 
   and any other module that diverges, then port. Carry the DL.2 caveat: the rail
   must be withheld or collapsible on wide-table pages (Time, Team, Leads, Deals,
   Calls, Tracks, client Invoices) where it costs columns and clips money.
-- [~] MR.6 - [Design then FE] Studio invoices designed in Claude Design (the critic FIX is being worked in the overnight design pass, module "finance", 2026-09-14; port after Liam reviews)
-  (invoices-studio.* module: list with totals strip, seven saved views, rail chip
-  with pay-link state, bulk bar, New invoice slide-over with the IC.3 defaults;
-  detail with hero, metadata grid, grouped actions, activity strip, chase
-  drafter). Critic: FIX (two blocking interaction bugs in the scratch mount,
-  plus defects); fixer was running; then wire into the shell under Finance and
-  port. The fixer's outcome is not recorded anywhere, so this stays `[~]`.
-- [~] MR.7 - [Design then FE] Services showcase redesigned in portal-money.* (port half live via CB1; the fuller showcase is being reworked in the overnight design pass, module "portal-money", 2026-09-14)
-  (dark forest plan stage with the two tracks as objects, How you are using Tahi
-  with honest charts, an editorial catalogue with a feature, stories and lines,
-  an add-ons shelf tied to the plan, member-seat and read-only degrades). Critic:
-  FIX not REDO ("best single tile in the prototype"); fixer was running. The PORT
-  half is done and live (CB1, 6534ebdd, smoked in Client view of Giant Group).
-  The design fixer's outcome is not recorded, so this stays `[~]`.
-- [ ] CB4 studio invoices port. Waits on the MR.6 critic FIX and Liam's design
-  review.
+- [~] MR.6 - [Design/FE] Studio invoices design revision is SHIP in the
+  2026-09-14 review document, and finance.md has the full port plan.
+  The old "fixer outcome not recorded" blocker is obsolete. CB4 owns the
+  implementation; it may proceed as "ported, unchecked" under Liam's
+  2026-09-26 instruction. Review boxes remain empty until he looks.
+
+- [~] MR.7 - [Design/FE] Services showcase: the CB1 half is live
+  (6534ebdd). The fuller portal-money plan exists, with the review document's
+  FIX caveats. Follow its bounded slices as "ported, unchecked"; preserve
+  Services hidden for clients by default and do not settle the CT.11 order
+  path by porting speculative checkout/request controls.
+
+- [ ] CB4 - [FE/BE] Studio invoices port is ready from
+  docs/superpowers/design/port-plans/finance.md (revision SHIP).
+  Liam's 2026-09-26 unchecked-port instruction removes the advance-review
+  dependency. Start with invoice list/detail, preserve all real billing fields
+  and guards, then record port commits with review boxes left empty.
 
 ---
 
@@ -703,32 +738,36 @@ fixed.
   self-grantable, Ship Studio backdoor prod-gated. REMAINING: one manual
   forgot-password click-through on the live Clerk build (A5 step 17); branded
   error and verification states at 375px.
-- [ ] T1.6 - [BE] **Permissions invariant enforcement.** Client
-  feature_visibility denies are nav-cosmetic only; enforce at route level so
-  denied = 403, not just hidden (memory `project_permissions_vision`: visible =
-  permitted, absent = denied).
+- [~] T1.6 - [BE] Permissions invariant enforcement: feature guards shipped
+  in c3db922e (requirePortalFeature on portal routes; role/page/API guards).
+  The old claim that all client denies are nav-only is stale. Remaining:
+  audit uncovered/new routes and prove denied deep links/data reads return
+  403 for real scoped/client seats. T1.16 owns global search organisation
+  scoping; share the tests and live lap rather than rebuild the guard system.
+
 - [ ] T1.7 (C4.3/C4.4) - [Ops/BE] Portal noindex + robots; WAF rate rules
   (60/min `/api/portal/*`, 20/min `/api/uploads/*`) or KV limiter.
-- [ ] T1.11 (audit A2) - [Liam+BE] **Worker MCP /authorize hardening (APPROVED,
-  Liam will reconnect).** `workers/mcp-server/src/index.ts:2675` auto-approves on
-  client_id alone (not a secret), so anyone can mint full admin. Require an
-  authenticated Tahi session before minting a code, or drop
-  authorization_code/none for client_credentials plus secret. Deploys via
-  `mcp-worker-deploy.yml`; Liam re-approves the connector once after.
-- [ ] T1.12 (audit B2) - [Liam+BE] **Rotate the committed ManyRequests token,
-  DEPRIORITISED 2026-08-18.** Liam: "a later problem tbh, since the goal here is
-  to replace that." `workers/mcp-server/src/index.ts:97` hardcodes a live token
-  that is now in git history; treat as exposed. Revisit at ManyRequests cutover
-  (the token dies with the platform), or sooner if the legacy data matters.
-- [ ] T1.13 (audit finding) - [Ops] **Fix the GH Actions crons.**
-  TAHI_DASHBOARD_URL repo variable still points at the retired webflow.io host
-  (404s), and cron paths are not allowlisted while workflows send x-cron-secret
-  not Bearer. VERIFY FIRST: sync-airwallex fired fine on 2026-08-18 and bank data
-  refreshed, which contradicts a fully-broken cron path; check whether "Dashboard
-  cron triggers" and `dashboard-crons.yml` differ, then fix the repo variable and
-  switch workflows to `Authorization: Bearer $TAHI_CRON_SECRET` (already accepted
-  by assertCronAuth). Batch J5 folds in the daily-summary and
-  sync-drive-transcripts UTC windows, which still compare lexicographically.
+- [~] T1.11 - [BE/QA] Worker MCP /authorize hardening is implemented in
+  17799931. GET renders consent without minting a code; POST requires the
+  admin approval key, with redirect/PKCE validation and throttling. The old
+  auto-approval description is obsolete. Verify the deployed consent/reject/
+  approve flow and token revocation configuration, then record live evidence.
+  No new credential changes authorised by this triage.
+
+- [ ] T1.12 - [Liam+BE] Rotate/revoke the historically committed ManyRequests
+  token at cutover (deprioritised by Liam 2026-08-18). 17799931 removed the
+  literal from source; the worker now reads MANYREQUESTS_API_TOKEN. That does
+  not prove the old exposed token was revoked. Confirm revocation/rotation
+  separately, without printing the value or copying it into a tracked file.
+
+- [~] T1.13 - [Ops/QA] Cron scheduling repair is live via eb89d21d (LW.43),
+  Cloudflare workers/cron-trigger, with middleware repair 33f61601. The old
+  retired-host/GitHub-schedule implementation brief is obsolete. Production
+  SELECTs on 2026-10-10 show calendar, transcript, suggestion and financial
+  sync runs succeeding. Remaining: review the UTC/local-hour windows and
+  intended coverage. delivery-watch and automation-sweep are unscheduled
+  deliberately pending the reminder policy; do not enable client mail here.
+
 - [~] T1.14 - LIVE c6c4870f (2026-09-07 03:45 NZST): one rule in
   `lib/portal-access.ts` (portalRole admin, or the primary contact) on brands,
   organisation, people, invites and the subscription change request; profile
@@ -750,27 +789,30 @@ bypass must survive. Note `isTahiAdmin()` gates 506 admin routes on CLERK ORG
 MEMBERSHIP, not role, so containment needs BOTH the default flip and per-route
 scoping.
 
-- [ ] T1.15 - [BE] **Deny by default.** `lib/permissions.ts` roleless member
-  becomes admin (the `else level='admin'`), and `lib/access-scoping.ts`
-  no-team-member-row becomes unrestricted. Flip both to deny, preserving:
-  super_admin/admin role bypass, the 'api-service' MCP token, crons/webhooks, and
-  a bootstrap fallback for an unseeded DB.
-- [~] T1.16 - [BE] **Per-org scoping rollout** (the old T717). Only 30 of 362
-  admin route files call a scoping helper. Batch A (contracts, proposals,
-  schedules, including share, publish and email) is DONE per the catalogue
-  compile of 2026-09-13. Batch B is the remaining five entities: deals,
-  conversations, calls, time-entries, announcements. Scheduled as catalogue J4.
-- [ ] T1.17 - [BE/FE] **Hire onboarding path.** CONFIRMED by audit: the only
-  writer of `teamMembers.clerkUserId` is a hand-crafted PUT; no Clerk webhook for
-  it, and accept-invite rejects `flow:'team'`. So today a hire invited to the
-  Tahi Clerk org resolves to NO member row and gets FULL ADMIN (all financials);
-  after T1.15 the same user is locked out of an empty dashboard. Building:
-  verified-email backfill on the dashboard layout, POST
-  `/api/admin/team/[id]/invite` (Clerk org invitation), gate the team write
-  routes, Linked/Not-linked column, honest invite copy, and deal-sales-kit stops
-  hardcoding Liam as contract signer.
-  Note: LW.18 removed Clerk invitations from product code and added an admin team
-  accept route, so re-scope this against that merge before building.
+- [~] T1.15 - [BE/QA] Deny by default is implemented in 7e58adeb and
+  c3db922e. permissions.ts denies roleless seats after role seeding;
+  access-scoping.ts returns no orgs for an unknown member in a seeded DB.
+  Admin/super_admin and api-service bypasses remain; bootstrap fallback is
+  limited to an unseeded role system. Remaining: prove the deployed roleless,
+  revoked-role and scoped-seat behaviour without affecting Liam/Staci.
+
+- [~] T1.16 - [BE] Per-org scoping rollout: both the deliverable batch and
+  named batch-B index routes now have guards (deals, conversations, calls,
+  time, announcements). The old "only 30 of 362" tally is historical.
+  Confirmed remaining source gap 2026-10-10: /api/admin/search checks Tahi
+  membership and queries entities without feature or organisation scoping.
+  Prioritise that repair, then audit nested writes/reports and the scoped
+  teammate preview. Add tests for denied/partially scoped seats. Source
+  finding only; no attack against another person's account was attempted.
+
+- [~] T1.17 - [BE/FE/QA] Hire onboarding's core implementation is built
+  in 45ec6d2a: verified-email roster linking, guarded team writes, Login
+  status and invites, current-user contract signer. LW.18 (7516bc5b,
+  81153703) then replaced Clerk product invites with Tahi tokens and an
+  admin team acceptance route. Do not rebuild the old writer gap. Remaining:
+  trace/test the current invite-to-roster-to-role path and live verification
+  with a controlled non-founder seat. The welcome context seam is T1.20.
+
 - [~] T1.19 - [FE] **Teammate home leaks and never visually verified.** The calls
   feed is FIXED and shipped (643433f8: teammate-home calls feed org-scoped, docs
   card relabelled, duplicate super-admin allowlists deleted). STILL OPEN, and why
@@ -816,10 +858,14 @@ scoping.
   Manage Billing renders only when the subscription reports canManagePayment
   (Stripe rail), so a Xero-rail client such as Giant Group never sees the failing
   popup. Live smoke in Client view still owed.
-- [ ] CT.17 (0.5d) - [BE] The MCP `send_message` and `create_conversation` tools
-  post the wrong body shape and always fail; fix or delete. Same family of bug as
-  MCP `create_invoice`, which posts amountUsd/totalUsd with no lineItems and
-  400s. Catalogue E4.
+- [ ] CT.17 - [BE/MCP] Messaging adapters are implemented: the messages API
+  accepts body as an alias for content and conversations accept the MCP
+  participant shape. Verify them end to end rather than rebuilding them.
+  Remaining confirmed mismatch: create_invoice's worker schema still requires
+  amountUsd/totalUsd and exposes no lineItems, while the API requires non-empty
+  lineItems. Align schema/mapping and test the real tool-to-route contract on
+  QA data. Triage 2026-10-10, source checked on main.
+
 - [ ] CT.18 (0.25d) - [Liam decision] Delete /tracks (linked from nowhere,
   HTML5-drag only; the client home's TrackBoard tells the same story with
   buttons). Catalogue H1.
@@ -846,9 +892,12 @@ scoping.
 
 ### Requests, tasks and messages polish
 
-- [ ] T2.6 (C3.5b) - [FE] **Messages polish.** PageHeader instead of bespoke h1;
-  thread UX pass; client-visible partials brought to v3. Needs a design file
-  first; none exists for either audience. Catalogue E3.
+- [ ] T2.6 (C3.5b) - [FE] Messages polish: port the written messages module
+  plan in docs/superpowers/design/port-plans/messages.md using existing
+  primitives. A design now exists; the old "none exists" blocker is stale.
+  Keep standalone Messages hidden for clients by default (Decision #061).
+  New messaging behaviour remains separate from a "ported, unchecked" UI port.
+
 - [ ] T2.7 - [FE/BE] **Daily-briefing dedup** (Liam 2026-08-18): the home-page
   brief card and the nav-bar briefing are two surfaces that do not overlap well.
   One source of truth, one refresh cycle, consistent content; nav popover
